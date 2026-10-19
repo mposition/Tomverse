@@ -41,12 +41,16 @@ type PriceRow = {
   outputMicroUsdPerMillion: number;
 };
 
+export type AmuxApprovedPriceMode = "api" | "subscription_cli";
+
 /** Only the exact owner-approved profile may be used by this runner. A changed
- * limit or price needs a new runner contract and a separate approval. */
-export function amuxV4ApprovedCliCostProfileMatches(row: PriceRow): boolean {
+ * limit or price needs a new runner contract and a separate approval. The v19
+ * Max runner uses the same rates as a subscription_cli conversion estimate. */
+export function amuxV4ApprovedCliCostProfileMatches(row: PriceRow,
+  mode: AmuxApprovedPriceMode = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE.mode): boolean {
   const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
   return row.provider === profile.provider && row.modelId === profile.modelId &&
-    row.mode === profile.mode && row.status === "approved" &&
+    row.mode === mode && row.status === "approved" &&
     row.inputTokensCap === profile.inputTokensCap &&
     row.outputTokensCap === profile.outputTokensCap &&
     row.inputMicroUsdPerMillion === profile.inputMicroUsdPerMillion &&

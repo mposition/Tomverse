@@ -24,8 +24,11 @@ export type HaltAttention = "automatic_pending" | "operator_required" | "cause_r
 /** Presentation only; the server and database decide whether a halt is cleared. */
 export function amuxHaltAttention(halt: AmuxOrchestratorAdminHalt): HaltAttention {
   if (halt.reasonCode === "contract_violation" || halt.reasonCode === "selection_read_failures") return "cause_required";
-  if (amuxOrchestratorHaltReasonAllowsAutoClear(halt.reasonCode)
-    && halt.requestId !== null && halt.write?.requestId === halt.requestId
+  if (!amuxOrchestratorHaltReasonAllowsAutoClear(halt.reasonCode) || halt.requestId === null
+    || halt.haltKey !== halt.requestId) return "operator_required";
+  // 2026-10-20 amendment: no admission means the server admits a placeholder and clears it.
+  if (halt.write === null) return "automatic_pending";
+  if (halt.write.requestId === halt.requestId
     && halt.write.receiptCount === 0 && halt.write.resolution === null && halt.write.resolvedAt === null
     && halt.write.ackedAt === null) return "automatic_pending";
   return "operator_required";
@@ -91,7 +94,7 @@ function HaltCard({ halt, canClear, showCleared, m, locale }: { halt: AmuxOrches
       {automatic ? <CheckCircle2 className="size-4" aria-hidden /> : attention === "automatic_pending" ? <Clock3 className="size-4" aria-hidden /> : <AlertTriangle className="size-4" aria-hidden />}
       {showCleared ? automatic ? m.autoCleared : halt.clearKind === "human" ? m.humanCleared : m.clearKindUnknown : m.category[attention]}</span></div>
     <p className={`mt-2 ${muted}`}>{showCleared ? m.clearConsequence : incompleteClear ? m.autoClearIncomplete : m.categoryDetail[attention]}</p>
-    <dl className="mt-4 grid min-w-0 gap-x-4 gap-y-2 rounded-md bg-zinc-900 p-3 sm:grid-cols-[auto_minmax(0,1fr)]"><dt className={muted}>{m.admission}</dt><dd>{halt.write ? m.admissionPresent : m.admissionMissing}</dd><dt className={muted}>{showCleared ? m.clearedAt : m.openedAt}</dt><dd><DateValue value={showCleared ? halt.clearedAt ?? halt.openedAt : halt.openedAt} locale={locale} /></dd>
+    <dl className="mt-4 grid min-w-0 gap-x-4 gap-y-2 rounded-md bg-zinc-900 p-3 sm:grid-cols-[auto_minmax(0,1fr)]"><dt className={muted}>{m.admission}</dt><dd>{halt.write ? m.admissionPresent : attention === "automatic_pending" ? m.admissionPlaceholderPending : m.admissionMissing}</dd><dt className={muted}>{showCleared ? m.clearedAt : m.openedAt}</dt><dd><DateValue value={showCleared ? halt.clearedAt ?? halt.openedAt : halt.openedAt} locale={locale} /></dd>
       {showCleared ? <><dt className={muted}>{m.actor}</dt><dd className="break-all">{automatic ? m.autoCleared : halt.clearedByUserId ?? m.none}</dd></> : null}</dl>
     {halt.write ? WriteSummary({ write: halt.write, m, locale }) : null}
     <details className="mt-3 min-w-0"><summary className={`min-h-11 cursor-pointer py-2 font-medium ${focus}`}>{m.reason} · <code className="break-all font-mono text-xs">{halt.reasonCode}</code></summary><dl className="grid gap-1 break-all text-xs sm:grid-cols-[auto_minmax(0,1fr)]"><dt>{m.haltId}</dt><dd className="font-mono">{halt.haltId}</dd><dt>{m.haltKey}</dt><dd className="font-mono">{halt.haltKey}</dd><dt>{m.request}</dt><dd className="font-mono">{halt.requestId ?? m.none}</dd>

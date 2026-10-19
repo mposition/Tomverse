@@ -10,11 +10,19 @@ import {
   readActiveRouterGuidance,
 } from "@/lib/autoLlmRouterGuidance";
 import {
+  AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
+  readAutoLlmRouterModelId,
+  updateAutoLlmRouterModelId,
+} from "@/lib/autoLlmRouterSettings";
+import { reserveRouterCost, settleRouterCost } from "@/lib/autoLlmRouter";
+import { getProviderCostBudget } from "@/lib/providerCostBudget";
+import {
   AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
   finishOptimizerCycle,
   readOptimizerAutomation,
   updateOptimizerAutomation,
   promoteAutoRouterOptimizerCycle,
+  readAutoRouterOptimizerState,
   reserveOptimizerCycle,
   rollBackAutoRouterGuidance,
 } from "@/lib/autoRouterOptimizer";
@@ -22,6 +30,7 @@ import {
   AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
   AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
   AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
+  AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS,
 } from "@/lib/autoRouterOptimizerCore";
 
 // The money and audit steps of the Auto router optimizer, on a real database.
@@ -40,12 +49,24 @@ const PROPOSAL = "Send greetings and small talk to the lightest model.\nSend cod
 // are never touched.
 const OPTIMIZER_PROVIDER = "optimizertest";
 const ROUTER_PROVIDER = "routertest";
-const providerKeys = [`provider:${OPTIMIZER_PROVIDER}`, `provider:${ROUTER_PROVIDER}`];
+// An answering model's provider: neither the optimizer's nor the router's.
+const ANSWER_PROVIDER = "answertest";
+const providerKeys = [OPTIMIZER_PROVIDER, ROUTER_PROVIDER, ANSWER_PROVIDER].map((provider) => `provider:${provider}`);
+// Old enough to be closed as interrupted.
+const staleCreatedAt = () => new Date(Date.now() - AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS - 5 * 60_000);
 
 const reset = async () => {
   await prisma.autoRouterOptimizerCycle.deleteMany({});
   await prisma.appSetting.deleteMany({
-    where: { key: { in: [AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY, AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY] } },
+    where: {
+      key: {
+        in: [
+          AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY,
+          AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
+          AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
+        ],
+      },
+    },
   });
   await prisma.chatUsageBucket.deleteMany({ where: { key: { in: providerKeys } } });
 };
@@ -146,6 +167,60 @@ test("a finished cycle adds what each provider was actually paid to its buckets,
   assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), 5_300);
 });
 
+test("an answering model's spend is booked to its own provider, beside the optimizer's and the router's", async () => {
+  const started = await reserve();
+  assert.ok("cycle" in started);
+  // As runOptimizerCycle sums it: each call to the provider that was paid.
+  const spentByProvider = new Map([
+    [OPTIMIZER_PROVIDER, 2_000],
+    [ROUTER_PROVIDER, 400],
+    [ANSWER_PROVIDER, 900],
+  ]);
+  const data = { status: "failed", failure: "too_few_decided", spentMicroUsd: 3_300, finishedAt: new Date() };
+  assert.equal(await finishOptimizerCycle({ cycleId: started.cycle.id, data, spentByProvider }), true);
+  for (const [provider, microUsd] of spentByProvider) {
+    assert.equal(await bucket(provider, "provider-cost-day"), microUsd);
+    assert.equal(await bucket(provider, "provider-cost-month"), microUsd);
+  }
+  const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: started.cycle.id } });
+  assert.equal(row.spentMicroUsd, 3_300);
+});
+
+test("Admin state shows a cycle's synthetic cases and never a real decision's", async () => {
+  const realDecisionId = `real-${randomUUID()}`;
+  const cycle = await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model",
+      routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
+      reservedMicroUsd: 0,
+      status: "failed",
+      failure: "too_few_decided",
+      cases: [
+        { decisionId: realDecisionId, incumbentPick: "strong", candidatePick: "light", verdict: "candidate" },
+        {
+          decisionId: "synthetic-1",
+          source: "synthetic",
+          message: "1마일은 몇 km인가요?",
+          kind: "easy",
+          incumbentPick: "strong",
+          candidatePick: "light",
+          verdict: "undecided",
+        },
+      ],
+      summary: { evaluated: 2, undecided: 1 },
+    },
+  });
+  const state = await readAutoRouterOptimizerState();
+  const view = state.cycles.find((item) => item.id === cycle.id);
+  assert.ok(view);
+  assert.deepEqual(view.syntheticCases, [
+    { message: "1마일은 몇 km인가요?", kind: "easy", incumbentPick: "strong", candidatePick: "light", verdict: "undecided" },
+  ]);
+  assert.equal("cases" in view, false);
+  assert.equal(JSON.stringify(state).includes(realDecisionId), false);
+});
+
 test("a cycle that cannot record its result still books its known spend to the row and the buckets, once", async () => {
   const started = await reserve();
   assert.ok("cycle" in started);
@@ -174,7 +249,7 @@ test("a cycle cut off by a restart is closed without changing its recorded spend
     status: "running",
     reservedMicroUsd: 5_000, // an older row's reservation: never turned into spend
     spentMicroUsd: 700,
-    createdAt: new Date(Date.now() - 20 * 60_000),
+    createdAt: staleCreatedAt(),
   });
   const next = await reserve();
   assert.ok("cycle" in next);
@@ -293,7 +368,7 @@ test("a finishing cycle and its close as interrupted never leave cost and bucket
     // Old enough to be closed as interrupted by the next start.
     await prisma.autoRouterOptimizerCycle.update({
       where: { id: started.cycle.id },
-      data: { createdAt: new Date(Date.now() - 20 * 60_000) },
+      data: { createdAt: staleCreatedAt() },
     });
     const [finished] = await Promise.all([
       finishOptimizerCycle({
@@ -362,4 +437,46 @@ test("the system starts at most one cycle a day; a person still may", async () =
   assert.ok("cycle" in byPerson);
   const rows = await prisma.autoRouterOptimizerCycle.findMany({ select: { startedBy: true } });
   assert.deepEqual(rows.map((row) => row.startedBy).sort(), ["person", "system"]);
+});
+
+test("the router model changes only together with its audit entry, and a no-op writes neither", async () => {
+  const entries = () =>
+    prisma.adminAuditLog.count({
+      where: { action: "auto.llm_router_model.updated", targetId: AUTO_LLM_ROUTER_MODEL_SETTING_KEY, actorUserId: session.user?.id },
+    });
+  assert.equal(await updateAutoLlmRouterModelId(actor, "router-model"), true);
+  assert.equal(await readAutoLlmRouterModelId(), "router-model");
+  assert.equal(await entries(), 1);
+  // A retry of the same request neither writes nor needs to: the first one
+  // committed with its record.
+  assert.equal(await updateAutoLlmRouterModelId(actor, "router-model"), false);
+  assert.equal(await entries(), 1);
+  assert.equal(await updateAutoLlmRouterModelId(actor, null), true);
+  assert.equal(await readAutoLlmRouterModelId(), null);
+  const last = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "auto.llm_router_model.updated", actorUserId: session.user?.id },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.deepEqual(last.metadata, { before: "router-model", after: null });
+});
+
+test("a live router call holds its worst case in both provider buckets or neither, then settles to actual", async () => {
+  const now = new Date();
+  const { day } = getProviderCostBudget(ROUTER_PROVIDER);
+  // Leave 100 micro-USD of room today.
+  await prisma.chatUsageBucket.create({
+    data: { key: `provider:${ROUTER_PROVIDER}`, period: "provider-cost-day", periodStart: utcDay(now), count: day - 100 },
+  });
+  assert.equal(await reserveRouterCost(ROUTER_PROVIDER, 101, now), false);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), day - 100);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-month"), 0);
+
+  assert.equal(await reserveRouterCost(ROUTER_PROVIDER, 100, now), true);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), day);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-month"), 100);
+
+  // The call cost 30 of the 100 held.
+  await settleRouterCost(ROUTER_PROVIDER, 30 - 100, now);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), day - 70);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-month"), 30);
 });

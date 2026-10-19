@@ -145,7 +145,7 @@ bridge는 시작할 때와 heartbeat를 보내는 매 회차에 `GET /api/intern
 
 #### 설치 (운영자, S2)
 
-정책 버전 55 3항의 1·2번이다. 이 단계는 **설치만 한다.** 활성화 기록(S3, 새 정책 버전) 전에는 `tomverse-amux-bridge@` 인스턴스를 하나도 시작하지 않는다. 앱의 `bridge-scope` 래치가 꺼져 있는 동안 시작한 인스턴스는 `bridge_scope_off`를 받아 아무것도 등록하지 않지만, 지금의 bridge와 같은 worker를 맡게 되는 순간이 3.1의 전환이므로 그 순서 밖에서 시작하지 않는다.
+정책 버전 55 3항의 1·2번이다. 이 단계는 **설치만 한다.** S3(운영자 승인) 전에는 `tomverse-amux-bridge@` 인스턴스를 하나도 시작하지 않는다. 앱의 `bridge-scope` 래치가 꺼져 있는 동안 시작한 인스턴스는 `bridge_scope_off`를 받아 아무것도 등록하지 않지만, 지금의 bridge와 같은 worker를 맡게 되는 순간이 3.1의 전환이므로 그 순서 밖에서 시작하지 않는다.
 
 1. 바이너리. 이 절이 들어 있는 develop 병합 commit에서 빌드한 `tomverse-wsl-bridge`(`cargo build --release --locked --bin tomverse-wsl-bridge`, 자격증명 불필요)로 Ubuntu 호스트(192.168.0.7)의 `/usr/local/libexec/tomverse-wsl-bridge`를 교체한다. 빌드한 파일의 sha256을 운영 기록에 남기고, worker 계정이 바꿀 수 없는 상태에서 설치 직전에 같은 값인지 확인한다. 설치는 관리자 계정 `tomverse-admin`의 sudo로 root 소유 0755로 하고, 이전 파일은 날짜를 붙인 백업으로 남긴다(버전 23의 root 소유 경계, 버전 54의 교체와 같은 방식).
    - 지금 돌고 있는 `tomverse-bridge.service`는 다시 시작하지 않는다. 디스크의 파일을 바꿔도 실행 중인 프로세스는 옛 바이너리로 계속 돈다. 나중에 그 unit이 다시 시작돼도 인자가 없으므로 동작은 같다.
@@ -155,16 +155,18 @@ bridge는 시작할 때와 heartbeat를 보내는 매 회차에 `GET /api/intern
 
 S2가 끝나는 조건은 develop 병합과 위 1~3의 설치다(정책 버전 55 5항).
 
-#### 활성화와 전환 (S3, 이 단계에서 하지 않음)
+#### 활성화와 전환 (S3)
 
-S3의 활성화 기록이 래치를 켠 뒤, 옛 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*`에서 `tomverse-amux-bridge@<worker>`로 옮기는 순서는 정책 버전 55 3.1항을 그대로 따른다. 요약하면 다음과 같다.
+S3는 운영자 승인(대화, PR에 한 줄)으로 래치 `AMUX_WORKER_BRIDGE_SCOPE_LATCH`를 켠다(2026-10-19 운영자 지침에 따라 새 정책 버전은 없다). 래치가 켜진 배포 뒤, 옛 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*`에서 `tomverse-amux-bridge@<worker>`로 옮기는 순서는 정책 버전 55 3.1항을 그대로 따른다. 요약하면 다음과 같다.
 
 - 단위: codex 셋은 옛 unit 하나를 함께 쓰므로 한 단위, v22 worker는 worker 하나가 한 단위다.
 - 단위마다, 앱의 read-back으로 열린 attempt·소유한 `todo`·`doing` 카드·미해결 orchestrator 쓰기·열린 halt가 없음을 확인한다. 옛 인스턴스를 멈추고 runtime lease(90초)가 끝난 것을 확인한 뒤 같은 확인을 다시 한다. 그 사이 attempt가 생겼으면 옛 인스턴스도 새 인스턴스도 시작하지 않고 기존 복구 절차로 정리한 뒤 처음부터 다시 확인한다. 로컬 AMUX 세션이나 sidecar에 진행 중인 작업이 없음을 호스트에서 확인한 뒤에만 새 인스턴스를 시작한다.
 - 되돌리기는 같은 조건을 반대로 따른다. 래치를 끄는 것만으로는 되돌리기가 아니다.
 - 어느 확인이든 하지 못하면 멈추고 사람이 판단한다.
 
-S3에서 함께 정해야 하는 것이 있다. watchdog은 `tomverse-bridge.service`를 이름으로 늘 확인하므로, codex 단위를 옮긴 뒤 옛 unit을 멈추면 down 알림이 계속 나간다. 옮기는 순간에 맞춰 watchdog의 그 확인을 바꾸는 변경이 필요하다.
+watchdog은 `tomverse-bridge.service`를 enable되어 있는 동안만 이름으로 본다. codex 단위를 옮길 때 옛 unit을 `systemctl disable --now`로 멈추면 그 뒤로 down을 보내지 않는다(`bridge-monitoring.md` 1절). 이 변경은 S3 배포와 함께 watchdog 재설치(1.2절)로 호스트에 들어간다.
+
+worker별 unit에는 `[Install]`이 없어(버전 31 4항) 호스트를 재부팅하면 저절로 켜지지 않는다. 버전 31의 R6 조정기가 생기기 전까지는 재부팅 뒤 운영자가 인스턴스를 시작한다. 그동안 watchdog은 로드된 bridge가 하나도 없는 상태를 down으로 알린다.
 
 ## 활성화
 

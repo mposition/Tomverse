@@ -70,6 +70,7 @@ after(async () => {
 });
 
 const GRACE_MS = 5_000;
+const AMUX_PLACEHOLDER_BUDGET_MS = 1_000;
 
 /**
  * A database refusal, found wherever Prisma put the trigger's message: the
@@ -577,8 +578,7 @@ test("an existing no_commit resolution can close a later halt, while forged clea
   });
 });
 
-test("missing admission, acknowledged, receipt-bearing, and non-request halts never auto-clear", async () => {
-  const missing = randomUUID();
+test("acknowledged, receipt-bearing, and non-request halts never auto-clear", async () => {
   const acknowledged = await admit(12_000, "claim");
   const receiptBearing = await admit(1_000, "auto_promotion_tick");
   const nonRequest = randomUUID();
@@ -595,20 +595,141 @@ test("missing admission, acknowledged, receipt-bearing, and non-request halts ne
     );
     assert.equal(ack.status, 200);
     const halts = await Promise.all([
-      recordHalt({ halt_key: missing, reason_code: "claim_outcome_unknown", request_id: missing }),
       recordHalt({ halt_key: acknowledged.requestId, reason_code: "claim_outcome_unknown", request_id: acknowledged.requestId }),
       recordHalt({ halt_key: receiptBearing.requestId, reason_code: "promotion_outcome_unknown", request_id: receiptBearing.requestId }),
       recordHalt({ halt_key: nonRequest, reason_code: "selection_read_failures" }),
     ]);
     await delay(1_000 + GRACE_MS + 500);
-    const state = await readState([missing, acknowledged.requestId, receiptBearing.requestId, nonRequest]);
+    const state = await readState([acknowledged.requestId, receiptBearing.requestId, nonRequest]);
     assert.equal(state.halts.every((halt) => halt.cleared === false && halt.clear_kind === null), true);
     assert.equal(state.human_required.some((row) => row.request_id === receiptBearing.requestId), true);
     assert.equal(
       await prisma.amuxOrchestratorHalt.count({
         where: { id: { in: halts.map((halt) => halt.halt_id) }, clearedAt: null },
       }),
-      4,
+      3,
+    );
+  });
+});
+
+const PLACEHOLDER_INSTANCE_ID = "00000000-0000-0000-0000-000000000000";
+
+test("a result-unknown halt whose request never reached the server gets a placeholder admission and is auto-cleared", async () => {
+  // 2026-10-20 amendment: the server admits the lost request itself, so a late copy is
+  // refused before it changes anything, then clears the halt by version 33.
+  const missing = randomUUID();
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
+    const halt = await recordHalt({ halt_key: missing, reason_code: "claim_outcome_unknown", request_id: missing });
+    const first = await readState([missing]);
+    assert.equal(first.halts[0]?.cleared, false);
+    const placeholder = await writeRow(missing);
+    assert.equal(placeholder.instanceId, PLACEHOLDER_INSTANCE_ID);
+    assert.equal(placeholder.callKind, "claim");
+    assert.equal(placeholder.ackedAt, null);
+    assert.equal(placeholder.resolvedAt, null);
+    const admitted = await prisma.adminAuditLog.findMany({
+      where: { action: "amux.orchestrator.write_placeholder_admitted", targetId: missing },
+    });
+    assert.equal(admitted.length, 1);
+    assert.equal(admitted[0]!.actorUserId, null);
+    const metadata = admitted[0]!.metadata as Record<string, unknown>;
+    assert.deepEqual(Object.keys(metadata).sort(), [
+      "call_kind",
+      "halt_id",
+      "halt_key",
+      "reason_code",
+      "request_id",
+      "systemActor",
+    ]);
+    assert.equal(metadata.halt_id, halt.halt_id);
+
+    // The real request, arriving late, can no longer be admitted.
+    const late = await withAmuxRouteBudget(() =>
+      admitAmuxOrchestratorWrite({ requestId: missing, instanceId: randomUUID(), callKind: "claim" }),
+    );
+    assert.equal(late.admitted, false);
+
+    await delay(AMUX_PLACEHOLDER_BUDGET_MS + GRACE_MS + 500);
+    const second = await readState([missing]);
+    assert.deepEqual(
+      [second.halts[0]?.cleared, second.halts[0]?.clear_kind, second.halts[0]?.resolution],
+      [true, "system_no_commit", "no_commit"],
+    );
+    const stored = await prisma.amuxOrchestratorHalt.findUniqueOrThrow({ where: { id: halt.halt_id } });
+    assert.equal(stored.clearedByUserId, null);
+    assert.equal((await receiptsOf(missing)).length, 0);
+    // A later read writes no second placeholder.
+    await readState([missing]);
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: { action: "amux.orchestrator.write_placeholder_admitted", targetId: missing },
+      }),
+      1,
+    );
+  });
+});
+
+test("an admitted request keeps its own admission and halts outside the automatic list get no placeholder", async () => {
+  const real = await admit(12_000, "claim");
+  const unacked = randomUUID();
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
+    await recordHalt({ halt_key: real.requestId, reason_code: "claim_outcome_unknown", request_id: real.requestId });
+    await recordHalt({ halt_key: unacked, reason_code: "unacked_write_receipt", request_id: unacked });
+    await readState([real.requestId, unacked]);
+    assert.equal((await writeRow(real.requestId)).instanceId, real.instanceId);
+    assert.equal(await prisma.amuxOrchestratorWrite.count({ where: { requestId: unacked } }), 0);
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: {
+          action: "amux.orchestrator.write_placeholder_admitted",
+          targetId: { in: [real.requestId, unacked] },
+        },
+      }),
+      0,
+    );
+  });
+});
+
+test("a recovery sweep whose answer was lost is acknowledged by the server and never waits for a person", async () => {
+  // 2026-10-20 amendment: recover only releases what has expired, so its receipts need
+  // no person; a claim's receipts still do.
+  const sweep = await admit(1_000, "recover");
+  const claim = await admit(1_000, "claim");
+  for (const { requestId } of [sweep, claim]) {
+    await prisma.$transaction(async (tx) => {
+      await lockAmuxOrchestratorAdmission(tx, requestId);
+      await tx.$executeRaw`
+        INSERT INTO "AmuxOrchestratorWriteReceipt" ("id", "requestId", "targetKind", "targetId", "rowCount", "committedAt")
+        VALUES (${randomUUID()}, ${requestId}, 'work_item', 'TASK-SWEPT', 1, clock_timestamp())
+      `;
+    });
+  }
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
+    await delay(1_000 + GRACE_MS + 500);
+    const state = await readState();
+    assert.equal(state.human_required.some((row) => row.request_id === sweep.requestId), false);
+    assert.equal(state.human_required.some((row) => row.request_id === claim.requestId), true);
+    const swept = await writeRow(sweep.requestId);
+    assert.notEqual(swept.ackedAt, null);
+    assert.equal(swept.resolution, null);
+    assert.equal((await writeRow(claim.requestId)).ackedAt, null);
+    const audits = await prisma.adminAuditLog.findMany({
+      where: { action: "amux.orchestrator.write_auto_acknowledged", targetId: sweep.requestId },
+    });
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0]!.actorUserId, null);
+    assert.deepEqual(Object.keys(audits[0]!.metadata as Record<string, unknown>).sort(), [
+      "call_kind",
+      "request_id",
+      "systemActor",
+    ]);
+    // An acknowledged admission takes no later receipt.
+    await rejectsWith(
+      prisma.$executeRaw`
+        INSERT INTO "AmuxOrchestratorWriteReceipt" ("id", "requestId", "targetKind", "targetId", "rowCount", "committedAt")
+        VALUES (${randomUUID()}, ${sweep.requestId}, 'work_item', 'TASK-LATE', 1, clock_timestamp())
+      `,
+      /AMUX_ORCHESTRATOR_WRITE_CLOSED/,
     );
   });
 });

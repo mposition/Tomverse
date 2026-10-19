@@ -298,6 +298,8 @@ export const en = {
         copyCode: "Copy code",
         responseCopied: "Copied",
         tryAnotherModelHint: "You can also select another model and try again.",
+        concurrencyRetryWaiting: "Retry becomes available when a running answer finishes.",
+        concurrencyRetryReady: "A slot is free. You can retry now.",
         guestQuotaLoginBenefitHint: "Logging in gives you a much higher daily limit, and keeps this conversation on your account.",
         send: "Send",
         creditUnit: "credits",

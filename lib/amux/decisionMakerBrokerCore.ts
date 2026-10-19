@@ -10,6 +10,7 @@ import {
 } from "./decisionMakerLauncherCore.ts";
 import { DM_LAUNCH_HARD_TIMEOUT_MS } from "./decisionMakerLauncherProcess.ts";
 import { isDmRequestId } from "./decisionMakerRequestCore.ts";
+import { DM_SNAPSHOT_PATHS_MAX, dmSnapshotPayloadLines, type DmSnapshot } from "./decisionMakerSnapshot.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
 
 /**
@@ -62,12 +63,13 @@ export const DM_LAUNCHER_SOCKET_PATHS: Readonly<Record<DmInstanceScope, string>>
 
 /**
  * The stdin payload. §5 caps the card's text at 16 KiB; serialized as JSON a
- * byte takes at most six, so 96 KiB, plus the DM's instructions. 128 KiB
- * holds that; a larger payload is refused before anything is made.
+ * byte takes at most six, so 96 KiB, plus the DM's instructions -- 128 KiB --
+ * and the snapshot's lines, at most DM_SNAPSHOT_TOTAL_MAX_BYTES (512 KiB) and
+ * their header: 768 KiB. A larger payload is refused before anything is made.
  */
-export const DM_PAYLOAD_MAX_BYTES = 128 * 1024;
+export const DM_PAYLOAD_MAX_BYTES = 768 * 1024;
 /** A `launch` line: the payload as base64 (4/3) and the fixed fields. */
-export const DM_LAUNCH_LINE_MAX_BYTES = 256 * 1024;
+export const DM_LAUNCH_LINE_MAX_BYTES = 1280 * 1024;
 /**
  * A `result` line: the output (at most `DM_LAUNCH_OUTPUT_MAX_BYTES`, at most
  * six bytes each as a JSON string) and the fixed fields.
@@ -203,6 +205,50 @@ export type DmLaunchRequest = {
 };
 
 const LAUNCH_KEYS = ["v", "type", "requestId", "instance", "requestKey", "payload", "transmitIntent"] as const;
+
+// ---------------------------------------------------------------------------
+// `snapshot`: bridge -> broker (stage S2b)
+// ---------------------------------------------------------------------------
+
+/**
+ * Before the transmission intent, the bridge asks the broker for the
+ * repository snapshot of a card's paths (§5: the broker fetches it, holding no
+ * credential). The broker answers with the snapshot's payload lines and its
+ * target; the bridge appends the lines to the payload, computes the manifest
+ * digest itself under its request key, and records the intent for the whole
+ * payload -- so the launch that follows is checked against every byte.
+ */
+const SNAPSHOT_KEYS = ["v", "type", "requestId", "paths"] as const;
+export type DmSnapshotRequest = { requestId: string; paths: string[] };
+
+/** A `snapshot` request line, or null for anything else. */
+export const dmParseSnapshotRequest = (line: string): DmSnapshotRequest | null => {
+  const value = parseJson(line);
+  if (!isPlainObject(value) || !hasExactKeys(value, SNAPSHOT_KEYS)) return null;
+  if (value.v !== DM_BROKER_PROTOCOL_VERSION || value.type !== "snapshot") return null;
+  if (!isDmRequestId(value.requestId) || !Array.isArray(value.paths)) return null;
+  if (value.paths.length > DM_SNAPSHOT_PATHS_MAX) return null;
+  if (!value.paths.every((path) => typeof path === "string" && path.length <= 512)) return null;
+  return { requestId: value.requestId, paths: value.paths as string[] };
+};
+
+/** Whether a request line asks for a snapshot rather than a launch. */
+export const dmIsSnapshotRequestLine = (line: string): boolean => {
+  const value = parseJson(line);
+  return isPlainObject(value) && value.type === "snapshot";
+};
+
+/** The broker's answer: the lines (base64, empty for none), the target, and what was left out. */
+export const dmEncodeSnapshotAnswer = (requestId: string | null, snapshot: DmSnapshot | null) => ({
+  v: DM_BROKER_PROTOCOL_VERSION,
+  type: "snapshot",
+  requestId,
+  state: snapshot === null ? "none" : snapshot.state,
+  targetSha: snapshot !== null && snapshot.state !== "none" ? snapshot.targetSha : null,
+  lines: snapshot === null ? "" : Buffer.from(dmSnapshotPayloadLines(snapshot), "utf8").toString("base64"),
+  reason: snapshot === null ? "request_malformed" : snapshot.state === "none" ? snapshot.reason : null,
+  excluded: snapshot === null ? {} : snapshot.excluded,
+});
 
 export type DmLaunchParse =
   | { ok: true; request: DmLaunchRequest }

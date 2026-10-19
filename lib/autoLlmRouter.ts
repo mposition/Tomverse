@@ -7,6 +7,11 @@ import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import { readAutoLlmRouterModelId, readAutoLlmRouterRewrite } from "@/lib/autoLlmRouterSettings";
 import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
+import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
+import { holdChatUsageBucket } from "@/lib/chatSecurity";
+import { providerBucketKey } from "@/lib/chatProviderHolds";
+import { resolveModelPricing } from "@/lib/modelPricing";
+import { getProviderCostBudget } from "@/lib/providerCostBudget";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
@@ -21,6 +26,7 @@ import {
     autoLlmRouterProviderOptions,
     autoLlmRouterSession,
     autoLlmRouterUserMessage,
+    autoLlmRouterWorstCaseMicroUsd,
     buildAutoLlmRouterSystem,
     parseAutoLlmRouterOutput,
     resolveAutoLlmRouterModel,
@@ -40,7 +46,7 @@ export type AutoLlmRouterCallResult = {
  * optimizer's replay (lib/autoRouterOptimizer.ts), so a cycle measures the
  * same request the product sends. Never throws.
  */
-export async function callAutoLlmRouter(input: {
+type AutoLlmRouterCallInput = {
     routerModel: AiModel;
     guidance: string;
     prompt: string;
@@ -53,24 +59,39 @@ export async function callAutoLlmRouter(input: {
     rewriteGuidance?: string;
     /** The live turn's deadline unless given; the optimizer's replay waits longer. */
     timeoutMs?: number;
-}): Promise<AutoLlmRouterCallResult> {
+};
+
+/** What the call sends, built once so its cost bound is of the same request. */
+const routerRequest = (input: AutoLlmRouterCallInput) => {
     const rewrite = input.rewrite === true;
+    return {
+        rewrite,
+        system: buildAutoLlmRouterSystem(input.guidance, {
+            rewrite,
+            rewriteGuidance: input.rewriteGuidance,
+        }),
+        prompt: autoLlmRouterUserMessage(
+            input.prompt,
+            input.previousAnswer,
+            input.candidates,
+            input.session
+        ),
+        maxOutputTokens: rewrite
+            ? AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS
+            : AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+    };
+};
+
+export async function callAutoLlmRouter(
+    input: AutoLlmRouterCallInput
+): Promise<AutoLlmRouterCallResult> {
+    const { rewrite, system, prompt, maxOutputTokens } = routerRequest(input);
     try {
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
-            system: buildAutoLlmRouterSystem(input.guidance, {
-                rewrite,
-                rewriteGuidance: input.rewriteGuidance,
-            }),
-            prompt: autoLlmRouterUserMessage(
-                input.prompt,
-                input.previousAnswer,
-                input.candidates,
-                input.session
-            ),
-            maxOutputTokens: rewrite
-                ? AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS
-                : AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+            system,
+            prompt,
+            maxOutputTokens,
             maxRetries: 0,
             abortSignal: AbortSignal.timeout(
                 input.timeoutMs ??
@@ -117,6 +138,96 @@ async function readRouterSession(
         return null;
     }
 }
+
+// The provider's operational budget, shared with chat, memory extraction and
+// the optimizer (docs/policy/credit-and-cost-limits.md): the same
+// ChatUsageBucket keys and periods.
+const providerPeriods = (now: Date) => [
+    {
+        period: "provider-cost-day",
+        start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
+    },
+    {
+        period: "provider-cost-month",
+        start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+    },
+];
+
+class RouterBudgetRefused extends Error {}
+
+/**
+ * Holds the call's worst case under the provider's day and month budgets,
+ * both or neither. False -- and no call -- when either is spent or the hold
+ * cannot be written: the router fails closed on money, the turn does not.
+ * Exported for the database test.
+ */
+export async function reserveRouterCost(provider: string, microUsd: number, now: Date) {
+    const budget = getProviderCostBudget(provider);
+    const limits = [budget.day, budget.month];
+    try {
+        await prisma.$transaction(async (tx) => {
+            for (const [index, { period, start }] of providerPeriods(now).entries()) {
+                const held = await holdChatUsageBucket(
+                    tx,
+                    providerBucketKey(provider),
+                    period,
+                    start,
+                    limits[index],
+                    microUsd
+                );
+                if (!held) throw new RouterBudgetRefused();
+            }
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Moves the hold to what the call actually cost: gives back what it did not
+ * use, or adds what it used beyond the bound. Only called with usage the
+ * provider reported; a failed or timed-out call keeps its whole hold, because
+ * it may still have been billed. Exported for the database test.
+ */
+export async function settleRouterCost(provider: string, deltaMicroUsd: number, reservedAt: Date) {
+    if (!Number.isSafeInteger(deltaMicroUsd) || deltaMicroUsd === 0) return;
+    try {
+        await prisma.$transaction(async (tx) => {
+            for (const { period, start } of providerPeriods(reservedAt)) {
+                await tx.$executeRaw`
+                    UPDATE "ChatUsageBucket"
+                    SET "count" = GREATEST(0, "count" + ${deltaMicroUsd}), "updatedAt" = NOW()
+                    WHERE "key" = ${providerBucketKey(provider)}
+                      AND "period" = ${period}
+                      AND "periodStart" = ${start}
+                `;
+            }
+        });
+    } catch (error) {
+        // The hold stays as it was; over-counted is the usual side of it.
+        console.error(
+            JSON.stringify({
+                event: "chat_auto_llm_router_settle_failed",
+                provider,
+                error: error instanceof Error ? error.name : "unknown",
+            })
+        );
+    }
+}
+
+/** Null when the price cannot be resolved; the call is then not made. */
+const routerPrices = (model: AiModel) => {
+    try {
+        const pricing = resolveModelPricing(model);
+        return {
+            inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+            outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+        };
+    } catch {
+        return null;
+    }
+};
 
 /**
  * Ask a small model which eligible candidate should answer this prompt.
@@ -180,8 +291,7 @@ export async function pickAutoModelWithLlm(input: {
         rewrite,
         rewriteCycleId: rewriteGuidance?.cycleId ?? null,
     });
-    const startedAt = Date.now();
-    const { outcome, pick, usage } = await callAutoLlmRouter({
+    const call: AutoLlmRouterCallInput = {
         routerModel,
         guidance: active.guidance,
         prompt: input.prompt,
@@ -190,8 +300,33 @@ export async function pickAutoModelWithLlm(input: {
         session,
         rewrite,
         rewriteGuidance: rewriteGuidance?.guidance,
-    });
+    };
+    const prices = routerPrices(routerModel);
+    const request = routerRequest(call);
+    const worstCase = prices ? autoLlmRouterWorstCaseMicroUsd({ ...request, ...prices }) : null;
+    const reservedAt = new Date();
+    if (worstCase === null || !(await reserveRouterCost(routerModel.provider, worstCase, reservedAt))) {
+        console.info(
+            JSON.stringify({
+                event: "chat_auto_llm_router_skipped",
+                traceId: input.traceId,
+                routerModelId: routerModel.id,
+                reason: worstCase === null ? "unpriced" : "provider_budget",
+            })
+        );
+        return null;
+    }
+    const startedAt = Date.now();
+    const { outcome, pick, usage } = await callAutoLlmRouter(call);
     const latencyMs = Date.now() - startedAt;
+    if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
+        const actual = callCostMicroUsd({
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            ...prices,
+        });
+        void settleRouterCost(routerModel.provider, actual - worstCase, reservedAt);
+    }
     console.info(
         JSON.stringify({
             event: "chat_auto_llm_router",

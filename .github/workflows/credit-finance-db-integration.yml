@@ -391,11 +391,17 @@ jobs:
   # gives it the dependency and `always()` makes it run even when a lane failed,
   # because a skipped aggregate would leave the same silent gap it exists to
   # close.
+  # Pull requests only (2026-10-20). This job exists for branch protection,
+  # which reads checks on pull requests, never on pushes. On a develop or main
+  # push it did nothing but wait for a runner after the lanes had finished --
+  # 9+ minutes on 2026-10-20 behind the PR queue -- and Railway's Wait for CI
+  # held the deployment until it did. Skipped on push, the run concludes when
+  # the lanes do, and a failing one still fails the run.
   credit-finance-db-result:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
     needs: [credit-finance-db, ops-observer-pg16, credit-finance-db-postgres16]
-    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
     steps:
       - name: Require every lane to have passed
         env:

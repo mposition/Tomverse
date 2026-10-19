@@ -260,7 +260,10 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "read",
   },
   // setup + admission lock + receipt count + resolution audit (4) + update +
-  // receipt recheck + halt lock + automatic-clear audit (4) + update + fence
+  // receipt recheck + halt lock + automatic-clear audit (4) + update + fence.
+  // The 2026-10-20 amendment's two other paths are shorter: setup + admission lock + halt
+  // lock + placeholder insert + audit (4) + fence, and setup + admission lock
+  // + receipt count + acknowledgement audit (4) + update + fence.
   orchestratorResolve: {
     operation: "orchestrator_resolve",
     prismaCallCeiling: 16,
@@ -451,6 +454,14 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerJudgment: {
     operation: "decision_maker_judgment",
     prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // A person resolving an unknown delivery (Admin, stage S2): lock, delivery
+  // read, the administrator's audit 3 (4 with an integrity key), the event --
+  // 7 at most (resolveDecisionMakerDeliveryUnknown) + setup + fence.
+  decisionMakerDeliveryResolve: {
+    operation: "decision_maker_delivery_resolve",
+    prismaCallCeiling: 9,
     isolation: "mutation",
   },
   // Stage S2-2b3's delivery routes for the bridge (app/api/internal/amux/

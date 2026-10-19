@@ -31,7 +31,12 @@ const bodySchema = z.object({
   id: uuid,
   expectedPreviousVersion: z.number().int().nonnegative().max(2_147_483_646),
   ownerConfirmedWorstTier: z.literal(true),
+  // amux-intake v19: the Max session runner needs the same rates approved as a
+  // subscription_cli conversion estimate. Absent keeps the v4 API price.
+  mode: z.enum(["api", "subscription_cli"]).optional(),
 }).strict();
+/** Read profiles: the v4 API price and the v19 Max subscription price. */
+const PROFILE_MODES = { "first-live": "api", "max-subscription": "subscription_cli" } as const;
 const revokeSchema = z.object({
   priceVersionId: uuid,
   expectedVersion: z.number().int().positive().max(2_147_483_647),
@@ -87,7 +92,7 @@ export async function POST(request: Request): Promise<Response> {
     const body = await readLimitedJson(request, 2_048, bodySchema);
     const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
     const approval = { ...body, provider: profile.provider,
-      modelId: profile.modelId, mode: profile.mode,
+      modelId: profile.modelId, mode: body.mode ?? profile.mode,
       inputTokensCap: profile.inputTokensCap,
       outputTokensCap: profile.outputTokensCap,
       inputMicroUsdPerMillion: profile.inputMicroUsdPerMillion,
@@ -145,23 +150,24 @@ export async function GET(request: Request): Promise<Response> {
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v4-analysis-price-read", { minute: 15, day: 100 });
     const params = new URL(request.url).searchParams;
-    if ([...params.keys()].length === 1 && params.get("profile") === "first-live" &&
-        params.getAll("profile").length === 1) {
+    const profileName = params.get("profile");
+    if ([...params.keys()].length === 1 && params.getAll("profile").length === 1 &&
+        (profileName === "first-live" || profileName === "max-subscription")) {
+      const mode = PROFILE_MODES[profileName];
       const latest = await prisma.amuxIdeaAnalysisPriceVersion.findFirst({
         where: { provider: AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE.provider,
-          modelId: AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE.modelId,
-          mode: AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE.mode },
+          modelId: AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE.modelId, mode },
         orderBy: { version: "desc" },
       });
       return NextResponse.json({ state: "profile", profile: {
-        ...AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE,
+        ...AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE, mode,
         maxReservationMicroUsd:
           AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE.maxReservationMicroUsd.toString(),
         ...AMUX_V4_CLAUDE_OPUS_55_PRICE_EVIDENCE,
         evidenceDigest: amuxV4ApprovedCliPriceEvidenceDigest(),
       }, latest: latest ? { id: latest.id, version: latest.version,
         status: latest.status, expiresAt: latest.expiresAt.toISOString(),
-        admissible: amuxV4ApprovedCliCostProfileMatches(latest) &&
+        admissible: amuxV4ApprovedCliCostProfileMatches(latest, mode) &&
           latest.expiresAt.getTime() > Date.now() } : null },
       { headers: noStore });
     }

@@ -1672,8 +1672,8 @@ export function ChatInput({
     () =>
       isGuestMode
         ? null
-        : getContextualModelSuggestion({ text: value, attachments }),
-    [attachments, isGuestMode, value]
+        : getContextualModelSuggestion({ text: value, attachments, selectionMode }),
+    [attachments, isGuestMode, selectionMode, value]
   );
   const contextualModel = contextualSuggestion
     ? AVAILABLE_MODELS.find(

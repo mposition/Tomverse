@@ -415,3 +415,33 @@ test("the broker listens only on the one socket systemd passed this process", ()
   assert.equal(dmSystemdListenFd({ LISTEN_PID: "42", LISTEN_FDS: "2" }, 42), null);
   assert.equal(dmSystemdListenFd({}, 42), null);
 });
+
+test("stage S2b: a snapshot request is answered from the public reads alone -- no directory, no launcher", async () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const text = "SQLite is the store.\n";
+  const { gitBlobId } = await import("../lib/amux/decisionMakerSnapshot.ts");
+  const enc = (value) => new TextEncoder().encode(value);
+  const reads = [];
+  const snapshotHttp = async (url) => {
+    reads.push(url);
+    if (url.endsWith("/commits/develop") || url.endsWith(`/commits/${sha}`)) return { status: 200, body: enc(JSON.stringify({ sha })) };
+    if (url.includes("/git/trees/")) return { status: 200, body: enc(JSON.stringify({ truncated: false, tree: [{ path: "docs/store.md", mode: "100644", type: "blob", sha: gitBlobId(enc(text)) }] })) };
+    if (url.endsWith("/docs/store.md")) return { status: 200, body: enc(text) };
+    return { status: 404, body: enc("") };
+  };
+  await withBroker(OPENAI, { launcher: "absent", snapshotHttp }, async (broker) => {
+    const answer = await broker.call({ v: 1, type: "snapshot", requestId: REQUEST_ID, paths: ["docs/store.md", ".env"] });
+    assert.equal(answer.type, "snapshot");
+    assert.equal(answer.requestId, REQUEST_ID);
+    assert.equal(answer.state, "develop");
+    assert.equal(answer.targetSha, sha);
+    assert.deepEqual(answer.excluded, { secret_path: 1 });
+    const lines = Buffer.from(answer.lines, "base64").toString("utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(lines[1], { file: "docs/store.md", blob: gitBlobId(enc(text)), text });
+    assert.equal(broker.launcherConnections.length, 0);
+    assert.equal(existsSync(broker.requestDirectory()), false);
+    // A malformed snapshot request is answered with no snapshot, not a launch.
+    const malformed = await broker.call({ v: 1, type: "snapshot", requestId: "nope", paths: [] });
+    assert.deepEqual([malformed.state, malformed.reason, malformed.lines], ["none", "request_malformed", ""]);
+  });
+});

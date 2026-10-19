@@ -56,6 +56,15 @@ export type ChatConcurrencyPlan = {
 export const SUBJECT_CONCURRENCY_EXCEEDED = "CHAT_CONCURRENCY_EXCEEDED";
 export const IP_CONCURRENCY_EXCEEDED = "CHAT_IP_CONCURRENCY_EXCEEDED";
 
+/**
+ * Refusals decided before any provider was contacted and before anything was
+ * reserved: the same request, sent again once a slot frees, is the whole fix.
+ */
+export const CHAT_CONCURRENCY_ERROR_CODES: ReadonlySet<string> = new Set([
+    SUBJECT_CONCURRENCY_EXCEEDED,
+    IP_CONCURRENCY_EXCEEDED,
+]);
+
 /** Layer names. `entitlement` and `operational_guardrail` belong to credits. */
 export const SUBJECT_CONCURRENCY_LAYER = "concurrency";
 export const IP_CONCURRENCY_LAYER = "operational_admission";
