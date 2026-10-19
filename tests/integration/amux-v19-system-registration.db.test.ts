@@ -6,7 +6,8 @@ import { after, before, test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog, writeSystemAuditLog } from
+  "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V19_SYSTEM_REGISTRATION_ACTION,
   AMUX_V19_SYSTEM_REGISTRATION_TARGET } from
@@ -62,6 +63,9 @@ import { commitIdeaOnlyTransferPreview } from
   "@/lib/amux/ideaTransferPreviewService";
 import { commitIdeaTransferConfirmation } from
   "@/lib/amux/ideaTransferConfirmationService";
+import { commitAmuxSessionAnalysisPlanInTx,
+  prepareAmuxSessionAnalysisPlan } from
+  "@/lib/amux/ideaSessionAnalysisPlanService";
 import { prisma } from "@/lib/prisma";
 
 const commitAmuxIdeaSessionSubmission = (
@@ -502,6 +506,130 @@ test("one completed session plan registers atomically under system evidence", as
   assert.deepEqual(await readAmuxV19SystemRegistration(ideaId), {
     state: "committed", retryWrite: false, ideaId, auditId: result.auditId,
   });
+});
+
+/** A session idea whose only analysis is one claim-bound CLI answer: no owner
+ * preview, no confirmation, no v4 budget hold. */
+async function sessionPlannedIdea(rawPage: (previewId: string) => unknown) {
+  const ideaId = randomUUID();
+  const inspected = inspectAmuxIdeaSessionSubmission({ version: 1,
+    requestId: ideaId, input: { version: 1,
+      idea: `Synthetic session plan ${ideaId}`,
+      repositories: [], pullRequests: [] },
+    source: { toolName: "synthetic", modelProvider: "synthetic",
+      sessionDisplay: "session plan DB test" },
+  });
+  if (!inspected.ok) throw new Error(inspected.code);
+  const rawIdentity = { ideaId, purpose: "idea_raw" as const, subjectId: ideaId };
+  const rawKeys = await createAmuxContentUnitKeys(rawIdentity);
+  const submitted = await prisma.$transaction((tx) =>
+    commitAmuxIdeaSessionSubmission(tx, { inspected,
+      expectedAuthority: authority, ideaId, keys: rawKeys }));
+  await prisma.amuxIdeaSubmission.update({ where: { id: ideaId },
+    data: { state: "analyzing" } });
+  const claimId = randomUUID();
+  const unitIds = Array.from({ length: 4 }, () => randomUUID());
+  const keys = await createAmuxContentKeyRing([rawIdentity], [
+    { ideaId, purpose: "analysis_freeform" as const,
+      subjectId: amuxAnalysisFreeformSubjectId(ideaId, claimId) },
+    ...unitIds.map((subjectId) => ({ ideaId,
+      purpose: "analysis_draft" as const, subjectId }))]);
+  const rawModelOutput = JSON.stringify(rawPage(claimId));
+  const planned = await prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    const plan = prepareAmuxSessionAnalysisPlan({ ideaId, claimId,
+      rawModelOutput, keys, unitIds });
+    // The submission audit stands in for the claim-bound result audit here;
+    // the result commit itself is covered by the session submission suite.
+    return commitAmuxSessionAnalysisPlanInTx(tx, { ideaId, claimId,
+      resultAuditId: submitted.auditId, modelId: authority.scope.model.modelId,
+      plan, keys });
+  }, { timeout: 30_000 });
+  return { ideaId, claimId, unitIds, planned };
+}
+
+const sessionPage = (units: unknown[], extra: Record<string, unknown> = {}) =>
+  (previewId: string) => ({ schemaVersion: 5, previewId, chunkIndex: 0,
+    outcome: "propose", coverageStatus: "complete", continuationKind: null,
+    ownerQuestion: null, coveredScope: "One synthetic session plan was analyzed.",
+    remainingScope: null, units, ...extra });
+
+function sessionPlanUnits(title: string) {
+  const signal = (metrics: Record<string, number>) => ({ metrics,
+    uncertainty: "low", rationale: "Synthetic deterministic evidence.",
+    evidenceRefIds: ["operator_idea"] });
+  return [
+    { kind: "node", localId: "c0:node-0", level: "initiative", parentRef: null,
+      title: `${title} initiative`, description: "Session plan fixture.",
+      sourceRefIds: ["operator_idea"], portfolioSignal: signal({ value: 3 }) },
+    { kind: "node", localId: "c0:node-1", level: "epic", parentRef: "c0:node-0",
+      title: `${title} epic`, description: "Session plan fixture.",
+      sourceRefIds: ["operator_idea"], portfolioSignal: signal({ value: 3 }) },
+    { kind: "node", localId: "c0:node-2", level: "feature", parentRef: "c0:node-1",
+      title: `${title} feature`, description: "Session plan fixture.",
+      sourceRefIds: ["operator_idea"], portfolioSignal: signal({ value: 3 }) },
+    { kind: "card", localId: "c0:card-0", cardType: "task", storyKind: null,
+      title: `${title} Task`, problem: "Register one session plan.",
+      scopeIn: ["Register this fixture"], scopeOut: ["Do not execute it"],
+      completionCriteria: ["The inert Task is auditable"],
+      featureRef: "c0:node-2", parentStoryRef: null, dependencyRefs: [],
+      duplicateCandidateRefs: [], taskRole: "implement",
+      executionGrade: "advanced",
+      expectedPaths: ["lib/amux/ideaSessionAnalysisPlanService.ts"],
+      executionBrief: "Implement and verify one bounded change.",
+      sourceRefIds: ["operator_idea"], portfolioSignal: signal({ contribution: 3,
+        urgency: 2, dependencyUnlock: 2, workerCoverage: 2, effort: 2,
+        deliveryRisk: 1 }) },
+  ];
+}
+
+test("a session CLI answer becomes a plan the system registration accepts", async () => {
+  await approveSyntheticTaskCatalog();
+  const title = `Synthetic session ${randomUUID()}`;
+  const { ideaId, claimId, unitIds, planned } = await sessionPlannedIdea(
+    sessionPage(sessionPlanUnits(title)));
+  assert.equal(planned.state, "plan_ready");
+  if (planned.state !== "plan_ready") throw new Error("session plan refused");
+  assert.equal(planned.unitCount, 4);
+  const [idea, chunk, preview] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } } }),
+    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: claimId } }),
+  ]);
+  assert.equal(idea.state, "awaiting_owner");
+  assert.equal(idea.currentSourcePlanRevisionId, planned.planId);
+  assert.equal(chunk.state, "draft_ready");
+  assert.equal(chunk.currentPreviewId, claimId);
+  assert.equal(preview.state, "completed");
+  assert.equal(preview.payloadCiphertext, null);
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
+  assert.equal(result.state, "committed");
+  const decisions = await prisma.amuxIdeaUnitDecision.findMany({
+    where: { ideaId }, select: { draftUnitId: true, sourcePreviewId: true,
+      registeredWorkItemId: true } });
+  assert.equal(decisions.length, 4);
+  assert.ok(decisions.every((entry) => entry.sourcePreviewId === claimId));
+  assert.deepEqual(new Set(decisions.map((entry) => entry.draftUnitId)),
+    new Set(unitIds));
+  assert.equal(decisions.filter((entry) => entry.registeredWorkItemId).length, 1);
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId }, select: { state: true } })).state, "completed");
+});
+
+test("a session answer that asks the owner leaves the queue without a plan", async () => {
+  const { ideaId, planned } = await sessionPlannedIdea(sessionPage([], {
+    outcome: "needs_information", coverageStatus: "needs_owner_input",
+    continuationKind: "input",
+    ownerQuestion: "Which repository owns this change?" }));
+  assert.equal(planned.state, "plan_refused");
+  const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId }, select: { state: true, analysisCompletedAt: true,
+      currentSourcePlanRevisionId: true } });
+  assert.equal(idea.state, "awaiting_owner");
+  assert.ok(idea.analysisCompletedAt);
+  assert.equal(idea.currentSourcePlanRevisionId, null);
+  assert.equal(await prisma.amuxIdeaAnalysisChunk.count({ where: { ideaId } }), 0);
 });
 
 test("the receipt DB guard requires session scope evidence and no waiting refusal", async () => {

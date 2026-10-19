@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
@@ -12,7 +13,14 @@ import { AmuxMaxSessionResultError,
   commitAmuxMaxSessionResult, preflightAmuxMaxSessionResult,
   readAmuxMaxSessionResultReceipt } from
   "@/lib/amux/ideaSessionAnalysisResultService";
-import { createAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
+import { amuxAnalysisFreeformSubjectId } from
+  "@/lib/amux/ideaAnalysisDraftSealCore";
+import { createAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
+import { amuxV19SystemRegistrationEnabled } from
+  "@/lib/amux/ideaSystemRegistrationCore";
+import { AmuxV19SystemRegistrationError,
+  registerCompletedAmuxIdeaFromSystem } from
+  "@/lib/amux/ideaSystemRegistrationService";
 import { prisma } from "@/lib/prisma";
 
 const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE";
@@ -66,24 +74,61 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return amuxJsonNoStore({ error: "not_ready" }, 409);
   }
+  // One key per proposal unit the plan may store; an unusable answer still
+  // commits its result and settlement, and its unit keys stay empty.
+  let unitCount = 0;
+  try {
+    const parsed: unknown = JSON.parse(body.rawModelOutput);
+    const units = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).units : null;
+    if (Array.isArray(units) && units.length <= 40) unitCount = units.length;
+  } catch { /* A non-JSON answer is a refused plan, not a failed write. */ }
+  const unitIds = Array.from({ length: unitCount }, () => randomUUID());
   let keys;
   try {
-    keys = await createAmuxContentUnitKeys({ ideaId: body.ideaId,
-      purpose: "analysis_result", subjectId: body.claimId });
+    keys = await createAmuxContentKeyRing(
+      [{ ideaId: body.ideaId, purpose: "idea_raw", subjectId: body.ideaId }],
+      [{ ideaId: body.ideaId, purpose: "analysis_result",
+        subjectId: body.claimId },
+      { ideaId: body.ideaId, purpose: "analysis_freeform",
+        subjectId: amuxAnalysisFreeformSubjectId(body.ideaId, body.claimId) },
+      ...unitIds.map((id) => ({ ideaId: body.ideaId,
+        purpose: "analysis_draft" as const, subjectId: id }))]);
   } catch { return amuxJsonNoStore({ error: "key_outcome_unknown" }, 503); }
   let callbackReturned = false;
+  let result: Awaited<ReturnType<typeof commitAmuxMaxSessionResult>>;
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      const saved = await commitAmuxMaxSessionResult(tx, { ...body, keys });
+    result = await prisma.$transaction(async (tx) => {
+      const saved = await commitAmuxMaxSessionResult(tx, { ...body, keys,
+        unitIds });
       callbackReturned = true;
       return saved;
     }, { maxWait: 5_000, timeout: 15_000 });
-    return amuxJsonNoStore(result);
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxMaxSessionResultError) {
       return amuxJsonNoStore({ error: error.code }, 409);
     }
     return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
+  }
+  return amuxJsonNoStore({ ...result,
+    registration: result.plan.state === "plan_ready"
+      ? await registerSessionPlan(body.ideaId) : { state: "not_planned" } });
+}
+
+/** v19 item 5: the committed plan goes straight to the deterministic
+ * registration Guard. It runs after the result commit in its own
+ * transactions, so its outcome never changes the result answer; an unknown
+ * outcome is read back by idea ID, never resent (v19 item 8). */
+async function registerSessionPlan(ideaId: string): Promise<{ state: string }> {
+  if (!amuxV19SystemRegistrationEnabled(process.env)) {
+    return { state: "write_disabled" };
+  }
+  try {
+    const registered = await registerCompletedAmuxIdeaFromSystem(ideaId);
+    return { state: registered.state };
+  } catch (error) {
+    return { state: error instanceof AmuxV19SystemRegistrationError
+      ? error.code : "outcome_unknown" };
   }
 }
 
