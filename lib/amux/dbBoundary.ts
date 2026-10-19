@@ -453,6 +453,14 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // A person resolving an unknown delivery (Admin, stage S2): lock, delivery
+  // read, the administrator's audit 3 (4 with an integrity key), the event --
+  // 7 at most (resolveDecisionMakerDeliveryUnknown) + setup + fence.
+  decisionMakerDeliveryResolve: {
+    operation: "decision_maker_delivery_resolve",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // Stage S2-2b3's delivery routes for the bridge (app/api/internal/amux/
   // decision-maker/deliveries/**). The read of the next confirmed answer:
   // setup + the switches, the confirmation, the request state, the result
