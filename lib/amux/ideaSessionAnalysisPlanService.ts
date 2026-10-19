@@ -201,6 +201,15 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     if (parked.count !== 1) {
       throw new AmuxSessionAnalysisPlanError("integrity_unavailable");
     }
+    // An analysis that ends here ends every earlier page's body clock too,
+    // as a completed plan does (amux-intake v6 item 1). Deadlines only move
+    // earlier; the database refuses moving them later.
+    await tx.amuxIdeaAnalysisChunk.updateMany({ where: { ideaId: idea.id,
+      freeformCiphertext: { not: null }, freeformPurgeAfter: { gt: now } },
+    data: { freeformPurgeAfter: now } });
+    await tx.amuxIdeaTransferPreview.updateMany({ where: { ideaId: idea.id,
+      payloadCiphertext: { not: null }, payloadPurgeAfter: { gt: now } },
+    data: { payloadPurgeAfter: now } });
     return { state: "plan_refused" as const, reason };
   };
   let context: AmuxSessionPageContext;
