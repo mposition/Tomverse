@@ -8,6 +8,8 @@ import { parse } from "yaml";
 // header of .github/workflows/pr-fast-gate.yml for why. The condition is
 // copied into every job, so this keeps the copies honest.
 
+const PULL_REQUEST_ROLLUP =
+    "always() && github.event_name == 'pull_request' && !github.event.pull_request.draft";
 const RUN_UNLESS_DRAFT = "github.event_name != 'pull_request' || !github.event.pull_request.draft";
 
 // The workflows that run on pull requests and occupy a runner. A new one
@@ -53,7 +55,11 @@ for (const name of GUARDED) {
                 continue; // never runs for a pull request at all
             }
             assert.ok(
-                condition === RUN_UNLESS_DRAFT || condition === `always() && (${RUN_UNLESS_DRAFT})`,
+                condition === RUN_UNLESS_DRAFT ||
+                    condition === `always() && (${RUN_UNLESS_DRAFT})` ||
+                    // A rollup that exists only for branch protection runs on
+                    // ready pull requests and never on pushes.
+                    condition === PULL_REQUEST_ROLLUP,
                 `${name} job ${id} has if: ${condition || "(none)"}`
             );
         }
