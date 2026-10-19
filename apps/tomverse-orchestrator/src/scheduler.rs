@@ -296,9 +296,14 @@ pub struct Scheduler {
     /// What this tick's selection reads did so far. Set by
     /// `handle_selection_read`, read once by `tick` when the tick ends.
     tick_selection: TickSelection,
-    /// Recovery sweeps in a row whose outcome was unknown (the 2026-10-20 amendment). Only
-    /// logged: such a sweep is skipped, never halted on.
+    /// Recovery sweeps in a row whose outcome was unknown (the 2026-10-20
+    /// amendment). Only logged: such a sweep is skipped, never halted on.
     consecutive_unknown_recoveries: u32,
+    /// Set by a recovery sweep whose outcome was unknown. The server decides
+    /// such an admission only on a halt state read, which a scheduling process
+    /// otherwise never makes, so the next recovery passes read it (and ignore
+    /// what it says) until nothing is left undecided.
+    lost_recoveries_to_resolve: bool,
     /// The halts this process holds until the server returns a verified clear.
     halts: HaltBook,
     error_log: ErrorLogClock,
@@ -330,6 +335,7 @@ impl Scheduler {
             consecutive_selection_skips: 0,
             tick_selection: TickSelection::Untouched,
             consecutive_unknown_recoveries: 0,
+            lost_recoveries_to_resolve: false,
             halts: HaltBook::default(),
             error_log: ErrorLogClock::default(),
         }
@@ -715,10 +721,14 @@ impl Scheduler {
     /// resolves the admission by itself (`no_commit` without receipts, a
     /// system acknowledgement with them).
     async fn recovery_step(&mut self) -> Flow {
+        if self.lost_recoveries_to_resolve {
+            self.let_the_server_resolve_lost_recoveries().await;
+        }
         let ids = self.new_write_ids();
         let answer = write_answer(self.api.execution_recover(ids).await, classify_recover);
         if let WriteAnswer::Unknown(class) = answer {
-            self.consecutive_unknown_recoveries += 1;
+            self.consecutive_unknown_recoveries = self.consecutive_unknown_recoveries.saturating_add(1);
+            self.lost_recoveries_to_resolve = true;
             warn!(
                 endpoint = "execution_recover",
                 request_id = %ids.request_id,
@@ -764,6 +774,25 @@ impl Scheduler {
                 Flow::Continue
             }
             Settled::Halted => Flow::Halted,
+        }
+    }
+
+    /// One halt state read made only so the server runs its resolver over the
+    /// admissions of lost recovery sweeps (the 2026-10-20 amendment): it
+    /// acknowledges one with receipts and resolves one without as no_commit.
+    /// Nothing in the answer changes what this process does; the flag is
+    /// cleared once the server reports nothing undecided.
+    async fn let_the_server_resolve_lost_recoveries(&mut self) {
+        let settled = match self.api.orchestrator_halt_state(&[]).await {
+            Ok(raw) => matches!(classify_state(&raw), StateAnswer::State(state) if state.pending_count == 0),
+            Err(_) => false,
+        };
+        if settled {
+            self.lost_recoveries_to_resolve = false;
+            info!(
+                instance_id = %self.instance_id,
+                "Tomverse AMUX resolved the admissions of lost recovery sweeps"
+            );
         }
     }
 
@@ -1863,14 +1892,35 @@ mod tests {
             ("DROP", ""),
         ] {
             let body = body.to_owned();
-            let (base_url, log) = serve(handler(move |seen| (seen.path == RECOVER_PATH).then(|| (status, body.clone())))).await;
+            let (base_url, log) = serve(handler(move |seen| match seen.path.as_str() {
+                RECOVER_PATH => Some((status, body.clone())),
+                HALT_PATH if seen.method == "GET" => Some(("200 OK", CLEAR_STATE.to_owned())),
+                _ => None,
+            }))
+            .await;
             let mut scheduler = scheduler_for(base_url);
             assert_eq!(scheduler.recovery_step().await, Flow::Continue, "{status}");
+            assert!(scheduler.lost_recoveries_to_resolve, "{status}");
             assert_eq!(scheduler.recovery_step().await, Flow::Continue, "{status}");
             assert!(scheduler.halts.is_empty(), "{status}");
             assert_eq!(scheduler.consecutive_unknown_recoveries, 2, "{status}");
             let seen = log.lock().unwrap().clone();
-            assert!(seen.iter().all(|seen| seen.path != ACK_PATH && seen.path != HALT_PATH), "{status}");
+            assert!(
+                seen.iter().all(|seen| seen.path != ACK_PATH && !seen.is("POST", HALT_PATH)),
+                "{status}"
+            );
+            // The second pass first lets the server resolve the lost one with
+            // one state read, then sweeps.
+            let calls: Vec<String> = seen.iter().map(|seen| format!("{} {}", seen.method, seen.path)).collect();
+            assert_eq!(
+                calls,
+                [
+                    format!("POST {RECOVER_PATH}"),
+                    format!("GET {HALT_PATH}"),
+                    format!("POST {RECOVER_PATH}"),
+                ],
+                "{status}"
+            );
             // Each pass is a new write with its own request id, not a resend.
             let ids: std::collections::HashSet<_> = seen
                 .iter()
@@ -1879,6 +1929,35 @@ mod tests {
                 .collect();
             assert_eq!(ids.len(), 2, "{status}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_state_read_after_a_lost_recovery_repeats_until_nothing_is_undecided() {
+        let pending = r#"{"open_halt_count":0,"open_halts":[],"pending_count":1,"latest_deadline_at":"2026-10-20T00:00:00.000Z","retry_after_ms":0,"human_required_count":0,"human_required":[],"halts":[]}"#;
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counter = reads.clone();
+        let (base_url, log) = serve(handler(move |seen| match seen.path.as_str() {
+            RECOVER_PATH => Some(("200 OK", r#"{"recovered":true,"reclaimed":0,"reclaimed_claims":0,"quota_observations_deleted":0,"more":false}"#.to_owned())),
+            HALT_PATH if seen.method == "GET" => Some(if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                ("200 OK", pending.to_owned())
+            } else {
+                ("200 OK", CLEAR_STATE.to_owned())
+            }),
+            ACK_PATH => Some(("200 OK", r#"{"acked":true}"#.to_owned())),
+            _ => None,
+        }))
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+        scheduler.lost_recoveries_to_resolve = true;
+        assert_eq!(scheduler.recovery_step().await, Flow::Continue);
+        assert!(scheduler.lost_recoveries_to_resolve, "still undecided after the first read");
+        assert_eq!(scheduler.recovery_step().await, Flow::Continue);
+        assert!(!scheduler.lost_recoveries_to_resolve);
+        assert_eq!(scheduler.recovery_step().await, Flow::Continue);
+        assert_eq!(reads.load(Ordering::SeqCst), 2, "no read once nothing is undecided");
+        assert!(scheduler.halts.is_empty());
+        assert_eq!(scheduler.consecutive_unknown_recoveries, 0);
+        assert_eq!(log.lock().unwrap().iter().filter(|seen| seen.path == RECOVER_PATH).count(), 3);
     }
 
     #[tokio::test]
