@@ -41,12 +41,13 @@ export default async function AdminMarketingPage({
   // What each tab holds, from the overview the loader already read: the
   // drafts waiting for a person (in the attention colour), the accounts, and
   // the stage a section waits for. An unreadable count draws nothing.
-  const { pending, accounts } = initial.overview;
+  const { pending, accounts, competitors } = initial.overview;
   const chips: Record<string, AdminPageTabChip | undefined> = {
     queue: pending && pending.count > 0 ? { label: String(pending.count), attention: true } : undefined,
     accounts: accounts && accounts.total > 0 ? { label: String(accounts.total) } : undefined,
-    comments: { label: "S4" },
-    experiments: { label: "S5" },
+    competitors: competitors && competitors.approved > 0 ? { label: String(competitors.approved) } : undefined,
+    comments: { label: "S4", locked: true },
+    experiments: { label: "S5", locked: true },
   };
 
   return (

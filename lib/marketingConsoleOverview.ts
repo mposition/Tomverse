@@ -2,6 +2,7 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -14,6 +15,14 @@ import { prisma } from "@/lib/prisma";
  * rule 8). Counts only -- no draft text, fact value, URL or prompt.
  */
 export type MarketingConsoleOverview = {
+  /**
+   * When this was read, by the server's clock. The screen measures "2 hours
+   * ago" from here rather than from the browser's clock, so the page the
+   * server renders and the page the browser hydrates say the same thing.
+   */
+  readAt: string;
+  /** The deployment this console belongs to (production, staging, dev...). */
+  environment: string;
   pending: { count: number; oldestAt: string | null } | null;
   /**
    * This UTC month's ledger. `countedMicroUsd` is what the monthly cap counts
@@ -33,6 +42,8 @@ export type MarketingConsoleOverview = {
       }
     | null;
   accounts: { total: number; byStatus: Record<string, number> } | null;
+  /** Approved competitors: the ones A3 searches. */
+  competitors: { approved: number } | null;
 };
 
 const settle = async <T>(read: () => Promise<T>): Promise<T | null> => {
@@ -44,7 +55,8 @@ const settle = async <T>(read: () => Promise<T>): Promise<T | null> => {
 };
 
 export async function readMarketingConsoleOverview(): Promise<MarketingConsoleOverview> {
-  const [pending, llm, lastRun, accounts] = await Promise.all([
+  const readAt = new Date().toISOString();
+  const [pending, llm, lastRun, accounts, competitors] = await Promise.all([
     settle(async () => {
       const rows = await prisma.$queryRaw<Array<{ count: number; oldest: Date | null }>>(Prisma.sql`
         SELECT count(*)::int AS "count", min("createdAt") AS "oldest"
@@ -102,6 +114,12 @@ export async function readMarketingConsoleOverview(): Promise<MarketingConsoleOv
       const byStatus = Object.fromEntries(rows.map((row) => [row.status, row.count]));
       return { total: rows.reduce((sum, row) => sum + row.count, 0), byStatus };
     }),
+    settle(async () => {
+      const rows = await prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+        SELECT count(*)::int AS "count" FROM "MarketingCompetitor" WHERE "status" = 'approved'
+      `);
+      return { approved: rows[0]?.count ?? 0 };
+    }),
   ]);
-  return { pending, llm, lastRun, accounts };
+  return { readAt, environment: resolveDeploymentEnvironment(), pending, llm, lastRun, accounts, competitors };
 }

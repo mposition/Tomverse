@@ -172,6 +172,7 @@ export function AdminMarketingPanel({
   const [view, setView] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [channel, setChannel] = useState<string>("");
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -198,6 +199,11 @@ export function AdminMarketingPanel({
 
   const unavailable = view.availability.available ? null : view.availability;
   const done = () => void refresh();
+  // A filter over the rows this page already read, never a new query: the
+  // list says how many it holds, and the filter only narrows what is drawn.
+  const channels = [...new Set(view.rows.map((row) => str(row.channel)).filter(Boolean))].sort();
+  const rows = channel ? view.rows.filter((row) => str(row.channel) === channel) : view.rows;
+  const now = view.overview.readAt;
 
   // Three bands, in the order an operator asks the questions: what needs me
   // (the overview), what is in this section (the list, under its tabs), and
@@ -207,22 +213,26 @@ export function AdminMarketingPanel({
     <section className="flex min-w-0 flex-col gap-6" data-testid="marketing-console">
       <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-zinc-500">{m.consoleEyebrow}</p>
+          <p className="text-xs text-zinc-500">{m.consoleEyebrow}</p>
           <h2 className="mt-1 text-2xl font-bold text-white">{m.consoleTitle}</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">{m.consoleDescription}</p>
-          <p className="mt-1 text-xs text-zinc-500">
-            {view.canWrite ? m.writesNote : m.readOnlyNote}
-          </p>
+          {view.canWrite ? null : <p className="mt-1 text-xs text-zinc-500">{m.readOnlyNote}</p>}
         </div>
-        <button
-          type="button"
-          onClick={done}
-          disabled={busy}
-          className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 self-start rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-[13px] font-semibold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 md:self-auto"
-        >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {m.refresh}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <MarketingTag tone="neutral">{view.overview.environment}</MarketingTag>
+          <span className="text-xs text-zinc-500">
+            {m.updatedAt.replace("{time}", `${(stamp(now) ?? "").slice(11)} UTC`)}
+          </span>
+          <button
+            type="button"
+            onClick={done}
+            disabled={busy}
+            className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-[13px] font-semibold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {m.refresh}
+          </button>
+        </div>
       </header>
 
       <MarketingOverview view={view} m={m} />
@@ -255,24 +265,45 @@ export function AdminMarketingPanel({
                     "{count}",
                     String(view.pageSize)
                   )}
+                  {" · "}
+                  {m.shownCount.replace("{n}", String(rows.length))}
                 </p>
+                {channels.length > 1 ? (
+                  <label className="relative inline-flex items-center">
+                    <span className="sr-only">{m.filterChannel}</span>
+                    <select
+                      data-testid="marketing-channel-filter"
+                      value={channel}
+                      onChange={(event) => setChannel(event.target.value)}
+                      className="min-h-11 cursor-pointer appearance-none rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:border-zinc-700 focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="">{m.filterAllChannels}</option>
+                      {channels.map((value) => (
+                        <option key={value} value={value}>
+                          {channelName(value)}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-2.5 h-4 w-4 text-zinc-500" />
+                  </label>
+                ) : null}
                 {view.truncated ? (
-                  <p className="text-xs font-semibold text-amber-300">{m.truncatedAtLimit}</p>
+                  <p className="w-full text-xs font-semibold text-amber-300">{m.truncatedAtLimit}</p>
                 ) : null}
               </div>
-              {view.rows.length === 0 ? (
+              {rows.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-400">
                   {m.empty}
                 </p>
               ) : (
                 <div className="grid gap-3">
-                  {view.rows.map((row) => (
+                  {rows.map((row) => (
                     <article
                       key={String(row.id)}
                       data-testid="marketing-row"
                       className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
                     >
-                      <MarketingRow section={view.section} row={row} m={m} />
+                      <MarketingRow section={view.section} row={row} now={now} m={m} />
                       <MarketingActionRail
                         actions={view.canWrite ? rowActions(view.section, row, m) : []}
                         section={view.section}
@@ -298,24 +329,38 @@ export function AdminMarketingPanel({
           />
           <MarketingLlmSettings
             llm={view.llm}
+            spend={view.overview.llm}
             canWrite={view.canWrite}
             section={view.section}
             onDone={done}
             m={m}
           />
-          {view.webhookStaging ? (
-            <MarketingWebhookStaging
-              staging={view.webhookStaging}
-              canWrite={view.canWrite}
-              section={view.section}
-              onDone={done}
-              m={m}
-            />
+          {view.webhookStaging || view.canWrite ? (
+            <div data-testid="marketing-webhook-card" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-[15px] font-semibold text-white">{m.webhookCardTitle}</h3>
+                <MarketingTag tone={view.switches.webhookShadow === "on" ? "success" : "neutral"}>
+                  {view.switches.webhookShadow === "on" ? m.switchOn : m.switchOff}
+                </MarketingTag>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">{m.webhookCardHint}</p>
+              <div className="mt-4 grid gap-5 [&>*+*]:border-t [&>*+*]:border-zinc-800 [&>*+*]:pt-5">
+                {view.webhookStaging ? (
+                  <MarketingWebhookStaging
+                    staging={view.webhookStaging}
+                    canWrite={view.canWrite}
+                    section={view.section}
+                    onDone={done}
+                    m={m}
+                  />
+                ) : null}
+                {view.canWrite ? (
+                  <MarketingWebhookVerificationSign section={view.section} onDone={done} m={m} />
+                ) : null}
+                {view.canWrite ? <MarketingWebhookProduction section={view.section} /> : null}
+              </div>
+            </div>
           ) : null}
-          {view.canWrite ? (
-            <MarketingWebhookVerificationSign section={view.section} onDone={done} m={m} />
-          ) : null}
-          {view.canWrite ? <MarketingWebhookProduction section={view.section} /> : null}
         </aside>
       </div>
     </section>
@@ -323,6 +368,25 @@ export function AdminMarketingPanel({
 }
 
 const usd = (micro: number) => `$${(micro / 1_000_000).toFixed(2)}`;
+
+/**
+ * How long ago (or how long until) an instant was, measured from when the page
+ * was read on the server -- not from the browser's clock -- so the server's
+ * render and the browser's say the same thing.
+ */
+const relative = (iso: unknown, now: string, m: Record<string, string>): string | null => {
+  if (typeof iso !== "string") return null;
+  const at = Date.parse(iso);
+  const reference = Date.parse(now);
+  if (Number.isNaN(at) || Number.isNaN(reference)) return null;
+  const ahead = at > reference;
+  const minutes = Math.round(Math.abs(reference - at) / 60_000);
+  if (minutes < 1) return m.timeJustNow;
+  if (minutes < 60) return (ahead ? m.timeMinutesLeft : m.timeMinutesAgo).replace("{n}", String(minutes));
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return (ahead ? m.timeHoursLeft : m.timeHoursAgo).replace("{n}", String(hours));
+  return (ahead ? m.timeDaysLeft : m.timeDaysAgo).replace("{n}", String(Math.round(hours / 24)));
+};
 
 /** A small pill whose colour says what kind of state it is. */
 export function MarketingTag({
@@ -380,29 +444,21 @@ function StatusTag({ status, m }: { status: unknown; m: Record<string, string> }
   );
 }
 
-function StatCard({
-  label,
-  testId,
-  children,
-}: {
-  label: string;
-  testId: string;
-  children: ReactNode;
-}) {
+function StatCard({ label, testId, children }: { label: string; testId: string; children: ReactNode }) {
   return (
-    <div
-      data-testid={testId}
-      className="flex min-w-0 flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
-    >
+    <div data-testid={testId} className="flex min-w-0 flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
       <p className="text-[13px] font-medium text-zinc-400">{label}</p>
       {children}
     </div>
   );
 }
 
-const StatValue = ({ children, tone }: { children: ReactNode; tone?: "accent" }) => (
-  <p className={`text-3xl font-semibold tabular-nums ${tone === "accent" ? "text-blue-300" : "text-white"}`}>
-    {children}
+const StatValue = ({ value, unit, tone }: { value: ReactNode; unit?: string; tone?: "accent" }) => (
+  <p className="flex items-baseline gap-1.5">
+    <span className={`text-3xl font-semibold tabular-nums ${tone === "accent" ? "text-blue-300" : "text-white"}`}>
+      {value}
+    </span>
+    {unit ? <span className="text-sm text-zinc-400">{unit}</span> : null}
   </p>
 );
 
@@ -416,11 +472,10 @@ const StatCaption = ({ children }: { children: ReactNode }) => (
  * than showing zero.
  */
 function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<string, string> }) {
-  const { pending, llm, lastRun, accounts } = view.overview;
+  const { pending, llm, lastRun, accounts, competitors, readAt } = view.overview;
   const capRaw = view.llm.settings?.monthlyUsdCap ?? null;
   const capMicro = capRaw === null ? null : Math.round(Number(capRaw) * 1_000_000);
   const used = llm && capMicro ? Math.min(100, (llm.countedMicroUsd / capMicro) * 100) : 0;
-  const barColour = used >= 90 ? "bg-red-500" : used >= 70 ? "bg-amber-500" : "bg-blue-500";
   const unreadable = <p className="text-sm font-semibold text-amber-300">{m.overviewUnreadable}</p>;
 
   return (
@@ -428,16 +483,16 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
       <StatCard label={m.overviewPending} testId="marketing-overview-pending">
         {pending ? (
           <>
-            <StatValue tone={pending.count > 0 ? "accent" : undefined}>{pending.count}</StatValue>
+            <StatValue value={pending.count} unit={m.unitCount} tone={pending.count > 0 ? "accent" : undefined} />
             <StatCaption>
               {pending.oldestAt
-                ? m.overviewPendingOldest.replace("{time}", stamp(pending.oldestAt) ?? m.none)
+                ? m.overviewPendingAge.replace("{age}", relative(pending.oldestAt, readAt, m) ?? m.none)
                 : m.overviewPendingNone}
             </StatCaption>
-            {pending.count > 0 && view.section !== "queue" ? (
+            {pending.count > 0 ? (
               <Link
                 href="/admin/marketing?tab=queue"
-                className="inline-flex min-h-11 items-center gap-1 text-[13px] font-semibold text-blue-300 hover:underline"
+                className="inline-flex min-h-11 items-center gap-1 self-start text-[13px] font-semibold text-blue-300 hover:underline"
               >
                 {m.overviewReview}
                 <ArrowRight className="h-4 w-4" />
@@ -452,28 +507,18 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
       <StatCard label={m.overviewSpend} testId="marketing-overview-spend">
         {llm ? (
           <>
-            <p className="flex items-baseline gap-2">
-              <span className="text-3xl font-semibold tabular-nums text-white">{usd(llm.countedMicroUsd)}</span>
-              <span className="text-sm text-zinc-400">
-                {capMicro ? m.overviewSpendOf.replace("{cap}", usd(capMicro)) : m.overviewNoCap}
-              </span>
-            </p>
-            {capMicro ? (
-              <div
-                className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
-                role="meter"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(used)}
-                aria-label={m.overviewSpend}
-              >
-                <div className={`h-full rounded-full ${barColour}`} style={{ width: `${Math.max(used, 1)}%` }} />
-              </div>
-            ) : null}
+            <StatValue
+              value={usd(llm.countedMicroUsd)}
+              unit={capMicro ? m.overviewSpendOf.replace("{cap}", usd(capMicro)) : m.overviewNoCap}
+            />
+            {capMicro ? <SpendMeter percent={used} label={m.overviewSpend} /> : null}
             <StatCaption>
-              {m.overviewSpendCaption
+              {m.overviewSpendModel
+                .replace("{model}", view.llm.settings?.model ?? m.llmUnset)
                 .replace("{calls}", String(llm.calls))
-                .replace("{tokens}", usd(llm.tokenMicroUsd))}
+                .replace("{percent}", String(Math.round(used)))}
+              <br />
+              {m.overviewSpendTokens.replace("{tokens}", usd(llm.tokenMicroUsd))}
             </StatCaption>
           </>
         ) : (
@@ -489,7 +534,9 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
         ) : (
           <>
             <p className="flex flex-wrap items-center gap-2">
-              <span className="text-2xl font-semibold tabular-nums text-white">{stamp(lastRun.at)}</span>
+              <span className="text-3xl font-semibold tabular-nums text-white">
+                {(stamp(lastRun.at) ?? "").slice(11)}
+              </span>
               {lastRun.factsKept === null ? null : lastRun.factsKept > 0 ? (
                 <MarketingTag tone="success">
                   <Check className="h-3 w-3" />
@@ -503,8 +550,9 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
               )}
             </p>
             <StatCaption>
-              {m.overviewRunCaption
-                .replace("{calls}", String(lastRun.calls))
+              {`${(stamp(lastRun.at) ?? "").slice(0, 10)} UTC · `}
+              {m.overviewRunCounts
+                .replace("{competitors}", competitors ? String(competitors.approved) : m.none)
                 .replace("{kept}", lastRun.factsKept === null ? m.none : String(lastRun.factsKept))
                 .replace("{dropped}", lastRun.factsDropped === null ? m.none : String(lastRun.factsDropped))}
             </StatCaption>
@@ -515,7 +563,7 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
       <StatCard label={m.overviewAccounts} testId="marketing-overview-accounts">
         {accounts ? (
           <>
-            <StatValue>{accounts.total}</StatValue>
+            <StatValue value={accounts.total} unit={m.unitAccounts} />
             <StatCaption>
               {m.overviewAccountsCaption
                 .replace("{approval}", String(accounts.byStatus.approval_mode ?? 0))
@@ -527,6 +575,23 @@ function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<
           unreadable
         )}
       </StatCard>
+    </div>
+  );
+}
+
+/** How much of the monthly cap is counted, in the colour of how close it is. */
+function SpendMeter({ percent, label }: { percent: number; label: string }) {
+  const colour = percent >= 90 ? "bg-red-500" : percent >= 70 ? "bg-amber-500" : "bg-blue-500";
+  return (
+    <div
+      className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
+      role="meter"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(percent)}
+      aria-label={label}
+    >
+      <div className={`h-full rounded-full ${colour}`} style={{ width: `${Math.max(percent, 1)}%` }} />
     </div>
   );
 }
@@ -561,13 +626,13 @@ function MarketingSwitchStrip({
   onDone: () => void;
   m: Record<string, string>;
 }) {
-  // The three an operator can move, each with what it does, then the three
-  // that are only read here, folded away: they matter when something looks
-  // wrong, not on every visit.
-  const main: [string, string, string][] = [
-    ["drafts", m.switchDrafts, m.switchDraftsHint],
-    ["publish", m.switchPublish, m.switchPublishHint],
-    ["autoPublish", m.switchAutoPublish, m.switchAutoPublishHint],
+  // The three an operator can move, each with what it does and a switch, then
+  // the three that are only read here, folded away: they matter when something
+  // looks wrong, not on every visit.
+  const main: { key: string; name: (typeof MARKETING_CONSOLE_SWITCH_CONTROLS)[number]["name"]; label: string; hint: string }[] = [
+    { key: "drafts", name: "drafts", label: m.switchDrafts, hint: m.switchDraftsHint },
+    { key: "publish", name: "publish", label: m.switchPublish, hint: m.switchPublishHint },
+    { key: "autoPublish", name: "autonomous", label: m.switchAutoPublish, hint: m.switchAutoPublishHint },
   ];
   const advanced: [string, string][] = [
     ["experiments", m.switchExperiments],
@@ -594,80 +659,87 @@ function MarketingSwitchStrip({
         : "neutral";
   const stateOf = (key: string) => switches[key] ?? "unreadable";
 
-  const switchLabel = (name: string) =>
-    ({
-      drafts: m.switchDrafts,
-      publish: m.switchPublish,
-      autonomous: m.switchAutoPublish,
-    })[name] ?? name;
-
-  const toggles: MarketingAction[] =
-    !canWrite || configGeneration === null
-      ? []
-      : MARKETING_CONSOLE_SWITCH_CONTROLS.flatMap((control) => {
-          const state = switches[control.state];
-          if (state !== "on" && state !== "off") return [];
-          const turningOn = state === "off";
-          return [
-            {
-              id: `switch-${control.name}`,
-              label: (turningOn ? m.switchTurnOn : m.switchTurnOff).replace(
-                "{switch}",
-                switchLabel(control.name)
-              ),
-              path: "/api/admin/marketing/settings",
-              // The route exports PATCH. Sending POST answered 405, which
-              // reached the operator as "that did not go through" -- three
-              // switches that looked broken rather than misaddressed.
-              method: "PATCH",
-              // Two switches the writer is certain to refuse, each drawn
-              // disabled with its reason rather than hidden: someone looking
-              // for a switch should find out why it is not theirs to move,
-              // and a control whose only outcome is a 409 teaches them that
-              // this screen's buttons are guesses.
-              //
-              // Publishing cannot go on before the publisher exists (S2c);
-              // the writer answers `publisher_capability_unavailable`.
-              // Autonomous cannot go on while drafts or publishing are off;
-              // the writer answers `autonomous_needs_drafts_and_publish`.
-              unavailable: !turningOn
-                ? undefined
-                : control.name === "publish"
-                  ? m.switchPublishUnavailable
-                  : control.name === "autonomous" &&
-                      (switches.drafts !== "on" || switches.publish !== "on")
-                    ? m.switchAutonomousNeedsBoth
-                    : undefined,
-              confirm: turningOn ? m.switchConfirmOn : undefined,
-              body: () => ({
-                switch: control.name,
-                enabled: turningOn,
-                expectedConfigGeneration: configGeneration,
-              }),
-            },
-          ];
-        });
+  // One switch per row. A switch whose state cannot be read, or a viewer who
+  // may not write, gets no control at all: a switch has to show the real
+  // position, and there is no real position to show.
+  const toggleFor = (control: (typeof main)[number]): MarketingAction | null => {
+    const state = switches[control.key];
+    if (!canWrite || configGeneration === null || (state !== "on" && state !== "off")) return null;
+    const turningOn = state === "off";
+    return {
+      id: `switch-${control.name}`,
+      label: (turningOn ? m.switchTurnOn : m.switchTurnOff).replace("{switch}", control.label),
+      path: "/api/admin/marketing/settings",
+      // The route exports PATCH. Sending POST answered 405, which reached the
+      // operator as "that did not go through" -- three switches that looked
+      // broken rather than misaddressed.
+      method: "PATCH",
+      checked: state === "on",
+      // Two switches the writer is certain to refuse, each drawn disabled with
+      // its reason rather than hidden: someone looking for a switch should
+      // find out why it is not theirs to move, and a control whose only
+      // outcome is a 409 teaches them that this screen's buttons are guesses.
+      //
+      // Publishing cannot go on before the publisher exists (S2c); the writer
+      // answers `publisher_capability_unavailable`. Autonomous cannot go on
+      // while drafts or publishing are off; the writer answers
+      // `autonomous_needs_drafts_and_publish`.
+      unavailable: !turningOn
+        ? undefined
+        : control.name === "publish"
+          ? m.switchPublishUnavailable
+          : control.name === "autonomous" && (switches.drafts !== "on" || switches.publish !== "on")
+            ? m.switchAutonomousNeedsBoth
+            : undefined,
+      confirm: turningOn ? m.switchConfirmOn : undefined,
+      body: () => ({
+        switch: control.name,
+        enabled: turningOn,
+        expectedConfigGeneration: configGeneration,
+      }),
+    };
+  };
 
   return (
     <div data-testid="marketing-switches" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
       <h3 className="text-[15px] font-semibold text-white">{m.automationTitle}</h3>
       <p className="mt-1 text-xs leading-5 text-zinc-500">{m.automationHint}</p>
       <dl className="mt-4 grid gap-4">
-        {main.map(([key, label, hint]) => (
-          <div key={key} className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <dt className="text-sm font-medium text-zinc-100">{label}</dt>
-              <p className="mt-0.5 text-xs leading-5 text-zinc-500">{hint}</p>
+        {main.map((control) => {
+          const action = toggleFor(control);
+          return (
+            <div key={control.key} className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <dt className="text-sm font-medium text-zinc-100">{control.label}</dt>
+                  <dd data-state={stateOf(control.key)}>
+                    <MarketingTag tone={tone(stateOf(control.key))}>{word(stateOf(control.key))}</MarketingTag>
+                  </dd>
+                </div>
+                {action?.unavailable ? (
+                  <p id={`marketing-why-${action.id}`} className="mt-1 text-xs leading-5 text-amber-300">
+                    {action.unavailable}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">{control.hint}</p>
+                )}
+              </div>
+              {action ? (
+                <MarketingActionRail
+                  actions={[action]}
+                  section={section}
+                  onDone={onDone}
+                  m={m}
+                  appearance="switch"
+                />
+              ) : null}
             </div>
-            <dd data-state={stateOf(key)}>
-              <MarketingTag tone={tone(stateOf(key))}>{word(stateOf(key))}</MarketingTag>
-            </dd>
-          </div>
-        ))}
+          );
+        })}
       </dl>
       <details className="group mt-4 border-t border-zinc-800 pt-3">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between text-[13px] font-medium text-zinc-400 hover:text-zinc-200">
-          {m.switchAdvanced}
+          {m.switchAdvancedCount.replace("{count}", String(advanced.length))}
           <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
         </summary>
         <dl className="mt-2 grid gap-2">
@@ -690,7 +762,6 @@ function MarketingSwitchStrip({
       {canWrite && configGeneration === null ? (
         <p className="mt-3 text-xs text-amber-300">{m.switchNoGeneration}</p>
       ) : null}
-      <MarketingActionRail actions={toggles} section={section} onDone={onDone} m={m} />
     </div>
   );
 }
@@ -698,18 +769,20 @@ function MarketingSwitchStrip({
 /**
  * The generator's model and monthly LLM cap, set here instead of in Railway
  * variables (operator decision 2026-10-19). The models are the OpenAI ones the
- * chat price catalog prices; one the ledger's limits refuse is listed with the
- * reason and not offered. The cost ledger reads these inside every
- * reservation, so a change applies to the next call.
+ * chat price catalog prices; only one the ledger's limits accept can be
+ * selected. The cost ledger reads these inside every reservation, so a change
+ * applies to the next call.
  */
 function MarketingLlmSettings({
   llm,
+  spend,
   canWrite,
   section,
   onDone,
   m,
 }: {
   llm: LlmView;
+  spend: MarketingConsoleOverview["llm"];
   canWrite: boolean;
   section: string;
   onDone: () => void;
@@ -717,6 +790,9 @@ function MarketingLlmSettings({
 }) {
   const settings = llm.settings;
   const models = llm.models.filter((option) => option.unavailable === null);
+  const selected = llm.models.find((option) => option.model === settings?.model) ?? null;
+  const capMicro = settings?.monthlyUsdCap ? Math.round(Number(settings.monthlyUsdCap) * 1_000_000) : null;
+  const percent = spend && capMicro ? Math.min(100, (spend.countedMicroUsd / capMicro) * 100) : 0;
   const action: MarketingAction[] = !canWrite
     ? []
     : [
@@ -750,6 +826,17 @@ function MarketingLlmSettings({
           }),
         },
       ];
+  const row = (label: string, value: ReactNode, testId?: string, mono?: boolean) => (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-[13px] text-zinc-400">{label}</dt>
+      <dd
+        data-testid={testId}
+        className={`truncate text-[13px] font-medium tabular-nums text-zinc-100 ${mono ? "font-mono" : ""}`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
 
   return (
     <div data-testid="marketing-llm-settings" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
@@ -758,18 +845,15 @@ function MarketingLlmSettings({
         <p className="mt-3 text-xs text-amber-300">{m.llmUnreadable}</p>
       ) : (
         <dl className="mt-4 grid gap-2.5">
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-[13px] text-zinc-400">{m.llmModel}</dt>
-            <dd data-testid="marketing-llm-model" className="truncate font-mono text-[13px] font-medium text-zinc-100">
-              {settings.model ?? m.llmUnset}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-[13px] text-zinc-400">{m.llmCap}</dt>
-            <dd data-testid="marketing-llm-cap" className="text-[13px] font-medium tabular-nums text-zinc-100">
-              {settings.monthlyUsdCap ?? m.llmUnset}
-            </dd>
-          </div>
+          {row(m.llmModel, settings.model ?? m.llmUnset, "marketing-llm-model", true)}
+          {row(m.llmCap, capMicro ? usd(capMicro) : m.llmUnset, "marketing-llm-cap")}
+          {spend ? (
+            <>
+              {row(m.llmUsed, `${usd(spend.countedMicroUsd)}${capMicro ? `  ·  ${Math.round(percent)}%` : ""}`)}
+              {capMicro ? <SpendMeter percent={percent} label={m.llmUsed} /> : null}
+            </>
+          ) : null}
+          {selected ? row(m.llmWorstSearch, usd(selected.worstCallMicroUsd)) : null}
         </dl>
       )}
       {settings === null || settings.model === null || settings.monthlyUsdCap === null ? (
@@ -777,36 +861,9 @@ function MarketingLlmSettings({
           {m.llmNothingSpends}
         </p>
       ) : null}
-      {llm.models.length > 0 ? (
-        <details className="group mt-4 border-t border-zinc-800 pt-3">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between text-[13px] font-medium text-zinc-400 hover:text-zinc-200">
-            {m.llmModelsTitle.replace("{count}", String(llm.models.length))}
-            <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
-          </summary>
-          <ul data-testid="marketing-llm-models" className="mt-2 grid gap-2">
-            {llm.models.map((option) => (
-              <li
-                key={option.model}
-                data-available={option.unavailable === null}
-                className="rounded-lg border border-zinc-800 px-3 py-2"
-              >
-                <p className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-xs text-zinc-200">{option.model}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-zinc-400">
-                    {m.llmWorstCall.replace("{usd}", (option.worstCallMicroUsd / 1_000_000).toFixed(2))}
-                  </span>
-                </p>
-                {option.unavailable === null ? null : (
-                  <p className="mt-1 text-xs text-amber-300">
-                    {m.llmUnavailable.replace("{reason}", option.unavailable)}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-      <MarketingActionRail actions={action} section={section} onDone={onDone} m={m} />
+      <div className="mt-4">
+        <MarketingActionRail actions={action} section={section} onDone={onDone} m={m} appearance="block" />
+      </div>
     </div>
   );
 }
@@ -860,9 +917,8 @@ export function MarketingWebhookVerificationSign({
   return (
     <div
       data-testid="marketing-webhook-verification-sign"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{m.webhookSignTitle}</p>
+      <p className="text-sm font-semibold text-zinc-100">{m.webhookSignTitle}</p>
       <p className="mt-1 text-xs text-zinc-500">{m.webhookSignNote}</p>
       <MarketingActionRail actions={sign} section={section} onDone={onDone} m={m} />
     </div>
@@ -965,9 +1021,8 @@ export function MarketingWebhookStaging({
   return (
     <div
       data-testid="marketing-webhook-staging"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+      <p className="text-sm font-semibold text-zinc-100">
         {m.webhookStagingTitle}
       </p>
       <p className="mt-1 text-xs text-zinc-500">{m.webhookStagingNote}</p>
@@ -1136,9 +1191,9 @@ function MarketingAccountCreate({
   return (
     <div
       data-testid="marketing-account-create"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+      className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+      <p className="text-[15px] font-semibold text-white">
         {m.createAccountTitle}
       </p>
       <p className="mt-1 text-xs text-zinc-500">{m.createAccountNote}</p>
@@ -1186,9 +1241,9 @@ function MarketingCompetitorCreate({
   return (
     <div
       data-testid="marketing-competitor-create"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+      className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+      <p className="text-[15px] font-semibold text-white">
         {m.createCompetitorTitle}
       </p>
       <p className="mt-1 text-xs text-zinc-500">{m.createCompetitorNote}</p>
@@ -1295,6 +1350,8 @@ const legalHoldAction = (row: Row, m: Record<string, string>): MarketingAction =
   const held = row.legalHold === true;
   return {
     id: held ? "legal-hold-release" : "legal-hold-set",
+    align: "end",
+    icon: "pause",
     label: held ? m.actReleaseHold : m.actSetHold,
     path: POST(row.id, "legal-hold"),
     confirm: held ? m.confirmReleaseHold : undefined,
@@ -1307,7 +1364,8 @@ function queueActions(row: Row, m: Record<string, string>): MarketingAction[] {
   if (row.status === "pending_approval") {
     actions.push({
       id: "approve",
-    primary: true,
+      primary: true,
+      icon: "check",
       label: m.actApprove,
       path: POST(row.id, "approve"),
       fields: [
@@ -1395,7 +1453,7 @@ function publishedActions(row: Row, m: Record<string, string>): MarketingAction[
   if (status === "approved") {
     actions.push({
       id: "schedule",
-    primary: true,
+      primary: true,
       label: m.actSchedule,
       path: POST(row.id, "schedule"),
       fields: [
@@ -1536,7 +1594,7 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
   if (status === "connect_pending") {
     actions.push({
       id: "confirm-connection",
-    primary: true,
+      primary: true,
       label: m.actConfirmConnection,
       path: ACCOUNT(row.id, "confirm-connection"),
       body: () => ({ expectedConnectionGeneration: generation }),
@@ -1724,6 +1782,23 @@ function RowHeading({ title, detail, children }: { title: string; detail?: strin
   );
 }
 
+const CHANNEL_NAMES: Record<string, string> = {
+  linkedin: "LinkedIn",
+  x: "X",
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  threads: "Threads",
+  facebook: "Facebook",
+  youtube: "YouTube",
+  bluesky: "Bluesky",
+};
+const channelName = (value: unknown) => CHANNEL_NAMES[str(value)] ?? str(value);
+
+const guardWord = (decision: unknown, m: Record<string, string>) => {
+  const tone = guardTone(decision);
+  return tone === "success" ? m.guardPass : tone === "danger" ? m.guardBlock : m.guardReview;
+};
+
 const guardTone = (decision: unknown): "success" | "warning" | "danger" | "neutral" => {
   const value = typeof decision === "string" ? decision : "";
   if (/pass|allow|approve/u.test(value)) return "success";
@@ -1734,38 +1809,44 @@ const guardTone = (decision: unknown): "success" | "warning" | "danger" | "neutr
 function MarketingRow({
   section,
   row,
+  now,
   m,
 }: {
   section: MarketingConsoleSection;
   row: Row;
+  /** When the page was read: relative times are measured from here. */
+  now: string;
   m: Record<string, string>;
 }) {
   if (section === "queue") {
-    const verdict = [row.guardDecision as string, ...((row.guardCodes as string[]) ?? [])]
-      .filter(Boolean)
-      .join(" · ");
+    const codes = ((row.guardCodes as string[]) ?? []).filter(Boolean);
+    const guard = guardTone(row.guardDecision);
     return (
       <>
-        <RowHeading title={`${str(row.accountSlug)}`} detail={`${str(row.channel)} · ${str(row.locale)}`}>
-          <MarketingTag tone={guardTone(row.guardDecision)}>
-            {m.colVerdict} {verdict || m.none}
-          </MarketingTag>
-          <StatusTag status={row.status} m={m} />
-        </RowHeading>
-        <p className="mt-3 whitespace-pre-line text-[15px] leading-7 text-zinc-100">
-          {text(row.excerpt) ?? m.none}
-        </p>
-        <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
-          <span>
-            {m.colCreated} {stamp(row.createdAt) ?? m.none} UTC
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 rounded-md border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-xs font-medium text-zinc-200">
+              {channelName(row.channel)}
+            </span>
+            <span className="truncate text-[13px] font-semibold text-zinc-100">{str(row.accountSlug)}</span>
+            <span className="shrink-0 font-mono text-[11px] uppercase text-zinc-500">{str(row.locale)}</span>
+          </p>
+          <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+            {row.status === "pending_approval" ? null : <StatusTag status={row.status} m={m} />}
+            {row.legalHold === true ? <MarketingTag tone="warning">{m.legalHeld}</MarketingTag> : null}
+            <MarketingTag tone={guard}>
+              {guard === "success" ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+              Guard {guardWord(row.guardDecision, m)}
+              {codes.length > 0 ? ` · ${codes.join(" · ")}` : ""}
+            </MarketingTag>
           </span>
-          <span aria-hidden="true">·</span>
-          <span>
-            {m.colExpires} {stamp(row.approvalExpiresAt) ?? m.none}
-          </span>
-          <span aria-hidden="true">·</span>
-          <span>{String(row.mode)}</span>
-          {row.legalHold === true ? <MarketingTag tone="warning">{m.legalHeld}</MarketingTag> : null}
+        </div>
+        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-100">{text(row.excerpt) ?? m.none}</p>
+        <p className="mt-3 text-xs text-zinc-500" title={`${stamp(row.createdAt) ?? ""} UTC`}>
+          {m.queueMeta
+            .replace("{created}", relative(row.createdAt, now, m) ?? m.none)
+            .replace("{expires}", relative(row.approvalExpiresAt, now, m) ?? m.none)
+            .replace("{claims}", typeof row.claimCount === "number" ? String(row.claimCount) : m.none)}
         </p>
       </>
     );

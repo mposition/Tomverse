@@ -465,6 +465,10 @@ export async function readMarketingConsole(
         guardCodes: post.guardCodes,
         guardRuleIds: post.guardRuleIds,
         excerpt: excerpt(post.envelope),
+        // How many registry claims the draft cites: a count, not the claims.
+        claimCount: Array.isArray((post.envelope as { claimIds?: unknown } | null)?.claimIds)
+          ? ((post.envelope as { claimIds: unknown[] }).claimIds.length)
+          : null,
         // The words themselves, not only the shortened line above them: the
         // edit control starts from what is actually there, and an edit box
         // that opened empty would replace a draft with whatever was typed.

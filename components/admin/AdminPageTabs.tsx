@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Lock } from "lucide-react";
 import type { AdminRole } from "@/lib/adminAuthCore";
 import {
   adminVisibleTabs,
@@ -22,6 +23,8 @@ export type AdminPageTabChip = {
   label: string;
   /** Drawn in the attention colour: writes are open, rather than closed. */
   attention?: boolean;
+  /** A section a later stage owns: drawn with a lock and in a muted colour. */
+  locked?: boolean;
 };
 
 type Props = {
@@ -152,14 +155,17 @@ export async function AdminPageTabs({
                       }`
                 }
               >
-                <span className="truncate">{tab.label}</span>
+                {underline && chip?.locked ? <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : null}
+                <span className={`truncate ${underline && chip?.locked && !active ? "text-zinc-500" : ""}`}>{tab.label}</span>
                 {chip ? (
                   <span
                     className={
                       underline
-                        ? `shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-                            chip.attention ? "bg-blue-500/15 text-blue-300" : "bg-zinc-800 text-zinc-400"
-                          }`
+                        ? chip.locked
+                          ? "shrink-0 text-[11px] font-medium text-zinc-500"
+                          : `shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                              chip.attention ? "bg-blue-500/15 text-blue-300" : "bg-zinc-800 text-zinc-400"
+                            }`
                         : `shrink-0 rounded-full border px-2 py-0.5 text-xs font-bold ${
                             chip.attention
                               ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
