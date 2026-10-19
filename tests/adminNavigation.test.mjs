@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ADMIN_AMUX_EXECUTION_LEGACY_TABS,
   ADMIN_DETAIL_ROUTES,
+  ADMIN_ENGINEERING_AGENT_LEGACY_TABS,
   ADMIN_LEGACY_ROUTES,
   ADMIN_LEGACY_TAB_ROUTES,
   ADMIN_NAVIGATION,
@@ -685,6 +686,34 @@ test("the shell does not title a page the role cannot view", () => {
   assert.equal(resolveAdminPageMeta("/admin/amux-execution", "support").isKnown, true);
 });
 
+
+test("product research is its own workspace and the engineering agent's old tab link opens it", () => {
+  const research = ADMIN_NAVIGATION.find((item) => item.id === "product-research");
+  assert.equal(research.href, "/admin/product-research");
+  assert.equal(research.group, "Operations");
+  assert.equal(research.badge, "productResearch");
+  assert.deepEqual(research.tabs.map((tab) => tab.id), ["suggestions", "runs", "observations"]);
+  assert.equal(research.tabs[0].badge, "productResearch");
+  assert.equal(
+    adminNavigationBadge("productResearch", { ...EMPTY_ADMIN_NAVIGATION_COUNTS, openProductResearchSuggestions: 42 }),
+    42
+  );
+  assert.equal(adminNavigationBadge("productResearch", EMPTY_ADMIN_NAVIGATION_COUNTS), null);
+
+  // The tab moved, so the engineering agent no longer offers it, and the old
+  // link lands on the first section with the rest of its query.
+  assert.equal(adminNavItemTabs("engineering-agent").some((tab) => tab.id === "product-research"), false);
+  assert.deepEqual(ADMIN_ENGINEERING_AGENT_LEGACY_TABS, {
+    "product-research": "/admin/product-research?tab=suggestions",
+  });
+  assert.equal(
+    adminRedirectTarget(ADMIN_ENGINEERING_AGENT_LEGACY_TABS["product-research"], { tab: "product-research", from: "office" }),
+    "/admin/product-research?tab=suggestions&from=office"
+  );
+  const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/engineering-agent/page.tsx"), "utf8");
+  assert.ok(page.includes("ADMIN_ENGINEERING_AGENT_LEGACY_TABS[query.tab]"));
+  assert.ok(page.includes("redirect(adminRedirectTarget(legacy, query))"));
+});
 
 test("legacy execution controls retain their exact settings section and query", () => {
   assert.deepEqual(ADMIN_AMUX_EXECUTION_LEGACY_TABS, {

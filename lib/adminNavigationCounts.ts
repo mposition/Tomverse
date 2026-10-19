@@ -78,6 +78,7 @@ export async function getAdminNavigationCounts(): Promise<{
     openModelLifecycle,
     overdueCampaignWaves,
     pendingMarketingApprovals,
+    openProductResearchSuggestions,
     openAmuxEscalations,
     openAmuxOrchestratorHalts,
     awaitingAmuxDecisionMaker,
@@ -112,6 +113,7 @@ export async function getAdminNavigationCounts(): Promise<{
     countOpenWorkItems(),
     overdueCampaignWaveCount({ now }),
     countPendingMarketingApprovals(),
+    prisma.productResearchSuggestion.count({ where: { status: "open" } }),
     countAwaitingAmuxEscalations(),
     // Orchestration policy version 20: halts no person has cleared.
     countOpenAmuxOrchestratorHalts(),
@@ -136,6 +138,7 @@ export async function getAdminNavigationCounts(): Promise<{
     openModelLifecycle: settled(openModelLifecycle),
     overdueCampaignWaves: settled(overdueCampaignWaves),
     pendingMarketingApprovals: settled(pendingMarketingApprovals),
+    openProductResearchSuggestions: settled(openProductResearchSuggestions),
     openAmuxEscalations: settled(openAmuxEscalations),
     openAmuxOrchestratorHalts: settled(openAmuxOrchestratorHalts),
     awaitingAmuxDecisionMaker: settled(awaitingAmuxDecisionMaker),

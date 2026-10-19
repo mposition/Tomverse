@@ -97,7 +97,7 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
     id: "research",
     icon: "🔭",
     policy: "docs/policy/product-research-agent.md",
-    recordHref: "/admin/engineering-agent?tab=product-research",
+    recordHref: "/admin/product-research",
   },
   { id: "digest", icon: "📋", policy: null, recordHref: "/admin/agent-digests" },
 ];

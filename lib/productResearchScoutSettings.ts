@@ -13,7 +13,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { SCOUT_DAILY_CALL_CAP_MAX } from "@/lib/productResearchScoutCore";
+import { SCOUT_DAILY_CALL_CAP_MAX, type ScoutCallRow } from "@/lib/productResearchScoutCore";
 
 export const SCOUT_MODEL_SETTING_KEY = "productResearch.scoutModelId";
 export const SCOUT_DAILY_CALL_CAP_SETTING_KEY = "productResearch.scoutDailyCallCap";
@@ -119,4 +119,15 @@ export async function scoutUsageToday(): Promise<ScoutUsageToday> {
     inputTokens: totals._sum.inputTokens ?? 0,
     outputTokens: totals._sum.outputTokens ?? 0,
   };
+}
+
+/** The ledger rows of the last `days` UTC days, newest first, for the Admin run view. */
+export async function scoutRecentCalls(days: number): Promise<ScoutCallRow[]> {
+  const since = new Date(startOfUtcDay(new Date()).getTime() - (days - 1) * 86_400_000);
+  return prisma.productResearchScoutLlmCall.findMany({
+    where: { createdAt: { gte: since } },
+    orderBy: { createdAt: "desc" },
+    take: days * SCOUT_DAILY_CALL_CAP_MAX,
+    select: { createdAt: true, outcome: true, inputTokens: true, outputTokens: true, kept: true },
+  });
 }

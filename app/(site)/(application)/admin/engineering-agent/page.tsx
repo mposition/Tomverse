@@ -1,19 +1,21 @@
 export const dynamic = "force-dynamic";
 
+import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminEngineeringAgentPanel } from "@/components/admin/AdminEngineeringAgentPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
-import { AdminProductResearchPanel } from "@/components/admin/AdminProductResearchPanel";
-import { AdminProductResearchScoutPanel } from "@/components/admin/AdminProductResearchScoutPanel";
 import { hasAdminPermission } from "@/lib/adminAuth";
-import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import {
+  ADMIN_ENGINEERING_AGENT_LEGACY_TABS,
+  adminNavItemTabs,
+  adminRedirectTarget,
+  resolveAdminTab,
+} from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
 import {
   readEngineeringAgentConsole,
   type EngineeringAgentConsoleSection,
 } from "@/lib/engineeringAgentConsoleRead";
-import { readProductResearchConsole } from "@/lib/productResearchConsoleRead";
-import { readScoutConsole } from "@/lib/productResearchScoutConsoleRead";
 
 const TABS = adminNavItemTabs("engineering-agent");
 
@@ -28,30 +30,22 @@ const TABS = adminNavItemTabs("engineering-agent");
  * and a recent sign-in, and each route checks both again. Whether this viewer
  * may write travels with the payload, so a reader is not offered buttons that
  * can only refuse.
+ *
+ * Product research had a tab here until 2026-10-19; it is its own workspace
+ * now, and the old tab link redirects there.
  */
 export default async function AdminEngineeringAgentPage({
   searchParams,
 }: PageProps<"/admin/engineering-agent">) {
   const query = await searchParams;
+  const legacy = typeof query.tab === "string" ? ADMIN_ENGINEERING_AGENT_LEGACY_TABS[query.tab] : undefined;
+  if (legacy) redirect(adminRedirectTarget(legacy, query));
   const tab = resolveAdminTab(TABS, query.tab);
   const session = await getServerSession(authOptions);
-
-  // The product-research section is on this screen rather than its own
-  // (docs/policy/product-research-agent.md §4: one shared agent area). It
-  // shares nothing else: its own read, its own panel, and no control at all,
-  // because that agent proposes nothing to decide.
-  const productResearch = tab.id === "product-research";
-  const initial = productResearch
-    ? null
-    : await readEngineeringAgentConsole(
-        tab.id as EngineeringAgentConsoleSection,
-        hasAdminPermission(session, "engineering-agent:write"),
-      );
-  const observations = productResearch ? await readProductResearchConsole() : null;
-  // The Scout's suggestions share the tab and nothing else
-  // (docs/policy/product-research-agent.md §10): their own
-  // read, their own panel, and the only controls on the tab.
-  const scout = productResearch ? await readScoutConsole(session) : null;
+  const initial = await readEngineeringAgentConsole(
+    tab.id as EngineeringAgentConsoleSection,
+    hasAdminPermission(session, "engineering-agent:write"),
+  );
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -63,14 +57,7 @@ export default async function AdminEngineeringAgentPage({
         query={query}
       />
       {/* Keyed by section: a tab change remounts the panel with its own rows. */}
-      {observations === null ? (
-        <AdminEngineeringAgentPanel key={tab.id} initial={initial!} />
-      ) : (
-        <>
-          <AdminProductResearchScoutPanel key={`${tab.id}-scout`} initial={scout!} />
-          <AdminProductResearchPanel key={tab.id} initial={observations} />
-        </>
-      )}
+      <AdminEngineeringAgentPanel key={tab.id} initial={initial} />
     </div>
   );
 }

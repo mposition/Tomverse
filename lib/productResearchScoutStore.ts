@@ -68,7 +68,7 @@ export async function insertSuggestions(input: {
   return created.count;
 }
 
-export const SUGGESTION_LIST_LIMIT = 100;
+export const SUGGESTION_LIST_LIMIT = 300;
 
 /** Open suggestions first by severity then newest; the rest newest first. */
 export async function listSuggestions(status: SuggestionStatus): Promise<StoredSuggestion[]> {
