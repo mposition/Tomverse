@@ -50,6 +50,7 @@ import {
   maxGuardedBudgetMs,
   triageLaneFor,
   type GroupKind,
+  type LaneSource,
   type TriageLane,
 } from "@/lib/supportTriageCore";
 import { suggestionInputDigest } from "@/lib/supportTriageInputDigest";
@@ -60,6 +61,14 @@ import {
   planGroups,
   type GroupFacts,
 } from "@/lib/supportTriageGroupCore";
+import {
+  DUPLICATE_CANDIDATES_MAX,
+  supportTriageLlmFromEnv,
+  type TriageCandidate,
+  type TriageLlm,
+  type TriageLlmAnswer,
+  type TriageLlmInput,
+} from "@/lib/supportTriageLlm";
 import { finishSupportTriageRun, startSupportTriageRun } from "@/lib/supportTriageRunStore";
 import { armSupportTriageTransaction } from "@/lib/supportTriageTransaction";
 
@@ -238,14 +247,26 @@ export type ClaimedRow = {
   readonly inputDigest: string;
   readonly lane: TriageLane;
   readonly flags: string[];
+  /** The LLM step's answer, when it ran and its answer was usable. */
+  readonly llm?: TriageLlmAnswer;
 };
+
+/** What the LLM step reads of a claimed report; never logged or audited. */
+export type ClaimedReport = TriageLlmInput["report"];
 
 /** Step 2: supersede, insert and claim, for the reports still eligible under lock. */
 export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, reportIds: string[]) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
     const reports = await lockEligibleReports(tx, reportIds);
-    if (reports.length === 0) return { token: null as string | null, claimed: [] as ClaimedRow[], superseded: 0 };
+    if (reports.length === 0) {
+      return {
+        token: null as string | null,
+        claimed: [] as ClaimedRow[],
+        superseded: 0,
+        reports: new Map<string, ClaimedReport>(),
+      };
+    }
     const feedbackIds = reports.map((row) => row.id);
     const digests = reports.map(digestOf);
     const superseded = await tx.$executeRaw`
@@ -277,12 +298,23 @@ export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, r
       await audit(tx, run.id, "support_triage.worker_claim", { claimed: claimed.length, superseded });
       await assertDeadline(tx, run.deadlineAt);
     }
-    // Step 3, in memory only: the text never leaves this function's result
-    // except as flag codes and a lane.
+    // Step 3, in memory: flag codes and a keyword lane; the report itself is
+    // returned only for the LLM step, which sends it to the configured model.
     const byId = new Map(reports.map((row) => [row.id, row]));
     return {
       token,
       superseded,
+      reports: new Map<string, ClaimedReport>(
+        reports.map((row) => [
+          row.id,
+          {
+            type: row.type,
+            language: row.language,
+            message: row.message,
+            verifiedError: row.errorReportVerification === "verified" ? row.evErrorCode : null,
+          },
+        ])
+      ),
       claimed: claimed.map((row) => {
         const report = byId.get(row.feedbackId) as ReportRow;
         const flags = keywordFlagsIn(report.message);
@@ -605,6 +637,56 @@ const writeGroups = async (
  * locked with the batch in one statement, in id order, so the report lock is
  * taken once and before any group row.
  */
+const HUMAN_LANES: readonly TriageLane[] = ["billing_human", "trust_safety_human"];
+
+/**
+ * The lane written: a money or trust-and-safety keyword keeps its human lane
+ * whatever the model says (a floor, not a vote); otherwise the model's lane
+ * when it answered, else the keyword lane.
+ */
+export const finalLane = (row: ClaimedRow): { finalLane: TriageLane; laneSource: LaneSource } => {
+  if (!row.llm || HUMAN_LANES.includes(row.lane)) return { finalLane: row.lane, laneSource: "keyword" };
+  // Verified is a server fact: the keyword rule reads it from the report, the
+  // model only from the prompt. The model cannot raise a report to verified.
+  if (row.llm.lane === "bug_verified" && row.lane !== "bug_verified") {
+    return { finalLane: "bug_unverified", laneSource: "llm" };
+  }
+  return { finalLane: row.llm.lane, laneSource: "llm" };
+};
+
+/** Open reports a claimed report may duplicate: the newest 30 eligible ones from the last 30 days. */
+const readDuplicateCandidates = (): Promise<TriageCandidate[]> =>
+  prisma.$queryRaw<TriageCandidate[]>`
+    SELECT f."id", f."type", f."message"
+      FROM "Feedback" f
+     WHERE f."status" = ANY(${ELIGIBLE}::text[])
+       AND f."message" <> ${DELETED_ACCOUNT_MARKER}
+       AND f."createdAt" >= (clock_timestamp() AT TIME ZONE 'UTC') - interval '30 days'
+     ORDER BY f."createdAt" DESC
+     LIMIT ${DUPLICATE_CANDIDATES_MAX + WORKER_CLAIM_BATCH_SIZE}::integer`;
+
+/**
+ * The LLM step, outside any transaction: one call per claimed report, all at
+ * once (a batch is at most 10). A failed or unusable answer leaves the row on
+ * its keyword lane. The lease (5 minutes) outlasts the call timeout.
+ */
+export const runTriageLlm = async (
+  llm: TriageLlm,
+  claimed: readonly ClaimedRow[],
+  reports: ReadonlyMap<string, ClaimedReport>
+): Promise<ClaimedRow[]> => {
+  const pool = await readDuplicateCandidates();
+  return Promise.all(
+    claimed.map(async (row) => {
+      const report = reports.get(row.feedbackId);
+      if (!report) return row;
+      const candidates = pool.filter((c) => c.id !== row.feedbackId).slice(0, DUPLICATE_CANDIDATES_MAX);
+      const answer = await llm({ report, candidates });
+      return answer ? { ...row, llm: answer } : row;
+    })
+  );
+};
+
 export const writeSupportTriageResults = (
   run: { id: string; deadlineAt: Date },
   token: string,
@@ -613,22 +695,48 @@ export const writeSupportTriageResults = (
 ) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
-    const lockIds = [...new Set([...rows.map((row) => row.feedbackId), ...(grouping.peerIds ?? [])])];
+    // The batch, its group peers and every report the model was shown, in one
+    // id-ordered lock: an account deletion of a shown report either waits for
+    // this commit (and then deletes this row by contextFeedbackIds) or has
+    // already marked it, which drops the answer below.
+    const lockIds = [
+      ...new Set([
+        ...rows.map((row) => row.feedbackId),
+        ...(grouping.peerIds ?? []),
+        ...rows.flatMap((row) => row.llm?.contextIds ?? []),
+      ]),
+    ];
     const locked = await lockEligibleReports(tx, lockIds);
     // Still eligible, and the same input the lane and flags were computed from.
     const current = new Map(locked.map((row) => [row.id, digestOf(row)]));
-    const writable = rows.filter((row) => current.get(row.feedbackId) === row.inputDigest);
+    const writable = rows
+      .filter((row) => current.get(row.feedbackId) === row.inputDigest)
+      // An answer whose context lost a report (deleted or closed since) is not kept.
+      .map((row) =>
+        row.llm && !row.llm.contextIds.every((id) => current.has(id)) ? { ...row, llm: undefined } : row
+      )
+      .map((row) => ({ ...row, ...finalLane(row) }));
     const ready =
       writable.length === 0
         ? []
         : await tx.$queryRaw<{ id: string }[]>`
             UPDATE "SupportTriageSuggestion" s
-               SET "state" = 'ready', "lane" = c."lane",
+               SET "state" = 'ready', "lane" = c."lane", "laneSource" = c."laneSource",
                    "keywordFlags" = CASE WHEN c."flags" = '' THEN ARRAY[]::text[]
-                                         ELSE pg_catalog.string_to_array(c."flags", ',') END
+                                         ELSE pg_catalog.string_to_array(c."flags", ',') END,
+                   "contextFeedbackIds" = CASE WHEN c."context" = '' THEN ARRAY[]::text[]
+                                               ELSE pg_catalog.string_to_array(c."context", ',') END,
+                   "duplicateOfFeedbackIds" = CASE WHEN c."duplicates" = '' THEN ARRAY[]::text[]
+                                                   ELSE pg_catalog.string_to_array(c."duplicates", ',') END,
+                   "replyDraft" = NULLIF(c."replyDraft", '')
               FROM unnest(${writable.map((row) => row.id)}::text[],
-                                     ${writable.map((row) => row.lane)}::text[],
-                                     ${writable.map((row) => row.flags.join(","))}::text[]) AS c("id", "lane", "flags")
+                                     ${writable.map((row) => row.finalLane)}::text[],
+                                     ${writable.map((row) => row.laneSource)}::text[],
+                                     ${writable.map((row) => row.flags.join(","))}::text[],
+                                     ${writable.map((row) => (row.llm?.contextIds ?? []).join(","))}::text[],
+                                     ${writable.map((row) => (row.llm?.duplicateOf ?? []).join(","))}::text[],
+                                     ${writable.map((row) => row.llm?.replyDraft ?? "")}::text[])
+                   AS c("id", "lane", "laneSource", "flags", "context", "duplicates", "replyDraft")
              WHERE s."id" = c."id" AND s."state" = 'claimed' AND s."claimToken" = ${token}
             RETURNING s."id"`;
     const readyIds = new Set(ready.map((row) => row.id));
@@ -680,9 +788,13 @@ const databaseNow = async (): Promise<Date> => {
   return row.now;
 };
 
-export const runSupportTriageWorker = async (): Promise<WorkerPassResult> => {
+/** `options.llm` replaces the configured model (tests); `null` turns the step off. */
+export const runSupportTriageWorker = async (
+  options: { readonly llm?: TriageLlm | null } = {}
+): Promise<WorkerPassResult> => {
   const run = await startSupportTriageRun("worker");
   const totals = { reclaimed: 0, exhausted: 0, claimed: 0, ready: 0, stale: 0, superseded: 0, groupsCreated: 0 };
+  const llm = options.llm === undefined ? await supportTriageLlmFromEnv() : options.llm;
   let membershipBudget = GROUP_NEW_MEMBERSHIPS_PER_PASS_MAX;
   let batchesCompleted = 0;
   let partial = false;
@@ -714,8 +826,13 @@ export const runSupportTriageWorker = async (): Promise<WorkerPassResult> => {
             partial = true;
             break;
           }
+          const answered = llm ? await runTriageLlm(llm, batch.claimed, batch.reports) : batch.claimed;
+          if (!(await hasBudget())) {
+            partial = true;
+            break;
+          }
           const peerIds = await readGroupPeers(batch.claimed.map((row) => row.feedbackId));
-          const result = await writeSupportTriageResults(run, batch.token, batch.claimed, { peerIds, membershipBudget });
+          const result = await writeSupportTriageResults(run, batch.token, answered, { peerIds, membershipBudget });
           totals.ready += result.ready;
           totals.stale += result.stale;
           totals.groupsCreated += result.groups.groupsCreated;

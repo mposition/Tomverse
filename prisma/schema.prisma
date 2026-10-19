@@ -9866,6 +9866,15 @@ model SupportTriageSuggestion {
   attemptCount    Int       @default(0)
   lane            String?
   keywordFlags    String[]  @default([])
+  /// Where the lane came from: keyword or llm (migration 20261019100000).
+  laneSource      String?
+  /// Every other report the LLM was shown, at most 30: an account deletion of
+  /// any of them deletes this row.
+  contextFeedbackIds String[] @default([])
+  /// Open reports the LLM named as duplicates, at most five, among those shown.
+  duplicateOfFeedbackIds String[] @default([])
+  /// A reply draft for the operator to review; never sent by itself.
+  replyDraft      String?
   ownerQueueState String    @default("not_queued")
   displayedAt     DateTime?
   createdAt       DateTime  @default(now())
@@ -9878,6 +9887,7 @@ model SupportTriageSuggestion {
   @@index([feedbackId, inputDigest])
   @@index([state, ownerQueueState, createdAt])
   @@index([leaseExpiresAt])
+  @@index([contextFeedbackIds], type: Gin)
 }
 
 /// Support-triage group (docs/policy/support-triage.md §5, §6): one
