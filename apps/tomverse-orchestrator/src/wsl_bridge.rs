@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -44,8 +45,8 @@ use crate::tomverse_api::{
     DatabaseBusy, ExecutionStartResponse,
     NothingCommittedAnswer, OwnedTodoTask,
     PulledDelivery, SelectionRead, SelectionReadTransientStatus, UnacceptedStatus,
-    V22ReadOnlyRetryEcho, V22ReadOnlyRetryProfile, WorkerSessionList,
-    V52ReviewEvidence,
+    V22ReadOnlyRetryEcho, V22ReadOnlyRetryProfile, WorkerBridgeKind, WorkerBridgeScope,
+    WorkerSessionList, V52ReviewEvidence,
     BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
 
@@ -236,6 +237,265 @@ pub fn session_listed(list: &WorkerSessionList, name: &str) -> bool {
         WorkerSessionList::Off => true,
         WorkerSessionList::Listed(names) => names.contains(name),
         WorkerSessionList::Unreadable => false,
+    }
+}
+
+/// How the binary was started (orchestration policy version 55, section 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeArgs {
+    /// No arguments: the bridge exactly as before version 55 -- the
+    /// environment allowlist, the session list and the environment's sidecar
+    /// socket.
+    Sessions,
+    /// `--worker <name>`: one bridge for one worker, its scope read from the
+    /// app.
+    Worker(String),
+    /// `--dm-relay`: the AMUX Decision Maker relay alone (crate::dm_relay),
+    /// no worker loop. One systemd unit runs it; no bridge does.
+    DmRelay,
+}
+
+/// Exactly three forms are accepted: no arguments, `--worker <name>` with
+/// a name in the session-name grammar, or `--dm-relay` alone. Anything else
+/// -- another flag, a missing or extra value, a name that is not a session
+/// name, an argument that is not UTF-8 -- is refused, and the binary does
+/// not start.
+pub fn parse_bridge_args<I>(args: I) -> Option<BridgeArgs>
+where
+    I: IntoIterator<Item = std::ffi::OsString>,
+{
+    let mut args = args.into_iter();
+    let Some(flag) = args.next() else {
+        return Some(BridgeArgs::Sessions);
+    };
+    if flag.to_str() == Some("--dm-relay") {
+        return args.next().is_none().then_some(BridgeArgs::DmRelay);
+    }
+    let name = args.next()?.into_string().ok()?;
+    if args.next().is_some() || flag.to_str() != Some("--worker") || !valid_session_name(&name) {
+        return None;
+    }
+    Some(BridgeArgs::Worker(name))
+}
+
+/// The sidecar socket of a v22 worker's `--worker` bridge (orchestration
+/// policy version 55, section 2), computed from the worker's name, never
+/// read from the environment.
+pub fn v22_sidecar_socket_path(worker: &str) -> String {
+    format!("/run/tomverse-amux-v22-{worker}/task.sock")
+}
+
+#[cfg(unix)]
+fn v22_sidecar_socket_present(path: &str) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.file_type().is_socket())
+}
+
+#[cfg(not(unix))]
+fn v22_sidecar_socket_present(_path: &str) -> bool {
+    false
+}
+
+/// One round's answer for a `--worker` bridge (orchestration policy version
+/// 55, section 2). Only `Admitted` lets the worker register or be offered for
+/// dispatch; every other answer withholds both, and none of them is a halt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerScopeGate {
+    Admitted,
+    NotListed,
+    ScopeOff,
+    CatalogUnavailable,
+    Unreadable,
+    /// Listed as `v22`, but the sidecar has no socket: nothing registers
+    /// until it does. It stands in for the old unit's `Requires=` and
+    /// `ExecStartPre=test -S` on the sidecar, which one template serving both
+    /// kinds cannot carry.
+    SidecarSocketMissing,
+    /// Listed with a kind other than the one this process took when it was
+    /// first admitted. Sticky: this process never offers the worker again,
+    /// finishes what is in flight, and waits for a person (or the reconciler)
+    /// to restart it.
+    KindChanged,
+}
+
+impl WorkerScopeGate {
+    pub const fn reason(self) -> &'static str {
+        match self {
+            WorkerScopeGate::Admitted => "admitted",
+            WorkerScopeGate::NotListed => "not_listed",
+            WorkerScopeGate::ScopeOff => "bridge_scope_off",
+            WorkerScopeGate::CatalogUnavailable => "worker_catalog_unavailable",
+            WorkerScopeGate::Unreadable => "unreadable",
+            WorkerScopeGate::SidecarSocketMissing => "sidecar_socket_missing",
+            WorkerScopeGate::KindChanged => "kind_changed",
+        }
+    }
+}
+
+/// The decision for one round, pure. `bound` is the kind this process took
+/// at its first admission; `kind_changed` is that decision once it has been
+/// made. The socket is looked at only for a worker listed as `v22` with the
+/// kind it is bound to (or not bound yet). Returns the gate and the kind the
+/// process is bound to after this round.
+pub fn plan_worker_scope<F>(
+    scope: &WorkerBridgeScope,
+    worker: &str,
+    bound: Option<WorkerBridgeKind>,
+    kind_changed: bool,
+    socket_present: F,
+) -> (WorkerScopeGate, Option<WorkerBridgeKind>)
+where
+    F: FnOnce(&str) -> bool,
+{
+    if kind_changed {
+        return (WorkerScopeGate::KindChanged, bound);
+    }
+    let listed = match scope {
+        WorkerBridgeScope::Listed(listed) => listed,
+        WorkerBridgeScope::Off => return (WorkerScopeGate::ScopeOff, bound),
+        WorkerBridgeScope::CatalogUnavailable => {
+            return (WorkerScopeGate::CatalogUnavailable, bound)
+        }
+        WorkerBridgeScope::Unreadable => return (WorkerScopeGate::Unreadable, bound),
+    };
+    let Some(&kind) = listed.get(worker) else {
+        return (WorkerScopeGate::NotListed, bound);
+    };
+    if bound.is_some_and(|bound| bound != kind) {
+        return (WorkerScopeGate::KindChanged, bound);
+    }
+    if kind == WorkerBridgeKind::V22 && !socket_present(&v22_sidecar_socket_path(worker)) {
+        return (WorkerScopeGate::SidecarSocketMissing, bound);
+    }
+    (WorkerScopeGate::Admitted, Some(kind))
+}
+
+/// The gate as the run loop's existing session-list checks read it: the
+/// worker alone when admitted, nobody otherwise. Never `Off`, which would let
+/// every session through.
+pub fn worker_scope_session_list(gate: WorkerScopeGate, worker: &str) -> WorkerSessionList {
+    let mut names = std::collections::BTreeSet::new();
+    if gate == WorkerScopeGate::Admitted {
+        names.insert(worker.to_owned());
+    }
+    WorkerSessionList::Listed(names)
+}
+
+/// The state of a `--worker` bridge across rounds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerScope {
+    worker: String,
+    bound: Option<WorkerBridgeKind>,
+    kind_changed: bool,
+    last: Option<WorkerScopeGate>,
+    listed_kind: Option<WorkerBridgeKind>,
+}
+
+impl WorkerScope {
+    pub fn new(worker: &str) -> Self {
+        Self {
+            worker: worker.to_owned(),
+            bound: None,
+            kind_changed: false,
+            last: None,
+            listed_kind: None,
+        }
+    }
+
+    /// Applies one bridge-scope answer and returns the gate. A change of
+    /// gate other than to `Admitted` leaves one warning line; every one ends
+    /// in "not halted", the form the auto-restart's journal reader already
+    /// counts as harmless (docs/ops/amux/bridge-monitoring.md, section 5).
+    fn observe<F>(&mut self, scope: &WorkerBridgeScope, socket_present: F) -> WorkerScopeGate
+    where
+        F: FnOnce(&str) -> bool,
+    {
+        let (gate, bound) =
+            plan_worker_scope(scope, &self.worker, self.bound, self.kind_changed, socket_present);
+        if gate == WorkerScopeGate::KindChanged && !self.kind_changed {
+            self.listed_kind = match scope {
+                WorkerBridgeScope::Listed(listed) => listed.get(&self.worker).copied(),
+                _ => None,
+            };
+        }
+        self.bound = bound;
+        self.kind_changed = gate == WorkerScopeGate::KindChanged;
+        if self.last != Some(gate) {
+            if let Some(line) = self.gate_line(gate) {
+                eprintln!("{line}");
+            }
+            self.last = Some(gate);
+        }
+        gate
+    }
+
+    fn gate_line(&self, gate: WorkerScopeGate) -> Option<String> {
+        match gate {
+            WorkerScopeGate::Admitted => None,
+            WorkerScopeGate::KindChanged => Some(format!(
+                "amux wsl bridge warn: worker {} is listed as {} but this bridge serves it as {}; no new assignment until a person restarts this bridge, not halted",
+                self.worker,
+                self.listed_kind.map_or("another kind", WorkerBridgeKind::as_str),
+                self.bound.map_or("unknown", WorkerBridgeKind::as_str),
+            )),
+            withheld => Some(format!(
+                "amux wsl bridge warn: worker {} is not served by this bridge now ({}); nothing new registers or is offered for dispatch, not halted",
+                self.worker,
+                withheld.reason(),
+            )),
+        }
+    }
+
+    fn v22_socket(&self) -> Option<String> {
+        (self.bound == Some(WorkerBridgeKind::V22)).then(|| v22_sidecar_socket_path(&self.worker))
+    }
+}
+
+/// Which local sessions one bridge process may register and offer for
+/// dispatch.
+pub enum BridgeScope {
+    /// Started without `--worker`: the version 35 session list, the
+    /// environment allowlist and the environment's sidecar socket, exactly as
+    /// before version 55. Kept for the transition (version 55, section 2).
+    SessionList { v22_socket: Option<String> },
+    /// Started with `--worker <name>` (version 55, section 2): that worker's
+    /// session only, gated every round by the bridge-scope route. Neither
+    /// `TOMVERSE_AMUX_WSL_SESSIONS` nor `TOMVERSE_AMUX_V22_SIDECAR_SOCKET` is
+    /// read.
+    Worker(WorkerScope),
+}
+
+impl BridgeScope {
+    fn allowlist(&self) -> Option<Vec<String>> {
+        match self {
+            BridgeScope::SessionList { .. } => {
+                session_allowlist(std::env::var(WSL_BRIDGE_SESSIONS_ENV).ok().as_deref())
+            }
+            BridgeScope::Worker(scope) => Some(vec![scope.worker.clone()]),
+        }
+    }
+
+    /// Read at start and at the top of every round. Never a halt.
+    async fn session_list(&mut self, api: &crate::tomverse_api::TomverseApi) -> WorkerSessionList {
+        match self {
+            BridgeScope::SessionList { .. } => api.worker_session_list().await,
+            BridgeScope::Worker(scope) => {
+                let answer = api.worker_bridge_scope().await;
+                let gate = scope.observe(&answer, v22_sidecar_socket_present);
+                worker_scope_session_list(gate, &scope.worker)
+            }
+        }
+    }
+
+    /// The sidecar socket the run hands to `HttpLocal`. For a `--worker`
+    /// bridge it is set once the worker is first admitted as `v22`, and kept
+    /// after that -- a kind change must not cut off the sidecar an attempt
+    /// already in flight settles through.
+    fn v22_socket(&self) -> Option<String> {
+        match self {
+            BridgeScope::SessionList { v22_socket } => v22_socket.clone(),
+            BridgeScope::Worker(scope) => scope.v22_socket(),
+        }
     }
 }
 
@@ -2565,7 +2825,28 @@ async fn settle_unavailable_review_feedback(
     true
 }
 
+/// The bridge started without arguments: exactly as before orchestration
+/// policy version 55.
 pub async fn run_from_env() -> i32 {
+    run_bridge(BridgeScope::SessionList {
+        v22_socket: std::env::var("TOMVERSE_AMUX_V22_SIDECAR_SOCKET").ok(),
+    })
+    .await
+}
+
+/// The bridge started with `--worker <name>` (orchestration policy version
+/// 55, section 2). The same run, the same halts and the same lease handling;
+/// only which session it may register and offer, and which sidecar it talks
+/// to, come from the bridge-scope route instead of the environment.
+pub async fn run_worker_from_env(worker: &str) -> i32 {
+    if !valid_session_name(worker) {
+        eprintln!("amux wsl bridge worker name is invalid");
+        return 1;
+    }
+    run_bridge(BridgeScope::Worker(WorkerScope::new(worker))).await
+}
+
+async fn run_bridge(mut scope: BridgeScope) -> i32 {
     let Ok(local_url) = std::env::var(WSL_BRIDGE_LOCAL_URL_ENV) else {
         eprintln!("amux wsl bridge local url is unset");
         return 1;
@@ -2589,7 +2870,7 @@ pub async fn run_from_env() -> i32 {
             return 1;
         }
     };
-    let allowlist = session_allowlist(std::env::var(WSL_BRIDGE_SESSIONS_ENV).ok().as_deref());
+    let allowlist = scope.allowlist();
     let running: Vec<_> = roster
         .into_iter()
         .filter(|row| row.running && session_allowed(&allowlist, &row.name))
@@ -2606,11 +2887,6 @@ pub async fn run_from_env() -> i32 {
             return 1;
         }
     };
-    // The AMUX Decision Maker relay (crate::dm_relay), off unless
-    // TOMVERSE_AMUX_DM_RELAY is exactly `enabled`: one task beside this loop,
-    // with this loop's clients. It never halts this loop, and this loop's
-    // exit ends it.
-    crate::dm_relay::start_from_env(&api, &client, &base);
     // Sessions whose registration answered busy: it did not happen, so they
     // register next tick with the same instance id.
     let mut awaiting_registration: Vec<(String, String)> = Vec::new();
@@ -2619,14 +2895,17 @@ pub async fn run_from_env() -> i32 {
     // list does not let through now -- or every one, when the list cannot be
     // read -- is not registered yet: it waits with its own instance id, and
     // every round reads the list again before retrying it. Never a halt.
-    let session_list = api.worker_session_list().await;
+    // Version 55, section 2: a `--worker` bridge reads its bridge scope here
+    // instead, as a list of its own worker or of nobody.
+    let session_list = scope.session_list(&api).await;
     let (running, deferred): (Vec<_>, Vec<_>) = running
         .into_iter()
         .partition(|row| session_listed(&session_list, &row.name));
     for row in deferred {
         awaiting_registration.push((row.name, Uuid::new_v4().to_string()));
     }
-    if !awaiting_registration.is_empty() {
+    // A `--worker` bridge has already said why, in its own words.
+    if !awaiting_registration.is_empty() && matches!(scope, BridgeScope::SessionList { .. }) {
         eprintln!(
             "amux wsl bridge warn: the session list does not let every running session through yet; waiting"
         );
@@ -2663,7 +2942,7 @@ pub async fn run_from_env() -> i32 {
     let mut local = HttpLocal {
         client: client.clone(),
         base: base.clone(),
-        v22_socket: std::env::var("TOMVERSE_AMUX_V22_SIDECAR_SOCKET").ok(),
+        v22_socket: scope.v22_socket(),
     };
     let mut reserved = Vec::new();
     let mut pending: Vec<PendingExecution> = Vec::new();
@@ -2680,7 +2959,11 @@ pub async fn run_from_env() -> i32 {
         // Version 35, section 4: read the session list every round. A session
         // it does not let through keeps its true status but is not offered
         // for dispatch; an attempt already running finishes.
-        let session_list = api.worker_session_list().await;
+        let session_list = scope.session_list(&api).await;
+        // Version 55, section 2: a `--worker` bridge first admitted as v22
+        // this round now knows its sidecar. Without `--worker` this is the
+        // environment's socket, the same every round.
+        local.v22_socket = scope.v22_socket();
         if !halted && !awaiting_registration.is_empty() {
             retry_registrations(
                 &api,
@@ -3052,6 +3335,23 @@ pub async fn run_from_env() -> i32 {
                             still_running.push(entry);
                             continue;
                         };
+                        // This opt-in probe is deliberately fail-closed even for a
+                        // non-target Codex card when the app cannot classify it.
+                        // Enable only for the isolated U21 test window: an app
+                        // eligibility outage will halt unrelated settlements too.
+                        if entry.delivery.assignment_id.is_none() && outcome == "succeeded" &&
+                            to_status == "review" &&
+                            std::env::var("TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_CANDIDATE_BRIDGE")
+                                .ok().as_deref() == Some("enabled") &&
+                            transfer_chat_optimizer_candidate(&api, &client, &base,
+                                &entry, &session.instance_id, session.generation).await.is_err() {
+                            // Never settle a CHAT-01 author attempt when its
+                            // candidate write or exact read-back is unknown.
+                            // The app attempt remains open for operator read-back.
+                            halted = true;
+                            note_halt(&mut halt_cause, "optimizer_candidate_outcome_unknown");
+                            continue;
+                        }
                         let settled = if entry.delivery.assignment_id.is_some() {
                             let retry_echo = v22_result.as_ref()
                                 .and_then(|result| result.read_only_retry.as_ref());
@@ -3136,6 +3436,23 @@ pub async fn run_from_env() -> i32 {
                                     },
                                     other => other,
                                 };
+                                // The same fail-closed blast radius applies to
+                                // v22 results while this opt-in switch is on.
+                                if outcome == "succeeded" &&
+                                    matches!(&result_record,
+                                        Ok(crate::tomverse_api::V22UsageRecord::Recorded)) &&
+                                    std::env::var("TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_CANDIDATE_BRIDGE")
+                                        .ok().as_deref() == Some("enabled") &&
+                                    transfer_chat_optimizer_v22_candidate(&api, &entry,
+                                        v22_result.as_ref(), &session.instance_id,
+                                        session.generation).await.is_err() {
+                                    // The sidecar may have the only plaintext copy. Never
+                                    // confirm it or settle the attempt after an unknown write.
+                                    halted = true;
+                                    note_halt(&mut halt_cause,
+                                        "optimizer_candidate_outcome_unknown");
+                                    continue;
+                                }
                                 match result_record {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
                                         if outcome == "succeeded" {
@@ -3398,6 +3715,36 @@ pub async fn run_from_env() -> i32 {
     }
 }
 
+/// The binary started with `--dm-relay`: the AMUX Decision Maker relay as its
+/// own process, with the local AMUX client and the app client a bridge builds.
+/// No worker is registered and no session is read here.
+pub async fn run_dm_relay_from_env() -> i32 {
+    let Ok(local_url) = std::env::var(WSL_BRIDGE_LOCAL_URL_ENV) else {
+        eprintln!("amux dm relay local url is unset");
+        return 1;
+    };
+    if !local_amux_url_allowed(&local_url) {
+        eprintln!("amux dm relay local url is not loopback");
+        return 1;
+    }
+    let client = match local_client(&local_url) {
+        Ok(client) => client,
+        Err(_) => {
+            eprintln!("amux dm relay local client failed");
+            return 1;
+        }
+    };
+    let base = local_url.trim_end_matches('/').to_owned();
+    let api = match crate::tomverse_api::TomverseApi::from_env() {
+        Ok(api) => api,
+        Err(_) => {
+            eprintln!("amux dm relay control plane is unavailable");
+            return 1;
+        }
+    };
+    crate::dm_relay::run_from_env(api, client, base).await
+}
+
 /// Applies one tick's results — either `bridge_tick_sourced`'s `Ok` value, or
 /// the `partial` results carried by its `BridgeTickError` — to the run loop's
 /// bookkeeping. A `Halted` result sets `halted`; a skip-without-halt result
@@ -3629,6 +3976,95 @@ async fn local_completion(
         },
         Err(_) => LocalCompletion::LookupFailed,
     }
+}
+
+/// This optional bridge path only reads a linked, finished local Codex card
+/// after the app names the exact live CHAT-01 attempt and its public source.
+/// It never forwards the result of an unrelated AMUX task.
+async fn transfer_chat_optimizer_candidate(
+    api: &crate::tomverse_api::TomverseApi,
+    client: &reqwest::Client,
+    base: &str,
+    entry: &PendingExecution,
+    instance_id: &str,
+    generation: i64,
+) -> Result<()> {
+    if entry.delivery.worker != "codex-impl" { return Ok(()); }
+    let Some(pin) = api.chat_optimizer_candidate_eligibility(
+        &entry.delivery.attempt_id).await? else { return Ok(()); };
+    let card_id = entry.card.as_deref().context("optimizer local card unlinked")?;
+    let detail = fetch_board_card(client, base, card_id).await?
+        .context("optimizer local card disappeared")?;
+    let result = chat_optimizer_result_from_card(&detail,
+        &entry.delivery.attempt_id)?;
+    let digest = hex::encode(Sha256::digest(result.as_bytes()));
+    match api.chat_optimizer_candidate_readback(
+        &entry.delivery.attempt_id, &digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => return Ok(()),
+        crate::tomverse_api::V22UsageRecord::Rejected => {},
+        crate::tomverse_api::V22UsageRecord::PrivateOnly =>
+            bail!("optimizer candidate read-back invariant failed"),
+    }
+    match api.chat_optimizer_candidate_record_once(&entry.delivery,
+        instance_id, generation, &pin, result, &digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => Ok(()),
+        _ => bail!("optimizer candidate was not durably recorded"),
+    }
+}
+
+/// V22 results are sealed by the app before this bridge writes a proposal.
+/// The exact app eligibility pin selects one v4 Task; a wrong operator pin
+/// halts settlement instead of silently accepting an ordinary Task. The
+/// sidecar digest and app result read-back bind the one live worker response.
+async fn transfer_chat_optimizer_v22_candidate(
+    api: &crate::tomverse_api::TomverseApi,
+    entry: &PendingExecution,
+    result: Option<&V22SidecarResult>,
+    instance_id: &str,
+    generation: i64,
+) -> Result<()> {
+    if entry.delivery.worker != "codex-impl" { return Ok(()); }
+    let Some(pin) = api.chat_optimizer_candidate_eligibility(
+        &entry.delivery.attempt_id).await? else { return Ok(()); };
+    let result = result.context("optimizer v22 sidecar result absent")?;
+    let digest = result.result_sha256.as_deref()
+        .context("optimizer v22 result digest absent")?;
+    match api.chat_optimizer_candidate_readback(
+        &entry.delivery.attempt_id, digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => return Ok(()),
+        crate::tomverse_api::V22UsageRecord::Rejected => {},
+        crate::tomverse_api::V22UsageRecord::PrivateOnly =>
+            bail!("optimizer v22 candidate read-back invariant failed"),
+    }
+    let text = result.result_text.as_deref()
+        .context("optimizer v22 result text unavailable")?;
+    if text.is_empty() || text.len() > 65_536 || text.contains('\0') ||
+        hex::encode(Sha256::digest(text.as_bytes())) != digest {
+        bail!("optimizer v22 result digest mismatch");
+    }
+    match api.chat_optimizer_candidate_record_once(&entry.delivery,
+        instance_id, generation, &pin, text, digest).await? {
+        crate::tomverse_api::V22UsageRecord::Recorded => Ok(()),
+        _ => bail!("optimizer v22 candidate was not durably recorded"),
+    }
+}
+
+fn chat_optimizer_result_from_card<'a>(
+    detail: &'a serde_json::Value,
+    attempt_id: &str,
+) -> Result<&'a str> {
+    if !card_links_attempt(detail, attempt_id) ||
+        detail.get("session").and_then(serde_json::Value::as_str) != Some("codex-impl") ||
+        detail.get("status").and_then(serde_json::Value::as_str) != Some("done") {
+        bail!("optimizer local card is not the linked completed attempt");
+    }
+    let result = detail.get("last_result")
+        .and_then(serde_json::Value::as_str)
+        .context("optimizer local result absent")?;
+    if result.is_empty() || result.len() > 65_536 || result.contains('\0') {
+        bail!("optimizer local result outside bounded envelope");
+    }
+    Ok(result)
 }
 
 async fn fetch_roster(client: &reqwest::Client, base: &str) -> Result<Vec<SessionObservation>> {
@@ -3960,9 +4396,22 @@ mod tests {
     #[test]
     fn the_run_reads_the_session_list_at_start_and_every_round_and_never_halts_on_it() {
         let source = include_str!("wsl_bridge.rs");
-        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        // Without `--worker` the scope's read is the version 35 session list
+        // itself, and the environment's sidecar socket, both as before.
+        let scope = &source[source.find("impl BridgeScope {").unwrap()..];
+        let scope = &scope[..scope.find("/// Exit status of a runner").unwrap()];
+        assert!(scope.contains("BridgeScope::SessionList { .. } => api.worker_session_list().await,"));
+        assert!(scope.contains(
+            "BridgeScope::SessionList { .. } => {\n                session_allowlist(std::env::var(WSL_BRIDGE_SESSIONS_ENV).ok().as_deref())"
+        ));
+        let legacy = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let legacy = &legacy[..legacy.find("pub async fn run_worker_from_env").unwrap()];
+        assert!(legacy.contains(
+            "run_bridge(BridgeScope::SessionList {\n        v22_socket: std::env::var(\"TOMVERSE_AMUX_V22_SIDECAR_SOCKET\").ok(),"
+        ));
+        let run = &source[source.find("async fn run_bridge(").unwrap()..];
         let start = run
-            .find("let session_list = api.worker_session_list().await;")
+            .find("let session_list = scope.session_list(&api).await;")
             .unwrap();
         // At start the list is read before anything registers; a session it
         // holds back (all of them when it is unreadable) waits instead.
@@ -3977,8 +4426,14 @@ mod tests {
         let round = &run[run.find("    loop {").unwrap()..];
         assert!(
             round
-                .find("let session_list = api.worker_session_list().await;")
+                .find("let session_list = scope.session_list(&api).await;")
                 .unwrap()
+                < round.find("retry_registrations(").unwrap()
+        );
+        // The sidecar a `--worker` bridge is bound to reaches the local
+        // client before anything in the round can use it.
+        assert!(
+            round.find("local.v22_socket = scope.v22_socket();").unwrap()
                 < round.find("retry_registrations(").unwrap()
         );
         assert!(round.contains("plan.dispatch_ready && session_listed(&session_list, &name)"));
@@ -4001,6 +4456,402 @@ mod tests {
                 .iter()
                 .all(|line| !line.contains("halted = true"))
         );
+    }
+
+    #[test]
+    fn the_binary_accepts_no_arguments_or_exactly_one_worker() {
+        // Orchestration policy version 55, section 2.
+        use std::ffi::OsString;
+        let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(parse_bridge_args(args(&[])), Some(BridgeArgs::Sessions));
+        assert_eq!(
+            parse_bridge_args(args(&["--worker", "claude-impl"])),
+            Some(BridgeArgs::Worker("claude-impl".to_owned()))
+        );
+        assert_eq!(
+            parse_bridge_args(args(&["--worker", "codex-chore"])),
+            Some(BridgeArgs::Worker("codex-chore".to_owned()))
+        );
+        for refused in [
+            &["--worker"][..],
+            &["--worker", ""],
+            &["--worker", "a/b"],
+            &["--worker", "claude impl"],
+            &["--worker", "../claude-impl"],
+            &["--worker=claude-impl"],
+            &["--worker", "claude-impl", "--worker", "codex-chore"],
+            &["--worker", "claude-impl", "extra"],
+            &["--sessions", "claude-impl"],
+            &["claude-impl"],
+            &["--dm-relay", "claude-impl"],
+            &["--dm-relay", "--dm-relay"],
+            &["--worker", "claude-impl", "--dm-relay"],
+            &["--dm-relay="],
+        ] {
+            assert_eq!(parse_bridge_args(args(refused)), None, "{refused:?}");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let not_utf8 = vec![OsString::from("--worker"), OsString::from_vec(vec![0xff, 0x61])];
+            assert_eq!(parse_bridge_args(not_utf8), None);
+        }
+        // The binary parses before anything else and runs the old path for
+        // no arguments.
+        let binary = include_str!("bin/tomverse-wsl-bridge.rs");
+        assert!(binary.contains("parse_bridge_args(std::env::args_os().skip(1))"));
+        assert!(binary.contains("BridgeArgs::Sessions => tomverse_orchestrator::wsl_bridge::run_from_env().await,"));
+        assert!(binary.contains("BridgeArgs::Worker(worker) => {"));
+        assert!(binary.contains(
+            "BridgeArgs::DmRelay => tomverse_orchestrator::wsl_bridge::run_dm_relay_from_env().await,"
+        ));
+    }
+
+    #[test]
+    fn the_relay_runs_only_in_its_own_mode_never_beside_a_worker_loop() {
+        // Every bridge unit reads the same environment file and the relay
+        // releases every local marker each tick: a relay per bridge would
+        // release another relay's marker mid-question.
+        use std::ffi::OsString;
+        assert_eq!(
+            parse_bridge_args([OsString::from("--dm-relay")]),
+            Some(BridgeArgs::DmRelay)
+        );
+        let source = include_str!("wsl_bridge.rs");
+        let run = &source[source.find("async fn run_bridge(").unwrap()..];
+        let run = &run[..run.find("\n}\n").unwrap()];
+        assert!(!run.contains("dm_relay"), "a worker bridge starts no relay");
+        let relay = &source[source.find("pub async fn run_dm_relay_from_env").unwrap()..];
+        let relay = &relay[..relay.find("\n}\n").unwrap()];
+        assert!(relay.contains("crate::dm_relay::run_from_env(api, client, base).await"));
+        assert!(!relay.contains("register"), "the relay registers no worker");
+    }
+
+    #[test]
+    fn the_bridge_scope_reads_four_ways_and_only_the_exact_shapes_count() {
+        // Orchestration policy version 55, section 1.
+        use crate::tomverse_api::plan_worker_bridge_scope;
+        let listed = plan_worker_bridge_scope(&serde_json::json!({
+            "listed": true,
+            "workers": [
+                { "name": "claude-impl", "kind": "v22" },
+                { "name": "codex-chore", "kind": "session" },
+            ],
+        }));
+        assert_eq!(
+            listed,
+            WorkerBridgeScope::Listed(
+                [
+                    ("claude-impl".to_owned(), WorkerBridgeKind::V22),
+                    ("codex-chore".to_owned(), WorkerBridgeKind::Session),
+                ]
+                .into_iter()
+                .collect()
+            )
+        );
+        assert_eq!(
+            plan_worker_bridge_scope(&serde_json::json!({ "listed": true, "workers": [] })),
+            WorkerBridgeScope::Listed(Default::default())
+        );
+        assert_eq!(
+            plan_worker_bridge_scope(&serde_json::json!({ "listed": false, "reason": "bridge_scope_off" })),
+            WorkerBridgeScope::Off
+        );
+        assert_eq!(
+            plan_worker_bridge_scope(
+                &serde_json::json!({ "listed": false, "reason": "worker_catalog_unavailable" })
+            ),
+            WorkerBridgeScope::CatalogUnavailable
+        );
+        for unreadable in [
+            // The session list's own shapes are not a bridge scope.
+            serde_json::json!({ "listed": true, "workers": ["claude-impl"] }),
+            serde_json::json!({ "listed": false, "reason": "session_list_off" }),
+            serde_json::json!({ "listed": false, "reason": "execution_api_disabled" }),
+            serde_json::json!({ "listed": false, "reason": null }),
+            serde_json::json!({ "listed": false }),
+            serde_json::json!({ "listed": true }),
+            serde_json::json!({ "listed": true, "workers": null }),
+            serde_json::json!({ "listed": true, "workers": [], "reason": null }),
+            serde_json::json!({ "listed": false, "reason": "bridge_scope_off", "workers": [] }),
+            serde_json::json!({ "listed": "true", "workers": [] }),
+            serde_json::json!({ "listed": true, "workers": [{ "name": "claude-impl" }] }),
+            serde_json::json!({ "listed": true, "workers": [{ "name": "claude-impl", "kind": "V22" }] }),
+            serde_json::json!({ "listed": true, "workers": [{ "name": "claude-impl", "kind": "cli" }] }),
+            serde_json::json!({ "listed": true, "workers": [{ "name": "claude-impl", "kind": null }] }),
+            serde_json::json!({ "listed": true, "workers": [{ "name": 1, "kind": "v22" }] }),
+            serde_json::json!({
+                "listed": true,
+                "workers": [{ "name": "claude-impl", "kind": "v22", "socket": "/tmp/x" }],
+            }),
+            // A name listed twice could name two kinds; neither is the answer.
+            serde_json::json!({
+                "listed": true,
+                "workers": [
+                    { "name": "claude-impl", "kind": "v22" },
+                    { "name": "claude-impl", "kind": "session" },
+                ],
+            }),
+            serde_json::json!({
+                "listed": true,
+                "workers": [
+                    { "name": "claude-impl", "kind": "v22" },
+                    { "name": "claude-impl", "kind": "v22" },
+                ],
+            }),
+            serde_json::json!(["claude-impl"]),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                plan_worker_bridge_scope(&unreadable),
+                WorkerBridgeScope::Unreadable,
+                "{unreadable}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bridge_scope_read_has_no_off_for_a_missing_route() {
+        // Unlike the session list, a 404 is not "off": the method has no
+        // branch that answers anything but a parsed 200 body or unreadable.
+        let source = include_str!("tomverse_api.rs");
+        let read = &source[source.find("pub async fn worker_bridge_scope").unwrap()..];
+        let read = &read[..read.find("async fn worker_heartbeat_with_capabilities").unwrap()];
+        assert!(read.contains("/api/internal/amux/workers/bridge-scope"));
+        assert!(read.contains(".timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)"));
+        assert!(read.contains("&[StatusCode::OK]"));
+        assert!(!read.contains("NOT_FOUND"));
+        assert!(!read.contains("WorkerBridgeScope::Off"));
+        assert!(!read.contains("WorkerBridgeScope::Listed"));
+    }
+
+    fn scope_of(entries: &[(&str, WorkerBridgeKind)]) -> WorkerBridgeScope {
+        WorkerBridgeScope::Listed(
+            entries
+                .iter()
+                .map(|(name, kind)| ((*name).to_owned(), *kind))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_worker_bridge_is_admitted_only_by_its_own_name_and_kind() {
+        use WorkerBridgeKind::{Session, V22};
+        let present = |_: &str| true;
+        let absent = |_: &str| false;
+        let listed = scope_of(&[("claude-impl", V22), ("codex-chore", Session)]);
+
+        assert_eq!(
+            plan_worker_scope(&listed, "claude-impl", None, false, present),
+            (WorkerScopeGate::Admitted, Some(V22))
+        );
+        assert_eq!(
+            plan_worker_scope(&listed, "codex-chore", None, false, absent),
+            (WorkerScopeGate::Admitted, Some(Session)),
+            "a session worker never looks for a sidecar"
+        );
+        assert_eq!(
+            plan_worker_scope(&listed, "claude-impl", None, false, absent),
+            (WorkerScopeGate::SidecarSocketMissing, None)
+        );
+        assert_eq!(
+            plan_worker_scope(&listed, "claude-review", None, false, present),
+            (WorkerScopeGate::NotListed, None)
+        );
+        assert_eq!(
+            plan_worker_scope(&WorkerBridgeScope::Off, "claude-impl", Some(V22), false, present),
+            (WorkerScopeGate::ScopeOff, Some(V22))
+        );
+        assert_eq!(
+            plan_worker_scope(
+                &WorkerBridgeScope::CatalogUnavailable,
+                "claude-impl",
+                Some(V22),
+                false,
+                present
+            ),
+            (WorkerScopeGate::CatalogUnavailable, Some(V22))
+        );
+        assert_eq!(
+            plan_worker_scope(&WorkerBridgeScope::Unreadable, "claude-impl", None, false, present),
+            (WorkerScopeGate::Unreadable, None)
+        );
+        // The socket is computed from the worker's own name.
+        let mut asked = None;
+        let _ = plan_worker_scope(&listed, "claude-impl", None, false, |path: &str| {
+            asked = Some(path.to_owned());
+            true
+        });
+        assert_eq!(asked.as_deref(), Some("/run/tomverse-amux-v22-claude-impl/task.sock"));
+        assert_eq!(
+            v22_sidecar_socket_path("claude-contract"),
+            "/run/tomverse-amux-v22-claude-contract/task.sock"
+        );
+    }
+
+    #[test]
+    fn a_kind_change_while_running_withholds_the_worker_for_good() {
+        use WorkerBridgeKind::{Session, V22};
+        let present = |_: &str| true;
+        let as_session = scope_of(&[("claude-impl", Session)]);
+        let as_v22 = scope_of(&[("claude-impl", V22)]);
+        assert_eq!(
+            plan_worker_scope(&as_session, "claude-impl", Some(V22), false, present),
+            (WorkerScopeGate::KindChanged, Some(V22))
+        );
+        assert_eq!(
+            plan_worker_scope(&as_v22, "claude-impl", Some(Session), false, present),
+            (WorkerScopeGate::KindChanged, Some(Session))
+        );
+        // Once decided it stays, whatever a later round says -- the bound
+        // kind included.
+        for later in [&as_v22, &as_session, &WorkerBridgeScope::Off] {
+            assert_eq!(
+                plan_worker_scope(later, "claude-impl", Some(V22), true, present),
+                (WorkerScopeGate::KindChanged, Some(V22))
+            );
+        }
+        // The kind is checked before the socket: a v22 listing for a session
+        // bridge does not look for a sidecar at all.
+        assert_eq!(
+            plan_worker_scope(&as_v22, "claude-impl", Some(Session), false, |_: &str| {
+                panic!("no socket check for a changed kind")
+            }),
+            (WorkerScopeGate::KindChanged, Some(Session))
+        );
+    }
+
+    #[test]
+    fn the_worker_gate_reaches_the_run_loop_as_its_own_name_or_nobody() {
+        let gates = [
+            WorkerScopeGate::Admitted,
+            WorkerScopeGate::NotListed,
+            WorkerScopeGate::ScopeOff,
+            WorkerScopeGate::CatalogUnavailable,
+            WorkerScopeGate::Unreadable,
+            WorkerScopeGate::SidecarSocketMissing,
+            WorkerScopeGate::KindChanged,
+        ];
+        for gate in gates {
+            let list = worker_scope_session_list(gate, "claude-impl");
+            // Never off: off lets every session through.
+            assert_ne!(list, WorkerSessionList::Off);
+            assert_eq!(session_listed(&list, "claude-impl"), gate == WorkerScopeGate::Admitted);
+            assert!(!session_listed(&list, "codex-chore"));
+        }
+    }
+
+    #[test]
+    fn a_worker_scope_binds_its_sidecar_once_and_keeps_it() {
+        use WorkerBridgeKind::{Session, V22};
+        let mut scope = WorkerScope::new("claude-impl");
+        assert_eq!(scope.v22_socket(), None);
+        assert_eq!(
+            scope.observe(&WorkerBridgeScope::Off, |_: &str| true),
+            WorkerScopeGate::ScopeOff
+        );
+        assert_eq!(scope.v22_socket(), None);
+        assert_eq!(
+            scope.observe(&scope_of(&[("claude-impl", V22)]), |_: &str| false),
+            WorkerScopeGate::SidecarSocketMissing
+        );
+        assert_eq!(scope.v22_socket(), None, "not bound until admitted");
+        assert_eq!(
+            scope.observe(&scope_of(&[("claude-impl", V22)]), |_: &str| true),
+            WorkerScopeGate::Admitted
+        );
+        let bound = Some("/run/tomverse-amux-v22-claude-impl/task.sock".to_owned());
+        assert_eq!(scope.v22_socket(), bound);
+        // Out of the list and back: admitted again, same sidecar.
+        assert_eq!(
+            scope.observe(&scope_of(&[]), |_: &str| true),
+            WorkerScopeGate::NotListed
+        );
+        assert_eq!(
+            scope.observe(&scope_of(&[("claude-impl", V22)]), |_: &str| true),
+            WorkerScopeGate::Admitted
+        );
+        // A kind change keeps the sidecar an attempt in flight settles through,
+        // and never admits again.
+        assert_eq!(
+            scope.observe(&scope_of(&[("claude-impl", Session)]), |_: &str| true),
+            WorkerScopeGate::KindChanged
+        );
+        assert_eq!(scope.v22_socket(), bound);
+        assert_eq!(
+            scope.observe(&scope_of(&[("claude-impl", V22)]), |_: &str| true),
+            WorkerScopeGate::KindChanged
+        );
+        assert_eq!(scope.v22_socket(), bound);
+
+        // A session worker never has a sidecar.
+        let mut session = WorkerScope::new("codex-chore");
+        assert_eq!(
+            session.observe(&scope_of(&[("codex-chore", Session)]), |_: &str| false),
+            WorkerScopeGate::Admitted
+        );
+        assert_eq!(session.v22_socket(), None);
+    }
+
+    #[test]
+    fn a_worker_scope_explains_itself_in_lines_the_auto_restart_reads_as_harmless() {
+        use WorkerBridgeKind::{Session, V22};
+        let mut scope = WorkerScope::new("claude-impl");
+        let _ = scope.observe(&scope_of(&[("claude-impl", V22)]), |_: &str| true);
+        for gate in [
+            WorkerScopeGate::NotListed,
+            WorkerScopeGate::ScopeOff,
+            WorkerScopeGate::CatalogUnavailable,
+            WorkerScopeGate::Unreadable,
+            WorkerScopeGate::SidecarSocketMissing,
+        ] {
+            let line = scope.gate_line(gate).unwrap();
+            assert!(line.starts_with("amux wsl bridge warn: worker claude-impl "), "{line}");
+            assert!(line.ends_with("; nothing new registers or is offered for dispatch, not halted"), "{line}");
+            assert!(line.contains(&format!("({})", gate.reason())), "{line}");
+        }
+        assert_eq!(scope.gate_line(WorkerScopeGate::Admitted), None);
+        let _ = scope.observe(&scope_of(&[("claude-impl", Session)]), |_: &str| true);
+        assert_eq!(
+            scope.gate_line(WorkerScopeGate::KindChanged).unwrap(),
+            "amux wsl bridge warn: worker claude-impl is listed as session but this bridge serves it as v22; no new assignment until a person restarts this bridge, not halted"
+        );
+        // The bridge prints no other line of its own for the scope, and none
+        // of its scope code can halt.
+        let source = include_str!("wsl_bridge.rs");
+        let code = &source[source.find("pub enum BridgeArgs").unwrap()..];
+        let code = &code[..code.find("/// Exit status of a runner").unwrap()];
+        // One print in all of it, and it is the warning above (`println!(`
+        // also counts `eprintln!(`).
+        assert_eq!(code.matches("println!(").count(), 1);
+        assert_eq!(code.matches("eprintln!(\"{line}\");").count(), 1);
+        assert!(!code.contains("halted = true"));
+        assert!(!code.contains("note_halt("));
+        assert!(!code.contains("BRIDGE_HALT_EXIT_CODE"));
+    }
+
+    #[test]
+    fn a_worker_bridge_reads_neither_environment_list_nor_socket() {
+        let source = include_str!("wsl_bridge.rs");
+        let scope = &source[source.find("pub struct WorkerScope {").unwrap()..];
+        let scope = &scope[..scope.find("/// Which local sessions one bridge process").unwrap()];
+        assert!(!scope.contains("std::env"));
+        let bridge = &source[source.find("impl BridgeScope {").unwrap()..];
+        let bridge = &bridge[..bridge.find("/// Exit status of a runner").unwrap()];
+        assert!(bridge.contains("BridgeScope::Worker(scope) => Some(vec![scope.worker.clone()]),"));
+        assert!(bridge.contains("let answer = api.worker_bridge_scope().await;"));
+        // Exactly one environment read in the scope, and it is the session
+        // list branch's allowlist.
+        assert_eq!(bridge.matches("std::env::var(").count(), 1);
+        let worker = &source[source.find("pub async fn run_worker_from_env").unwrap()..];
+        let worker = &worker[..worker.find("async fn run_bridge(").unwrap()];
+        assert!(!worker.contains("std::env"));
+        assert!(worker.contains("if !valid_session_name(worker) {"));
+        assert!(worker.contains("return 1;"));
+        // A `--worker` allowlist is the worker alone.
+        let only = BridgeScope::Worker(WorkerScope::new("claude-impl")).allowlist();
+        assert!(session_allowed(&only, "claude-impl"));
+        assert!(!session_allowed(&only, "codex-chore"));
     }
 
     #[test]
@@ -4518,6 +5369,147 @@ mod tests {
                 review_pr_number: Some(1740),
             }
         );
+    }
+
+    #[test]
+    fn optimizer_result_requires_the_exact_linked_done_card_and_bounded_bytes() {
+        let attempt = "00000000-0000-4000-8000-000000000001";
+        let mut detail = serde_json::json!({
+            "id": "AMUX-1", "session": "codex-impl", "status": "done",
+            "last_result": "{\"taskGuidance\":\"safe\"}",
+            "messages": [{"card_id": "AMUX-1",
+                "text": format!("Execution attempt: {attempt}")}],
+        });
+        assert_eq!(chat_optimizer_result_from_card(&detail, attempt).unwrap(),
+            "{\"taskGuidance\":\"safe\"}");
+        assert!(chat_optimizer_result_from_card(&detail,
+            "00000000-0000-4000-8000-000000000002").is_err());
+        detail["session"] = serde_json::json!("claude-impl");
+        assert!(chat_optimizer_result_from_card(&detail, attempt).is_err());
+        detail["session"] = serde_json::json!("codex-impl");
+        detail["status"] = serde_json::json!("doing");
+        assert!(chat_optimizer_result_from_card(&detail, attempt).is_err());
+        detail["status"] = serde_json::json!("done");
+        detail["last_result"] = serde_json::json!("x".repeat(65_537));
+        assert!(chat_optimizer_result_from_card(&detail, attempt).is_err());
+    }
+
+    #[tokio::test]
+    async fn optimizer_linked_result_crosses_only_after_eligibility_and_exact_readback() {
+        let result = r#"{"taskGuidance":"safe","publicExampleRefs":[]}"#;
+        let digest = hex::encode(Sha256::digest(result.as_bytes()));
+        let pin = serde_json::json!({"repositoryId": 123,
+            "commitSha": "a".repeat(40), "blobSha": "b".repeat(40),
+            "sha256": "c".repeat(64)});
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api_base = tomverse_sequence(vec![
+            ("200 OK".into(), serde_json::json!({"eligible": true,
+                "attemptId": ATTEMPT_ID, "sourcePin": pin}).to_string()),
+            ("200 OK".into(), r#"{"status":"absent"}"#.into()),
+            ("200 OK".into(), "{}".into()),
+            ("200 OK".into(), serde_json::json!({"status": "recorded",
+                "attemptId": ATTEMPT_ID, "resultSha256": digest,
+                "cycleId": "22222222-2222-4222-8222-222222222222",
+                "candidateDigest": "d".repeat(64),
+                "bundleDigest": "e".repeat(64),
+                "authorshipVerified": false}).to_string()),
+        ], paths.clone());
+        let local_body = serde_json::json!({"id": "AMUX-1", "status": "done",
+            "session": "codex-impl", "last_result": result, "messages": [{"card_id": "AMUX-1",
+                "text": format!("Execution attempt: {ATTEMPT_ID}")}],
+        }).to_string();
+        let local_base = tomverse_answering("200 OK",
+            Box::leak(local_body.into_boxed_str()));
+        let mut delivery = pulled_delivery();
+        delivery.worker = "codex-impl".into();
+        let entry = PendingExecution { delivery, sent_at: 0,
+            card: Some("AMUX-1".into()) };
+        let api = tomverse_api(api_base);
+        let client = local_client(&local_base).unwrap();
+        transfer_chat_optimizer_candidate(&api, &client, &local_base,
+            &entry, "00000000-0000-4000-8000-000000000010", 1).await.unwrap();
+        let paths = paths.lock().unwrap();
+        assert_eq!(paths.len(), 4);
+        assert!(paths[0].ends_with("/eligibility?attemptId=4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f"));
+        assert!(paths[1].contains("/amux-candidate?attemptId="));
+        assert!(paths[2].ends_with("/amux-candidate"));
+        assert!(paths[3].contains("/amux-candidate?attemptId="));
+        assert!(paths.iter().all(|path| !path.contains("taskGuidance")));
+    }
+
+    #[tokio::test]
+    async fn optimizer_v22_result_crosses_only_after_eligibility_and_result_readback() {
+        let text = r#"{"taskGuidance":"safe","publicExampleRefs":[]}"#;
+        let digest = hex::encode(Sha256::digest(text.as_bytes()));
+        let pin = serde_json::json!({"repositoryId": 123,
+            "commitSha": "a".repeat(40), "blobSha": "b".repeat(40),
+            "sha256": "c".repeat(64)});
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api_base = tomverse_sequence(vec![
+            ("200 OK".into(), serde_json::json!({"eligible": true,
+                "attemptId": ATTEMPT_ID, "sourcePin": pin}).to_string()),
+            ("200 OK".into(), r#"{"status":"absent"}"#.into()),
+            ("200 OK".into(), "{}".into()),
+            ("200 OK".into(), serde_json::json!({"status": "recorded",
+                "attemptId": ATTEMPT_ID, "resultSha256": digest,
+                "cycleId": "22222222-2222-4222-8222-222222222222",
+                "candidateDigest": "d".repeat(64),
+                "bundleDigest": "e".repeat(64),
+                "authorshipVerified": false}).to_string()),
+        ], paths.clone());
+        let mut delivery = pulled_delivery();
+        delivery.worker = "codex-impl".into();
+        delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
+        let entry = PendingExecution { delivery, sent_at: 0, card: None };
+        let result = V22SidecarResult { state: V22SidecarState::Succeeded,
+            read_only_retry: None, api_execution_receipt: None,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: Some(text.into()), result_sha256: Some(digest),
+            patch_body: None, patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None,
+            changed_paths: None, review_commit_sha: None,
+            review_base_sha: None, review_touches_contract: None,
+            review_ref: None };
+        let api = tomverse_api(api_base);
+        transfer_chat_optimizer_v22_candidate(&api, &entry, Some(&result),
+            "00000000-0000-4000-8000-000000000010", 1).await.unwrap();
+        let paths = paths.lock().unwrap();
+        assert_eq!(paths.len(), 4);
+        assert!(paths[0].contains("/eligibility?attemptId="));
+        assert!(paths[1].contains("/amux-candidate?attemptId="));
+        assert!(paths[2].ends_with("/amux-candidate"));
+        assert!(paths[3].contains("/amux-candidate?attemptId="));
+    }
+
+    #[tokio::test]
+    async fn optimizer_v22_digest_mismatch_never_posts_a_candidate() {
+        let pin = serde_json::json!({"repositoryId": 123,
+            "commitSha": "a".repeat(40), "blobSha": "b".repeat(40),
+            "sha256": "c".repeat(64)});
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let api_base = tomverse_sequence(vec![
+            ("200 OK".into(), serde_json::json!({"eligible": true,
+                "attemptId": ATTEMPT_ID, "sourcePin": pin}).to_string()),
+            ("200 OK".into(), r#"{"status":"absent"}"#.into()),
+        ], paths.clone());
+        let mut delivery = pulled_delivery();
+        delivery.worker = "codex-impl".into();
+        delivery.assignment_id = Some("11111111-1111-4111-8111-111111111111".into());
+        let entry = PendingExecution { delivery, sent_at: 0, card: None };
+        let result = V22SidecarResult { state: V22SidecarState::Succeeded,
+            read_only_retry: None, api_execution_receipt: None,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: Some("different text".into()),
+            result_sha256: Some("a".repeat(64)),
+            patch_body: None, patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None,
+            changed_paths: None, review_commit_sha: None,
+            review_base_sha: None, review_touches_contract: None,
+            review_ref: None };
+        let api = tomverse_api(api_base);
+        assert!(transfer_chat_optimizer_v22_candidate(&api, &entry, Some(&result),
+            "00000000-0000-4000-8000-000000000010", 1).await.is_err());
+        assert_eq!(paths.lock().unwrap().len(), 2);
     }
 
     #[test]

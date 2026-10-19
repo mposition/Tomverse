@@ -9,7 +9,7 @@ import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationA
 import { MARKETING_COMPETITOR_ACTIONS } from "@/lib/marketingCompetitorCore";
 import {
   createApprovedMarketingCompetitor,
-  holdApprovedMarketingCompetitorHosts,
+  holdApprovedMarketingCompetitorSources,
 } from "@/lib/marketingCompetitorStore";
 import {
   MARKETING_GENERATOR_REPORT_ACTION,
@@ -237,9 +237,9 @@ test("a report with too little time before the service's deadline is not started
     assert.equal(await prisma.marketingReport.count(), 0);
   }));
 
-test("a fact from a host a person approved is kept, and only from that host", () =>
+test("a fact from a page a person approved is kept, and only from that page", () =>
   withSecret(async () => {
-    await approve("poe", "Poe", ["poe.com"]);
+    await approve("poe", "Poe", ["poe.com"], ["https://poe.com/blog/launch"]);
     const report = intel({
       payload: {
         facts: [
@@ -251,6 +251,14 @@ test("a fact from a host a person approved is kept, and only from that host", ()
             sourceUrl: "https://blog.poe.com/launch",
             checkedAt: "2026-10-16T00:00:00.000Z",
           },
+          // The approved host, but a page nobody approved: not a source.
+          {
+            competitorId: "poe",
+            factType: "launch_date",
+            value: { kind: "date", value: "2026-10-03" },
+            sourceUrl: "https://poe.com/pricing",
+            checkedAt: "2026-10-16T00:00:00.000Z",
+          },
         ],
         unrepresentableFactCount: 0,
       },
@@ -259,11 +267,11 @@ test("a fact from a host a person approved is kept, and only from that host", ()
       result: { status: string; reportRowId: string; droppedFactCount: number };
     };
     assert.equal(result.status, "recorded");
-    assert.equal(result.droppedFactCount, 1);
+    assert.equal(result.droppedFactCount, 2);
     const row = await prisma.marketingReport.findUniqueOrThrow({ where: { id: result.reportRowId } });
     const payload = row.payload as { facts: Array<{ sourceUrl: string }>; unrepresentableFactCount: number };
     assert.deepEqual(payload.facts.map((fact) => fact.sourceUrl), ["https://poe.com/blog/launch"]);
-    assert.equal(payload.unrepresentableFactCount, 1);
+    assert.equal(payload.unrepresentableFactCount, 2);
   }));
 
 test("candidates become proposals once, and a known competitor is not touched", () =>
@@ -317,7 +325,7 @@ test("candidates become proposals once, and a known competitor is not touched", 
       "www.beta.example",
     ]);
     // A proposal is never a source.
-    assert.deepEqual(Object.keys(await runMarketingTransaction(prisma, (tx) => holdApprovedMarketingCompetitorHosts(tx))), ["poe"]);
+    assert.deepEqual(Object.keys((await runMarketingTransaction(prisma, (tx) => holdApprovedMarketingCompetitorSources(tx))).hosts), ["poe"]);
   }));
 
 test("the approved hosts a report read cannot change until it commits", async () => {
@@ -333,7 +341,7 @@ test("the approved hosts a report read cannot change until it commits", async ()
   const reader = runMarketingTransaction(
     prisma,
     async (tx) => {
-      await holdApprovedMarketingCompetitorHosts(tx);
+      await holdApprovedMarketingCompetitorSources(tx);
       held();
       await released;
     },

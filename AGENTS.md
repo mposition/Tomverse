@@ -1386,8 +1386,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `tests/integration/marketing-intel-reports.db.test.ts`. 생성기 secret으로 쓸 수 있는 보고서는 `brief`·`market_intel`
   둘뿐입니다. key는 앱이 종류·run·보고서 id로 유도하고, 같은 key에 다른 바이트가 오면 conflict이며, 이미 기록된
   보고서는 모든 게이트보다 먼저 되읽습니다. 마감은 draft 접수와 같은 helper로 겁니다. **시장 사실은 사람이 승인한
-  경쟁사의 공식 host에서 온 것만 저장합니다** — host는 같은 트랜잭션에서 등록부의 승인 행을 FOR SHARE로 읽은
-  것이고(S3f-R1·R2), 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
+  경쟁사의 추적 페이지에서, 그 경쟁사의 공식 host 위에서 온 것만 저장합니다** — 둘 다 같은 트랜잭션에서 등록부의
+  승인 행을 FOR SHARE로 읽은 것이고(`holdApprovedMarketingCompetitorSources()`), 승인된 host의 다른 페이지는 출처가
+  아닙니다(docs/policy/marketing-automation.md §4.1). 그 밖의 사실은 저장하지 않고 `unrepresentableFactCount`에 더합니다. `market_intel` 보고서는
   후보(`competitorCandidates`, 최대 5개)를 함께 서명해 보낼 수 있고, 후보는 제안으로만 저장됩니다. registry에 없는 claim을 이름 대는 brief는 거절합니다. 감사 actor는
   `marketing-generator`이고 범위는 `MarketingReport`의 `marketing_report.generator_recorded` 하나입니다.
 - **S3e1(생성기 LLM adapter)**: `lib/marketingLlmClientCore.ts`, `tests/marketingLlmClientCore.test.mjs`. 생성기
@@ -1399,6 +1400,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   정한 pin(모든 tier 중 최악 단가)으로 가격이 정해지고 예약 snapshot이 tier를 기록하므로,
   `scripts/check-processing-tier-core.mjs`가 이 파일의 원장 상수 한 줄만 예외로 받고 literal이나 다른 파일은
   그대로 실패시킵니다. 모델 선택·첫 pin·서비스 배선은 S3e2 이후입니다(D4).
+  **원장이 `settled`로 닫지 않은 답은 쓰지 않습니다**(2026-10-18) — `unknown_retained`(token 초과·모델·tier 불일치)이면 client는
+  본문 없이 `retained`를 돌려주고 A3·A5는 실행을 멈춥니다. 비용이 pin과 다르다는 뜻이므로 확인되지 않은 결과입니다(공통 기반 규칙 7).
 - **S3e2(A5 문안 생성 core)**: `lib/marketingGeneratorDraftingCore.ts`, `tests/marketingGeneratorDraftingCore.test.mjs`.
   모델에게는 고정 system 지시와, S3b 문맥 중 그 계정·locale의 조각을 **데이터로** 줍니다. 답은 하나의 JSON 객체만
   받고(아니면 통째로 거절), 초안마다 링크·문맥에 없는 claim·asset id·접수 schema 위반이면 그 초안만 버리고 사유별로
@@ -1982,10 +1985,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `apps/tomverse-orchestrator/src/dm_relay/flow.rs`, `apps/tomverse-orchestrator/src/dm_relay/io.rs`,
   `apps/tomverse-orchestrator/src/tomverse_api.rs`의 Decision Maker POST 도우미, `apps/tomverse-orchestrator/src/wsl_bridge.rs`의 시작
   한 줄, `vendor/amux/crates/amux-server/src/api/dm_relay.rs`(로컬 표시 route와 그 등록), `tests/amuxDecisionMakerBridgeRelay.test.mjs`.
-  bridge 프로세스(`tomverse-bridge`) 안의 task 하나가 로컬 AMUX의 `needsyou` typed ask를 **한 번에 하나씩** 앱 원장으로 옮깁니다:
+  relay 프로세스 하나(bridge 바이너리의 `--dm-relay` 모드, 계정 `tomverse-bridge`)가 로컬 AMUX의 `needsyou` typed ask를 **한 번에 하나씩** 앱 원장으로 옮깁니다:
   라우팅 → 배정 → 로컬 DM 대기 표시(compare-and-swap, 실패하면 배정 폐기) → payload → 전송 의도 → broker → 결과 → cleanup_unknown
   보고 → 전송 영수증 → 표시 해제. **`TOMVERSE_AMUX_DM_RELAY=enabled`가 아니면 아무것도 읽지도 쓰지도 않습니다**(앱의 라우팅
-  스위치는 별개이고 둘 다 꺼져 있습니다). **broker는 전송 의도의 기록 응답을 받은 뒤에만 부릅니다** — 그 응답을 잃으면 보내지 않습니다.
+  스위치는 별개이고 둘 다 꺼져 있습니다). **relay는 자기 unit 하나에서만 돕니다** — 모든 bridge unit이 같은 `bridge.env`를 읽고 relay는 매 tick 처음에 로컬 표시를
+  전부 풀므로, bridge가 아니라 바이너리의 `--dm-relay` 모드를 `scripts/systemd/tomverse-amux-dm-relay.service` 하나가 돌리고(worker
+  bridge는 relay를 시작하지 않음), 스위치와 token은 그 unit만 읽는 `/etc/tomverse-bridge/dm-relay.env`에 둡니다
+  (`tests/amuxDmRelayUnit.test.mjs`). token이 없거나 형식이 틀리면 exit 2로 끝나고 다시 시작하지 않습니다. **broker는 전송 의도의 기록 응답을 받은 뒤에만 부릅니다** — 그 응답을 잃으면 보내지 않습니다.
   **결과 응답을 잃으면 다시 제출하지 않고** `results/lookup`으로만 확정하며, 확정하지 못하면 `results/unknown`입니다
   (docs/policy/amux-decision-maker.md §9). 라우팅은 질문당 하나라 결과를 모르면 다음 scan에서 다시 묻는 것이 조회이고, 그 밖의 앱
   쓰기(배정·폐기·전송 의도·영수증·`results/unknown`)의 결과를 모르거나 cleanup 보고가 기록되지 않으면(그 인스턴스의 latch를 확인하지
@@ -2055,10 +2061,49 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   검토 r-20261018-065705-65cb2a; `tests/amuxDecisionMakerDashboardAnswer.test.mjs`가 app.js의 함수를 직접 실행해 고정). typed revision이 없는
   카드는 claim할 것이 없고 그대로 보냅니다. worker 신원 header가 있는 요청은 운영자 claim을 할 수 없습니다. **전달된 답의 카드 기록이 실패하면**
   영수증(worker에게는 도착했으므로 사실)은 기록하되 relay가 `delivery_card_record_failed`로 멈춥니다 — 결정이 있는 요청은 다시 읽히지 않아
-  docs/policy/amux-decision-maker.md §7의 카드 기록이 영구히 빠지므로, 재시도 route 대신 명시적으로 멈춥니다(재시도는 bridge 재시작에도 남는 밀린 기록 저장소가 필요합니다). **남은 것(migration 필요, 이 조각에서 멈춤)**: 전달 결정 뒤 claim이 지거나 lane이 그 사이 거부해
-  아무것도 보내지 않은 경우를 앱의 전달 기록이 말할 어휘가 없습니다(영수증도 `unknown`도 사실이 아님). 그 경우 결정만 남고 relay가
-  멈추며, 확인 단계가 그 창을 결정 직전 한 번의 왕복으로 줄입니다. bridge가 결정과 영수증 사이에 죽은 결정은 자동으로 정리하지 않으며,
-  운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것(docs/policy/amux-decision-maker.md §2-7 마지막 문장)도 아직 없습니다.
+  docs/policy/amux-decision-maker.md §7의 카드 기록이 영구히 빠지므로, 재시도 route 대신 명시적으로 멈춥니다(재시도는 bridge 재시작에도 남는 밀린 기록 저장소가 필요합니다). 이 조각이 남긴 세 빈틈 — 전달 결정 뒤
+  아무것도 보내지 않은 경우의 어휘, bridge가 결정과 결과 사이에 죽어 남은 결정, 운영자의 직접 답이 먼저일 때 앱 요청을 닫는 것
+  (docs/policy/amux-decision-maker.md §2-7 마지막 문장) — 은 S2-2b4가 메웁니다.
+- **S2-2b4(전달 경로의 남은 빈틈)**: `prisma/migrations/20261018120000_amux_decision_maker_delivery_gaps/migration.sql`,
+  `app/api/internal/amux/decision-maker/deliveries/unsettled/route.ts`,
+  `app/api/internal/amux/decision-maker/requests/direct-answer/route.ts`, outcome route의 `reason`, judgment store의
+  `recordDecisionMakerDeliveryOutcome()`·`readNextDecisionMakerUnsettledDelivery()`, request store의
+  `closeDecisionMakerRequestOnDirectAnswer()`, `lib/amux/decisionMakerDeliveryRead.ts`의 `readDecisionMakerUnsettledDelivery()`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerDeliveryUnsettledRead`(상한 4)·`decisionMakerDirectAnswerClose`(10), Admin 상세의
+  `amux-dm-detail-not-sent`, `apps/tomverse-orchestrator/src/dm_relay/delivery.rs`의 `local_delivery()`·`settle_unsettled()`,
+  `apps/tomverse-orchestrator/src/dm_relay/direct.rs`, `vendor/amux/crates/amux-server/src/api/dm_relay.rs`의
+  `/api/dm-relay/answers/operator`·`/answers/receipt`, `vendor/amux/crates/amux-server/src/db/dm_ask.rs`의 `operator_answers_after()`.
+  **전달 결과는 요청당 하나이고 셋입니다** — `delivery_receipt`·`delivery_unknown`·`delivery_not_sent`(partial unique index). 미전송은
+  닫힌 사유 컬럼 `notSentReason`(`answered_by_operator`·`question_changed`·`binding_changed`·`lane_refused`·`send_refused`·`local_refused`, CHECK와
+  judgment core의 사유 목록이 같은 목록이고 `check:enum-constraints`가 대조)을 갖고, 사유는 미전송 사건에만 있습니다(shape CHECK).
+  감사는 router의 `amux.decision.deliver`이며 docs/policy/amux-decision-maker.md §10 목록 안입니다. relay는 로컬 전달이 **보내지
+  않았음을 증명하는 답**(다른 claim이 이김, revision·결속이 바뀜, claim 전 lane 거부, claim 뒤 전송 거절, claim 트랜잭션 rollback)만
+  미전송으로 기록하고, 그 밖의 불명확한 답은 그대로 `unknown`과 pause입니다. 미전송 기록이 확인되지 않으면 멈춥니다. **claim 뒤 전송
+  거절(`send_refused`)만 질문을 차지한 채 남습니다**(답변 기록은 고칠 수 없음) — 대시보드의 직접 답도 거절되므로 Admin 상세는 사유마다
+  다음 행동을 따로 말하고, 이 사유만 worker가 다시 물어야 한다고 안내합니다(검토 r-20261018-121437-f0d9ce). **직접 답은 앱 요청을 닫습니다** — 새 닫힘
+  종류 `direct_answer_close`는 router가 `dm_proposal`로 라우팅된 열린 요청에만 쓰고, 감사는 docs/policy/amux-decision-maker.md §10 목록 안의 `amux.decision.assign_discarded`로
+  남깁니다(event guard와 보존 guard가 CASE로 대응). 닫힌 요청은 판정을 받을 수 없으므로 **확정되지 않은 제안이 이 경로로 전달되는 일은
+  없고**, 그 뒤 도착한 DM 결과는 거부됩니다(DB 테스트). 닫힘 목록을 쓰는 원장 event guard·본문 guard·보존 guard·키 guard·판정 guard와
+  request store의 네 SQL 목록, request core의 닫힘 목록(router 셋 + 판정 셋)이 함께 여섯 종류로 바뀌었습니다 — 한쪽만 바꾸지 않습니다. relay는 매
+  tick 전달 앞에서 로컬 AMUX의 `operator` 답변 기록을 (시각, 카드, revision) 순으로 읽어(한 번에 50건) 각 질문을 앱에 보고합니다.
+  요청 없음·DM이 아닌 라우팅·이미 닫힘은 실패가 아니라 답이고, 앱 문법에 맞지 않는 기록은 보고하지 않고 지나갑니다. **읽기 위치는
+  rowid가 아니라 마지막으로 지난 기록의 key이고 다음 읽기는 그 뒤부터입니다** — AMUX가 매일 VACUUM해 rowid가 바뀔 수 있고, 시각만으로는
+  한 초에 page 하나를 넘는 기록에서 멈춥니다(검토 r-20261018-121437-f0d9ce). 대시보드는 writer를 기다리기 전에 기록 시각을 정하므로
+  늦게 commit된 기록이 이미 지난 key보다 앞설 수 있어, 목록 끝에 닿으면 본 가장 새 시각에서 10분 앞으로 되돌아가 그 창을 다시 읽고
+  이미 보고한 기록은 건너뜁니다. 시작 위치는 31일 전(stale close 720시간 + 하루)이고 메모리에만 있어 재시작은 같은 창을 다시 보고하며,
+  닫힘이 멱등이라 아무것도 더 쓰지 않습니다.
+  **bridge가 결정과 결과 사이에 죽어 남은 결정은 시작 때 다시 보내지 않고 정리합니다** — relay는 첫 전달 전에 결과 없는 가장 오래된
+  결정을 하나씩 읽어(`deliveries/unsettled`, 결정 시각·카드·revision·결속·메시지 id, 본문 없음, kill switch를 읽지 않음) 로컬의 `dm-answer:<요청 id>` 예약과
+  답변 기록(`answers/receipt`, 읽기만 하고 pause·전송 없음)으로 판정합니다: 수신 확인 → 영수증(그래도 docs/policy/amux-decision-maker.md §7 카드 기록을 확인할 수 없어
+  `delivery_recovered_card_record_unconfirmed`로 멈춤), 예약만 있음 → `unknown`(세션 pause 먼저), 예약 없음 + 운영자 기록 → 미전송
+  `answered_by_operator`, 예약 없음 + 기록 없음 + revision이 지나감 → 미전송 `question_changed`, 그 밖은 `unknown`입니다. 읽지 못하면
+  아무것도 쓰지 않고 다음 tick에 다시 묻고, 정리가 끝나기 전에는 전달하지 않습니다. 문장 수: unsettled 읽기 2(+ setup·fence = 4),
+  직접 답 닫기 최대 8(스위치를 읽지 않음, 상한 10), 미전송 결과는 기존 outcome 경계(9) 안입니다. flow.rs의 거절을
+  성공으로 읽던 세 곳(배정 폐기, 전송 결과, 결과 unknown)은 각자 기록됐다는 답만 성공으로 받고 나머지는 멈춥니다. **남은 것**: `send_refused`의
+  claim은 남으므로 그 질문 revision에는 worker가 다시 물을 때까지 아무도 답할 수 없습니다. 결정 전에 운영자가 이미 답한 확정은 확인
+  단계가 결정 없이 지나가며 계속 순회합니다. 직접 답으로 세는 것은 대시보드 claim(`source='operator'`)뿐입니다. writer 대기에는 상한이
+  없으므로 되감는 창(10분)보다 늦게 commit된 운영자 기록은 보고되지 않을 수 있습니다 — 그 요청은 판정되거나 stale로 닫힐 때까지 열려
+  있고, 답변 기록이 질문을 차지하고 있어 확정 제안이 전달되지는 않습니다.
 
 # AMUX 카드 표시 번호
 

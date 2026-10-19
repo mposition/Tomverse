@@ -58,7 +58,7 @@ test("the model is given a fixed instruction and only this account's slice of th
   // A5 writes posts; it is told nothing about the competitor registry, so no
   // host name can reach a post.
   assert.equal("competitors" in data, false);
-  assert.equal(user.content.includes("poe.com"), false);
+  assert.doesNotMatch(user.content, /poe\.com/u);
 });
 
 test("an answer without the registry still parses, for a service deployed before the app", () => {

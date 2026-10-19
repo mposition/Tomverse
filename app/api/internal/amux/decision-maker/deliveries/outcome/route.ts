@@ -22,13 +22,15 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * AMUX Decision Maker delivery outcome (docs/policy/amux-decision-maker.md
  * §2-7, §9), stage S2-2b3: after the decision, the delivery's receipt -- the
  * local AMUX confirmed the message reached the worker -- or `unknown` when
- * its result is unclear, one of the two once. Recorded under the kill switch
- * as well: each records what already happened. An unknown delivery is never
- * sent again; the bridge pauses the worker's session and a person resolves it
- * in Admin. The decision is the judgment store's
- * `recordDecisionMakerDeliveryOutcome()`; this route only authenticates, reads
- * the body and runs that one transaction in the route budget and its DB
- * boundary.
+ * its result is unclear; since stage S2-2b4 also `not_sent` with its `reason`
+ * when the local AMUX proved nothing was sent (the operator's direct answer
+ * won the claim, the question or the binding changed, the lane refused). One
+ * of the three once. Recorded under the kill switch as well: each records
+ * what already happened. An unknown delivery is never sent again; the bridge
+ * pauses the worker's session and a person resolves it in Admin. The decision
+ * is the judgment store's `recordDecisionMakerDeliveryOutcome()`; this route
+ * only authenticates, reads the body and runs that one transaction in the
+ * route budget and its DB boundary.
  *
  * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
@@ -39,6 +41,7 @@ const requestSchema = z
   .object({
     request_id: z.unknown(),
     outcome: z.unknown(),
+    reason: z.unknown().optional(),
   })
   .strict();
 
@@ -56,7 +59,7 @@ export async function POST(request: Request) {
     try {
       const body = await readLimitedJson(request, MAX_BODY_BYTES, requestSchema);
       const outcome = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerDeliveryOutcome, (tx) =>
-        recordDecisionMakerDeliveryOutcome(tx, { requestId: body.request_id, outcome: body.outcome }),
+        recordDecisionMakerDeliveryOutcome(tx, { requestId: body.request_id, outcome: body.outcome, reason: body.reason }),
       );
       if (!outcome.recorded) return refused(dmReturnedRefusalStatus(outcome.reason), outcome.reason);
       return amuxJsonNoStore({

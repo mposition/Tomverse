@@ -936,6 +936,8 @@ run(
     "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts",
     "tests/integration/prompt-refiner-chat-execution.db.test.ts",
     "tests/integration/prompt-refiner-chat-execution-full-schema.db.test.ts",
+    "tests/integration/chat-unified-optimizer-ledger.db.test.ts",
+    "tests/integration/chat-unified-optimizer-amux-test-card.db.test.ts",
     "tests/integration/prompt-refiner-product-operational-guard.db.test.ts",
     "tests/integration/chat-refiner-initial-auto-release.db.test.ts"],
   "Running the Prompt Refiner Auto budget hold transaction scenarios",

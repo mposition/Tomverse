@@ -320,6 +320,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "read",
   },
+  // setup + the derived worker catalog in one statement (orchestration policy
+  // version 55, section 1: the bridge scope) + fence
+  workerBridgeScopeRead: {
+    operation: "worker_bridge_scope_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
   // setup + the newest capability of each worker (1, pinned by
   // tests/amuxWorkerCapabilityStore.test.mjs) + fence (orchestration policy
   // version 35, section 2)
@@ -468,6 +475,24 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerDeliveryOutcome: {
     operation: "decision_maker_delivery_outcome",
     prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // Stage S2-2b4. The bridge's read of a decision with no outcome, which it
+  // settles at its start: setup + the decision and the request state (2,
+  // lib/amux/decisionMakerDeliveryRead.ts) + fence, one REPEATABLE READ
+  // snapshot. And the close of a request whose question the operator answered
+  // directly (lock, the request lookup, its state, the router's audit 4, the
+  // event: 8) + setup + fence. Both pinned by
+  // tests/amuxDecisionMakerDelivery.test.mjs, within
+  // docs/policy/amux-decision-maker.md §9's 12.
+  decisionMakerDeliveryUnsettledRead: {
+    operation: "decision_maker_delivery_unsettled_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  decisionMakerDirectAnswerClose: {
+    operation: "decision_maker_direct_answer_close",
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   // §4's report (docs/policy/amux-decision-maker.md): setup + the judgment

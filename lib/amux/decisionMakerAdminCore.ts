@@ -2,8 +2,11 @@ import { DM_OUTPUT_KINDS, type DmOutputKind } from "./decisionMakerBodyCore.ts";
 import { dmInstanceForProvider } from "./decisionMakerCore.ts";
 import {
   DM_DECLARATION_ACCURACIES,
+  DM_DELIVERY_NOT_SENT_REASONS,
   DM_DELIVERY_RESOLVE_OUTCOMES,
+  DM_JUDGMENT_KINDS,
   isDmConfirmingJudgmentKind,
+  type DmDeliveryNotSentReason,
   type DmDeliveryResolveOutcome,
 } from "./decisionMakerJudgmentCore.ts";
 import {
@@ -68,7 +71,9 @@ export type DmAdminRequestRow = {
   irreversible: boolean | null;
   declarationAccuracy: (typeof DM_DECLARATION_ACCURACIES)[number] | null;
   delivered: boolean;
-  deliveryOutcome: "receipt" | "unknown" | null;
+  deliveryOutcome: "receipt" | "unknown" | "not_sent" | null;
+  /** Why a decided delivery sent nothing (stage S2-2b4), exactly when the outcome is `not_sent`. */
+  deliveryNotSentReason: DmDeliveryNotSentReason | null;
   deliveryResolution: DmDeliveryResolveOutcome | null;
   /**
    * The database clock of the request's `cleanup_unknown` report (§5: the
@@ -140,13 +145,15 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
   const outputKind = nullableOneOf(DM_OUTPUT_KINDS, r.outputKind);
   const declarationAccuracy = nullableOneOf(DM_DECLARATION_ACCURACIES, r.declarationAccuracy);
   const deliveryResolution = nullableOneOf(DM_DELIVERY_RESOLVE_OUTCOMES, r.deliveryResolution);
+  const deliveryNotSentReason = nullableOneOf(DM_DELIVERY_NOT_SENT_REASONS, r.deliveryNotSentReason);
   if (
     snapshotState === undefined ||
     resultKind === undefined ||
     closingKind === undefined ||
     outputKind === undefined ||
     declarationAccuracy === undefined ||
-    deliveryResolution === undefined
+    deliveryResolution === undefined ||
+    deliveryNotSentReason === undefined
   ) {
     return null;
   }
@@ -160,7 +167,10 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
   let deliveryOutcome: DmAdminRequestRow["deliveryOutcome"] = null;
   if (r.deliveryOutcomeKind === "delivery_receipt") deliveryOutcome = "receipt";
   else if (r.deliveryOutcomeKind === "delivery_unknown") deliveryOutcome = "unknown";
+  else if (r.deliveryOutcomeKind === "delivery_not_sent") deliveryOutcome = "not_sent";
   else if (r.deliveryOutcomeKind !== null) return null;
+  // The shape CHECK of stage S2-2b4: a reason exactly on the not-sent outcome.
+  if ((deliveryOutcome === "not_sent") !== (deliveryNotSentReason !== null)) return null;
 
   // The order the triggers enforce, read back: an operator route has no
   // events; a transmission follows an assignment; output details belong to a
@@ -175,7 +185,7 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
   if (cleanupUnknownAtMs !== null && (r.route === "operator" || !r.assigned)) return null;
   if (transmitOutcome !== null && snapshotState === null) return null;
   if ((outputKind !== null || r.irreversible !== null) && resultKind === null) return null;
-  const judged = closingKind === "confirm" || closingKind === "edit_confirm" || closingKind === "reject";
+  const judged = isOneOf(DM_JUDGMENT_KINDS, closingKind);
   if (declarationAccuracy !== null && !judged) return null;
   if (judged && declarationAccuracy === null) return null;
   if (r.delivered && !isDmConfirmingJudgmentKind(closingKind)) return null;
@@ -204,6 +214,7 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
     declarationAccuracy,
     delivered: r.delivered,
     deliveryOutcome,
+    deliveryNotSentReason,
     deliveryResolution,
     cleanupUnknownAtMs,
   };
@@ -211,9 +222,10 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
 
 /**
  * Where a request stands, as one code. A closing event decides first (a
- * person's judgment, a discarded assignment, a stale close); then an unknown
- * result; then the terminal result; then how far the DM path got before it.
- * A request routed to the operator never had a DM path.
+ * person's judgment, a discarded assignment, a stale close, or -- since stage
+ * S2-2b4 -- the operator's direct answer); then an unknown result; then the
+ * terminal result; then how far the DM path got before it. A request routed
+ * to the operator never had a DM path.
  */
 export const DM_ADMIN_REQUEST_STATUSES = [
   "routed_to_operator",
@@ -233,6 +245,7 @@ export const DM_ADMIN_REQUEST_STATUSES = [
   "reject",
   "assign_discarded",
   "stale_close",
+  "direct_answer_close",
 ] as const;
 export type DmAdminRequestStatus = (typeof DM_ADMIN_REQUEST_STATUSES)[number];
 
@@ -250,7 +263,9 @@ export const dmAdminRequestStatus = (row: DmAdminRequestRow, dbNowMs: number): D
 /**
  * Whether a confirmed answer reached the worker (§2-7, §9). Only a
  * confirmation or an edited confirmation is ever delivered; every other
- * request has nothing to deliver.
+ * request has nothing to deliver. `not_sent` (stage S2-2b4) is a decided
+ * answer the local AMUX proved it never sent -- §2-7's "다른 쪽은 거절되어
+ * 운영자에게 보인다" -- shown with its reason; the operator answers directly.
  */
 export const DM_ADMIN_DELIVERY_STATUSES = [
   "not_applicable",
@@ -260,6 +275,7 @@ export const DM_ADMIN_DELIVERY_STATUSES = [
   "unknown",
   "resolved_delivered",
   "resolved_not_delivered",
+  "not_sent",
 ] as const;
 export type DmAdminDeliveryStatus = (typeof DM_ADMIN_DELIVERY_STATUSES)[number];
 
@@ -268,6 +284,7 @@ export const dmAdminDeliveryStatus = (row: DmAdminRequestRow): DmAdminDeliverySt
   if (!row.delivered) return "pending";
   if (row.deliveryOutcome === null) return "in_flight";
   if (row.deliveryOutcome === "receipt") return "delivered";
+  if (row.deliveryOutcome === "not_sent") return "not_sent";
   if (row.deliveryResolution === null) return "unknown";
   return row.deliveryResolution === "delivered" ? "resolved_delivered" : "resolved_not_delivered";
 };

@@ -257,6 +257,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // classifier or deferred trigger.
   "20261018080000_amux_v19_max_shadow_budget",
   "20261018110000_amux_v19_session_analysis_result",
+  // AMUX Decision Maker S2-2b4: a direct answer's close and a delivery that
+  // sent nothing. It adds no commit deadline: neither kind holds one, the
+  // event guard's deadline lines are unchanged, and the ledger's deferred
+  // check does not cover either.
+  "20261018120000_amux_decision_maker_delivery_gaps",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
