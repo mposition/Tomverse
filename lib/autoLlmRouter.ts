@@ -7,7 +7,6 @@ import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import { readAutoLlmRouterModelId, readAutoLlmRouterRewrite } from "@/lib/autoLlmRouterSettings";
 import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
-import { autoLlmRouterVersionFor } from "@/lib/autoRouterOptimizerCore";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
@@ -16,8 +15,8 @@ import {
     AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS,
     AUTO_LLM_ROUTER_SESSION_PICKS,
     AUTO_LLM_ROUTER_TIMEOUT_MS,
-    AUTO_LLM_ROUTER_VERSION,
     autoLlmRouterCandidates,
+    autoLlmRouterDecisionVersion,
     autoLlmRouterOutputSchema,
     autoLlmRouterProviderOptions,
     autoLlmRouterSession,
@@ -50,6 +49,8 @@ export async function callAutoLlmRouter(input: {
     session: AutoLlmRouterSession | null;
     /** Ask the same call for a self-contained rewrite of the message. */
     rewrite?: boolean;
+    /** The rewrite guidance in force; the code default when not given. */
+    rewriteGuidance?: string;
     /** The live turn's deadline unless given; the optimizer's replay waits longer. */
     timeoutMs?: number;
 }): Promise<AutoLlmRouterCallResult> {
@@ -57,7 +58,10 @@ export async function callAutoLlmRouter(input: {
     try {
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
-            system: buildAutoLlmRouterSystem(input.guidance, { rewrite }),
+            system: buildAutoLlmRouterSystem(input.guidance, {
+                rewrite,
+                rewriteGuidance: input.rewriteGuidance,
+            }),
             prompt: autoLlmRouterUserMessage(
                 input.prompt,
                 input.previousAnswer,
@@ -168,8 +172,14 @@ export async function pickAutoModelWithLlm(input: {
         rewriteOn &&
         input.rewriteAllowed === true &&
         input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
-    const version =
-        autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, active.cycleId) + (rewrite ? "+rewrite" : "");
+    // Read only when a rewrite is asked for, so a turn with rewriting off
+    // makes the same reads and sends the same prompt as before.
+    const rewriteGuidance = rewrite ? await readActiveRouterGuidance(prisma, "rewrite") : null;
+    const version = autoLlmRouterDecisionVersion({
+        routingCycleId: active.cycleId,
+        rewrite,
+        rewriteCycleId: rewriteGuidance?.cycleId ?? null,
+    });
     const startedAt = Date.now();
     const { outcome, pick, usage } = await callAutoLlmRouter({
         routerModel,
@@ -179,6 +189,7 @@ export async function pickAutoModelWithLlm(input: {
         candidates,
         session,
         rewrite,
+        rewriteGuidance: rewriteGuidance?.guidance,
     });
     const latencyMs = Date.now() - startedAt;
     console.info(
