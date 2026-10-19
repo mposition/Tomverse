@@ -59,6 +59,9 @@ import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 import { recoveryPromptsForMessages } from "@/lib/chatTranscriptRecovery";
+import { splitInlineCode, splitUserMessageSegments } from "@/lib/userMessageSegments";
+import { CHAT_CONCURRENCY_ERROR_CODES } from "@/lib/chatConcurrencyCore";
+import { useChatConcurrencySlot } from "@/components/chat/useChatConcurrencySlot";
 import {
   chatProductUiCopy,
   localizedProductHref,
@@ -81,6 +84,13 @@ type ChatMessageListProps = {
    * and no stored message changes.
    */
   onContinueWithoutUnavailableAttachments?: (attachmentIds: string[]) => void;
+  /**
+   * Sends the refused question again, in place of this concurrency-refused
+   * turn. Offered in both Chat and Review: the refusal happened before any
+   * provider or reservation, so unlike a transport failure there is no chance
+   * the original answer is still running or billed.
+   */
+  onRetryConcurrency?: (assistantMessageId: string) => void;
   onRequestCloseModel?: MouseEventHandler<HTMLButtonElement>;
   hasMultipleActiveModels?: boolean;
   currentModelId?: string | null;
@@ -151,14 +161,17 @@ const QUOTA_ERROR_CODES = new Set([
   "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
   "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
   "PROVIDER_SPEND_LIMIT_REACHED",
-  "CHAT_CONCURRENCY_EXCEEDED",
-  "CHAT_IP_CONCURRENCY_EXCEEDED",
 ]);
 
-type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
+type ErrorCategory = "quota" | "model_retired" | "attachment" | "concurrency" | "generic";
 
 const classifyError = (message: Message): ErrorCategory => {
   if (message.errorCode === "MODEL_RETIRED") return "model_retired";
+  // Not quota: another model is refused the same way, and the fix is waiting
+  // for a running answer, not changing what was asked for.
+  if (message.errorCode && CHAT_CONCURRENCY_ERROR_CODES.has(message.errorCode)) {
+    return "concurrency";
+  }
   if (message.errorCode && QUOTA_ERROR_CODES.has(message.errorCode)) return "quota";
   if (message.errorHadAttachments && isFileParsingError(message.recoveryNotice ?? message.content)) return "attachment";
   return "generic";
@@ -316,6 +329,67 @@ function MarkdownCodeBlock({ children }: MarkdownPreProps) {
   );
 }
 
+/** Stable map: an inline one would remount each code block on every render. */
+const USER_CODE_COMPONENTS = {
+  pre: MarkdownCodeBlock,
+  code: ({ children, className, ...props }: MarkdownCodeProps) => (
+    <code {...props} className={className}>
+      {children}
+    </code>
+  ),
+};
+
+/**
+ * A user's own message: text exactly as typed, with only code lifted out
+ * (lib/userMessageSegments.ts). The code goes through the same code block as
+ * an answer, so it gets the same copy control and, for a fence that names its
+ * language, the same highlighting. The message text itself is never altered.
+ */
+function UserMessageContent({ content }: { content: string }) {
+  const segments = useMemo(() => splitUserMessageSegments(content), [content]);
+  return (
+    <>
+      {segments.map((segment, index) => {
+        if (segment.kind === "code") {
+          // A fence longer than any backtick run inside, so the code cannot
+          // close it early.
+          const longestRun = Math.max(
+            2,
+            ...(segment.code.match(/`+/g) ?? []).map((run) => run.length)
+          );
+          const fence = "`".repeat(longestRun + 1);
+          return (
+            <div key={index} data-testid="user-message-code" className="mb-3 min-w-0 text-left last:mb-0">
+              <ReactMarkdown
+                rehypePlugins={[rehypeHighlight]}
+                components={USER_CODE_COMPONENTS}
+              >
+                {`${fence}${segment.language ?? ""}\n${segment.code}\n${fence}`}
+              </ReactMarkdown>
+            </div>
+          );
+        }
+        return (
+          <p key={index} className="mb-3 whitespace-pre-wrap last:mb-0">
+            {splitInlineCode(segment.text).map((part, partIndex) =>
+              part.kind === "code" ? (
+                <code
+                  key={partIndex}
+                  className="rounded bg-white/20 px-1 py-0.5 font-mono text-[0.9em]"
+                >
+                  {part.text}
+                </code>
+              ) : (
+                part.text
+              )
+            )}
+          </p>
+        );
+      })}
+    </>
+  );
+}
+
 function TypingIndicator({ label }: { label?: string }) {
   return (
     // The three bouncing dots are purely visual: without a text alternative,
@@ -338,6 +412,7 @@ export function ChatMessageList({
   onRestoreQuestion,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
+  onRetryConcurrency,
   onRequestCloseModel,
   hasMultipleActiveModels = false,
   currentModelId,
@@ -379,6 +454,19 @@ export function ChatMessageList({
     () => recoveryPromptsForMessages(recoveryEnabled ? messages : [], currentChatId),
     [currentChatId, messages, recoveryEnabled]
   );
+
+  // Only the newest turn can be retried in place: it is the question the
+  // runtime's retry prompt still holds.
+  const newestMessage = messages.at(-1);
+  const concurrencyRetryMessageId =
+    onRetryConcurrency &&
+    newestMessage?.role === "assistant" &&
+    newestMessage.status === "error" &&
+    newestMessage.errorCode &&
+    CHAT_CONCURRENCY_ERROR_CODES.has(newestMessage.errorCode)
+      ? newestMessage.id
+      : null;
+  const concurrencySlotReady = useChatConcurrencySlot(concurrencyRetryMessageId);
 
   // Coarse announcement of the response lifecycle. Deliberately NOT an
   // aria-live region around the transcript itself: streaming token-by-token
@@ -764,7 +852,10 @@ export function ChatMessageList({
               !isUser && msg.status === "error"
                 ? errorText.split("\n").slice(1).filter(Boolean)
                 : [];
-            const canRestoreQuestion = recoveryEnabled && !isSending && recoveryPrompts.has(msg.id);
+            // A turn that can be retried in place does not also offer to put
+            // the question back in the composer: retrying is that, done for you.
+            const canRestoreQuestion = recoveryEnabled && !isSending &&
+              recoveryPrompts.has(msg.id) && msg.id !== concurrencyRetryMessageId;
 
             // UI-ERR-001. A failed turn is a state of one answer, not of the
             // conversation: three failed panels used to paint the whole
@@ -1427,7 +1518,7 @@ export function ChatMessageList({
                     )}
                     </>
                   ) : (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <UserMessageContent content={msg.content} />
                   )}
                   {!isUser && msg.status === "error" && msg.recoveryNotice !== undefined && (
                     <p data-testid="chat-recovery-notice" className="mt-3 whitespace-pre-wrap text-sm font-medium">
@@ -1528,6 +1619,23 @@ export function ChatMessageList({
                                 {t("chat.retry")}
                               </button>
                             )}
+                          {errorCategory === "concurrency" &&
+                            msg.id === concurrencyRetryMessageId &&
+                            onRetryConcurrency && (
+                              <button
+                                type="button"
+                                data-testid="concurrency-retry-button"
+                                onClick={() => onRetryConcurrency(msg.id)}
+                                disabled={!concurrencySlotReady || isSending || isSendPreparing}
+                                className={`${primaryButtonClass} disabled:cursor-not-allowed disabled:bg-zinc-400 disabled:shadow-none disabled:hover:bg-zinc-400 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-300`}
+                              >
+                                <RotateCcw
+                                  className={`h-3.5 w-3.5 ${concurrencySlotReady ? "" : "animate-spin motion-reduce:animate-none [animation-direction:reverse]"}`}
+                                  aria-hidden="true"
+                                />
+                                {t("chat.retry")}
+                              </button>
+                            )}
                           {errorCategory === "attachment" && onRetryWithoutAttachments && (
                             <button
                               type="button"
@@ -1566,6 +1674,8 @@ export function ChatMessageList({
                                 {t("chat.attachmentContinueWithout")}
                               </button>
                             )}
+                          {/* A concurrency refusal is the limit working, not a fault to report. */}
+                          {errorCategory !== "concurrency" && (
                           <FeedbackButton
                             currentModelId={msg.modelId ?? currentModelId}
                             currentPlan={currentPlan}
@@ -1576,9 +1686,21 @@ export function ChatMessageList({
                             triggerClassName={secondaryButtonClass}
                             triggerTestId="report-error-button"
                           />
+                          )}
                           {(errorCategory === "generic" || errorCategory === "attachment") && (
                             <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
                               {t("chat.tryAnotherModelHint")}
+                            </span>
+                          )}
+                          {errorCategory === "concurrency" && msg.id === concurrencyRetryMessageId && (
+                            <span
+                              data-testid="concurrency-retry-hint"
+                              aria-live="polite"
+                              className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+                            >
+                              {concurrencySlotReady
+                                ? t("chat.concurrencyRetryReady")
+                                : t("chat.concurrencyRetryWaiting")}
                             </span>
                           )}
                         </div>

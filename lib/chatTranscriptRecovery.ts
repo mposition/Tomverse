@@ -1,4 +1,5 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
+import { CHAT_CONCURRENCY_ERROR_CODES } from "@/lib/chatConcurrencyCore";
 
 export type ChatRecoveryPrompt = {
   text: string;
@@ -14,7 +15,11 @@ export const CHAT_NON_RECOVERABLE_ERROR_CODES = new Set([
   "GUEST_AUTO_OUTCOME_UNKNOWN",
 ]);
 
-/** Keep UI failures in memory, but do not send their empty placeholders. */
+/**
+ * Keep UI failures in memory, but do not send their empty placeholders. A
+ * concurrency refusal never reached a model, so its card is never sent either
+ * -- in Review its content is the refusal sentence, not an answer.
+ */
 export function requestTranscriptForScope(
   messages: readonly Message[],
   userMessage: Message,
@@ -24,7 +29,9 @@ export function requestTranscriptForScope(
     ...messages.filter((message) =>
       message.id !== CHAT_WELCOME_MESSAGE_ID && message.id !== userMessage.id &&
       !(scope === "conversation" && message.role === "assistant" &&
-        !message.content.trim() && !message.attachments?.length)
+        !message.content.trim() && !message.attachments?.length) &&
+      !(message.role === "assistant" && message.errorCode &&
+        CHAT_CONCURRENCY_ERROR_CODES.has(message.errorCode))
     ),
     userMessage,
   ];
