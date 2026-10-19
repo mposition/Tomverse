@@ -10,7 +10,10 @@ import {
   readActiveRouterGuidance,
 } from "@/lib/autoLlmRouterGuidance";
 import {
+  AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
   finishOptimizerCycle,
+  readOptimizerAutomation,
+  updateOptimizerAutomation,
   promoteAutoRouterOptimizerCycle,
   reserveOptimizerCycle,
   rollBackAutoRouterGuidance,
@@ -48,7 +51,9 @@ const providerKeys = [`provider:${OPTIMIZER_PROVIDER}`, `provider:${ROUTER_PROVI
 
 const reset = async () => {
   await prisma.autoRouterOptimizerCycle.deleteMany({});
-  await prisma.appSetting.deleteMany({ where: { key: AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY } });
+  await prisma.appSetting.deleteMany({
+    where: { key: { in: [AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY, AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY] } },
+  });
   await prisma.chatUsageBucket.deleteMany({ where: { key: { in: providerKeys } } });
 };
 beforeEach(reset);
@@ -58,9 +63,9 @@ after(async () => {
 });
 
 /** `worstCaseMicroUsd` split 60/40 between the optimizer and router providers. */
-const reserve = (worstCaseMicroUsd: number, now?: Date) =>
+const reserve = (worstCaseMicroUsd: number, now?: Date, by: typeof actor | "system" = actor) =>
   reserveOptimizerCycle({
-    actor,
+    actor: by,
     optimizerModelId: "optimizer-model",
     routerModelId: "router-model",
     incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
@@ -288,4 +293,30 @@ test("the daily step starts nothing while the daily switch is off", async () => 
   const { runScheduledAutoRouterOptimizerCycle } = await import("@/lib/autoRouterOptimizer");
   assert.deepEqual(await runScheduledAutoRouterOptimizerCycle(), { started: false, reason: "daily_off" });
   assert.equal(await prisma.autoRouterOptimizerCycle.count(), 0);
+});
+
+test("the automation switches change only together with their audit entry", async () => {
+  assert.deepEqual(await readOptimizerAutomation(), { daily: false, autoPromote: false });
+  await updateOptimizerAutomation(actor, { daily: true, autoPromote: false });
+  assert.deepEqual(await readOptimizerAutomation(), { daily: true, autoPromote: false });
+  const entry = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "auto.llm_router_optimizer_automation.updated", targetId: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.deepEqual((entry.metadata as { after?: unknown }).after, { daily: true, autoPromote: false });
+  assert.equal(entry.actorUserId, session.user?.id);
+
+  await updateOptimizerAutomation(actor, { daily: false, autoPromote: false });
+  assert.equal(await prisma.appSetting.count({ where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY } }), 0);
+});
+
+test("the system starts at most one cycle a day; a person still may", async () => {
+  const first = await reserve(1_000, undefined, "system");
+  assert.ok("cycle" in first);
+  await prisma.autoRouterOptimizerCycle.update({ where: { id: first.cycle.id }, data: { status: "failed" } });
+  assert.deepEqual(await reserve(1_000, undefined, "system"), { refused: "daily_done" });
+  const byPerson = await reserve(1_000);
+  assert.ok("cycle" in byPerson);
+  const rows = await prisma.autoRouterOptimizerCycle.findMany({ select: { startedBy: true } });
+  assert.deepEqual(rows.map((row) => row.startedBy).sort(), ["person", "system"]);
 });

@@ -66,16 +66,6 @@ test("the Prompt Refiner Auto budget actor has only its audited hold transitions
 });
 
 test("the unified optimizer actor is limited to provider-free ledger facts", () => {
-  assert.equal(isSystemAuditActor("auto-router-optimizer"), true);
-  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
-    "auto.llm_router_optimizer.cycle_started", "AutoRouterOptimizerCycle"), true);
-  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
-    "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), true);
-  // Rollback stays a person's action, and no other target is in scope.
-  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
-    "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
-  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
-    "auto.llm_router_guidance.promoted", "AppSettings"), false);
   assert.equal(isSystemAuditActor("chat-unified-optimizer"), true);
   assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
     "chat.unified_optimizer.run_admitted", "ChatUnifiedOptimizerRun"), true);
@@ -513,4 +503,17 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.reserved", "MarketingReport"), false);
   // Other actors are unaffected by the generator's scope.
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
+});
+
+test("the Auto router optimizer actor may only start a cycle and promote one", () => {
+  assert.equal(isSystemAuditActor("auto-router-optimizer"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_optimizer.cycle_started", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), true);
+  // Rollback stays a person's action, and no other target is in scope.
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AppSettings"), false);
 });

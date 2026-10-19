@@ -4601,6 +4601,8 @@ model AutoRouterOptimizerCycle {
   reservedMicroUsd  Int
   /// [{ provider, microUsd, dayStart, monthStart }] held in each provider budget until settled.
   providerReservations Json?
+  /// person | system -- who started it; the daily automation may start one a day.
+  startedBy         String    @default("person")
   spentMicroUsd     Int       @default(0)
   promotedAt        DateTime?
 

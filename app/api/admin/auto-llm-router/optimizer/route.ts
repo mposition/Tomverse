@@ -5,20 +5,15 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
-import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
-  AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY,
   promoteAutoRouterOptimizerCycle,
   readAutoRouterOptimizerState,
-  readOptimizerAutomation,
-  readOptimizerModelId,
   rollBackAutoRouterGuidance,
   startAutoRouterOptimizerCycle,
-  writeOptimizerAutomation,
-  writeOptimizerModelId,
-  AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
+  updateOptimizerAutomation,
+  updateOptimizerModel,
 } from "@/lib/autoRouterOptimizer";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
@@ -85,33 +80,12 @@ export async function POST(req: Request) {
       if (body.modelId !== null && !(await modelOptions()).some((option) => option.id === body.modelId)) {
         return NextResponse.json({ error: "That model is not an enabled model." }, { status: 400 });
       }
-      const before = await readOptimizerModelId();
-      await writeOptimizerModelId(body.modelId);
-      await writeAdminAuditLog({
-        ...actor,
-        action: "auto.llm_router_optimizer_model.updated",
-        targetType: "AppSettings",
-        targetId: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY,
-        summary: body.modelId
-          ? `Set the Auto router optimizer model to ${body.modelId}.`
-          : "Turned the Auto router optimizer off.",
-        metadata: { before, after: body.modelId },
-      });
+      await updateOptimizerModel(actor, body.modelId);
       return await stateResponse();
     }
 
     if (body.action === "set_automation") {
-      const before = await readOptimizerAutomation();
-      const after = { daily: body.daily, autoPromote: body.autoPromote };
-      await writeOptimizerAutomation(after);
-      await writeAdminAuditLog({
-        ...actor,
-        action: "auto.llm_router_optimizer_automation.updated",
-        targetType: "AppSettings",
-        targetId: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
-        summary: `Set the Auto router optimizer automation: daily ${after.daily ? "on" : "off"}, auto-promote ${after.autoPromote ? "on" : "off"}.`,
-        metadata: { before, after },
-      });
+      await updateOptimizerAutomation(actor, { daily: body.daily, autoPromote: body.autoPromote });
       return await stateResponse();
     }
 

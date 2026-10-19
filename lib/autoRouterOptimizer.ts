@@ -82,12 +82,12 @@ export async function readOptimizerModelId(): Promise<string | null> {
     }
 }
 
-export async function writeOptimizerModelId(modelId: string | null): Promise<void> {
+async function writeOptimizerModelId(tx: Prisma.TransactionClient, modelId: string | null): Promise<void> {
     if (modelId === null) {
-        await prisma.appSetting.deleteMany({ where: { key: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY } });
+        await tx.appSetting.deleteMany({ where: { key: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY } });
         return;
     }
-    await prisma.appSetting.upsert({
+    await tx.appSetting.upsert({
         where: { key: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY },
         create: { key: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY, value: modelId },
         update: { value: modelId },
@@ -105,9 +105,11 @@ export const AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterOptim
 
 export type OptimizerAutomation = { daily: boolean; autoPromote: boolean };
 
-export async function readOptimizerAutomation(): Promise<OptimizerAutomation> {
+export async function readOptimizerAutomation(
+    db: Pick<Prisma.TransactionClient, "appSetting"> = prisma
+): Promise<OptimizerAutomation> {
     try {
-        const row = await prisma.appSetting.findUnique({
+        const row = await db.appSetting.findUnique({
             where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY },
             select: { value: true },
         });
@@ -118,13 +120,16 @@ export async function readOptimizerAutomation(): Promise<OptimizerAutomation> {
     }
 }
 
-export async function writeOptimizerAutomation(value: OptimizerAutomation): Promise<void> {
+async function writeOptimizerAutomation(
+    tx: Prisma.TransactionClient,
+    value: OptimizerAutomation
+): Promise<void> {
     if (!value.daily && !value.autoPromote) {
-        await prisma.appSetting.deleteMany({ where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY } });
+        await tx.appSetting.deleteMany({ where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY } });
         return;
     }
     const stored = JSON.stringify({ daily: value.daily, autoPromote: value.autoPromote });
-    await prisma.appSetting.upsert({
+    await tx.appSetting.upsert({
         where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY },
         create: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY, value: stored },
         update: { value: stored },
@@ -317,7 +322,7 @@ async function adjustProviderBucket(
 class ProviderBudgetExhausted extends Error {}
 
 type Reserved =
-    | { refused: "already_running" | "run_cap" | "day_cap" | "month_cap" | "provider_budget" }
+    | { refused: "already_running" | "daily_done" | "run_cap" | "day_cap" | "month_cap" | "provider_budget" }
     | { cycle: { id: string; reservedMicroUsd: number } };
 
 /**
@@ -353,6 +358,15 @@ export async function reserveOptimizerCycle(input: {
             await closeStaleCycles(tx, now);
             const running = await tx.autoRouterOptimizerCycle.count({ where: { status: "running" } });
             if (running > 0) return { refused: "already_running" };
+            // "One cycle a day" is a count, not only a spend cap: under the
+            // same lock, the system may start at most one cycle per UTC day,
+            // however often the maintenance run is retried.
+            if (input.actor === "system") {
+                const startedToday = await tx.autoRouterOptimizerCycle.count({
+                    where: { startedBy: "system", createdAt: { gte: dayStart } },
+                });
+                if (startedToday > 0) return { refused: "daily_done" };
+            }
             const recent = await tx.autoRouterOptimizerCycle.findMany({
                 where: { createdAt: { gte: monthStart } },
                 select: { createdAt: true, status: true, reservedMicroUsd: true, spentMicroUsd: true },
@@ -387,6 +401,7 @@ export async function reserveOptimizerCycle(input: {
                     incumbentGuidance: input.incumbentGuidance,
                     reservedMicroUsd: admitted.reservedMicroUsd,
                     providerReservations: reservations,
+                    startedBy: input.actor === "system" ? "system" : "person",
                 },
                 select: { id: true, reservedMicroUsd: true },
             });
@@ -453,6 +468,7 @@ export type OptimizerStartRefusal =
     | "not_enough_decisions"
     | "pricing_unavailable"
     | "already_running"
+    | "daily_done"
     | "run_cap"
     | "day_cap"
     | "month_cap"
@@ -644,10 +660,17 @@ async function runInBackground(input: {
         });
         // Automatic promotion only of a result this cycle itself recorded, and
         // only through the same compare-and-set a person's click uses.
-        const promotion =
-            recorded && result.status === "passed" && (await readOptimizerAutomation()).autoPromote
-                ? await promoteAutoRouterOptimizerCycle(input.cycleId, "system")
-                : null;
+        let promotion:
+            | Awaited<ReturnType<typeof promoteAutoRouterOptimizerCycle>>
+            | { refused: "promotion_error" }
+            | null = null;
+        if (recorded && result.status === "passed" && (await readOptimizerAutomation()).autoPromote) {
+            // The cycle is already recorded; a failed promotion leaves it a
+            // passed cycle a person can still promote.
+            promotion = await promoteAutoRouterOptimizerCycle(input.cycleId, "system").catch(
+                () => ({ refused: "promotion_error" as const })
+            );
+        }
         console.info(JSON.stringify({
             event: "auto_router_optimizer_cycle",
             cycleId: input.cycleId,
@@ -819,4 +842,50 @@ export async function readAutoRouterOptimizerState() {
             monthCapMicroUsd: AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
         },
     };
+}
+
+/**
+ * Sets the optimizer model -- the switch, and the owner's approval for its
+ * spending -- in one transaction with its audit entry, so the setting never
+ * changes without a record of who changed it.
+ */
+export async function updateOptimizerModel(actor: AdminActor, modelId: string | null) {
+    return prisma.$transaction(async (tx) => {
+        await takeAuditChainLock(tx);
+        const row = await tx.appSetting.findUnique({
+            where: { key: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY },
+            select: { value: true },
+        });
+        const before = row?.value.trim() || null;
+        await writeOptimizerModelId(tx, modelId);
+        await writeAdminAuditLog({
+            ...actor,
+            tx,
+            action: "auto.llm_router_optimizer_model.updated",
+            targetType: "AppSettings",
+            targetId: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY,
+            summary: modelId
+                ? `Set the Auto router optimizer model to ${modelId}.`
+                : "Turned the Auto router optimizer off.",
+            metadata: { before, after: modelId },
+        });
+    });
+}
+
+/** Sets the automation switches in one transaction with their audit entry. */
+export async function updateOptimizerAutomation(actor: AdminActor, after: OptimizerAutomation) {
+    return prisma.$transaction(async (tx) => {
+        await takeAuditChainLock(tx);
+        const before = await readOptimizerAutomation(tx);
+        await writeOptimizerAutomation(tx, after);
+        await writeAdminAuditLog({
+            ...actor,
+            tx,
+            action: "auto.llm_router_optimizer_automation.updated",
+            targetType: "AppSettings",
+            targetId: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
+            summary: `Set the Auto router optimizer automation: daily ${after.daily ? "on" : "off"}, auto-promote ${after.autoPromote ? "on" : "off"}.`,
+            metadata: { before, after },
+        });
+    });
 }

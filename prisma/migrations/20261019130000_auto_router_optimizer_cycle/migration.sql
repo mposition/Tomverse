@@ -26,6 +26,7 @@ CREATE TABLE "AutoRouterOptimizerCycle" (
     "summary" JSONB,
     "reservedMicroUsd" INTEGER NOT NULL,
     "providerReservations" JSONB,
+    "startedBy" TEXT NOT NULL DEFAULT 'person',
     "spentMicroUsd" INTEGER NOT NULL DEFAULT 0,
     "promotedAt" TIMESTAMP(3),
 
