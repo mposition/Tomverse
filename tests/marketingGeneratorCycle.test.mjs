@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -197,49 +198,71 @@ test("a 4xx the app did not write -- a proxy's HTML -- keeps its status and is n
   assert.equal(sent.length, 2);
 });
 
-test("the worker needs every variable, a long secret, HTTPS and at least one price pin", () => {
+test("the worker needs every variable, a long secret and HTTPS", () => {
   const env = {
     MARKETING_APP_URL: "https://tomverse.app",
     MARKETING_GENERATOR_SUBMIT_SECRET: SECRET,
     MARKETING_LLM_API_KEY: "sk-fixture",
   };
-  const pins = [{ model: "fixture-model" }];
-  assert.equal(marketingGeneratorWorkerConfig(env, pins).ok, true);
-  assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_LLM_API_KEY: undefined }, pins).reason, /missing/);
-  assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_GENERATOR_SUBMIT_SECRET: "short" }, pins).reason, /32/);
-  assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_APP_URL: "http://tomverse.app" }, pins).reason, /HTTPS/);
-  assert.equal(marketingGeneratorWorkerConfig({ ...env, MARKETING_APP_URL: "http://localhost:3000" }, pins).ok, true);
-  assert.match(marketingGeneratorWorkerConfig(env, []).reason, /price pin/);
+  assert.equal(marketingGeneratorWorkerConfig(env).ok, true);
+  assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_LLM_API_KEY: undefined }).reason, /missing/);
+  assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_GENERATOR_SUBMIT_SECRET: "short" }).reason, /32/);
+  assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_APP_URL: "http://tomverse.app" }).reason, /HTTPS/);
+  assert.equal(marketingGeneratorWorkerConfig({ ...env, MARKETING_APP_URL: "http://localhost:3000" }).ok, true);
 });
 
-test("the model is the one the operator selected in the Admin Console, and it needs a pin", () => {
+test("the model and its pin are the ones the context carries from the Admin Console", () => {
   const pins = [{ model: "fixture-model" }, { model: "other-model" }];
-  assert.deepEqual(marketingGeneratorPinForContext({ llm: { model: "other-model" } }, pins), { ok: true, pin: pins[1] });
-  assert.match(marketingGeneratorPinForContext({ llm: { model: null } }, pins).reason, /no model is selected/);
-  assert.match(marketingGeneratorPinForContext({}, pins).reason, /no model is selected/);
-  assert.match(marketingGeneratorPinForContext(null, pins).reason, /no model is selected/);
-  assert.match(marketingGeneratorPinForContext({ llm: { model: "unpinned" } }, pins).reason, /no price pin/);
+  const fine = () => [];
+  assert.deepEqual(marketingGeneratorPinForContext({ llm: { model: "other-model", pin: pins[1] } }, fine), { ok: true, pin: pins[1] });
+  assert.match(marketingGeneratorPinForContext({ llm: { model: null, pin: null } }, fine).reason, /no model is selected/);
+  assert.match(marketingGeneratorPinForContext({}, fine).reason, /no model is selected/);
+  assert.match(marketingGeneratorPinForContext(null, fine).reason, /no model is selected/);
+  assert.match(marketingGeneratorPinForContext({ llm: { model: "unpinned", pin: null } }, fine).reason, /no price pin/);
+  // A pin for another model, or one the ledger's check refuses, is not used.
+  assert.match(marketingGeneratorPinForContext({ llm: { model: "other-model", pin: pins[0] } }, fine).reason, /no price pin/);
+  assert.match(
+    marketingGeneratorPinForContext({ llm: { model: "other-model", pin: pins[1] } }, () => ["tiers_format"]).reason,
+    /refused: tiers_format/,
+  );
 });
 
-test("the shipped worker will not start: no model has a price pin yet", () => {
-  const result = spawnSync(
-    process.execPath,
-    ["--experimental-strip-types", "--no-warnings", resolve("scripts/marketing-generator-worker.mjs")],
-    {
-      env: {
-        PATH: process.env.PATH,
-        SystemRoot: process.env.SystemRoot,
-        MARKETING_GENERATOR_RUN_ID: "run-1",
-        MARKETING_GENERATOR_DEADLINE: DEADLINE,
-        MARKETING_APP_URL: "https://tomverse.app",
-        MARKETING_GENERATOR_SUBMIT_SECRET: SECRET,
-        MARKETING_LLM_API_KEY: "sk-fixture",
+test("the shipped worker asks the app for its model and does nothing while none is selected", async () => {
+  // A local app that answers the context route with no model selected.
+  const asked = [];
+  const server = createServer((request, response) => {
+    asked.push(request.url);
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ context: { llm: { model: null, pin: null } } }));
+  });
+  await new Promise((done) => server.listen(0, "127.0.0.1", done));
+  const { port } = server.address();
+  try {
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", "--no-warnings", resolve("scripts/marketing-generator-worker.mjs")],
+      {
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          MARKETING_GENERATOR_RUN_ID: "run-1",
+          // The worker aborts its requests at its deadline, so this one is real time.
+          MARKETING_GENERATOR_DEADLINE: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          MARKETING_APP_URL: `http://127.0.0.1:${port}`,
+          MARKETING_GENERATOR_SUBMIT_SECRET: SECRET,
+          MARKETING_LLM_API_KEY: "sk-fixture",
+        },
       },
-      encoding: "utf8",
-    },
-  );
-  assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /no model has a price pin/);
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const code = await new Promise((done) => child.on("exit", done));
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /no model is selected in the Admin Console/);
+    assert.deepEqual(asked, ["/api/internal/marketing-generator-context"]);
+  } finally {
+    server.close();
+  }
 });
 
 test("a worker that does not finish is killed at the deadline", async () => {

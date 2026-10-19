@@ -71,7 +71,6 @@ export type MarketingLlmCloseAction = (typeof MARKETING_LLM_CLOSE_ACTIONS)[numbe
 
 export const MARKETING_LLM_RESERVATION_TTL_MS = 15 * 60 * 1000;
 export const MARKETING_LLM_DISPATCH_TTL_MS = 60 * 60 * 1000;
-export const MARKETING_LLM_PIN_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 
 /** The most the operator may set the cap to: US$100, policy v4 (D2). */
 export const MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD = 100_000_000;
@@ -84,7 +83,7 @@ export const MARKETING_LLM_ROW_LIMITS = {
 } as const;
 
 export type MarketingLlmPricePin = {
-  /** The dated snapshot id the generator sends, never an alias. */
+  /** The model id the generator sends: the chat catalog's API id. */
   model: string;
   tokenizerFamily: string;
   projectId: string;
@@ -100,7 +99,7 @@ export type MarketingLlmPricePin = {
   maxOutputTokens: number;
   priceVersion: string;
   verifiedAt: string;
-  /** verifiedAt + 90 days. */
+  /** The end of this price: the next scheduled change, or far future for a current catalog price. */
   expiresAt: string;
   source: string;
   /**
@@ -114,11 +113,33 @@ export type MarketingLlmPricePin = {
 };
 
 /**
- * Empty until S3e chooses the generator's model with its price evidence. With
- * no pin every reservation is refused as `model_not_pinned`, which is the
- * state the ledger should be in before anything can spend.
+ * OpenAI's web search tool price for reasoning models: US$10 per 1,000 calls
+ * (https://developers.openai.com/api/docs/pricing, read 2026-10-19). Search
+ * content tokens are billed at the model's input rate, which the reservation
+ * already holds as input. Pins are derived from the chat price catalog
+ * (lib/marketingLlmModelCatalog.ts, operator decision 2026-10-19: the model
+ * is chosen in the Admin Console), and this is the one price that catalog
+ * does not carry for every model.
  */
-export const MARKETING_LLM_PRICE_PINS: readonly MarketingLlmPricePin[] = [];
+export const MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL = 10_000;
+
+/** A pin whose project is the API key's own: no `openai-project` header is sent. */
+export const MARKETING_LLM_KEY_SCOPED_PROJECT = "key-scoped";
+
+/** Searches each A3 web-search call may make (`max_tool_calls`). */
+export const MARKETING_LLM_WEB_SEARCH_CALLS = 3;
+
+/** The output cap every generator request sends. */
+export const MARKETING_LLM_MAX_OUTPUT_TOKENS = 8_192;
+
+/**
+ * Whether the model a provider reported is the pinned one: the same id, or a
+ * dated snapshot of it (`gpt-5.4-mini` answered as `gpt-5.4-mini-2026-03-17`).
+ * An alias and its snapshot are one price; anything else is a different model.
+ */
+export const marketingLlmReportedModelMatches = (pinned: string, reported: string): boolean =>
+  reported === pinned ||
+  (reported.startsWith(`${pinned}-`) && /^\d{4}-\d{2}-\d{2}$/.test(reported.slice(pinned.length + 1)));
 
 // ---------------------------------------------------------------------------
 // Canonical JSON. Keys sorted, integers only, absent values omitted, no null:
@@ -370,9 +391,7 @@ export const marketingLlmPinProblems = (pin: MarketingLlmPricePin): string[] => 
   if (!ISO_INSTANT.test(pin.verifiedAt) || !ISO_INSTANT.test(pin.expiresAt)) {
     return [...problems, "instant_format"];
   }
-  if (Date.parse(pin.expiresAt) - Date.parse(pin.verifiedAt) !== MARKETING_LLM_PIN_LIFETIME_MS) {
-    problems.push("expiry_not_ninety_days");
-  }
+  if (Date.parse(pin.expiresAt) <= Date.parse(pin.verifiedAt)) problems.push("expiry_not_after_verified");
   const searchFields = [pin.webSearchMicroUsdPerCall, pin.maxWebSearchCalls].filter((value) => value !== undefined);
   if (
     searchFields.length === 1 ||
@@ -509,7 +528,7 @@ export const marketingLlmSettleOutcome = (input: {
   ) {
     return { terminalState: "unknown_retained", reason: "tokens_over_bound" };
   }
-  if (observation.reportedModel !== input.configSnapshot.pin.model) {
+  if (!marketingLlmReportedModelMatches(input.configSnapshot.pin.model, observation.reportedModel)) {
     return { terminalState: "unknown_retained", reason: "model_mismatch" };
   }
   if (observation.reportedServiceTier !== MARKETING_LLM_SERVICE_TIER) {

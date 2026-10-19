@@ -59,7 +59,7 @@ type LlmView = {
   /** Null when the stored document cannot be read. */
   settings: { model: string | null; monthlyUsdCap: string | null } | null;
   version: string | null;
-  pinnedModels: Array<{ model: string; expiresAt: string; webSearch: boolean }>;
+  models: Array<{ model: string; name: string; worstCallMicroUsd: number; unavailable: string | null }>;
 };
 
 type WebhookStagingView = {
@@ -476,9 +476,10 @@ function MarketingSwitchStrip({
 
 /**
  * The generator's model and monthly LLM cap, set here instead of in Railway
- * variables (operator decision 2026-10-19). Only pinned models are offered:
- * the pin is price evidence and lives in code. The cost ledger reads these
- * inside every reservation, so a change applies to the next call.
+ * variables (operator decision 2026-10-19). The models are the OpenAI ones the
+ * chat price catalog prices; one the ledger's limits refuse is listed with the
+ * reason and not offered. The cost ledger reads these inside every
+ * reservation, so a change applies to the next call.
  */
 function MarketingLlmSettings({
   llm,
@@ -494,7 +495,7 @@ function MarketingLlmSettings({
   m: Record<string, string>;
 }) {
   const settings = llm.settings;
-  const models = llm.pinnedModels;
+  const models = llm.models.filter((option) => option.unavailable === null);
   const action: MarketingAction[] = !canWrite
     ? []
     : [
@@ -510,7 +511,7 @@ function MarketingLlmSettings({
               name: "model",
               label: m.llmModel,
               kind: "select",
-              options: [m.llmModelNone, ...models.map((pinned) => pinned.model)],
+              options: [m.llmModelNone, ...models.map((option) => option.model)],
               initial: settings?.model ?? m.llmModelNone,
             },
             {
@@ -550,14 +551,16 @@ function MarketingLlmSettings({
           </div>
         </dl>
       )}
-      {models.length > 0 ? (
-        <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-500">
-          {models.map((pinned) => (
-            <li key={pinned.model}>
-              <span className="font-mono">{pinned.model}</span>
+      {llm.models.length > 0 ? (
+        <ul data-testid="marketing-llm-models" className="mt-2 space-y-0.5 text-[11px] text-zinc-500">
+          {llm.models.map((option) => (
+            <li key={option.model} data-available={option.unavailable === null}>
+              <span className="font-mono">{option.model}</span>
               {" · "}
-              {m.llmPinExpires.replace("{date}", pinned.expiresAt.slice(0, 10))}
-              {pinned.webSearch ? ` · ${m.llmWebSearch}` : ""}
+              {m.llmWorstCall.replace("{usd}", (option.worstCallMicroUsd / 1_000_000).toFixed(2))}
+              {option.unavailable === null ? null : (
+                <span className="text-amber-300">{` · ${m.llmUnavailable.replace("{reason}", option.unavailable)}`}</span>
+              )}
             </li>
           ))}
         </ul>

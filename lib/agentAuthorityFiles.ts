@@ -301,7 +301,7 @@ export const RESERVED_DECISION_CONSTANTS: ReadonlyArray<{
     definedIn: ["lib/modelPricing.ts", "scripts/report-issue-backlog-core.mjs"],
   },
   { name: "CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED", definedIn: ["lib/modelPricing.ts"] },
-  { name: "MARKETING_LLM_PRICE_PINS", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
+  { name: "MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
   { name: "STATIC_CATALOG_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "RESERVATION_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
