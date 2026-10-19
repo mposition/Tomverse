@@ -626,6 +626,22 @@ domains:
       carries no userId and is untouched, which is why the column stays
       nullable.
 
+  - domain: autoRouterDecision
+    prismaModel: AutoRouterDecision
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Labelled data from Auto's per-prompt model choice: the user's message as
+      sent to the router model, the candidates, the deterministic rule's choice
+      and the model the call picked, and -- when Admin turns rewriting on -- the
+      router's self-contained restatement of the message (rewrite). Kept to train
+      a Tomverse triage that can replace the call. Deleted with the conversation as well as the account.
+
   # --- anonymised at deletion, implemented ----------------------------------
   - domain: feedback
     prismaModel: Feedback
@@ -2090,6 +2106,52 @@ domains:
       price-version and audit references do not establish account deletion,
       retention cleanup or unified export; live CLI admission remains gated.
 
+  - domain: amuxIdeaSessionAnalysisResult
+    prismaModel: AmuxIdeaSessionAnalysisResult
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, session analysis result account deletion,
+      retention and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      One row per verified session claim holds the model's analysis output as
+      ciphertext under an external content key, with its keyed digest, token
+      counts, reference ordinal, checkout evidence, read manifest and canonical
+      audit. A dark purge path clears the ciphertext at its retention point
+      and keeps only digest and audit. Scheduler activation, backup deletion
+      evidence, account deletion and export remain unverified; restrictive
+      claim, idea, evidence, manifest and audit references remain.
+
+  - domain: amuxIdeaSessionResultOrphanKeyRetirement
+    prismaModel: AmuxIdeaSessionResultOrphanKeyRetirement
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, session result orphan-key retirement
+      account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The row records the claim and later deletion of one external result key
+      whose result row was never committed, with canonical audit references
+      and timestamps only: no ciphertext, analysis text or repository path. It
+      permits an orphan-key sweep, but its restrictive claim, idea and audit
+      references do not settle account deletion or export.
+
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
     userLinkageRole: actor
@@ -3278,6 +3340,35 @@ domains:
       Who last edited a model's registry row, by id and address. Registered on 2026-09-21 when the actor rule
       widened past one column name. Every axis is unverified: nobody has
       decided this one yet, and that is what the state means.
+
+  - domain: modelCatalogEntry
+    prismaModel: ModelCatalogEntry
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last edited a dynamic catalogue row (image or coding), by id and address. Same shape as
+      modelRegistryEntry; registered with the table on 2026-10-19 and undecided on every axis.
+
+  - domain: modelCatalogPriceRevision
+    prismaModel: ModelCatalogPriceRevision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who wrote an append-only price revision, by id and address. The rows are price
+      history and a database trigger refuses UPDATE and DELETE, so an erasure decision here needs a
+      migration; undecided on every axis.
 
   - domain: providerBillingConfig
     prismaModel: ProviderBillingConfig

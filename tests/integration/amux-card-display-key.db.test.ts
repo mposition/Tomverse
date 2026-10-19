@@ -158,6 +158,45 @@ test("concurrent allocations of one prefix never share a number", async () => {
   assert.deepEqual([...keys].sort(), [1, 2, 3, 4, 5, 6].map((n) => `AMUX-${prefix}-00${n}`));
 });
 
+test("an allocation holds the audit chain lock before the counter row", async () => {
+  // Registrations allocate and then write their audit entry; the backfill
+  // writes its entry and then allocates. Both orders are safe only because
+  // the allocation itself takes the audit chain lock first.
+  const prefix = freshPrefix();
+  await prisma.$transaction(async (tx) => {
+    assert.equal(await allocateAmuxCardDisplayKey(tx, prefix), `AMUX-${prefix}-001`);
+    const [other] = await prisma.$queryRaw<Array<{ locked: boolean }>>`
+      SELECT pg_try_advisory_xact_lock(hashtext('tomverse-admin-audit-chain')) AS "locked"`;
+    assert.equal(other?.locked, false, "another transaction cannot take the audit chain lock");
+  });
+  // A transaction that already holds the audit chain lock, as the backfill
+  // does, allocates without waiting on itself.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
+    assert.equal(await allocateAmuxCardDisplayKey(tx, prefix), `AMUX-${prefix}-002`);
+  });
+});
+
+test("a registration and the backfill allocating the same prefix both finish", async () => {
+  const prefix = freshPrefix();
+  const keys = await Promise.all([
+    // A registration: allocate, then append its audit entry.
+    prisma.$transaction(async (tx) => {
+      const key = await allocateAmuxCardDisplayKey(tx, prefix);
+      await tx.$executeRaw`SELECT pg_sleep(0.1)`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
+      return key;
+    }),
+    // The backfill: append its audit entry, then allocate.
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_sleep(0.05)`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
+      return allocateAmuxCardDisplayKey(tx, prefix);
+    }),
+  ]);
+  assert.deepEqual([...keys].sort(), [`AMUX-${prefix}-001`, `AMUX-${prefix}-002`]);
+});
+
 test("the allocator refuses a malformed prefix before touching the database", async () => {
   for (const prefix of ["github", "A", "GIT-HUB", ""]) {
     await assert.rejects(allocate(prefix), /prefix is invalid/);

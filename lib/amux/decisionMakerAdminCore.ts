@@ -2,8 +2,11 @@ import { DM_OUTPUT_KINDS, type DmOutputKind } from "./decisionMakerBodyCore.ts";
 import { dmInstanceForProvider } from "./decisionMakerCore.ts";
 import {
   DM_DECLARATION_ACCURACIES,
+  DM_DELIVERY_NOT_SENT_REASONS,
   DM_DELIVERY_RESOLVE_OUTCOMES,
+  DM_JUDGMENT_KINDS,
   isDmConfirmingJudgmentKind,
+  type DmDeliveryNotSentReason,
   type DmDeliveryResolveOutcome,
 } from "./decisionMakerJudgmentCore.ts";
 import {
@@ -19,7 +22,13 @@ import {
   type DmResultKind,
   type DmSnapshotState,
 } from "./decisionMakerRequestCore.ts";
-import { isDmInstanceScope, type DmInstanceScope } from "./decisionMakerSwitchCore.ts";
+import {
+  DM_SWITCH_LATCH_REASONS,
+  isDmInstanceScope,
+  isDmSwitchScope,
+  type DmInstanceScope,
+  type DmSwitchLatchReason,
+} from "./decisionMakerSwitchCore.ts";
 
 /**
  * The AMUX Decision Maker's Admin request list, stage S2
@@ -62,8 +71,17 @@ export type DmAdminRequestRow = {
   irreversible: boolean | null;
   declarationAccuracy: (typeof DM_DECLARATION_ACCURACIES)[number] | null;
   delivered: boolean;
-  deliveryOutcome: "receipt" | "unknown" | null;
+  deliveryOutcome: "receipt" | "unknown" | "not_sent" | null;
+  /** Why a decided delivery sent nothing (stage S2-2b4), exactly when the outcome is `not_sent`. */
+  deliveryNotSentReason: DmDeliveryNotSentReason | null;
   deliveryResolution: DmDeliveryResolveOutcome | null;
+  /**
+   * The database clock of the request's `cleanup_unknown` report (§5: the
+   * broker could not confirm that the request's directories were deleted); null
+   * when none was reported. A closed flag and a time, not a body: it is shown
+   * with the status, whatever the request's status is.
+   */
+  cleanupUnknownAtMs: number | null;
 };
 
 export type DmAdminRequestList = {
@@ -111,6 +129,12 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
   const createdAtMs = epochMs(r.createdAtEpochMs);
   const assignmentDeadlineAtMs = epochMs(r.assignmentDeadlineAtEpochMs);
   if (createdAtMs === null || assignmentDeadlineAtMs === null) return null;
+  // The statement returns the column for every row (null when no report), so a
+  // missing key is not a row this reader was written for.
+  const cleanupUnknownAtMs = r.cleanupUnknownAtEpochMs === null ? null : epochMs(r.cleanupUnknownAtEpochMs);
+  if (r.cleanupUnknownAtEpochMs === undefined || (r.cleanupUnknownAtEpochMs !== null && cleanupUnknownAtMs === null)) {
+    return null;
+  }
   if (typeof r.assigned !== "boolean" || typeof r.resultUnknown !== "boolean" || typeof r.delivered !== "boolean") {
     return null;
   }
@@ -121,13 +145,15 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
   const outputKind = nullableOneOf(DM_OUTPUT_KINDS, r.outputKind);
   const declarationAccuracy = nullableOneOf(DM_DECLARATION_ACCURACIES, r.declarationAccuracy);
   const deliveryResolution = nullableOneOf(DM_DELIVERY_RESOLVE_OUTCOMES, r.deliveryResolution);
+  const deliveryNotSentReason = nullableOneOf(DM_DELIVERY_NOT_SENT_REASONS, r.deliveryNotSentReason);
   if (
     snapshotState === undefined ||
     resultKind === undefined ||
     closingKind === undefined ||
     outputKind === undefined ||
     declarationAccuracy === undefined ||
-    deliveryResolution === undefined
+    deliveryResolution === undefined ||
+    deliveryNotSentReason === undefined
   ) {
     return null;
   }
@@ -141,7 +167,10 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
   let deliveryOutcome: DmAdminRequestRow["deliveryOutcome"] = null;
   if (r.deliveryOutcomeKind === "delivery_receipt") deliveryOutcome = "receipt";
   else if (r.deliveryOutcomeKind === "delivery_unknown") deliveryOutcome = "unknown";
+  else if (r.deliveryOutcomeKind === "delivery_not_sent") deliveryOutcome = "not_sent";
   else if (r.deliveryOutcomeKind !== null) return null;
+  // The shape CHECK of stage S2-2b4: a reason exactly on the not-sent outcome.
+  if ((deliveryOutcome === "not_sent") !== (deliveryNotSentReason !== null)) return null;
 
   // The order the triggers enforce, read back: an operator route has no
   // events; a transmission follows an assignment; output details belong to a
@@ -151,9 +180,12 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
     return null;
   }
   if (snapshotState !== null && !r.assigned) return null;
+  // §5, S2-2a3: a cleanup report is received only for an assigned request, so
+  // an operator route (no events) or an unassigned request cannot carry one.
+  if (cleanupUnknownAtMs !== null && (r.route === "operator" || !r.assigned)) return null;
   if (transmitOutcome !== null && snapshotState === null) return null;
   if ((outputKind !== null || r.irreversible !== null) && resultKind === null) return null;
-  const judged = closingKind === "confirm" || closingKind === "edit_confirm" || closingKind === "reject";
+  const judged = isOneOf(DM_JUDGMENT_KINDS, closingKind);
   if (declarationAccuracy !== null && !judged) return null;
   if (judged && declarationAccuracy === null) return null;
   if (r.delivered && !isDmConfirmingJudgmentKind(closingKind)) return null;
@@ -182,15 +214,18 @@ export const dmAdminRequestRowFromRow = (row: unknown): DmAdminRequestRow | null
     declarationAccuracy,
     delivered: r.delivered,
     deliveryOutcome,
+    deliveryNotSentReason,
     deliveryResolution,
+    cleanupUnknownAtMs,
   };
 };
 
 /**
  * Where a request stands, as one code. A closing event decides first (a
- * person's judgment, a discarded assignment, a stale close); then an unknown
- * result; then the terminal result; then how far the DM path got before it.
- * A request routed to the operator never had a DM path.
+ * person's judgment, a discarded assignment, a stale close, or -- since stage
+ * S2-2b4 -- the operator's direct answer); then an unknown result; then the
+ * terminal result; then how far the DM path got before it. A request routed
+ * to the operator never had a DM path.
  */
 export const DM_ADMIN_REQUEST_STATUSES = [
   "routed_to_operator",
@@ -210,6 +245,7 @@ export const DM_ADMIN_REQUEST_STATUSES = [
   "reject",
   "assign_discarded",
   "stale_close",
+  "direct_answer_close",
 ] as const;
 export type DmAdminRequestStatus = (typeof DM_ADMIN_REQUEST_STATUSES)[number];
 
@@ -227,7 +263,9 @@ export const dmAdminRequestStatus = (row: DmAdminRequestRow, dbNowMs: number): D
 /**
  * Whether a confirmed answer reached the worker (§2-7, §9). Only a
  * confirmation or an edited confirmation is ever delivered; every other
- * request has nothing to deliver.
+ * request has nothing to deliver. `not_sent` (stage S2-2b4) is a decided
+ * answer the local AMUX proved it never sent -- §2-7's "다른 쪽은 거절되어
+ * 운영자에게 보인다" -- shown with its reason; the operator answers directly.
  */
 export const DM_ADMIN_DELIVERY_STATUSES = [
   "not_applicable",
@@ -237,6 +275,7 @@ export const DM_ADMIN_DELIVERY_STATUSES = [
   "unknown",
   "resolved_delivered",
   "resolved_not_delivered",
+  "not_sent",
 ] as const;
 export type DmAdminDeliveryStatus = (typeof DM_ADMIN_DELIVERY_STATUSES)[number];
 
@@ -245,6 +284,63 @@ export const dmAdminDeliveryStatus = (row: DmAdminRequestRow): DmAdminDeliverySt
   if (!row.delivered) return "pending";
   if (row.deliveryOutcome === null) return "in_flight";
   if (row.deliveryOutcome === "receipt") return "delivered";
+  if (row.deliveryOutcome === "not_sent") return "not_sent";
   if (row.deliveryResolution === null) return "unknown";
   return row.deliveryResolution === "delivered" ? "resolved_delivered" : "resolved_not_delivered";
+};
+
+/**
+ * The newest switch event of one scope, as the Admin switch read returns it
+ * (lib/amux/decisionMakerSwitchStore.ts, `readDecisionMakerSwitchRowsForAdmin()`).
+ */
+export type DmAdminSwitchRow = { scope: unknown; value: unknown; actorKind: unknown; reasonCode: unknown };
+
+/**
+ * Why an instance is off when the system turned it off and no person has
+ * released it since (§8, §5): the reason of its newest switch event when that
+ * event is a system latch. A person's newest event is a release or an
+ * ordinary change, so it is null; an instance with no event is null.
+ */
+export type DmAdminSwitchLatches = Record<DmInstanceScope, DmSwitchLatchReason | null>;
+
+/**
+ * The instances' latch reasons from the newest event of each scope, or null
+ * when any row could not have been written by the switch table's CHECKs (a
+ * system event that is not a latch reason, an instance latch that is not
+ * `off`, a person's event with a reason, an event in a scope outside the
+ * lists). Null shows no reason at all: the switch state itself is read
+ * separately and still decides what the screen offers.
+ */
+export const dmAdminSwitchLatchesFromRows = (rows: unknown): DmAdminSwitchLatches | null => {
+  if (!Array.isArray(rows)) return null;
+  const latches: DmAdminSwitchLatches = { "decision-maker-openai": null, "decision-maker-anthropic": null };
+  const seen = new Set<string>();
+  for (const row of rows as unknown[]) {
+    if (row === null || typeof row !== "object") return null;
+    const { scope, value, actorKind, reasonCode } = row as Partial<DmAdminSwitchRow>;
+    if (!isDmSwitchScope(scope) || seen.has(scope)) return null;
+    seen.add(scope);
+    if (actorKind === "human") {
+      if (reasonCode !== "operator") return null;
+      continue;
+    }
+    if (actorKind !== "system" || !isOneOf(DM_SWITCH_LATCH_REASONS, reasonCode)) return null;
+    // The table accepts a system event only as an instance turned off.
+    if (!isDmInstanceScope(scope) || value !== "off") return null;
+    latches[scope] = reasonCode;
+  }
+  return latches;
+};
+
+/**
+ * What waits on a person in Admin, for AMUX › Execution's attention lane: an
+ * open proposal to judge, or a confirmed answer whose delivery nobody knows.
+ * Everything else is either still running, closed, or answered in AMUX, and
+ * stays in Operations settings › Decision Maker's history.
+ */
+export type DmAdminAttentionKind = "proposal" | "delivery_unknown";
+
+export const dmAdminAttentionKind = (row: DmAdminRequestRow, dbNowMs: number): DmAdminAttentionKind | null => {
+  if (dmAdminRequestStatus(row, dbNowMs) === "proposal") return "proposal";
+  return dmAdminDeliveryStatus(row) === "unknown" ? "delivery_unknown" : null;
 };

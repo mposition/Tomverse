@@ -7,7 +7,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModel,
   getImageModelPrice,
-  IMAGE_MODEL_REGISTRY,
+  listImageModels,
 } from "@/lib/imageModelRegistry";
 import { currentImageAttempt } from "@/lib/imageGenerationStateCore";
 
@@ -55,7 +55,7 @@ export type ImageComposerRestore = {
 };
 
 const registryOrder = (modelId: string) => {
-  const index = IMAGE_MODEL_REGISTRY.findIndex((model) => model.id === modelId);
+  const index = listImageModels().findIndex((model) => model.id === modelId);
   return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 };
 

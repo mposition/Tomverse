@@ -45,6 +45,16 @@ test("control-plane, unclassified and unknown top-level paths are T2", () => {
       "control_plane_path",
     ),
   );
+  for (const path of [
+    "lib/chatUnifiedOptimizerAmuxCandidateStore.ts",
+    "lib/chatUnifiedOptimizerAmuxSourcePin.ts",
+    "tests/chatUnifiedOptimizerAmuxCandidateStore.test.mjs",
+    "tests/chatUnifiedOptimizerAmuxSourcePin.test.mjs",
+  ]) {
+    const verdict = decideTier(clean([change({ path })]));
+    assert.equal(verdict.tier, "T2", path);
+    assert.ok(reasons(verdict).includes("control_plane_path"), path);
+  }
   assert.ok(
     reasons(decideTier(clean([change({ path: "public/robots.txt" })]))).includes(
       "unclassified_path",
@@ -212,7 +222,8 @@ test("policy-named and policy-titled tests cannot be changed at T1", () => {
 
 test("the policy documents' named tests are found in the real tree", () => {
   const agents = readFileSync(new URL("../AGENTS.md", import.meta.url), "utf8");
-  const named = policyNamedTestPaths([agents]);
+  const machineIndex = readFileSync(new URL("../docs/agents/machine-index.md", import.meta.url), "utf8");
+  const named = policyNamedTestPaths([agents, machineIndex]);
   assert.ok(named.has("tests/typographyPolicy.test.mjs"));
   assert.ok(named.has("tests/e2e/mobile-short-viewport-drawer.spec.ts"));
 });

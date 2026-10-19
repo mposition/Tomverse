@@ -7,6 +7,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type StopSnapshot = {
   namespace: string;
+  budgetMode: string;
   claimStatus: string;
   closedAt: Date | null;
   resolutionAuditLogId: string | null;
@@ -47,8 +48,9 @@ export function shouldAmuxSessionAnalysisStop(row: StopSnapshot): boolean {
 /** Content-free, transaction-scoped stop poll for one exact v19 claim. */
 export async function readAmuxSessionAnalysisStopState(
   tx: Prisma.TransactionClient, claimId: string, reservationId: string,
+  ideaId: string, requiredBudgetMode?: "bounded" | "max_shadow",
 ): Promise<{ claimId: string; reservationId: string; stop: boolean }> {
-  if (!UUID.test(claimId) || !UUID.test(reservationId)) {
+  if (!UUID.test(claimId) || !UUID.test(reservationId) || !UUID.test(ideaId)) {
     throw new AmuxSessionAnalysisStopReadError("not_found");
   }
   await tx.$queryRaw`
@@ -57,7 +59,7 @@ export async function readAmuxSessionAnalysisStopState(
            set_config('TimeZone', 'UTC', true) AS transaction_zone
   `;
   const rows = await tx.$queryRaw<StopSnapshot[]>`
-    SELECT c."namespace", c."status" AS "claimStatus", c."closedAt",
+    SELECT c."namespace", c."budgetMode", c."status" AS "claimStatus", c."closedAt",
            c."resolutionAuditLogId", r."status" AS "reservationStatus",
            r."operatingScopeSettingId",
            (SELECT s."id" FROM "AmuxIdeaOperatingScopeSetting" s
@@ -72,9 +74,13 @@ export async function readAmuxSessionAnalysisStopState(
     JOIN "AmuxIdeaSessionAnalysisReservation" r ON r."id" = c."reservationId"
     JOIN "AmuxIdeaSubmission" i ON i."id" = r."ideaId"
     WHERE c."id" = ${claimId} AND c."reservationId" = ${reservationId}
+      AND r."ideaId" = ${ideaId}
   `;
   if (rows.length !== 1) throw new AmuxSessionAnalysisStopReadError("not_found");
   const row = rows[0]!;
+  if (requiredBudgetMode && row.budgetMode !== requiredBudgetMode) {
+    throw new AmuxSessionAnalysisStopReadError("not_found");
+  }
   if (!(row.now instanceof Date) || !Number.isFinite(row.now.getTime()) ||
       !(row.analysisDeadlineAt instanceof Date)) {
     throw new AmuxSessionAnalysisStopReadError("integrity_unavailable");

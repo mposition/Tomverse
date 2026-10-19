@@ -42,6 +42,12 @@ export const adminAmuxDecisionMakerMessages = defineAdminMessages({
       "The change may or may not have been recorded, and the state could not be read again. Read it again before you change anything.",
     invalidChange: "That value is not allowed for this switch.",
     changeFailed: "The switch was not changed.",
+    latchReasons: {
+      validation_latch:
+        "Turned off by the system after repeated output validation failures. It stays off until a person sets it again.",
+      cleanup_latch:
+        "Turned off by the system because a request's working directories could not be confirmed deleted (see the flagged requests below). It stays off until a person sets it again, after the leftover directories are gone.",
+    },
   },
   ko: {
     title: "Decision Maker 스위치",
@@ -78,6 +84,12 @@ export const adminAmuxDecisionMakerMessages = defineAdminMessages({
       "변경이 기록됐는지 알 수 없고, 상태도 다시 읽지 못했습니다. 다른 것을 바꾸기 전에 다시 읽으세요.",
     invalidChange: "이 스위치에 허용되지 않는 값입니다.",
     changeFailed: "스위치를 바꾸지 못했습니다.",
+    latchReasons: {
+      validation_latch:
+        "출력 검증 실패가 이어져 시스템이 껐습니다. 사람이 다시 설정하기 전에는 꺼진 채로 있습니다.",
+      cleanup_latch:
+        "요청의 작업 디렉터리를 지웠는지 확인하지 못해 시스템이 껐습니다(아래 표시된 요청 참고). 남은 디렉터리를 치운 뒤 사람이 다시 설정하기 전에는 꺼진 채로 있습니다.",
+    },
   },
 });
 
@@ -146,6 +158,9 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
     operator: "Operator",
     revision: (revision: number) => `revision ${revision}`,
     irreversible: "Irreversible",
+    cleanupUnknown: "Cleanup not confirmed",
+    cleanupUnknownNotice: (count: number) =>
+      `Cleanup could not be confirmed for ${count} of the requests shown. Directories the Decision Maker made for ${count === 1 ? "it" : "them"} may still be on the runner. Such a report turns its instance off until a person releases it; the switches above show whether it still is. Open a flagged request to see what to check.`,
     keptBecause: (codes: string) => `Kept with the operator: ${codes}`,
     statuses: {
       routed_to_operator: "With the operator",
@@ -165,6 +180,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       reject: "Rejected",
       assign_discarded: "Assignment discarded",
       stale_close: "Closed as stale",
+      direct_answer_close: "Closed: the operator answered directly",
     },
     deliveries: {
       not_applicable: "Nothing to deliver",
@@ -174,6 +190,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       unknown: "Delivery unknown",
       resolved_delivered: "Confirmed delivered by a person",
       resolved_not_delivered: "Confirmed not delivered by a person",
+      not_sent: "Not sent",
     },
   },
   ko: {
@@ -194,6 +211,9 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
     operator: "운영자",
     revision: (revision: number) => `revision ${revision}`,
     irreversible: "되돌릴 수 없음",
+    cleanupUnknown: "정리 확인 못 함",
+    cleanupUnknownNotice: (count: number) =>
+      `표시된 요청 중 ${count}건은 정리를 확인하지 못했습니다. Decision Maker가 만든 디렉터리가 runner에 남아 있을 수 있습니다. 이런 보고는 사람이 해제하기 전까지 그 인스턴스를 끄며, 지금도 꺼져 있는지는 위 스위치에서 봅니다. 표시된 요청을 열어 무엇을 확인할지 보세요.`,
     keptBecause: (codes: string) => `운영자에게 둔 이유: ${codes}`,
     statuses: {
       routed_to_operator: "운영자 대기",
@@ -213,6 +233,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       reject: "거절",
       assign_discarded: "배정 버림",
       stale_close: "기한 경과로 닫힘",
+      direct_answer_close: "운영자가 직접 답해 닫힘",
     },
     deliveries: {
       not_applicable: "전달할 것 없음",
@@ -222,6 +243,7 @@ export const adminAmuxDecisionMakerRequestsMessages = defineAdminMessages({
       unknown: "전달 불명",
       resolved_delivered: "사람이 전달됨으로 확인",
       resolved_not_delivered: "사람이 전달 안 됨으로 확인",
+      not_sent: "보내지 않음",
     },
   },
 });
@@ -263,6 +285,30 @@ export const adminAmuxDecisionMakerRequestDetailMessages = defineAdminMessages({
     snapshotAt: (state: string, sha: string) => `${state} at ${sha}`,
     judgeable: "This proposal is waiting for a person's judgment.",
     notJudgeable: "There is nothing to judge on this request now.",
+    notSent: "The confirmed answer was not sent",
+    notSentReasons: {
+      answered_by_operator: "The operator answered the question directly first, so this answer was refused.",
+      question_changed: "The worker no longer asks this question: it asked again, or the card left the queue.",
+      binding_changed: "The card was given to another worker or attempt.",
+      lane_refused: "The worker's session refused automated input before this answer claimed the question; nothing was typed into it.",
+      send_refused: "This answer claimed the question, then the worker's session refused the send; nothing was typed into it.",
+      local_refused: "The local AMUX refused or failed before it claimed or sent anything.",
+    },
+    // What the operator does next. Only a send refused after the claim leaves
+    // the question held, so only that reason sends the operator elsewhere.
+    notSentNext: {
+      answered_by_operator: "The operator's own answer holds this question. Nothing more goes to the worker from this request.",
+      question_changed: "Nothing more goes to the worker from this request. If the worker's new question needs an answer, answer it directly in AMUX.",
+      binding_changed: "Nothing more goes to the worker from this request. If the card still asks, answer it directly in AMUX.",
+      lane_refused: "Nothing holds the question. Once the session takes input again, answer it directly in AMUX.",
+      send_refused: "This answer still holds the question, so AMUX refuses a direct answer to it as well. The worker has to ask again (a new question revision) before anyone can answer.",
+      local_refused: "Nothing holds the question. If the worker still needs an answer, answer it directly in AMUX.",
+    },
+    cleanupUnknown: "Cleanup not confirmed",
+    cleanupUnknownAt: (at: string) =>
+      `At ${at} (database clock) the Decision Maker reported that it could not confirm this request's working directories were deleted. Such a report turns its instance off until a person releases it; the switches above show whether it still is.`,
+    cleanupUnknownSteps:
+      "If the instance is still off for this: on the runner host, check whether a directory is left over from this request (this card and the time above tell which one), delete whatever is left, and only then set the instance again in the switches above (owner or ops role, recent sign-in). While a leftover directory exists, the broker refuses every later request.",
   },
   ko: {
     title: (cardId: string, revision: number) => `${cardId}의 요청, revision ${revision}`,
@@ -298,6 +344,28 @@ export const adminAmuxDecisionMakerRequestDetailMessages = defineAdminMessages({
     snapshotAt: (state: string, sha: string) => `${state}, ${sha}`,
     judgeable: "이 제안은 사람의 판정을 기다립니다.",
     notJudgeable: "이 요청에는 지금 판정할 것이 없습니다.",
+    notSent: "확정한 답을 보내지 않았습니다",
+    notSentReasons: {
+      answered_by_operator: "운영자가 그 질문에 먼저 직접 답해서 이 답은 거절됐습니다.",
+      question_changed: "worker가 더는 이 질문을 묻지 않습니다. 다시 물었거나 카드가 대기열을 떠났습니다.",
+      binding_changed: "카드가 다른 worker나 시도에 넘어갔습니다.",
+      lane_refused: "이 답이 질문을 차지하기 전에 worker 세션이 자동 입력을 거부했습니다. 세션에 아무것도 입력되지 않았습니다.",
+      send_refused: "이 답이 질문을 차지한 뒤 worker 세션이 전송을 거부했습니다. 세션에 아무것도 입력되지 않았습니다.",
+      local_refused: "로컬 AMUX가 답변 기록이나 전송 전에 거부했거나 실패했습니다.",
+    },
+    notSentNext: {
+      answered_by_operator: "운영자의 직접 답이 이 질문을 차지했습니다. 이 요청에서 worker에게 가는 것은 더 없습니다.",
+      question_changed: "이 요청에서 worker에게 가는 것은 더 없습니다. worker의 새 질문에 답이 필요하면 AMUX에서 직접 답하세요.",
+      binding_changed: "이 요청에서 worker에게 가는 것은 더 없습니다. 카드가 아직 묻고 있으면 AMUX에서 직접 답하세요.",
+      lane_refused: "질문을 차지한 답은 없습니다. 세션이 다시 입력을 받으면 AMUX에서 직접 답하세요.",
+      send_refused: "이 답이 아직 질문을 차지하고 있어 AMUX가 직접 답도 거절합니다. worker가 다시 물어야(새 질문 revision) 누구든 답할 수 있습니다.",
+      local_refused: "질문을 차지한 답은 없습니다. worker에게 아직 답이 필요하면 AMUX에서 직접 답하세요.",
+    },
+    cleanupUnknown: "정리 확인 못 함",
+    cleanupUnknownAt: (at: string) =>
+      `DB 시계 기준 ${at}에 Decision Maker가 이 요청의 작업 디렉터리를 지웠는지 확인하지 못했다고 보고했습니다. 이런 보고는 사람이 해제하기 전까지 그 인스턴스를 끄며, 지금도 꺼져 있는지는 위 스위치에서 봅니다.`,
+    cleanupUnknownSteps:
+      "이 일로 인스턴스가 아직 꺼져 있다면 runner 호스트에서 이 요청이 남긴 디렉터리가 있는지 확인하고(이 카드와 위의 시각으로 어느 것인지 가립니다), 남은 것을 지운 뒤에야 위 스위치에서 인스턴스를 다시 설정하세요(owner나 ops 역할, 최근 로그인 필요). 남은 디렉터리가 있는 동안 broker는 이후 모든 요청을 거부합니다.",
   },
 });
 
@@ -418,5 +486,62 @@ export const adminAmuxDecisionMakerJudgmentMessages = defineAdminMessages({
     unknown: "결과를 모릅니다. 다시 보내지 마세요. 이 요청을 다시 읽어 기록됐는지 확인하세요.",
     failed: "판정을 기록하지 못했습니다.",
     reload: "이 요청 다시 읽기",
+  },
+});
+
+/**
+ * Copy for the Decision Maker requests that wait on a person, drawn in
+ * AMUX › Execution's attention lane and opened as a side panel there.
+ */
+export const adminAmuxDecisionMakerAttentionMessages = defineAdminMessages({
+  en: {
+    summary: (count: number) => `${count} waiting on you`,
+    summaryDm: (count: number) => `Decision Maker ${count}`,
+    summaryCards: (count: number) => `Card reviews ${count}`,
+    jumpToLane: "Go to the attention lane",
+    groupDm: (count: number) => `Decision Maker · ${count}`,
+    groupCards: (count: number) => `Cards · ${count}`,
+    kinds: { proposal: "DM proposal", delivery_unknown: "Check delivery" },
+    proposalLabel: { proposal: "DM proposal", delivery_unknown: "Confirmed answer" },
+    irreversible: "Irreversible",
+    waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · waiting ${age}`,
+    more: (count: number) => `${count} more. See Operations settings › Decision Maker for the history.`,
+    bodiesHidden: "The question is shown to administrators who may judge it (ops:write).",
+    unavailable: "The Decision Maker requests could not be read. None is shown.",
+    open: (cardId: string, revision: number) => `Open ${cardId}, revision ${revision}`,
+    close: "Close",
+    dialog: (cardId: string, revision: number) => `${cardId}, revision ${revision}`,
+    dmChoice: "DM's choice",
+    moreContext: "Context",
+    deliveryUnknownNext:
+      "Nobody knows whether the confirmed answer reached the worker. Check the worker's session in AMUX before answering again.",
+    settingsPointer: "Requests to judge are in AMUX › Execution, in the attention lane.",
+    settingsOpen: (count: number) => `Open ${count} waiting`,
+    settingsNone: "Nothing waits on a person now.",
+  },
+  ko: {
+    summary: (count: number) => `지금 판단할 것 ${count}건`,
+    summaryDm: (count: number) => `Decision Maker 판정 ${count}`,
+    summaryCards: (count: number) => `카드 검토 ${count}`,
+    jumpToLane: "Attention 열로 이동",
+    groupDm: (count: number) => `Decision Maker 판정 대기 · ${count}`,
+    groupCards: (count: number) => `카드 · ${count}`,
+    kinds: { proposal: "DM 제안", delivery_unknown: "전달 확인 필요" },
+    proposalLabel: { proposal: "DM 제안", delivery_unknown: "확정한 답" },
+    irreversible: "되돌릴 수 없음",
+    waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · ${age} 대기`,
+    more: (count: number) => `${count}건이 더 있습니다. 운영 설정 › Decision Maker의 기록에서 보세요.`,
+    bodiesHidden: "질문은 판정할 수 있는 관리자(ops:write)에게만 보입니다.",
+    unavailable: "Decision Maker 요청을 읽지 못했습니다. 아무것도 표시하지 않습니다.",
+    open: (cardId: string, revision: number) => `${cardId}, revision ${revision} 열기`,
+    close: "닫기",
+    dialog: (cardId: string, revision: number) => `${cardId}, revision ${revision}`,
+    dmChoice: "DM 선택",
+    moreContext: "맥락",
+    deliveryUnknownNext:
+      "확정한 답이 worker에게 전해졌는지 알 수 없습니다. 다시 답하기 전에 AMUX에서 worker 세션을 확인하세요.",
+    settingsPointer: "판정할 요청은 AMUX › 실행의 Attention 열에 있습니다.",
+    settingsOpen: (count: number) => `판정 대기 ${count}건 열기`,
+    settingsNone: "지금 사람을 기다리는 요청이 없습니다.",
   },
 });

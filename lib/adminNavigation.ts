@@ -46,7 +46,9 @@ export type AdminNavBadgeKey =
   | "marketing"
   | "amuxEscalations"
   | "amuxOrchestratorHalts"
-  | "amuxExecution";
+  | "amuxExecution"
+  | "amuxDecisionMaker"
+  | "amuxOwnerAttention";
 
 export type AdminNavTab = {
   id: string;
@@ -352,6 +354,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "discovery",
         label: "Discovery",
         description: "Models a provider listed that nobody has decided about",
+      },
+      {
+        id: "catalog",
+        label: "Image & coding catalog",
+        description: "Enable or hold image and coding models, price history, LLM drafts, the Code snapshot",
       },
     ],
   },
@@ -811,8 +818,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     // registry change takes the owner role and a recent step-up in its route
     // (orchestration policy version 31, section 3).
     writeRoles: ["owner", "ops"],
-    // Halts belong to Operations settings, so this counts escalations only.
-    badge: "amuxEscalations",
+    // Halts belong to Operations settings, so this counts what waits on a
+    // person here: escalations and Decision Maker requests.
+    badge: "amuxOwnerAttention",
     aliases: [
       "amux",
       "cards",
@@ -833,6 +841,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Cards",
         description: "Every AMUX card stored in Tomverse and its execution state",
         viewRoles: ["owner"],
+        badge: "amuxDecisionMaker",
       },
       {
         id: "assignment",
@@ -1017,6 +1026,19 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
 
 export const ADMIN_DETAIL_ROUTES = [
   {
+    // This one-card diagnostic is linked from the owner-only AMUX execution
+    // view. Detail metadata provides its breadcrumb without advertising it in
+    // the global palette for roles that cannot open the page.
+    id: "amux-u21-test-card",
+    pattern: /^\/admin\/amux-u21-test-card$/,
+    label: "AMUX U21 test card",
+    description: "Owner-only synthetic candidate receipt diagnostic",
+    parentLabel: "AMUX execution",
+    parentHref: "/admin/amux-execution",
+    group: "AMUX" as const,
+    viewRoles: ["owner"] as const,
+  },
+  {
     // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
     // those tables feed the palette for every admin role, while this one-shot
     // cost-authority surface is owner-only and should not be advertised to
@@ -1090,7 +1112,9 @@ export const resolveAdminPageMeta = (
   role?: AdminRole | null,
 ): AdminPageMeta => {
   const detail = ADMIN_DETAIL_ROUTES.find((route) => route.pattern.test(pathname));
-  if (detail) {
+  if (detail && (role === undefined ||
+      !("viewRoles" in detail) ||
+      detail.viewRoles.some((allowedRole) => allowedRole === role))) {
     return {
       label: detail.label,
       description: detail.description,

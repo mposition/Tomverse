@@ -85,12 +85,26 @@ const row = (overrides: Record<string, unknown>): DmAdminRequestRow => {
     declarationAccuracy: null,
     delivered: false,
     deliveryOutcomeKind: null,
+    deliveryNotSentReason: null,
     deliveryResolution: null,
+    cleanupUnknownAtEpochMs: null,
     ...overrides,
   });
   assert.ok(parsed);
   return parsed;
 };
+
+const ID_CLEANUP = "00000000-0000-4000-8000-000000000004";
+const CLEANUP_AT = NOW - 30_000;
+
+/** One request whose cleanup was not confirmed (a timed-out one, §5) beside one that has none. */
+const cleanupList = (): DmAdminRequestList => ({
+  dbNowMs: NOW,
+  rows: [
+    row({ id: ID_CLEANUP, cardId: "card-44", resultKind: "timeout", snapshotState: "none", cleanupUnknownAtEpochMs: CLEANUP_AT }),
+    row({ resultKind: "timeout", snapshotState: "none" }),
+  ],
+});
 
 const list = (): DmAdminRequestList => ({
   dbNowMs: NOW,
@@ -161,6 +175,37 @@ for (const locale of ["en", "ko"] as const) {
     assert.equal(byTestId(tree, `amux-dm-request-irreversible-${ID_OPERATOR}`).length, 0);
   });
 
+  test(`${locale}: a request whose cleanup was not confirmed says so beside its status, and the list says what it means once`, () => {
+    const tree = AmuxDecisionMakerRequestsView({ m, list: cleanupList() });
+    const flagged = one(tree, `amux-dm-request-status-${ID_CLEANUP}`);
+    // The status stays what the ledger says; the flag is added, not substituted.
+    assert.equal(flagged["data-status"], "timeout");
+    const text = textOf(flagged.children as ReactNode);
+    assert.ok(text.includes(m.statuses.timeout));
+    assert.ok(text.indexOf(m.statuses.timeout) < text.indexOf(m.cleanupUnknown));
+    assert.equal(textOf(one(tree, `amux-dm-request-cleanup-unknown-${ID_CLEANUP}`).children as ReactNode), m.cleanupUnknown);
+    // The other request carries no flag, and the notice counts only the flagged one.
+    assert.equal(byTestId(tree, `amux-dm-request-cleanup-unknown-${ID_PROPOSAL}`).length, 0);
+    assert.equal(
+      textOf(one(tree, "amux-dm-requests-cleanup-unknown-notice").children as ReactNode),
+      m.cleanupUnknownNotice(1),
+    );
+    // Nothing else on the screen names a directory, a path or a command.
+    const screen = textOf(tree as ReactNode);
+    assert.doesNotMatch(screen, /\/var\/|\/home\/|rm -|requests\//);
+  });
+
+  test(`${locale}: with no flagged request there is no flag and no notice`, () => {
+    const tree = AmuxDecisionMakerRequestsView({ m, list: list() });
+    assert.equal(byTestId(tree, "amux-dm-requests-cleanup-unknown-notice").length, 0);
+    assert.equal(
+      propsOf(tree).filter((props) => String(props["data-testid"] ?? "").startsWith("amux-dm-request-cleanup-unknown-")).length,
+      0,
+    );
+    const failed = AmuxDecisionMakerRequestsView({ m, list: null });
+    assert.equal(byTestId(failed, "amux-dm-requests-cleanup-unknown-notice").length, 0);
+  });
+
   test(`${locale}: the panel states how many rows it shows, and that they are not totals`, () => {
     const tree = AmuxDecisionMakerRequestsView({ m, list: list() });
     assert.equal(
@@ -193,6 +238,6 @@ for (const locale of ["en", "ko"] as const) {
       if (props.href !== undefined) hrefs.push(props.href);
     }
     assert.deepEqual(hrefs.sort(), [ID_PROPOSAL, ID_OPERATOR, ID_CONFIRMED].map(dmAdminRequestDetailHref).sort());
-    assert.equal(dmAdminRequestDetailHref(ID_PROPOSAL), `/admin/amux-settings?tab=decision-maker&request=${ID_PROPOSAL}`);
+    assert.equal(dmAdminRequestDetailHref(ID_PROPOSAL), `/admin/amux-execution?dmRequest=${ID_PROPOSAL}`);
   });
 }

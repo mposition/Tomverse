@@ -109,7 +109,8 @@ export async function recordMarketingGeneratorReport(
   }
 
   // Which hosts are official is a person's decision in the registry, read here
-  // and held until this record commits. A brief cites no source.
+  // and held until this record commits; a fact counts only from a page on
+  // them, whatever the generator says it read. A brief cites no source.
   const hosts = report.kind === "market_intel" ? await holdApprovedMarketingCompetitorHosts(tx) : {};
   const stored = marketingGeneratorReportStoredPayload(report, hosts);
   const row = await insertMarketingReport(tx, {

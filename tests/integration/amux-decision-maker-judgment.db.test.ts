@@ -7,7 +7,11 @@ import type { Session } from "next-auth";
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { dmAdminDeliveryStatus, dmAdminRequestStatus } from "@/lib/amux/decisionMakerAdminCore";
-import { listDecisionMakerRequestsForAdmin, readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
+import {
+  listDecisionMakerRequestsForAdmin,
+  readDecisionMakerRequestDetailForAdmin,
+  readDecisionMakerSwitchesForAdmin,
+} from "@/lib/amux/decisionMakerAdminRead";
 import {
   dmBodyDigest,
   dmKeyPeriodEndMs,
@@ -40,11 +44,13 @@ import {
 import {
   countOpenDecisionMakerRequestsCreatedBetween,
   readDecisionMakerRequestState,
+  recordDecisionMakerCleanupLatch,
+  recordDecisionMakerCleanupUnknown,
   recordDecisionMakerRequest,
   recordDecisionMakerTransmitIntent,
   staleCloseDecisionMakerRequest,
 } from "@/lib/amux/decisionMakerRequestStore";
-import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
+import { latchDecisionMakerInstanceOff, recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
 import { prisma } from "@/lib/prisma";
 
 // AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
@@ -198,7 +204,8 @@ const CARD = {
   tags: [] as string[],
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
-  options: OPTIONS,
+  // The card's options carry their effect class and paths (stage S2-2b1); a result names OPTIONS.
+  options: OPTIONS.map((option) => ({ ...option, effect: "choice_only", paths: [] as string[] })),
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.",
   contextPaths: ["lib/cache.ts"],
@@ -807,6 +814,7 @@ test("delivery: one decision after a confirmation and never under the kill switc
     judgmentKind: "confirm",
     delivered: true,
     outcome: "unknown",
+    notSentReason: null,
     resolution: "not_delivered",
   });
   const rows = await prisma.$queryRaw<Array<{ kind: string; outcome: string | null; actorKind: string; actorUserId: string | null }>>`
@@ -1102,6 +1110,79 @@ test("Admin's request list shows each request's route, status and delivery as th
   const short = { ...AMUX_DB_BOUNDARIES.decisionMakerRequestListRead, prismaCallCeiling: 2 };
   await assert.rejects(
     withAmuxDbBoundary(short, (tx) => listDecisionMakerRequestsForAdmin(tx)),
+    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+  );
+});
+
+test("Admin's list and detail carry a cleanup_unknown report beside the status, and the switch read names the latch it caused until a person releases it", async () => {
+  const readList = () =>
+    withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestListRead, (tx) => listDecisionMakerRequestsForAdmin(tx));
+  const readDetail = (requestId: string) =>
+    withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead, (tx) =>
+      readDecisionMakerRequestDetailForAdmin(tx, requestId),
+    );
+  const readSwitches = () =>
+    withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead, (tx) => readDecisionMakerSwitchesForAdmin(tx));
+
+  const flagged = await proposed();
+  const plain = await proposed("timeout");
+  const none = await readList();
+  assert.deepEqual(none.rows.map((row) => row.cleanupUnknownAtMs), [null, null]);
+
+  // §5: the broker could not confirm the deletion. Beside a proposal still waiting for a person.
+  const report = await prisma.$transaction((tx) => recordDecisionMakerCleanupUnknown(tx, { requestId: flagged.requestId, instance: OPENAI }));
+  assert.equal(report.status, "recorded");
+  const eventId = (report as { event: { eventId: string } }).event.eventId;
+  const [stored] = await prisma.$queryRaw<Array<{ at: bigint }>>`
+    SELECT floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "at"
+    FROM "AmuxDecisionMakerRequestEvent" WHERE "id" = ${eventId}
+  `;
+  const list = await readList();
+  const flaggedRow = list.rows.find((row) => row.requestId === flagged.requestId)!;
+  const plainRow = list.rows.find((row) => row.requestId === plain.requestId)!;
+  assert.equal(flaggedRow.cleanupUnknownAtMs, Number(stored!.at));
+  assert.equal(plainRow.cleanupUnknownAtMs, null);
+  // The flag does not replace the status, and does not stop a person judging the proposal.
+  assert.equal(dmAdminRequestStatus(flaggedRow, list.dbNowMs), "proposal");
+  const detail = (await readDetail(flagged.requestId))!;
+  assert.equal(detail.row.cleanupUnknownAtMs, Number(stored!.at));
+  assert.notEqual(detail.shown, null);
+
+  // The report writes one event and the closing set is unchanged: it is never a closing kind.
+  const closing = await prisma.$queryRaw<Array<{ n: bigint }>>`
+    SELECT count(*) AS "n" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${flagged.requestId} AND "kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+  `;
+  assert.equal(Number(closing[0]!.n), 0);
+
+  // One call fewer than the boundary refuses the list and the detail, as before.
+  const shortList = { ...AMUX_DB_BOUNDARIES.decisionMakerRequestListRead, prismaCallCeiling: 4 };
+  await assert.rejects(
+    withAmuxDbBoundary(shortList, (tx) => listDecisionMakerRequestsForAdmin(tx)),
+    (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+  );
+
+  // The switch read: no reason while a person's events are the newest.
+  const calm = await readSwitches();
+  assert.deepEqual(calm.state.instances, { "decision-maker-openai": "proposal", "decision-maker-anthropic": "proposal" });
+  assert.deepEqual(calm.latches, { "decision-maker-openai": null, "decision-maker-anthropic": null });
+
+  // The cleanup latch, then a validation latch on the other instance.
+  const latched = await prisma.$transaction((tx) => recordDecisionMakerCleanupLatch(tx, { instance: OPENAI }));
+  assert.equal(latched.latched, true);
+  await prisma.$transaction((tx) => latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-anthropic", reason: "validation_latch" }));
+  const off = await readSwitches();
+  assert.deepEqual(off.state.instances, { "decision-maker-openai": "off", "decision-maker-anthropic": "off" });
+  assert.deepEqual(off.latches, { "decision-maker-openai": "cleanup_latch", "decision-maker-anthropic": "validation_latch" });
+
+  // A person sets the cleanup-latched instance again: that newest event is theirs, so no reason is left.
+  await setSwitch(OPENAI, "off");
+  const released = await readSwitches();
+  assert.deepEqual(released.latches, { "decision-maker-openai": null, "decision-maker-anthropic": "validation_latch" });
+
+  // Reading wrote nothing; the boundary is the switch read's own, one call fewer refuses it.
+  const shortSwitch = { ...AMUX_DB_BOUNDARIES.decisionMakerSwitchRead, prismaCallCeiling: 2 };
+  await assert.rejects(
+    withAmuxDbBoundary(shortSwitch, (tx) => readDecisionMakerSwitchesForAdmin(tx)),
     (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
   );
 });

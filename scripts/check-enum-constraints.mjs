@@ -1213,7 +1213,7 @@ const REGISTRY = {
     module: "lib/amux/decisionMakerRequestCore.ts",
     list: "DM_LEDGER_EVENT_KINDS",
     reason:
-      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request, and since stage S2-2a3 (migration 20261017160000_amux_decision_maker_cleanup_unknown, which recreated it again) section 5's cleanup_unknown, which the request store writes once per request and which closes nothing. Deliveries, retention and body events have tables of their own and are not values here.",
+      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request, and since stage S2-2a3 (migration 20261017160000_amux_decision_maker_cleanup_unknown, which recreated it again) section 5's cleanup_unknown, which the request store writes once per request and which closes nothing, and since stage S2-2b4 (migration 20261018120000_amux_decision_maker_delivery_gaps) section 2-7's direct_answer_close, the router's close of a request whose question the operator answered directly -- the one kind not named after its own action: section 10 names none for it, so it is audited under the router's amux.decision.assign_discarded, which the guard maps. Deliveries, retention and body events have tables of their own and are not values here.",
   },
   AmuxDecisionMakerRequestEvent_instance_check: {
     owner: "list",
@@ -1325,7 +1325,14 @@ const REGISTRY = {
     module: "lib/amux/decisionMakerJudgmentCore.ts",
     list: "DM_DELIVERY_EVENT_KINDS",
     reason:
-      "Sections 2-7 and 9: the delivery decision of a confirmed answer, then its receipt or an unknown outcome, then a person's resolution of an unknown outcome -- each once per request by a partial unique index, in that order by the guard.",
+      "Sections 2-7 and 9: the delivery decision of a confirmed answer, then its receipt, an unknown outcome or -- since stage S2-2b4 (migration 20261018120000_amux_decision_maker_delivery_gaps, which recreated this CHECK) -- a delivery the local AMUX proved sent nothing, one of the three, then a person's resolution of an unknown outcome -- each once per request by a partial unique index, in that order by the guard.",
+  },
+  AmuxDecisionMakerDeliveryEvent_not_sent_reason_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_NOT_SENT_REASONS",
+    reason:
+      "Stage S2-2b4 (sections 2-7 and 9): why a decided delivery sent nothing -- the operator's direct answer won the answer record's claim, the question or section 9's binding changed, the worker's lane refused before typing, or the local AMUX refused before claiming -- each a fact the local AMUX proved; an unproved result stays delivery_unknown. NULL on every other kind; a shape CHECK requires it exactly on delivery_not_sent, and the bridge maps the local answer to one of these.",
   },
   AmuxDecisionMakerDeliveryEvent_outcome_check: {
     owner: "list",
@@ -1515,6 +1522,67 @@ const REGISTRY = {
     list: "TRIAGE_LANES",
     reason:
       "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
+  },
+  ProductResearchScoutLlmCall_outcome_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SCOUT_LLM_CALL_OUTCOMES",
+    reason: "A Scout model call is started before it runs and settled ok or failed after; started rows count toward the daily cap.",
+  },
+  ModelCatalogEntry_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Image and coding have rows; chat is a view of ModelRegistryEntry and video has no activation policy yet.",
+  },
+  ModelCatalogEntry_draftSource_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "CATALOG_DRAFT_SOURCES",
+    reason: "A pending draft is written by one model call; nothing else writes drafts.",
+  },
+  ModelCatalogPriceRevision_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Price revisions exist for the categories that have rows.",
+  },
+  ModelCatalogSnapshot_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "SNAPSHOT_CATALOG_CATEGORIES",
+    reason: "Only the coding catalogue is published as a snapshot, for the Code client.",
+  },
+  ProductResearchSuggestion_kind_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SCOUT_SUBJECT_KINDS",
+    reason: "What the scout looked at: a public page, a generated file, or the model catalogue.",
+  },
+  ProductResearchSuggestion_area_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SUGGESTION_AREAS",
+    reason: "The area the model assigned. The answer is parsed against the same list, so an unknown area is dropped before it is stored.",
+  },
+  ProductResearchSuggestion_severity_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SUGGESTION_SEVERITIES",
+    reason: "low, medium or high, as the model judged it; the Admin list sorts on it.",
+  },
+  ProductResearchSuggestion_status_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SUGGESTION_STATUSES",
+    reason: "open until the operator dismisses it or sends it to AMUX.",
+  },
+  SupportTriageSuggestion_laneSource_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "LANE_SOURCES",
+    reason:
+      "Where a ready suggestion's lane came from. llm when the model answered and no money or trust-and-safety keyword held the human lane; keyword otherwise.",
   },
   SupportTriageSuggestion_ownerQueueState_check: {
     owner: "list",

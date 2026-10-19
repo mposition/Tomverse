@@ -42,11 +42,18 @@ test("v19 claim readback denies unauthorised, disabled and malformed requests be
   }
 });
 
-test("v19 claim readback route is read-only and does not require its write switch", async () => {
+test("v19 claim readback is read-only; the claim write is the launcher's separate POST", async () => {
   const source = await readFile(new URL(
     "../app/api/internal/amux/v19/analysis-budget/claim/route.ts", import.meta.url),
   "utf8");
-  assert.match(source, /readAmuxSessionBudgetClaimReceipt/);
-  assert.doesNotMatch(source, /commitAmuxSessionBudgetClaim|export async function POST/);
-  assert.doesNotMatch(source, /CLAIM_WRITE_ENV|TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE/);
+  const getHandler = source.slice(source.indexOf("export async function GET"));
+  const postHandler = source.slice(source.indexOf("export async function POST"),
+    source.indexOf("export async function GET"));
+  assert.match(getHandler, /readAmuxSessionBudgetClaimReceipt/);
+  assert.doesNotMatch(getHandler, /commitAmuxSessionBudgetClaim|WRITE_ENV/);
+  // The Max launcher's claim write needs its own credential and write switch.
+  assert.match(postHandler, /isAmuxV19MaxLauncherAuthorized\(request/);
+  assert.match(postHandler, /process\.env\[WRITE_ENV\] !== "enabled"/);
+  assert.match(postHandler, /commitAmuxSessionBudgetClaim/);
+  assert.match(source, /const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE";/);
 });

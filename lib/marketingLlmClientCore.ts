@@ -24,6 +24,10 @@
  *   `max_completion_tokens` (the pin's output cap), the ledger's service tier,
  *   `store: false`, `stream: false` -- nothing else, and the tier is the one the
  *   reservation's config snapshot records.
+ * - **Web search is one more allowlist.** A call given `webSearch` goes to the
+ *   Responses API with one `web_search` tool limited to the given domains and
+ *   `max_tool_calls` set to the pin's search cap, which the reservation priced;
+ *   its answer comes back with the URLs the provider cited.
  *
  * Imports only node built-ins and the ledger's own core, so the service can
  * load it with `--experimental-strip-types` from a clone of this repository.
@@ -34,6 +38,8 @@ import { randomUUID } from "node:crypto";
 import {
   MARKETING_LLM_ADAPTER_PROFILE,
   MARKETING_LLM_ADAPTER_VERSION,
+  MARKETING_LLM_WEB_SEARCH_PROFILE,
+  MARKETING_LLM_KEY_SCOPED_PROJECT,
   MARKETING_LLM_SERVICE_TIER,
   marketingLlmAdapterConfigDigest,
   marketingLlmBudgetSignature,
@@ -56,6 +62,44 @@ export function marketingLlmRequestBody(
     model: pin.model,
     messages: messages.map((message) => ({ role: message.role, content: message.content })),
     max_completion_tokens: pin.maxOutputTokens,
+    service_tier: MARKETING_LLM_SERVICE_TIER,
+    store: false,
+    stream: false,
+  };
+}
+
+/** Where a web-search call is sent: the Responses API, which runs the search tool. */
+export const MARKETING_LLM_RESPONSES_URL = "https://api.openai.com/v1/responses";
+
+/**
+ * The provider request body for a web-search call: the system message as
+ * instructions, the user message as input, one search tool limited to the
+ * competitor's domains, and the search cap the reservation priced. No other
+ * tool, no stored response, no stream. It asks for the search's sources
+ * (`web_search_call.action.sources`): a JSON-only answer often carries no
+ * inline `url_citation`, so the pages the search actually returned are what a
+ * fact's source is checked against.
+ */
+export function marketingLlmWebSearchRequestBody(
+  pin: MarketingLlmPricePin,
+  messages: readonly MarketingLlmMessage[],
+  allowedDomains: readonly string[],
+): Record<string, unknown> {
+  return {
+    model: pin.model,
+    instructions: messages.filter((message) => message.role === "system").map((message) => message.content).join("\n"),
+    input: messages.filter((message) => message.role === "user").map((message) => message.content).join("\n"),
+    tools: [
+      {
+        type: "web_search",
+        filters: { allowed_domains: [...allowedDomains] },
+        search_context_size: "low",
+        user_location: { type: "approximate" },
+      },
+    ],
+    include: ["web_search_call.action.sources"],
+    max_tool_calls: pin.maxWebSearchCalls,
+    max_output_tokens: pin.maxOutputTokens,
     service_tier: MARKETING_LLM_SERVICE_TIER,
     store: false,
     stream: false,
@@ -107,13 +151,28 @@ export type MarketingLlmCallOutcome =
   | { readonly status: "refused"; readonly stage: "reserve" | "dispatch"; readonly code: string }
   /** Given up before dispatch, and the reservation released. */
   | { readonly status: "released"; readonly callId: string }
-  /** The provider answered and the answer is recorded. */
+  /** The provider answered and the ledger settled it: the answer may be used. */
   | {
       readonly status: "answered";
       readonly callId: string;
       readonly requestKey: string;
       readonly content: string;
-      /** `settled`, or `unknown_retained` when the answer did not match the pin. */
+      /** The URLs the provider cited in a web-search answer; empty for a text call. */
+      readonly citations: readonly string[];
+      /** Always `settled`: any other ledger state comes back as `retained`. */
+      readonly ledgerState: "settled";
+    }
+  /**
+   * The provider answered, but the ledger closed the call as anything other
+   * than `settled` (`unknown_retained`: tokens over the reservation, another
+   * model, another tier). The cost is not what the pin says, so the answer is
+   * not returned and the caller stops: an unconfirmed result is not used
+   * (agent foundation rule 7).
+   */
+  | {
+      readonly status: "retained";
+      readonly callId: string;
+      readonly requestKey: string;
       readonly ledgerState: string;
     }
   /** Nothing usable came back; the call is recorded as unknown at its reservation. */
@@ -134,6 +193,7 @@ export type MarketingLlmCallOutcome =
 
 type ProviderAnswer = {
   readonly content: string;
+  readonly citations: readonly string[];
   readonly model: string;
   readonly serviceTier: string;
   readonly inputTokens: number;
@@ -164,7 +224,58 @@ export function readMarketingLlmProviderAnswer(body: unknown): ProviderAnswer | 
   ) {
     return null;
   }
-  return { content, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
+  return { content, citations: [], model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
+}
+
+/**
+ * The parts of a Responses answer the ledger is told, with the URLs the
+ * provider cited or its searches returned, or null when one is missing.
+ */
+export function readMarketingLlmWebSearchAnswer(body: unknown): ProviderAnswer | null {
+  if (!body || typeof body !== "object") return null;
+  const root = body as {
+    model?: unknown;
+    service_tier?: unknown;
+    status?: unknown;
+    usage?: { input_tokens?: unknown; output_tokens?: unknown };
+    output?: Array<{
+      type?: unknown;
+      content?: Array<{ type?: unknown; text?: unknown; annotations?: Array<{ type?: unknown; url?: unknown }> }>;
+      action?: { type?: unknown; url?: unknown; sources?: Array<{ type?: unknown; url?: unknown }> };
+    }>;
+  };
+  const parts = (root.output ?? [])
+    .filter((item) => item?.type === "message")
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part?.type === "output_text" && typeof part.text === "string");
+  const content = parts.map((part) => part.text as string).join("");
+  const cited = parts
+    .flatMap((part) => part.annotations ?? [])
+    .filter((annotation) => annotation?.type === "url_citation" && typeof annotation.url === "string")
+    .map((annotation) => annotation.url as string);
+  // The pages the provider's own searches returned or opened.
+  const retrieved = (root.output ?? [])
+    .filter((item) => item?.type === "web_search_call" && item.action && typeof item.action === "object")
+    .flatMap((item) => [
+      ...(Array.isArray(item.action?.sources) ? item.action.sources : [])
+        .filter((source) => source?.type === "url" && typeof source.url === "string")
+        .map((source) => source.url as string),
+      ...(item.action?.type === "open_page" && typeof item.action.url === "string" ? [item.action.url] : []),
+    ]);
+  const citations = [...new Set([...cited, ...retrieved])];
+  const inputTokens = root.usage?.input_tokens;
+  const outputTokens = root.usage?.output_tokens;
+  if (
+    root.status !== "completed" ||
+    typeof root.model !== "string" ||
+    typeof root.service_tier !== "string" ||
+    content.length === 0 ||
+    !nonNegativeInteger(inputTokens) ||
+    !nonNegativeInteger(outputTokens)
+  ) {
+    return null;
+  }
+  return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
 }
 
 const ok = (answer: MarketingLlmBudgetAnswer) => answer.httpStatus === 200 && answer.body.status === "ok";
@@ -177,6 +288,8 @@ export async function runMarketingLlmCall(
     readonly generatorRunId: string;
     readonly purpose: MarketingLlmPurpose;
     readonly messages: readonly MarketingLlmMessage[];
+    /** Run the provider's web search, limited to these domains (the web-search profile). */
+    readonly webSearch?: { readonly allowedDomains: readonly string[] };
     /** A key chosen by the caller makes a resend of the same call the same reservation. */
     readonly requestKey?: string;
   },
@@ -194,6 +307,7 @@ export async function runMarketingLlmCall(
 ): Promise<MarketingLlmCallOutcome> {
   const newId = deps.newId ?? randomUUID;
   const requestKey = input.requestKey ?? newId();
+  const adapterProfile = input.webSearch ? MARKETING_LLM_WEB_SEARCH_PROFILE : MARKETING_LLM_ADAPTER_PROFILE;
   const stop = (stage: Extract<MarketingLlmCallOutcome, { status: "stopped" }>["stage"], callId: string | null, content?: string) =>
     ({ status: "stopped", stage, callId, requestKey, ...(content === undefined ? {} : { content }) }) as const;
 
@@ -205,7 +319,7 @@ export async function runMarketingLlmCall(
       generatorRunId: input.generatorRunId,
       purpose: input.purpose,
       model: input.pin.model,
-      adapterProfile: MARKETING_LLM_ADAPTER_PROFILE,
+      adapterProfile,
     });
   } catch {
     return stop("reserve", null);
@@ -234,7 +348,7 @@ export async function runMarketingLlmCall(
       requestKey,
       dispatchIntentId,
       adapterConfigDigest: marketingLlmAdapterConfigDigest(
-        marketingLlmConfigSnapshot({ pin: input.pin, adapterVersion: MARKETING_LLM_ADAPTER_VERSION }),
+        marketingLlmConfigSnapshot({ pin: input.pin, adapterVersion: MARKETING_LLM_ADAPTER_VERSION, adapterProfile }),
       ),
     });
   } catch {
@@ -259,17 +373,25 @@ export async function runMarketingLlmCall(
   // 4. The provider, exactly once.
   let answer: ProviderAnswer | null = null;
   try {
-    const response = await deps.transport(MARKETING_LLM_CHAT_COMPLETIONS_URL, {
+    const response = await deps.transport(input.webSearch ? MARKETING_LLM_RESPONSES_URL : MARKETING_LLM_CHAT_COMPLETIONS_URL, {
       method: "POST",
       headers: {
         authorization: `Bearer ${deps.apiKey}`,
         "content-type": "application/json",
-        "openai-project": input.pin.projectId,
+        // A project key already names its project; the header is only for a named one.
+        ...(input.pin.projectId === MARKETING_LLM_KEY_SCOPED_PROJECT ? {} : { "openai-project": input.pin.projectId }),
       },
-      body: JSON.stringify(marketingLlmRequestBody(input.pin, input.messages)),
+      body: JSON.stringify(
+        input.webSearch
+          ? marketingLlmWebSearchRequestBody(input.pin, input.messages, input.webSearch.allowedDomains)
+          : marketingLlmRequestBody(input.pin, input.messages),
+      ),
       signal: deps.signal,
     });
-    if (response.ok) answer = readMarketingLlmProviderAnswer(await response.json().catch(() => null));
+    if (response.ok) {
+      const body = await response.json().catch(() => null);
+      answer = input.webSearch ? readMarketingLlmWebSearchAnswer(body) : readMarketingLlmProviderAnswer(body);
+    }
   } catch {
     answer = null;
   }
@@ -287,13 +409,9 @@ export async function runMarketingLlmCall(
       reportedOutputTokens: answer.outputTokens,
     });
     if (!ok(settled)) return stop("settle", callId, answer.content);
-    return {
-      status: "answered",
-      callId,
-      requestKey,
-      content: answer.content,
-      ledgerState: String(settled.body.state ?? "settled"),
-    };
+    const ledgerState = String(settled.body.state ?? "");
+    if (ledgerState !== "settled") return { status: "retained", callId, requestKey, ledgerState };
+    return { status: "answered", callId, requestKey, content: answer.content, citations: answer.citations, ledgerState: "settled" };
   } catch {
     return stop("settle", callId, answer.content);
   }

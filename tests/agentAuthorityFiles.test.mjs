@@ -65,8 +65,10 @@ test("every reserved decision constant is defined exactly where listed, in contr
   }
 });
 
-test("every constant AGENTS.md names is either a reserved decision or a named contract", () => {
-  const agents = readFileSync(new URL("AGENTS.md", repoRoot), "utf8");
+test("every constant AGENTS.md and its machine index name is either a reserved decision or a named contract", () => {
+  const agents = ["AGENTS.md", "docs/agents/machine-index.md"]
+    .map((path) => readFileSync(new URL(path, repoRoot), "utf8"))
+    .join("\n");
   const named = [...new Set([...agents.matchAll(/`([A-Z][A-Z0-9_]{2,})`/g)].map((m) => m[1]))];
   const definedInCode = named.filter((name) => definitionsOf(name).length > 0).sort();
   const categorised = [
@@ -105,6 +107,10 @@ test("classification of representative paths", () => {
     ["lib/amux/guard.ts", "control-plane"],
     ["lib/amux/executionGradeCore.ts", "control-plane"],
     ["lib/amux/v52GradeReceipt.ts", "control-plane"],
+    ["lib/chatUnifiedOptimizerAmuxCandidateStore.ts", "control-plane"],
+    ["lib/chatUnifiedOptimizerAmuxSourcePin.ts", "control-plane"],
+    ["tests/chatUnifiedOptimizerAmuxCandidateStore.test.mjs", "control-plane"],
+    ["tests/chatUnifiedOptimizerAmuxSourcePin.test.mjs", "control-plane"],
     ["tests/amuxV52GradeReceipt.test.mjs", "control-plane"],
     ["tests/amuxExecutionGradeCore.test.mjs", "control-plane"],
     ["scripts/report-amux-execution-grades.mjs", "control-plane"],

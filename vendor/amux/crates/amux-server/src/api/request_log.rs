@@ -1299,6 +1299,22 @@ pub const ROUTE_TABLE: &[RouteEntry] = &[
     // GET+POST, artifacts/{aid} is PATCH+DELETE.
     RouteEntry { path: "/api/board/{id}/capsule", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/typed-ask", methods: &["GET"] },
+    // The operator's direct answer claims the card's answer record first.
+    RouteEntry { path: "/api/board/{id}/typed-ask/answer", methods: &["POST"] },
+    // The Decision Maker marker's verbs, for the Tomverse bridge relay only
+    // (api/dm_relay.rs): outside /api/board, behind the relay token. GET is
+    // the list of every marker a restarted relay releases.
+    RouteEntry { path: "/api/dm-relay/pending", methods: &["GET", "POST"] },
+    RouteEntry { path: "/api/dm-relay/pending/release", methods: &["POST"] },
+    // Delivering an operator-confirmed answer (stage S2-2b3), same token: the
+    // check, the claim and send, and a delivery whose result is unknown.
+    RouteEntry { path: "/api/dm-relay/answers", methods: &["POST"] },
+    RouteEntry { path: "/api/dm-relay/answers/check", methods: &["POST"] },
+    RouteEntry { path: "/api/dm-relay/answers/unknown", methods: &["POST"] },
+    // Stage S2-2b4, same token, two reads by POST: the operator's answer
+    // records, and one decided delivery's records for a restarted bridge.
+    RouteEntry { path: "/api/dm-relay/answers/operator", methods: &["POST"] },
+    RouteEntry { path: "/api/dm-relay/answers/receipt", methods: &["POST"] },
     RouteEntry { path: "/api/board/{id}/verifications", methods: &["GET"] },
     RouteEntry { path: "/api/board/{id}/artifacts", methods: &["GET", "POST"] },
     RouteEntry { path: "/api/board/{id}/artifacts/{aid}", methods: &["PATCH", "DELETE"] },

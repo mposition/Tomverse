@@ -26,7 +26,7 @@ export async function AdminPackageImportPanel({
 
     return (
         <section
-            className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
+            className="rounded-2xl border p-4 border-zinc-800 bg-zinc-950/60"
             data-testid="admin-package-import"
         >
             <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -62,7 +62,7 @@ export async function AdminPackageImportPanel({
                 </thead>
                 <tbody>
                     {metrics.steps.map((step) => (
-                        <tr key={step.step} className="border-t border-zinc-100 dark:border-zinc-900">
+                        <tr key={step.step} className="border-t border-zinc-900">
                             <td className="py-1">{step.step}</td>
                             <td className="py-1 text-right tabular-nums">{step.entered}</td>
                             <td className="py-1 text-right tabular-nums">{step.abandoned}</td>
@@ -96,7 +96,7 @@ export async function AdminPackageImportPanel({
                         <span className="tabular-nums">{entry.count}</span>
                     </li>
                 ))}
-                <li className="flex justify-between gap-4 border-t border-zinc-100 pt-1 font-semibold dark:border-zinc-900">
+                <li className="flex justify-between gap-4 border-t pt-1 font-semibold border-zinc-900">
                     <span>{m.total}</span>
                     <span className="tabular-nums">{metrics.completedTotal}</span>
                 </li>

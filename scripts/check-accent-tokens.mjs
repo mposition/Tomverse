@@ -120,7 +120,7 @@ for (const file of GUARDED_FILES) {
     for (const match of line.match(RAW_UTILITY) ?? []) {
       failures.push(
         `${file}:${index + 1}  raw accent utility "${match}" -- use the role token that owns this hue ` +
-          `(see AGENTS.md "Accent colour roles")`
+          `(see docs/agents/agents-reference.md "Accent colour roles")`
       );
     }
 
@@ -161,7 +161,7 @@ if (failures.length > 0) {
   for (const failure of failures) console.error(`  ${failure}`);
   console.error(
     `\n${failures.length} problem(s). Define the role in app/globals.css and use its token, ` +
-      "or state the exception in AGENTS.md before adding a raw accent utility."
+      'or state the exception in docs/agents/agents-reference.md "Accent colour roles" before adding a raw accent utility.'
   );
   process.exit(1);
 }

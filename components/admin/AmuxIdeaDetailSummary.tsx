@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
@@ -20,7 +21,8 @@ const EXCLUSION_REASONS = ["secretPath", "secretContent", "nonRegular",
  * The top of one idea's detail (approved backlog redesign, B3): where the idea
  * is on the six steps, which of them are a person's, and its Tasks with their
  * PRs. Everything here is read from the progress snapshot; there is no action
- * besides opening GitHub, reading its own CLI manifest, and cancelling a queued v19 session idea, because
+ * besides opening GitHub, reading its own CLI manifest, cancelling a queued v19 session idea and
+ * stopping its in-flight analysis, because
  * other human steps have their own panels below and merge is observed here.
  */
 export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
@@ -60,8 +62,35 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         })}
       </ol>
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
+      {row.waitingFor === "session_review" ? (
+        <p className="text-amber-200" data-testid="amux-session-review">{m.sessionReviewDetail}</p>
+      ) : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
+      {row.submissionOrigin === "session" ?
+        <AmuxSessionAnalysisStopPanel ideaId={row.ideaId} /> : null}
+      {row.submissionOrigin === "session" && row.referencePins === null &&
+          row.referencePinsLegacy ? (
+        <p className="text-zinc-400">{m.intakePinsLegacy}</p>
+      ) : null}
+      {row.submissionOrigin === "session" && row.referencePins === null &&
+          !row.referencePinsLegacy ? (
+        <p role="alert" className="text-red-200">{m.intakePinsUnavailable}</p>
+      ) : null}
+      {row.submissionOrigin === "session" && row.referencePins && row.referencePins.length > 0 ? (
+        <section aria-labelledby="amux-intake-pins-heading" data-testid="amux-intake-pins"
+          className="space-y-2 border-t border-zinc-800 pt-3">
+          <h3 id="amux-intake-pins-heading" className="font-medium text-zinc-100">
+            {m.intakePinsTitle}
+          </h3>
+          <ol className="space-y-1 text-xs text-zinc-300">
+            {row.referencePins.map((pin) => <li key={pin.referenceOrdinal}>
+              {m.checkoutReference(pin.referenceOrdinal)}: <code className="break-all text-zinc-100">
+                {pin.pinnedCommitSha}</code>
+            </li>)}
+          </ol>
+        </section>
+      ) : null}
       {row.checkoutEvidence.length > 0 ? (
         <section aria-labelledby="amux-checkout-evidence-heading" data-testid="amux-checkout-evidence"
           className="space-y-2 border-t border-zinc-800 pt-3">

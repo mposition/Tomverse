@@ -65,6 +65,25 @@ test("the Prompt Refiner Auto budget actor has only its audited hold transitions
     "prompt_refiner.provider_dispatch", "PromptRefinerAutoBudgetHold"), false);
 });
 
+test("the unified optimizer actor is limited to provider-free ledger facts", () => {
+  assert.equal(isSystemAuditActor("chat-unified-optimizer"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.run_admitted", "ChatUnifiedOptimizerRun"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.dispatch_intended",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.run_terminal",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.queued_before_dispatch_terminal",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_candidate.promoted", "ChatUnifiedOptimizerCandidate"), false);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.dispatch_intended", "AdminAuditLog"), false);
+});
+
 // The closed list of system actors and the reserved metadata key.
 //
 // Contract: docs/policy/marketing-automation.md §6. Several later checks ask
@@ -133,6 +152,10 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-checker",
     "amux-v22-recovery-controller",
     "amux-v22-api-model-access",
+    // docs/policy/chat-unified-router-refiner-v1.md §7 and
+    // docs/policy/chat-unified-router-refiner-v1.md §12: provider-free facts.
+    "chat-unified-optimizer",
+    "auto-router-optimizer",
     "amux-v4-intake",
     "amux-session-intake",
     "engineering-agent-runner",
@@ -480,4 +503,17 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.reserved", "MarketingReport"), false);
   // Other actors are unaffected by the generator's scope.
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
+});
+
+test("the Auto router optimizer actor may only start a cycle and promote one", () => {
+  assert.equal(isSystemAuditActor("auto-router-optimizer"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_optimizer.cycle_started", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), true);
+  // Rollback stays a person's action, and no other target is in scope.
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AppSettings"), false);
 });

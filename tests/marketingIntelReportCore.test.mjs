@@ -14,6 +14,7 @@ import {
 const SECRET = "g".repeat(48);
 const HOSTS = Object.freeze({ poe: ["poe.com"] });
 
+
 const fact = (overrides = {}) => ({
   competitorId: "poe",
   factType: "launch_date",
@@ -151,6 +152,8 @@ test("market facts may carry up to five signed competitor candidates, each once"
 test("a fact is kept only for an exact official host of its own competitor", () => {
   assert.equal(marketIntelSourceAllowed(fact(), HOSTS), true);
   assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://POE.com/x" }), HOSTS), true);
+  assert.equal(marketIntelSourceAllowed(fact({ sourceUrl: "https://poe.com/pricing" }), HOSTS), true);
+  assert.equal(marketIntelSourceAllowed(fact(), {}), false);
   for (const sourceUrl of [
     "https://blog.poe.com/launch",
     "https://poe.com.example.net/launch",

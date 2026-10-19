@@ -39,10 +39,10 @@ export type AmuxWorkerRegistryNotice =
 
 export type AmuxWorkerRegistryRefusal = { workerName: string; code: string } | null;
 
-const cellClass = "border-b border-zinc-200 px-2 py-2 align-top dark:border-zinc-700";
-const headClass = `${cellClass} text-xs font-semibold text-zinc-600 dark:text-zinc-400`;
+const cellClass = "border-b px-2 py-2 align-top border-zinc-700";
+const headClass = `${cellClass} text-xs font-semibold text-zinc-400`;
 const buttonClass =
-  "inline-flex min-h-11 items-center rounded-md border border-zinc-400 px-3 py-1 text-xs font-bold disabled:opacity-60 dark:border-zinc-500";
+  "inline-flex min-h-11 items-center rounded-md border px-3 py-1 text-xs font-bold disabled:opacity-60 border-zinc-500";
 
 const brisbaneTime = new Intl.DateTimeFormat("en-AU", {
   timeZone: "Australia/Brisbane",
@@ -90,11 +90,11 @@ export function AmuxWorkerRegistryView({
       className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4"
       data-testid="amux-worker-registry-panel"
     >
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{m.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.description}</p>
+      <h2 className="text-lg font-semibold text-zinc-100">{m.title}</h2>
+      <p className="text-sm text-zinc-300">{m.description}</p>
       {view === null ? (
         <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-worker-registry-unavailable">
+          <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-registry-unavailable">
             {m.unavailable}
           </p>
           <button
@@ -109,26 +109,26 @@ export function AmuxWorkerRegistryView({
         </div>
       ) : (
         <>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-worker-registry-latch">
+          <p className="text-sm text-zinc-300" data-testid="amux-worker-registry-latch">
             {view.writesLatch ? m.writesOn : m.writesOff}
           </p>
           {isOwner ? null : (
-            <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-worker-registry-read-only">
+            <p className="text-sm text-zinc-300" data-testid="amux-worker-registry-read-only">
               {m.readOnly}
             </p>
           )}
           {view.registryReadable ? null : (
-            <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-worker-registry-unreadable">
+            <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-registry-unreadable">
               {m.unreadableRows}
             </p>
           )}
 
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.workersTitle}</h3>
+          <h3 className="text-base font-semibold text-zinc-100">{m.workersTitle}</h3>
           {view.rows.length === 0 ? (
-            <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-worker-registry-empty">{m.noWorkers}</p>
+            <p className="text-sm text-zinc-300" data-testid="amux-worker-registry-empty">{m.noWorkers}</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm text-zinc-900 dark:text-zinc-100">
+              <table className="w-full border-collapse text-left text-sm text-zinc-100">
                 <thead>
                   <tr>
                     <th scope="col" className={headClass}>{m.column.worker}</th>
@@ -171,13 +171,13 @@ export function AmuxWorkerRegistryView({
 
           {isOwner && view.seed !== null ? (
             <div className="flex flex-col gap-2" data-testid="amux-worker-registry-seed">
-              <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.seedTitle}</h3>
-              <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.seedHelp}</p>
+              <h3 className="text-base font-semibold text-zinc-100">{m.seedTitle}</h3>
+              <p className="text-sm text-zinc-300">{m.seedHelp}</p>
               {toRegister.length === 0 ? (
-                <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.seedAllRegistered}</p>
+                <p className="text-sm text-zinc-300">{m.seedAllRegistered}</p>
               ) : (
                 <>
-                  <ul className="list-disc pl-5 text-sm text-zinc-700 dark:text-zinc-300">
+                  <ul className="list-disc pl-5 text-sm text-zinc-300">
                     {toRegister.map((entry) => (
                       <li key={entry.workerName}>
                         <span className="font-mono text-xs">{entry.workerName}</span> · {entry.desiredState} · {entry.roleCeiling}
@@ -208,17 +208,17 @@ export function AmuxWorkerRegistryView({
         <p role="status" className="text-sm" data-testid="amux-worker-registry-stopped">{m.seedStopped}</p>
       ) : null}
       {notice === "outcome_unknown" ? (
-        <p role="alert" className="text-sm text-amber-700 dark:text-amber-300" data-testid="amux-worker-registry-outcome-unknown">
+        <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-registry-outcome-unknown">
           {m.seedOutcomeUnknown}
         </p>
       ) : null}
       {notice === "unread" ? (
-        <p role="alert" className="text-sm text-amber-700 dark:text-amber-300" data-testid="amux-worker-registry-run-unread">
+        <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-registry-run-unread">
           {m.seedUnread}
         </p>
       ) : null}
       {refusal ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-worker-registry-refused">
+        <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-registry-refused">
           {m.seedRefused(refusal.workerName, refusal.code)}
         </p>
       ) : null}

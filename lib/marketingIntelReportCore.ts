@@ -204,10 +204,12 @@ export const marketingGeneratorReportProvenanceDigest = (provenance: string): st
   sha256(`marketing-generator-report-provenance-v1:${provenance}`);
 
 /**
- * Whether a market fact cites one of the official hosts a person approved for
- * its competitor (`holdApprovedMarketingCompetitorHosts` in a writing
- * transaction, which holds them until it commits). There is no default:
- * a caller that has not read the registry has no hosts to allow.
+ * Whether a market fact cites a page on one of the official hosts a person
+ * approved for its competitor (`holdApprovedMarketingCompetitorHosts` in a
+ * writing transaction, which holds them until it commits). A3 finds the page
+ * by a web search limited to those hosts; this is the app's own check of what
+ * it was told. There is no default: a caller that has not read the registry
+ * has no hosts to allow.
  *
  * Hosts are matched exactly, lower case, with no subdomain wildcard: a page on
  * `blog.example.com` is a different host from `example.com`, and an approval

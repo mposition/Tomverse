@@ -45,6 +45,7 @@ const SUBMISSION_ERROR_STATUS: Record<
   scope_unavailable: 409,
   outside_scope: 409,
   model_not_approved: 409,
+  reference_snapshot_unavailable: 503,
   key_store_unavailable: 503,
   request_already_seen: 409,
   outcome_unknown: 503,

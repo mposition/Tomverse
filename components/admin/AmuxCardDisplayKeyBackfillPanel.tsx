@@ -86,8 +86,8 @@ export function AmuxCardDisplayKeyBackfillPanel() {
   const allDone = nothing && plan.unresolved.length === 0;
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4" data-testid="amux-card-display-key-backfill">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{m.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.description}</p>
+      <h2 className="text-lg font-semibold text-zinc-100">{m.title}</h2>
+      <p className="text-sm text-zinc-300">{m.description}</p>
       <div>
         <button type="button" onClick={() => void load()} disabled={busy !== null}
           className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">

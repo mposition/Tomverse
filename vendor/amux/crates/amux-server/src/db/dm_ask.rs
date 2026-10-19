@@ -1,5 +1,5 @@
 //! The local AMUX half of the Decision Maker's typed ask (stage S2-1,
-//! migration 0083).
+//! migration 0084).
 //!
 //! docs/policy/amux-decision-maker.md §12 names the local AMUX part of stage
 //! S2, and this module is it, as store functions on the writer's connection:
@@ -15,7 +15,7 @@
 //!    a revision is an immutable snapshot of what the card was asking, taken
 //!    when a typed card enters `needsyou` or changes its ask while there. It
 //!    is bound to two counters the database keeps for every writer (a status
-//!    epoch and an ask epoch, migration 0083), never to a clock or to the
+//!    epoch and an ask epoch, migration 0084), never to a clock or to the
 //!    wording, so any status change or rewording by any door ends it.
 //! 3. **The DM-pending marker**, set by one compare-and-swap against the
 //!    card's current question revision and removed by the request that set it,
@@ -485,7 +485,7 @@ pub fn parse_typed_ask(value: &Value) -> Result<TypedAskInput, TypedAskRefusal> 
 // ---------------------------------------------------------------------------
 
 /// The card's base ask, from the row as stored, with the card's two epochs
-/// (migration 0083: the status epoch moves on every status change and the ask
+/// (migration 0084: the status epoch moves on every status change and the ask
 /// epoch on every change of the base ask, whoever writes the row).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CardAsk {
@@ -909,6 +909,27 @@ pub fn pending_for(
     .optional()
 }
 
+/// Every marker the table holds, on any card in any state and on any question
+/// revision, oldest first, at most `limit`. The bridge relay reads this after
+/// a restart: a marker its stopped process left is found wherever its card is,
+/// not only on a card its board scan happens to open.
+pub fn pending_markers(conn: &Connection, limit: usize) -> rusqlite::Result<Vec<Pending>> {
+    let mut statement = conn.prepare(
+        "SELECT issue_id, question_revision, request_id, instance, set_at FROM _amux_dm_pending \
+         ORDER BY set_at, issue_id, question_revision LIMIT ?1",
+    )?;
+    let rows = statement.query_map(params![limit as i64], |r| {
+        Ok(Pending {
+            issue_id: r.get(0)?,
+            question_revision: r.get(1)?,
+            request_id: r.get(2)?,
+            instance: r.get(3)?,
+            set_at: r.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
 /// Set the marker with one compare-and-swap: the card is in `needsyou`, its
 /// current question revision is `question_revision`, nobody has answered that
 /// revision, and no other request holds the marker. Runs inside the writer's
@@ -1140,6 +1161,42 @@ pub fn claim_answer(
         actor: actor.to_string(),
         recorded_at: now,
     }))
+}
+
+/// Stage S2-2b4: the operator's answer records after `after` -- (time in
+/// seconds, card, question revision) -- in that order, at most `limit`. The
+/// Tomverse bridge relay reads them to close the app's Decision Maker request
+/// of each question the operator answered directly
+/// (docs/policy/amux-decision-maker.md §2-7: "운영자의 직접 답이 먼저면 요청은
+/// 닫힌다"). The key is the records' own values, never their row numbers,
+/// which a vacuum may change, and a record's card and revision are its primary
+/// key, so a read that starts strictly after the last record the reader passed
+/// always moves on, however many records share a second. A read.
+pub fn operator_answers_after(
+    conn: &Connection,
+    after: (i64, &str, i64),
+    limit: usize,
+) -> rusqlite::Result<Vec<AnswerRecord>> {
+    let mut statement = conn.prepare(
+        "SELECT issue_id, question_revision, source, request_id, actor, recorded_at \
+         FROM _amux_dm_answers WHERE source = 'operator' \
+         AND (recorded_at > ?1 OR (recorded_at = ?1 AND (issue_id > ?2 \
+              OR (issue_id = ?2 AND question_revision > ?3)))) \
+         ORDER BY recorded_at, issue_id, question_revision LIMIT ?4",
+    )?;
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let (at, card, revision) = after;
+    let records = statement.query_map(params![at, card, revision, limit], |r| {
+        Ok(AnswerRecord {
+            issue_id: r.get(0)?,
+            question_revision: r.get(1)?,
+            source: r.get(2)?,
+            request_id: r.get(3)?,
+            actor: r.get(4)?,
+            recorded_at: r.get(5)?,
+        })
+    })?;
+    records.collect()
 }
 
 /// Everything this module knows about a card, for the read endpoint.
@@ -1980,6 +2037,67 @@ mod tests {
     }
 
     // -- the answer record --------------------------------------------------------
+
+    /// Stage S2-2b4: the operator's records only, from a time on, in the
+    /// order of their time and then their question -- what the bridge reads to
+    /// close the app's request of each question the operator answered directly.
+    #[test]
+    fn the_operators_answer_records_are_listed_by_time_without_the_confirmed_ones() {
+        let conn = db();
+        for (id, entered) in [("DM-21", 100), ("DM-22", 100), ("DM-23", 100), ("DM-24", 100)] {
+            card(&conn, id, "needsyou", entered);
+            write_draft(&conn, id, &TypedAskInput::Set(ask(two_options())), entered).unwrap();
+            sync_question_revision(&conn, id, entered).unwrap();
+        }
+        let confirmed = AnswerSource::DmConfirmed {
+            request_id: REQUEST_A.into(),
+        };
+        // Written in this order; two share a second, and the later-written one sorts first.
+        claim_answer(&conn, "DM-23", 1, &AnswerSource::Operator, "Ethan", 300).unwrap();
+        claim_answer(&conn, "DM-24", 1, &AnswerSource::Operator, "Ethan", 300).unwrap();
+        claim_answer(&conn, "DM-22", 1, &AnswerSource::Operator, "Ethan", 300).unwrap();
+        // A confirmed answer's record is not the operator's.
+        claim_answer(&conn, "DM-21", 1, &confirmed, "amux-dm-relay", 250).unwrap();
+        let listed = |after: (i64, &str, i64), limit: usize| -> Vec<(String, i64, i64)> {
+            operator_answers_after(&conn, after, limit)
+                .unwrap()
+                .into_iter()
+                .map(|record| {
+                    assert_eq!(record.source, "operator");
+                    assert_eq!(record.request_id, None);
+                    (record.issue_id, record.question_revision, record.recorded_at)
+                })
+                .collect()
+        };
+        let all = listed((0, "", i64::MIN), 10);
+        assert_eq!(
+            all,
+            vec![
+                ("DM-22".to_string(), 1, 300),
+                ("DM-23".to_string(), 1, 300),
+                ("DM-24".to_string(), 1, 300),
+            ]
+        );
+        // Strictly after a record: the rest of its second, then later seconds.
+        assert_eq!(
+            listed((300, "DM-22", 1), 10),
+            vec![("DM-23".to_string(), 1, 300), ("DM-24".to_string(), 1, 300)]
+        );
+        assert_eq!(listed((300, "DM-24", 1), 10), Vec::<(String, i64, i64)>::new());
+        // Pages of one move on inside a single second: a read by time alone never
+        // left a second that held a full page (review r-20261018-121437-f0d9ce).
+        let mut after = (0_i64, String::new(), i64::MIN);
+        let mut walked = Vec::new();
+        loop {
+            let page = listed((after.0, after.1.as_str(), after.2), 1);
+            let Some((card, revision, at)) = page.last().cloned() else {
+                break;
+            };
+            walked.extend(page);
+            after = (at, card, revision);
+        }
+        assert_eq!(walked, all);
+    }
 
     /// docs/policy/amux-decision-maker.md §12, blocking criterion: a direct
     /// answer and a confirmed answer arriving together deliver one answer.

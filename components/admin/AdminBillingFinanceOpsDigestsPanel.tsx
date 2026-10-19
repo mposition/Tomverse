@@ -36,48 +36,48 @@ export function AdminBillingFinanceOpsDigestsPanel({ initial }: { initial: Billi
 
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="billing-finance-ops-tab">
-      <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="flex items-center gap-2 text-sm text-zinc-400">
         <Lock className="h-4 w-4" aria-hidden="true" />
         {m.readOnlyNote}
       </p>
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.switchTitle}</h2>
+        <h2 className="text-base font-semibold text-zinc-100">{m.switchTitle}</h2>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm" data-testid="billing-finance-ops-switch">
-          <dt className="text-zinc-600 dark:text-zinc-400">{m.state}</dt>
-          <dd className={initial.control.state === "unreadable" ? "text-amber-800 dark:text-amber-300" : undefined}>
+          <dt className="text-zinc-400">{m.state}</dt>
+          <dd className={initial.control.state === "unreadable" ? "text-amber-300" : undefined}>
             {stateLabel}
           </dd>
-          <dt className="text-zinc-600 dark:text-zinc-400">{m.revision}</dt>
+          <dt className="text-zinc-400">{m.revision}</dt>
           <dd>{initial.control.revision ?? m.none}</dd>
-          <dt className="text-zinc-600 dark:text-zinc-400">{m.enabledAt}</dt>
+          <dt className="text-zinc-400">{m.enabledAt}</dt>
           <dd>{initial.control.enabledAt ?? m.none}</dd>
-          <dt className="text-zinc-600 dark:text-zinc-400">{m.monitorConfirmedAt}</dt>
+          <dt className="text-zinc-400">{m.monitorConfirmedAt}</dt>
           <dd>{initial.monitorConfirmedAt ?? m.none}</dd>
         </dl>
         {initial.canWrite ? <BillingFinanceOpsControls state={initial.control.state} /> : null}
       </div>
 
       <div className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.digestsTitle}</h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
+        <h2 className="text-base font-semibold text-zinc-100">{m.digestsTitle}</h2>
+        <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
         {initial.digests.length === 0 ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.emptyDigests}</p>
+          <p className="text-sm text-zinc-400">{m.emptyDigests}</p>
         ) : (
           <ul className="flex flex-col gap-3" data-testid="billing-finance-ops-digest-list">
             {initial.digests.map((row) => (
-              <li key={row.id} className="rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
-                <p className="font-medium text-zinc-900 dark:text-zinc-100">
+              <li key={row.id} className="rounded-lg border p-3 text-sm border-zinc-800">
+                <p className="font-medium text-zinc-100">
                   {m.digestDate}: {row.digest?.computedAtDate ?? m.none}
                   {row.digest ? ` · ${m.environment}: ${row.digest.environment} · ${m.verdict}: ${row.digest.verdict}` : ""}
                 </p>
-                <p className="text-zinc-600 dark:text-zinc-400">
+                <p className="text-zinc-400">
                   {m.stored}: {row.createdAt} · {m.size}: {row.sizeBytes} B
                 </p>
-                {row.body === "expired" ? <p className="text-zinc-600 dark:text-zinc-400">{m.bodyExpired}</p> : null}
-                {row.body === "unreadable" ? <p className="text-amber-800 dark:text-amber-300">{m.bodyUnreadable}</p> : null}
+                {row.body === "expired" ? <p className="text-zinc-400">{m.bodyExpired}</p> : null}
+                {row.body === "unreadable" ? <p className="text-amber-300">{m.bodyUnreadable}</p> : null}
                 {row.digest ? (
-                  <div className="mt-2 flex flex-col gap-1 text-zinc-700 dark:text-zinc-300">
+                  <div className="mt-2 flex flex-col gap-1 text-zinc-300">
                     {row.digest.items.length === 0 ? (
                       <p>{m.noItems}</p>
                     ) : (
@@ -156,7 +156,7 @@ function BillingFinanceOpsControls({ state }: { state: BillingFinanceOpsConsole[
       type="button"
       disabled={busy}
       onClick={onClick}
-      className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+      className="min-h-11 rounded-md px-4 text-sm font-medium disabled:opacity-60 bg-zinc-100 text-zinc-900"
       data-testid={testId}
     >
       {label}
@@ -164,8 +164,8 @@ function BillingFinanceOpsControls({ state }: { state: BillingFinanceOpsConsole[
   );
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.monitorNote}</p>
+    <div className="flex flex-col gap-3 rounded-lg border p-3 border-zinc-800">
+      <p className="text-sm text-zinc-400">{m.monitorNote}</p>
       <div className="flex flex-wrap gap-2">
         {state === "enabled"
           ? null
@@ -178,7 +178,7 @@ function BillingFinanceOpsControls({ state }: { state: BillingFinanceOpsConsole[
         {button(m.recordMonitors, () => void post(MONITORS_ROUTE, {}, m.confirmMonitors), "billing-finance-ops-record-monitors")}
       </div>
       {reauthenticationRequired ? (
-        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-300">
           {m.reauthenticationRequired}
           <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
             {m.signInAgain}
@@ -188,7 +188,7 @@ function BillingFinanceOpsControls({ state }: { state: BillingFinanceOpsConsole[
       {notice ? (
         <p
           role="status"
-          className={notice.tone === "ok" ? "text-sm text-zinc-700 dark:text-zinc-300" : "text-sm text-red-700 dark:text-red-300"}
+          className={notice.tone === "ok" ? "text-sm text-zinc-300" : "text-sm text-red-300"}
         >
           {notice.text}
         </p>

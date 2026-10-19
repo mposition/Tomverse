@@ -22,12 +22,21 @@ import {
   type AmuxTrackedCheckoutVerifiedReadInput,
 } from "./ideaTrackedCheckoutReadManifestCore.ts";
 import { AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION,
-  AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET } from
+  AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET,
+  AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+  auditRowActorKind } from
   "../adminAuditSystemActors.ts";
+import { readAmuxSessionBudgetClaimReceipt } from
+  "./ideaSessionAnalysisBudgetClaimService.ts";
+import { AmuxTrackedCheckoutEvidenceError,
+  readAmuxMaxTrackedCheckoutEvidence,
+  requireActiveMaxCheckoutClaim,
+  type AmuxMaxCheckoutClaim } from
+  "./ideaTrackedCheckoutEvidenceStore.ts";
 
 export class AmuxTrackedCheckoutReadManifestError extends Error {
   constructor(readonly code: "invalid_manifest" | "idea_unavailable" |
-    "evidence_unavailable" | "already_recorded") {
+    "evidence_unavailable" | "already_recorded" | "claim_unavailable") {
     super(code);
     this.name = "AmuxTrackedCheckoutReadManifestError";
   }
@@ -106,6 +115,7 @@ export async function commitAmuxDueReadManifestPurge(tx: Prisma.TransactionClien
  * An uncertain key-store write or COMMIT is never retried blindly. */
 export async function prepareAmuxTrackedCheckoutReadManifest(
   input: AmuxTrackedCheckoutVerifiedReadInput,
+  maxClaim?: AmuxMaxCheckoutClaim,
 ) {
   const prepared = input;
   const inspected = inspectAmuxTrackedCheckoutReadManifest(prepared);
@@ -116,7 +126,8 @@ export async function prepareAmuxTrackedCheckoutReadManifest(
       SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
              set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
     `;
-    await recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, prepared);
+    await recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, prepared,
+      maxClaim);
   }, { maxWait: 3_000, timeout: 12_000 });
   const keys = await createAmuxContentUnitKeys(
     amuxTrackedCheckoutReadManifestKeyIdentity(input.ideaId, input.manifestId));
@@ -128,11 +139,14 @@ export async function prepareAmuxTrackedCheckoutReadManifest(
  * uncertain; the seven-day sweeper can then address the exact key. */
 export async function recordAmuxTrackedCheckoutReadManifestKeyIntent(
   tx: Prisma.TransactionClient, input: AmuxTrackedCheckoutVerifiedReadInput,
+  maxClaim?: AmuxMaxCheckoutClaim,
 ): Promise<void> {
   const inspected = inspectAmuxTrackedCheckoutReadManifest(input);
   if (!inspected) throw new AmuxTrackedCheckoutReadManifestError("invalid_manifest");
   try {
     await takeAuditChainLock(tx);
+    if (maxClaim) await requireMaxManifestClaim(tx, inspected.ideaId,
+      inspected.referenceOrdinal, inspected.pinnedCommitSha, maxClaim);
     const locked = await tx.$queryRaw<Array<{ pinnedCommitSha: string }>>`
       SELECT e."pinnedCommitSha" FROM "AmuxIdeaTrackedCheckoutEvidence" e
       JOIN "AmuxIdeaSubmission" i ON i."id" = e."ideaId"
@@ -169,6 +183,20 @@ export async function recordAmuxTrackedCheckoutReadManifestKeyIntent(
       referenceOrdinal: inspected.referenceOrdinal,
       pinnedCommitSha: inspected.pinnedCommitSha, auditLogId,
     } });
+    if (maxClaim) await writeSystemAuditLog({ tx,
+      systemActor: AMUX_V19_READ_MANIFEST_AUDIT_ACTOR,
+      action: AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+      targetType: AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET,
+      targetId: inspected.manifestId,
+      summary: "Bound one AMUX v19 read-manifest key intent to a Max claim.",
+      metadata: { claimId: maxClaim.claimId,
+        requestId: maxClaim.requestId,
+        reservationId: maxClaim.reservationId,
+        invocationOrdinal: maxClaim.invocationOrdinal,
+        ideaId: inspected.ideaId,
+        referenceOrdinal: inspected.referenceOrdinal,
+        keyIntentAuditLogId: auditLogId },
+    });
   } finally { inspected.plaintext.fill(0); }
 }
 
@@ -178,6 +206,7 @@ export async function recordAmuxTrackedCheckoutReadManifest(
   tx: Prisma.TransactionClient,
   input: AmuxTrackedCheckoutVerifiedReadInput,
   keys: AmuxContentKeys,
+  maxClaim?: AmuxMaxCheckoutClaim,
 ) {
   const inspected = inspectAmuxTrackedCheckoutReadManifest(input);
   if (!inspected || keys.masterKeyId !== amuxContentUnitKeyId(
@@ -186,6 +215,8 @@ export async function recordAmuxTrackedCheckoutReadManifest(
   }
   try {
   await takeAuditChainLock(tx);
+  if (maxClaim) await requireMaxManifestClaim(tx, inspected.ideaId,
+    inspected.referenceOrdinal, inspected.pinnedCommitSha, maxClaim);
   const locked = await tx.$queryRaw<Array<{ pinnedCommitSha: string }>>`
     SELECT e."pinnedCommitSha" FROM "AmuxIdeaTrackedCheckoutEvidence" e
     JOIN "AmuxIdeaSubmission" i ON i."id" = e."ideaId"
@@ -205,13 +236,19 @@ export async function recordAmuxTrackedCheckoutReadManifest(
   const intent = await tx.amuxIdeaReadManifestKeyIntent.findUnique({
     where: { id: inspected.manifestId }, select: { ideaId: true,
       referenceOrdinal: true, pinnedCommitSha: true,
-      keyRetirementClaimedAt: true, keyDeletedAt: true },
+      keyRetirementClaimedAt: true, keyDeletedAt: true,
+      auditLogId: true },
   });
   if (!intent || intent.ideaId !== inspected.ideaId ||
       intent.referenceOrdinal !== inspected.referenceOrdinal ||
       intent.pinnedCommitSha !== inspected.pinnedCommitSha ||
       intent.keyRetirementClaimedAt || intent.keyDeletedAt) {
     throw new AmuxTrackedCheckoutReadManifestError("evidence_unavailable");
+  }
+  if (maxClaim && !await readAmuxMaxManifestIntentBinding(tx,
+    inspected.ideaId, inspected.referenceOrdinal, inspected.manifestId,
+    intent.auditLogId, maxClaim)) {
+    throw new AmuxTrackedCheckoutReadManifestError("claim_unavailable");
   }
   if (await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
     where: { ideaId_referenceOrdinal: { ideaId: inspected.ideaId,
@@ -253,6 +290,52 @@ export async function recordAmuxTrackedCheckoutReadManifest(
   } finally { inspected.plaintext.fill(0); }
 }
 
+async function requireMaxManifestClaim(tx: Prisma.TransactionClient,
+  ideaId: string, referenceOrdinal: number, pinnedCommitSha: string,
+  claim: AmuxMaxCheckoutClaim): Promise<void> {
+  try {
+    await requireActiveMaxCheckoutClaim(tx, ideaId, claim);
+    const evidence = await readAmuxMaxTrackedCheckoutEvidence(tx, ideaId,
+      referenceOrdinal, claim);
+    if (!evidence || evidence.pinnedCommitSha !== pinnedCommitSha) {
+      throw new AmuxTrackedCheckoutEvidenceError("claim_unavailable");
+    }
+  } catch {
+    throw new AmuxTrackedCheckoutReadManifestError("claim_unavailable");
+  }
+}
+
+/** The claim link was committed with the key intent before key creation.
+ * It remains readable after settlement or seven-day ciphertext retirement. */
+export async function readAmuxMaxManifestIntentBinding(
+  tx: Prisma.TransactionClient, ideaId: string, referenceOrdinal: number,
+  manifestId: string, keyIntentAuditLogId: string,
+  claim: AmuxMaxCheckoutClaim,
+): Promise<boolean> {
+  const receipt = await readAmuxSessionBudgetClaimReceipt(tx, claim);
+  if (receipt.status !== "committed" || receipt.claimId !== claim.claimId) {
+    return false;
+  }
+  const bindings = await tx.adminAuditLog.findMany({ where: {
+    action: AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+    targetType: AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET,
+    targetId: manifestId,
+  }, take: 2 });
+  const audit = bindings[0];
+  const metadata = audit?.metadata;
+  const bound = metadata && typeof metadata === "object" &&
+    !Array.isArray(metadata) ? metadata as Record<string, unknown> : null;
+  return bindings.length === 1 && !!audit?.entryHash &&
+    auditRowActorKind(audit) === "system" && !!bound &&
+    bound.claimId === claim.claimId &&
+    bound.requestId === claim.requestId &&
+    bound.reservationId === claim.reservationId &&
+    bound.invocationOrdinal === claim.invocationOrdinal &&
+    bound.ideaId === ideaId &&
+    bound.referenceOrdinal === referenceOrdinal &&
+    bound.keyIntentAuditLogId === keyIntentAuditLogId;
+}
+
 /** Content-free exact-reference readback for a worker whose POST outcome is
  * unknown. Never select ciphertext or the external content key here. */
 export async function readAmuxTrackedCheckoutReadManifestReceipt(
@@ -275,7 +358,7 @@ export async function readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(
     where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal } },
     select: { id: true, ideaId: true, referenceOrdinal: true,
       pinnedCommitSha: true, keyRetirementClaimedAt: true,
-      keyDeletedAt: true },
+      keyDeletedAt: true, auditLogId: true },
   });
 }
 

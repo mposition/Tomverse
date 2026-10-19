@@ -5,8 +5,10 @@ import test from "node:test";
 
 import {
   amuxSessionIntakeWritePermitted,
+  inspectAmuxIdeaSessionInput,
   inspectAmuxIdeaSessionSource,
   inspectAmuxIdeaSessionSubmission,
+  inspectSealedAmuxIdeaSessionInput,
   sameAmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 
@@ -65,6 +67,9 @@ test("session input does not inherit the owner parser's byte or item caps", () =
   assert.equal(inspected.counts.repositoryCount, 9);
   assert.equal(inspected.counts.pullRequestCount, 17);
   assert.equal(inspected.input.idea, longIdea);
+  assert.deepEqual(inspectAmuxIdeaSessionInput(idea({ idea: longIdea,
+    repositories: manyRepositories, pullRequests: manyPullRequests })),
+  { ok: true, input: inspected.input, counts: inspected.counts });
 });
 
 test("session email refusal preserves its existing address boundaries", () => {
@@ -84,6 +89,15 @@ test("session email refusal preserves its existing address boundaries", () => {
   ]) {
     assert.equal(inspectAmuxIdeaSessionSubmission(submission(idea({ idea: value }))).ok, true);
   }
+});
+
+test("a sealed v1 body retains its intake-time content decision", () => {
+  const stored = idea({ idea: "person@example.test" });
+  assert.deepEqual(inspectAmuxIdeaSessionInput(stored),
+    { ok: false, code: "content_refused" });
+  assert.equal(inspectSealedAmuxIdeaSessionInput(stored).ok, true);
+  assert.equal(inspectSealedAmuxIdeaSessionInput({ ...stored,
+    repositories: ["not-a-repository"] }).ok, false);
 });
 
 test("session parser scans multi-megabyte non-email content without quadratic slowdown", () => {

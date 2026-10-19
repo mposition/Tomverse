@@ -251,6 +251,15 @@ test("a fact from a host a person approved is kept, and only from that host", ()
             sourceUrl: "https://blog.poe.com/launch",
             checkedAt: "2026-10-16T00:00:00.000Z",
           },
+          // Another page on the approved host: A3 found it by a search limited
+          // to the official hosts, so it is a source too.
+          {
+            competitorId: "poe",
+            factType: "launch_date",
+            value: { kind: "date", value: "2026-10-03" },
+            sourceUrl: "https://poe.com/pricing",
+            checkedAt: "2026-10-16T00:00:00.000Z",
+          },
         ],
         unrepresentableFactCount: 0,
       },
@@ -262,7 +271,7 @@ test("a fact from a host a person approved is kept, and only from that host", ()
     assert.equal(result.droppedFactCount, 1);
     const row = await prisma.marketingReport.findUniqueOrThrow({ where: { id: result.reportRowId } });
     const payload = row.payload as { facts: Array<{ sourceUrl: string }>; unrepresentableFactCount: number };
-    assert.deepEqual(payload.facts.map((fact) => fact.sourceUrl), ["https://poe.com/blog/launch"]);
+    assert.deepEqual(payload.facts.map((fact) => fact.sourceUrl), ["https://poe.com/blog/launch", "https://poe.com/pricing"]);
     assert.equal(payload.unrepresentableFactCount, 1);
   }));
 

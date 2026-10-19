@@ -30,15 +30,15 @@ export function QaReleaseMergeLaneSection({ lane, canWrite }: { lane: Lane; canW
   const attempt = lane.openAttempt;
   return (
     <div className="flex flex-col gap-2" data-testid="qa-release-merge-lane">
-      <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.laneTitle}</h2>
-      <p className={lane.latched ? "text-sm text-amber-800 dark:text-amber-300" : "text-sm text-zinc-600 dark:text-zinc-400"}>
+      <h2 className="text-base font-semibold text-zinc-100">{m.laneTitle}</h2>
+      <p className={lane.latched ? "text-sm text-amber-300" : "text-sm text-zinc-400"}>
         {lane.latched ? m.laneLatched : m.laneFree}
       </p>
       {lane.latched && lane.latch ? (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
-          <dt className="text-zinc-600 dark:text-zinc-400">{m.latchReason}</dt>
+          <dt className="text-zinc-400">{m.latchReason}</dt>
           <dd className="font-mono text-xs" data-testid="qa-release-merge-lane-reason">{lane.latch.reason ?? m.none}</dd>
-          <dt className="text-zinc-600 dark:text-zinc-400">{m.latchAt}</dt>
+          <dt className="text-zinc-400">{m.latchAt}</dt>
           <dd>{lane.latch.createdAt}</dd>
         </dl>
       ) : null}
@@ -46,15 +46,15 @@ export function QaReleaseMergeLaneSection({ lane, canWrite }: { lane: Lane; canW
           and it is what the latch alert sends a person here to read. */}
       {lane.latched && lane.latchAttempt && lane.latchAttempt.id !== attempt?.id ? (
         <>
-          <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{m.latchAttempt}</h3>
+          <h3 className="text-sm font-medium text-zinc-100">{m.latchAttempt}</h3>
           <AttemptDetails attempt={lane.latchAttempt} testId="qa-release-merge-lane-latch-attempt" />
         </>
       ) : null}
-      <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{m.openAttempt}</h3>
+      <h3 className="text-sm font-medium text-zinc-100">{m.openAttempt}</h3>
       {attempt ? (
         <AttemptDetails attempt={attempt} testId="qa-release-merge-lane-attempt" />
       ) : (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.noOpenAttempt}</p>
+        <p className="text-sm text-zinc-400">{m.noOpenAttempt}</p>
       )}
       {/* Keyed by the latch event: after a release and refresh the form starts again. */}
       {canWrite && lane.latched ? <ReleaseForm key={lane.latch?.sequence ?? 0} lane={lane} /> : null}
@@ -66,22 +66,22 @@ function AttemptDetails({ attempt, testId }: { attempt: QaReleaseConsoleAttempt;
   const m = useAdminMessages(adminAgentDigestsMessages);
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm" data-testid={testId}>
-      <dt className="text-zinc-600 dark:text-zinc-400">{m.attemptId}</dt>
+      <dt className="text-zinc-400">{m.attemptId}</dt>
       <dd className="break-all font-mono text-xs">{attempt.id}</dd>
-      <dt className="text-zinc-600 dark:text-zinc-400">{m.attemptState}</dt>
+      <dt className="text-zinc-400">{m.attemptState}</dt>
       <dd className="font-mono text-xs">
         {attempt.state}
         {attempt.outcome ? ` (${attempt.outcome})` : ""}
       </dd>
-      <dt className="text-zinc-600 dark:text-zinc-400">{m.pullRequest}</dt>
+      <dt className="text-zinc-400">{m.pullRequest}</dt>
       <dd>#{attempt.pullRequestNumber}</dd>
-      <dt className="text-zinc-600 dark:text-zinc-400">{m.headSha}</dt>
+      <dt className="text-zinc-400">{m.headSha}</dt>
       <dd className="break-all font-mono text-xs">{attempt.headSha}</dd>
-      <dt className="text-zinc-600 dark:text-zinc-400">{m.mergeCommit}</dt>
+      <dt className="text-zinc-400">{m.mergeCommit}</dt>
       <dd className="break-all font-mono text-xs">{attempt.mergeCommitSha ?? m.none}</dd>
-      <dt className="text-zinc-600 dark:text-zinc-400">{m.issuedAt}</dt>
+      <dt className="text-zinc-400">{m.issuedAt}</dt>
       <dd>{attempt.issuedAt}</dd>
-      <dt className="text-zinc-600 dark:text-zinc-400">{m.deployObserved}</dt>
+      <dt className="text-zinc-400">{m.deployObserved}</dt>
       <dd>
         {attempt.deployObservation === null ? (
           m.deployNotObserved
@@ -170,15 +170,15 @@ function ReleaseForm({ lane }: { lane: Lane }) {
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+      className="flex flex-col gap-3 rounded-lg border p-3 border-zinc-800"
       data-testid="qa-release-merge-lane-release-form"
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
       }}
     >
-      <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.releaseTitle}</h3>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.releaseNote}</p>
+      <h3 className="text-sm font-semibold text-zinc-100">{m.releaseTitle}</h3>
+      <p className="text-sm text-zinc-400">{m.releaseNote}</p>
       <fieldset className="flex flex-col gap-1">
         {choices.map((value) => (
           <label key={value} className="flex min-h-11 items-center gap-2 text-sm">
@@ -198,7 +198,7 @@ function ReleaseForm({ lane }: { lane: Lane }) {
         <label className="flex flex-col gap-1 text-sm">
           {m.mergeCommit}
           <input
-            className="rounded border border-zinc-300 px-2 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+            className="rounded border px-2 py-2 font-mono text-xs border-zinc-700 bg-zinc-900"
             value={mergeCommit}
             onChange={(event) => setMergeCommit(event.target.value)}
             placeholder={m.mergeCommitHint}
@@ -210,7 +210,7 @@ function ReleaseForm({ lane }: { lane: Lane }) {
         </label>
       ) : null}
       {reauthenticationRequired ? (
-        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-300">
           {m.reauthenticationRequiredRelease}
           <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
             {m.signInAgain}
@@ -220,7 +220,7 @@ function ReleaseForm({ lane }: { lane: Lane }) {
       {notice ? (
         <p
           role="status"
-          className={notice.tone === "ok" ? "text-sm text-zinc-700 dark:text-zinc-300" : "text-sm text-red-700 dark:text-red-300"}
+          className={notice.tone === "ok" ? "text-sm text-zinc-300" : "text-sm text-red-300"}
         >
           {notice.text}
         </p>
@@ -228,7 +228,7 @@ function ReleaseForm({ lane }: { lane: Lane }) {
       <button
         type="submit"
         disabled={busy}
-        className="min-h-11 self-start rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+        className="min-h-11 self-start rounded-md px-4 text-sm font-medium disabled:opacity-60 bg-zinc-100 text-zinc-900"
         data-testid="qa-release-merge-lane-release"
       >
         {m.release}

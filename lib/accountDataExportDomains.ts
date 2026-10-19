@@ -245,6 +245,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "modelCatalogEntry",
+    publicName: "model_catalog_entry",
+    prismaModel: "ModelCatalogEntry",
+    state: "unverified",
+  },
+  {
+    domain: "modelCatalogPriceRevision",
+    publicName: "model_catalog_price_revision",
+    prismaModel: "ModelCatalogPriceRevision",
+    state: "unverified",
+  },
+  {
     domain: "providerBillingConfig",
     publicName: "provider_billing_config",
     prismaModel: "ProviderBillingConfig",
@@ -783,6 +795,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaSessionAnalysisResult",
+    publicName: "amux_idea_session_analysis_results",
+    prismaModel: "AmuxIdeaSessionAnalysisResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaSessionResultOrphanKeyRetirement",
+    publicName: "amux_idea_session_result_orphan_key_retirements",
+    prismaModel: "AmuxIdeaSessionResultOrphanKeyRetirement",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaTrackedCheckoutEvidence",
     publicName: "amux_idea_tracked_checkout_evidence",
     prismaModel: "AmuxIdeaTrackedCheckoutEvidence",
@@ -1045,6 +1069,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
   // a table that records something a person did almost always records what it
   // cost Tomverse, which idempotency key deduplicated it, or which digest
   // reconciles it. That is exactly why the state exists.
+  {
+    domain: "autoRouterDecision",
+    publicName: "auto_model_choices",
+    prismaModel: "AutoRouterDecision",
+    state: "included_filtered",
+    withheldReason:
+      "The user's message as Auto read it and the model chosen to answer it. The candidate list, the rule's choice, the router model, token counts and timings are Tomverse's routing internals.",
+  },
   {
     domain: "comparisonReview",
     publicName: "comparison_reviews",

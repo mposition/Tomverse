@@ -9,9 +9,12 @@ import {
 } from "@/lib/marketingLlmBudgetCore";
 import {
   MARKETING_LLM_CHAT_COMPLETIONS_URL,
+  MARKETING_LLM_RESPONSES_URL,
   marketingLlmBudgetHttpPort,
   marketingLlmRequestBody,
+  marketingLlmWebSearchRequestBody,
   readMarketingLlmProviderAnswer,
+  readMarketingLlmWebSearchAnswer,
   runMarketingLlmCall,
 } from "@/lib/marketingLlmClientCore";
 
@@ -201,15 +204,25 @@ test("a settle the ledger has already closed stops, keeping the answer it cannot
   assert.deepEqual(b.actions(), ["reserve", "dispatch", "settle"]);
 });
 
-test("an answer the ledger keeps as unknown is still the answer, with the ledger's state", async () => {
+test("an answer the ledger keeps as unknown is not returned: the caller stops on it", async () => {
   const b = budget({
     settle: { httpStatus: 200, body: { status: "ok", replay: false, callId: "call0000000000000000001", state: "unknown_retained", reason: "tier_mismatch" } },
   });
   const p = provider(() => jsonResponse(200, completion({ service_tier: "priority" })));
   const outcome = await run(b, p);
-  assert.equal(outcome.status, "answered");
+  assert.equal(outcome.status, "retained");
   assert.equal(outcome.ledgerState, "unknown_retained");
+  assert.equal("content" in outcome, false, "the unconfirmed answer is not handed back");
   assert.equal(b.calls[2].fields.reportedServiceTier, "priority");
+});
+
+test("a settle answer that names no state is not taken as settled", async () => {
+  const b = budget({
+    settle: { httpStatus: 200, body: { status: "ok", replay: false, callId: "call0000000000000000001" } },
+  });
+  const outcome = await run(b, provider(() => jsonResponse(200, completion())));
+  assert.equal(outcome.status, "retained");
+  assert.equal("content" in outcome, false);
 });
 
 test("the HTTP budget port signs each action the way the app's route verifies it", async () => {
@@ -264,6 +277,7 @@ test("a budget request that hangs is aborted into a lost answer, which stops the
 test("a provider answer is read only when every field the ledger needs is there", () => {
   assert.deepEqual(readMarketingLlmProviderAnswer(completion()), {
     content: "Three answers, side by side.",
+    citations: [],
     model: PIN.model,
     serviceTier: "default",
     inputTokens: 120,
@@ -279,4 +293,124 @@ test("a provider answer is read only when every field the ledger needs is there"
   ]) {
     assert.equal(readMarketingLlmProviderAnswer(broken), null);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Web search (A3): the Responses API with one domain-limited search tool.
+
+const SEARCH_PIN = { ...PIN, webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 };
+const searchAnswer = (overrides = {}) => ({
+  status: "completed",
+  model: PIN.model,
+  service_tier: "default",
+  usage: { input_tokens: 9_000, output_tokens: 400 },
+  output: [
+    {
+      type: "web_search_call",
+      id: "ws_1",
+      status: "completed",
+      action: {
+        type: "search",
+        sources: [
+          { type: "url", url: "https://claude.com/pricing?utm_source=chatgpt.com" },
+          { type: "url", url: "https://support.claude.com/plans" },
+          { type: "other", url: "https://ignored.example" },
+        ],
+      },
+    },
+    { type: "web_search_call", id: "ws_2", status: "completed", action: { type: "open_page", url: "https://claude.com/max" } },
+    {
+      type: "message",
+      content: [
+        {
+          type: "output_text",
+          text: '{"facts":[]}',
+          annotations: [
+            { type: "url_citation", url: "https://claude.com/pricing?utm_source=chatgpt.com", title: "Pricing" },
+            { type: "url_citation", url: "https://claude.com/pricing?utm_source=chatgpt.com", title: "Pricing" },
+          ],
+        },
+      ],
+    },
+  ],
+  ...overrides,
+});
+
+test("a web-search request is one domain-limited search tool, capped at the pin's search count", () => {
+  const body = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com", "support.claude.com"]);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "include",
+    "input",
+    "instructions",
+    "max_output_tokens",
+    "max_tool_calls",
+    "model",
+    "service_tier",
+    "store",
+    "stream",
+    "tools",
+  ]);
+  assert.equal(body.max_tool_calls, 3);
+  assert.deepEqual(body.include, ["web_search_call.action.sources"]);
+  assert.equal(body.store, false);
+  assert.deepEqual(body.tools, [
+    {
+      type: "web_search",
+      filters: { allowed_domains: ["claude.com", "support.claude.com"] },
+      search_context_size: "low",
+      user_location: { type: "approximate" },
+    },
+  ]);
+  assert.equal(body.instructions, MESSAGES[0].content);
+  assert.equal(body.input, MESSAGES[1].content);
+});
+
+test("a web-search answer is read with the URLs it cited or its searches returned, once each, or not at all", () => {
+  assert.deepEqual(readMarketingLlmWebSearchAnswer(searchAnswer()), {
+    content: '{"facts":[]}',
+    citations: [
+      "https://claude.com/pricing?utm_source=chatgpt.com",
+      "https://support.claude.com/plans",
+      "https://claude.com/max",
+    ],
+    model: PIN.model,
+    serviceTier: "default",
+    inputTokens: 9_000,
+    outputTokens: 400,
+  });
+  for (const broken of [
+    null,
+    searchAnswer({ status: "incomplete" }),
+    searchAnswer({ model: 3 }),
+    searchAnswer({ usage: { input_tokens: -1, output_tokens: 1 } }),
+    searchAnswer({ output: [] }),
+  ]) {
+    assert.equal(readMarketingLlmWebSearchAnswer(broken), null, JSON.stringify(broken));
+  }
+});
+
+test("a web-search call reserves under its own profile, calls the Responses API once and returns the citations", async () => {
+  const b = budget();
+  const p = provider(() => jsonResponse(200, searchAnswer()));
+  const outcome = await runMarketingLlmCall(
+    { pin: SEARCH_PIN, generatorRunId: "run-1", purpose: "market_intel", messages: MESSAGES, webSearch: { allowedDomains: ["claude.com"] } },
+    { budget: b.port, transport: p.transport, apiKey: "sk-fixture", newId: ids },
+  );
+  assert.equal(outcome.status, "answered");
+  assert.deepEqual(outcome.citations, [
+    "https://claude.com/pricing?utm_source=chatgpt.com",
+    "https://support.claude.com/plans",
+    "https://claude.com/max",
+  ]);
+  assert.deepEqual(b.actions(), ["reserve", "dispatch", "settle"]);
+  assert.equal(b.calls[0].fields.adapterProfile, "web-search-v1");
+  assert.equal(
+    b.calls[1].fields.adapterConfigDigest,
+    marketingLlmAdapterConfigDigest(
+      marketingLlmConfigSnapshot({ pin: SEARCH_PIN, adapterVersion: MARKETING_LLM_ADAPTER_VERSION, adapterProfile: "web-search-v1" }),
+    ),
+  );
+  assert.equal(p.requests.length, 1);
+  assert.equal(p.requests[0].url, MARKETING_LLM_RESPONSES_URL);
+  assert.equal(JSON.parse(p.requests[0].init.body).max_tool_calls, 3);
 });

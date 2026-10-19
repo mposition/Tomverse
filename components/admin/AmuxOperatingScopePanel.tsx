@@ -129,7 +129,7 @@ export function AmuxOperatingScopePanel({ operatorId }: { operatorId: string }) 
   };
 
   return <section aria-labelledby="amux-operating-scope-title"
-    className="space-y-3 rounded-lg border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+    className="space-y-3 rounded-lg border p-4 text-sm border-zinc-700">
     <h4 id="amux-operating-scope-title" className="font-semibold">{m.title}</h4>
     <p>{m.hint}</p>
     {current?.state === "current" ? <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
@@ -143,7 +143,7 @@ export function AmuxOperatingScopePanel({ operatorId }: { operatorId: string }) 
         aria-describedby="amux-operating-scope-repositories-hint amux-operating-scope-error"
         aria-invalid={repositoriesInvalid}
         onChange={(event) => { setRepositories(event.target.value); setConfirmed(false); setNotice(null); }}
-        className="rounded-lg border border-zinc-400 px-3 py-2 font-mono dark:border-zinc-600 dark:bg-zinc-900" />
+        className="rounded-lg border px-3 py-2 font-mono border-zinc-600 bg-zinc-900" />
     </label>
     <p id="amux-operating-scope-repositories-hint">{m.repositoriesHint}</p>
     <p id="amux-operating-scope-error" role="alert">{repositoriesInvalid && repositories.trim() ? m.invalid : null}</p>
@@ -152,7 +152,7 @@ export function AmuxOperatingScopePanel({ operatorId }: { operatorId: string }) 
       <label className="flex flex-col gap-1">{m.model}
         <select value={modelKey} disabled={locked || !models?.length}
           onChange={(event) => { setModelKey(event.target.value); setEffort(""); setConfirmed(false); }}
-          className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
+          className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
           <option value="">—</option>
           {models?.map((model) => <option key={model.approvalId} value={`${model.provider}:${model.modelId}`}>
             {model.modelId}</option>)}
@@ -161,7 +161,7 @@ export function AmuxOperatingScopePanel({ operatorId }: { operatorId: string }) 
       <label className="flex flex-col gap-1">{m.effort}
         <select value={effort} disabled={locked || !chosen}
           onChange={(event) => { setEffort(event.target.value); setConfirmed(false); }}
-          className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
+          className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
           <option value="">—</option>
           {chosen?.allowedEfforts.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>

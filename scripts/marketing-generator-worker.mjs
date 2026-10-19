@@ -1,9 +1,9 @@
 // The marketing generator's worker: one run, then exit (S3 plan, S3e3, S3f).
 //
 // Started by scripts/marketing-generator-service.mjs, which gives it the run
-// id and the deadline and kills it at that deadline. A3 runs first: it reads
-// the pages a person approved for each tracked competitor and reports the
-// facts it finds. A5 then reads the app's context -- which now holds those
+// id and the deadline and kills it at that deadline. A3 runs first: one web
+// search per approved competitor, limited to its official domains, and the
+// facts it finds reported. A5 then reads the app's context -- which now holds those
 // facts -- asks the model once per approval-mode account through the LLM cost
 // ledger, and submits what survives the reading to the draft intake, where
 // the Guard judges it again. It holds the LLM key and the generator's secret
@@ -17,12 +17,12 @@
 
 import { randomUUID } from "node:crypto";
 
-import { MARKETING_LLM_PRICE_PINS } from "../lib/marketingLlmBudgetCore.ts";
+import { marketingLlmPinProblems } from "../lib/marketingLlmBudgetCore.ts";
 import { marketingLlmBudgetHttpPort, runMarketingLlmCall } from "../lib/marketingLlmClientCore.ts";
-import { fetchMarketingA3Page } from "../lib/marketingA3Core.ts";
 import { runMarketingA3Cycle } from "../lib/marketingA3CycleCore.ts";
 import {
   marketingGeneratorAppPorts,
+  marketingGeneratorPinForContext,
   marketingGeneratorWorkerConfig,
   runMarketingGeneratorCycle,
 } from "../lib/marketingGeneratorCycleCore.ts";
@@ -46,13 +46,13 @@ if (!runId || !deadlineAt) {
   process.exit(1);
 }
 
-const configured = marketingGeneratorWorkerConfig(process.env, MARKETING_LLM_PRICE_PINS);
+const configured = marketingGeneratorWorkerConfig(process.env);
 if (!configured.ok) {
-  // Not an error in the run: a worker without a pin or a key has nothing to do.
+  // Not an error in the run: a worker without its variables has nothing to do.
   console.error(`Marketing generator will not run: ${configured.reason}.`);
   process.exit(1);
 }
-const { appUrl, secret, apiKey, pin } = configured.config;
+const { appUrl, secret, apiKey } = configured.config;
 
 // Aborted a little before the deadline, so the run can say it ran out of time
 // rather than vanish when the supervisor's SIGKILL lands.
@@ -68,6 +68,17 @@ const budget = marketingLlmBudgetHttpPort({
 });
 
 const app = marketingGeneratorAppPorts({ appUrl, secret, generatorRunId: runId, fetch, signal: controller.signal });
+
+// The model is the operator's Admin Console setting, read from the context;
+// the ledger refuses any other, so a worker started before a change spends
+// nothing on the old model.
+const chosen = marketingGeneratorPinForContext(await app.readContext(), marketingLlmPinProblems);
+if (!chosen.ok) {
+  console.error(`Marketing generator will not run: ${chosen.reason}.`);
+  clearTimeout(timer);
+  process.exit(1);
+}
+const pin = chosen.pin;
 
 try {
   // A3's share is enforced, not just checked between competitors: every
@@ -92,12 +103,10 @@ try {
     { generatorRunId: runId, deadlineAt: a3DeadlineAt },
     {
       readContext: a3App.readContext,
-      // A page gets no credential and no header of the app's: the plain fetch,
-      // bounded by fetchMarketingA3Page and by A3's share.
-      fetchPage: (url, hosts) => fetchMarketingA3Page({ url, hosts }, { fetch, signal: a3Signal }),
-      callLlm: (messages, requestKey) =>
+      // One web search per competitor, limited to its official domains.
+      callLlm: (messages, requestKey, allowedDomains) =>
         runMarketingLlmCall(
-          { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey },
+          { pin, generatorRunId: runId, purpose: "market_intel", messages, requestKey, webSearch: { allowedDomains } },
           {
             budget: a3Budget,
             transport: fetch,

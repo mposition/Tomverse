@@ -23,9 +23,9 @@ export const amuxIdeaHref = (requestId: string) =>
 /** null: the read failed; "reauthenticate": the owner's sign-in is not recent. */
 export type AmuxIdeaProgressRows = AmuxIdeaProgressRow[] | null | "reauthenticate";
 
-// The Admin console is always dark (AdminConsoleShell), whatever the product
-// theme is, so these classes are dark-only: a theme variant would follow the
-// product theme and draw light surfaces under the console's light text.
+// The console is written in dark classes only; its Light theme remaps the
+// palette (docs/ui-contracts/admin-console-ia.md, "The console theme"). A dark
+// variant prefix would follow the product theme instead.
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300";
 const BUTTON_PRIMARY = `inline-flex min-h-11 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 ${FOCUS}`;
 const BUTTON_SECONDARY = `inline-flex min-h-11 items-center rounded-lg border border-zinc-600 px-4 text-sm font-medium text-zinc-100 hover:bg-zinc-800 ${FOCUS}`;
@@ -65,6 +65,7 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
     continuation: [m.continuationApproval, m.continuationHint],
     owner_input: [m.ownerInput, m.ownerInputHint],
     plan_approval: [m.planApproval, m.planApprovalHint],
+    session_review: [m.sessionReview, m.sessionReviewHint],
   };
   const reviews = rows.flatMap((row) => row.reviewPullRequests.map((pr) => ({ row, pr })));
   const waiting = decisions.length + reviews.length;

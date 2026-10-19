@@ -276,10 +276,13 @@ test("the triggers use the core's period, retention, total and actions, and the 
   for (const name of ["amux_decision_maker_body_guard", "amux_decision_maker_retention_event_guard"]) {
     assert.ok(functionBody(sql, name).includes("'tomverse-amux-decision-maker-request:' ||"), name);
   }
-  // The closing trigger fires on exactly the router's closing kinds. Stage S1e recreated it with a
-  // judgment's three as well (20261008130100_amux_decision_maker_judgment_delivery,
-  // tests/amuxDecisionMakerJudgment.test.mjs).
-  assert.match(sql, new RegExp(`WHEN \\(NEW\\."kind" IN \\(${DM_ROUTER_CLOSING_EVENT_KINDS.map((kind) => `'${kind}'`).join(", ")}\\)\\)`));
+  // The closing trigger fires on exactly the router's closing kinds of stage S1d. Stage S1e recreated
+  // it with a judgment's three as well (20261008130100_amux_decision_maker_judgment_delivery), and
+  // stage S2-2b4 with a direct answer's close, the router's third
+  // (20261018120000_amux_decision_maker_delivery_gaps; both in tests/amuxDecisionMakerJudgment.test.mjs).
+  const s1dRouterClosing = DM_ROUTER_CLOSING_EVENT_KINDS.filter((kind) => kind !== "direct_answer_close");
+  assert.deepEqual(s1dRouterClosing, ["assign_discarded", "stale_close"]);
+  assert.match(sql, new RegExp(`WHEN \\(NEW\\."kind" IN \\(${s1dRouterClosing.map((kind) => `'${kind}'`).join(", ")}\\)\\)`));
   assert.match(sql, /AFTER INSERT ON "AmuxDecisionMakerRequestEvent"/);
 });
 
@@ -735,6 +738,15 @@ const OPTIONS = [
   { id: "b", label: "Model id and locale" },
 ];
 const OPTION_SET = dmOptionSetDigest(dmRequestDigestKey(KEY, REQUEST_ID), OPTIONS);
+/**
+ * The same options as the card carries them since stage S2-2b1, with each
+ * one's effect class and paths. The option set digest reads ids and labels
+ * only, so it is OPTION_SET for these too, and a result still names OPTIONS.
+ */
+const CARD_OPTIONS = [
+  { ...OPTIONS[0], effect: "choice_only", paths: [] },
+  { ...OPTIONS[1], effect: "branch_code_change", paths: ["lib/cache.ts"] },
+];
 
 /** The S1c state read's row, as tests/amuxDecisionMakerRequest.test.mjs shapes it. */
 const requestRow = (overrides = {}) => ({
@@ -864,9 +876,18 @@ const recordingTx = ({
       if (sql.includes('"holdSets"')) return Promise.resolve([retentionValues]);
       if (sql.includes('"heldRequests"')) return Promise.resolve([key]);
       if (sql.includes('AS "open"')) return Promise.resolve([{ open }]);
-      // The ledger's switch read carries each scope's newest actor and clock (2026-10-17): a person's, a minute ago.
+      // The ledger's switch read carries each scope's newest cleanup latch's report (stage S2-2a3) and §8
+      // count boundary (stage S2-2a4): none of either.
       if (sql.includes("SELECT DISTINCT ON")) {
-        return Promise.resolve(switches.map((row) => ({ actorKind: "human", createdAtEpochMs: BigInt(NOW - 60_000), newestCleanupLatchEventId: null, ...row })));
+        return Promise.resolve(
+          switches.map((row) => ({
+            newestCleanupLatchEventId: null,
+            newestValidationLatchSequence: null,
+            validationReleaseSequence: null,
+            validationReleasedAtEpochMs: null,
+            ...row,
+          })),
+        );
       }
       if (sql.includes('ORDER BY re."retentionUntil"')) return Promise.resolve(candidates);
       if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve([]);
@@ -953,7 +974,7 @@ const ROUTED_CARD = Object.freeze({
   tags: ["needs:you"],
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale or only the model id?",
-  options: OPTIONS,
+  options: CARD_OPTIONS,
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass the current tests.",
   contextPaths: ["lib/cache.ts"],
@@ -1326,7 +1347,8 @@ test("the routing and the stored text read one copy of the card: a change to the
     const { tx, sent } = recordingTx();
     const pending = recordDecisionMakerRequestWithCardText(tx, { binding: ROUTING_BINDING, card, keyRing: RING });
     card.question = "Deploy the cache to production?";
-    card.options.push({ id: "c", label: "Something else" });
+    card.options.push({ id: "c", label: "Something else", effect: "choice_only", paths: [] });
+    card.options[1].paths.push("lib/other.ts");
     const result = await pending;
     assert.equal(result.route, "dm_proposal");
     assert.equal(cardInsertOf(sent).values[CARD_INSERT.text], dmCardText(ROUTED_CARD));
@@ -1381,12 +1403,19 @@ test("Admin reads a request's card text back as the card it was routed with, in 
     assert.equal(await readDecisionMakerCardText(tx, REQUEST_ID), null);
   }
   // A text the serializer did not write, or a digest the table could not hold, is never shown.
+  const v1Layout = JSON.parse(text);
+  v1Layout.format = "amux-dm-card-text-v1";
+  v1Layout.options = v1Layout.options.map(({ id, label }) => ({ id, label }));
   for (const tampered of [
     { ...row, text: JSON.stringify(JSON.parse(text), null, 1) },
-    { ...row, text: text.replace("amux-dm-card-text-v1", "amux-dm-card-text-v0") },
+    { ...row, text: text.replace(/"format":"amux-dm-card-text-v\d+"/, '"format":"amux-dm-card-text-v0"') },
+    // Stage S2-2b1's format v2 does not read the v1 layout, whose options had no class or paths.
+    { ...row, text: JSON.stringify(v1Layout) },
     { ...row, text: "Pick a cache key layout" },
     { ...row, digest: "C".repeat(64) },
   ]) {
+    // A replace that matched nothing would leave the stored row itself, which proves nothing.
+    assert.ok(tampered.text !== text || tampered.digest !== row.digest);
     const { tx } = recordingTx({ cardTextRows: [tampered] });
     await assert.rejects(readDecisionMakerCardText(tx, REQUEST_ID), (error) => error instanceof DecisionMakerBodyWriteError && error.code === "state_unreadable");
   }

@@ -14,6 +14,12 @@ const detail = (card=a) => ({ ...card, revision:3, body:JSON.stringify({
   brief:"Approved fixture brief", feedback:null, outcomeWriteEnabled:false, result:null,
   dependencies:[],dependents:[],attempts:[],escalations:[],score:null,usage:[],reviews:[],publications:[] });
 
+/** A console palette colour as the browser resolves it, so the board is checked against the theme, not a literal. */
+const palette = (page:Page, name:string) => page.evaluate((variable) => {
+  const probe = document.createElement("div"); probe.style.color = `var(${variable})`;
+  document.body.appendChild(probe); const value = getComputedStyle(probe).color; probe.remove(); return value;
+}, name);
+
 async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUnknown?:boolean;
   moveRefused?:boolean; moveHalted?:boolean; moveUnavailable?:boolean; readOnly?:boolean;
   moveDelay?:boolean; moveNoReceipt?:boolean }={}) {
@@ -283,12 +289,12 @@ test("Korean board and detail render with the console theme",async({page})=>{
   await setup(page);
   await page.goto("/e2e/admin-console-fixture?view=amux&locale=ko");
   await expect(page.getByRole("region",{name:"AMUX 대기열"})).toBeVisible();
-  await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("background-color","rgb(11, 15, 22)");
+  await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("background-color",await palette(page,"--color-zinc-950"));
   await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("color-scheme","dark");
   await page.screenshot({path:test.info().outputPath("ko-board-desktop.png")});
   await page.getByRole("button",{name:"qa-task-104",exact:true}).click();
   await expect(page.getByRole("dialog").getByRole("tab",{name:"개요",exact:true})).toBeVisible();
-  await expect(page.getByRole("dialog")).toHaveCSS("background-color","rgb(23, 30, 42)");
+  await expect(page.getByRole("dialog")).toHaveCSS("background-color",await palette(page,"--color-zinc-900"));
   await expect(page.getByRole("dialog")).toHaveCSS("color-scheme","dark");
   await page.getByRole("tab",{name:"개요",exact:true}).focus();
   await page.keyboard.press("ArrowRight");
@@ -301,7 +307,7 @@ test("Korean board and detail render with the console theme",async({page})=>{
 test("hierarchy metadata stays readable in the console's own dark theme",async({page})=>{
   await setup(page);
   await page.getByRole("button",{name:"Hierarchy",exact:true}).click();
-  await expect(page.getByText(/backlog · impl · standard/)).toHaveCSS("color","rgb(162, 174, 192)");
+  await expect(page.getByText(/backlog · impl · standard/)).toHaveCSS("color",await palette(page,"--color-zinc-400"));
   // docs/policy/amux-card-display-key.md decision 5: tree entries name the number, Task ID beside it.
   await expect(page.getByTestId("amux-tree-card-label")).toHaveText("AMUX-GITHUB-007 (Task ID: qa-task-105)");
 });

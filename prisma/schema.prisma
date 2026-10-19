@@ -93,6 +93,7 @@ model User {
   memoryItems                          MemoryItem[]
   memoryExtractionRuns                 MemoryExtractionRun[]
   routingRuns                          RoutingRun[]
+  autoRouterDecisions                  AutoRouterDecision[]
   memorySettings                       UserMemorySettings?
   accountDataExportRequests            AccountDataExportRequest[]
   assistantProfiles                    AssistantProfile[]
@@ -389,6 +390,7 @@ model Conversation {
 
   messages              Message[]
   routingRuns           RoutingRun[]
+  autoRouterDecisions   AutoRouterDecision[]
   messageArtifacts      MessageArtifact[]
   messageAttachments    MessageAttachment[]
   composerDrafts        ChatComposerDraft[]
@@ -1221,6 +1223,138 @@ model PromptRefinerProductAttempt {
   @@index([state, createdAt])
 }
 
+/// One provider-free optimizer validation cycle. This metadata ledger grants
+/// no paid execution, external dispatch, promotion or product-runtime authority.
+model ChatUnifiedOptimizerCycle {
+  id                         String    @id @db.Uuid
+  ledgerVersion              String
+  policyVersion              Int
+  purpose                    String
+  registrationRequestId      String    @unique @db.Uuid
+  registrationDigest         String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  promotionAuthorized        Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  candidate ChatUnifiedOptimizerCandidate?
+  runs      ChatUnifiedOptimizerRun[]
+  evidence  ChatUnifiedOptimizerEvidence[]
+
+  @@index([state, createdAt])
+}
+
+/// Frozen candidate identity only. Candidate source, examples and hidden
+/// evaluation material never enter this table.
+model ChatUnifiedOptimizerCandidate {
+  id                   String   @id @db.Uuid
+  cycleId              String   @unique @db.Uuid
+  candidateVersion     String
+  bundleVersion        String
+  candidateDigest      String
+  bundleDigest         String   @unique
+  controlsDigest       String
+  schemaVersion        String
+  promptVersion        String
+  stageCandidateDigest String
+  adapterConfigDigest  String
+  pricePinDigest       String
+  sourceCommitSha      String
+  sourceRepositoryId   BigInt?
+  sourceBlobSha        String?
+  sourceSha256         String?
+  runtimeAuthorized    Boolean  @default(false)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  cycle    ChatUnifiedOptimizerCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence ChatUnifiedOptimizerEvidence[]
+
+  @@index([candidateDigest])
+}
+
+/// The first provider-free validation run in a cycle. Three independent paid
+/// evaluation runs remain a later admission contract; this row does not waive it.
+model ChatUnifiedOptimizerRun {
+  id                         String    @id @db.Uuid
+  cycleId                    String    @db.Uuid
+  ordinal                    Int
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  admissionAuditLogId        String    @unique
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalAt                 DateTime? @db.Timestamptz(3)
+
+  cycle          ChatUnifiedOptimizerCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  admissionAudit AdminAuditLog                  @relation("ChatUnifiedOptimizerRunAdmissionAudit", fields: [admissionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  jobs           ChatUnifiedOptimizerRoleJob[]
+  evidence       ChatUnifiedOptimizerEvidence[]
+
+  @@unique([cycleId, ordinal])
+  @@index([state, createdAt])
+}
+
+/// One closed optimizer role job. A claim is single-use and carries no vendor
+/// or paid-dispatch authority. There is no lease/requeue transition in v1.
+model ChatUnifiedOptimizerRoleJob {
+  id                         String    @id @db.Uuid
+  runId                      String    @db.Uuid
+  role                       String
+  purpose                    String
+  state                      String
+  externalDispatchAuthorized Boolean   @default(false)
+  paidAuthorized             Boolean   @default(false)
+  deadlineAt                 DateTime  @db.Timestamptz(3)
+  claimRequestId             String?   @unique @db.Uuid
+  claimRequestDigest         String?
+  claimToken                 String?   @unique @db.Uuid
+  claimAuditLogId            String?   @unique
+  claimedAt                  DateTime? @db.Timestamptz(3)
+  terminalRequestId          String?   @unique @db.Uuid
+  terminalRequestDigest      String?
+  terminalOutcome            String?
+  terminalAuditLogId         String?   @unique
+  terminalAt                 DateTime? @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @db.Timestamptz(3)
+
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit    AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog?                @relation("ChatUnifiedOptimizerRoleTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence      ChatUnifiedOptimizerEvidence?
+
+  @@unique([runId, role])
+  @@index([state, createdAt])
+}
+
+/// Content-free terminal evidence identity for one known role-job outcome.
+/// The evidence body and any provider prose live outside this ledger.
+model ChatUnifiedOptimizerEvidence {
+  id                 String   @id @db.Uuid
+  jobId              String   @unique @db.Uuid
+  runId              String   @db.Uuid
+  cycleId            String   @db.Uuid
+  candidateId        String   @db.Uuid
+  outcome            String
+  evidenceRef        String
+  payloadDigest      String
+  terminalAuditLogId String   @unique
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  job           ChatUnifiedOptimizerRoleJob   @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run           ChatUnifiedOptimizerRun       @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cycle         ChatUnifiedOptimizerCycle     @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  candidate     ChatUnifiedOptimizerCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  terminalAudit AdminAuditLog                 @relation("ChatUnifiedOptimizerEvidenceTerminalAudit", fields: [terminalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([cycleId, createdAt])
+  @@index([runId, createdAt])
+}
+
 /// Content-free immutable product execution fact. It deliberately has no
 /// user, conversation, session, attachment, prompt or digest column.
 model PromptRefinerProductExecutionReceipt {
@@ -1836,7 +1970,7 @@ model ImageGeneration {
   // so the two can never settle or refund the same generation twice.
   // Transitions are defined in lib/imageGenerationStateCore.ts.
   status              String  @default("pending")
-  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled
+  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled | model_profile_changed
   publicErrorCode     String?
   internalErrorDetail String?
   providerRequestId   String?
@@ -2445,6 +2579,9 @@ model AdminAuditLog {
   amuxIdeaSessionAnalysisReservations AmuxIdeaSessionAnalysisReservation[] @relation("AmuxIdeaSessionAnalysisReservationAudit")
   amuxV19SessionBudgetClaims AmuxIdeaSessionAnalysisBudgetClaim[] @relation("AmuxV19SessionBudgetClaimAudit")
   amuxV19SessionBudgetResolutions AmuxIdeaSessionAnalysisBudgetClaim[] @relation("AmuxV19SessionBudgetResolutionAudit")
+  amuxV19SessionAnalysisResults AmuxIdeaSessionAnalysisResult[] @relation("AmuxV19SessionAnalysisResultAudit")
+  amuxV19SessionResultOrphanClaims AmuxIdeaSessionResultOrphanKeyRetirement[] @relation("AmuxV19SessionResultOrphanClaimAudit")
+  amuxV19SessionResultOrphanDeletes AmuxIdeaSessionResultOrphanKeyRetirement[] @relation("AmuxV19SessionResultOrphanDeleteAudit")
   amuxIdeaSystemRegistrations AmuxIdeaSubmission[] @relation("AmuxIdeaSystemRegistrationAudit")
   amuxIdeaTrackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[] @relation("AmuxIdeaTrackedCheckoutAudit")
   amuxIdeaTrackedCheckoutReadManifest AmuxIdeaTrackedCheckoutReadManifest[] @relation("AmuxIdeaTrackedCheckoutReadManifestAudit")
@@ -2494,6 +2631,10 @@ model AdminAuditLog {
   marketingLlmCallCloses       MarketingLlmCall[] @relation("MarketingLlmCallCloseAudit")
   marketingLlmCallLegalHolds   MarketingLlmCall[] @relation("MarketingLlmCallLegalHoldAudit")
   promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
+  chatUnifiedOptimizerRunAdmissions ChatUnifiedOptimizerRun[] @relation("ChatUnifiedOptimizerRunAdmissionAudit")
+  chatUnifiedOptimizerRoleClaims ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleClaimAudit")
+  chatUnifiedOptimizerRoleTerminals ChatUnifiedOptimizerRoleJob[] @relation("ChatUnifiedOptimizerRoleTerminalAudit")
+  chatUnifiedOptimizerEvidenceTerminals ChatUnifiedOptimizerEvidence[] @relation("ChatUnifiedOptimizerEvidenceTerminalAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -4382,6 +4523,94 @@ model RoutingRun {
   /// ON DELETE SET NULL has to find the referencing rows -- without this,
   /// deleting one conversation scans every RoutingRun.
   @@index([conversationId])
+}
+
+/// One Auto turn where a model call chose the answering model
+/// (lib/autoLlmRouter.ts), kept as labelled data.
+///
+/// The point is the future, not the turn: once enough of these exist, a
+/// Tomverse-trained triage can replace the call. Each row is one training
+/// example -- the exact input the call saw, the candidates it chose among,
+/// what the deterministic rule would have picked, and what the call picked.
+/// `traceId` joins the turn's outcome (RoutingRun, feedback) later.
+///
+/// `routerInput` is the user's own message text, cut to the router's limit,
+/// so the row goes with the conversation and with the account: Cascade on both.
+model AutoRouterDecision {
+  id             String       @id @default(cuid())
+  createdAt      DateTime     @default(now())
+  /// AUTO_LLM_ROUTER_VERSION: the prompt and schema this row was produced under.
+  version        String
+  traceId        String
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// The message text exactly as sent to the router model.
+  routerInput    String
+  /// The start of the previous answer, as sent; null on a first turn.
+  routerContext  String?
+  /// The router's session memory as sent (topic, recent picks); null when none.
+  routerSession  Json?
+  /// The candidates exactly as sent: id, name, bestFor, tier, credits.
+  candidates     Json
+  /// Task kind from the deterministic profiler, as a feature beside the text.
+  taskKind       String
+  /// What the deterministic Router chose before the call.
+  ruleModelId    String
+  /// The model that made the call.
+  routerModelId  String
+  /// The call's answer. Null when it answered outside the set or failed.
+  pickedModelId  String?
+  /// The call's one-sentence reason for its pick, cut to 300 characters.
+  reason         String?
+  /// The self-contained restatement the call wrote when rewriting is on; the
+  /// final model read it instead of the message. Null when not asked or not kept.
+  rewrite        String?
+  /// The conversation topic the call wrote, read back by the next turn.
+  sessionTopic   String?
+  /// picked | invalid | error
+  outcome        String
+  latencyMs      Int
+  inputTokens    Int?
+  outputTokens   Int?
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([conversationId])
+  @@index([traceId])
+}
+
+/// One improvement cycle of the Auto LLM router's guidance
+/// (lib/autoRouterOptimizerCore.ts). Holds no user content: evaluated decisions
+/// are named by AutoRouterDecision id only, and who started or promoted a cycle
+/// is in AdminAuditLog (targetId = this id).
+model AutoRouterOptimizerCycle {
+  id                String    @id @default(cuid())
+  createdAt         DateTime  @default(now())
+  finishedAt        DateTime?
+  /// running | passed | failed | error
+  status            String
+  /// The cycle's gate failure or run error code; null when passed or running.
+  failure           String?
+  optimizerModelId  String
+  routerModelId     String
+  incumbentGuidance String
+  candidateGuidance String?
+  /// [{ decisionId, incumbentPick, candidatePick, verdict }]
+  cases             Json?
+  summary           Json?
+  /// Worst case reserved against the day and month caps when the cycle started.
+  reservedMicroUsd  Int
+  /// [{ provider, microUsd, dayStart, monthStart }] held in each provider budget until settled.
+  providerReservations Json?
+  /// person | system -- who started it; the daily automation may start one a day.
+  startedBy         String    @default("person")
+  spentMicroUsd     Int       @default(0)
+  promotedAt        DateTime?
+
+  @@index([createdAt])
+  @@index([status])
 }
 
 /// One dual-estimate observation for prompt-token estimator calibration (G1 in
@@ -8895,6 +9124,14 @@ model AmuxDecisionMakerRequestEvent {
   /// Set by the insert trigger on an assignment: its `createdAt` plus 30 minutes.
   resultDeadlineAt       DateTime? @db.Timestamptz(3)
   auditLogId             String    @unique
+  /// Since migration 20261017200000_amux_decision_maker_validation_count_boundary:
+  /// on a result, the sequence of its instance's newest switch event it was
+  /// admitted under (0 with none), read by the insert trigger under the shared
+  /// switch gate whatever the writer supplies; NULL on every other kind and on
+  /// a result written before that migration. After a release, the validation
+  /// count of docs/policy/amux-decision-maker.md §8 reads the results at or
+  /// above the release's sequence.
+  switchSequence         BigInt?
   /// Overwritten by the insert trigger from the database clock.
   createdAt              DateTime  @default(now()) @db.Timestamptz(3)
 
@@ -9093,18 +9330,22 @@ model AmuxDecisionMakerJudgment {
 /// kill switch for the decision, the router's or the person's audit of the
 /// same transaction naming the event, an increasing sequence, READ COMMITTED
 /// only, no update or delete. `actorUserId` is the operator's id on a
-/// resolution and intentionally has no User foreign key.
+/// resolution and intentionally has no User foreign key. Since stage S2-2b4
+/// (migration 20261018120000_amux_decision_maker_delivery_gaps) the outcome
+/// may also be `delivery_not_sent`, one of the three once, with
+/// `notSentReason` from a closed list exactly on that kind.
 model AmuxDecisionMakerDeliveryEvent {
-  id          String   @id
-  sequence    BigInt   @unique @default(autoincrement())
-  requestId   String
-  kind        String
-  outcome     String?
-  actorKind   String
-  actorUserId String?
-  auditLogId  String   @unique
+  id            String   @id
+  sequence      BigInt   @unique @default(autoincrement())
+  requestId     String
+  kind          String
+  outcome       String?
+  actorKind     String
+  actorUserId   String?
+  notSentReason String?
+  auditLogId    String   @unique
   /// Overwritten by the insert trigger from the database clock.
-  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
   request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -9450,6 +9691,51 @@ model ProductResearchObservation {
   @@index([submittedAt])
 }
 
+/// One improvement suggestion from the product-research scout (owner direction
+/// 2026-10-19, LLM-first): the model looked at a page, a generated file or the
+/// catalogue and named something worth changing. The operator dismisses it or
+/// sends it to AMUX as an idea. No user is linked to a row.
+model ProductResearchSuggestion {
+  id              String    @id @default(cuid())
+  createdAt       DateTime  @default(now())
+  /// page | file | catalogue (SCOUT_SUBJECT_KINDS)
+  kind            String
+  /// The page id (home.en), probe id (pdf.document) or catalogue.
+  subject         String
+  title           String
+  /// SUGGESTION_AREAS
+  area            String
+  /// SUGGESTION_SEVERITIES
+  severity        String
+  evidence        String
+  suggestion      String
+  /// SUGGESTION_STATUSES
+  status          String    @default("open")
+  statusChangedAt DateTime?
+  /// The AMUX idea made from this suggestion, once sent.
+  amuxIdeaId      String?
+  modelId         String?
+
+  @@index([status, createdAt])
+  @@index([subject, createdAt])
+}
+
+/// One Scout model call: written before the call, settled after it. The
+/// daily cap set in Admin counts these rows. Token counts only, no content.
+model ProductResearchScoutLlmCall {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  subject      String
+  modelId      String
+  /// SCOUT_LLM_CALL_OUTCOMES
+  outcome      String   @default("started")
+  inputTokens  Int?
+  outputTokens Int?
+  kept         Int?
+
+  @@index([createdAt])
+}
+
 /// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
 /// only by the Admin genesis action; never updated or deleted. The migration's
 /// trigger enforces the chain: one first genesis (shadow), every later one
@@ -9660,6 +9946,15 @@ model SupportTriageSuggestion {
   attemptCount    Int       @default(0)
   lane            String?
   keywordFlags    String[]  @default([])
+  /// Where the lane came from: keyword or llm (migration 20261019100000).
+  laneSource      String?
+  /// Every other report the LLM was shown, at most 30: an account deletion of
+  /// any of them deletes this row.
+  contextFeedbackIds String[] @default([])
+  /// Open reports the LLM named as duplicates, at most five, among those shown.
+  duplicateOfFeedbackIds String[] @default([])
+  /// A reply draft for the operator to review; never sent by itself.
+  replyDraft      String?
   ownerQueueState String    @default("not_queued")
   displayedAt     DateTime?
   createdAt       DateTime  @default(now())
@@ -9672,6 +9967,7 @@ model SupportTriageSuggestion {
   @@index([feedbackId, inputDigest])
   @@index([state, ownerQueueState, createdAt])
   @@index([leaseExpiresAt])
+  @@index([contextFeedbackIds], type: Gin)
 }
 
 /// Support-triage group (docs/policy/support-triage.md §5, §6): one
@@ -9813,6 +10109,8 @@ model AmuxIdeaSubmission {
   registrationRefusals AmuxIdeaRegistrationRefusal[]
   trackedCheckoutEvidence AmuxIdeaTrackedCheckoutEvidence[]
   trackedCheckoutReadManifests AmuxIdeaTrackedCheckoutReadManifest[]
+  sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
+  sessionResultOrphanKeyRetirements AmuxIdeaSessionResultOrphanKeyRetirement[]
   readManifestKeyIntents AmuxIdeaReadManifestKeyIntent[]
   sessionAnalysisReservation AmuxIdeaSessionAnalysisReservation?
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
@@ -9877,6 +10175,7 @@ model AmuxIdeaTrackedCheckoutEvidence {
   audit AdminAuditLog      @relation("AmuxIdeaTrackedCheckoutAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   readManifest AmuxIdeaTrackedCheckoutReadManifest?
   readManifestKeyIntent AmuxIdeaReadManifestKeyIntent?
+  sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
 
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
@@ -9902,6 +10201,7 @@ model AmuxIdeaTrackedCheckoutReadManifest {
   idea     AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [ideaId, referenceOrdinal], references: [ideaId, referenceOrdinal], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaTrackedCheckoutReadManifest_evidence_fkey")
   audit    AdminAuditLog @relation("AmuxIdeaTrackedCheckoutReadManifestAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
 
   @@unique([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
@@ -10143,6 +10443,8 @@ model AmuxIdeaAnalysisBudgetWindow {
   limitMicroUsd    BigInt
   spentMicroUsd    BigInt   @default(0)
   reservedMicroUsd BigInt   @default(0)
+  /// Observed v19 Max API-equivalent usage beyond the occupied headroom.
+  shadowOverrunMicroUsd BigInt @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -10203,6 +10505,8 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   inputMicroUsdPerMillion  Int
   outputMicroUsdPerMillion Int
   reservedMicroUsd         BigInt
+  /// bounded for historical claims; max_shadow has no per-call cost ceiling.
+  budgetMode               String   @default("bounded")
   settledMicroUsd          BigInt?
   inputTokens              Int?
   outputTokens             Int?
@@ -10217,9 +10521,60 @@ model AmuxIdeaSessionAnalysisBudgetClaim {
   priceVersion   AmuxIdeaAnalysisPriceVersion       @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_price_fkey")
   claimAudit     AdminAuditLog                      @relation("AmuxV19SessionBudgetClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_claim_audit_fkey")
   resolutionAudit AdminAuditLog?                    @relation("AmuxV19SessionBudgetResolutionAudit", fields: [resolutionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionAnalysisBudgetClaim_resolution_audit_fkey")
+  analysisResult AmuxIdeaSessionAnalysisResult?
+  resultOrphanKeyRetirement AmuxIdeaSessionResultOrphanKeyRetirement?
 
   @@index([namespace, monthStart, status], map: "AmuxIdeaSessionAnalysisBudgetClaim_window_status_idx")
   @@unique([reservationId, invocationOrdinal], map: "AmuxIdeaSessionAnalysisBudgetClaim_reservation_ordinal_key")
+}
+
+/// One Max CLI output bound to its budget claim and observed reference. The
+/// body is encrypted under a claim-specific external key and purged on the
+/// idea's absolute retention clock; only digest and aggregate usage remain.
+model AmuxIdeaSessionAnalysisResult {
+  claimId          String    @id @db.Uuid
+  reservationId    String    @db.Uuid
+  ideaId           String
+  referenceOrdinal Int
+  evidenceId       String    @db.Uuid
+  manifestId       String    @db.Uuid
+  ciphertext       Bytes?
+  keyId            String?
+  keyVersion       Int?
+  digest           String
+  digestKeyId      String
+  inputTokens      Int
+  outputTokens     Int
+  auditLogId       String    @unique
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+  bodyPurgedAt     DateTime? @db.Timestamptz(3)
+
+  claim    AmuxIdeaSessionAnalysisBudgetClaim @relation(fields: [claimId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea     AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence AmuxIdeaTrackedCheckoutEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  manifest AmuxIdeaTrackedCheckoutReadManifest @relation(fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  audit    AdminAuditLog @relation("AmuxV19SessionAnalysisResultAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, createdAt])
+  @@index([bodyPurgedAt, createdAt])
+}
+
+/// Durable terminal fence for a Max claim whose external result key may have
+/// been created before a failed or uncertain result transaction.
+model AmuxIdeaSessionResultOrphanKeyRetirement {
+  claimId             String    @id @db.Uuid
+  ideaId              String
+  claimedAt           DateTime  @db.Timestamptz(3)
+  claimAuditLogId     String    @unique
+  keyDeletedAt        DateTime? @db.Timestamptz(3)
+  keyDeleteAuditLogId String?   @unique(map: "AmuxIdeaSessionResultOrphanKeyRetiremen_keyDeleteAuditLogId_key")
+
+  claim AmuxIdeaSessionAnalysisBudgetClaim @relation(fields: [claimId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  claimAudit AdminAuditLog @relation("AmuxV19SessionResultOrphanClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  keyDeleteAudit AdminAuditLog? @relation("AmuxV19SessionResultOrphanDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaSessionResultOrphanKeyRetirement_keyDeleteAuditLogId_fk")
+
+  @@index([keyDeletedAt, claimedAt], map: "AmuxIdeaSessionResultOrphanKeyRetirement_pending_idx")
 }
 
 /// One worst-case reservation for one exact, owner-confirmed preview. Unknown
@@ -11177,4 +11532,59 @@ model AmuxWorkerCapabilityEvent {
 
   @@unique([workerName, revision])
   @@index([workerName, sequence])
+}
+
+/// Runtime overrides and additions for the image and coding model catalogues.
+/// A NULL column inherits the code profile (lib/imageModelRegistry.ts); a value
+/// is an operator override. Coding rows have no code profile, so `profile`
+/// carries the whole row. Prices live in ModelCatalogPriceRevision.
+model ModelCatalogEntry {
+  category       String
+  modelId        String
+  enabled        Boolean?
+  holdReason     String?
+  sortOrder      Int?
+  profile        Json?
+  draft          Json?
+  draftSource    String?
+  draftCreatedAt DateTime?
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@id([category, modelId])
+  @@index([category, enabled])
+}
+
+/// Append-only price history. The effective price of a model is its latest
+/// revision whose effectiveFrom has passed; nothing updates or deletes a row.
+model ModelCatalogPriceRevision {
+  id             String   @id @default(cuid())
+  category       String
+  modelId        String
+  pricingVersion String
+  prices         Json
+  verification   Json
+  effectiveFrom  DateTime
+  actorId        String?
+  actorEmail     String?
+  createdAt      DateTime @default(now())
+
+  @@unique([category, modelId, pricingVersion])
+  @@index([category, modelId, effectiveFrom])
+}
+
+/// Immutable published catalogue the Code client reads (managed mode).
+model ModelCatalogSnapshot {
+  version       Int      @id @default(autoincrement())
+  category      String
+  contentHash   String
+  payload       Json
+  coverageUntil DateTime
+  publishedById String?
+  publishedAt   DateTime @default(now())
+
+  @@index([category, contentHash])
+  @@index([category, version])
 }

@@ -109,6 +109,74 @@ test("an outstanding readiness gate refuses everyone, at any percentage", () => 
   }
 });
 
+test("dev skips pending readiness gates, and says so on the decision", () => {
+  const decision = decideAutoCohort(subject({
+    readiness: notReady,
+    config: config({ readinessWaivedOutsideProduction: true }),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.equal(decision.nonProductionReadinessWaiver, true);
+  // A ready register needs no waiver, so none is recorded.
+  const readyDecision = decideAutoCohort(subject({
+    config: config({ readinessWaivedOutsideProduction: true }),
+  }));
+  assert.equal(readyDecision.eligible, true);
+  assert.equal("nonProductionReadinessWaiver" in readyDecision, false);
+});
+
+test("the readiness waiver leaves every rollout control in force", () => {
+  const waived = (overrides) =>
+    decideAutoCohort(subject({
+      readiness: notReady,
+      config: config({ readinessWaivedOutsideProduction: true, ...overrides }),
+    }));
+  assert.equal(waived({ killSwitch: true }).reason, "kill_switch");
+  assert.equal(waived({ rolloutPercent: 0 }).reason, "rollout_disabled");
+  assert.equal(waived({ eligiblePlans: [] }).reason, "rollout_disabled");
+  assert.equal(waived({ salt: "unset" }).reason, "rollout_disabled");
+  assert.equal(waived({ eligiblePlans: ["Max"] }).reason, "plan_not_eligible");
+  assert.equal(
+    decideAutoCohort(subject({
+      isGuest: true,
+      readiness: notReady,
+      config: config({ readinessWaivedOutsideProduction: true }),
+    })).reason,
+    "guest_not_eligible"
+  );
+});
+
+test("only a deployment explicitly named dev waives readiness", () => {
+  const waives = (env) => autoCohortConfig(env).readinessWaivedOutsideProduction;
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "dev" }), true);
+  assert.equal(waives({ APP_ENV: "dev" }), true);
+  // Staging holds the release candidate and keeps the gate (the drill is its
+  // exception); tests/server-contract/chat-route-fallback-liveness relies on it.
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging" }), false);
+  assert.equal(waives({ APP_ENV: "staging" }), false);
+  // ...unless the operator names the waiver on staging itself.
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), true);
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging", AUTO_ROUTER_STAGING_READINESS_WAIVED: "true" }), false);
+  // The staging switch never reaches production or an unnamed build.
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "production", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), false);
+  assert.equal(waives({ APP_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "staging", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), false);
+  assert.equal(waives({ NODE_ENV: "production", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), false);
+  // Production keeps the gate, however it is named.
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "production" }), false);
+  assert.equal(waives({ APP_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "dev" }), false);
+  // An unnamed or unrecognised deployment is not trusted to be non-production.
+  assert.equal(waives({ NODE_ENV: "production" }), false);
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "preview-123" }), false);
+  assert.equal(waives({}), false);
+  // And a production config still refuses on pending gates.
+  const productionDecision = decideAutoCohort(subject({
+    readiness: notReady,
+    config: config({
+      readinessWaivedOutsideProduction: waives({ RAILWAY_ENVIRONMENT_NAME: "production" }),
+    }),
+  }));
+  assert.equal(productionDecision.reason, "readiness_incomplete");
+});
+
 test("a separately approved limited release may admit honest pending gates", () => {
   const decision = decideAutoCohort(subject({
     readiness: notReady,

@@ -24,39 +24,39 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="sre-ops-digest">
       <div className="flex flex-col gap-1">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.digestTitle}</h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.digestNote}</p>
+        <h2 className="text-base font-semibold text-zinc-100">{m.digestTitle}</h2>
+        <p className="text-sm text-zinc-400">{m.digestNote}</p>
       </div>
 
       {!payload ? (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400" data-testid="sre-ops-digest-gone">
+        <p className="text-sm text-zinc-400" data-testid="sre-ops-digest-gone">
           {m.digestBodyGone}
         </p>
       ) : (
         <>
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.digestOwnerDate}</dt>
+            <dt className="text-zinc-400">{m.digestOwnerDate}</dt>
             <dd>{payload.ownerDate}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.mode}</dt>
+            <dt className="text-zinc-400">{m.mode}</dt>
             <dd>{payload.mode}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.digestRecorded}</dt>
+            <dt className="text-zinc-400">{m.digestRecorded}</dt>
             <dd>{view.createdAt}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.itemChannelCheck}</dt>
+            <dt className="text-zinc-400">{m.itemChannelCheck}</dt>
             <dd>{payload.channelCheckTaken ? m.yes : m.no}</dd>
           </dl>
 
           <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.digestReadiness}</h3>
+            <h3 className="text-sm font-semibold text-zinc-100">{m.digestReadiness}</h3>
             {payload.readiness === "unknown" ? (
-              <p className="text-sm text-amber-800 dark:text-amber-300">{m.digestReadinessUnknown}</p>
+              <p className="text-sm text-amber-300">{m.digestReadinessUnknown}</p>
             ) : Object.keys(payload.readiness).length === 0 ? (
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.digestReadinessNone}</p>
+              <p className="text-sm text-zinc-400">{m.digestReadinessNone}</p>
             ) : (
               <ul className="flex flex-col gap-1 text-sm" data-testid="sre-ops-digest-readiness">
                 {Object.entries(payload.readiness).map(([name, ok]) => (
                   <li key={name} className="flex flex-wrap gap-2">
                     <span className="font-mono text-xs">{name}</span>
-                    <span className={ok ? "text-zinc-700 dark:text-zinc-300" : "text-red-700 dark:text-red-300"}>
+                    <span className={ok ? "text-zinc-300" : "text-red-300"}>
                       {ok ? m.digestReadinessOk : m.digestReadinessFailing}
                     </span>
                   </li>
@@ -66,20 +66,20 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
           </div>
 
           <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.digestReserved}</h3>
+            <h3 className="text-sm font-semibold text-zinc-100">{m.digestReserved}</h3>
             {/* An older digest recorded only one mode's reservations, so even an
                 empty list does not say the date had no messages. */}
             {!view.countsComplete ? (
-              <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-counts-partial">
+              <p className="text-sm text-amber-300" data-testid="sre-ops-digest-counts-partial">
                 {m.digestCountsFromList}
               </p>
             ) : null}
             {total === 0 ? (
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.digestNoReserved}</p>
+              <p className="text-sm text-zinc-400">{m.digestNoReserved}</p>
             ) : (
               <>
                 {payload.mode === "shadow" ? (
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.digestWouldHavePaged}</p>
+                  <p className="text-sm text-zinc-400">{m.digestWouldHavePaged}</p>
                 ) : null}
                 <ul className="flex flex-col gap-1 text-sm" data-testid="sre-ops-digest-counts">
                   {counts.map((row) => (
@@ -89,7 +89,7 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                   ))}
                 </ul>
                 {total > payload.items.length ? (
-                  <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-truncated">
+                  <p className="text-sm text-amber-300" data-testid="sre-ops-digest-truncated">
                     {m.digestListCapped
                       .replace("{shown}", String(payload.items.length))
                       .replace("{total}", String(total))}
@@ -97,7 +97,7 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                 ) : null}
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
-                    <thead className="text-zinc-600 dark:text-zinc-400">
+                    <thead className="text-zinc-400">
                       <tr>
                         <th className="py-1 pr-4 font-medium">{m.itemSignal}</th>
                         <th className="py-1 pr-4 font-medium">{m.itemKind}</th>
@@ -108,7 +108,7 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                     </thead>
                     <tbody>
                       {payload.items.map((item, index) => (
-                        <tr key={`${item.key}-${item.kind}-${index}`} className="border-t border-zinc-200 dark:border-zinc-800">
+                        <tr key={`${item.key}-${item.kind}-${index}`} className="border-t border-zinc-800">
                           <td className="py-1 pr-4 font-mono text-xs">{item.key}</td>
                           <td className="py-1 pr-4">{label("kind", item.kind)}</td>
                           <td className="py-1 pr-4">{item.mode}</td>

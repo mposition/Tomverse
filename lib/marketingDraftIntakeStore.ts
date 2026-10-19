@@ -29,8 +29,9 @@ import {
 } from "@/lib/marketingAutomationAccess";
 import type { MarketingChannel as MarketingChannelName } from "@/lib/marketingAutomationSchema";
 import {
-  MARKETING_LLM_MONTHLY_CAP_ENV,
+  MARKETING_LLM_SETTINGS_KEY,
   parseMarketingLlmMonthlyCap,
+  parseMarketingLlmSettings,
 } from "@/lib/marketingLlmBudgetCore";
 import { consumeMarketingLlmCallsForSubmission } from "@/lib/marketingLlmBudgetStore";
 import {
@@ -167,11 +168,14 @@ const BUILD_READERS: MarketingDraftIntakeReaders = {
   // The budget is the cost ledger's (S3c): every call was reserved against the
   // monthly cap before it ran, and the intake consumes the calls it names. What
   // the intake asks is only that the cap can be read; an unreadable cap is
-  // unknown, and unknown refuses.
-  llmGenerationBudgetAvailable: async () =>
-    parseMarketingLlmMonthlyCap(process.env[MARKETING_LLM_MONTHLY_CAP_ENV]) === null
+  // unknown, and unknown refuses. The cap is the operator's Admin setting.
+  llmGenerationBudgetAvailable: async (tx) => {
+    const row = await tx.appSetting.findUnique({ where: { key: MARKETING_LLM_SETTINGS_KEY }, select: { value: true } });
+    const settings = parseMarketingLlmSettings(row?.value);
+    return parseMarketingLlmMonthlyCap(settings?.monthlyUsdCap ?? undefined) === null
       ? unreadable
-      : { ok: true, value: true },
+      : { ok: true, value: true };
+  },
   // S3d: the operational alert path, ready when it has a recipient.
   priceFallbackAlertReady: async () => marketingPriceAlertReadyInput(),
 };

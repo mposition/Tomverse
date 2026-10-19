@@ -373,6 +373,11 @@ run(
     // delivery decision once and its outcome once, §4's report, and the stale
     // close at 720 hours across a daylight-saving change.
     "tests/integration/amux-decision-maker-judgment.db.test.ts",
+    // AMUX Decision Maker delivery to the worker (docs/policy/amux-decision-maker.md
+    // §2-7, §6, §9), stage S2-2b3: only a confirmation is ever read as an answer
+    // to deliver, nothing under the kill switch, the decision once and its
+    // outcome once, each through its route's own DB boundary.
+    "tests/integration/amux-decision-maker-delivery.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
@@ -413,6 +418,9 @@ run(
     // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
     // supersede on a changed input, nothing for a closed or deleted report.
     "tests/integration/support-triage-worker.db.test.ts",
+    // Support-triage LLM step: the model answer written with the ready row, the
+    // human-lane floor, and the keyword lane when there is no answer.
+    "tests/integration/support-triage-llm.db.test.ts",
     // Support-triage new groups: one kind per group, the higher kind first, a
     // tombstoned key stops a second group, a member lost to a concurrent pass
     // empties and invalidates the group, and the pass membership budget.
@@ -761,6 +769,13 @@ run(
     // cap under one month lock across two connections, and each action's
     // statement count pinned.
     "tests/integration/marketing-llm-budget-store.db.test.ts",
+    // The operator's Admin settings for the generator's model and monthly cap:
+    // one writer, compare-and-set on the row, only a pinned model, the cap
+    // within its ceiling, and a refused save that writes nothing.
+    "tests/integration/marketing-llm-settings.db.test.ts",
+    // The Marketing console overview: each of its four reads against the real
+    // tables, and an empty record reading as zeros rather than as unreadable.
+    "tests/integration/marketing-console-overview.db.test.ts",
     // The generator's budget route (S3c3a): signed, bounded, strict requests,
     // each action in its own transaction, and no model pinned as built.
     "tests/integration/marketing-llm-budget-route.db.test.ts",
@@ -788,6 +803,9 @@ run(
     // What an automatic disable leaves behind: the queue row, its notice
     // requirement, and the account count that decides it.
     "tests/integration/model-lifecycle-auto-disable.db.test.ts",
+    // The Auto router optimizer's money and audit steps: one cycle at a time,
+    // the run/day/month caps, promotion as a compare-and-set, one-step rollback.
+    "tests/integration/auto-router-optimizer.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
     // history constraints that refuse a decision without its record.
@@ -931,6 +949,8 @@ run(
     "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts",
     "tests/integration/prompt-refiner-chat-execution.db.test.ts",
     "tests/integration/prompt-refiner-chat-execution-full-schema.db.test.ts",
+    "tests/integration/chat-unified-optimizer-ledger.db.test.ts",
+    "tests/integration/chat-unified-optimizer-amux-test-card.db.test.ts",
     "tests/integration/prompt-refiner-product-operational-guard.db.test.ts",
     "tests/integration/chat-refiner-initial-auto-release.db.test.ts"],
   "Running the Prompt Refiner Auto budget hold transaction scenarios",
@@ -1199,4 +1219,17 @@ run(
     "tests/integration/message-attachment-resend.db.test.ts",
   ],
   "Running restored question attachment persistence scenarios"
+);
+// The dynamic model catalogue: a refused enable writes nothing, accepted
+// writes carry their audit row, price revisions and snapshots are immutable.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/model-catalog.db.test.ts",
+  ],
+  "Running the dynamic model catalogue scenarios"
 );

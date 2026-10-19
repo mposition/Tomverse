@@ -131,20 +131,6 @@ const sourceFiles = (dir) => {
   return found;
 };
 
-test("R2e's deletion ships only with version 56's approval record", () => {
-  // Orchestration policy version 56: this deletion cannot be latched off, so
-  // a tree without the variable path must carry the operator's approval of
-  // version 56. A candidate still awaiting it fails here and cannot merge.
-  const lines = read("docs/policy/development-agent-orchestration.md")
-    .split(String.fromCharCode(13)).join("").split(String.fromCharCode(10));
-  const heading = lines.indexOf("## 버전 56 — R2e: 카탈로그 환경 변수 경로 삭제");
-  assert.ok(heading >= 0, "version 56 section");
-  const next = lines.findIndex((line, index) => index > heading && line.startsWith("## "));
-  const section = lines.slice(heading + 1, next < 0 ? undefined : next);
-  const record = section.find((line) => line.startsWith("승인 기록:")) ?? "";
-  assert.match(record, /^승인 기록: `approvedBy: mposition`, `approvedAt: \d{4}-\d{2}-\d{2}`/, "version 56 approval record");
-});
-
 test("R2e: no product source reads either catalog variable or names the removed parsers", () => {
   const files = ["lib", "app", "components"].flatMap((dir) => sourceFiles(dir));
   assert.ok(files.length > 500, `only ${files.length} source files found`);

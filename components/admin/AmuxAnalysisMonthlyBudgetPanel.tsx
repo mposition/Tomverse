@@ -121,13 +121,15 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
     finally { setBusy(false); }
   };
   return <section aria-labelledby="amux-analysis-monthly-budget-title"
-    className="space-y-3 rounded-lg border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+    className="space-y-3 rounded-lg border p-4 text-sm border-zinc-700">
     <h4 id="amux-analysis-monthly-budget-title" className="font-semibold">{m.title}</h4>
     <p>{m.hint}</p>
     {snapshot ? <dl className="grid grid-cols-2 gap-2">
       <dt>{m.month}</dt><dd>{snapshot.monthStart.slice(0, 7)}</dd>
       <dt>{m.current}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.limitMicroUsd)}</dd>
       <dt>{m.spent}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.spentMicroUsd)}</dd>
+      {snapshot.shadowOverrunMicroUsd !== "0" && <><dt>{m.shadowOverrun}</dt>
+        <dd>{analysisBudgetMicroUsdToUsd(snapshot.shadowOverrunMicroUsd)}</dd></>}
       <dt>{m.reserved}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.reservedMicroUsd)}</dd>
       <dt>{m.remaining}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.remainingMicroUsd)}</dd>
       <dt>{m.version}</dt><dd>{snapshot.version}</dd>
@@ -137,7 +139,7 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
       <input id="amux-analysis-monthly-usd" type="text" inputMode="decimal" value={monthlyUsd}
         maxLength={16} disabled={locked} aria-describedby="amux-analysis-monthly-hint amux-analysis-monthly-error"
         aria-invalid={invalid || below} onChange={(e) => { setMonthlyUsd(e.target.value); setConfirmed(false); setNotice(null); }}
-        className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900" />
+        className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900" />
     </label>
     <p id="amux-analysis-monthly-hint">{m.inputHint}</p>
     <p id="amux-analysis-monthly-error" role="alert">{invalid ? m.invalid : below ? m.below : null}</p>

@@ -16,6 +16,19 @@ import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationBadges";
 import { GUEST_BRAND_TRIO_MODEL_IDS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import { AdminUserSecurityHarness } from "./AdminUserSecurityHarness";
+import { AmuxDecisionMakerReportPanel } from "@/components/admin/AmuxDecisionMakerReportPanel";
+import { AmuxDecisionMakerRequestDrawer } from "@/components/admin/AmuxDecisionMakerRequestDrawer";
+import { AmuxDecisionMakerRequestsPanel } from "@/components/admin/AmuxDecisionMakerRequestsPanel";
+import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
+import { AmuxDecisionMakerWorkPointer } from "@/components/admin/AmuxDecisionMakerWorkPointer";
+import {
+  dmFixtureAttention,
+  dmFixtureDetail,
+  dmFixtureReport,
+  dmFixtureRequests,
+  dmFixtureSwitches,
+} from "./decisionMakerFixture";
+import "../../admin/admin-theme.css";
 
 export const dynamic = "force-dynamic";
 
@@ -142,6 +155,7 @@ export default async function AdminConsoleFixturePage({
       version="e2e"
       apiStatus="healthy"
       counts={EMPTY_ADMIN_NAVIGATION_COUNTS}
+      theme={single(params.theme) === "light" ? "light" : "dark"}
     >
       {/*
         Each panel is mounted in the same layout context the real console gives
@@ -155,7 +169,22 @@ export default async function AdminConsoleFixturePage({
       </div>
       {view === "amux" && <AdminLocaleProvider locale={single(params.locale) === "ko" ? "ko" : "en"}>
         <AmuxExecutionWorkspace canMoveCards={single(params.readOnly) !== "true"}
+          decisionMaker={single(params.dm) === "sample" ? dmFixtureAttention : undefined}
           initialTaskId={single(params.taskId) || null} />
+      </AdminLocaleProvider>}
+      {/* Decision Maker: Operations settings with the side panel over it (drawer=open). */}
+      {view === "dm" && <AdminLocaleProvider locale={single(params.locale) === "ko" ? "ko" : "en"}>
+        <section className="mt-4 flex min-w-0 flex-col gap-5">
+          <AmuxDecisionMakerWorkPointer waiting={dmFixtureAttention.total}
+            href="/e2e/admin-console-fixture?view=amux&dm=sample" />
+          <div className="grid min-w-0 gap-5 xl:grid-cols-2">
+            <AmuxDecisionMakerSwitchPanel state={dmFixtureSwitches} latches={null} canChange />
+            <AmuxDecisionMakerReportPanel report={dmFixtureReport} />
+          </div>
+          <AmuxDecisionMakerRequestsPanel list={dmFixtureRequests} />
+        </section>
+        {single(params.drawer) === "open" &&
+          <AmuxDecisionMakerRequestDrawer view={dmFixtureDetail} closeHref="/e2e/admin-console-fixture?view=dm" />}
       </AdminLocaleProvider>}
       {view === "narrow" ? (
         <section className="mt-4 flex flex-col gap-4">

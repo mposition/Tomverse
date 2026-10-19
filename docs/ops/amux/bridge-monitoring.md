@@ -36,7 +36,11 @@ bridge는 하나가 아니다. `tomverse-bridge.service`가 codex 세션을 맡�
 파일: `scripts/amux-bridge-watchdog/`. 테스트: `tests/amuxBridgeWatchdog.test.mjs`.
 
 한 번 실행할 때 bridge unit 전부의 상태를 읽고 본문 없는 요청 하나를 보낸다. 대상은 `tomverse-bridge.service`(항상)와,
-로드된 `tomverse-amux-v22-bridge@*`·`tomverse-amux-v22-sidecar@*` 인스턴스 전부다.
+로드된 `tomverse-amux-v22-bridge@*`·`tomverse-amux-v22-sidecar@*`·`tomverse-amux-bridge@*` 인스턴스 전부다.
+`tomverse-amux-bridge@*`는 정책 버전 55의 worker별 bridge(`wsl-execution-bridge.md`의 `--worker` 절)이고, 전환
+기간에는 옛 이름과 함께 본다. 시작하지 않은 인스턴스는 보통 로드되지 않으므로 템플릿을 설치만 한 동안에는 대상이
+아니다. 다만 `systemctl status tomverse-amux-bridge@<이름>`처럼 이름으로 조회하면 그 인스턴스가 잠시 로드되어
+`inactive`로 읽히고 down 신호가 나갈 수 있다.
 
 | 상태 | 보내는 것 | monitor |
 |---|---|---|
@@ -227,8 +231,8 @@ amux wsl bridge halted: no new assignments; cause=<원인>; restart only after c
 
 동작:
 
-- systemd timer가 2분마다 실행한다. 대상은 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*` 중
-  `failed`이고 종료 코드가 3인 unit뿐이다. 종료 코드 1(시작 실패)은 unit의 `Restart=on-failure`가 이미 다시
+- systemd timer가 2분마다 실행한다. 대상은 `tomverse-bridge.service`, `tomverse-amux-v22-bridge@*`,
+  `tomverse-amux-bridge@*`(정책 버전 55의 worker별 bridge) 중 `failed`이고 종료 코드가 3인 unit뿐이다. 종료 코드 1(시작 실패)은 unit의 `Restart=on-failure`가 이미 다시
   시작하고, 손으로 멈춘 unit은 `inactive`라 건드리지 않는다. sidecar도 건드리지 않는다.
 - 원인은 그 실패한 실행(invocation)의 journal만 읽는다. 이전 실행의 줄이 섞이지 않는다.
 - halt 줄은 처음 원인만 적고, halt 뒤에 결과를 모르게 된 작업(예: 열린 채 남은 읽기 전용 API attempt)은 다른 줄을
@@ -262,8 +266,9 @@ done
 sudo bash "$d/install.sh" "$d"
 ```
 
-- 설치는 polkit에 직접 물어 규칙의 범위를 확인한다: bridge restart는 허용, bridge stop·ssh restart·sidecar
-  restart는 거절이어야 한다. 하나라도 어긋나면 실패하고 timer를 켜지 않는다.
+- 설치는 polkit에 직접 물어 규칙의 범위를 확인한다: bridge restart(`tomverse-amux-bridge@` 인스턴스 포함)는 허용,
+  bridge stop, `tomverse-amux-bridge@` 인스턴스의 stop·start, ssh restart, sidecar restart는 거절이어야 한다.
+  하나라도 어긋나면 실패하고 timer를 켜지 않는다.
 - 그 뒤 한 번 실행하고 timer를 켠다. 마지막 줄이 `TOMVERSE_BRIDGE_AUTORESTART_INSTALLED`이면 끝이다.
 - 바꾸는 것: 시스템 계정 하나, 실행 파일과 unit 둘, polkit 규칙 하나, timer 활성화. 되돌리기는 5.3절.
 

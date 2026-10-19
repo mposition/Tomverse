@@ -186,7 +186,7 @@ const isPolicyTestName = (path: string) =>
 
 /**
  * Test files the base commit's instruction documents name by path. The caller
- * passes the documents read at the base commit: `AGENTS.md`, `docs/policy/**`,
+ * passes the documents read at the base commit: `AGENTS.md`, `docs/agents/machine-index.md`, `docs/policy/**`,
  * `docs/ui-contracts/**` and the security regression script.
  */
 export const policyNamedTestPaths = (documents: Iterable<string>): Set<string> => {

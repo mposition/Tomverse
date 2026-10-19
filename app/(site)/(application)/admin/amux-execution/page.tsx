@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 
@@ -10,6 +11,8 @@ import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisp
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
+import { AmuxDecisionMakerRequestDrawer } from "@/components/admin/AmuxDecisionMakerRequestDrawer";
+import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
 import { AmuxWorkerCapabilityPanel } from "@/components/admin/AmuxWorkerCapabilityPanel";
 import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
@@ -23,6 +26,10 @@ import {
 } from "@/lib/adminNavigationCounts";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
+import { countDecisionMakerAttention, readDecisionMakerAttentionForAdmin } from "@/lib/amux/decisionMakerAttention";
+import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
 import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
@@ -56,11 +63,30 @@ export default async function AdminAmuxExecutionPage({
   if (!resolved) notFound();
   const { tab } = resolved;
 
-  const [m, openAmuxEscalations] = await Promise.all([
+  // One Decision Maker request as a side panel (?dmRequest=), on any tab, so
+  // an operator who may judge but not see the Cards board still reaches it.
+  // Its bodies are for the person who may judge it (ops:write).
+  const canJudge = hasAdminPermission(session, "ops:write");
+  const dmRequested = typeof query.dmRequest === "string" ? query.dmRequest : null;
+  const readDmRequest = async (requestId: string): Promise<DmAdminRequestDetailView> => {
+    if (!canJudge) return { kind: "restricted" };
+    if (!isDmRequestId(requestId)) return { kind: "not_found" };
+    const read = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead,
+      (tx) => readDecisionMakerRequestDetailForAdmin(tx, requestId))
+      .then((detail) => ({ detail }), () => null);
+    if (read === null) return { kind: "unavailable" };
+    return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
+  };
+
+  const [m, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
     // The tabs' badges. A failed count shows no badge rather than a zero.
     countAwaitingAmuxEscalations().catch(() => null),
+    countDecisionMakerAttention().catch(() => null),
+    dmRequested === null ? null : readDmRequest(dmRequested),
   ]);
+  const drawer = dmView === null ? null :
+    <AmuxDecisionMakerRequestDrawer view={dmView} closeHref={`/admin/amux-execution?tab=${tab.id}`} />;
   const isOwner = Boolean(session?.user?.id) && role === "owner";
   const statuses: Record<string, AmuxTabStatus | undefined> = {
     // The owner may move cards in the Kanban workspace. Every command checks
@@ -81,7 +107,7 @@ export default async function AdminAmuxExecutionPage({
       label="Execution sections"
       query={query}
       role={role}
-      counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations }}
+      counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations, awaitingAmuxDecisionMaker }}
       chips={amuxTabChips(statuses, m.status)}
     />
   );
@@ -90,14 +116,22 @@ export default async function AdminAmuxExecutionPage({
     // Authorization for the section, decided here and not by the route
     // table's `viewRoles`, exactly as the page it replaced decided it.
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-    const [{ rows, total, limit }, usage] = await Promise.all([
+    const [{ rows, total, limit }, usage, decisionMaker] = await Promise.all([
       listAmuxCardsForAdmin(),
       readAmuxCliUsageSummaryForAdmin().catch(() => null),
+      readDecisionMakerAttentionForAdmin({ withBodies: canJudge }).catch(() => null),
     ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} initialTaskId={typeof query.taskId === "string" &&
+        {drawer}
+        {process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_CARD_INTAKE_UI === "enabled" ? (
+          <Link href="/admin/amux-u21-test-card" prefetch={false}
+            className="w-fit text-sm font-medium underline text-blue-300">
+            {m.testCardIntake}
+          </Link>
+        ) : null}
+        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>
           <AmuxCardListPanel rows={rows} total={total} limit={limit} />
@@ -120,6 +154,7 @@ export default async function AdminAmuxExecutionPage({
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
+        {drawer}
         <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
         <AmuxWorkerCapabilityPanel view={capabilities} />
       </div>
@@ -129,6 +164,7 @@ export default async function AdminAmuxExecutionPage({
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
+      {drawer}
       <AdminAmuxRoutingPanel canInspectCards={isOwner} focusEscalationId={
         typeof query.focusEscalation === "string" &&
         /^c[a-z0-9]{20,}$/i.test(query.focusEscalation) ?

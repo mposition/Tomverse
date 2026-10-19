@@ -3,7 +3,7 @@
  * landed where it had to.
  *
  * docs/policy/qa-release-agent.md (version 3), section 8: items 4 (hold while
- * any staging service has a deployment in flight), 5 (one attempt per lane;
+ * any service in the environment that deploys develop has a deployment in flight), 5 (one attempt per lane;
  * an unknown outcome latches, and only a person clears a latch) and 3 step 4
  * (after a merge, the pull request must read as merged into develop with its
  * merge commit in develop's history, or the lane latches).
@@ -21,8 +21,8 @@ export type QaReleaseLaneRoundInput = {
   latched: boolean | null;
   /** Whether an attempt row is still open, from the app database; null when unread. */
   attemptOpen: boolean | null;
-  /** Every staging service's deployments, from Railway; null when unread. */
-  stagingDeployments: readonly { status: string }[] | null;
+  /** Every deployment in the environment that deploys develop, from Railway; null when unread. */
+  developDeployments: readonly { status: string }[] | null;
   selection: QaReleaseLaneSelection;
 };
 
@@ -38,8 +38,8 @@ export function decideQaReleaseLaneRound(input: QaReleaseLaneRoundInput): QaRele
   // One attempt per lane: an open one is either running elsewhere or its
   // outcome is unknown, and both mean this round does nothing.
   if (input.attemptOpen) return { action: "stop", reason: "attempt_open" };
-  if (!Array.isArray(input.stagingDeployments)) return { action: "stop", reason: "deployments_unknown" };
-  const inFlight = inFlightDeployments(input.stagingDeployments).length;
+  if (!Array.isArray(input.developDeployments)) return { action: "stop", reason: "deployments_unknown" };
+  const inFlight = inFlightDeployments(input.developDeployments).length;
   if (inFlight > 0) return { action: "hold", reason: "deployment_in_flight", inFlight };
   if (input.selection.pick === null) return { action: "idle" };
   return { action: "request_instruction", pullRequest: input.selection.pick };

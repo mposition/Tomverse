@@ -232,6 +232,7 @@ export const fr = {
         imageGenerationErrorBudget: "La génération d'images est temporairement suspendue. Réessayez sous peu.",
         imageGenerationErrorConflict: "Votre solde de crédits a changé pendant la réservation. Réessayez.",
         imageGenerationErrorGeneric: "Impossible de démarrer la génération de l'image. Réessayez.",
+        imageGenerationErrorPriceChanged: "Un prix a changé depuis le chargement de cette page. Rien n'a été facturé. Rechargez pour voir le prix actuel.",
         imageGenerationRestoreExcluded: "{models} n'est pas disponible actuellement et a été exclu de la sélection restaurée.",
         imageGenerationSelectionCount: "{count}/{max} modèles",
         imageGenerationModelLimitNotice: "Vous pouvez comparer jusqu'à {max} modèles à la fois. Désélectionnez un modèle avant d'en choisir un autre.",

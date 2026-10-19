@@ -62,6 +62,15 @@ export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-contr
 /** Policy v42: records only content-free, exact FIRST model-access evidence. */
 export const AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR = "amux-v22-api-model-access" as const;
 
+/** Provider-free CHAT-01 optimizer metadata only. The scoped actions below
+ * cannot authorize a paid call, external dispatch or candidate promotion
+ * (docs/policy/chat-unified-router-refiner-v1.md §§7, 12). */
+export const CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR =
+  "chat-unified-optimizer" as const;
+/** The Auto router guidance optimizer (lib/autoRouterOptimizer.ts) when the
+ * owner has turned on its daily cycle or automatic promotion. */
+export const AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR = "auto-router-optimizer" as const;
+
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
  * names the service or app path whose action the entry records; none of them
@@ -128,6 +137,11 @@ export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET =
   "AmuxIdeaTrackedCheckoutEvidence" as const;
 export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE =
   "tracked-checkout-evidence-v1" as const;
+/** Links an already fenced Max claim to the checkout proof in the same chain. */
+export const AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION =
+  "amux.v19.tracked_checkout.max_claim_bound" as const;
+export const AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE =
+  "tracked-checkout-max-claim-bound-v1" as const;
 export const AMUX_V19_READ_MANIFEST_RECORDED_ACTION =
   "amux.v19.read_manifest.recorded" as const;
 export const AMUX_V19_READ_MANIFEST_RECORDED_TARGET =
@@ -138,6 +152,24 @@ export const AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION =
   "amux.v19.read_manifest.key_intent" as const;
 export const AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET =
   "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION =
+  "amux.v19.read_manifest.max_claim_bound" as const;
+export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE =
+  "read-manifest-max-claim-bound-v1" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION =
+  "amux.v19.session_analysis.result_recorded" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET =
+  "AmuxIdeaSessionAnalysisResult" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_SCOPE =
+  "session-analysis-result-v1" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_CLAIM_ACTION =
+  "amux.v19.session_analysis.orphan_key_claimed" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_RETIRE_ACTION =
+  "amux.v19.session_analysis.orphan_key_retired" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_TARGET =
+  "AmuxIdeaSessionResultOrphanKeyRetirement" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_SCOPE =
+  "session-result-orphan-key-v1" as const;
 export const AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE =
   "tracked-checkout-read-manifest-key-intent-v1" as const;
 export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION =
@@ -223,6 +255,8 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
+  CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
+  AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
@@ -287,6 +321,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
       targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
     return AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE;
   }
+  if (action === AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION &&
+      targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
+    return AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE;
+  }
   if (action === AMUX_V19_READ_MANIFEST_RECORDED_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_RECORDED_TARGET) {
     return AMUX_V19_READ_MANIFEST_RECORDED_SCOPE;
@@ -294,6 +332,19 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
     return AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE;
+  }
+  if (action === AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
+    return AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE;
+  }
+  if (action === AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION &&
+      targetType === AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET) {
+    return AMUX_V19_SESSION_ANALYSIS_RESULT_SCOPE;
+  }
+  if ((action === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_CLAIM_ACTION ||
+       action === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_RETIRE_ACTION) &&
+      targetType === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_TARGET) {
+    return AMUX_V19_SESSION_RESULT_ORPHAN_KEY_SCOPE;
   }
   if (action === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION &&
       targetType === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_TARGET) {
@@ -382,6 +433,17 @@ export const systemAuditActionAllowed = (
   (actor !== AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.api_model_access_observed" &&
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
+  (actor !== AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR ||
+    ((action === "auto.llm_router_optimizer.cycle_started" ||
+      action === "auto.llm_router_guidance.promoted") &&
+      targetType === "AutoRouterOptimizerCycle")) &&
+  (actor !== CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR ||
+    (action === "chat.unified_optimizer.run_admitted" &&
+      targetType === "ChatUnifiedOptimizerRun") ||
+    ((action === "chat.unified_optimizer.dispatch_intended" ||
+      action === "chat.unified_optimizer.run_terminal" ||
+      action === "chat.unified_optimizer.queued_before_dispatch_terminal") &&
+      targetType === "ChatUnifiedOptimizerRoleJob")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||

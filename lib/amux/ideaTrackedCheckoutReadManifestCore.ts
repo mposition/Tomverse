@@ -16,7 +16,7 @@ export const AMUX_V19_READ_MANIFEST_AUDIT_SUMMARY =
 
 const UUID_V4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const FULL_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
-const validReadPath = (file: unknown): file is string =>
+export const validAmuxTrackedCheckoutReadPath = (file: unknown): file is string =>
   typeof file === "string" && file.length > 0 &&
   !file.startsWith("/") && !file.includes("\\") &&
   !/[\x00-\x1f\x7f]/.test(file) && posix.normalize(file) === file &&
@@ -27,7 +27,7 @@ function inspectReadPaths(files: unknown): string[] | null {
   if (!Array.isArray(files)) return null;
   const seen = new Set<string>();
   for (const file of files) {
-    if (!validReadPath(file) || seen.has(file)) return null;
+    if (!validAmuxTrackedCheckoutReadPath(file) || seen.has(file)) return null;
     seen.add(file);
   }
   return [...seen].sort();

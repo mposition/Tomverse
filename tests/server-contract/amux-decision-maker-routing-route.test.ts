@@ -162,7 +162,7 @@ const CARD = {
   tags: ["needs:you"],
   title: "Pick a cache key layout",
   question: "Should the cache key include the locale?",
-  options: [{ id: "a", label: "Model id only" }],
+  options: [{ id: "a", label: "Model id only", effect: "choice_only", paths: [] }],
   unblocks: "The cache module can be finished.",
   context: "Both layouts pass.",
   contextPaths: ["lib/cache.ts"],

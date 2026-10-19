@@ -1,5 +1,6 @@
 "use client";
 
+import { Bot, Power } from "lucide-react";
 import { useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
@@ -11,13 +12,16 @@ import {
 } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxDecisionMakerMessages } from "@/lib/adminMessages/amuxDecisionMaker";
+import type { DmAdminSwitchLatches } from "@/lib/amux/decisionMakerAdminCore";
 import {
   DM_INSTANCE_MODES,
   DM_INSTANCE_SCOPES,
   DM_KILL_SWITCH_SCOPE,
   DM_KILL_SWITCH_VALUES,
+  isDmInstanceScope,
   type DecisionMakerSwitchState,
   type DmInstanceMode,
+  type DmSwitchLatchReason,
   type DmSwitchScope,
 } from "@/lib/amux/decisionMakerSwitchCore";
 
@@ -87,9 +91,25 @@ const changeLabel = (m: Messages, change: DmSwitchChange) =>
 const valueText = (m: Messages, value: string | null) =>
   value === null ? m.unreadable : `${m.value[value as keyof Messages["value"]]} (${value})`;
 
-const cellClass = "border-b border-zinc-200 px-2 py-2 align-top dark:border-zinc-700";
-const buttonClass =
-  "inline-flex min-h-11 items-center rounded-md border border-zinc-400 px-3 py-1 text-xs font-bold disabled:opacity-60 dark:border-zinc-500";
+/**
+ * The reason the system turned an instance off, shown only while the instance
+ * is still off: a mode a person set since has no reason, and the kill switch
+ * is never latched.
+ */
+const latchReason = (
+  latches: DmAdminSwitchLatches | null,
+  row: { scope: DmSwitchScope; current: string | null },
+): DmSwitchLatchReason | null =>
+  latches !== null && isDmInstanceScope(row.scope) && row.current === "off" ? latches[row.scope] : null;
+
+/** The value pill: the kill switch on and an unreadable scope are the two that need a person. */
+const valueTone = (kill: boolean, value: string | null) =>
+  value === null ? "border-amber-800 bg-amber-950/50 text-amber-200"
+    : kill ? (value === "on" ? "border-red-800 bg-red-950/50 text-red-200" : "border-emerald-800 bg-emerald-950/50 text-emerald-200")
+      : value === "proposal" ? "border-sky-800 bg-sky-950/50 text-sky-200" : "border-zinc-700 bg-zinc-800 text-zinc-300";
+const buttonBase = "inline-flex min-h-11 items-center rounded-lg border px-4 text-sm font-medium disabled:opacity-60";
+const buttonClass = `${buttonBase} border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700`;
+const dangerButtonClass = `${buttonBase} border-red-800 text-red-200 hover:bg-red-950/50`;
 
 /**
  * AMUX › Execution › Decision Maker, without hooks, so a test can call it and
@@ -111,9 +131,15 @@ export function AmuxDecisionMakerSwitchView({
   failure,
   onChange,
   onReread,
+  latches = null,
 }: {
   m: Messages;
   state: DecisionMakerSwitchState | null;
+  /**
+   * Why the system turned an instance off, as read with `state` (stage S2-4c);
+   * null when nothing is known, and then no reason is shown.
+   */
+  latches?: DmAdminSwitchLatches | null;
   canChange: boolean;
   pending: DmSwitchPending;
   notice: DmSwitchNotice;
@@ -135,21 +161,21 @@ export function AmuxDecisionMakerSwitchView({
   const unread = notice === "saved_unread" || notice === "outcome_unknown_unread";
   return (
     <section
-      className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4"
+      className="flex min-w-0 flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-900 p-5"
       data-testid="amux-decision-maker-switch-panel"
     >
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{m.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.description}</p>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.killSwitchHelp}</p>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.instanceHelp}</p>
+      <header className="flex flex-col gap-1.5">
+        <h2 className="text-base font-bold text-zinc-100">{m.title}</h2>
+        <p className="text-sm leading-6 text-zinc-400">{m.description}</p>
+      </header>
       {canChange ? null : (
-        <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-dm-switch-read-only">
+        <p className="text-sm text-zinc-300" data-testid="amux-dm-switch-read-only">
           {m.readOnly}
         </p>
       )}
       {state === null ? (
         <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-dm-switch-unavailable">
+          <p role="alert" className="text-sm text-red-300" data-testid="amux-dm-switch-unavailable">
             {unread ? m.rereadFailed : m.stateUnavailable}
           </p>
           <button
@@ -163,61 +189,81 @@ export function AmuxDecisionMakerSwitchView({
           </button>
         </div>
       ) : (
-        <table className="w-full border-collapse text-left text-sm text-zinc-900 dark:text-zinc-100">
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.scope} data-testid={`amux-dm-switch-${row.scope}`}>
-                <th scope="row" className={`${cellClass} font-medium`}>
-                  {row.label}
-                </th>
-                <td className={cellClass} data-testid={`amux-dm-switch-value-${row.scope}`}>
-                  {valueText(m, row.current)}
-                </td>
-                <td className={cellClass}>
-                  {canChange ? (
-                    <div className="flex flex-wrap gap-2">
-                      {dmSwitchChangesFor(row.scope, row.current).map((change) => (
-                        <button
-                          key={change.value}
-                          type="button"
-                          className={buttonClass}
-                          disabled={pending !== null}
-                          onClick={() => onChange(change)}
-                          data-testid={`amux-dm-switch-set-${row.scope}-${change.value}`}
-                        >
-                          {pending !== null &&
-                          pending !== "reading" &&
-                          pending.scope === change.scope &&
-                          pending.value === change.value
-                            ? m.saving
-                            : changeLabel(m, change)}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {rows.map((row) => {
+            const kill = row.scope === DM_KILL_SWITCH_SCOPE;
+            const latched = latchReason(latches, row);
+            return (
+              <li
+                key={row.scope}
+                className={`flex min-w-0 flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4 ${kill ? "sm:col-span-2" : ""}`}
+                data-testid={`amux-dm-switch-${row.scope}`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {kill ? <Power className="h-4 w-4 text-zinc-400" aria-hidden /> : <Bot className="h-4 w-4 text-zinc-400" aria-hidden />}
+                  <span className={`min-w-0 flex-1 break-words text-sm font-semibold text-zinc-100 ${kill ? "" : "font-mono"}`}>
+                    {kill ? row.label : row.scope}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${valueTone(kill, row.current)}`}
+                    data-testid={`amux-dm-switch-value-${row.scope}`}
+                  >
+                    {valueText(m, row.current)}
+                  </span>
+                </div>
+                <p className="text-xs leading-5 text-zinc-400">{kill ? m.killSwitchHelp : m.instanceHelp}</p>
+                {latched !== null ? (
+                  <p
+                    className="rounded-md border border-amber-800 bg-amber-950/50 px-3 py-2 text-xs text-amber-200"
+                    data-testid={`amux-dm-switch-latch-${row.scope}`}
+                    data-latch-reason={latched}
+                  >
+                    {m.latchReasons[latched as DmSwitchLatchReason]}
+                  </p>
+                ) : null}
+                {canChange ? (
+                  <div className="flex flex-wrap gap-2">
+                    {dmSwitchChangesFor(row.scope, row.current).map((change) => (
+                      <button
+                        key={change.value}
+                        type="button"
+                        className={kill && change.value === "on" ? dangerButtonClass : buttonClass}
+                        disabled={pending !== null}
+                        onClick={() => onChange(change)}
+                        data-testid={`amux-dm-switch-set-${row.scope}-${change.value}`}
+                      >
+                        {pending !== null &&
+                        pending !== "reading" &&
+                        pending.scope === change.scope &&
+                        pending.value === change.value
+                          ? m.saving
+                          : changeLabel(m, change)}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
       )}
       {notice === "saved" ? (
-        <p role="status" className="text-sm" data-testid="amux-dm-switch-saved">
+        <p role="status" className="text-sm text-zinc-300" data-testid="amux-dm-switch-saved">
           {m.saved}
         </p>
       ) : null}
       {notice === "saved_unread" ? (
-        <p role="status" className="text-sm" data-testid="amux-dm-switch-saved">
+        <p role="status" className="text-sm text-zinc-300" data-testid="amux-dm-switch-saved">
           {m.savedUnread}
         </p>
       ) : null}
       {notice === "outcome_unknown" || notice === "outcome_unknown_unread" ? (
-        <p role="alert" className="text-sm text-amber-700 dark:text-amber-300" data-testid="amux-dm-switch-outcome-unknown">
+        <p role="alert" className="text-sm text-amber-300" data-testid="amux-dm-switch-outcome-unknown">
           {notice === "outcome_unknown" ? m.outcomeUnknown : m.outcomeUnknownUnread}
         </p>
       ) : null}
       {notice === "invalid_change" ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+        <p role="alert" className="text-sm text-red-300">
           {m.invalidChange}
         </p>
       ) : null}
@@ -333,9 +379,12 @@ export async function runDmSwitchReread(
  */
 export function AmuxDecisionMakerSwitchPanel({
   state,
+  latches = null,
   canChange,
 }: {
   state: DecisionMakerSwitchState | null;
+  /** The reasons read with `state`; they describe that state only, so they are not shown after a change or a re-read. */
+  latches?: DmAdminSwitchLatches | null;
   canChange: boolean;
 }) {
   const m = useAdminMessages(adminAmuxDecisionMakerMessages) as Messages;
@@ -377,6 +426,7 @@ export function AmuxDecisionMakerSwitchPanel({
     <AmuxDecisionMakerSwitchView
       m={m}
       state={current}
+      latches={current === state ? latches : null}
       canChange={canChange}
       pending={pending}
       notice={notice}

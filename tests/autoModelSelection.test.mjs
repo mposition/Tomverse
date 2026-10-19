@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
-import { selectAutoModel, selectionDisclosure } from "../lib/autoModelSelection.ts";
+import {
+  applyLlmModelPick,
+  selectAutoModel,
+  selectionDisclosure,
+} from "../lib/autoModelSelection.ts";
 import {
   DEFAULT_SELECTION_MODE,
   parseSelectionMode,
@@ -156,19 +160,55 @@ test("no candidate falls back and explains itself rather than guessing", () => {
   assert.ok(selection.record.rejections.length > 0);
 });
 
-test("sticky state from the conversation reaches the Router", () => {
+test("a stored model does not pin the next prompt: Auto chooses per prompt", () => {
+  const fresh = selectAutoModel(input());
+  assert.equal(fresh.routed, true);
+  // Remember a different eligible model, as a previous turn would have.
+  const remembered = fresh.record.eligibleModelIds.find(
+    (modelId) => modelId !== fresh.modelId
+  );
+  assert.ok(remembered, "the fixture needs a second eligible model");
   const withHistory = selectAutoModel(
     input({
       conversation: autoConversation({
-        routerModelId: "deepseek-v4-flash",
+        routerModelId: remembered,
         routerChallengerTurns: 1,
       }),
     })
   );
   assert.equal(withHistory.routed, true);
-  // Whatever it decides, the streak it reports is the one to store next.
-  assert.equal(typeof withHistory.sticky.turnsFavouringChallenger, "number");
-  assert.ok(withHistory.sticky.turnsFavouringChallenger >= 0);
+  assert.equal(withHistory.modelId, fresh.modelId);
+  assert.notEqual(withHistory.record.selectionReason, "sticky");
+});
+
+// --- LLM pick ---
+
+test("an LLM pick inside the eligible set replaces the deterministic choice", () => {
+  const selection = selectAutoModel(input());
+  assert.equal(selection.routed, true);
+  const pick = selection.record.eligibleModelIds.find(
+    (modelId) => modelId !== selection.modelId
+  );
+  const picked = applyLlmModelPick(selection, pick);
+  assert.equal(picked.modelId, pick);
+  assert.equal(picked.record.selectedModelId, pick);
+  assert.equal(picked.record.selectionReason, "llm_pick");
+  assert.equal(picked.sticky.modelId, pick);
+  // The deterministic winner stays first in line for fallback.
+  assert.equal(picked.fallbackCandidateModelIds[0], selection.modelId);
+  assert.equal(picked.fallbackCandidateModelIds.includes(pick), false);
+});
+
+test("an LLM pick outside the eligible set, or none, changes nothing", () => {
+  const selection = selectAutoModel(input());
+  assert.equal(applyLlmModelPick(selection, null), selection);
+  assert.equal(applyLlmModelPick(selection, "not-a-model"), selection);
+  const refused = selection.record.rejections[0]?.modelId;
+  if (refused) assert.equal(applyLlmModelPick(selection, refused), selection);
+  const manual = selectAutoModel(
+    input({ conversation: autoConversation({ selectionMode: "manual" }) })
+  );
+  assert.equal(applyLlmModelPick(manual, selection.modelId), manual);
 });
 
 // --- disclosure ---

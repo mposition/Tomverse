@@ -11,6 +11,7 @@ import {
 } from "@/lib/amux/workerAssignmentCatalog";
 import { recordAmuxWorkerCapabilityByOwner } from "@/lib/amux/workerCapabilityStore";
 import { readAmuxWorkerSessionList } from "@/lib/amux/workerSessionList";
+import { readAmuxWorkerBridgeScope } from "@/lib/amux/workerBridgeScope";
 import { recordAmuxWorkerRegistryChangeByOwner } from "@/lib/amux/workerRegistryStore";
 import {
   AmuxWorkerRegistrationRefusedError,
@@ -161,4 +162,24 @@ test("the bridge session list is the derived catalog without the engineering run
     await record(session, name, { model: null, routingTags: [tag], toolCapabilities: [], v22: null });
   }
   assert.deepEqual(await readAmuxWorkerSessionList(true), { listed: true, workers: ["claude-impl", "codex-chore"] });
+});
+
+test("the bridge scope is the derived catalog without the engineering runner, with each worker's kind, or off", async () => {
+  // Orchestration policy version 55, section 1 (S1).
+  assert.deepEqual(await readAmuxWorkerBridgeScope(false), { listed: false, reason: "bridge_scope_off" });
+  assert.deepEqual(await readAmuxWorkerBridgeScope(true), { listed: true, workers: [] });
+  const session = owner();
+  await register(session, "claude-impl", "implementation", "active");
+  await register(session, "codex-chore", "chore", "active");
+  await register(session, "cursor-impl", "implementation", "requested");
+  await record(session, "claude-impl", {
+    model: null, routingTags: ["implementation"], toolCapabilities: [],
+    v22: { model: "claude-opus-5-5", roles: ["implement"], tools: ["repo_read", "repo_write"] },
+  });
+  await record(session, "codex-chore", { model: null, routingTags: ["chore"], toolCapabilities: [], v22: null });
+  await record(session, "cursor-impl", { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null });
+  assert.deepEqual(await readAmuxWorkerBridgeScope(true), {
+    listed: true,
+    workers: [{ name: "claude-impl", kind: "v22" }, { name: "codex-chore", kind: "session" }],
+  });
 });

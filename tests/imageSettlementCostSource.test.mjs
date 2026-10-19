@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { reservationOutputCostMicroUsd } from "../lib/imageGenerationService.ts";
+import { reservationOutputCostMicroUsd, settledThinkingCostMicroUsd } from "../lib/imageGenerationService.ts";
 
 // Settlement used to re-read the live price table and fall back to zero. Both
 // halves were wrong in ways that hide: a deploy between reservation and
@@ -60,4 +60,14 @@ test("a snapshot written by an older deploy still answers", () => {
     }),
     53_000
   );
+});
+
+test("a request that thought settles the reserved thinking cap, never zero", () => {
+  // Review finding 2026-10-19: success settled output + prompt only, so a
+  // model with a finite thinking cap released that cap back to the budget.
+  assert.equal(settledThinkingCostMicroUsd({ thinkingCapMicroUsd: 2_000 }, 0), 0);
+  assert.equal(settledThinkingCostMicroUsd({ thinkingCapMicroUsd: 2_000 }, 512), 2_000);
+  // No cap recorded (older snapshot): the caller settles the whole reservation.
+  assert.equal(settledThinkingCostMicroUsd({ outputCostMicroUsd: 1 }, 512), null);
+  assert.equal(settledThinkingCostMicroUsd(null, 512), null);
 });

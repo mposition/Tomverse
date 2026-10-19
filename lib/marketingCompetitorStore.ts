@@ -48,7 +48,9 @@ export async function readApprovedMarketingCompetitorHosts(
  * each approved row held FOR SHARE until the transaction ends: a retirement or
  * a host change waits for the facts read against the old hosts to commit,
  * rather than landing between the read and the write (READ COMMITTED reads
- * each statement afresh, so a plain read would not hold).
+ * each statement afresh, so a plain read would not hold). A3 finds pages by a
+ * web search limited to these hosts (operator direction 2026-10-19), so a fact
+ * counts from any page on them.
  *
  * Only rows approved when it reads are held. A competitor approved after that
  * is not, on purpose: this record kept nothing from its hosts, and the next

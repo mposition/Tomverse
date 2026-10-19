@@ -7,6 +7,7 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V19_SESSION_BUDGET_TARGET } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE,
   assessAmuxIdeaAnalysisSettlement } from "./ideaAnalysisBudgetCore.ts";
+import { settleSessionShadowUsage } from "./ideaSessionShadowBudgetCore.ts";
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,9 +28,17 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
   outcome: "verified_success" | "invocation_failed" | "outcome_unknown";
   inputTokens: number | null;
   outputTokens: number | null;
+  requiredBudgetMode?: "bounded" | "max_shadow";
+  exactAgentClaim?: { requestId: string; reservationId: string;
+    ideaId: string; invocationOrdinal: number };
 }): Promise<{ claimId: string; status: "succeeded" | "failed" |
   "outcome_unknown"; settledMicroUsd: string | null; auditId: string }> {
-  if (!UUID.test(input.claimId)) {
+  if (!UUID.test(input.claimId) || (input.exactAgentClaim &&
+      (!UUID.test(input.exactAgentClaim.requestId) ||
+       !UUID.test(input.exactAgentClaim.reservationId) ||
+       !UUID.test(input.exactAgentClaim.ideaId) ||
+       !Number.isSafeInteger(input.exactAgentClaim.invocationOrdinal) ||
+       input.exactAgentClaim.invocationOrdinal < 0))) {
     throw new AmuxSessionBudgetSettlementError("not_settleable");
   }
   await tx.$queryRaw`
@@ -49,16 +58,23 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
     where: { id: input.claimId },
     include: { reservation: { select: { idea: { select: {
       state: true, cancelledAt: true, analysisDeadlineAt: true,
-    } } } } },
+    } }, ideaId: true } } },
   });
   if (!claim || claim.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
+      (input.requiredBudgetMode &&
+        claim.budgetMode !== input.requiredBudgetMode) ||
       claim.status !== "in_flight" || claim.closedAt !== null ||
-      claim.resolutionAuditLogId !== null) {
+      claim.resolutionAuditLogId !== null ||
+      (input.exactAgentClaim &&
+        (claim.requestId !== input.exactAgentClaim.requestId ||
+         claim.reservationId !== input.exactAgentClaim.reservationId ||
+         claim.reservation.ideaId !== input.exactAgentClaim.ideaId ||
+         claim.invocationOrdinal !== input.exactAgentClaim.invocationOrdinal))) {
     throw new AmuxSessionBudgetSettlementError("not_settleable");
   }
   const windowRows = await tx.$queryRaw<Array<{ spentMicroUsd: bigint;
-    reservedMicroUsd: bigint }>>`
-    SELECT "spentMicroUsd", "reservedMicroUsd"
+    reservedMicroUsd: bigint; shadowOverrunMicroUsd: bigint; limitMicroUsd: bigint }>>`
+    SELECT "spentMicroUsd", "reservedMicroUsd", "shadowOverrunMicroUsd", "limitMicroUsd"
     FROM "AmuxIdeaAnalysisBudgetWindow"
     WHERE "namespace" = ${claim.namespace}
       AND "monthStart" = ${claim.monthStart} FOR UPDATE
@@ -67,7 +83,7 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
   if (!window || window.reservedMicroUsd < claim.reservedMicroUsd) {
     throw new AmuxSessionBudgetSettlementError("integrity_unavailable");
   }
-  const decision = assessAmuxIdeaAnalysisSettlement({
+  const boundedDecision = assessAmuxIdeaAnalysisSettlement({
     outcome: input.outcome,
     reservedMicroUsd: claim.reservedMicroUsd.toString(),
     inputTokensCap: claim.inputTokensCap,
@@ -76,17 +92,40 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
     outputMicroUsdPerMillion: claim.outputMicroUsdPerMillion,
     inputTokens: input.inputTokens, outputTokens: input.outputTokens,
   });
-  if (decision.decision !== "settlement_candidate" &&
+  const shadowDecision = claim.budgetMode === "max_shadow" &&
+    input.outcome !== "outcome_unknown"
+    ? settleSessionShadowUsage({
+      reservedMicroUsd: claim.reservedMicroUsd.toString(),
+      inputTokens: input.inputTokens, outputTokens: input.outputTokens,
+      inputMicroUsdPerMillion: claim.inputMicroUsdPerMillion,
+      outputMicroUsdPerMillion: claim.outputMicroUsdPerMillion,
+    }) : null;
+  const measured = shadowDecision?.decision === "measured" ||
+    (shadowDecision === null && boundedDecision.decision === "settlement_candidate");
+  if (!measured &&
       !(input.outcome === "outcome_unknown" &&
-        decision.decision === "hold" && decision.reason === "usage_unknown")) {
+        boundedDecision.decision === "hold" && boundedDecision.reason === "usage_unknown")) {
     throw new AmuxSessionBudgetSettlementError("usage_hold",
-      decision.decision === "hold" ? decision.reason : undefined);
+      shadowDecision?.decision === "hold" ? shadowDecision.reason :
+        boundedDecision.decision === "hold" ? boundedDecision.reason : undefined);
   }
   const status = input.outcome === "outcome_unknown"
-    ? "outcome_unknown" as const : decision.decision === "settlement_candidate"
-      ? decision.status : "outcome_unknown" as const;
-  const settledMicroUsd = decision.decision === "settlement_candidate"
-    ? decision.settledMicroUsd : null;
+    ? "outcome_unknown" as const : input.outcome === "verified_success"
+      ? "succeeded" as const : "failed" as const;
+  const settledMicroUsd = shadowDecision?.decision === "measured"
+    ? shadowDecision.settledMicroUsd : boundedDecision.decision === "settlement_candidate"
+      ? boundedDecision.settledMicroUsd : null;
+  const boundedSpent = shadowDecision?.decision === "measured"
+    ? BigInt(shadowDecision.boundedSpentMicroUsd) : settledMicroUsd === null
+      ? BigInt(0) : BigInt(settledMicroUsd);
+  const shadowOverrun = shadowDecision?.decision === "measured"
+    ? BigInt(shadowDecision.shadowOverrunMicroUsd) : BigInt(0);
+  if (measured && (window.spentMicroUsd + window.reservedMicroUsd -
+      claim.reservedMicroUsd + boundedSpent > window.limitMicroUsd ||
+      window.shadowOverrunMicroUsd + shadowOverrun > BigInt("9223372036854775807") -
+        window.spentMicroUsd - boundedSpent)) {
+    throw new AmuxSessionBudgetSettlementError("integrity_unavailable");
+  }
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
@@ -115,15 +154,26 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
       outputTokens: status === "outcome_unknown" ? null : input.outputTokens,
       settledMicroUsd,
       reservedMicroUsd: claim.reservedMicroUsd.toString(),
-      amountMeaning: "cli_api_conversion_estimate" },
+      budgetMode: claim.budgetMode,
+      ...(claim.budgetMode === "max_shadow" ? {
+        shadowOverrunMicroUsd: shadowOverrun.toString(),
+        monthlyShadowExceeded: measured &&
+          window.spentMicroUsd + boundedSpent + window.shadowOverrunMicroUsd +
+            shadowOverrun >= window.limitMicroUsd,
+      } : {}),
+      amountMeaning: claim.budgetMode === "max_shadow"
+        ? "cli_shadow_observed_not_ceiling" : "cli_api_conversion_estimate" },
   });
-  if (decision.decision === "settlement_candidate") {
+  if (measured) {
     const moved = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({
       where: { namespace: claim.namespace, monthStart: claim.monthStart,
         spentMicroUsd: window.spentMicroUsd,
-        reservedMicroUsd: window.reservedMicroUsd },
-      data: { spentMicroUsd: { increment: BigInt(decision.settledMicroUsd) },
-        reservedMicroUsd: { decrement: claim.reservedMicroUsd } },
+        reservedMicroUsd: window.reservedMicroUsd,
+        shadowOverrunMicroUsd: window.shadowOverrunMicroUsd },
+      data: { spentMicroUsd: { increment: boundedSpent },
+        reservedMicroUsd: { decrement: claim.reservedMicroUsd },
+        ...(shadowOverrun > BigInt(0)
+          ? { shadowOverrunMicroUsd: { increment: shadowOverrun } } : {}) },
     });
     if (moved.count !== 1) {
       throw new AmuxSessionBudgetSettlementError("integrity_unavailable");
