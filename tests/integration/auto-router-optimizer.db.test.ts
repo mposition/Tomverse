@@ -234,3 +234,41 @@ test("rollback returns one step to the default and is audited", async () => {
   assert.equal(await auditFor(cycle.id, "auto.llm_router_guidance.rolled_back"), 1);
   assert.deepEqual(await rollBackAutoRouterGuidance(actor), { refused: "nothing_to_roll_back" });
 });
+
+test("a finishing cycle and its close as interrupted never leave cost and buckets disagreeing", async () => {
+  for (let round = 0; round < 5; round += 1) {
+    await reset();
+    const started = await reserve(10_000);
+    assert.ok("cycle" in started);
+    // Old enough to be closed as interrupted by the next reservation.
+    await prisma.autoRouterOptimizerCycle.update({
+      where: { id: started.cycle.id },
+      data: { createdAt: new Date(Date.now() - 20 * 60_000) },
+    });
+    const [finished] = await Promise.all([
+      finishOptimizerCycle({
+        cycleId: started.cycle.id,
+        data: { status: "passed", spentMicroUsd: 1_200, finishedAt: new Date() },
+        spentByProvider: new Map([[OPTIMIZER_PROVIDER, 1_200]]),
+      }),
+      reserve(1_000),
+    ]);
+    const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: started.cycle.id } });
+    const optimizerDay = await bucket(OPTIMIZER_PROVIDER, "provider-cost-day");
+    const routerDay = await bucket(ROUTER_PROVIDER, "provider-cost-day");
+    // The second reservation (if it ran) holds 600 + 400 on top.
+    const second = (await prisma.autoRouterOptimizerCycle.count()) === 2;
+    const held = second ? { optimizer: 600, router: 400 } : { optimizer: 0, router: 0 };
+    if (finished) {
+      assert.equal(row.status, "passed");
+      assert.equal(row.spentMicroUsd, 1_200);
+      assert.equal(optimizerDay - held.optimizer, 1_200);
+      assert.equal(routerDay - held.router, 0);
+    } else {
+      assert.equal(row.status, "error");
+      assert.equal(row.spentMicroUsd, 10_000);
+      assert.equal(optimizerDay - held.optimizer, 6_000);
+      assert.equal(routerDay - held.router, 4_000);
+    }
+  }
+});

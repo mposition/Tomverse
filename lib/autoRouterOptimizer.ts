@@ -187,8 +187,9 @@ async function closeStaleCycles(tx: Prisma.TransactionClient, now: Date) {
         select: { id: true, reservedMicroUsd: true },
     });
     for (const cycle of stale) {
-        await tx.autoRouterOptimizerCycle.update({
-            where: { id: cycle.id },
+        // Conditional as well as locked: only a row still running is closed.
+        await tx.autoRouterOptimizerCycle.updateMany({
+            where: { id: cycle.id, status: "running" },
             data: {
                 status: "error",
                 failure: "interrupted",
@@ -375,6 +376,9 @@ export async function finishOptimizerCycle(input: {
     spentByProvider: ReadonlyMap<string, number>;
 }): Promise<boolean> {
     return prisma.$transaction(async (tx) => {
+        // The same lock as the stale-cycle close in reserveOptimizerCycle, so a
+        // finishing cycle and a close of it as interrupted cannot interleave.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
         const cycle = await tx.autoRouterOptimizerCycle.findUnique({
             where: { id: input.cycleId },
             select: { status: true, providerReservations: true },

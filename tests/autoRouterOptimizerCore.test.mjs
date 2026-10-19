@@ -268,3 +268,9 @@ test("rollback walks back through every promotion, then to the default", async (
   assert.equal(long.history.length, AUTO_ROUTER_GUIDANCE_HISTORY_MAX);
   assert.equal(long.history[0].cycleId, "c14");
 });
+
+test("a record from before the history keeps its one previous step", async () => {
+  const { parseActiveRouterGuidance } = await import("../lib/autoRouterOptimizerCore.ts");
+  const legacy = { guidance: NEW_GUIDANCE, cycleId: "c2", previous: { guidance: `${NEW_GUIDANCE}\nOlder rule.`, cycleId: "c1" } };
+  assert.deepEqual(parseActiveRouterGuidance(JSON.stringify(legacy)).history, [legacy.previous]);
+});

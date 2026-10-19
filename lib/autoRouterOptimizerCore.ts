@@ -129,12 +129,12 @@ export const parseActiveRouterGuidance = (raw: string | null | undefined): Activ
     }
     const current = parseStep(value);
     if (!current?.cycleId) return null;
-    const history = (value as { history?: unknown }).history;
+    const { history, previous } = value as { history?: unknown; previous?: unknown };
+    // A record from before the history existed kept one `previous` step.
+    const steps = Array.isArray(history) ? history : previous ? [previous] : [];
     return {
         ...current,
-        history: Array.isArray(history)
-            ? history.flatMap((step) => parseStep(step) ?? []).slice(0, AUTO_ROUTER_GUIDANCE_HISTORY_MAX)
-            : [],
+        history: steps.flatMap((step) => parseStep(step) ?? []).slice(0, AUTO_ROUTER_GUIDANCE_HISTORY_MAX),
     };
 };
 
