@@ -699,6 +699,51 @@ test("a session plan continues on its next page and registers once complete", as
   assert.equal(decisions.filter((entry) => entry.registeredWorkItemId).length, 9);
 });
 
+test("a refused later page ends every earlier page's body clock", async () => {
+  const title = `Synthetic parked session ${randomUUID()}`;
+  const signal = (metrics: Record<string, number>) => ({ metrics,
+    uncertainty: "low", rationale: "Synthetic deterministic evidence.",
+    evidenceRefIds: ["operator_idea"] });
+  const stories = Array.from({ length: 8 }, (_, index) => ({
+    kind: "card", localId: `c0:card-${index}`, cardType: "story",
+    storyKind: "general", title: `${title} story ${index}`,
+    problem: "The idea holds more than eight independent cards.",
+    scopeIn: ["Review this story"], scopeOut: ["Do not execute"],
+    completionCriteria: ["The owner can review the result"],
+    featureRef: "c0:node-2", parentStoryRef: null, dependencyRefs: [],
+    duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
+    executionBrief: null, sourceRefIds: ["operator_idea"],
+    portfolioSignal: signal({ impact: 2 }) }));
+  const idea = await analysingSessionIdea();
+  const first = await sessionPageAnswer(idea, (previewId) => ({ schemaVersion: 5,
+    previewId, chunkIndex: 0, outcome: "propose", coverageStatus: "more",
+    continuationKind: "output", ownerQuestion: null,
+    coveredScope: "Eight independently reviewable stories were proposed.",
+    remainingScope: "One implementation Task remains for the same feature.",
+    units: [...sessionPlanUnits(title).slice(0, 3), ...stories] }));
+  assert.equal(first.planned.state, "plan_continues");
+  const before = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId: idea.ideaId, chunkIndex: 0 } },
+    select: { freeformPurgeAfter: true } });
+  assert.ok(before.freeformPurgeAfter && before.freeformPurgeAfter > new Date(),
+    "a continuing page keeps its body for the next page");
+  const second = await sessionPageAnswer(idea, () => ({ units: [] }));
+  assert.deepEqual(second.planned, { state: "plan_refused", reason: "invalid_result" });
+  const [idea0, chunk0, preview0] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: idea.ideaId },
+      select: { state: true, analysisCompletedAt: true } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId: idea.ideaId, chunkIndex: 0 } },
+      select: { freeformPurgeAfter: true } }),
+    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+      where: { id: first.claimId }, select: { payloadPurgeAfter: true } }),
+  ]);
+  assert.equal(idea0.state, "awaiting_owner");
+  assert.ok(idea0.analysisCompletedAt);
+  assert.ok(chunk0.freeformPurgeAfter! <= idea0.analysisCompletedAt);
+  assert.ok(preview0.payloadPurgeAfter! <= idea0.analysisCompletedAt);
+});
+
 test("a session answer that asks the owner leaves the queue without a plan", async () => {
   const { ideaId, planned } = await sessionPlannedIdea(sessionPage([], {
     outcome: "needs_information", coverageStatus: "needs_owner_input",
