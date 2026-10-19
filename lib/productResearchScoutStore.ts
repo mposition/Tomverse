@@ -5,6 +5,9 @@
  */
 import "server-only";
 
+import type { Session } from "next-auth";
+
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import {
   SCOUT_EXISTING_TITLES_MAX,
@@ -83,18 +86,51 @@ export async function readSuggestion(id: string): Promise<StoredSuggestion | nul
   return prisma.productResearchSuggestion.findUnique({ where: { id } });
 }
 
-/** Moves an open suggestion on. Answers false when it was no longer open. */
-export async function closeSuggestion(
-  id: string,
-  next: { readonly status: "dismissed" } | { readonly status: "sent"; readonly amuxIdeaId: string },
-): Promise<boolean> {
-  const updated = await prisma.productResearchSuggestion.updateMany({
-    where: { id, status: "open" },
-    data: {
-      status: next.status,
-      statusChangedAt: new Date(),
-      amuxIdeaId: next.status === "sent" ? next.amuxIdeaId : null,
-    },
+export const SUGGESTION_AUDIT_TARGET = "product_research_suggestion";
+export const SUGGESTION_AUDIT_ACTIONS = {
+  dismissed: "product_research.suggestion.dismissed",
+  sent: "product_research.suggestion.sent",
+} as const;
+
+/**
+ * Moves an open suggestion on, with the operator's audit entry in the same
+ * transaction. Answers false when it was no longer open (another tab got
+ * there first), and then writes nothing.
+ */
+export async function closeSuggestion(input: {
+  readonly session: Session;
+  readonly request: Request;
+  readonly id: string;
+  readonly next: { readonly status: "dismissed" } | { readonly status: "sent"; readonly amuxIdeaId: string };
+}): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.productResearchSuggestion.updateMany({
+      where: { id: input.id, status: "open" },
+      data: {
+        status: input.next.status,
+        statusChangedAt: new Date(),
+        amuxIdeaId: input.next.status === "sent" ? input.next.amuxIdeaId : null,
+      },
+    });
+    if (updated.count !== 1) return false;
+    await writeAdminAuditLog({
+      session: input.session,
+      request: input.request,
+      action: SUGGESTION_AUDIT_ACTIONS[input.next.status],
+      targetType: SUGGESTION_AUDIT_TARGET,
+      targetId: input.id,
+      summary: input.next.status === "sent" ? "Scout suggestion sent to AMUX as an idea" : "Scout suggestion dismissed",
+      metadata: input.next.status === "sent" ? { amuxIdeaId: input.next.amuxIdeaId } : {},
+      tx,
+    });
+    return true;
   });
-  return updated.count === 1;
+}
+
+export type SuggestionCounts = { readonly open: number; readonly dismissed: number; readonly sent: number };
+
+export async function suggestionCounts(): Promise<SuggestionCounts> {
+  const groups = await prisma.productResearchSuggestion.groupBy({ by: ["status"], _count: { _all: true } });
+  const count = (status: SuggestionStatus) => groups.find((group) => group.status === status)?._count._all ?? 0;
+  return { open: count("open"), dismissed: count("dismissed"), sent: count("sent") };
 }
