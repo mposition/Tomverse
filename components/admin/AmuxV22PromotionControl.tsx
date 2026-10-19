@@ -22,11 +22,11 @@ import {
 
 type Messages = (typeof adminAmuxAutoAdmissionMessages)["en"];
 const CONTROL_PATH = "/api/admin/amux/v22-auto-promotion";
-const buttonClass = "relative inline-flex min-h-11 items-center justify-center rounded-lg border border-zinc-300 bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700";
-const helpClass = "text-xs leading-5 text-zinc-600 dark:text-zinc-400";
-const chipClass = "inline-flex rounded-md bg-zinc-200 px-2.5 py-1.5 text-xs font-semibold dark:bg-zinc-800";
-const positiveClass = "text-status-success-700 dark:text-status-success-300";
-const switchOnClass = "text-status-switch-on-700 dark:text-status-switch-on-300";
+const buttonClass = "relative inline-flex min-h-11 items-center justify-center rounded-lg border px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 border-zinc-600 bg-zinc-800 text-zinc-100 hover:bg-zinc-700";
+const helpClass = "text-xs leading-5 text-zinc-400";
+const chipClass = "inline-flex rounded-md px-2.5 py-1.5 text-xs font-semibold bg-zinc-800";
+const positiveClass = "text-status-success-300";
+const switchOnClass = "text-status-switch-on-300";
 
 /** Only returned control fields are state. Claim and execution remain scope text. */
 export function AmuxAutoAdmissionControlView({
@@ -56,14 +56,14 @@ export function AmuxAutoAdmissionControlView({
   return (
     <section className="mx-auto w-full min-w-0 max-w-6xl p-4"
       data-testid="amux-v22-promotion-control" aria-busy={busy}>
-      <div className="space-y-5 rounded-2xl border border-zinc-300 bg-white p-5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 md:p-7">
+      <div className="space-y-5 rounded-2xl border p-5 text-sm border-zinc-700 bg-zinc-900 text-zinc-100 md:p-7">
         <div className="space-y-2">
           <h2 className="text-[22px] font-semibold leading-snug">{m.title}</h2>
-          <p className="leading-6 text-zinc-600 dark:text-zinc-400">{m.description}</p>
+          <p className="leading-6 text-zinc-400">{m.description}</p>
         </div>
-        <div className="min-h-28 space-y-2 rounded-xl bg-zinc-100 p-4 dark:bg-zinc-800"
+        <div className="min-h-28 space-y-2 rounded-xl p-4 bg-zinc-800"
           data-testid="amux-auto-admission-owner-state">
-          <span className={`inline-flex text-xs font-semibold ${control?.active ? switchOnClass : "text-zinc-600 dark:text-zinc-400"}`}>
+          <span className={`inline-flex text-xs font-semibold ${control?.active ? switchOnClass : "text-zinc-400"}`}>
             {stateChip}
           </span>
           <p className="text-base font-semibold leading-6" role={pending === "reading" ? "status" : undefined}>
@@ -73,10 +73,10 @@ export function AmuxAutoAdmissionControlView({
         </div>
         <div>
           <h3 className="mb-2 font-semibold">{m.gates}</h3>
-          <dl className="divide-y divide-zinc-200 dark:divide-zinc-700">
+          <dl className="divide-y divide-zinc-700">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3" data-testid="amux-auto-admission-server-gate">
               <dt className="font-semibold">{m.serverGate}</dt>
-              <dd className={`${chipClass} ${serverOpen ? switchOnClass : "text-zinc-600 dark:text-zinc-400"}`}>
+              <dd className={`${chipClass} ${serverOpen ? switchOnClass : "text-zinc-400"}`}>
                 {control ? serverOpen ? m.gateOpen : m.gateClosed : m.unreadable}
               </dd>
               <dd className={`${helpClass} w-full`}>{m.serverHelp}</dd>
@@ -87,18 +87,18 @@ export function AmuxAutoAdmissionControlView({
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3" data-testid="amux-auto-admission-owner-gate">
               <dt className="font-semibold">{m.ownerGate}</dt>
-              <dd className={`${chipClass} ${control?.active ? switchOnClass : "text-zinc-600 dark:text-zinc-400"}`}>
+              <dd className={`${chipClass} ${control?.active ? switchOnClass : "text-zinc-400"}`}>
                 {control ? control.active ? m.enabled : m.disabled : m.unreadable}
               </dd>
               <dd className={`${helpClass} w-full`}>{m.ownerHelp}</dd>
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3" data-testid="amux-auto-admission-graduation-gate">
               <dt className="font-semibold">{m.graduationGate}</dt>
-              <dd className={`${chipClass} ${control?.graduation.ok ? positiveClass : "text-zinc-600 dark:text-zinc-400"}`}>
+              <dd className={`${chipClass} ${control?.graduation.ok ? positiveClass : "text-zinc-400"}`}>
                 {graduationState}
               </dd>
               {control?.graduationExceptionAvailable ? (
-                <dd className={`${chipClass} text-amber-700 dark:text-amber-300`}
+                <dd className={`${chipClass} text-amber-300`}
                   data-testid="amux-auto-admission-exception">
                   {control.graduationExceptionApplied ? m.exceptionApplied : m.exceptionAvailable}
                 </dd>
@@ -111,11 +111,11 @@ export function AmuxAutoAdmissionControlView({
             </div>
           </dl>
         </div>
-        <div className="space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+        <div className="space-y-2 border-t pt-4 border-zinc-700">
           <p className="text-[13px] font-semibold leading-6">{m.flow}</p>
           <p className={helpClass}>{m.scopeHelp}</p>
         </div>
-        <div className="space-y-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+        <div className="space-y-3 border-t pt-4 border-zinc-700">
           {approvalNeeded ? (
             <div className="space-y-2">
               <label className="flex min-h-11 items-start gap-3 py-2 leading-6"
@@ -162,11 +162,11 @@ export function AmuxAutoAdmissionControlView({
             </p>
           ) : null}
           {notice === "conflict" ? (
-            <p role="alert" className="text-sm leading-6 text-amber-700 dark:text-amber-300"
+            <p role="alert" className="text-sm leading-6 text-amber-300"
               data-testid="amux-auto-admission-conflict">{m.conflict}</p>
           ) : null}
           {locked ? (
-            <p role="alert" className="text-sm leading-6 text-amber-700 dark:text-amber-300"
+            <p role="alert" className="text-sm leading-6 text-amber-300"
               data-testid="amux-auto-admission-outcome-unknown">{m.unknownOutcome}</p>
           ) : null}
           {notice === "load_failed" && !failure ? <p role="alert">{m.readFailed}</p> : null}

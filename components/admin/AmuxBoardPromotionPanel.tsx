@@ -68,22 +68,22 @@ export function AmuxBoardPromotionPanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-promotion-panel">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
-      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-board-promotion-request">
+      <h2 className="text-lg font-semibold text-zinc-100">{messages.title}</h2>
+      <p className="text-sm text-zinc-300">{messages.description}</p>
+      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-100" htmlFor="amux-board-promotion-request">
         {messages.requestLabel}
         <textarea
           id="amux-board-promotion-request"
-          className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          className="min-h-40 w-full rounded-md border p-3 text-base border-zinc-600 bg-zinc-950 text-zinc-100"
           value={requestText}
           onChange={(event) => setRequestText(event.target.value)}
         />
       </label>
-      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-board-promotion-approval">
+      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-100" htmlFor="amux-board-promotion-approval">
         {messages.approvalLabel}
         <input
           id="amux-board-promotion-approval"
-          className="min-h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          className="min-h-11 w-full rounded-md border px-3 text-base border-zinc-600 bg-zinc-950 text-zinc-100"
           value={approvalId}
           onChange={(event) => setApprovalId(event.target.value)}
         />
@@ -91,7 +91,7 @@ export function AmuxBoardPromotionPanel() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="min-h-11 rounded-md px-4 text-sm font-medium disabled:opacity-50 bg-zinc-100 text-zinc-900"
           disabled={pending || requestText.trim().length === 0}
           onClick={() => send("preview", requestText)}
         >
@@ -99,7 +99,7 @@ export function AmuxBoardPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || requestText.trim().length === 0}
           onClick={() => send("prepare", requestText)}
         >
@@ -107,7 +107,7 @@ export function AmuxBoardPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("approve", JSON.stringify({ approvalId }))}
         >
@@ -115,7 +115,7 @@ export function AmuxBoardPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("reject", JSON.stringify({ approvalId }))}
         >
@@ -123,7 +123,7 @@ export function AmuxBoardPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || approvalId.trim().length === 0}
           onClick={() => send("expire", JSON.stringify({ approvalId }))}
         >
@@ -131,7 +131,7 @@ export function AmuxBoardPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending}
           onClick={() => send("expire-due", "{}")}
         >
@@ -139,7 +139,7 @@ export function AmuxBoardPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || !applyReady}
           aria-describedby="amux-board-promotion-apply-reason"
           onClick={() => send("apply", JSON.stringify({ approvalId }))}
@@ -147,7 +147,7 @@ export function AmuxBoardPromotionPanel() {
           {messages.apply}
         </button>
       </div>
-      <p id="amux-board-promotion-apply-reason" className="text-sm text-zinc-700 dark:text-zinc-300">
+      <p id="amux-board-promotion-apply-reason" className="text-sm text-zinc-300">
         {applyReady
           ? messages.applyPermitted("true")
           : applySwitch === false
@@ -155,12 +155,12 @@ export function AmuxBoardPromotionPanel() {
             : messages.applyWaiting}
       </p>
       {refusedForStepUp ? (
-        <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
+        <a className="text-sm font-medium underline text-zinc-100" href={STEP_UP_HREF}>
           {messages.renewSignIn}
         </a>
       ) : null}
       {result ? (
-        <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
+        <div className="rounded-md border p-3 text-sm border-zinc-700 text-zinc-100" role="status">
           {result.error ? <p>{messages.error(result.error)}</p> : null}
           {result.status ? <p>{messages.status(result.status)}</p> : null}
           {result.refusal ? <p>{messages.refusal(result.refusal)}</p> : null}

@@ -89,8 +89,8 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
         tone === "primary"
           ? "border-blue-600 bg-blue-600 text-white"
           : tone === "danger"
-            ? "border-red-300 text-red-700 dark:border-red-800 dark:text-red-300"
-            : "border-zinc-300 text-zinc-800 dark:border-zinc-700 dark:text-zinc-200",
+            ? "border-red-800 text-red-300"
+            : "border-zinc-700 text-zinc-200",
       ].join(" ")}
     >
       {busy === key ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
@@ -104,14 +104,14 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
   return (
     <section className="flex min-w-0 flex-col gap-4">
       {!initial.canWrite ? (
-        <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="flex items-center gap-2 text-sm text-zinc-400">
           <Lock className="h-4 w-4" aria-hidden="true" />
           {m.readOnlyNote}
         </p>
       ) : null}
 
       {reauthenticationRequired ? (
-        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-300">
           {m.reauthenticationRequired}
           <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
             {m.signInAgain}
@@ -121,7 +121,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
       {notice ? (
         <p
           role="status"
-          className={notice.tone === "ok" ? "text-sm text-zinc-700 dark:text-zinc-300" : "text-sm text-red-700 dark:text-red-300"}
+          className={notice.tone === "ok" ? "text-sm text-zinc-300" : "text-sm text-red-300"}
         >
           {notice.text}
         </p>
@@ -129,7 +129,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
 
       {initial.queue ? (
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          <p className="text-sm text-zinc-300">
             {fill(m.totals, {
               t2: initial.queue.totals.t2_draft,
               decision: initial.queue.totals.decision,
@@ -137,12 +137,12 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
             })}{" "}
             {fill(m.showingOldest, { count: initial.limit })}
           </p>
-          {initial.queue.items.length === 0 ? <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.emptyQueue}</p> : null}
+          {initial.queue.items.length === 0 ? <p className="text-sm text-zinc-400">{m.emptyQueue}</p> : null}
           <ul className="flex flex-col gap-3">
             {initial.queue.items.map((item) => (
-              <li key={item.id} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+              <li key={item.id} className="rounded-lg border p-4 border-zinc-800">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{kindLabel(item.kind)}</p>
+                  <p className="text-sm font-semibold text-zinc-100">{kindLabel(item.kind)}</p>
                   <p className="text-xs text-zinc-500">{item.createdAt}</p>
                 </div>
                 <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
@@ -174,13 +174,13 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                 {item.patchBody !== null ? (
                   <details className="mt-3">
                     <summary className="cursor-pointer text-sm font-medium">{m.patch}</summary>
-                    <pre className="mt-2 max-h-96 overflow-auto rounded bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
+                    <pre className="mt-2 max-h-96 overflow-auto rounded p-3 text-xs bg-zinc-900">
                       {item.patchBody}
                     </pre>
                   </details>
                 ) : null}
                 {item.kind === "state_mismatch" ? (
-                  <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{m.mismatchNote}</p>
+                  <p className="mt-2 text-sm text-zinc-400">{m.mismatchNote}</p>
                 ) : null}
                 {initial.canWrite && item.kind === "t2_draft" ? (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -238,9 +238,9 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
 
       {initial.runs ? (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
+          <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
           {initial.runs.length === 0 ? (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.emptyRuns}</p>
+            <p className="text-sm text-zinc-400">{m.emptyRuns}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
@@ -258,7 +258,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                 </thead>
                 <tbody>
                   {initial.runs.map((run) => (
-                    <tr key={run.id} className="border-t border-zinc-200 dark:border-zinc-800">
+                    <tr key={run.id} className="border-t border-zinc-800">
                       <td className="px-2 py-1 font-mono">{run.id}</td>
                       <td className="px-2 py-1 font-mono">{run.cardId}</td>
                       <td className="px-2 py-1">{run.modeAtStart}</td>
@@ -278,9 +278,9 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
 
       {initial.pullRequests ? (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
+          <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
           {initial.pullRequests.length === 0 ? (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.emptyPullRequests}</p>
+            <p className="text-sm text-zinc-400">{m.emptyPullRequests}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
@@ -296,7 +296,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                 </thead>
                 <tbody>
                   {initial.pullRequests.map((row) => (
-                    <tr key={row.id} className="border-t border-zinc-200 dark:border-zinc-800">
+                    <tr key={row.id} className="border-t border-zinc-800">
                       <td className="px-2 py-1 font-mono">#{row.prNumber}</td>
                       <td className="px-2 py-1 font-mono">{row.runId}</td>
                       <td className="px-2 py-1">{row.state}</td>
@@ -324,7 +324,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
             <dt className="text-zinc-500">{m.killSwitch}</dt>
             <dd>{initial.settings.killSwitch ? m.engaged : m.notEngaged}</dd>
           </dl>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          <p className="text-sm text-zinc-300">
             {initial.settings.pullRequests.firstT1Window
               ? fill(m.prQueueWindow, {
                   occupied: initial.settings.pullRequests.occupied,
@@ -341,7 +341,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
               limit: initial.settings.decisions.limit,
             })}
           </p>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.queueNote}</p>
+          <p className="text-sm text-zinc-400">{m.queueNote}</p>
           {initial.canWrite ? (
             <div className="flex flex-wrap gap-2">
               {button("mode:off", m.setOff, () =>
@@ -365,8 +365,8 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
               )}
             </div>
           ) : null}
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.haltNote}</p>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.t1Note}</p>
+          <p className="text-sm text-zinc-400">{m.haltNote}</p>
+          <p className="text-sm text-zinc-400">{m.t1Note}</p>
         </div>
       ) : null}
     </section>

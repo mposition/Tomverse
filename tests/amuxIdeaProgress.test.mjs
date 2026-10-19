@@ -206,9 +206,9 @@ test("the Ideas main follows the approved mockup: inbox on top, input beside the
     "an unresolved request always comes before the idea a row opened");
 });
 
-test("the Ideas components are dark-only: the console is always dark, so no light surface or dark: pair", () => {
-  // AdminConsoleShell draws bg-zinc-950 text-zinc-100 whatever the product theme is. A `dark:` variant
-  // follows the product theme instead, so a light theme gave white cards under near-white text.
+test("the Ideas components are dark-only: the console's Light theme remaps them, so no light surface or dark: pair", () => {
+  // The console is written in dark classes and its Light theme remaps the palette. A `dark:` variant
+  // follows the product theme instead, so a light product theme gave white cards under near-white text.
   const files = ["AmuxIdeaInputPanel", "AmuxIdeaRequestStatusCard", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary",
     "AmuxFrontierModelsPanel", "AmuxInitialPlanPanel", "AmuxIdeaPlanApprovalPanel", "AmuxIdeaAnalysisResultPanel",
     "AmuxFrontierModelRegistrationPanel", "AmuxIdeaCardLinkPanel", "AmuxIdeaDerivationPanel", "AmuxIdeaNodeRegistrationPanel",

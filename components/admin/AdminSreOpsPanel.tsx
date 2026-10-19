@@ -32,7 +32,7 @@ export function AdminSreOpsPanel({ view, canApprove }: { view: OpsObserverAdminV
   const m = useAdminMessages(adminSreOpsMessages);
   if (!view) {
     return (
-      <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="sre-ops-read-failed">
+      <p role="alert" className="text-sm text-red-300" data-testid="sre-ops-read-failed">
         {m.readFailed}
       </p>
     );
@@ -106,53 +106,53 @@ function AdminSreOpsChain({ view, canApprove }: { view: OpsObserverAdminView; ca
 
   return (
     <section className="flex min-w-0 flex-col gap-5">
-      <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="flex items-center gap-2 text-sm text-zinc-400">
         <Lock className="h-4 w-4 shrink-0" aria-hidden="true" />
         {m.readNote}
       </p>
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.chainTitle}</h2>
+        <h2 className="text-base font-semibold text-zinc-100">{m.chainTitle}</h2>
         {view.head ? (
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm" data-testid="sre-ops-chain">
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.genesisId}</dt>
+            <dt className="text-zinc-400">{m.genesisId}</dt>
             <dd className="break-all font-mono text-xs">{view.head.genesisId}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.generation}</dt>
+            <dt className="text-zinc-400">{m.generation}</dt>
             <dd>{view.head.generation ?? m.generationMissing}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.mode}</dt>
+            <dt className="text-zinc-400">{m.mode}</dt>
             <dd>{view.head.mode}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.approvedAt}</dt>
+            <dt className="text-zinc-400">{m.approvedAt}</dt>
             <dd>{view.head.createdAt}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.trust}</dt>
+            <dt className="text-zinc-400">{m.trust}</dt>
             <dd data-testid="sre-ops-trust">
               {view.trustReason === "trusted" ? m.trusted : fill(m.untrusted, { reason: view.trustReason })}
             </dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.nextGenesisAt}</dt>
+            <dt className="text-zinc-400">{m.nextGenesisAt}</dt>
             <dd>{view.nextGenesisAt}</dd>
           </dl>
         ) : (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400" data-testid="sre-ops-chain">
+          <p className="text-sm text-zinc-400" data-testid="sre-ops-chain">
             {m.noHead}
           </p>
         )}
       </div>
 
-      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.genesisTitle}</h2>
+      <div className="flex flex-col gap-3 rounded-lg border p-3 border-zinc-800">
+        <h2 className="text-base font-semibold text-zinc-100">{m.genesisTitle}</h2>
         {!offer ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.noOffer}</p>
+          <p className="text-sm text-zinc-400">{m.noOffer}</p>
         ) : !canApprove ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.ownerOnly}</p>
+          <p className="text-sm text-zinc-400">{m.ownerOnly}</p>
         ) : (
           <>
-            <p className="text-sm text-zinc-800 dark:text-zinc-200" data-testid="sre-ops-offer">
+            <p className="text-sm text-zinc-200" data-testid="sre-ops-offer">
               {offerLabel}
             </p>
             {tooSoon ? (
-              <p className="text-sm text-amber-800 dark:text-amber-300">{fill(m.tooSoon, { at: view.nextGenesisAt ?? "" })}</p>
+              <p className="text-sm text-amber-300">{fill(m.tooSoon, { at: view.nextGenesisAt ?? "" })}</p>
             ) : null}
             {reauthenticationRequired ? (
-              <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+              <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-300">
                 {m.reauthenticationRequired}
                 <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
                   {m.signInAgain}
@@ -163,7 +163,7 @@ function AdminSreOpsChain({ view, canApprove }: { view: OpsObserverAdminView; ca
               <p
                 role="status"
                 className={
-                  notice.tone === "ok" ? "text-sm text-zinc-700 dark:text-zinc-300" : "text-sm text-red-700 dark:text-red-300"
+                  notice.tone === "ok" ? "text-sm text-zinc-300" : "text-sm text-red-300"
                 }
               >
                 {notice.text}
@@ -174,7 +174,7 @@ function AdminSreOpsChain({ view, canApprove }: { view: OpsObserverAdminView; ca
               onClick={() => void approve()}
               disabled={busy || tooSoon}
               data-testid="sre-ops-approve"
-              className="min-h-11 self-start rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+              className="min-h-11 self-start rounded-md px-4 text-sm font-medium disabled:opacity-60 bg-zinc-100 text-zinc-900"
             >
               {m.approve}
             </button>
