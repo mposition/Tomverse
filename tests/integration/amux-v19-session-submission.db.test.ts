@@ -1763,7 +1763,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   const claimId = randomUUID();
   const signedIdentity = { claimId, requestId: claimRequestId,
     reservationId: reservation.reservationId, ideaId,
-    invocationOrdinal: 0, priceVersionId, modelId: maxModelId,
+    invocationOrdinal: 0, priceVersionId, provider: "anthropic", modelId: maxModelId,
     reasoningEffort: "high" };
   const authVerifiedAt = new Date().toISOString();
   const authProof = signAmuxV19MaxClaimAttestation(launcherSecret,
