@@ -8,7 +8,7 @@ import { QA_RELEASE_RAILWAY_API, createQaReleaseRailwayPorts } from "../lib/qaRe
 const HEAD = "a".repeat(40);
 const MERGE = "b".repeat(40);
 const PROJECT = "0c5f17ad-a42a-4fa8-a245-bcd6a3275a35";
-const STAGING = "11111111-2222-3333-4444-555555555555";
+const DEV_ENVIRONMENT = "11111111-2222-3333-4444-555555555555";
 const SERVICE_A = "aaaaaaaa-0000-0000-0000-000000000001";
 const SERVICE_B = "aaaaaaaa-0000-0000-0000-000000000002";
 const json = (status, body) => ({ status, text: JSON.stringify(body) });
@@ -29,12 +29,12 @@ function recorder(answer) {
 function railway(overrides = {}) {
   return (request) => {
     const { query, variables } = JSON.parse(request.body);
-    if (query.includes("projectToken")) return overrides.token ?? json(200, { data: { projectToken: { projectId: PROJECT, environmentId: STAGING } } });
+    if (query.includes("projectToken")) return overrides.token ?? json(200, { data: { projectToken: { projectId: PROJECT, environmentId: DEV_ENVIRONMENT } } });
     if (query.includes("environment(id")) {
       return overrides.environment ?? json(200, {
         data: {
           environment: {
-            id: STAGING,
+            id: DEV_ENVIRONMENT,
             name: "dev",
             serviceInstances: {
               edges: [
@@ -72,21 +72,21 @@ test("Railway: every dev service's deployments, read with the project token head
     assert.doesNotMatch(JSON.parse(call.body).query, /mutation/);
   }
   const listCall = JSON.parse(calls.at(-1).body);
-  assert.deepEqual(listCall.variables, { input: { projectId: PROJECT, environmentId: STAGING, serviceId: SERVICE_B }, first: 25 });
+  assert.deepEqual(listCall.variables, { input: { projectId: PROJECT, environmentId: DEV_ENVIRONMENT, serviceId: SERVICE_B }, first: 25 });
 });
 
 test("Railway: another environment, no service from this repository, errors or odd shapes all read as null", async () => {
-  const production = { data: { environment: { id: STAGING, name: "production", serviceInstances: { edges: [] } } } };
+  const production = { data: { environment: { id: DEV_ENVIRONMENT, name: "production", serviceInstances: { edges: [] } } } };
   // A token for staging (Test), which deploys the test branch since 2026-10-13: a develop merge never deploys there.
-  const staging = { data: { environment: { id: STAGING, name: "staging", serviceInstances: { edges: [{ node: { serviceId: SERVICE_A, serviceName: "web", source: { repo: "mposition/Tomverse" } } }] } } } };
-  const foreign = { data: { environment: { id: STAGING, name: "dev", serviceInstances: { edges: [{ node: { serviceId: SERVICE_A, serviceName: "x", source: { repo: "other/repo" } } }] } } } };
+  const staging = { data: { environment: { id: DEV_ENVIRONMENT, name: "staging", serviceInstances: { edges: [{ node: { serviceId: SERVICE_A, serviceName: "web", source: { repo: "mposition/Tomverse" } } }] } } } };
+  const foreign = { data: { environment: { id: DEV_ENVIRONMENT, name: "dev", serviceInstances: { edges: [{ node: { serviceId: SERVICE_A, serviceName: "x", source: { repo: "other/repo" } } }] } } } };
   for (const overrides of [
     { environment: json(200, production) },
     { environment: json(200, staging) },
     { environment: json(200, foreign) },
     { token: json(200, { errors: [{ message: "Not Authorized" }] }) },
     { token: json(401, {}) },
-    { token: json(200, { data: { projectToken: { projectId: "nope", environmentId: STAGING } } }) },
+    { token: json(200, { data: { projectToken: { projectId: "nope", environmentId: DEV_ENVIRONMENT } } }) },
     { token: { status: 200, text: "<html>" } },
   ]) {
     const { http } = recorder(railway(overrides));
