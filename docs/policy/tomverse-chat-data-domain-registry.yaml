@@ -2090,6 +2090,52 @@ domains:
       price-version and audit references do not establish account deletion,
       retention cleanup or unified export; live CLI admission remains gated.
 
+  - domain: amuxIdeaSessionAnalysisResult
+    prismaModel: AmuxIdeaSessionAnalysisResult
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, session analysis result account deletion,
+      retention and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      One row per verified session claim holds the model's analysis output as
+      ciphertext under an external content key, with its keyed digest, token
+      counts, reference ordinal, checkout evidence, read manifest and canonical
+      audit. A dark purge path clears the ciphertext at its retention point
+      and keeps only digest and audit. Scheduler activation, backup deletion
+      evidence, account deletion and export remain unverified; restrictive
+      claim, idea, evidence, manifest and audit references remain.
+
+  - domain: amuxIdeaSessionResultOrphanKeyRetirement
+    prismaModel: AmuxIdeaSessionResultOrphanKeyRetirement
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v19, session result orphan-key retirement
+      account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The row records the claim and later deletion of one external result key
+      whose result row was never committed, with canonical audit references
+      and timestamps only: no ciphertext, analysis text or repository path. It
+      permits an orphan-key sweep, but its restrictive claim, idea and audit
+      references do not settle account deletion or export.
+
   - domain: amuxIdeaAnalysisChunk
     prismaModel: AmuxIdeaAnalysisChunk
     userLinkageRole: actor

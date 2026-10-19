@@ -783,6 +783,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaSessionAnalysisResult",
+    publicName: "amux_idea_session_analysis_results",
+    prismaModel: "AmuxIdeaSessionAnalysisResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaSessionResultOrphanKeyRetirement",
+    publicName: "amux_idea_session_result_orphan_key_retirements",
+    prismaModel: "AmuxIdeaSessionResultOrphanKeyRetirement",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaTrackedCheckoutEvidence",
     publicName: "amux_idea_tracked_checkout_evidence",
     prismaModel: "AmuxIdeaTrackedCheckoutEvidence",
