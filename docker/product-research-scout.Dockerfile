@@ -1,8 +1,6 @@
 # The Scout's image (docs/policy/product-research-agent.md §10, §13): the daily
-# walker (`Product Research Scout`) and the probe that measured its browser
-# rules (`Product Research Scout Probe`) run from it with different start
-# commands. It holds Chromium, the renderers the walker exercises, and no
-# credential.
+# walker (`Product Research Scout`). It holds Chromium, the renderers the walker
+# exercises, the local S0 probe script, and no credential.
 #
 # The base is Playwright's own image at the version package-lock.json pins, so
 # the browsers it carries are the ones @playwright/test expects. It runs as the
