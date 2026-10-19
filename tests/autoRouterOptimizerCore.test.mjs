@@ -8,18 +8,18 @@ import {
 } from "../lib/autoLlmRouterCore.ts";
 import {
   AUTO_ROUTER_GUIDANCE_MAX_CHARS,
+  AUTO_ROUTER_OPTIMIZER_CONCURRENCY,
   AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
   AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
   AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
   admitGuidance,
-  admitOptimizerReservation,
+  admitOptimizerCycle,
   callCostMicroUsd,
   combineJudgeOrders,
   optimizerGateFailure,
   parseJudgeWinner,
   runOptimizerCycle,
   splitOptimizerDecisions,
-  worstCaseCallMicroUsd,
 } from "../lib/autoRouterOptimizerCore.ts";
 
 // The router prompt as it was before the split (#2717). Promotion changes
@@ -94,32 +94,27 @@ test("the gate names the first reason a proposal may not be promoted", () => {
   assert.equal(optimizerGateFailure(summary({ incumbentCredits: 0, candidateCredits: 0 })), null);
 });
 
-test("the worst case bounds input tokens by UTF-8 bytes plus the request overhead", () => {
+test("a call costs its reported usage; unknown usage counts as nothing", () => {
   const prices = { inputUsdPerMillionTokens: 0.2, outputUsdPerMillionTokens: 1.2 };
-  // 10 ASCII bytes vs 10 Korean characters = 30 bytes; each plus 1,000 overhead tokens.
-  assert.equal(worstCaseCallMicroUsd({ inputText: "a".repeat(10), maxOutputTokens: 200, ...prices }), 442);
-  assert.equal(worstCaseCallMicroUsd({ inputText: "가".repeat(10), maxOutputTokens: 200, ...prices }), 446);
-  assert.equal(callCostMicroUsd({ inputTokens: 300, outputTokens: 50, worstCaseMicroUsd: 446, ...prices }), 120);
-  assert.equal(callCostMicroUsd({ inputTokens: undefined, outputTokens: 50, worstCaseMicroUsd: 446, ...prices }), 446);
+  assert.equal(callCostMicroUsd({ inputTokens: 300, outputTokens: 50, ...prices }), 120);
+  assert.equal(callCostMicroUsd({ inputTokens: undefined, outputTokens: 50, ...prices }), 0);
+  assert.equal(callCostMicroUsd({ inputTokens: 300, outputTokens: undefined, ...prices }), 0);
 });
 
-test("a reservation is the whole worst case, refused past the run, day or month cap", () => {
-  assert.deepEqual(
-    admitOptimizerReservation({ worstCaseMicroUsd: 1_234.2, spentTodayMicroUsd: 0, spentThisMonthMicroUsd: 0 }),
-    { reservedMicroUsd: 1_235 }
-  );
-  assert.deepEqual(
-    admitOptimizerReservation({ worstCaseMicroUsd: AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD + 1, spentTodayMicroUsd: 0, spentThisMonthMicroUsd: 0 }),
-    { refused: "run_cap" }
-  );
-  assert.deepEqual(
-    admitOptimizerReservation({ worstCaseMicroUsd: 2, spentTodayMicroUsd: AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD - 1, spentThisMonthMicroUsd: 0 }),
-    { refused: "day_cap" }
-  );
-  assert.deepEqual(
-    admitOptimizerReservation({ worstCaseMicroUsd: 2, spentTodayMicroUsd: 0, spentThisMonthMicroUsd: AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD - 1 }),
-    { refused: "month_cap" }
-  );
+test("a cycle is refused once actual spend reaches the day or month cap; otherwise its budget is the smallest room left", () => {
+  const admit = (spentTodayMicroUsd, spentThisMonthMicroUsd) =>
+    admitOptimizerCycle({ spentTodayMicroUsd, spentThisMonthMicroUsd });
+  // Nothing spent: one run's cap.
+  assert.deepEqual(admit(0, 0), { budgetMicroUsd: AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD });
+  // The day's room is smaller than a run's cap.
+  assert.deepEqual(admit(AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD - 1_000, AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD - 1_000), { budgetMicroUsd: 1_000 });
+  // The month's room is smaller than the day's.
+  assert.deepEqual(admit(0, AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD - 700), { budgetMicroUsd: 700 });
+  // Reaching a cap refuses; one micro-dollar under it does not.
+  assert.deepEqual(admit(AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD, AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD), { refused: "day_cap" });
+  assert.deepEqual(admit(AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD + 5, AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD + 5), { refused: "day_cap" });
+  assert.deepEqual(admit(0, AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD), { refused: "month_cap" });
+  assert.deepEqual(admit(AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD - 1, AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD - 1), { budgetMicroUsd: 1 });
 });
 
 const candidates = [
@@ -154,7 +149,6 @@ const fakeDeps = (overrides = {}) => {
         const { choiceA } = JSON.parse(message);
         return { value: choiceA === "light" ? "A" : "B", costMicroUsd: 20 };
       },
-      worstCaseMicroUsd: { generate: 1_000, route: 50, judge: 80 },
       budgetMicroUsd: 1_000_000,
       ...overrides,
     },
@@ -176,20 +170,7 @@ test("a cycle that finds cheaper equal picks passes, judging only differing case
   assert.equal(calls.judge, 12); // two orders for each of the six differing cases
   assert.equal(result.spentMicroUsd, 100 + 24 * 10 + 12 * 20);
   assert.deepEqual(result.spentByKind, { generate: 100, route: 240, judge: 240 });
-  assert.equal(result.overrunCalls, 0);
-});
-
-test("a call that costs more than its bound is recorded in full and counted as an overrun", async () => {
-  const { deps } = fakeDeps({
-    judge: async (message) => {
-      const { choiceA } = JSON.parse(message);
-      return { value: choiceA === "light" ? "A" : "B", costMicroUsd: 95 }; // bound is 80
-    },
-  });
-  const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
-  assert.equal(result.spentByKind.judge, 12 * 95);
-  assert.equal(result.overrunCalls, 12);
-  assert.equal(result.spentMicroUsd, 100 + 240 + 12 * 95);
+  assert.equal(result.failedCalls, 0);
 });
 
 test("a proposal equal to the current guidance stops before any routing", async () => {
@@ -202,36 +183,63 @@ test("a proposal equal to the current guidance stops before any routing", async 
   assert.equal(result.spentMicroUsd, 100);
 });
 
-test("running out of budget never passes and still counts every started call", async () => {
-  // Generation fits; the routing calls run the budget dry part-way through.
-  const { calls, deps } = fakeDeps({
-    worstCaseMicroUsd: { generate: 200, route: 50, judge: 80 },
-    budgetMicroUsd: 300,
-  });
+test("once actual spend reaches the budget no new call starts, and the cycle never passes", async () => {
+  // Generation alone spends the whole budget: not one routing call starts.
+  const { calls, deps } = fakeDeps({ budgetMicroUsd: 100 });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.status, "failed");
   assert.equal(result.failure, "budget_exhausted");
-  assert.ok(calls.route > 0 && calls.route < 24);
-  assert.equal(result.spentMicroUsd, 100 + calls.route * 10 + calls.judge * 20);
-  assert.ok(result.spentMicroUsd <= deps.budgetMicroUsd);
+  assert.equal(calls.generate, 1);
+  assert.equal(calls.route, 0);
+  assert.equal(calls.judge, 0);
+  assert.equal(result.spentMicroUsd, 100);
 });
 
-test("no call starts when even generation does not fit the budget", async () => {
-  const { calls, deps } = fakeDeps({ budgetMicroUsd: 999 });
+test("calls already in flight when the budget is reached are counted in full", async () => {
+  // Routing runs the budget dry part-way; the calls still running finish and
+  // are counted, so spend may pass the budget by at most those calls.
+  const { calls, deps } = fakeDeps({ budgetMicroUsd: 300 });
+  const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.equal(result.failure, "budget_exhausted");
+  assert.ok(calls.route > 0 && calls.route < 24);
+  assert.equal(calls.judge, 0);
+  assert.equal(result.spentMicroUsd, 100 + calls.route * 10);
+  assert.deepEqual(result.spentByKind, { generate: 100, route: calls.route * 10, judge: 0 });
+  assert.ok(result.spentMicroUsd >= deps.budgetMicroUsd);
+  assert.ok(result.spentMicroUsd - deps.budgetMicroUsd < AUTO_ROUTER_OPTIMIZER_CONCURRENCY * 10);
+});
+
+test("a zero budget starts no call", async () => {
+  const { calls, deps } = fakeDeps({ budgetMicroUsd: 0 });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.failure, "budget_exhausted");
   assert.equal(calls.generate, 0);
   assert.equal(result.spentMicroUsd, 0);
 });
 
-test("a call that throws is charged its worst case and reads as no answer", async () => {
+test("a call that throws costs nothing, is counted as failed and reads as no answer", async () => {
   const { deps } = fakeDeps({
     route: async () => { throw new Error("provider down"); },
   });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.failure, "too_many_unrouted");
   assert.equal(result.summary.unrouted, 12);
-  assert.equal(result.spentMicroUsd, 100 + 24 * 50);
+  assert.equal(result.failedCalls, 24);
+  assert.equal(result.spentMicroUsd, 100);
+  assert.deepEqual(result.spentByKind, { generate: 100, route: 0, judge: 0 });
+});
+
+test("a reported cost that is not a number counts as nothing and never disables the budget", async () => {
+  const { calls, deps } = fakeDeps({
+    generate: async () => ({ value: NEW_GUIDANCE, costMicroUsd: Number.NaN }),
+    budgetMicroUsd: 50,
+  });
+  const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.equal(result.spentByKind.generate, 0);
+  // The routing calls still stop at the budget: 50 at 10 a call.
+  assert.equal(result.failure, "budget_exhausted");
+  assert.ok(calls.route >= 5 && calls.route < 5 + AUTO_ROUTER_OPTIMIZER_CONCURRENCY);
+  assert.equal(result.spentMicroUsd, calls.route * 10);
 });
 
 test("a stored guidance record is read only when it is complete and valid", async () => {
