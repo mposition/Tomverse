@@ -28,6 +28,7 @@ import {
   launchFailure,
   originOf,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
+import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
 const args = process.argv.slice(2);
 const outIndex = args.indexOf("--out");
@@ -63,7 +64,9 @@ setTimeout(() => {
   process.exit(1);
 }, RUN_DEADLINE_MS).unref();
 
-const outcomes = { sent: 0, stored: 0, modelOff: 0, refused: 0, failed: 0, stopped: 0, skipped: 0 };
+const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0 };
+/** Set by the route's first daily_cap_reached; nothing more is captured or sent today. */
+let capReached = false;
 
 async function deliver(subject) {
   if (outDir) {
@@ -75,6 +78,10 @@ async function deliver(subject) {
     outcomes.sent += 1;
     return;
   }
+  if (capReached) {
+    outcomes.capped += 1;
+    return;
+  }
   try {
     const response = await fetch(ingestUrl, {
       method: "POST",
@@ -84,10 +91,10 @@ async function deliver(subject) {
     });
     const answer = await response.json().catch(() => ({}));
     outcomes.sent += 1;
-    if (answer.judged === true) outcomes.stored += Number(answer.stored) || 0;
-    else if (answer.reason === "model_off") outcomes.modelOff += 1;
-    else if (answer.refused) outcomes.refused += 1;
-    else outcomes.failed += 1;
+    const outcome = scoutSendOutcome(answer);
+    if (outcome === "judged") outcomes.stored += Number(answer.stored) || 0;
+    else outcomes[outcome] += 1;
+    if (outcome === "capped") capReached = true;
   } catch (error) {
     // Unknown outcome: the app may have stored it. Not repeated.
     outcomes.failed += 1;
@@ -174,6 +181,10 @@ async function walkPages() {
   try {
     const rules = await installCdpRules(browser, [SCOUT_PAGE_ORIGIN]);
     for (const target of SCOUT_PAGES) {
+      if (capReached) {
+        outcomes.capped += 1;
+        continue;
+      }
       const captured = await capturePage(browser, rules, target);
       if (captured.subject) await deliver(captured.subject);
       else {
