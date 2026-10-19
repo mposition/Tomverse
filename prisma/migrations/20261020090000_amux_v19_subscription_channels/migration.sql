@@ -87,7 +87,7 @@ BEGIN
     WHERE "namespace" = NEW."namespace" AND "monthStart" = NEW."monthStart";
   IF TG_OP = 'INSERT' THEN
     SELECT * INTO audit_row FROM "AdminAuditLog" WHERE "id" = NEW."claimAuditLogId";
-    SELECT "ideaId", "reasoningEffort" INTO reservation_row
+    SELECT "ideaId", "reasoningEffort", "modelProvider", "modelId" INTO reservation_row
       FROM "AmuxIdeaSessionAnalysisReservation"
       WHERE "id" = NEW."reservationId";
     IF window_row."limitMicroUsd" IS NULL OR
@@ -100,6 +100,9 @@ BEGIN
        audit_row."targetType" <> 'AmuxIdeaSessionAnalysisBudgetClaim' OR
        audit_row."targetId" IS DISTINCT FROM NEW."id"::text OR
        audit_row."actorUserId" IS NOT NULL OR
+       -- The claim runs the reserved channel and model, not one it names itself.
+       NEW."provider" IS DISTINCT FROM reservation_row."modelProvider" OR
+       NEW."modelId" IS DISTINCT FROM reservation_row."modelId" OR
        -- One subscription sign-in profile per channel, the same map as
        -- lib/amux/ideaAnalysisChannelCore.ts. No profile or channel refuses.
        NOT COALESCE(audit_row."metadata"->>'maxAuthProfile' =

@@ -61,7 +61,8 @@ export function AmuxMaxSubscriptionPricePanel() {
 
   const loadModels = useCallback(async () => {
     const response = await adminFetch(modelsEndpoint, { cache: "no-store" });
-    if (response.status === 428) setRequiresReauthentication(true);
+    // A refused step-up is shown as the reauthentication link alone.
+    if (response.status === 428) { setRequiresReauthentication(true); return; }
     const parsed = readAvailableFrontierModels(response.status,
       response.ok ? await response.json() : null);
     if (!parsed) throw new Error("models_unavailable");

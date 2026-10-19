@@ -297,6 +297,13 @@ for (const [index, [provider]] of CHANNELS.entries()) {
         sqlState(error) === "23514" &&
         /Max shadow claim must occupy remaining headroom/.test(String(error)), wrong);
     }
+    // A claim naming another channel and model than the reservation is
+    // refused even with that other channel's own consistent profile.
+    const otherChannel = channels.find((each) => each.provider !== channel.provider)!;
+    await assert.rejects(prisma.$transaction((tx) => insertShadowClaimByHand(tx, {
+      channel: otherChannel, ...queued,
+      maxAuthProfile: AMUX_SUBSCRIPTION_AUTH_PROFILES[otherChannel.provider] })),
+    (error: unknown) => sqlState(error) === "23514", otherChannel.provider);
   });
 }
 
