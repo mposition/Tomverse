@@ -33,14 +33,16 @@ const digest = (value: string) => createHash("sha256").update(value, "utf8").dig
  */
 export const isProductResearchRouteEnabled = (
   env: Readonly<Record<string, string | undefined>> = process.env,
-): boolean => (env[PRODUCT_RESEARCH_SWITCH_ENV] ?? "").length > 0;
+  switchEnv: string = PRODUCT_RESEARCH_SWITCH_ENV,
+): boolean => (env[switchEnv] ?? "").length > 0;
 
 /** Whether the request carries the submission secret, and that secret is usable. */
 export const isProductResearchRouteAuthorized = (
   request: Request,
   env: Readonly<Record<string, string | undefined>> = process.env,
+  secretEnv: string = PRODUCT_RESEARCH_INGEST_SECRET_ENV,
 ): boolean => {
-  const own = env[PRODUCT_RESEARCH_INGEST_SECRET_ENV] ?? "";
+  const own = env[secretEnv] ?? "";
   if (own.length < MIN_SECRET_LENGTH) return false;
   const authorization = request.headers.get("authorization") ?? "";
   if (!authorization.startsWith("Bearer ")) return false;

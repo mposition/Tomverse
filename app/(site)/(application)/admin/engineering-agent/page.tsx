@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { AdminEngineeringAgentPanel } from "@/components/admin/AdminEngineeringAgentPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminProductResearchPanel } from "@/components/admin/AdminProductResearchPanel";
+import { AdminProductResearchScoutPanel } from "@/components/admin/AdminProductResearchScoutPanel";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
@@ -12,6 +13,7 @@ import {
   type EngineeringAgentConsoleSection,
 } from "@/lib/engineeringAgentConsoleRead";
 import { readProductResearchConsole } from "@/lib/productResearchConsoleRead";
+import { readScoutConsole } from "@/lib/productResearchScoutConsoleRead";
 
 const TABS = adminNavItemTabs("engineering-agent");
 
@@ -46,6 +48,10 @@ export default async function AdminEngineeringAgentPage({
         hasAdminPermission(session, "engineering-agent:write"),
       );
   const observations = productResearch ? await readProductResearchConsole() : null;
+  // The Scout's suggestions share the tab and nothing else
+  // (docs/policy/product-research-agent.md §10): their own
+  // read, their own panel, and the only controls on the tab.
+  const scout = productResearch ? await readScoutConsole(session) : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -60,7 +66,10 @@ export default async function AdminEngineeringAgentPage({
       {observations === null ? (
         <AdminEngineeringAgentPanel key={tab.id} initial={initial!} />
       ) : (
-        <AdminProductResearchPanel key={tab.id} initial={observations} />
+        <>
+          <AdminProductResearchScoutPanel key={`${tab.id}-scout`} initial={scout!} />
+          <AdminProductResearchPanel key={tab.id} initial={observations} />
+        </>
       )}
     </div>
   );

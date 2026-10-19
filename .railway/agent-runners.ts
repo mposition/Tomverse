@@ -127,9 +127,20 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
  * A service without a schedule runs on every deploy, so the probe does nothing
  * until the operator sets PRODUCT_RESEARCH_SCOUT_ENABLED; setting it redeploys
  * the service, and that deploy is the measurement. It reads no credential and
- * submits nowhere (docs/policy/product-research-agent.md §20).
+ * submits nowhere (docs/policy/product-research-agent.md §13).
  */
 const PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES = ["PRODUCT_RESEARCH_SCOUT_ENABLED"] as const;
+
+/**
+ * The Scout walker's variables: its switch, where to send, and the secret to
+ * send with. It holds no model key and no database credential -- the app
+ * calls the model (docs/policy/product-research-agent.md §11).
+ */
+const PRODUCT_RESEARCH_SCOUT_VARIABLES = [
+  "PRODUCT_RESEARCH_SCOUT_ENABLED",
+  "PRODUCT_RESEARCH_SCOUT_INGEST_URL",
+  "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
+] as const;
 
 /**
  * The QA-release services' variables (docs/policy/qa-release-agent.md
@@ -512,7 +523,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   },
   {
     // The improvement scout's S0 probe (docs/policy/product-research-agent.md
-    // §20). One environment is enough: what it measures is whether Chromium
+    // §13). One environment is enough: what it measures is whether Chromium
     // keeps its sandbox in a Railway container and what production's public
     // pages answer a Railway address, and every environment of this project
     // runs in the same region. dev, because dev builds from develop; staging
@@ -525,9 +536,9 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     startCommand: "npm run agent:product-research-scout-s0-probe -- all",
     cronSchedule: null,
     dockerfile: {
-      path: "docker/product-research-scout-probe.Dockerfile",
+      path: "docker/product-research-scout.Dockerfile",
       watchPatterns: [
-        "docker/product-research-scout-probe.Dockerfile",
+        "docker/product-research-scout.Dockerfile",
         "scripts/agents/product-research-scout-s0-probe.mjs",
         "lib/productResearchScout*",
         "package-lock.json",
@@ -535,6 +546,33 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     },
     environments: {
       dev: PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES,
+    },
+  },
+  {
+    // The Scout walker (docs/policy/product-research-agent.md §10, §13): once a
+    // day at 18:00 UTC (04:00 Brisbane) it captures the public pages, generated
+    // files and catalogue and posts each to its environment's app, which asks
+    // the model. Same image as the probe. dev first, where it sends to the dev
+    // app; production once main carries it. Not staging, which builds from
+    // `test` (docs/ops/dev-test-lanes.md).
+    key: "product_research_scout",
+    service: "Product Research Scout",
+    startCommand: "npm run agent:product-research-scout",
+    cronSchedule: "0 18 * * *",
+    dockerfile: {
+      path: "docker/product-research-scout.Dockerfile",
+      watchPatterns: [
+        "docker/product-research-scout.Dockerfile",
+        "scripts/agents/product-research-scout.mjs",
+        "scripts/report-product-consistency-core.mjs",
+        "lib/productResearchScout*",
+        "lib/generatedArtifact*",
+        "package-lock.json",
+      ],
+    },
+    environments: {
+      dev: PRODUCT_RESEARCH_SCOUT_VARIABLES,
+      production: PRODUCT_RESEARCH_SCOUT_VARIABLES,
     },
   },
   ...ENGINEERING_AGENT_SERVICES,
