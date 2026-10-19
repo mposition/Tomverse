@@ -52,7 +52,7 @@ import {
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
-import { stalePricingVersions } from "@/lib/modelCatalogCore";
+import { imageExecutionDrift, imageExecutionProfile, stalePricingVersions } from "@/lib/modelCatalogCore";
 import {
   generateImageWithProvider,
   ImageProviderError,
@@ -810,6 +810,8 @@ export const requestImageGeneration = async (
               promptTokenLimit: IMAGE_PROMPT_MAX_TOKENS,
               provider: target.model.provider,
               modelId: target.modelId,
+              // What the provider call may send; checked again before the call.
+              executionProfile: imageExecutionProfile(target.model),
             },
             // The per-lot payload belongs to the group's single add-on
             // reservation; it is stored on the first target that holds
@@ -1184,6 +1186,24 @@ export const processImageGeneration = async (
     where: { id: generationId },
   });
   if (!generation) return;
+
+  // A runtime model edited after this reservation would be called with a
+  // request the reservation did not price: refund instead of calling it.
+  const reservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId },
+    select: { pricingSnapshot: true },
+  });
+  const drift = imageExecutionDrift(reservation?.pricingSnapshot, getImageModel(generation.modelId));
+  if (drift) {
+    await finalizeFailure({
+      generationId,
+      failurePhase: "model_profile_changed",
+      publicErrorCode: "IMAGE_GENERATION_FAILED",
+      internalErrorDetail: drift,
+      releaseProviderBudget: true,
+    });
+    return;
+  }
 
   const ttlSeconds = resolveLeaseTtlSeconds();
   const heartbeat = generation.leaseId

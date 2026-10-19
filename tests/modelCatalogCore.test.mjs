@@ -13,6 +13,8 @@ import {
   canonicalJson,
   catalogContentHash,
   effectiveRevisions,
+  imageExecutionDrift,
+  imageExecutionProfile,
   isOfficialSourceUrl,
   judgeCodingModel,
   judgeImageModel,
@@ -259,26 +261,42 @@ test("an LLM image answer becomes a price revision draft at the policy floor", (
 });
 
 test("an LLM coding answer cannot cite a page it did not fetch", () => {
-  const sources = ["https://developers.openai.com/pricing"];
-  const draft = codingDraftFromAnswer(
-    {
-      name: "GPT Coding",
-      minimumPlan: "Pro",
-      capabilities: codingProfile().capabilities,
-      pricing: { inputUsdPerMTok: 1, outputUsdPerMTok: 8 },
-      terms: { allowsResaleAndCodingAgent: true, url: "https://openai.com/not-fetched" },
-      retentionUrl: "https://openai.com/also-not-fetched",
-      processingRegion: "US",
-    },
-    "openai",
-    "gpt-coding",
-    sources,
-    () => 7
-  );
+  const sources = ["https://developers.openai.com/pricing", "https://platform.openai.com/docs/guides/your-data"];
+  const answer = {
+    name: "GPT Coding",
+    minimumPlan: "Pro",
+    capabilities: codingProfile().capabilities,
+    pricing: { inputUsdPerMTok: 1, outputUsdPerMTok: 8 },
+    terms: { allowsResaleAndCodingAgent: true, url: "https://openai.com/not-fetched" },
+    retentionUrl: sources[1],
+    processingRegion: "US",
+  };
+  const draft = codingDraftFromAnswer(answer, "openai", "gpt-coding", sources, () => 7);
   assert.equal(draft.terms.allowsResaleAndCodingAgent, false);
   assert.equal(draft.terms.url, sources[0]);
-  assert.equal(draft.retention.url, sources[0]);
+  assert.equal(draft.retention.url, sources[1]);
   assert.equal(draft.pricing.creditWeight, 7);
+
+  // No fetched retention page: refused, not filled in with the price page
+  // (review finding 2026-10-19).
+  for (const retentionUrl of ["https://openai.com/also-not-fetched", undefined]) {
+    assert.throws(
+      () => codingDraftFromAnswer({ ...answer, retentionUrl }, "openai", "gpt-coding", sources, () => 7),
+      (error) => error.detail === "retention_source_missing"
+    );
+  }
+});
+
+test("a reserved image request runs only with the profile it was priced with", () => {
+  const model = { provider: "google", apiModelId: "img-a", maxOutputTokens: 1000, thinkingLevel: "low" };
+  const snapshot = JSON.parse(JSON.stringify({ outputCostMicroUsd: 1, executionProfile: imageExecutionProfile(model) }));
+  assert.equal(imageExecutionDrift(snapshot, model), null);
+  assert.equal(imageExecutionDrift(snapshot, { ...model, apiModelId: "img-b" }), "apiModelId_changed");
+  assert.equal(imageExecutionDrift(snapshot, { ...model, thinkingLevel: "high" }), "thinkingLevel_changed");
+  assert.equal(imageExecutionDrift(snapshot, { ...model, maxOutputTokens: undefined }), "maxOutputTokens_changed");
+  assert.equal(imageExecutionDrift(snapshot, null), "model_missing");
+  // A reservation from before the field existed has nothing to compare.
+  assert.equal(imageExecutionDrift({ outputCostMicroUsd: 1 }, null), null);
 });
 
 test("page text drops scripts and tags", () => {

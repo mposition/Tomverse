@@ -20,7 +20,7 @@ import {
 import {
   applyCatalogDraft,
   CatalogRefusal,
-  catalogEntryPatchSchema,
+  catalogPatchBodySchema,
   createImagePriceRevision,
   priceRevisionSchema,
   storeCatalogDraft,
@@ -121,19 +121,12 @@ export async function GET(req: Request) {
   }
 }
 
-const patchBodySchema = z
-  .object({
-    category: z.enum(STORED_CATALOG_CATEGORIES),
-    modelId: z.string().regex(MODEL_ID_PATTERN),
-  })
-  .and(catalogEntryPatchSchema);
-
 export async function PATCH(req: Request) {
   try {
     const auth = await adminSession(true);
     if ("response" in auth) return auth.response;
     await consumeApiRateLimit(req, auth.session.user.id, "admin-model-catalog-write", { minute: 20, day: 300 });
-    const body = await readLimitedJson(req, 32 * 1024, patchBodySchema);
+    const body = await readLimitedJson(req, 32 * 1024, catalogPatchBodySchema);
     const { category, modelId, ...patch } = body;
     const row = await updateCatalogEntry({ category, modelId, patch, session: auth.session, request: req });
     return NextResponse.json({ ok: true, row });

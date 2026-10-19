@@ -20,6 +20,7 @@ import {
   judgeImageModel,
   MODEL_ID_PATTERN,
   resolveImageCatalog,
+  STORED_CATALOG_CATEGORIES,
   type StoredCatalogCategory,
 } from "@/lib/modelCatalogCore";
 import { prisma } from "@/lib/prisma";
@@ -43,6 +44,12 @@ export const catalogEntryPatchSchema = z
   })
   .strict();
 export type CatalogEntryPatch = z.infer<typeof catalogEntryPatchSchema>;
+
+/** PATCH body: one strict object (an intersection with the strict patch would reject category and modelId). */
+export const catalogPatchBodySchema = catalogEntryPatchSchema.extend({
+  category: z.enum(STORED_CATALOG_CATEGORIES),
+  modelId: z.string().regex(MODEL_ID_PATTERN),
+});
 
 const validateProfile = (category: StoredCatalogCategory, modelId: string, profile: unknown) => {
   if (profile === null || profile === undefined) return profile;
@@ -191,7 +198,7 @@ export const createImagePriceRevision = async (input: {
 
   const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogPriceRevision.create>>>) =>
     input.tx ? body(input.tx) : prisma.$transaction(body);
-  const result = await run(async (tx) => {
+  const result = await runRevision(run, async (tx) => {
     const row = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category: "image", modelId } },
     });
@@ -214,20 +221,22 @@ export const createImagePriceRevision = async (input: {
     // Judge the model at the new price before storing it: a revision below the
     // credit floor or with an unbounded worst case is refused here, not
     // discovered later as a model that quietly stopped serving.
-    const base = seed ?? null;
-    const candidate = base
-      ? { ...base, disabledReason: null, prices: revision.prices, pricingVersion: revision.pricingVersion, priceVerification: revision.verification }
-      : null;
-    if (candidate) {
-      const admission = judgeImageModel(candidate as never, {
-        minimumCredits: minimumCreditsForImageOption,
-        // Budget is an enable-time question; a price is judged on its own.
-        providerBudgetReady: () => true,
-      });
-      if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons);
-    } else if (revision.verification.thinkingCapMicroUsd === null) {
-      throw new CatalogRefusal("not_admitted", ["worst_case_cost_unbounded"]);
-    }
+    // A runtime model is judged from its stored profile, like a seed one.
+    const base = seed ?? (fullProfile?.success ? { id: modelId, ...fullProfile.data } : null);
+    if (!base) throw new CatalogRefusal("unknown_model", [], 404);
+    const candidate = {
+      ...base,
+      disabledReason: null,
+      prices: revision.prices,
+      pricingVersion: revision.pricingVersion,
+      priceVerification: revision.verification,
+    };
+    const admission = judgeImageModel(candidate as never, {
+      minimumCredits: minimumCreditsForImageOption,
+      // Budget is an enable-time question; a price is judged on its own.
+      providerBudgetReady: () => true,
+    });
+    if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons);
 
     const created = await tx.modelCatalogPriceRevision.create({
       data: {
@@ -262,6 +271,20 @@ export const createImagePriceRevision = async (input: {
   });
   invalidateImageModelCatalog();
   return result;
+};
+
+// Two writers of the same pricingVersion pass the duplicate check together;
+// the unique index stops the second, and it gets the same 409 as a sequential one.
+const runRevision = async <T>(
+  run: (body: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>,
+  body: (tx: Prisma.TransactionClient) => Promise<T>
+): Promise<T> => {
+  try {
+    return await run(body);
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === "P2002") throw new CatalogRefusal("pricing_version_reused", [], 409);
+    throw error;
+  }
 };
 
 /**

@@ -1970,7 +1970,7 @@ model ImageGeneration {
   // so the two can never settle or refund the same generation twice.
   // Transitions are defined in lib/imageGenerationStateCore.ts.
   status              String  @default("pending")
-  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled
+  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled | model_profile_changed
   publicErrorCode     String?
   internalErrorDetail String?
   providerRequestId   String?

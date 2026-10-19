@@ -11,6 +11,7 @@ import {
 import {
   applyCatalogDraft,
   CatalogRefusal,
+  catalogPatchBodySchema,
   createImagePriceRevision,
   storeCatalogDraft,
   updateCatalogEntry,
@@ -64,6 +65,13 @@ before(cleanup);
 after(async () => {
   await cleanup();
   await prisma.$disconnect();
+});
+
+test("the PATCH body accepts category and modelId with the patch fields", () => {
+  // An intersection with the strict patch schema rejected every PATCH (review finding 2026-10-19).
+  const parsed = catalogPatchBodySchema.parse({ category: "image", modelId: enabledSeed.id, enabled: false, holdReason: "x" });
+  assert.equal(parsed.modelId, enabledSeed.id);
+  assert.throws(() => catalogPatchBodySchema.parse({ category: "image", modelId: enabledSeed.id, extra: 1 }));
 });
 
 const auditCount = (action: string) => prisma.adminAuditLog.count({ where: { action } });

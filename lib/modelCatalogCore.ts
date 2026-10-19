@@ -204,6 +204,41 @@ export type PriceRevisionInput = {
 
 export type ImageAdmission = { admitted: true } | { admitted: false; reasons: readonly string[] };
 
+type ImageExecutionFields = Pick<
+  ImageModelProfile,
+  "provider" | "apiModelId" | "maxOutputTokens" | "thinkingLevel" | "deliveryMimeType"
+>;
+
+/**
+ * What an image request sends to the provider besides the prompt. Frozen into
+ * the reservation: a runtime model's profile can be edited after the quote,
+ * and the settlement prices from the reservation's snapshot, so a request
+ * built from the edited profile would spend money the ledger never sees.
+ */
+export const imageExecutionProfile = (model: ImageExecutionFields) => ({
+  provider: model.provider,
+  apiModelId: model.apiModelId,
+  maxOutputTokens: model.maxOutputTokens ?? null,
+  thinkingLevel: model.thinkingLevel ?? null,
+  deliveryMimeType: model.deliveryMimeType ?? null,
+});
+
+/**
+ * Null when the model would still be called exactly as reserved; otherwise
+ * why it may not be called. A snapshot written before this field existed has
+ * nothing to compare and is not refused.
+ */
+export const imageExecutionDrift = (snapshot: unknown, model: ImageExecutionFields | null): string | null => {
+  const frozen = (snapshot as { executionProfile?: unknown } | null)?.executionProfile;
+  if (!frozen || typeof frozen !== "object") return null;
+  if (!model) return "model_missing";
+  const current = imageExecutionProfile(model);
+  for (const [key, value] of Object.entries(current)) {
+    if ((frozen as Record<string, unknown>)[key] !== value) return `${key}_changed`;
+  }
+  return null;
+};
+
 /**
  * Whether an image model may serve, from its resolved profile. Every condition
  * of image-generation policy section 12 that code can check:

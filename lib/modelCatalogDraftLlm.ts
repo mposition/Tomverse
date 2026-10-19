@@ -235,6 +235,9 @@ export const codingDraftFromAnswer = (
     processingRegion: string;
   };
   const fetched = new Set(sources);
+  // Retention is a refusal condition of its own; a price page standing in for
+  // it would let the judge pass a model nobody checked.
+  if (!fetched.has(value?.retentionUrl)) throw new DraftRefusal("draft_rejected", "retention_source_missing");
   const draft = {
     name: value?.name,
     provider,
@@ -256,7 +259,7 @@ export const codingDraftFromAnswer = (
       url: fetched.has(value?.terms?.url) ? value.terms.url : sources[0],
       checkedAt: today(),
     },
-    retention: { url: fetched.has(value?.retentionUrl) ? value.retentionUrl : sources[0], checkedAt: today() },
+    retention: { url: value.retentionUrl, checkedAt: today() },
     processingRegion: value?.processingRegion,
   };
   const parsed = codingProfileSchema.safeParse(draft);
