@@ -62,7 +62,7 @@ const one = (node: ReactNode, id: string) => {
 };
 
 const REQUEST_ID = "00000000-0000-4000-8000-000000000011";
-const RELOAD = `/admin/amux-settings?tab=decision-maker&request=${REQUEST_ID}`;
+const RELOAD = `/admin/amux-execution?dmRequest=${REQUEST_ID}`;
 const SHOWN: DmShownProposal = {
   answerDigest: "2".repeat(64),
   rationaleDigest: "3".repeat(64),

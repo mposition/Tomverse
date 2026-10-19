@@ -50,17 +50,34 @@ test("neither the image, the probe nor the walker turns the Chromium sandbox off
   }
 });
 
-test("the probe reads one variable, its switch, and the service declares only that", async () => {
+test("a failed launch reports the host's sandbox conditions as short values only", async () => {
+  const { sandboxHost } = await import("../lib/productResearchScoutBrowser.mjs");
+  const host = sandboxHost();
+  assert.deepEqual(Object.keys(host), [
+    "uid",
+    "maxUserNamespaces",
+    "unprivilegedUsernsClone",
+    "apparmorRestrictsUserns",
+    "noNewPrivs",
+    "seccomp",
+    "capBnd",
+  ]);
+  for (const [key, value] of Object.entries(host)) {
+    assert.ok(value === null || typeof value === "number" || (typeof value === "string" && value.length <= 32), key);
+  }
+  const walker = read("scripts/agents/product-research-scout.mjs");
+  assert.match(walker, /product_research_scout_browser_launch_failed", \.\.\.launchFailure\(error\), host: sandboxHost\(\)/);
+});
+
+test("the probe is a local tool: it reads only its switch, and no Railway service runs it", async () => {
   const probe = read("scripts/agents/product-research-scout-s0-probe.mjs");
   const names = [...probe.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]);
   assert.deepEqual([...new Set(names)], ["PRODUCT_RESEARCH_SCOUT_ENABLED"]);
 
+  // The walker's first run in Railway is the sandbox check, so the probe has
+  // no service of its own.
   const { AGENT_RUNNER_SERVICES } = await import("../.railway/agent-runners.ts");
-  const service = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_scout_probe");
-  assert.deepEqual(Object.keys(service.environments), ["dev"]);
-  assert.deepEqual([...service.environments.dev], ["PRODUCT_RESEARCH_SCOUT_ENABLED"]);
-  assert.equal(service.cronSchedule, null);
-  assert.equal(service.dockerfile.path, "docker/product-research-scout.Dockerfile");
+  assert.equal(AGENT_RUNNER_SERVICES.some((runner) => /s0-probe/.test(runner.startCommand)), false);
 });
 
 test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no model key", async () => {

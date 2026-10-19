@@ -32,6 +32,8 @@ import {
     AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
+    AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS,
+    optimizerCycleView,
     admitOptimizerReservation,
     autoRouterGeneratorMessage,
     autoRouterGeneratorSchema,
@@ -43,6 +45,8 @@ import {
     rolledBackRouterGuidance,
     runOptimizerCycle,
     splitOptimizerDecisions,
+    guidanceRejection,
+    optimizerCallFailureDetail,
     worstCaseCallMicroUsd,
     type OptimizerDecision,
 } from "@/lib/autoRouterOptimizerCore";
@@ -62,12 +66,18 @@ import { prisma } from "@/lib/prisma";
  */
 export const AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY = "auto.llmRouterOptimizerModelId";
 
-const GENERATOR_MAX_OUTPUT_TOKENS = 1_200;
+/**
+ * Room for the longest admitted guidance in any script plus its JSON wrapper:
+ * 2 000 characters of Korean can take more than 2 000 tokens. At 1 200 the
+ * first Test cycle (2026-10-19, Claude Opus 4.8) threw before admission and was
+ * charged the generate call's worst case.
+ */
+const GENERATOR_MAX_OUTPUT_TOKENS = 4_000;
 const GENERATOR_TIMEOUT_MS = 90_000;
 const JUDGE_MAX_OUTPUT_TOKENS = 40;
 const JUDGE_TIMEOUT_MS = 30_000;
 /** A cycle still `running` after this was cut off by a restart. */
-const STALE_RUNNING_MS = 15 * 60_000;
+const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
 const OPTIMIZER_LOCK = "auto-router-optimizer";
 
 export async function readOptimizerModelId(): Promise<string | null> {
@@ -573,6 +583,21 @@ async function runInBackground(input: {
     routerPrices: Prices;
     worstCaseMicroUsd: { generate: number; route: number; judge: number };
 }) {
+    // A failed call is charged its worst case and otherwise leaves no trace;
+    // its shape is logged so a failed cycle names its cause.
+    const traced = async <T>(kind: "generate" | "judge", run: () => Promise<T>) => {
+        try {
+            return await run();
+        } catch (error) {
+            console.warn(JSON.stringify({
+                event: "auto_router_optimizer_call_failed",
+                cycleId: input.cycleId,
+                kind,
+                ...optimizerCallFailureDetail(error),
+            }));
+            throw error;
+        }
+    };
     const cost = (prices: Prices, worstCase: number, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
         callCostMicroUsd({
             inputTokens: usage?.inputTokens,
@@ -587,7 +612,7 @@ async function runInBackground(input: {
                 budgetMicroUsd: input.budgetMicroUsd,
                 worstCaseMicroUsd: input.worstCaseMicroUsd,
                 generate: async (message) => {
-                    const generated = await generateText({
+                    const generated = await traced("generate", () => generateText({
                         model: getActiveAiModel(input.optimizerModel),
                         system: AUTO_ROUTER_GENERATOR_SYSTEM,
                         prompt: message,
@@ -599,8 +624,17 @@ async function runInBackground(input: {
                             name: "router_guidance",
                         }),
                         providerOptions: { openai: { strictJsonSchema: true } },
-                    });
+                    }));
                     const guidance = (generated.output as { guidance?: unknown } | null)?.guidance;
+                    const rejection = guidanceRejection(guidance);
+                    if (rejection) {
+                        console.warn(JSON.stringify({
+                            event: "auto_router_optimizer_guidance_rejected",
+                            cycleId: input.cycleId,
+                            finishReason: generated.finishReason,
+                            ...rejection,
+                        }));
+                    }
                     return {
                         value: typeof guidance === "string" ? guidance : null,
                         costMicroUsd: cost(input.optimizerPrices, input.worstCaseMicroUsd.generate, generated.usage),
@@ -622,7 +656,7 @@ async function runInBackground(input: {
                     };
                 },
                 judge: async (message) => {
-                    const generated = await generateText({
+                    const generated = await traced("judge", () => generateText({
                         model: getActiveAiModel(input.optimizerModel),
                         system: AUTO_ROUTER_JUDGE_SYSTEM,
                         prompt: message,
@@ -634,7 +668,7 @@ async function runInBackground(input: {
                             name: "router_judgement",
                         }),
                         providerOptions: { openai: { strictJsonSchema: true } },
-                    });
+                    }));
                     return {
                         value: parseJudgeWinner(generated.output),
                         costMicroUsd: cost(input.optimizerPrices, input.worstCaseMicroUsd.judge, generated.usage),
@@ -832,6 +866,7 @@ export async function readAutoRouterOptimizerState() {
         },
         cycles: cycles.map((cycle): OptimizerCycleView => ({
             ...cycle,
+            ...optimizerCycleView(cycle, now),
             createdAt: cycle.createdAt.toISOString(),
             finishedAt: cycle.finishedAt?.toISOString() ?? null,
             promotedAt: cycle.promotedAt?.toISOString() ?? null,

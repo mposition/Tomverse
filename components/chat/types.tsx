@@ -158,6 +158,14 @@ export type Message = {
   routedModelId?: string;
   routedReason?: string | null;
   /**
+   * The router's restatement of the user's message, when Auto rewriting was on
+   * and the answering model read it (docs/ui-contracts/prompt-refiner-suggestion.md,
+   * "Auto router rewrite"). From the same response's headers as routedModelId,
+   * shown only beside its badge, and runtime-only for the same reason: the
+   * stored message is the user's own text, and this is not.
+   */
+  autoRewrite?: string | null;
+  /**
    * docs/policy/external-conversation-import-and-memory.md §14.3: how many
    * assistant-profile knowledge excerpts this answer's prompt
    * carried. Same provenance and same handling as `memoryUsedCount` directly

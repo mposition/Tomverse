@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { unzipSync, strFromU8 } from "fflate";
-import { installCdpRules, launch, resolverRules, ruledContext } from "../../lib/productResearchScoutBrowser.mjs";
+import { installCdpRules, launch, resolverRules, ruledContext, sandboxHost } from "../../lib/productResearchScoutBrowser.mjs";
 import {
   AbortTally,
   SCOUT_LOCALES,
@@ -25,6 +25,7 @@ import {
   SCOUT_PAGES,
   errorCode,
   isScoutCausedConsoleError,
+  launchFailure,
   originOf,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
 
@@ -162,7 +163,14 @@ async function capturePage(browser, rules, target) {
 }
 
 async function walkPages() {
-  const browser = await launch([resolverRules([new URL(SCOUT_PAGE_ORIGIN).hostname])]);
+  let browser;
+  try {
+    browser = await launch([resolverRules([new URL(SCOUT_PAGE_ORIGIN).hostname])]);
+  } catch (error) {
+    // The first run in a new runtime is the sandbox check (§13): say why.
+    console.warn(JSON.stringify({ event: "product_research_scout_browser_launch_failed", ...launchFailure(error), host: sandboxHost() }));
+    throw error;
+  }
   try {
     const rules = await installCdpRules(browser, [SCOUT_PAGE_ORIGIN]);
     for (const target of SCOUT_PAGES) {

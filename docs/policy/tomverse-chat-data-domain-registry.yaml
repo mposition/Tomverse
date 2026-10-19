@@ -638,8 +638,9 @@ domains:
     note: >-
       Labelled data from Auto's per-prompt model choice: the user's message as
       sent to the router model, the candidates, the deterministic rule's choice
-      and the model the call picked. Kept to train a Tomverse triage that can
-      replace the call. Deleted with the conversation as well as the account.
+      and the model the call picked, and -- when Admin turns rewriting on -- the
+      router's self-contained restatement of the message (rewrite). Kept to train
+      a Tomverse triage that can replace the call. Deleted with the conversation as well as the account.
 
   # --- anonymised at deletion, implemented ----------------------------------
   - domain: feedback

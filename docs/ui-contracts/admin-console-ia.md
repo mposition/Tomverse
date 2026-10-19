@@ -495,6 +495,25 @@ never its own `tab`, which the lookup has already consumed.
     that names a section its role may not open is a 404, not a different
     section: substituting one would confirm the named section exists.
 
+### The console theme (2026-10-19)
+
+The console has its own theme, **Dark** (the default) or **Light**, chosen
+in the account menu and kept in the `tomverse_admin_theme` cookie. It never
+moves the product theme, and the product theme never moves it. The layout
+reads the cookie, so the first paint is already in the chosen theme.
+
+Panels are written in **dark classes only**, never `dark:` pairs: a `dark:`
+variant follows the product theme, so it drew light surfaces under light text
+whenever the two themes disagreed. Light is one generated stylesheet,
+`app/(site)/(application)/admin/admin-theme.css`
+(`npm run generate:admin-theme-css`), that remaps Tailwind's palette under
+`data-admin-theme="light"`: neutrals mirror, with the page at zinc-100 and a
+card white; hue tints and text mirror; the solid 500-700 steps stay, and white
+text on them stays white. A panel that needs a colour uses a palette class or a
+`var(--color-*)`, never a literal, or Light cannot reach it.
+`tests/adminTheme.test.mjs` keeps the stylesheet equal to its generator and
+every Admin component and page free of `dark:`.
+
 ## Language
 
 The console is written in **English and Korean**, and in nothing else. It is an
@@ -591,4 +610,21 @@ The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ide
 
 ### AMUX Ideas is a one-stop flow with two decisions (2026-10-16)
 
-From an idea to its plan approval the operator makes only the decisions policy requires (orchestration v49, intake v18 item 1): the **execution approval** and the **plan approval**, plus one button that builds the review screen. The new-idea card holds the text, the collapsed sources disclosure and one line naming the default model and its reasoning level (the approved-price model, else the first approved model; "high" when allowed, else its highest level) with a collapsed "Change the model"; its one button runs the existing input check, the model's eligibility check and the build-preview request (save, idea-only plan and exact preview) in that order, and a step that does not pass stops the chain with its own message. The separate steps (input check, save, source plan, eligibility, preview) stay reachable in a collapsed "Step by step (for recovery)" section and for a saved idea that stopped part-way. The execution approval screen shows the idea, the model, the exact payload (collapsed) and the cost ceiling with the single approve button; the legacy confirmation exists only when no approved price does and says what it does not do. After the approval the analysis result is read on a gentle bounded schedule (15 s, then 30 s, then 60 s, 48 reads at most, paused while the tab is hidden, ended by any refused or failed read; the manual button stays) and the plan approval opens by itself when the result arrives. While the plan approval, the execution approval or the build preview is in flight a blocking dialog (`role="dialog"`, `aria-modal`, focus trapped, background inert, Escape ignored) says what is being recorded, that it can take about 2 minutes and counts the seconds, then states the answer; an unknown outcome is read back and never posted again. The Admin console is always dark: the Ideas components use dark-only classes, never `dark:` pairs.
+From an idea to its plan approval the operator makes only the decisions policy requires (orchestration v49, intake v18 item 1): the **execution approval** and the **plan approval**, plus one button that builds the review screen. The new-idea card holds the text, the collapsed sources disclosure and one line naming the default model and its reasoning level (the approved-price model, else the first approved model; "high" when allowed, else its highest level) with a collapsed "Change the model"; its one button runs the existing input check, the model's eligibility check and the build-preview request (save, idea-only plan and exact preview) in that order, and a step that does not pass stops the chain with its own message. The separate steps (input check, save, source plan, eligibility, preview) stay reachable in a collapsed "Step by step (for recovery)" section and for a saved idea that stopped part-way. The execution approval screen shows the idea, the model, the exact payload (collapsed) and the cost ceiling with the single approve button; the legacy confirmation exists only when no approved price does and says what it does not do. After the approval the analysis result is read on a gentle bounded schedule (15 s, then 30 s, then 60 s, 48 reads at most, paused while the tab is hidden, ended by any refused or failed read; the manual button stays) and the plan approval opens by itself when the result arrives. While the plan approval, the execution approval or the build preview is in flight a blocking dialog (`role="dialog"`, `aria-modal`, focus trapped, background inert, Escape ignored) says what is being recorded, that it can take about 2 minutes and counts the seconds, then states the answer; an unknown outcome is read back and never posted again. The Ideas components use dark classes only, never `dark:` pairs (see "The console theme").
+
+### Decision Maker requests are judged in Execution (2026-10-19)
+
+A Decision Maker request that waits on a person -- an open proposal, or a
+confirmed answer whose delivery is unknown -- is work, so it moved from
+**Operations settings › Decision Maker** to **Execution**. On the Cards board it
+is pinned to the top of the attention lane, above the escalated cards, with a
+summary line above the board that counts both and jumps to the lane. It opens as
+a side panel at `?dmRequest=<id>` on any Execution tab, so an operator who may
+judge but cannot see the Cards board still reaches it; the panel is modal, closes
+by navigating (scrim, close link, Escape), and its bodies are read only for
+`ops:write`. The Execution badge counts escalations plus waiting requests (both
+must be known), the Cards tab badge the requests alone. Operations settings keeps
+the switches, the accuracy report and the request history, says where the
+requests to judge are, and the old `?tab=decision-maker&request=<id>` address
+redirects to the panel. A delivery that is unknown is shown but not resolved
+here: the console has no resolution control yet.

@@ -166,6 +166,23 @@ export const rolledBackRouterGuidance = (
 export const autoLlmRouterVersionFor = (baseVersion: string, cycleId: string | null) =>
     cycleId ? `${baseVersion}+${cycleId}` : baseVersion;
 
+/**
+ * A cycle still marked running after this long was cut off -- typically by a
+ * redeploy, which ends the background calls with the container. The next
+ * reservation closes it at its full reservation; until then it is shown as
+ * interrupted, so it neither blocks a new run nor reads as still working.
+ */
+export const AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS = 15 * 60_000;
+
+export const optimizerCycleView = (
+    cycle: { status: string; failure: string | null; createdAt: Date },
+    now: Date
+): { status: string; failure: string | null } =>
+    cycle.status === "running" &&
+    now.getTime() - cycle.createdAt.getTime() > AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS
+        ? { status: "error", failure: "interrupted" }
+        : { status: cycle.status, failure: cycle.failure };
+
 /** Newest first in, alternating out: both halves span the same period. */
 export const splitOptimizerDecisions = <T>(decisions: readonly T[]) => {
     const sample = decisions.slice(0, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
@@ -173,6 +190,38 @@ export const splitOptimizerDecisions = <T>(decisions: readonly T[]) => {
         train: sample.filter((_, index) => index % 2 === 0),
         evaluate: sample.filter((_, index) => index % 2 === 1),
     };
+};
+
+/**
+ * Why a proposal cannot stand in for the guidance, or null when it can. Only
+ * shape is reported, never the text: it is logged when a cycle ends
+ * candidate_invalid so the cause is not a guess.
+ */
+export const guidanceRejection = (raw: unknown) => {
+    if (typeof raw !== "string") return { reason: "not_text" as const };
+    const text = raw.replace(/\r\n?/g, "\n").trim();
+    const shape = { chars: text.length, lines: text.split("\n").length };
+    if (text.length < AUTO_ROUTER_GUIDANCE_MIN_CHARS) return { reason: "too_short" as const, ...shape };
+    if (text.length > AUTO_ROUTER_GUIDANCE_MAX_CHARS) return { reason: "too_long" as const, ...shape };
+    if (shape.lines > AUTO_ROUTER_GUIDANCE_MAX_LINES) return { reason: "too_many_lines" as const, ...shape };
+    return null;
+};
+
+/**
+ * What a failed optimizer call can say about itself without its content: the
+ * error's name and, for a structured-output failure, why the model stopped and
+ * how much text it wrote (a truncated object stops on "length").
+ */
+export const optimizerCallFailureDetail = (error: unknown) => {
+    const detail: { error: string; finishReason?: string; outputChars?: number } = {
+        error: error instanceof Error ? error.name : "unknown",
+    };
+    if (error && typeof error === "object") {
+        const { finishReason, text } = error as { finishReason?: unknown; text?: unknown };
+        if (typeof finishReason === "string") detail.finishReason = finishReason;
+        if (typeof text === "string") detail.outputChars = text.length;
+    }
+    return detail;
 };
 
 /** The proposal, trimmed, or null when it cannot stand in for the guidance. */

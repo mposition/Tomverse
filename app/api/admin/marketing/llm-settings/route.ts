@@ -2,11 +2,8 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 import { MARKETING_LLM_SETTINGS_KEY } from "@/lib/marketingLlmBudgetCore";
-import {
-  MARKETING_LLM_SETTINGS_ACTION,
-  MarketingLlmSettingsRefusedError,
-  writeMarketingLlmSettings,
-} from "@/lib/marketingLlmSettingsStore";
+import { MARKETING_LLM_SETTINGS_ACTION, MarketingLlmSettingsRefusedError } from "@/lib/marketingLlmSettingsCore";
+import { writeMarketingLlmSettings } from "@/lib/marketingLlmSettingsStore";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 
 const schema = z

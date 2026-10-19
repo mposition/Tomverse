@@ -624,12 +624,18 @@ test("Routing keeps Chat shadow routing and points at where AMUX assignment went
 test("execution and operations settings count distinct actions without duplicating halts", () => {
   const execution = ADMIN_NAVIGATION.find((item) => item.id === "amux-execution");
   const settings = ADMIN_NAVIGATION.find((item) => item.id === "amux-settings");
-  assert.equal(execution.badge, "amuxEscalations");
+  // Execution counts what waits on a person there: escalations (Assignment)
+  // and Decision Maker requests (the Cards board's attention lane).
+  assert.equal(execution.badge, "amuxOwnerAttention");
   assert.equal(execution.tabs.find((tab) => tab.id === "assignment").badge, "amuxEscalations");
+  assert.equal(execution.tabs.find((tab) => tab.id === "cards").badge, "amuxDecisionMaker");
   assert.equal(settings.badge, "amuxOrchestratorHalts");
   assert.equal(settings.tabs.find((tab) => tab.id === "safety").badge, "amuxOrchestratorHalts");
-  const counts = { ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations: 3, openAmuxOrchestratorHalts: 2 };
-  assert.equal(adminNavigationBadge(execution.badge, counts), 3);
+  const counts = { ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations: 3, openAmuxOrchestratorHalts: 2,
+    awaitingAmuxDecisionMaker: 4 };
+  assert.equal(adminNavigationBadge(execution.badge, counts), 7);
+  assert.equal(adminNavigationBadge("amuxDecisionMaker", counts), 4);
+  assert.equal(adminNavigationBadge(execution.badge, { ...counts, awaitingAmuxDecisionMaker: null }), null);
   assert.equal(adminNavigationBadge(settings.badge, counts), 2);
   assert.equal(adminNavigationBadge(settings.badge, { ...counts, openAmuxOrchestratorHalts: null }), null);
   assert.equal(adminNavigationBadge(execution.badge, { ...counts, openAmuxEscalations: null }), null);

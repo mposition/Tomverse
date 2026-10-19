@@ -11,6 +11,8 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
   AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
   readAutoLlmRouterModelId,
+  readAutoLlmRouterRewrite,
+  updateAutoLlmRouterRewrite,
   writeAutoLlmRouterModelId,
 } from "@/lib/autoLlmRouterSettings";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -30,7 +32,10 @@ import {
  */
 
 const updateSchema = z
-  .object({ modelId: z.string().trim().min(1).max(120).nullable() })
+  .object({
+    modelId: z.string().trim().min(1).max(120).nullable(),
+    rewrite: z.boolean().optional(),
+  })
   .strict();
 
 const routerModelOptions = async () =>
@@ -48,11 +53,12 @@ export async function GET(req: Request) {
       minute: 30,
       day: 500,
     });
-    const [modelId, options] = await Promise.all([
+    const [modelId, rewrite, options] = await Promise.all([
       readAutoLlmRouterModelId(),
+      readAutoLlmRouterRewrite(),
       routerModelOptions(),
     ]);
-    return NextResponse.json({ modelId, options });
+    return NextResponse.json({ modelId, rewrite, options });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
@@ -76,7 +82,7 @@ export async function PUT(req: Request) {
       day: 100,
     });
 
-    const { modelId } = await readLimitedJson(req, 1024, updateSchema);
+    const { modelId, rewrite } = await readLimitedJson(req, 1024, updateSchema);
     const options = await routerModelOptions();
     if (modelId !== null && !options.some((option) => option.id === modelId)) {
       return NextResponse.json(
@@ -85,7 +91,13 @@ export async function PUT(req: Request) {
       );
     }
 
+    if (rewrite !== undefined && rewrite !== (await readAutoLlmRouterRewrite())) {
+      await updateAutoLlmRouterRewrite({ session, request: req }, rewrite);
+    }
     const before = await readAutoLlmRouterModelId();
+    if (before === modelId) {
+      return NextResponse.json({ modelId, rewrite: await readAutoLlmRouterRewrite(), options });
+    }
     await writeAutoLlmRouterModelId(modelId);
     await writeAdminAuditLog({
       session,
@@ -98,7 +110,7 @@ export async function PUT(req: Request) {
         : "Turned the Auto LLM router off.",
       metadata: { before, after: modelId },
     });
-    return NextResponse.json({ modelId, options });
+    return NextResponse.json({ modelId, rewrite: await readAutoLlmRouterRewrite(), options });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;

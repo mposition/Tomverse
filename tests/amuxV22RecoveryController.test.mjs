@@ -417,8 +417,13 @@ test("one recorded intent issues only the fixed systemctl stop argv and proves t
     [["/usr/bin/systemctl", ["stop", request.targetUnit]]]);
   assert.deepEqual(report.modelOutcome, "unknown");
   assert.deepEqual(report.usage, { status: "unknown", projectedCostMicroUsd: null });
+  // The report carries random ids and digests; a hex run that happens to
+  // contain "4321" is not the fixture PID leaking, so they are masked first.
+  const serialised = JSON.stringify(report)
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
+    .replace(/[0-9a-f]{64}/g, "<digest>");
   for (const forbidden of ["4321", "/system.slice", "stderr", "Private output"])
-    assert.equal(JSON.stringify(report).includes(forbidden), false);
+    assert.equal(serialised.includes(forbidden), false, forbidden);
 });
 
 test("unknown or reused intent never reissues stop", async () => {

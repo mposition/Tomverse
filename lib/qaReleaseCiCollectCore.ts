@@ -50,7 +50,10 @@ export const QA_RELEASE_CI_JOB_NAMES: Readonly<Record<Workflow, readonly { job: 
     { job: "regression", name: /^Chromium desktop and mobile regression$/ },
   ],
   "nightly-visual-regression.yml": [{ job: "visual-regression", name: /^Chat state visual regression goldens$/ }],
-  "admin-console-e2e.yml": [{ job: "admin-console-e2e", name: /^Admin Console E2E \(PostgreSQL\)$/ }],
+  "admin-console-e2e.yml": [
+    { job: "admin-console-e2e-shard", name: /^Admin Console E2E \(PostgreSQL, shard ([1-9][0-9]?)\/[1-9][0-9]?\)$/ },
+    { job: "admin-console-e2e", name: /^Admin Console E2E \(PostgreSQL\)$/ },
+  ],
   "deployed-commit-drift.yml": [{ job: "drift", name: /^Deployed commit vs branch head$/ }],
   "back-merge-main-to-develop.yml": [
     { job: "back-merge", name: /^Back-merge main into develop$/ },

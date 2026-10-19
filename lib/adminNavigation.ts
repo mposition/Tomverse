@@ -46,7 +46,9 @@ export type AdminNavBadgeKey =
   | "marketing"
   | "amuxEscalations"
   | "amuxOrchestratorHalts"
-  | "amuxExecution";
+  | "amuxExecution"
+  | "amuxDecisionMaker"
+  | "amuxOwnerAttention";
 
 export type AdminNavTab = {
   id: string;
@@ -816,8 +818,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     // registry change takes the owner role and a recent step-up in its route
     // (orchestration policy version 31, section 3).
     writeRoles: ["owner", "ops"],
-    // Halts belong to Operations settings, so this counts escalations only.
-    badge: "amuxEscalations",
+    // Halts belong to Operations settings, so this counts what waits on a
+    // person here: escalations and Decision Maker requests.
+    badge: "amuxOwnerAttention",
     aliases: [
       "amux",
       "cards",
@@ -838,6 +841,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Cards",
         description: "Every AMUX card stored in Tomverse and its execution state",
         viewRoles: ["owner"],
+        badge: "amuxDecisionMaker",
       },
       {
         id: "assignment",

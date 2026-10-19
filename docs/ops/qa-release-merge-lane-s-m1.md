@@ -6,7 +6,7 @@
 
 S-M1은 **판정만 하고 병합하지 않는** 단계입니다. 서비스는 10분마다 후보를 고르고 본 앱에 지시를 요청하지만, develop 레인
 스위치가 꺼져 있으므로 본 앱이 지시를 거절하고, 서비스는 `instruction_refused`와 함께 **병합했을 PR 번호와 head**를 출력합니다.
-그 판정과 사람이 실제로 병합한 것을 7일 이상 비교해 어긋남이 0건이어야 S-M2로 갑니다.
+그 판정과 사람이 실제로 병합한 것을 3일 이상 비교해 어긋남이 0건이어야 S-M2로 갑니다.
 
 ## 순서와 되돌림
 
@@ -156,10 +156,11 @@ npm run qa-release:lane-rulesets -- --record docs/ops/qa-release-merge-lane-obse
 2-1과 같은 권한으로 **새** App을 만들고(예: `tomverse-qa-merge-lane`) `mposition/Tomverse`에만 설치합니다. 이 App은 bypass
 목록에 넣지 않습니다. App ID와 키(PEM 전체)를 4-3의 서비스 변수에만 넣습니다.
 
-### 4-2. staging 조회용 Railway 토큰 (Railway 대시보드)
+### 4-2. dev 조회용 Railway 토큰 (Railway 대시보드)
 
-`Tomverse` project → Settings → Tokens → 새 project token, environment **staging**. 이 토큰은 staging의 배포 목록을 읽는 데만
-씁니다. 서비스는 토큰이 가리키는 환경 이름이 `staging`이 아니면 아무것도 읽지 않습니다.
+`Tomverse` project → Settings → Tokens → 새 project token, environment **dev**. develop은 2026-10-13부터 `dev` 환경이
+배포합니다(staging은 `test` 브랜치, `docs/ops/dev-test-lanes.md`). 이 토큰은 dev의 배포 목록을 읽는 데만 씁니다. 서비스는
+토큰이 가리키는 환경 이름이 `dev`가 아니면 아무것도 읽지 않습니다.
 
 ### 4-3. 공유 secret과 변수
 
@@ -217,15 +218,15 @@ production Admin → Agent digest → QA·릴리스 → 제어 revision 기록.
 
 - `{"exitCode":0,"outcome":"instruction_refused","pullRequestNumber":…,"headSha":"…","reason":"…"}` — 판정이 있었고 스위치가
   꺼져 거절됨(S-M1의 정상)
-- `idle`(후보 없음), `hold`(staging 배포 진행 중)
+- `idle`(후보 없음), `hold`(dev 배포 진행 중)
 - `refused_to_start`면 변수 목록이나 revision 번호를 확인합니다. `state_unknown`·`candidates_unknown`이 계속되면 App 설치,
   Railway 토큰의 환경, 본 앱 secret이 같은지 확인합니다.
 
 ## S-M1 동안
 
-- 7일 이상, `instruction_refused`가 고른 PR(번호·head)과 사람이 merge train으로 실제 병합한 것을 비교합니다. 어긋남이 0건이어야
+- 3일 이상(운영자 결정 2026-10-19), `instruction_refused`가 고른 PR(번호·head)과 사람이 merge train으로 실제 병합한 것을 비교합니다. 어긋남이 0건이어야
   S-M2(정책 9절)입니다.
 - 멈출 때: 병합 레인 서비스의 `QA_RELEASE_MERGE_LANE_KILL_SWITCH`에 아무 값을 넣습니다(다음 회차부터 정지). 또는 병합 레인
   서비스를 끈 새 revision을 기록합니다.
-- S-M2 전에 필요한 것: 8절 8항의 변경(merge train의 develop 레인 삭제, AGENTS.md의 병합 주체 문장), 8절 3항의 staging 복구
-  runbook.
+- S-M2 전에 필요한 것: 8절 8항의 변경(merge train의 develop 레인 삭제, AGENTS.md의 병합 주체 문장), 8절 3항의 dev 복구
+  runbook(`docs/ops/qa-release-merge-lane-dev-recovery.md`).

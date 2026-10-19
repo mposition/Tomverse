@@ -10,6 +10,7 @@ import {
   errorCode,
   headersFromCdp,
   isScoutCausedConsoleError,
+  launchFailure,
   originOf,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
 
@@ -115,6 +116,34 @@ test("an error leaves the probe as a code, never as the URL the message carries"
   assert.equal(errorCode(new Error("Target page, context or browser has been closed at https://tomverse.app/secret")), "error");
   assert.equal(errorCode("boom"), "error");
   for (const value of [navigation, timeout]) assert.ok(!errorCode(value).includes("tomverse"));
+});
+
+test("a launch failure says whether the sandbox ran, without the URLs Chromium prints", () => {
+  // The shape Playwright gives a launch whose browser exits on its own.
+  const sandbox = new Error(
+    [
+      "browserType.launch: Target page, context or browser has been closed",
+      "Browser logs:",
+      "",
+      "<launching> /ms-playwright/chromium_headless_shell-1200/chrome-linux/headless_shell --disable-field-trial-config --host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE tomverse.app",
+      "<launched> pid=41",
+      "[pid=41][err] [1019/085605.523:FATAL:zygote_host_impl_linux.cc(128)] No usable sandbox! If you are running on Ubuntu 23.10+ or another Linux distro that has disabled unprivileged user namespaces with AppArmor, see https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md.",
+      "Call log:",
+    ].join("\n"),
+  );
+  const failure = launchFailure(sandbox);
+  assert.equal(failure.cause, "sandbox_unavailable");
+  assert.match(failure.fatal, /^No usable sandbox! If you are running on Ubuntu 23\.10\+/);
+  assert.ok(failure.fatal.includes("<url>"));
+  assert.ok(!/https?:|googlesource|tomverse/.test(failure.fatal));
+  assert.ok(failure.fatal.length <= 200);
+
+  assert.deepEqual(launchFailure(new Error("browserType.launch: Executable doesn't exist at /ms-playwright/chromium-1200/chrome-linux/chrome")), {
+    cause: "browser_missing",
+    fatal: null,
+  });
+  assert.deepEqual(launchFailure(new Error("browserType.launch: Target page, context or browser has been closed")), { cause: "launch_failed", fatal: null });
+  assert.deepEqual(launchFailure("boom"), { cause: "launch_failed", fatal: null });
 });
 
 test("the abort tally keeps method and origin and drops the path", () => {

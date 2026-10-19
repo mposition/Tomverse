@@ -274,3 +274,40 @@ test("a record from before the history keeps its one previous step", async () =>
   const legacy = { guidance: NEW_GUIDANCE, cycleId: "c2", previous: { guidance: `${NEW_GUIDANCE}\nOlder rule.`, cycleId: "c1" } };
   assert.deepEqual(parseActiveRouterGuidance(JSON.stringify(legacy)).history, [legacy.previous]);
 });
+
+test("a cycle running past the stale limit is shown as interrupted, not running", async () => {
+  const { optimizerCycleView, AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS } = await import("../lib/autoRouterOptimizerCore.ts");
+  const now = new Date("2026-10-19T07:20:00.000Z");
+  const at = (msAgo) => new Date(now.getTime() - msAgo);
+  assert.deepEqual(optimizerCycleView({ status: "running", failure: null, createdAt: at(60_000) }, now), { status: "running", failure: null });
+  assert.deepEqual(
+    optimizerCycleView({ status: "running", failure: null, createdAt: at(AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS + 1) }, now),
+    { status: "error", failure: "interrupted" }
+  );
+  assert.deepEqual(optimizerCycleView({ status: "passed", failure: null, createdAt: at(3_600_000) }, now), { status: "passed", failure: null });
+});
+
+test("a rejected proposal reports its shape, never its text", async () => {
+  const { guidanceRejection, AUTO_ROUTER_GUIDANCE_MAX_CHARS, AUTO_ROUTER_GUIDANCE_MAX_LINES } =
+    await import("../lib/autoRouterOptimizerCore.ts");
+  assert.deepEqual(guidanceRejection(null), { reason: "not_text" });
+  assert.equal(guidanceRejection("short").reason, "too_short");
+  const long = guidanceRejection("가".repeat(AUTO_ROUTER_GUIDANCE_MAX_CHARS + 1));
+  assert.deepEqual(long, { reason: "too_long", chars: AUTO_ROUTER_GUIDANCE_MAX_CHARS + 1, lines: 1 });
+  const many = guidanceRejection(Array.from({ length: AUTO_ROUTER_GUIDANCE_MAX_LINES + 1 }, () => "a rule about routing work").join("\n"));
+  assert.equal(many.reason, "too_many_lines");
+  assert.equal(guidanceRejection("Send casual chat to light models and hard reasoning to strong ones."), null);
+  assert.ok(!JSON.stringify(long).includes("가"));
+});
+
+test("a failed call is described by name, finish reason and output length only", async () => {
+  const { optimizerCallFailureDetail } = await import("../lib/autoRouterOptimizerCore.ts");
+  const truncated = Object.assign(new Error("No object generated"), {
+    name: "AI_NoObjectGeneratedError", finishReason: "length", text: "{\"guidance\": \"secret rule",
+  });
+  assert.deepEqual(optimizerCallFailureDetail(truncated), {
+    error: "AI_NoObjectGeneratedError", finishReason: "length", outputChars: truncated.text.length,
+  });
+  assert.deepEqual(optimizerCallFailureDetail(new DOMException("t", "TimeoutError")), { error: "TimeoutError" });
+  assert.deepEqual(optimizerCallFailureDetail("boom"), { error: "unknown" });
+});

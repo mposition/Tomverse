@@ -63,6 +63,12 @@ export type AdminNavigationCounts = {
    */
   openAmuxOrchestratorHalts: number | null;
   /**
+   * AMUX Decision Maker requests waiting on a person in Admin: an open
+   * proposal to judge, or a confirmed answer whose delivery is unknown
+   * (dmAdminAttentionKind). They are drawn in Execution's attention lane.
+   */
+  awaitingAmuxDecisionMaker: number | null;
+  /**
    * Reports that have not closed -- `open` and `reviewing` both, as named by
    * FEEDBACK_AWAITING_OPERATOR_STATUSES. Not `status: "open"`: a
    * verified-trace report arrives as `reviewing`, and counting only `open`
@@ -97,6 +103,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   pendingMarketingApprovals: null,
   openAmuxEscalations: null,
   openAmuxOrchestratorHalts: null,
+  awaitingAmuxDecisionMaker: null,
   openFeedback: null,
   supportFeedback: null,
   autoFixActionCases: null,
@@ -166,6 +173,14 @@ export const adminNavigationBadge = (
       return counts.openAmuxEscalations;
     case "amuxOrchestratorHalts":
       return counts.openAmuxOrchestratorHalts;
+    case "amuxDecisionMaker":
+      return counts.awaitingAmuxDecisionMaker;
+    case "amuxOwnerAttention":
+      // Both must be known, like amuxExecution: a figure that left out an
+      // unreadable count would read as less work than there is.
+      return counts.openAmuxEscalations === null || counts.awaitingAmuxDecisionMaker === null
+        ? null
+        : counts.openAmuxEscalations + counts.awaitingAmuxDecisionMaker;
     case "amuxExecution":
       // The Execution entry: escalations plus open orchestrator halts. Unlike
       // the partial sums above, both must be known. A halt stops the

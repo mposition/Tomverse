@@ -297,8 +297,8 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 | `PRODUCT_RESEARCH_SCOUT_INGEST_URL` | walker | 그 환경 앱의 `https://…/api/internal/product-research/scout` |
 | 모델·하루 호출 상한 | Admin › Engineering agent › Product research (`AppSetting` 두 행) | owner가 정함. 모델이 없으면 route는 `model_off`, 상한을 다 쓰면 `daily_cap_reached`로 답함 |
 
-켜는 순서: Railway에서 Chromium sandbox를 한 번 확인(`Product Research Scout Probe`의 `all`) → 앱 변수 → Admin에서 모델과 하루
-상한 지정(owner) → walker 스위치. walker는 Railway cron `Product Research Scout`로 매일 18:00 UTC(04:00 AEST)에 돕니다.
+켜는 순서: 앱 변수 → walker 서비스와 스위치 → Admin에서 모델과 하루 상한 지정(owner). walker의 첫 실행이 Railway 컨테이너에서
+Chromium sandbox가 뜨는지도 확인합니다. walker는 Railway cron `Product Research Scout`로 매일 18:00 UTC(04:00 AEST)에 돕니다.
 
 ## 14. 보류 — 자격증명이나 유료 생성 승인이 필요한 것
 

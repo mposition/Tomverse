@@ -1698,6 +1698,7 @@ function ChatAppComponent({
     // so "absent" already means "no routing decision to show".
     let routedModelId: string | null = null;
     let routedReason: string | null = null;
+    let autoRewrite: string | null = null;
     let knowledgeChunkCount = 0;
     // Once a Guest Auto POST is attempted, a transport failure cannot prove
     // whether the server stopped before or after its durable financial claim.
@@ -1804,6 +1805,7 @@ function ChatAppComponent({
         // routing decision with a fresh answer.
         routedModelId = res.headers.get("X-Chat-Routed-Model");
         routedReason = res.headers.get("X-Chat-Routed-Reason");
+        autoRewrite = decodeAutoRewriteHeader(res.headers.get("X-Chat-Auto-Rewrite"));
         requestErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
 
         if (!res.ok) {
@@ -2086,6 +2088,8 @@ function ChatAppComponent({
                     ? routedModelId : undefined,
                   routedReason: routedModelId && !progress.retryingWithModelId
                     ? routedReason : undefined,
+                  autoRewrite: routedModelId && !progress.retryingWithModelId
+                    ? autoRewrite : undefined,
                   isGeneratingArtifact: progress.isGeneratingArtifact,
                   ...(progress.generatingArtifactFormat
                     ? {
@@ -2183,7 +2187,7 @@ function ChatAppComponent({
             // different model produced the text, so a badge naming the routed
             // one would attribute the answer to a model that wrote none of it.
             ...(routedModelId && !retryingWithModelId
-              ? { routedModelId, routedReason }
+              ? { routedModelId, routedReason, ...(autoRewrite ? { autoRewrite } : {}) }
               : {}),
             ...(knowledgeChunkCount > 0 ? { knowledgeChunkCount } : {}),
             // §7: when the server fell back mid-response, the model that
@@ -3060,5 +3064,19 @@ function ChatAppComponent({
     </div>
   );
 }
+
+
+/** The X-Chat-Auto-Rewrite header (base64url UTF-8), or null when absent or unreadable. */
+const decodeAutoRewriteHeader = (value: string | null): string | null => {
+  if (!value) return null;
+  try {
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim();
+    return text ? text.slice(0, 2_000) : null;
+  } catch {
+    return null;
+  }
+};
 
 export const ChatApp = memo(ChatAppComponent);
