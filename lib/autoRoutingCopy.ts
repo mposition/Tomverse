@@ -44,6 +44,10 @@ export type AutoRoutingCopy = {
   turnedOff: string;
   /** Neutral selection label on an assistant message that Auto routed. */
   answeredBy: string;
+  /** The disclosure under a reply Auto answered from a rewrite of the message. */
+  rewriteSummary: string;
+  /** What the rewrite was for, and that the user's own message is unchanged. */
+  rewriteNote: string;
 };
 
 export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
@@ -60,6 +64,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     turnedOn: "Smart Adaptive is on. A model will be chosen for each message.",
     turnedOff: "Smart Adaptive is off. Your selected model answers every message.",
     answeredBy: "Auto selected",
+    rewriteSummary: "How Auto read your message",
+    rewriteNote: "The reply answered this restatement. Your message is saved as you wrote it.",
   },
   ko: {
     label: "스마트 자동",
@@ -74,6 +80,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     turnedOn: "스마트 자동이 켜졌습니다. 메시지마다 모델을 고릅니다.",
     turnedOff: "스마트 자동이 꺼졌습니다. 선택한 모델이 모든 메시지에 답변합니다.",
     answeredBy: "자동 선택",
+    rewriteSummary: "Auto가 이해한 메시지",
+    rewriteNote: "답변은 이 문장을 기준으로 작성됐습니다. 보내신 메시지는 쓰신 그대로 저장됩니다.",
   },
   zh: {
     label: "智能自动",
@@ -87,6 +95,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     turnedOn: "智能自动已开启。每条消息都会挑选一个模型。",
     turnedOff: "智能自动已关闭。你选择的模型将回答所有消息。",
     answeredBy: "自动选择",
+    rewriteSummary: "Auto 对你消息的理解",
+    rewriteNote: "回复依据的是这段重述。你的消息按原样保存。",
   },
   fr: {
     label: "Adaptation intelligente",
@@ -101,6 +111,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     turnedOn: "L’adaptation intelligente est activée. Un modèle sera choisi pour chaque message.",
     turnedOff: "L’adaptation intelligente est désactivée. Le modèle que vous avez choisi répond à tous les messages.",
     answeredBy: "Sélection automatique",
+    rewriteSummary: "Comment Auto a lu votre message",
+    rewriteNote: "La réponse porte sur cette reformulation. Votre message est enregistré tel que vous l'avez écrit.",
   },
   de: {
     label: "Intelligente Automatik",
@@ -115,6 +127,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     turnedOn: "Die intelligente Automatik ist an. Für jede Nachricht wird ein Modell gewählt.",
     turnedOff: "Die intelligente Automatik ist aus. Das von dir gewählte Modell beantwortet jede Nachricht.",
     answeredBy: "Automatisch ausgewählt",
+    rewriteSummary: "So hat Auto Ihre Nachricht gelesen",
+    rewriteNote: "Die Antwort bezieht sich auf diese Umformulierung. Ihre Nachricht wird so gespeichert, wie Sie sie geschrieben haben.",
   },
   es: {
     label: "Adaptación inteligente",
@@ -129,6 +143,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     turnedOn: "La adaptación inteligente está activada. Se elegirá un modelo para cada mensaje.",
     turnedOff: "La adaptación inteligente está desactivada. El modelo que elegiste responde a todos los mensajes.",
     answeredBy: "Selección automática",
+    rewriteSummary: "Cómo leyó Auto tu mensaje",
+    rewriteNote: "La respuesta se basa en esta reformulación. Tu mensaje se guarda tal como lo escribiste.",
   },
   pt: {
     label: "Adaptação inteligente",
@@ -143,6 +159,8 @@ export const autoRoutingCopy: Record<AutoRoutingLanguage, AutoRoutingCopy> = {
     turnedOn: "A adaptação inteligente está ligada. Um modelo será escolhido para cada mensagem.",
     turnedOff: "A adaptação inteligente está desligada. O modelo que você escolheu responde a todas as mensagens.",
     answeredBy: "Seleção automática",
+    rewriteSummary: "Como o Auto leu sua mensagem",
+    rewriteNote: "A resposta se baseia nesta reformulação. Sua mensagem fica salva como você a escreveu.",
   },
 };
 

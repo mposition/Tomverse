@@ -56,7 +56,7 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { previousAnswerExcerpt } from "@/lib/autoLlmRouterCore";
+import { previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -2026,10 +2026,8 @@ async function handleChatPost(
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
         // model; any failure keeps the deterministic choice.
-        const autoSelection = applyLlmModelPick(
-            deterministicAutoSelection,
-            deterministicAutoSelection.routed
-                ? await pickAutoModelWithLlm({
+        const llmPick = deterministicAutoSelection.routed
+            ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
                       previousAnswer: previousAnswerExcerpt(autoRoutingMessages),
                       eligibleModelIds:
@@ -2042,8 +2040,12 @@ async function handleChatPost(
                       userId: session?.user?.id ?? null,
                       conversationId: conversationId ?? null,
                       traceId,
+                      rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
                   })
-                : null
+            : null;
+        const autoSelection = applyLlmModelPick(
+            deterministicAutoSelection,
+            llmPick?.modelId ?? null
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;
@@ -2062,6 +2064,23 @@ async function handleChatPost(
             : autoSelection.routed
               ? autoSelection.modelId
             : requestedModelId;
+        // The router call's rewrite (docs/ui-contracts/prompt-refiner-suggestion.md,
+        // "Auto router rewrite"): only on a signed-in turn this router routed,
+        // never on top of a Refiner suggestion already applied, and only to the
+        // execution view -- the stored user message stays as the user wrote it.
+        let autoRewrite: string | null = null;
+        if (
+            !guestAutoSelection?.routed &&
+            autoSelection.routed &&
+            llmPick?.rewrite &&
+            !refinerExecution?.applied
+        ) {
+            const rewritten = withRouterRewrite(executionMessages, llmPick.rewrite);
+            if (rewritten !== executionMessages) {
+                executionMessages = [...rewritten];
+                autoRewrite = llmPick.rewrite;
+            }
+        }
         let autoSelectionRecorded = false;
         const recordAutoSelection = () => {
             if (autoSelectionRecorded || !autoRouted || !autoRecord) return;
@@ -7022,6 +7041,15 @@ async function handleChatPost(
         if (autoRouted && autoRecord) {
             headers.set("X-Chat-Routed-Model", effectiveModelId);
             headers.set("X-Chat-Routed-Reason", autoRecord.selectionReason);
+            if (autoRewrite) {
+                // The user's own words restated, back to the same user, so the
+                // reply can say how Auto read the message. base64url: a header
+                // carries no raw non-ASCII text.
+                headers.set(
+                    "X-Chat-Auto-Rewrite",
+                    Buffer.from(autoRewrite, "utf8").toString("base64url")
+                );
+            }
         }
         // These content-free facts describe the server-consumed decision.
         // They carry no proposal text and grant no authority to a later send.
