@@ -34,6 +34,15 @@ struct Migration {
 /// unrecognized mismatch.
 const MIGRATION_NAME_ALIASES: &[(i64, &str, &str)] = &[
     (35, "0029_regenerable_samples", "0035_regenerable_samples"),
+    // Version 83 was claimed twice. The Ubuntu AMUX host applied
+    // 0083_health_invariants_family on 2026-10-03 from a local build, and the
+    // Decision Maker's typed-ask migration later shipped as 0083 too, so that
+    // host skipped it (version-only dedupe) and never got its tables. The
+    // health backfill keeps 83 and the typed ask moved to 84. A database that
+    // recorded the typed ask at 83 re-runs it at 84, where every statement is
+    // IF NOT EXISTS and changes nothing, and skips the health backfill, which
+    // only reclassifies old request-log rows. Known and benign, so not an alarm.
+    (83, "0083_decision_maker_typed_ask", "0083_health_invariants_family"),
 ];
 
 fn known_name_alias(version: i64, recorded: &str, registered: &str) -> bool {
@@ -470,8 +479,13 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 83,
-        name: "0083_decision_maker_typed_ask",
-        sql: include_str!("../../migrations/0083_decision_maker_typed_ask.sql"),
+        name: "0083_health_invariants_family",
+        sql: include_str!("../../migrations/0083_health_invariants_family.sql"),
+    },
+    Migration {
+        version: 84,
+        name: "0084_decision_maker_typed_ask",
+        sql: include_str!("../../migrations/0084_decision_maker_typed_ask.sql"),
     },
 ];
 
@@ -1124,6 +1138,81 @@ mod tests {
             Vec::new(),
             "a version the code no longer registers has nothing to disagree with"
         );
+    }
+
+    #[test]
+    fn health_invariants_request_history_gets_its_own_latency_family() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(include_str!("../../migrations/0010_request_log.sql"))
+            .unwrap();
+        for (path, family) in [
+            ("/api/health/invariants", "/api/health"),
+            ("/api/health", "/api/health"),
+            ("/api/health/invariants", "/api/health/invariants"),
+        ] {
+            conn.execute(
+                "INSERT INTO _amux_request_log (ts, method, path, family, status, latency_ms) VALUES (1, 'GET', ?1, ?2, 200, 1)",
+                rusqlite::params![path, family],
+            )
+            .unwrap();
+        }
+        let backfill = include_str!("../../migrations/0083_health_invariants_family.sql");
+        conn.execute_batch(backfill).unwrap();
+        conn.execute_batch(backfill).unwrap();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT path, family FROM _amux_request_log ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("/api/health/invariants".into(), "/api/health/invariants".into()),
+                ("/api/health".into(), "/api/health".into()),
+                ("/api/health/invariants".into(), "/api/health/invariants".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_database_that_recorded_83_as_either_migration_ends_with_the_typed_ask_tables() {
+        // The Ubuntu host recorded 83 as the health backfill; a development
+        // database may have recorded it as the typed ask. Both must end with
+        // the Decision Maker's tables and boot without a collision finding.
+        for recorded in ["0083_health_invariants_family", "0083_decision_maker_typed_ask"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            apply_all(&mut conn).unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER amux_dm_epochs_on_insert; DROP TRIGGER amux_dm_status_epoch;                  DROP TRIGGER amux_dm_ask_epoch;",
+            )
+            .unwrap();
+            for table in ["_amux_dm_card_epochs", "_amux_dm_typed_asks", "_amux_dm_ask_revisions"] {
+                conn.execute_batch(&format!("DROP TABLE {table}")).unwrap();
+            }
+            conn.execute("DELETE FROM _amux_migrations WHERE version >= 83", []).unwrap();
+            conn.execute(
+                "INSERT INTO _amux_migrations (version, name, applied_at) VALUES (83, ?1, 'then')",
+                [recorded],
+            )
+            .unwrap();
+            if recorded == "0083_decision_maker_typed_ask" {
+                // That database did run the typed ask at 83.
+                conn.execute_batch(include_str!("../../migrations/0084_decision_maker_typed_ask.sql"))
+                    .unwrap();
+            }
+            apply_all(&mut conn).unwrap();
+            let tables: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN                      ('_amux_dm_card_epochs', '_amux_dm_typed_asks', '_amux_dm_ask_revisions')",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(tables, 3, "{recorded}");
+            assert!(renumbered_migrations(&conn).is_empty(), "{recorded}");
+        }
     }
 
     #[test]

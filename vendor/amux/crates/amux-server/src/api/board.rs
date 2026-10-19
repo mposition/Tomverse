@@ -12956,7 +12956,7 @@ pub async fn patch_item(
             // The Decision Maker's question revision (crate::db::dm_ask), in this
             // transaction so a revision never describes a card write that rolled
             // back. The save above already moved the card's epochs (migration
-            // 0083 triggers), so a re-entry or a rewording is a new revision.
+            // 0084 triggers), so a re-entry or a rewording is a new revision.
             if let Some(input) = typed_ask_w.as_ref() {
                 crate::db::dm_ask::write_draft(conn, &next.id, input, next.updated)?;
                 crate::db::dm_ask::sync_question_revision(conn, &next.id, next.updated)?;
