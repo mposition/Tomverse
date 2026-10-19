@@ -215,6 +215,14 @@ test("a conversation with attachments anywhere is never rewritten", async () => 
   assert.equal(withRouterRewrite(emptyList, "Fix the parser.")[0].content, "Fix the parser.");
 });
 
+test("the live router deadline is 5 s and stays below the rewrite and replay deadlines", async () => {
+  const { AUTO_LLM_ROUTER_TIMEOUT_MS, AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS, AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS } =
+    await import("../lib/autoLlmRouterCore.ts");
+  assert.equal(AUTO_LLM_ROUTER_TIMEOUT_MS, 5_000);
+  assert.ok(AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS >= AUTO_LLM_ROUTER_TIMEOUT_MS);
+  assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
+});
+
 test("the router asks an OpenAI model for low reasoning effort and leaves others alone", async () => {
   const { autoLlmRouterProviderOptions, AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS, AUTO_LLM_ROUTER_TIMEOUT_MS } =
     await import("../lib/autoLlmRouterCore.ts");
