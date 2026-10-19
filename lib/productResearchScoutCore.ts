@@ -98,7 +98,8 @@ export function admitScoutSubmission(body: unknown): ScoutAdmission {
   }
   const signalText = signals === undefined ? "" : signals;
   if (typeof signalText !== "string" || signalText.length > SCOUT_SIGNALS_MAX_CHARS) return refuse("signals");
-  if (kind !== "catalogue" && admittedImages.length === 0) return refuse("images");
+  // A page is judged on how it looks; a generated file may come as an image or as its text.
+  if (kind === "page" && admittedImages.length === 0) return refuse("images");
   if (admittedImages.length === 0 && signalText.trim().length === 0) return refuse("empty");
   return {
     ok: true,

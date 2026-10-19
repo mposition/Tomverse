@@ -14,7 +14,8 @@ import {
 const png = { label: "desktop", mediaType: "image/png", base64: "iVBORw0KGgo=" };
 const page = { kind: "page", subject: "pricing.en", language: "en", images: [png], signals: "console errors: 0" };
 
-test("a page needs at least one image; the catalogue may be text only", () => {
+test("a page needs at least one image; a file or the catalogue may be text only", () => {
+  assert.equal(admitScoutSubmission({ kind: "file", subject: "docx.document", signals: "Text the file contains: 제목" }).ok, true);
   assert.equal(admitScoutSubmission(page).ok, true);
   assert.deepEqual(admitScoutSubmission({ ...page, images: [] }), { ok: false, code: "images" });
   const catalogue = admitScoutSubmission({ kind: "catalogue", subject: "catalogue", signals: "CAT-01 claude-sonnet-5-5 on Brave" });
