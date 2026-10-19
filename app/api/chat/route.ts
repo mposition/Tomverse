@@ -54,7 +54,8 @@ import {
     isRouterShadowEnabled,
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
-import { selectAutoModel } from "@/lib/autoModelSelection";
+import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
+import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -1979,7 +1980,7 @@ async function handleChatPost(
                 "router_refused_before_dispatch"
             );
         }
-        const autoSelection = selectAutoModel({
+        const deterministicAutoSelection = selectAutoModel({
             explorationEnabled: await isAutoExplorationEnabled(),
             conversationId: conversationId ?? null,
             requestedModelId,
@@ -2021,6 +2022,23 @@ async function handleChatPost(
             requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
                 .maxOutputTokens,
         });
+        // Per prompt: a small model reads this message and reorders the
+        // Router's eligible set. Off unless CHAT_AUTO_LLM_ROUTER_MODEL_ID is
+        // set; any failure keeps the deterministic choice.
+        const autoSelection = applyLlmModelPick(
+            deterministicAutoSelection,
+            deterministicAutoSelection.routed
+                ? await pickAutoModelWithLlm({
+                      prompt: profileTextFor(autoRoutingMessages),
+                      eligibleModelIds:
+                          deterministicAutoSelection.record.eligibleModelIds,
+                      models: routerCandidateInputs.models,
+                      creditsByModelId:
+                          deterministicAutoSelection.candidateCreditsByModelId,
+                      traceId,
+                  })
+                : null
+        );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;
         const autoRecord = guestAutoSelection?.routed
