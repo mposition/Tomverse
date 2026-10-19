@@ -1,4 +1,4 @@
-// The improvement scout's S0 probe (docs/policy/product-research-agent.md §20).
+// The improvement scout's S0 probe (docs/policy/product-research-agent.md §13).
 //
 //   node scripts/agents/product-research-scout-s0-probe.mjs fixture [--json]
 //   node scripts/agents/product-research-scout-s0-probe.mjs pages [--json]
@@ -29,7 +29,7 @@
 // `pages` measures S0 (3): the twenty production public pages (§12), one at a
 // time, as a guest, GET and HEAD only, with the cdp+resolver rules. The
 // document response is read at commit and a challenge or an error status stops
-// the page there (§11-6). It records the document language and which other
+// the page there (§11-5). It records the document language and which other
 // origins the page tried to reach -- the candidates for the first-party static
 // origin list S0 (4) has to settle. It never clicks, types or solves anything.
 //
@@ -77,7 +77,7 @@ if (!MODES.includes(mode)) {
   process.exit(64);
 }
 
-/** The per-page ceiling the browser service enforces (§13). */
+/** The per-page ceiling the browser service enforces (§12). */
 const PAGE_DEADLINE_MS = 60_000;
 /** How long a loaded page may keep issuing requests before it is read. */
 const SETTLE_MS = 2_500;
@@ -97,7 +97,7 @@ async function launch(args) {
  * only when decideScoutRequest allows it. Every document response also pauses,
  * at the response stage, before its body reaches the renderer: documentStop
  * reads its status and headers there, and a challenge or an error status is
- * failed in place, so nothing it carries runs (§11-6). That holds for every
+ * failed in place, so nothing it carries runs (§11-5). That holds for every
  * document for as long as the page lives -- the top document, an iframe, a
  * later navigation -- and `onStop` tells the page's visit the moment one is
  * stopped. The caller swaps `tally`, `stops` and `onStop` per page.
@@ -137,7 +137,7 @@ async function installCdpRules(browser, allowedOrigins) {
   return state;
 }
 
-/** A browser context with the §13 context options, and Playwright's route when asked. */
+/** A browser context with the §12 context options, and Playwright's route when asked. */
 async function ruledContext(browser, { allowedOrigins, locale, serviceWorkers = "block", playwrightRoute, tally }) {
   const context = await browser.newContext({
     locale,
@@ -483,7 +483,7 @@ async function visitPage(browser, target, { origin, allowedOrigins, rules }) {
     });
 
     // A challenge or an error status is failed by the CDP rules while the
-    // document response is held, so nothing it carried has run (§11-6). Any
+    // document response is held, so nothing it carried has run (§11-5). Any
     // document stopped while the page lives -- the top one, an iframe, a later
     // navigation -- ends the visit at once, and the stop is the answer.
     const stopped = new Promise((resolve) => {

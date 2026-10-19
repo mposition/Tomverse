@@ -127,7 +127,7 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
  * A service without a schedule runs on every deploy, so the probe does nothing
  * until the operator sets PRODUCT_RESEARCH_SCOUT_ENABLED; setting it redeploys
  * the service, and that deploy is the measurement. It reads no credential and
- * submits nowhere (docs/policy/product-research-agent.md §20).
+ * submits nowhere (docs/policy/product-research-agent.md §13).
  */
 const PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES = ["PRODUCT_RESEARCH_SCOUT_ENABLED"] as const;
 
@@ -479,7 +479,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   },
   {
     // The improvement scout's S0 probe (docs/policy/product-research-agent.md
-    // §20). One environment is enough: what it measures is whether Chromium
+    // §13). One environment is enough: what it measures is whether Chromium
     // keeps its sandbox in a Railway container and what production's public
     // pages answer a Railway address, and every environment of this project
     // runs in the same region. dev, because dev builds from develop; staging

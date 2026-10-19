@@ -1,5 +1,5 @@
 # The improvement scout's S0 probe image (docs/policy/product-research-agent.md
-# §20, S0 (1), (2), (3), (4), (10), (11)).
+# §13, S0 (1), (2), (3), (4), (10), (11)).
 #
 # A measurement image, not the walker or the browser service: it answers
 # whether Chromium launches with its sandbox inside a Railway container, what

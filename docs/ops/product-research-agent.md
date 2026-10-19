@@ -294,7 +294,7 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
 - **GitHub에 아무것도 쓰지 않습니다.** 이슈·label·comment·PR·check 전부. 토큰은
   읽기 전용이고, 쓰기 권한이 붙은 토큰을 넣으면 그 자체가 정책 위반입니다.
 
-## 개선 탐색 S0 probe (정책 v2 §20)
+## 개선 탐색 S0 probe (정책 §13)
 
 `Product Research Scout Probe`는 개선 탐색의 S0 측정 전용 서비스입니다. walker도
 browser 서비스도 아니며, 아무 데도 제출하지 않고 자격증명을 읽지 않습니다.
