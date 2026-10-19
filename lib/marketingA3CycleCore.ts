@@ -24,6 +24,7 @@ import {
   marketingA3ReportBody,
   readMarketingA3Answer,
   type MarketIntelFact,
+  type MarketingA3DropReason,
 } from "./marketingA3Core.ts";
 import {
   MARKETING_INTEL_REPORT_MAX_BODY_BYTES,
@@ -80,6 +81,8 @@ export type MarketingA3CycleSummary = {
   readonly calls: number;
   readonly factsKept: number;
   readonly unrepresentable: number;
+  /** The facts the service did not keep, by reason (the model's own unrepresentable count is not here). */
+  readonly dropped: Partial<Record<MarketingA3DropReason | "unreadable_answer", number>>;
   /** The report route's answer, or null when nothing was reported. */
   readonly report: null | { readonly httpStatus: number; readonly status: string };
   readonly stoppedAt: null | { readonly stage: "context" | "deadline" | "llm" | "submit"; readonly detail: string };
@@ -132,6 +135,7 @@ export async function runMarketingA3Cycle(
   let competitors = 0;
   let calls = 0;
   let unrepresentable = 0;
+  const dropped: Partial<Record<MarketingA3DropReason | "unreadable_answer", number>> = {};
   const facts: MarketIntelFact[] = [];
   const summary = (
     stoppedAt: MarketingA3CycleSummary["stoppedAt"],
@@ -141,6 +145,7 @@ export async function runMarketingA3Cycle(
     calls,
     factsKept: facts.length,
     unrepresentable,
+    dropped,
     report,
     stoppedAt,
   });
@@ -184,6 +189,10 @@ export async function runMarketingA3Cycle(
     });
     // An answer that is not the JSON asked for found nothing usable: counted, not guessed at.
     unrepresentable += read.unreadable ? 1 : read.unrepresentable;
+    if (read.unreadable) dropped.unreadable_answer = (dropped.unreadable_answer ?? 0) + 1;
+    for (const [reason, count] of Object.entries(read.dropped) as Array<[MarketingA3DropReason, number]>) {
+      dropped[reason] = (dropped[reason] ?? 0) + count;
+    }
     facts.push(...read.facts);
   }
 

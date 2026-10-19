@@ -74,6 +74,7 @@ test("a run searches once per competitor within its official domains, and report
     calls: 1,
     factsKept: 1,
     unrepresentable: 2,
+    dropped: { source_not_retrieved: 1 },
     report: { httpStatus: 200, status: "recorded" },
     stoppedAt: null,
   });
