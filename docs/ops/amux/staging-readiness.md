@@ -15,7 +15,8 @@ dirty source identity는 deploy SHA가 아니며 staging 배포 증거를 대신
 - `TOMVERSE_AMUX_ENABLED`: 코드 기본값 off, 실제 runtime 값 미관측
 - `TOMVERSE_AMUX_EXECUTE`: 코드 기본값 off, 실제 runtime 값 미관측
 - `TOMVERSE_AMUX_EXECUTION_API_ENABLED`: 코드 기본값 off, 실제 runtime 값 미관측
-- `TOMVERSE_AMUX_WORKER_CATALOG_JSON`: 실제 runtime 값 미관측
+- worker 배정 카탈로그: 등록부에서 유도(정책 버전 35 3항). `TOMVERSE_AMUX_WORKER_CATALOG_JSON`은
+  R2e부터 앱이 읽지 않으므로 runtime 값이 배정에 영향을 주지 않음
 - local executor: production hard-disabled (`cfg(test)` process fixture only)
 - server routing `execution_ready=false`
 

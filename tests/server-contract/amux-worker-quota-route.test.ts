@@ -19,15 +19,12 @@ const tx = {
   },
 };
 mock.module(mod("lib/amux/guard.ts"), { namedExports: { isAmuxSyncAuthorized: () => authorized } });
-mock.module(mod("lib/amux/routing.ts"), { namedExports: {
-  getConfiguredAmuxV22WorkerCatalog: () => [{ worker_name: "claude-chore", provider: "anthropic" }],
-} });
-// R2c (orchestration policy version 53): the route checks the worker against
-// the derived catalog, read inside the write's own transaction.
+// Orchestration policy version 35, section 3: the route checks the worker
+// against the derived catalog, read inside the write's own transaction.
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
-  readAmuxAssignmentCatalogs: async (client: unknown, open: boolean) => {
-    assert.equal(client, tx); assert.equal(open, true); lockOrder.push("catalog");
-    return { source: "derived", workers: null, ceilings: null,
+  readAmuxAssignmentCatalogs: async (client: unknown, ...rest: unknown[]) => {
+    assert.equal(client, tx); assert.deepEqual(rest, []); lockOrder.push("catalog");
+    return { workers: null, ceilings: null,
       v22: [{ worker_name: "claude-chore", provider: "anthropic" }] };
   },
 } });

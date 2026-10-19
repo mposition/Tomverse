@@ -1,12 +1,12 @@
 // Orchestration policy version 35, stage R2a: the worker capability core.
 // Runs without a database: the closed tag and v22-role lists, the role-ceiling
-// rule at write and at derivation, and the import from the catalog variables.
+// rule at write and at derivation, and the Admin view of what is recorded.
+// R2a's import from the catalog variables went with them at R2e.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { parseAmuxV22WorkerCatalog } from "../lib/amux/v22WorkerCatalogCore.ts";
 import {
   AMUX_WORKER_CAPABILITY_WRITES_LATCH,
   AMUX_WORKER_ROUTING_TAGS,
@@ -14,10 +14,7 @@ import {
   AMUX_WORKER_V22_ROLES,
   AMUX_WORKER_V22_ROLE_REQUIREMENTS,
   amuxWorkerCapabilitiesEqual,
-  amuxWorkerCapabilityImportsToWrite,
-  amuxWorkerCapabilityImport,
   amuxWorkerCapabilityRefusal,
-  amuxWorkerCapabilityV22Catalog,
   amuxWorkerCapabilityWithinCeiling,
   amuxWorkerCapabilityWritesOpen,
   buildAmuxWorkerCapabilityAdminView,
@@ -140,130 +137,58 @@ test("a ceiling narrowed after the write drops what it no longer allows", () => 
   assert.ok(amuxWorkerCapabilitiesEqual(whole, written));
 });
 
-// The production catalogs as read on 2026-10-13: names, providers, models,
-// tags and tools only.
-const PRODUCTION_LEGACY = [
-  { worker_name: "codex-chore", provider: "codex", model: null, routing_roles: ["chore"], tool_capabilities: [] },
-  { worker_name: "codex-impl", provider: "codex", model: null, routing_roles: ["implementation"], tool_capabilities: [] },
-  { worker_name: "codex-contract", provider: "codex", model: null, routing_roles: ["contract"], tool_capabilities: [] },
-  { worker_name: "claude-chore", provider: "claude", model: null, routing_roles: ["chore"], tool_capabilities: [] },
-  { worker_name: "claude-impl", provider: "claude", model: null, routing_roles: ["implementation"], tool_capabilities: [] },
-  { worker_name: "claude-contract", provider: "claude", model: null, routing_roles: ["contract"], tool_capabilities: [] },
-  { worker_name: "claude-review", provider: "claude", model: null, routing_roles: ["review"], tool_capabilities: [] },
-  { worker_name: "engineering-runner", provider: "claude", model: "claude-opus-5", routing_roles: ["engineering"], tool_capabilities: [] },
-];
-const PRODUCTION_V22 = [
-  { worker_name: "claude-chore", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["investigate"], tool_capabilities: ["repo_read"] },
-  { worker_name: "claude-contract", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["design"], tool_capabilities: ["repo_read"] },
-  { worker_name: "claude-impl", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["implement"], tool_capabilities: ["repo_write"] },
-  { worker_name: "claude-review", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["review"], tool_capabilities: ["repo_read"] },
-];
 const PRODUCTION_REGISTRY = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) =>
   registration(entry.workerName, entry.roleCeiling, entry.desiredState));
 
-test("production's catalogs import for the seven with no refusal; the exempt runner is not imported", () => {
-  const rows = amuxWorkerCapabilityImport(PRODUCTION_REGISTRY, PRODUCTION_LEGACY, PRODUCTION_V22);
-  assert.deepEqual(rows.map((row) => row.workerName), [
-    "claude-chore", "claude-contract", "claude-impl", "claude-review", "codex-chore", "codex-contract", "codex-impl",
-  ]);
-  assert.deepEqual(rows.filter((row) => row.refusal !== null), []);
-  const chore = rows.find((row) => row.workerName === "claude-chore");
-  assert.deepEqual(chore.proposed, {
-    model: null,
-    routingTags: ["chore"],
-    toolCapabilities: [],
-    v22: { model: "claude-opus-5-5", roles: ["investigate"], tools: ["repo_read"] },
-  });
-  assert.equal(rows.find((row) => row.workerName === "codex-impl").proposed.v22, null);
-});
-
-test("an import shows the refusal a write would meet, and skips unregistered or retired names", () => {
-  const registry = [registration("claude-chore", "chore"), registration("codex-impl", "implementation", "retired")];
-  const rows = amuxWorkerCapabilityImport(
-    registry,
-    [
-      { worker_name: "claude-chore", provider: "claude", routing_roles: ["implementation"] },
-      { worker_name: "codex-impl", provider: "codex", routing_roles: ["implementation"] },
-      { worker_name: "devin-worker", provider: "devin", routing_roles: ["chore"] },
-    ],
-    null,
-  );
-  assert.deepEqual(rows.map((row) => [row.workerName, row.refusal]), [["claude-chore", "tag_above_ceiling"]]);
-});
-
-
-test("the Admin view proposes the import per worker and says what is already recorded", () => {
+test("the Admin view lists every registered, non-retired worker with what is recorded, and nothing else", () => {
   const recorded = new Map([[
-    "codex-impl",
-    { revision: 1, capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" },
+    "claude-chore",
+    { revision: 2, capability: capability(["chore"], { model: "claude-opus-5-5", roles: ["investigate"], tools: ["repo_read"] }), changedAt: "2026-10-13T00:00:00.000Z" },
   ]]);
-  const view = buildAmuxWorkerCapabilityAdminView({
-    registrations: PRODUCTION_REGISTRY,
-    current: recorded,
-    legacy: PRODUCTION_LEGACY,
-    v22: PRODUCTION_V22,
-  });
+  const registrations = [...PRODUCTION_REGISTRY, registration("codex-old", "chore", "retired")];
+  const view = buildAmuxWorkerCapabilityAdminView({ registrations, current: recorded });
   // Defaults to the code latch (true since version 36).
   assert.equal(view.writesLatch, AMUX_WORKER_CAPABILITY_WRITES_LATCH);
-  assert.equal(view.catalogReadable, true);
+  assert.deepEqual(Object.keys(view).sort(), ["rows", "writesLatch"]);
   assert.equal(view.rows.length, 13);
+  assert.deepEqual(view.rows.map((row) => row.workerName), [...PRODUCTION_REGISTRY.map((row) => row.workerName)].sort());
+  for (const row of view.rows) {
+    // R2a's import columns went with the catalog variables at R2e.
+    assert.deepEqual(Object.keys(row).sort(), ["current", "desiredState", "roleCeiling", "workerName"]);
+  }
   const byName = Object.fromEntries(view.rows.map((row) => [row.workerName, row]));
-  assert.equal(byName["codex-impl"].same, true);
-  assert.equal(byName["cursor-impl"].proposed, null);
-  const imports = amuxWorkerCapabilityImportsToWrite(view);
-  assert.equal(imports.length, 6);
-  assert.equal(imports.some((entry) => entry.workerName === "codex-impl"), false);
-  assert.deepEqual(imports.find((entry) => entry.workerName === "claude-chore").expectedRevision, 0);
+  assert.deepEqual(byName["claude-chore"].current, recorded.get("claude-chore"));
+  assert.equal(byName["cursor-impl"].current, null);
+  assert.equal(byName["cursor-impl"].desiredState, "requested");
   assert.deepEqual(parseAmuxWorkerCapabilityAdminView(JSON.parse(JSON.stringify(view))), view);
 });
 
 test("the GET body is accepted only in its exact shape", () => {
-  const view = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: new Map(), legacy: PRODUCTION_LEGACY, v22: PRODUCTION_V22 });
+  const recorded = new Map([[
+    "codex-impl",
+    { revision: 1, capability: capability(["implementation"]), changedAt: "2026-10-13T00:00:00.000Z" },
+  ]]);
+  const view = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: recorded });
   const body = JSON.parse(JSON.stringify(view));
+  const index = body.rows.findIndex((row) => row.workerName === "codex-impl");
+  const withRow = (row) => ({ ...body, rows: body.rows.map((entry, at) => (at === index ? row : entry)) });
   for (const broken of [
     null,
     { ...body, writesLatch: "no" },
-    { ...body, rows: [{ ...body.rows[0], workerName: "devin-worker" }] },
-    { ...body, rows: [{ ...body.rows[0], roleCeiling: "review" }] },
-    { ...body, rows: [{ ...body.rows[0], refusal: "because" }] },
-    { ...body, rows: [{ ...body.rows[0], proposed: { routingTags: "chore" } }] },
-    { ...body, catalogReadable: false },
+    { ...body, rows: "none" },
+    withRow({ ...body.rows[index], workerName: "devin-worker" }),
+    withRow({ ...body.rows[index], roleCeiling: "review" }),
+    withRow({ ...body.rows[index], desiredState: "retired" }),
+    withRow({ ...body.rows[index], current: { ...body.rows[index].current, revision: 0 } }),
+    withRow({ ...body.rows[index], current: { ...body.rows[index].current, capability: { routingTags: "chore" } } }),
   ]) {
     assert.equal(parseAmuxWorkerCapabilityAdminView(broken), null, JSON.stringify(broken)?.slice(0, 60));
   }
-  const unreadable = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: new Map(), legacy: null, v22: null });
-  assert.equal(unreadable.catalogReadable, false);
-  assert.ok(unreadable.rows.every((row) => row.proposed === null));
-  assert.deepEqual(parseAmuxWorkerCapabilityAdminView(JSON.parse(JSON.stringify(unreadable))), unreadable);
 });
 
-test("a v22 variable that is set but unreadable blocks the import; an unset one means no profiles", () => {
-  const recorded = new Map([[
-    "claude-chore",
-    { revision: 1, capability: { model: null, routingTags: ["chore"], toolCapabilities: [], v22: { model: "claude-opus-5-5", roles: ["investigate"], tools: ["repo_read"] } }, changedAt: "2026-10-13T00:00:00.000Z" },
-  ]]);
-  // Review r-20261013-020744-27285f: reading an invalid v22 variable as empty
-  // would propose v22: null and erase the recorded profile.
-  const unreadable = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: recorded, legacy: PRODUCTION_LEGACY, v22: null });
-  assert.equal(unreadable.catalogReadable, false);
-  assert.ok(unreadable.rows.every((row) => row.proposed === null));
-  assert.deepEqual(amuxWorkerCapabilityImportsToWrite(unreadable), []);
-  const unset = buildAmuxWorkerCapabilityAdminView({ registrations: PRODUCTION_REGISTRY, current: recorded, legacy: PRODUCTION_LEGACY, v22: [] });
-  assert.equal(unset.catalogReadable, true);
-  assert.equal(unset.rows.find((row) => row.workerName === "claude-chore").proposed.v22, null);
-});
-
-test("only an absent v22 variable reads as no profiles; a blank or malformed one is unreadable", () => {
-  // Review r-20261013-021506-9adb4b: a trimmed truthiness check read a blank
-  // variable as unset and proposed v22: null over the recorded profiles.
-  const parse = (raw) => parseAmuxV22WorkerCatalog(raw, PRODUCTION_LEGACY);
-  assert.deepEqual(amuxWorkerCapabilityV22Catalog(undefined, parse), []);
-  for (const raw of ["", "   ", "\n", "[]", "{", "not json"]) {
-    assert.equal(amuxWorkerCapabilityV22Catalog(raw, parse), null, JSON.stringify(raw));
-  }
-  assert.equal(amuxWorkerCapabilityV22Catalog(JSON.stringify(PRODUCTION_V22), parse).length, PRODUCTION_V22.length);
-  // The server read hands the variable over untouched; it decides nothing itself.
-  const source = readFileSync(new URL("../lib/amux/workerCapabilityAdminRead.ts", import.meta.url), "utf8");
-  assert.match(source, /amuxWorkerCapabilityV22Catalog\(process\.env\[AMUX_V22_WORKER_CATALOG_ENV\],/);
-  assert.doesNotMatch(source, /\.trim\(\)|getConfiguredAmuxV22WorkerCatalog/);
+test("the server read takes nothing from the environment", () => {
+  const source = readFileSync(new URL("../lib/amux/workerCapabilityAdminRead.ts", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.doesNotMatch(source, /process\.env|getConfiguredAmux|parseAmuxV22WorkerCatalog/);
+  assert.match(source, /buildAmuxWorkerCapabilityAdminView\(\{ registrations: registry\.registrations, current \}\)/);
 });

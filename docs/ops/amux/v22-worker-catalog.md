@@ -1,50 +1,44 @@
 # v22 Task worker metadata
 
-The resident AMUX roster, legacy product admission catalog and v22 Task
-profiles are different inventories. A running session is not execution
-permission; neither its name nor its CLI model alias proves a served model.
+The resident AMUX roster, the assignment catalog and v22 Task profiles are
+different inventories. A running session is not execution permission; neither
+its name nor its CLI model alias proves a served model.
 
-`TOMVERSE_AMUX_WORKER_CATALOG_JSON` remains the legacy product admission
-catalog. Its CLI providers, legacy roles and lifecycle exclusions are not
-rewritten by the v22 loader.
+The assignment catalog is derived from the worker registry (orchestration
+policy version 35, section 3; every assignment path reads it since stage R2c).
+A worker is an entry when its desired state is `active`, no automatic stop
+latch is open and a capability is recorded; `engineering-runner` is a code
+constant. Stage R2e removed `TOMVERSE_AMUX_WORKER_CATALOG_JSON` and
+`TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON` from the app: neither is read, so
+setting either changes nothing, and Admin no longer imports from them.
 
-`TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON` is a separate server-only JSON array.
-Each profile must name an already-admitted worker and explicitly declare its
-one-shot provider, model, Task roles and tools. For example (not an activation
-or price approval):
-
-```json
-[
-  {
-    "worker_name": "claude-chore",
-    "provider": "anthropic",
-    "model": "claude-opus-5-5",
-    "routing_roles": ["investigate"],
-    "tool_capabilities": ["repo_read"]
-  }
-]
-```
+A worker's v22 one-shot profile is part of its recorded capability: model,
+Task roles and tools. Only the owner records a capability, one worker at a
+time, through `POST /api/admin/amux/workers/capabilities` (owner role, R2a's
+code latch, a recent step-up, and the human audit `amux.worker.capability` in
+the same transaction). AMUX › Execution › Workers shows what is recorded.
 
 Only the existing Anthropic one-shot path is supported: `design`, `implement`,
-`review` and `investigate`. Read-only roles require `repo_read`; `implement`
-requires `repo_write`. Unsupported roles/providers, aliases, unknown fields,
-duplicates or names absent from product admission hold the whole v22 catalog.
-Missing configuration also holds it; there is no inferred legacy fallback.
-An unprofiled resident is not removed from the legacy inventory, but is not a
-v22 candidate. Catalog capacity is bounded at 128, not seven.
+`review` and `investigate`, on a Claude worker and a supported model.
+Read-only roles require `repo_read`; `implement` requires `repo_write`. A role
+the worker's role ceiling does not allow is refused when written and dropped
+when the catalog is derived, so a narrowed ceiling takes effect without a new
+capability. An unprofiled worker stays in the assignment catalog but is not a
+v22 candidate.
 
 Task readiness, automatic admission capacity and worker claim all use this
-same profile subset. Static `archived`, `paused`, `isolated` and `blocked`
-exclusions remain inherited. Profiles cannot set runtime liveness or
-dispatch readiness. Existing approval, approved cost receipt, runtime lease,
-role/tool match, quota, dependency, reserved-capacity and review-independence
-checks still apply.
+same profile subset. Holding a worker back is the registry's desired state and
+stop latch; a profile cannot set runtime liveness or dispatch readiness.
+Existing approval, approved cost receipt, runtime lease, role/tool match,
+quota, dependency, reserved-capacity and review-independence checks still
+apply.
 
-Setting this variable is an operational change requiring the usual approval;
-this document and its example do not set it or open any switch. To withdraw
-new v22 candidates, remove this variable; legacy routing remains intact. Do
-not replay an in-flight or unknown-outcome request during a configuration
-change. Reconcile its app receipt first through the existing owner path.
+A worker leaves the v22 candidates when the derived catalog stops listing its
+profile: its desired state is no longer `active`, a stop latch opens, or its
+newest capability has no v22 profile. Each of those is an operational change
+requiring the usual approval; this document opens no switch. Do not replay an
+in-flight or unknown-outcome request during such a change. Reconcile its app
+receipt first through the existing owner path.
 
 ## Task-profile quota reporting
 

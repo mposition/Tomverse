@@ -9,7 +9,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
   en: {
     title: "Worker registry",
     description:
-      "Policy version 31 makes this registry the one list of AMUX workers. Until stage R2, assignment still follows the catalog environment variable; this screen records the registry and compares the two, and assigns nothing.",
+      "Policy version 31 makes this registry the one list of AMUX workers. Since stage R2c, assignment reads the catalog derived from this registry and the capabilities below; the catalog environment variables are no longer read. This screen records the registry and assigns nothing itself.",
     writesOff:
       "Registry writes are off: stage R1 ships with its code latch off, and the operator's R1 activation record turns it on. Reading is open.",
     writesOn: "Registry writes are on. Only the owner may register or change a worker, after a recent sign-in.",
@@ -18,25 +18,6 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     unreadableRows: "A stored registry row is outside the policy's rules, so the registry is shown as unreadable.",
     reread: "Read again",
     reading: "Reading…",
-    comparisonTitle: "Registry and assignment catalog",
-    comparisonHelp:
-      "Stage R1 ends when these agree for the agreed period. A worker agrees when the registry says active and the catalog lists it assignable, or when neither does. A catalog entry with no registry entry never agrees, even when the catalog holds it, and neither does one whose provider is not its name's class; the only exception is a name version 34 excludes, which counts as agreement. Roles are not compared.",
-    comparisonStatus: {
-      match: "They agree",
-      mismatch: "They disagree",
-      registry_unreadable: "The registry cannot be read",
-      catalog_unreadable: "The catalog variable is unset or invalid",
-    },
-    verdict: {
-      match: "Agrees",
-      exempt: "Excluded: the engineering agent's runner, governed by its own policy (version 34)",
-      registry_only: "Active in the registry, not assignable in the catalog",
-      catalog_only: "Assignable in the catalog, not active in the registry",
-      unregistered: "In the catalog with no registry entry",
-      provider_mismatch: "The catalog's provider is not the name's class",
-    },
-    catalogState: { assignable: "assignable", held: "held", absent: "absent" },
-    notRegistered: "not registered",
     workersTitle: "Workers",
     noWorkers: "No worker is registered yet.",
     column: {
@@ -49,9 +30,6 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
       latch: "Stop latch",
       observation: "Last observation",
       effective: "Assignable by the registry",
-      registry: "Registry",
-      catalog: "Catalog",
-      verdict: "Verdict",
     },
     verified: "verified",
     unverified: "unverified",
@@ -84,7 +62,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
   ko: {
     title: "Worker 등록부",
     description:
-      "정책 버전 31에서 이 등록부가 AMUX worker의 단일 목록입니다. R2 단계 전까지 배정은 여전히 카탈로그 환경 변수를 따릅니다. 이 화면은 등록부를 기록하고 둘을 비교할 뿐, 아무것도 배정하지 않습니다.",
+      "정책 버전 31에서 이 등록부가 AMUX worker의 단일 목록입니다. R2c 단계부터 배정은 이 등록부와 아래 능력에서 유도한 카탈로그를 읽고, 카탈로그 환경 변수는 더 이상 읽지 않습니다. 이 화면은 등록부를 기록할 뿐 직접 배정하지 않습니다.",
     writesOff:
       "등록부 쓰기가 꺼져 있습니다. R1 단계는 코드 래치를 끈 채 출고되며, 운영자의 R1 활성화 기록이 켭니다. 읽기는 열려 있습니다.",
     writesOn: "등록부 쓰기가 켜져 있습니다. owner만 최근 로그인 뒤에 worker를 등록하거나 바꿀 수 있습니다.",
@@ -93,25 +71,6 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     unreadableRows: "저장된 등록부 행이 정책 규칙을 벗어나 등록부를 읽을 수 없는 상태로 보입니다.",
     reread: "다시 읽기",
     reading: "읽는 중…",
-    comparisonTitle: "등록부와 배정 카탈로그",
-    comparisonHelp:
-      "R1 단계는 정해진 기간 동안 둘이 일치하면 끝납니다. 등록부가 active이고 카탈로그가 배정 가능으로 두거나, 둘 다 아닐 때 일치입니다. 등록부에 없는 카탈로그 항목은 카탈로그가 보류 중이어도 불일치이고, 공급사가 이름의 종류와 다른 항목도 불일치입니다. 예외는 버전 34가 제외한 이름뿐이며 일치로 셉니다. 역할은 비교하지 않습니다.",
-    comparisonStatus: {
-      match: "일치",
-      mismatch: "불일치",
-      registry_unreadable: "등록부를 읽을 수 없음",
-      catalog_unreadable: "카탈로그 변수가 없거나 형식이 틀림",
-    },
-    verdict: {
-      match: "일치",
-      exempt: "제외: engineering agent의 runner로, 그 정책이 관리합니다(버전 34)",
-      registry_only: "등록부는 active, 카탈로그는 배정 불가",
-      catalog_only: "카탈로그는 배정 가능, 등록부는 active 아님",
-      unregistered: "카탈로그에 있으나 등록부에 없음",
-      provider_mismatch: "카탈로그의 공급사가 이름의 종류와 다름",
-    },
-    catalogState: { assignable: "배정 가능", held: "보류", absent: "없음" },
-    notRegistered: "미등록",
     workersTitle: "Worker",
     noWorkers: "아직 등록된 worker가 없습니다.",
     column: {
@@ -124,9 +83,6 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
       latch: "자동 정지 래치",
       observation: "최신 관측",
       effective: "등록부 기준 배정 가능",
-      registry: "등록부",
-      catalog: "카탈로그",
-      verdict: "판정",
     },
     verified: "검증",
     unverified: "미검증",

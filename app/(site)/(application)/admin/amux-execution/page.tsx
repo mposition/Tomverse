@@ -14,7 +14,6 @@ import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxDecisionMakerRequestDrawer } from "@/components/admin/AmuxDecisionMakerRequestDrawer";
 import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
 import { AmuxWorkerCapabilityPanel } from "@/components/admin/AmuxWorkerCapabilityPanel";
-import { AmuxWorkerDerivedCatalogPanel } from "@/components/admin/AmuxWorkerDerivedCatalogPanel";
 import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
@@ -32,7 +31,6 @@ import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMaker
 import { countDecisionMakerAttention, readDecisionMakerAttentionForAdmin } from "@/lib/amux/decisionMakerAttention";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
-import { readAmuxDerivedCatalogShadowForAdmin } from "@/lib/amux/workerDerivedCatalogAdminRead";
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
 import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
@@ -145,16 +143,13 @@ export default async function AdminAmuxExecutionPage({
   }
 
   if (tab.id === "workers") {
-    // Every admin role reads the registry and its comparison with the
-    // catalog; only the owner is offered registration, and the route decides
-    // that again. A read that fails is shown as such, never as an empty
-    // registry.
-    // Capabilities (version 35, R2a) sit under the registry they extend,
-    // and the derived catalog (R2b, a read-only shadow) under them.
-    const [view, capabilities, derivedCatalog] = await Promise.all([
+    // Every admin role reads the registry; only the owner is offered
+    // registration, and the route decides that again. A read that fails is
+    // shown as such, never as an empty registry. Capabilities (version 35,
+    // R2a) sit under the registry they extend.
+    const [view, capabilities] = await Promise.all([
       readAmuxWorkerRegistryForAdmin().catch(() => null),
       readAmuxWorkerCapabilitiesForAdmin().catch(() => null),
-      readAmuxDerivedCatalogShadowForAdmin().catch(() => null),
     ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
@@ -162,7 +157,6 @@ export default async function AdminAmuxExecutionPage({
         {drawer}
         <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
         <AmuxWorkerCapabilityPanel view={capabilities} isOwner={isOwner} />
-        <AmuxWorkerDerivedCatalogPanel view={derivedCatalog} />
       </div>
     );
   }

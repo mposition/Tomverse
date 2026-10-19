@@ -713,16 +713,17 @@ test.describe("the AMUX group by role", () => {
     signInAs,
   }) => {
     // Orchestration policy version 31, sections 3 and 8: any administrator
-    // reads the registry and its comparison with the assignment catalog; only
-    // the owner may register (version 32 turned R1's code latch on). Nothing
-    // is clicked here: a registration is a write.
+    // reads the registry; only the owner may register (version 32 turned R1's
+    // code latch on). R1's comparison with the catalog variable went with the
+    // variable at R2e. Nothing is clicked here: a registration is a write.
     await signInAs("readonly");
     await page.goto("/admin/amux-execution?tab=workers");
     // Streaming may retain a hidden page copy during the role transition.
     const panel = page.getByTestId("amux-worker-registry-panel").filter({ visible: true });
     await expect(panel).toHaveCount(1);
     await expect(panel.getByTestId("amux-worker-registry-read-only")).toBeVisible();
-    await expect(panel.getByTestId("amux-worker-registry-comparison-status")).toBeVisible();
+    // The fixture registers no worker, so the registry reads back empty.
+    await expect(panel.getByTestId("amux-worker-registry-empty")).toBeVisible();
     await expect(panel.getByTestId("amux-worker-registry-seed")).toHaveCount(0);
     await expect(panel.getByRole("button")).toHaveCount(0);
 

@@ -123,40 +123,6 @@ export function AmuxWorkerRegistryView({
             </p>
           )}
 
-          <h3 className="text-base font-semibold text-zinc-100">{m.comparisonTitle}</h3>
-          <p className="text-sm text-zinc-300">{m.comparisonHelp}</p>
-          <p
-            className={`text-sm font-semibold ${view.comparison.status === "match" ? "text-zinc-100" : "text-amber-300"}`}
-            data-testid="amux-worker-registry-comparison-status"
-            data-status={view.comparison.status}
-          >
-            {m.comparisonStatus[view.comparison.status]}
-          </p>
-          {view.comparison.rows.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm text-zinc-100">
-                <thead>
-                  <tr>
-                    <th scope="col" className={headClass}>{m.column.worker}</th>
-                    <th scope="col" className={headClass}>{m.column.registry}</th>
-                    <th scope="col" className={headClass}>{m.column.catalog}</th>
-                    <th scope="col" className={headClass}>{m.column.verdict}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {view.comparison.rows.map((row) => (
-                    <tr key={row.workerName} data-testid={`amux-worker-comparison-${row.workerName}`} data-verdict={row.verdict}>
-                      <th scope="row" className={`${cellClass} font-mono text-xs`}>{row.workerName}</th>
-                      <td className={cellClass}>{row.registryState ?? m.notRegistered}</td>
-                      <td className={cellClass}>{m.catalogState[row.catalog]}</td>
-                      <td className={cellClass}>{m.verdict[row.verdict]}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
           <h3 className="text-base font-semibold text-zinc-100">{m.workersTitle}</h3>
           {view.rows.length === 0 ? (
             <p className="text-sm text-zinc-300" data-testid="amux-worker-registry-empty">{m.noWorkers}</p>

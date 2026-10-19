@@ -11,14 +11,6 @@ import { amuxV22OpenCardOwnersAndSafeStopFenced } from
 import { readAmuxAssignmentCatalogs } from "@/lib/amux/workerAssignmentCatalog";
 import { amuxWorkerCeilingAllowsCard } from "@/lib/amux/workerDerivedCatalogCore";
 
-// The catalog variables' parser lives in workerCatalogVariables.ts so the
-// assignment catalog reader (version 35, section 3) can use it without a
-// cycle through this module; its importers here keep their path.
-export {
-  getConfiguredAmuxV22WorkerCatalog,
-  getConfiguredAmuxWorkerCatalog,
-} from "@/lib/amux/workerCatalogVariables";
-
 const classificationSchema = z
   .object({
     task_kind: z
@@ -113,13 +105,12 @@ export async function buildAmuxRoutingSnapshot(
         return unavailable("unclassified");
       }
 
-      // Orchestration policy version 35, section 3: the variables while
-      // R2c is off; the catalog derived from the registry, read in this
-      // boundary, once it is on.
+      // Orchestration policy version 35, section 3: the catalog derived from
+      // the registry, read in this boundary.
       const { workers, ceilings } = await readAmuxAssignmentCatalogs(tx);
-      // Version 45 (version 35 section 2, at selection): with the derived
-      // catalog, a worker whose ceiling is below the card's level is not a
-      // candidate, whatever its tags. The variables carry no ceiling.
+      // Version 45 (version 35 section 2, at selection): a worker whose
+      // ceiling is below the card's level is not a candidate, whatever its
+      // tags.
       const aboveCeiling = (workerName: string) =>
         ceilings !== null &&
         !amuxWorkerCeilingAllowsCard(workerName, ceilings.get(workerName), row.requiredRoutingRole);
