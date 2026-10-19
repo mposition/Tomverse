@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
-import { GripVertical, MoveRight } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, Clock, GripVertical, MoveRight } from "lucide-react";
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
 import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
@@ -12,8 +12,10 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from "rea
 
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
+import { adminAmuxDecisionMakerAttentionMessages } from "@/lib/adminMessages/amuxDecisionMaker";
+import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAttention";
 import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
 import {
   AMUX_EXECUTION_VISIBLE_LANES,
@@ -127,13 +129,57 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** How long a request has waited, in the largest whole unit. */
+const waitedFor = (fromMs: number, nowMs: number, locale: "en" | "ko") => {
+  const minutes = Math.max(0, Math.floor((nowMs - fromMs) / 60_000));
+  const [value, unit] = minutes < 60 ? [minutes, "minute"] as const : minutes < 1440 ?
+    [Math.floor(minutes / 60), "hour"] as const : [Math.floor(minutes / 1440), "day"] as const;
+  return new Intl.NumberFormat(locale, { style: "unit", unit, unitDisplay: "short" }).format(value);
+};
+
+/** The side panel over this page, on the Cards tab. */
+const dmRequestHref = (requestId: string) =>
+  `/admin/amux-execution?tab=cards&dmRequest=${encodeURIComponent(requestId)}`;
+
+function DecisionMakerAttentionCard({ item, nowMs }: { item: DmAttentionItem; nowMs: number }) {
+  const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
+  const { locale } = useAdminLocale();
+  const unknown = item.kind === "delivery_unknown";
+  return <li><Link href={dmRequestHref(item.requestId)} prefetch={false}
+    className={styles.dmCard + (unknown ? " " + styles.dmCardUnknown : "")}
+    aria-label={d.open(item.cardId, item.questionRevision)}
+    data-testid={"amux-dm-attention-" + item.requestId} data-kind={item.kind}>
+    <span className={styles.dmChips}>
+      <span className={styles.dmChip + (unknown ? " " + styles.dmChipUnknown : "")}>
+        <Bot size={12} aria-hidden="true" />{d.kinds[item.kind]}</span>
+      {item.irreversible === true && <span className={styles.dmChip + " " + styles.dmChipIrreversible}>
+        {d.irreversible}</span>}
+    </span>
+    <span className={styles.dmKey}>{amuxVisibleInspectionText(item.cardId)} · rev {item.questionRevision}</span>
+    {item.question !== null && <span className={styles.dmQuestion}>{amuxVisibleInspectionText(item.question)}</span>}
+    {item.proposal !== null && <span className={styles.dmProposal}>
+      <span>{d.proposalLabel[item.kind]}</span>
+      <span>{amuxVisibleInspectionText(item.proposal)}</span></span>}
+    <span className={styles.dmMeta}><Clock size={12} aria-hidden="true" />
+      {d.waiting(item.askingWorkerId, item.instance ?? "-", waitedFor(item.createdAtMs, nowMs, locale))}</span>
+  </Link></li>;
+}
+
 export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
-  canReviewCards = false }: {
+  canReviewCards = false, decisionMaker }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
   /** Whether a card waiting on the owner opens on its owner review. */
   canReviewCards?: boolean;
+  /**
+   * Decision Maker requests waiting on a person, read by the page
+   * (lib/amux/decisionMakerAttention.ts). Absent: not offered here; null: the
+   * read failed, which the lane says instead of showing none.
+   */
+  decisionMaker?: DmAttention | null;
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
+  const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
+  const dmTotal = decisionMaker?.total ?? 0;
   const [view, setView] = useState<"board" | "hierarchy">("board");
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
   const [activation, setActivation] = useState<ActivationSnapshot | null>(null);
@@ -415,7 +461,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     const key = keyOf(parent);
     const page = tree[key];
     if (!expanded[key]) return null;
-    return <ul className={depth > 0 ? "ml-4 border-l border-zinc-300 pl-3 dark:border-zinc-700" : ""}>
+    return <ul className={depth > 0 ? "ml-4 border-l pl-3 border-zinc-700" : ""}>
       {page?.items.map((item) => {
         const child: Parent = item.type === "node" ? { kind: "node", id: item.id } :
           { kind: "story", id: item.id };
@@ -454,7 +500,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
               disabled={feedbackBusy !== null}
               onClick={() => void loadFeedback(child)}>{m.feedback}</button>}
           </div>
-          {feedbackByParent[keyOf(child)] && <p className="ml-8 text-xs text-zinc-600 dark:text-zinc-300">
+          {feedbackByParent[keyOf(child)] && <p className="ml-8 text-xs text-zinc-300">
             {feedbackByParent[keyOf(child)].rollup ? (() => {
               const summary = feedbackByParent[keyOf(child)].rollup!;
               return `${m.progress(summary.doneCount, summary.taskCount)} · ${m.attempts} ${summary.attemptCount} · ` +
@@ -525,7 +571,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       <Link href="/admin/amux-settings?tab=safety">{m.haltsLink}</Link>
     </div>
     {activation && <details data-testid="amux-v22-activation-diagnostic"
-      className="rounded border border-zinc-300 p-3 text-sm dark:border-zinc-700">
+      className="rounded border p-3 text-sm border-zinc-700">
       <summary className="cursor-pointer font-semibold">{m.activationReadout}</summary>
       <p className="text-xs text-zinc-500">{m.activationCaveat}</p>
       <ul className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
@@ -542,6 +588,19 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         href={adminRecentAuthenticationHref("/admin/amux-execution?tab=cards")}>{m.reauth}</Link> :
         m.unavailable}
     </p>}
+    {view === "board" && board && board.counts.attention + dmTotal > 0 &&
+      <div className={styles.attentionSummary} data-testid="amux-attention-summary">
+        <AlertTriangle size={16} aria-hidden="true" />
+        <strong>{d.summary(board.counts.attention + dmTotal)}</strong>
+        {dmTotal > 0 && <span className={styles.summaryChip + " " + styles.summaryChipDm}>
+          <Bot size={12} aria-hidden="true" />{d.summaryDm(dmTotal)}</span>}
+        {board.counts.attention > 0 && <span className={styles.summaryChip}>{d.summaryCards(board.counts.attention)}</span>}
+        <button type="button" className={styles.summaryJump} onClick={() => {
+          const lane = boardRef.current?.querySelector<HTMLElement>('[data-amux-lane="attention"]');
+          lane?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "end" });
+          lane?.focus({ preventScroll: true });
+        }}>{d.jumpToLane}<ArrowRight size={14} aria-hidden="true" /></button>
+      </div>}
     {view === "board" && <>
       {!board ? <p role="status" className={styles.empty}>{boardLoading ? m.loading : m.unavailable}</p> :
         <div ref={boardRef} className={styles.board} aria-label={m.board} data-testid="amux-board-lanes">
@@ -549,16 +608,33 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
             const column = board.lanes.find((item) => item.lane === lane);
             const cards = column?.cards ?? [];
             const matches = filtered(cards);
-            return <section key={lane} aria-label={m.lane[lane]} className={styles.column} data-amux-lane={lane}
+            const attention = lane === "attention";
+            const laneCount = board.counts[lane] + (attention ? dmTotal : 0);
+            return <section key={lane} aria-label={m.lane[lane]} data-amux-lane={lane} tabIndex={attention ? -1 : undefined}
+              className={styles.column + (attention ? " " + styles.attentionColumn : "")}
               onDragOver={(event) => { if (lane === "amux_backlog" && dragCard.current) event.preventDefault(); }}
               onDrop={(event) => {
                 event.preventDefault(); const id = dragCard.current; dragCard.current = null;
                 if (lane === "amux_backlog" && id) openMove(id);
               }}>
               <h3 className={styles.columnHeading}>
-                <span>{m.lane[lane]}</span><span className={styles.count}>{board.counts[lane]}</span>
+                <span>{m.lane[lane]}</span><span className={styles.count}>{laneCount}</span>
               </h3>
               <p className={styles.columnHint}>{m.laneHint[lane]}</p>
+              {attention && decisionMaker === null && <p role="alert" className={styles.dmMore}>{d.unavailable}</p>}
+              {attention && decisionMaker && dmTotal > 0 && <>
+                <h4 className={styles.groupHeading + " " + styles.groupHeadingDm}>
+                  <Bot size={14} aria-hidden="true" />{d.groupDm(dmTotal)}</h4>
+                <ol className={styles.cards} data-testid="amux-dm-attention-list">
+                  {decisionMaker.items.map((item) =>
+                    <DecisionMakerAttentionCard key={item.requestId} item={item} nowMs={decisionMaker.dbNowMs} />)}
+                </ol>
+                {decisionMaker.items.some((item) => item.question === null) && <p className={styles.dmMore}>{d.bodiesHidden}</p>}
+                {dmTotal > decisionMaker.items.length && <p className={styles.dmMore}>
+                  {d.more(dmTotal - decisionMaker.items.length)}</p>}
+                {board.counts.attention > 0 && <h4 className={styles.groupHeading + " " + styles.groupHeadingCards}>
+                  <AlertTriangle size={14} aria-hidden="true" />{d.groupCards(board.counts.attention)}</h4>}
+              </>}
               <ol className={styles.cards}>{matches.map((card) =>
                 <li key={card.id} className={styles.card + (lane === "attention" ? " " + styles.attention : "")}
                   data-testid={"amux-board-card-" + card.id}
@@ -618,7 +694,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                         m.scoreUnavailable}
                   </p>
                 </li>)}</ol>
-              {matches.length === 0 && <p className={styles.empty}>{cards.length === 0 ? m.empty : m.noMatches}</p>}
+              {matches.length === 0 && !(attention && cards.length === 0 && dmTotal > 0) &&
+                <p className={styles.empty}>{cards.length === 0 ? m.empty : m.noMatches}</p>}
               {(query || workerFilter || priorityFilter) && <p className={styles.hint}>{m.matchCount(matches.length, cards.length)}</p>}
               {cards.length < board.counts[lane] && <button type="button"
                 disabled={boardBusy !== null || boardLoading} className={styles.button}
@@ -647,11 +724,11 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         </button>}
       </details>
     </>}
-    {view === "hierarchy" && <section className="rounded-lg border border-zinc-300 p-4 dark:border-zinc-700">
+    {view === "hierarchy" && <section className="rounded-lg border p-4 border-zinc-700">
       <h3 className="font-semibold">{m.hierarchy}</h3>
       <p className="text-xs text-zinc-500">{m.hierarchyHelp}</p>
       {renderTree({ kind: "root" }, 0)}
-      <div className="mt-3 border-t border-zinc-300 pt-3 dark:border-zinc-700">
+      <div className="mt-3 border-t pt-3 border-zinc-700">
         <button type="button" aria-expanded={Boolean(expanded.unassigned)}
           className="text-sm font-semibold underline"
           onClick={() => toggle({ kind: "unassigned" })}>
@@ -801,7 +878,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       <section><h4 className="font-semibold">{m.attempts}</h4>
         {selected.attempts.length === 0 && <p>{m.noRecords}</p>}
         <ol className="space-y-2 text-sm">{selected.attempts.map((item) => <li key={item.id}
-          className="rounded border border-zinc-300 p-2 dark:border-zinc-700">
+          className="rounded border p-2 border-zinc-700">
           <span>{date(item.startedAt)} · {item.worker} · {item.outcome ?? m.running} →
             {item.toStatus ?? m.unknown}</span>
           <p>{m.internalCost}: {item.costConfirmed && item.settledCostMicrousd !== null ?
@@ -831,7 +908,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       <section><h4 className="font-semibold">{m.publications}</h4>
         {selected.publications.length === 0 && <p>{m.noRecords}</p>}
         <ul className="space-y-2 text-sm">{selected.publications.map((run) =>
-          <li key={run.id} className="rounded border border-zinc-300 p-2 dark:border-zinc-700">
+          <li key={run.id} className="rounded border p-2 border-zinc-700">
             <p>{date(run.startedAt)} · {run.status} · {run.outcome ?? m.unknown}</p>
             <p className="break-all font-mono text-xs">base {run.baseSha}</p>
             {run.bindings.map((binding) => <p key={binding.id}>

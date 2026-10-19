@@ -74,10 +74,10 @@ export function AmuxBoardAutoPromotionPanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-auto-promotion-panel">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
+      <h2 className="text-lg font-semibold text-zinc-100">{messages.title}</h2>
+      <p className="text-sm text-zinc-300">{messages.description}</p>
       {overview ? (
-        <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100">
+        <div className="rounded-md border p-3 text-sm border-zinc-700 text-zinc-100">
           {typeof overview.humanDecisions === "number" && typeof overview.spanMs === "number" ? (
             <p>{messages.graduation(overview.humanDecisions, Math.floor(overview.spanMs / DAY_MS))}</p>
           ) : null}
@@ -93,25 +93,25 @@ export function AmuxBoardAutoPromotionPanel() {
         </div>
       ) : null}
       <label
-        className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100"
+        className="flex flex-col gap-2 text-sm font-medium text-zinc-100"
         htmlFor="amux-board-auto-promotion-request"
       >
         {messages.requestLabel}
         <textarea
           id="amux-board-auto-promotion-request"
-          className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          className="min-h-40 w-full rounded-md border p-3 text-base border-zinc-600 bg-zinc-950 text-zinc-100"
           value={requestText}
           onChange={(event) => setRequestText(event.target.value)}
         />
       </label>
       <label
-        className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100"
+        className="flex flex-col gap-2 text-sm font-medium text-zinc-100"
         htmlFor="amux-board-auto-promotion-halt"
       >
         {messages.haltLabel}
         <input
           id="amux-board-auto-promotion-halt"
-          className="min-h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          className="min-h-11 w-full rounded-md border px-3 text-base border-zinc-600 bg-zinc-950 text-zinc-100"
           value={haltId}
           onChange={(event) => setHaltId(event.target.value)}
         />
@@ -119,7 +119,7 @@ export function AmuxBoardAutoPromotionPanel() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="min-h-11 rounded-md px-4 text-sm font-medium disabled:opacity-50 bg-zinc-100 text-zinc-900"
           disabled={pending}
           onClick={() => send("preview", "{}")}
         >
@@ -127,7 +127,7 @@ export function AmuxBoardAutoPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || !writesReady || requestText.trim().length === 0}
           aria-describedby="amux-board-auto-promotion-apply-reason"
           onClick={() => send("grant", requestText)}
@@ -136,7 +136,7 @@ export function AmuxBoardAutoPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || !writesReady || requestText.trim().length === 0}
           aria-describedby="amux-board-auto-promotion-apply-reason"
           onClick={() => send("consume", requestText)}
@@ -145,7 +145,7 @@ export function AmuxBoardAutoPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending}
           onClick={() => send("expire-due", "{}")}
         >
@@ -153,14 +153,14 @@ export function AmuxBoardAutoPromotionPanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || haltId.trim().length === 0}
           onClick={() => send("resume", resumeBody)}
         >
           {messages.resume}
         </button>
       </div>
-      <p id="amux-board-auto-promotion-apply-reason" className="text-sm text-zinc-700 dark:text-zinc-300">
+      <p id="amux-board-auto-promotion-apply-reason" className="text-sm text-zinc-300">
         {writesReady
           ? messages.applyPermitted("true")
           : applySwitch === false
@@ -168,12 +168,12 @@ export function AmuxBoardAutoPromotionPanel() {
             : messages.applyWaiting}
       </p>
       {refusedForStepUp ? (
-        <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
+        <a className="text-sm font-medium underline text-zinc-100" href={STEP_UP_HREF}>
           {messages.renewSignIn}
         </a>
       ) : null}
       {result ? (
-        <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
+        <div className="rounded-md border p-3 text-sm border-zinc-700 text-zinc-100" role="status">
           {result.error ? <p>{messages.error(result.error)}</p> : null}
           {result.status ? <p>{messages.status(result.status)}</p> : null}
           {result.refusal ? <p>{messages.refusal(result.refusal)}</p> : null}

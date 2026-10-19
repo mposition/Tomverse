@@ -116,7 +116,7 @@ test("the wrapper makes the page behind inert, moves focus in, restores it and w
   assert.ok(source.includes('addEventListener("beforeunload"'), "a refresh or close asks first");
   assert.ok(source.includes("createPortal("), "rendered at the body, above the console");
   assert.equal(/adminFetch|fetch\(|method:/.test(source), false, "the dialog sends and retries nothing");
-  assert.equal(/\bdark:/.test(source), false, "dark-only: the console is always dark");
+  assert.equal(/\bdark:/.test(source), false, "dark-only: the console's Light theme remaps dark classes");
 });
 
 test("the three long writes open it: plan approval, execution approval and build preview, each with its answer", () => {

@@ -238,6 +238,6 @@ for (const locale of ["en", "ko"] as const) {
       if (props.href !== undefined) hrefs.push(props.href);
     }
     assert.deepEqual(hrefs.sort(), [ID_PROPOSAL, ID_OPERATOR, ID_CONFIRMED].map(dmAdminRequestDetailHref).sort());
-    assert.equal(dmAdminRequestDetailHref(ID_PROPOSAL), `/admin/amux-settings?tab=decision-maker&request=${ID_PROPOSAL}`);
+    assert.equal(dmAdminRequestDetailHref(ID_PROPOSAL), `/admin/amux-execution?dmRequest=${ID_PROPOSAL}`);
   });
 }

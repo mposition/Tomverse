@@ -331,3 +331,16 @@ export const dmAdminSwitchLatchesFromRows = (rows: unknown): DmAdminSwitchLatche
   }
   return latches;
 };
+
+/**
+ * What waits on a person in Admin, for AMUX › Execution's attention lane: an
+ * open proposal to judge, or a confirmed answer whose delivery nobody knows.
+ * Everything else is either still running, closed, or answered in AMUX, and
+ * stays in Operations settings › Decision Maker's history.
+ */
+export type DmAdminAttentionKind = "proposal" | "delivery_unknown";
+
+export const dmAdminAttentionKind = (row: DmAdminRequestRow, dbNowMs: number): DmAdminAttentionKind | null => {
+  if (dmAdminRequestStatus(row, dbNowMs) === "proposal") return "proposal";
+  return dmAdminDeliveryStatus(row) === "unknown" ? "delivery_unknown" : null;
+};

@@ -488,3 +488,60 @@ export const adminAmuxDecisionMakerJudgmentMessages = defineAdminMessages({
     reload: "이 요청 다시 읽기",
   },
 });
+
+/**
+ * Copy for the Decision Maker requests that wait on a person, drawn in
+ * AMUX › Execution's attention lane and opened as a side panel there.
+ */
+export const adminAmuxDecisionMakerAttentionMessages = defineAdminMessages({
+  en: {
+    summary: (count: number) => `${count} waiting on you`,
+    summaryDm: (count: number) => `Decision Maker ${count}`,
+    summaryCards: (count: number) => `Card reviews ${count}`,
+    jumpToLane: "Go to the attention lane",
+    groupDm: (count: number) => `Decision Maker · ${count}`,
+    groupCards: (count: number) => `Cards · ${count}`,
+    kinds: { proposal: "DM proposal", delivery_unknown: "Check delivery" },
+    proposalLabel: { proposal: "DM proposal", delivery_unknown: "Confirmed answer" },
+    irreversible: "Irreversible",
+    waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · waiting ${age}`,
+    more: (count: number) => `${count} more. See Operations settings › Decision Maker for the history.`,
+    bodiesHidden: "The question is shown to administrators who may judge it (ops:write).",
+    unavailable: "The Decision Maker requests could not be read. None is shown.",
+    open: (cardId: string, revision: number) => `Open ${cardId}, revision ${revision}`,
+    close: "Close",
+    dialog: (cardId: string, revision: number) => `${cardId}, revision ${revision}`,
+    dmChoice: "DM's choice",
+    moreContext: "Context",
+    deliveryUnknownNext:
+      "Nobody knows whether the confirmed answer reached the worker. Check the worker's session in AMUX before answering again.",
+    settingsPointer: "Requests to judge are in AMUX › Execution, in the attention lane.",
+    settingsOpen: (count: number) => `Open ${count} waiting`,
+    settingsNone: "Nothing waits on a person now.",
+  },
+  ko: {
+    summary: (count: number) => `지금 판단할 것 ${count}건`,
+    summaryDm: (count: number) => `Decision Maker 판정 ${count}`,
+    summaryCards: (count: number) => `카드 검토 ${count}`,
+    jumpToLane: "Attention 열로 이동",
+    groupDm: (count: number) => `Decision Maker 판정 대기 · ${count}`,
+    groupCards: (count: number) => `카드 · ${count}`,
+    kinds: { proposal: "DM 제안", delivery_unknown: "전달 확인 필요" },
+    proposalLabel: { proposal: "DM 제안", delivery_unknown: "확정한 답" },
+    irreversible: "되돌릴 수 없음",
+    waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · ${age} 대기`,
+    more: (count: number) => `${count}건이 더 있습니다. 운영 설정 › Decision Maker의 기록에서 보세요.`,
+    bodiesHidden: "질문은 판정할 수 있는 관리자(ops:write)에게만 보입니다.",
+    unavailable: "Decision Maker 요청을 읽지 못했습니다. 아무것도 표시하지 않습니다.",
+    open: (cardId: string, revision: number) => `${cardId}, revision ${revision} 열기`,
+    close: "닫기",
+    dialog: (cardId: string, revision: number) => `${cardId}, revision ${revision}`,
+    dmChoice: "DM 선택",
+    moreContext: "맥락",
+    deliveryUnknownNext:
+      "확정한 답이 worker에게 전해졌는지 알 수 없습니다. 다시 답하기 전에 AMUX에서 worker 세션을 확인하세요.",
+    settingsPointer: "판정할 요청은 AMUX › 실행의 Attention 열에 있습니다.",
+    settingsOpen: (count: number) => `판정 대기 ${count}건 열기`,
+    settingsNone: "지금 사람을 기다리는 요청이 없습니다.",
+  },
+});

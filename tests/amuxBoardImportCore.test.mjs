@@ -507,7 +507,7 @@ test("preview does not write, apply has no caller latch, and the worker boundary
   assert.match(panel, /const applyReady = result\?\.applyPermitted === true && approvalId\.trim\(\)\.length > 0/);
   assert.match(panel, /disabled=\{pending \|\| !applyReady\}/);
   assert.match(panel, /applyReady \? messages\.applyPermitted\("true"\) : messages\.applyDisabled/);
-  assert.match(panel, /dark:bg-zinc-950 dark:text-zinc-100/);
+  assert.match(panel, /bg-zinc-950 text-zinc-100/);
   assert.match(panel, /send\("apply"/);
   // The screen moved into Backlog's Catalog import section; its old address
   // still resolves there.

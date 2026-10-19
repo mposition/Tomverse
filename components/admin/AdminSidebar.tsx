@@ -249,7 +249,7 @@ export function AdminSidebar({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#08090c]">
+    <div className="flex h-full min-h-0 flex-col bg-zinc-950">
       <div className="border-b border-zinc-800 px-4 py-4">
         <Link
           href="/admin/overview"

@@ -210,7 +210,7 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
   };
 
   const score = previewScoreResponse.safeParse(preview);
-  return <section className="space-y-4 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+  return <section className="space-y-4 rounded-xl border p-4 text-sm border-zinc-700">
     <h3 className="font-semibold">{m.title}</h3>
     <p>{m.hint}</p>
     <p className="text-xs">{m.noPromotion}</p>
@@ -275,7 +275,7 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
     <button type="button" disabled={busy || unknown}
       onClick={() => void assessmentPreview()}
       className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">{m.assess}</button>
-    <div className="space-y-2 border-t border-zinc-300 pt-3 dark:border-zinc-700">
+    <div className="space-y-2 border-t pt-3 border-zinc-700">
       <label className="block">{m.scoreTaskId}
         <input value={taskId} disabled={busy || unknown} onChange={(event) => { setTaskId(event.target.value);
           resetPreview(); }} maxLength={128}
@@ -289,19 +289,19 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
       <button type="button" disabled={busy} onClick={() => void loadReadiness()}
         className="ml-2 min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">{m.readiness}</button>
     </div>
-    {readiness ? <div className="space-y-1 rounded border border-zinc-300 p-3 dark:border-zinc-700">
+    {readiness ? <div className="space-y-1 rounded border p-3 border-zinc-700">
       <p>{m.readinessHint}</p>
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
         {JSON.stringify(readiness, null, 2)}
       </pre>
     </div> : null}
-    {latest ? <div className="space-y-1 rounded border border-zinc-300 p-3 dark:border-zinc-700">
+    {latest ? <div className="space-y-1 rounded border p-3 border-zinc-700">
       <p>{m.historical}</p>
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
         {JSON.stringify(latest, null, 2)}
       </pre>
     </div> : null}
-    {preview ? <div className="space-y-2 rounded border border-zinc-300 p-3 dark:border-zinc-700">
+    {preview ? <div className="space-y-2 rounded border p-3 border-zinc-700">
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
         {JSON.stringify(preview, null, 2)}
       </pre>
