@@ -115,16 +115,42 @@ const cursorStream = (change = {}) => [
   { type: "assistant", message: { role: "assistant", content: [{ type: "text",
     text: "{\"units\":" }, { type: "text", text: "[]}" }] } },
   ...(change.extra ? [change.extra] : []),
+  // Measured shape and counts: cacheReadTokens above inputTokens shows that
+  // inputTokens excludes cache reads.
   { type: "result", subtype: "success", is_error: change.isError ?? false,
-    result: "I'll read the file.{\"units\":[]}", usage: { inputTokens: 17553,
-      outputTokens: 88, cacheReadTokens: 7680, cacheWriteTokens: 0 } },
+    result: "I'll read the file.{\"units\":[]}", usage: change.usage ?? {
+      inputTokens: 8365, outputTokens: 115, cacheReadTokens: 19968,
+      cacheWriteTokens: 0 } },
 ];
 
 test("a Cursor answer is only the text after its last tool call", () => {
   const { result } = run("cursor", "auto", cursorStream(), { chunkSize: 5 });
   assert.deepEqual(result, { kind: "verified_success",
     rawModelOutput: "{\"units\":[]}", readFiles: ["src/a.txt"],
-    inputTokens: 17553 + 7680, outputTokens: 88, modelAttestation: "requested" });
+    inputTokens: 8365 + 19968, outputTokens: 115, modelAttestation: "requested" });
+});
+
+test("Cursor and Copilot usage with unmeasured cache-write semantics stays unknown", () => {
+  const usage = { inputTokens: 8365, outputTokens: 115, cacheReadTokens: 19968,
+    cacheWriteTokens: 0 };
+  for (const [change, code] of [
+    [{ ...usage, cacheWriteTokens: 1 }, "usage_semantics_unmeasured"],
+    [{ ...usage, cacheReadTokens: undefined }, "usage_shape"],
+    [{ ...usage, cacheWriteTokens: undefined }, "usage_shape"],
+    [{ ...usage, inputTokens: -1 }, "usage_shape"],
+  ]) {
+    const { result, reason } = run("cursor", "auto", cursorStream({ usage: change }));
+    assert.deepEqual(result, { kind: "outcome_unknown" }, JSON.stringify(change));
+    assert.equal(reason, code, JSON.stringify(change));
+  }
+  const copilot = (cacheWriteTokens) => copilotStream().map((event) =>
+    event.type !== "session.usage_checkpoint" ? event : { ...event, data: {
+      providerModelMetrics: [{ ...event.data.providerModelMetrics[0], metrics: {
+        usage: { ...event.data.providerModelMetrics[0].metrics.usage, cacheWriteTokens } } }] } });
+  assert.equal(run("github-copilot", "gpt-5-mini", copilot(512)).reason,
+    "usage_semantics_unmeasured");
+  assert.equal(run("github-copilot", "gpt-5-mini", copilot(undefined)).reason,
+    "usage_shape");
 });
 
 test("a Cursor run is refused on a write or shell tool, an outside path or an odd stream", () => {

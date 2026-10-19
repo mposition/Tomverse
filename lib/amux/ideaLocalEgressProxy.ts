@@ -13,7 +13,6 @@ export type AmuxV4EgressProxyDeps = {
 };
 
 const MAX_HEAD_BYTES = 4_096;
-const MAX_ACTIVE_TUNNELS = 4;
 const MAX_PROXY_CONNECTIONS = 16;
 const V4_MAX_DIRECTION_BYTES = 16 * 1024 * 1024;
 // The historical v4 probe keeps its original tunnel limits. A v19 live
@@ -21,11 +20,17 @@ const V4_MAX_DIRECTION_BYTES = 16 * 1024 * 1024;
 const V4_TUNNEL_DEADLINE_MS = 600_000;
 const CONNECT_DEADLINE_MS = 5_000;
 
-type TunnelBounds = { deadlineMs: number | null; directionBytes: number | null };
+type TunnelBounds = { deadlineMs: number | null; directionBytes: number | null;
+  activeTunnels: number };
 const V4_BOUNDS: TunnelBounds = {
   deadlineMs: V4_TUNNEL_DEADLINE_MS, directionBytes: V4_MAX_DIRECTION_BYTES,
+  activeTunnels: 4,
 };
-const V19_BOUNDS: TunnelBounds = { deadlineMs: null, directionBytes: null };
+// Measured on the v19 runner (2026-10-20): the Cursor CLI opens up to nine
+// approved tunnels at once on start; with four, the extra ones were refused
+// and the run aborted. The approved-host list is unchanged.
+const V19_BOUNDS: TunnelBounds = { deadlineMs: null, directionBytes: null,
+  activeTunnels: MAX_PROXY_CONNECTIONS };
 
 const refuse = (socket: Socket, status: 403 | 429 | 502) => {
   if (socket.destroyed) return;
@@ -79,7 +84,7 @@ function createAmuxEgressProxy(
     if (head.length > MAX_HEAD_BYTES) {
       decide("denied"); refuse(client, 403); return;
     }
-    if (active >= MAX_ACTIVE_TUNNELS) {
+    if (active >= bounds.activeTunnels) {
       decide("denied"); refuse(client, 429); return;
     }
     const target = planAmuxV4EgressTarget({ method: request.method,

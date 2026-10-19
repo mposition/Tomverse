@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AMUX_V19_AUTH_MIN_REMAINING_MS, AMUX_V19_CODEX_MAX_REFRESH_AGE_MS,
-  amuxV19OutputRevealsSecret, inspectAmuxV19ChannelAuth } from
+  AMUX_V19_CURSOR_REFRESH_PLACEHOLDER, amuxV19OutputRevealsSecret,
+  inspectAmuxV19ChannelAuth } from
   "../lib/amux/ideaV19CliChannelHost.mjs";
 
 // Synthetic credentials only: unsigned JWT-shaped strings and fake tokens.
@@ -77,13 +78,23 @@ test("the Copilot copy is only the signed-in user's own token", () => {
   }
 });
 
-test("the Cursor copy needs a session token that outlives the run", () => {
+test("the Cursor copy carries the session token and never a refresh secret", () => {
   const session = token(now + 30 * 86_400_000, "s");
   const { copy, secrets } = inspectAmuxV19ChannelAuth("cursor",
     bytes({ accessToken: session, refreshToken: session }), now);
   assert.deepEqual(JSON.parse(copy.toString("utf8")),
-    { accessToken: session, refreshToken: session });
+    { accessToken: session, refreshToken: AMUX_V19_CURSOR_REFRESH_PLACEHOLDER });
   assert.deepEqual(secrets, [session]);
+  // A login whose refresh token differs from its access token still copies
+  // only the access token.
+  const distinct = inspectAmuxV19ChannelAuth("cursor", bytes({ accessToken: session,
+    refreshToken: "synthetic-distinct-refresh-secret" }), now);
+  assert.equal(distinct.copy.includes("synthetic-distinct-refresh-secret"), false);
+  assert.deepEqual(JSON.parse(distinct.copy.toString("utf8")).refreshToken,
+    AMUX_V19_CURSOR_REFRESH_PLACEHOLDER);
+  assert.deepEqual(distinct.secrets, [session]);
+  assert.equal(amuxV19OutputRevealsSecret(AMUX_V19_CURSOR_REFRESH_PLACEHOLDER,
+    distinct.secrets), false);
   for (const value of [{ accessToken: session },
     { accessToken: token(now + 60_000), refreshToken: session },
     { accessToken: "opaque", refreshToken: session }, []]) {
