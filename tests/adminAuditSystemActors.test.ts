@@ -66,6 +66,16 @@ test("the Prompt Refiner Auto budget actor has only its audited hold transitions
 });
 
 test("the unified optimizer actor is limited to provider-free ledger facts", () => {
+  assert.equal(isSystemAuditActor("auto-router-optimizer"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_optimizer.cycle_started", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), true);
+  // Rollback stays a person's action, and no other target is in scope.
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AppSettings"), false);
   assert.equal(isSystemAuditActor("chat-unified-optimizer"), true);
   assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
     "chat.unified_optimizer.run_admitted", "ChatUnifiedOptimizerRun"), true);
@@ -155,6 +165,7 @@ test("the system actor list is closed and changes only by review", () => {
     // docs/policy/chat-unified-router-refiner-v1.md §7 and
     // docs/policy/chat-unified-router-refiner-v1.md §12: provider-free facts.
     "chat-unified-optimizer",
+    "auto-router-optimizer",
     "amux-v4-intake",
     "amux-session-intake",
     "engineering-agent-runner",

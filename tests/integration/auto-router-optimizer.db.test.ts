@@ -272,3 +272,20 @@ test("a finishing cycle and its close as interrupted never leave cost and bucket
     }
   }
 });
+
+test("an automatic promotion is the system actor's, through the same compare-and-set", async () => {
+  const cycle = await seedCycle({ status: "passed", candidateGuidance: PROPOSAL });
+  assert.deepEqual(await promoteAutoRouterOptimizerCycle(cycle.id, "system"), { ok: true });
+  const entry = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { targetId: cycle.id, action: "auto.llm_router_guidance.promoted" },
+  });
+  assert.equal(entry.actorUserId, null);
+  assert.equal((entry.metadata as { systemActor?: string }).systemActor, "auto-router-optimizer");
+  assert.deepEqual(await promoteAutoRouterOptimizerCycle(cycle.id, "system"), { refused: "already_promoted" });
+});
+
+test("the daily step starts nothing while the daily switch is off", async () => {
+  const { runScheduledAutoRouterOptimizerCycle } = await import("@/lib/autoRouterOptimizer");
+  assert.deepEqual(await runScheduledAutoRouterOptimizerCycle(), { started: false, reason: "daily_off" });
+  assert.equal(await prisma.autoRouterOptimizerCycle.count(), 0);
+});

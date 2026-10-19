@@ -36,6 +36,7 @@ type Cycle = {
 
 type OptimizerState = {
   optimizerModelId: string | null;
+  automation: { daily: boolean; autoPromote: boolean };
   options: { id: string; name: string; provider: string }[];
   active: { cycleId: string | null; guidance: string; canRollBack: boolean };
   cycles: Cycle[];
@@ -51,6 +52,7 @@ type OptimizerState = {
 type Action =
   | { action: "set_model"; modelId: string | null }
   | { action: "run" }
+  | { action: "set_automation"; daily: boolean; autoPromote: boolean }
   | { action: "promote"; cycleId: string }
   | { action: "roll_back" };
 
@@ -68,6 +70,7 @@ export function AdminAutoRouterOptimizerPanel() {
   const { locale: apiLocale } = useAdminLocale();
   const [state, setState] = useState<OptimizerState | null>(null);
   const [draft, setDraft] = useState(OFF);
+  const [automation, setAutomation] = useState({ daily: false, autoPromote: false });
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
@@ -75,6 +78,7 @@ export function AdminAutoRouterOptimizerPanel() {
   const apply = useCallback((next: OptimizerState) => {
     setState(next);
     setDraft(next.optimizerModelId ?? OFF);
+    setAutomation(next.automation);
   }, []);
 
   const load = useCallback(async () => {
@@ -183,6 +187,47 @@ export function AdminAutoRouterOptimizerPanel() {
         </button>
       </div>
       <p className="mt-3 text-xs text-zinc-500">{m.costNote}</p>
+
+      <fieldset className="mt-4 flex flex-wrap items-center gap-4" data-testid="admin-auto-router-optimizer-automation">
+        <legend className="mb-2 text-xs font-bold text-zinc-300">{m.automationTitle}</legend>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={automation.daily}
+            disabled={!state || busy}
+            onChange={(event) => setAutomation({ ...automation, daily: event.target.checked })}
+            data-testid="admin-auto-router-optimizer-daily"
+            className="h-5 w-5"
+          />
+          {m.daily}
+        </label>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={automation.autoPromote}
+            disabled={!state || busy}
+            onChange={(event) => setAutomation({ ...automation, autoPromote: event.target.checked })}
+            data-testid="admin-auto-router-optimizer-auto-promote"
+            className="h-5 w-5"
+          />
+          {m.autoPromote}
+        </label>
+        <button
+          type="button"
+          onClick={() => void send({ action: "set_automation", ...automation })}
+          disabled={
+            !state ||
+            busy ||
+            (automation.daily === state.automation.daily &&
+              automation.autoPromote === state.automation.autoPromote)
+          }
+          data-testid="admin-auto-router-optimizer-automation-save"
+          className="min-h-11 rounded-xl border border-zinc-600 px-4 text-sm font-bold text-zinc-200 disabled:opacity-50"
+        >
+          {m.save}
+        </button>
+        <p className="w-full text-xs text-zinc-500">{m.automationNote}</p>
+      </fieldset>
 
       {state ? (
         <p className="mt-2 text-xs text-zinc-400" data-testid="admin-auto-router-optimizer-spend">

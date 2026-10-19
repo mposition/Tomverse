@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSystemAudit";
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
@@ -91,6 +92,57 @@ export async function writeOptimizerModelId(modelId: string | null): Promise<voi
         create: { key: AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY, value: modelId },
         update: { value: modelId },
     });
+}
+
+/**
+ * What the optimizer may do without a click: start one cycle a day (from the
+ * daily maintenance run) and promote a cycle that passed. Both off by default;
+ * no row is off. Every automatic step is audited as the system actor, and
+ * promotion still goes through the same compare-and-set as a person's click,
+ * so rollback undoes it the same way.
+ */
+export const AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterOptimizerAutomation";
+
+export type OptimizerAutomation = { daily: boolean; autoPromote: boolean };
+
+export async function readOptimizerAutomation(): Promise<OptimizerAutomation> {
+    try {
+        const row = await prisma.appSetting.findUnique({
+            where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY },
+            select: { value: true },
+        });
+        const value = row ? (JSON.parse(row.value) as Partial<OptimizerAutomation>) : null;
+        return { daily: value?.daily === true, autoPromote: value?.autoPromote === true };
+    } catch {
+        return { daily: false, autoPromote: false };
+    }
+}
+
+export async function writeOptimizerAutomation(value: OptimizerAutomation): Promise<void> {
+    if (!value.daily && !value.autoPromote) {
+        await prisma.appSetting.deleteMany({ where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY } });
+        return;
+    }
+    const stored = JSON.stringify({ daily: value.daily, autoPromote: value.autoPromote });
+    await prisma.appSetting.upsert({
+        where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY },
+        create: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY, value: stored },
+        update: { value: stored },
+    });
+}
+
+/**
+ * The daily maintenance run's step: one cycle when the daily switch is on.
+ * Off, or any refusal, starts nothing and costs nothing.
+ */
+export async function runScheduledAutoRouterOptimizerCycle(): Promise<
+    { started: false; reason: "daily_off" | OptimizerStartRefusal } | { started: true; cycleId: string }
+> {
+    if (!(await readOptimizerAutomation()).daily) return { started: false, reason: "daily_off" };
+    const result = await startAutoRouterOptimizerCycle("system");
+    return "refused" in result
+        ? { started: false, reason: result.refused }
+        : { started: true, cycleId: result.cycleId };
 }
 
 type Prices = { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
@@ -277,7 +329,7 @@ type Reserved =
  * startAutoRouterOptimizerCycle.
  */
 export async function reserveOptimizerCycle(input: {
-    actor: AdminActor;
+    actor: OptimizerActor;
     optimizerModelId: string;
     routerModelId: string;
     incumbentGuidance: string;
@@ -338,11 +390,8 @@ export async function reserveOptimizerCycle(input: {
                 },
                 select: { id: true, reservedMicroUsd: true },
             });
-            await writeAdminAuditLog({
-                ...input.actor,
-                tx,
+            await writeOptimizerAudit(tx, input.actor, {
                 action: "auto.llm_router_optimizer.cycle_started",
-                targetType: "AutoRouterOptimizerCycle",
                 targetId: cycle.id,
                 summary: "Started an Auto router optimizer cycle.",
                 metadata: { reservedMicroUsd: cycle.reservedMicroUsd },
@@ -413,7 +462,7 @@ export type OptimizerStartRefusal =
  * Starts one cycle and returns at once; the calls run in the background and
  * the row is updated when they finish. Refusals cost nothing.
  */
-export async function startAutoRouterOptimizerCycle(actor: AdminActor): Promise<
+export async function startAutoRouterOptimizerCycle(actor: OptimizerActor): Promise<
     { cycleId: string } | { refused: OptimizerStartRefusal }
 > {
     const models = await getRuntimeModels();
@@ -593,10 +642,17 @@ async function runInBackground(input: {
             },
             spentByProvider,
         });
+        // Automatic promotion only of a result this cycle itself recorded, and
+        // only through the same compare-and-set a person's click uses.
+        const promotion =
+            recorded && result.status === "passed" && (await readOptimizerAutomation()).autoPromote
+                ? await promoteAutoRouterOptimizerCycle(input.cycleId, "system")
+                : null;
         console.info(JSON.stringify({
             event: "auto_router_optimizer_cycle",
             cycleId: input.cycleId,
             recorded,
+            autoPromoted: promotion ? ("ok" in promotion ? true : promotion.refused) : false,
             status: result.status,
             failure: result.failure,
             spentMicroUsd: result.spentMicroUsd,
@@ -627,11 +683,27 @@ async function runInBackground(input: {
 }
 
 type AdminActor = { session: Session; request: Request };
+/** A person in Admin, or the optimizer itself when its automation is on. */
+export type OptimizerActor = AdminActor | "system";
+
+const writeOptimizerAudit = (
+    tx: Prisma.TransactionClient,
+    actor: OptimizerActor,
+    entry: {
+        action: "auto.llm_router_optimizer.cycle_started" | "auto.llm_router_guidance.promoted";
+        targetId: string;
+        summary: string;
+        metadata: Prisma.InputJsonObject;
+    }
+) =>
+    actor === "system"
+        ? writeAutoRouterOptimizerSystemAudit(tx, entry)
+        : writeAdminAuditLog({ ...actor, tx, targetType: "AutoRouterOptimizerCycle", ...entry });
 
 /** Makes a passed cycle's guidance the one the router uses. */
 export async function promoteAutoRouterOptimizerCycle(
     cycleId: string,
-    actor: AdminActor
+    actor: OptimizerActor
 ): Promise<{ ok: true } | { refused: "not_found" | "not_passed" | "already_promoted" | "stale" }> {
     return prisma.$transaction(async (tx) => {
         await takeAuditChainLock(tx);
@@ -653,13 +725,12 @@ export async function promoteAutoRouterOptimizerCycle(
             promotedRouterGuidance(active, { guidance: cycle.candidateGuidance, cycleId })
         );
         await tx.autoRouterOptimizerCycle.update({ where: { id: cycleId }, data: { promotedAt: new Date() } });
-        await writeAdminAuditLog({
-            ...actor,
-            tx,
+        await writeOptimizerAudit(tx, actor, {
             action: "auto.llm_router_guidance.promoted",
-            targetType: "AutoRouterOptimizerCycle",
             targetId: cycleId,
-            summary: "Promoted Auto router guidance from an optimizer cycle.",
+            summary: actor === "system"
+                ? "Promoted Auto router guidance automatically from a passed cycle."
+                : "Promoted Auto router guidance from an optimizer cycle.",
             metadata: { previousCycleId: active.cycleId },
         });
         return { ok: true as const };
@@ -708,8 +779,9 @@ export type OptimizerCycleView = {
 /** Everything Admin shows. No decision content: verdicts are counts. */
 export async function readAutoRouterOptimizerState() {
     const now = new Date();
-    const [optimizerModelId, active, cycles, monthCycles] = await Promise.all([
+    const [optimizerModelId, automation, active, cycles, monthCycles] = await Promise.all([
         readOptimizerModelId(),
+        readOptimizerAutomation(),
         readActiveRouterGuidance(),
         prisma.autoRouterOptimizerCycle.findMany({
             orderBy: { createdAt: "desc" },
@@ -727,6 +799,7 @@ export async function readAutoRouterOptimizerState() {
     ]);
     return {
         optimizerModelId,
+        automation,
         active: {
             cycleId: active.cycleId,
             guidance: active.guidance,

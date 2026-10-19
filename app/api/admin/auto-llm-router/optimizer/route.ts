@@ -12,10 +12,13 @@ import {
   AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY,
   promoteAutoRouterOptimizerCycle,
   readAutoRouterOptimizerState,
+  readOptimizerAutomation,
   readOptimizerModelId,
   rollBackAutoRouterGuidance,
   startAutoRouterOptimizerCycle,
+  writeOptimizerAutomation,
   writeOptimizerModelId,
+  AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
 } from "@/lib/autoRouterOptimizer";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
@@ -29,6 +32,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set_model"), modelId: z.string().trim().min(1).max(120).nullable() }).strict(),
   z.object({ action: z.literal("run") }).strict(),
+  z.object({ action: z.literal("set_automation"), daily: z.boolean(), autoPromote: z.boolean() }).strict(),
   z.object({ action: z.literal("promote"), cycleId: z.string().trim().min(1).max(64) }).strict(),
   z.object({ action: z.literal("roll_back") }).strict(),
 ]);
@@ -92,6 +96,21 @@ export async function POST(req: Request) {
           ? `Set the Auto router optimizer model to ${body.modelId}.`
           : "Turned the Auto router optimizer off.",
         metadata: { before, after: body.modelId },
+      });
+      return await stateResponse();
+    }
+
+    if (body.action === "set_automation") {
+      const before = await readOptimizerAutomation();
+      const after = { daily: body.daily, autoPromote: body.autoPromote };
+      await writeOptimizerAutomation(after);
+      await writeAdminAuditLog({
+        ...actor,
+        action: "auto.llm_router_optimizer_automation.updated",
+        targetType: "AppSettings",
+        targetId: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
+        summary: `Set the Auto router optimizer automation: daily ${after.daily ? "on" : "off"}, auto-promote ${after.autoPromote ? "on" : "off"}.`,
+        metadata: { before, after },
       });
       return await stateResponse();
     }
