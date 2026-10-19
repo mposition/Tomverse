@@ -14,6 +14,7 @@
  * lib/autoLlmRouter.ts.
  */
 
+import { turnCarriesAttachments } from "@/lib/autoDispatchPreflight";
 import { modelSupportsImageInput, type AiModel } from "@/lib/models";
 
 export const AUTO_LLM_ROUTER_VERSION = "auto-llm-router-v1";
@@ -222,9 +223,8 @@ export const withRouterRewrite = <
     messages: readonly M[],
     rewrite: string
 ): readonly M[] => {
-    if (messages.some((message) => Array.isArray(message.attachments) && message.attachments.length > 0)) {
-        return messages;
-    }
+    // The same rule the dispatch preflight uses, so the two cannot drift apart.
+    if (turnCarriesAttachments(messages)) return messages;
     let index = messages.length - 1;
     while (index >= 0 && messages[index]?.role !== "user") index -= 1;
     if (index < 0 || typeof messages[index].content !== "string") return messages;
