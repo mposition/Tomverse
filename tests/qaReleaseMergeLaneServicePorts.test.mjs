@@ -35,7 +35,7 @@ function railway(overrides = {}) {
         data: {
           environment: {
             id: STAGING,
-            name: "staging",
+            name: "dev",
             serviceInstances: {
               edges: [
                 { node: { serviceId: SERVICE_A, serviceName: "web", source: { repo: "mposition/Tomverse" } } },
@@ -57,9 +57,9 @@ function railway(overrides = {}) {
   };
 }
 
-test("Railway: every staging service's deployments, read with the project token header", async () => {
+test("Railway: every dev service's deployments, read with the project token header", async () => {
   const { http, calls } = recorder(railway());
-  const deployments = await createQaReleaseRailwayPorts({ http, token: "rw_test" }).stagingDeployments();
+  const deployments = await createQaReleaseRailwayPorts({ http, token: "rw_test" }).developDeployments();
   assert.deepEqual(deployments, [
     { serviceId: SERVICE_A, serviceName: "web", status: "SUCCESS", createdAt: "2026-10-05T00:00:00Z", meta: { commitHash: MERGE, branch: "develop" } },
     { serviceId: SERVICE_B, serviceName: "Postgres", status: "SUCCESS", createdAt: "2026-10-01T00:00:00Z", meta: { commitHash: undefined, branch: undefined } },
@@ -77,9 +77,12 @@ test("Railway: every staging service's deployments, read with the project token 
 
 test("Railway: another environment, no service from this repository, errors or odd shapes all read as null", async () => {
   const production = { data: { environment: { id: STAGING, name: "production", serviceInstances: { edges: [] } } } };
-  const foreign = { data: { environment: { id: STAGING, name: "staging", serviceInstances: { edges: [{ node: { serviceId: SERVICE_A, serviceName: "x", source: { repo: "other/repo" } } }] } } } };
+  // A token for staging (Test), which deploys the test branch since 2026-10-13: a develop merge never deploys there.
+  const staging = { data: { environment: { id: STAGING, name: "staging", serviceInstances: { edges: [{ node: { serviceId: SERVICE_A, serviceName: "web", source: { repo: "mposition/Tomverse" } } }] } } } };
+  const foreign = { data: { environment: { id: STAGING, name: "dev", serviceInstances: { edges: [{ node: { serviceId: SERVICE_A, serviceName: "x", source: { repo: "other/repo" } } }] } } } };
   for (const overrides of [
     { environment: json(200, production) },
+    { environment: json(200, staging) },
     { environment: json(200, foreign) },
     { token: json(200, { errors: [{ message: "Not Authorized" }] }) },
     { token: json(401, {}) },
@@ -87,10 +90,10 @@ test("Railway: another environment, no service from this repository, errors or o
     { token: { status: 200, text: "<html>" } },
   ]) {
     const { http } = recorder(railway(overrides));
-    assert.equal(await createQaReleaseRailwayPorts({ http, token: "t" }).stagingDeployments(), null);
+    assert.equal(await createQaReleaseRailwayPorts({ http, token: "t" }).developDeployments(), null);
   }
   const thrown = createQaReleaseRailwayPorts({ http: async () => { throw new Error("timeout"); }, token: "t" });
-  assert.equal(await thrown.stagingDeployments(), null);
+  assert.equal(await thrown.developDeployments(), null);
 });
 
 // ---- App -------------------------------------------------------------------

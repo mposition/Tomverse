@@ -160,7 +160,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 
 ## 8. 병합 레인
 
-1. **범위.** develop(→ Railway `staging`)만 병합합니다. 한 번에 하나씩 병합하고, staging에 배포가 둘 이상 쌓이지 않게
+1. **범위.** develop(→ Railway `dev`)만 병합합니다. develop은 2026-10-13부터 `dev` 환경이 배포하고 staging(Test)은
+   `test` 브랜치를 배포하므로(`docs/ops/dev-test-lanes.md`), 이 절에서 develop의 배포 환경을 가리키는 "staging"은
+   `dev`로 읽습니다. 한 번에 하나씩 병합하고, staging에 배포가 둘 이상 쌓이지 않게
    합니다. **main(→ `production`)은 사람이 GitHub에서 병합합니다**(`.github/RELEASE_CHECKLIST.md`의 7.9절, `docs/policy/trace-feedback-automation.md`
    §9.3, `docs/policy/engineering-agent.md`의 승인 증거와 같음). 레인은 "main으로 향하는 열린 PR"(`mainPullRequestDecision()`이
    허용한 head)과 production 상태를 Admin에 표시만 합니다. **이 목록은 병합 준비 판정이 아닙니다** — hotfix의 7.9.2 항목이나

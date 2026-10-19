@@ -5,7 +5,7 @@
 // force-stops it at the 10-minute hard timeout.
 //
 // It holds the lane's secret, the GitHub App id and key, the Railway read token
-// for staging, the operator control revision, the enable flag and the kill
+// for dev (the environment that deploys develop), the operator control revision, the enable flag and the kill
 // switch -- nothing else. All decisions are in
 // lib/qaReleaseMergeLaneServiceCore.ts; this file only connects the ports.
 // Every request follows no redirect and times out. The output is the outcome
