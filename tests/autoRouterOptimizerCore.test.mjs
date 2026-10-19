@@ -319,3 +319,14 @@ test("a failed call is described by name, finish reason and output length only",
   assert.deepEqual(optimizerCallFailureDetail(new DOMException("t", "TimeoutError")), { error: "TimeoutError" });
   assert.deepEqual(optimizerCallFailureDetail("boom"), { error: "unknown" });
 });
+
+test("the generator is asked for a length well under the cap it is held to", async () => {
+  const { AUTO_ROUTER_GENERATOR_SYSTEM, AUTO_ROUTER_GUIDANCE_TARGET_CHARS, AUTO_ROUTER_GUIDANCE_MAX_CHARS, admitGuidance } =
+    await import("../lib/autoRouterOptimizerCore.ts");
+  assert.ok(AUTO_ROUTER_GUIDANCE_TARGET_CHARS * 2 <= AUTO_ROUTER_GUIDANCE_MAX_CHARS);
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, new RegExp("about " + AUTO_ROUTER_GUIDANCE_TARGET_CHARS + " characters"));
+  // The rejected Test proposal was 2 317 characters on 12 lines.
+  const overshoot = Array.from({ length: 12 }, () => "r".repeat(192)).join("\n");
+  assert.equal(overshoot.length, 2_315);
+  assert.equal(admitGuidance(overshoot), overshoot);
+});

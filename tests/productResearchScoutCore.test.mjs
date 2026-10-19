@@ -8,6 +8,7 @@ import {
   admitScoutSubmission,
   parseScoutAnswer,
   scoutPromptText,
+  scoutSendOutcome,
   suggestionIdeaText,
 } from "../lib/productResearchScoutCore.ts";
 
@@ -81,4 +82,15 @@ test("the AMUX idea text names the subject, the evidence and the change", () => 
     text,
     "[Scout 제안] 모바일 가격표 잘림\n대상: pricing.en · 영역: mobile · 심각도: high\n근거: 320px에서 표 오른쪽이 잘림\n제안: 표를 세로 카드로 바꿈",
   );
+});
+
+test("the walker counts a day's cap as capped, not as a failure", () => {
+  assert.equal(scoutSendOutcome({ judged: true, stored: 3 }), "judged");
+  assert.equal(scoutSendOutcome({ judged: true, stored: 0 }), "judged");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "model_off" }), "modelOff");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "daily_cap_reached" }), "capped");
+  assert.equal(scoutSendOutcome({ refused: "images" }), "refused");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "model_failed" }), "failed");
+  assert.equal(scoutSendOutcome({}), "failed");
+  assert.equal(scoutSendOutcome(null), "failed");
 });

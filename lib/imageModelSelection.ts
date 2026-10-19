@@ -1,4 +1,4 @@
-import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
+import { listImageModels } from "@/lib/imageModelRegistry";
 
 /**
  * What the composer is allowed to do to its model selection, given the limit
@@ -19,7 +19,7 @@ import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
 
 /** Registry position, so a limited or restored set always comes back the same. */
 const registryOrder = (modelId: string) => {
-  const index = IMAGE_MODEL_REGISTRY.findIndex((model) => model.id === modelId);
+  const index = listImageModels().findIndex((model) => model.id === modelId);
   return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 };
 
