@@ -32,13 +32,22 @@ test("the probe runs unprivileged, with no build argument and no lifecycle scrip
   assert.deepEqual(runs, ["RUN npm ci --ignore-scripts --no-audit --no-fund"]);
 });
 
-test("neither the image nor the probe turns the Chromium sandbox off", () => {
-  const probe = read("scripts/agents/product-research-scout-s0-probe.mjs");
-  for (const [name, text] of [["Dockerfile", dockerfile], ["probe", probe]]) {
+test("neither the image, the probe nor the walker turns the Chromium sandbox off", () => {
+  const browser = read("lib/productResearchScoutBrowser.mjs");
+  const scripts = [
+    ["probe", read("scripts/agents/product-research-scout-s0-probe.mjs")],
+    ["walker", read("scripts/agents/product-research-scout.mjs")],
+  ];
+  for (const [name, text] of [["Dockerfile", dockerfile], ["browser", browser], ...scripts]) {
     assert.equal(/--no-sandbox|--disable-setuid-sandbox|--no-zygote/.test(text), false, name);
     assert.equal(/chromiumSandbox:\s*false/.test(text), false, name);
   }
-  assert.match(probe, /chromiumSandbox:\s*true/);
+  // Both scripts launch through the shared module, which asks for the sandbox.
+  assert.match(browser, /chromiumSandbox:\s*true/);
+  for (const [name, text] of scripts) {
+    assert.match(text, /from "\.\.\/\.\.\/lib\/productResearchScoutBrowser\.mjs"/, name);
+    assert.equal(/chromium\.launch\(/.test(text), false, name);
+  }
 });
 
 test("the probe reads one variable, its switch, and the service declares only that", async () => {
