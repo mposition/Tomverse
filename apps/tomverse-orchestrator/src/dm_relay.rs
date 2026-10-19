@@ -33,12 +33,14 @@
 //! tick it reports the operator's direct answer records so the app closes
 //! their questions' requests (`direct`, §2-7).
 //!
-//! Not here: the repository snapshot (stage S2b) and any Admin screen.
+//! The repository snapshot (stage S2b) is the broker's to fetch; the relay
+//! checks it and records it (dm_relay::snapshot). Not here: any Admin screen.
 
 pub mod delivery;
 pub mod direct;
 pub mod flow;
 pub mod io;
+pub mod snapshot;
 pub mod wire;
 
 /// Exit status when the relay is enabled but its token is missing or
