@@ -249,12 +249,16 @@ pub enum BridgeArgs {
     /// `--worker <name>`: one bridge for one worker, its scope read from the
     /// app.
     Worker(String),
+    /// `--dm-relay`: the AMUX Decision Maker relay alone (crate::dm_relay),
+    /// no worker loop. One systemd unit runs it; no bridge does.
+    DmRelay,
 }
 
-/// Exactly two forms are accepted: no arguments, or `--worker <name>` with
-/// a name in the session-name grammar. Anything else -- another flag, a
-/// missing or extra value, a name that is not a session name, an argument
-/// that is not UTF-8 -- is refused, and the binary does not start.
+/// Exactly three forms are accepted: no arguments, `--worker <name>` with
+/// a name in the session-name grammar, or `--dm-relay` alone. Anything else
+/// -- another flag, a missing or extra value, a name that is not a session
+/// name, an argument that is not UTF-8 -- is refused, and the binary does
+/// not start.
 pub fn parse_bridge_args<I>(args: I) -> Option<BridgeArgs>
 where
     I: IntoIterator<Item = std::ffi::OsString>,
@@ -263,6 +267,9 @@ where
     let Some(flag) = args.next() else {
         return Some(BridgeArgs::Sessions);
     };
+    if flag.to_str() == Some("--dm-relay") {
+        return args.next().is_none().then_some(BridgeArgs::DmRelay);
+    }
     let name = args.next()?.into_string().ok()?;
     if args.next().is_some() || flag.to_str() != Some("--worker") || !valid_session_name(&name) {
         return None;
@@ -2879,11 +2886,6 @@ async fn run_bridge(mut scope: BridgeScope) -> i32 {
             return 1;
         }
     };
-    // The AMUX Decision Maker relay (crate::dm_relay), off unless
-    // TOMVERSE_AMUX_DM_RELAY is exactly `enabled`: one task beside this loop,
-    // with this loop's clients. It never halts this loop, and this loop's
-    // exit ends it.
-    crate::dm_relay::start_from_env(&api, &client, &base);
     // Sessions whose registration answered busy: it did not happen, so they
     // register next tick with the same instance id.
     let mut awaiting_registration: Vec<(String, String)> = Vec::new();
@@ -3678,6 +3680,36 @@ async fn run_bridge(mut scope: BridgeScope) -> i32 {
     }
 }
 
+/// The binary started with `--dm-relay`: the AMUX Decision Maker relay as its
+/// own process, with the local AMUX client and the app client a bridge builds.
+/// No worker is registered and no session is read here.
+pub async fn run_dm_relay_from_env() -> i32 {
+    let Ok(local_url) = std::env::var(WSL_BRIDGE_LOCAL_URL_ENV) else {
+        eprintln!("amux dm relay local url is unset");
+        return 1;
+    };
+    if !local_amux_url_allowed(&local_url) {
+        eprintln!("amux dm relay local url is not loopback");
+        return 1;
+    }
+    let client = match local_client(&local_url) {
+        Ok(client) => client,
+        Err(_) => {
+            eprintln!("amux dm relay local client failed");
+            return 1;
+        }
+    };
+    let base = local_url.trim_end_matches('/').to_owned();
+    let api = match crate::tomverse_api::TomverseApi::from_env() {
+        Ok(api) => api,
+        Err(_) => {
+            eprintln!("amux dm relay control plane is unavailable");
+            return 1;
+        }
+    };
+    crate::dm_relay::run_from_env(api, client, base).await
+}
+
 /// Applies one tick's results — either `bridge_tick_sourced`'s `Ok` value, or
 /// the `partial` results carried by its `BridgeTickError` — to the run loop's
 /// bookkeeping. A `Halted` result sets `halted`; a skip-without-halt result
@@ -4327,6 +4359,10 @@ mod tests {
             &["--worker", "claude-impl", "extra"],
             &["--sessions", "claude-impl"],
             &["claude-impl"],
+            &["--dm-relay", "claude-impl"],
+            &["--dm-relay", "--dm-relay"],
+            &["--worker", "claude-impl", "--dm-relay"],
+            &["--dm-relay="],
         ] {
             assert_eq!(parse_bridge_args(args(refused)), None, "{refused:?}");
         }
@@ -4342,6 +4378,29 @@ mod tests {
         assert!(binary.contains("parse_bridge_args(std::env::args_os().skip(1))"));
         assert!(binary.contains("BridgeArgs::Sessions => tomverse_orchestrator::wsl_bridge::run_from_env().await,"));
         assert!(binary.contains("BridgeArgs::Worker(worker) => {"));
+        assert!(binary.contains(
+            "BridgeArgs::DmRelay => tomverse_orchestrator::wsl_bridge::run_dm_relay_from_env().await,"
+        ));
+    }
+
+    #[test]
+    fn the_relay_runs_only_in_its_own_mode_never_beside_a_worker_loop() {
+        // Every bridge unit reads the same environment file and the relay
+        // releases every local marker each tick: a relay per bridge would
+        // release another relay's marker mid-question.
+        use std::ffi::OsString;
+        assert_eq!(
+            parse_bridge_args([OsString::from("--dm-relay")]),
+            Some(BridgeArgs::DmRelay)
+        );
+        let source = include_str!("wsl_bridge.rs");
+        let run = &source[source.find("async fn run_bridge(").unwrap()..];
+        let run = &run[..run.find("\n}\n").unwrap()];
+        assert!(!run.contains("dm_relay"), "a worker bridge starts no relay");
+        let relay = &source[source.find("pub async fn run_dm_relay_from_env").unwrap()..];
+        let relay = &relay[..relay.find("\n}\n").unwrap()];
+        assert!(relay.contains("crate::dm_relay::run_from_env(api, client, base).await"));
+        assert!(!relay.contains("register"), "the relay registers no worker");
     }
 
     #[test]

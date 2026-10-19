@@ -1906,10 +1906,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `apps/tomverse-orchestrator/src/dm_relay/flow.rs`, `apps/tomverse-orchestrator/src/dm_relay/io.rs`,
   `apps/tomverse-orchestrator/src/tomverse_api.rs`의 Decision Maker POST 도우미, `apps/tomverse-orchestrator/src/wsl_bridge.rs`의 시작
   한 줄, `vendor/amux/crates/amux-server/src/api/dm_relay.rs`(로컬 표시 route와 그 등록), `tests/amuxDecisionMakerBridgeRelay.test.mjs`.
-  bridge 프로세스(`tomverse-bridge`) 안의 task 하나가 로컬 AMUX의 `needsyou` typed ask를 **한 번에 하나씩** 앱 원장으로 옮깁니다:
+  relay 프로세스 하나(bridge 바이너리의 `--dm-relay` 모드, 계정 `tomverse-bridge`)가 로컬 AMUX의 `needsyou` typed ask를 **한 번에 하나씩** 앱 원장으로 옮깁니다:
   라우팅 → 배정 → 로컬 DM 대기 표시(compare-and-swap, 실패하면 배정 폐기) → payload → 전송 의도 → broker → 결과 → cleanup_unknown
   보고 → 전송 영수증 → 표시 해제. **`TOMVERSE_AMUX_DM_RELAY=enabled`가 아니면 아무것도 읽지도 쓰지도 않습니다**(앱의 라우팅
-  스위치는 별개이고 둘 다 꺼져 있습니다). **broker는 전송 의도의 기록 응답을 받은 뒤에만 부릅니다** — 그 응답을 잃으면 보내지 않습니다.
+  스위치는 별개이고 둘 다 꺼져 있습니다). **relay는 자기 unit 하나에서만 돕니다** — 모든 bridge unit이 같은 `bridge.env`를 읽고 relay는 매 tick 처음에 로컬 표시를
+  전부 풀므로, bridge가 아니라 바이너리의 `--dm-relay` 모드를 `scripts/systemd/tomverse-amux-dm-relay.service` 하나가 돌리고(worker
+  bridge는 relay를 시작하지 않음), 스위치와 token은 그 unit만 읽는 `/etc/tomverse-bridge/dm-relay.env`에 둡니다
+  (`tests/amuxDmRelayUnit.test.mjs`). token이 없거나 형식이 틀리면 exit 2로 끝나고 다시 시작하지 않습니다. **broker는 전송 의도의 기록 응답을 받은 뒤에만 부릅니다** — 그 응답을 잃으면 보내지 않습니다.
   **결과 응답을 잃으면 다시 제출하지 않고** `results/lookup`으로만 확정하며, 확정하지 못하면 `results/unknown`입니다
   (docs/policy/amux-decision-maker.md §9). 라우팅은 질문당 하나라 결과를 모르면 다음 scan에서 다시 묻는 것이 조회이고, 그 밖의 앱
   쓰기(배정·폐기·전송 의도·영수증·`results/unknown`)의 결과를 모르거나 cleanup 보고가 기록되지 않으면(그 인스턴스의 latch를 확인하지

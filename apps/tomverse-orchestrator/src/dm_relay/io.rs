@@ -65,7 +65,8 @@ pub enum RelayActivation {
 }
 
 /// Off by default: the relay starts only on `TOMVERSE_AMUX_DM_RELAY=enabled`
-/// exactly, and then only with a usable local token.
+/// exactly, and then only with a usable local token. It runs only in the
+/// binary's `--dm-relay` mode (one systemd unit), never in a worker bridge.
 pub fn relay_activation(enabled: Option<&str>, local_token: Option<&str>) -> RelayActivation {
     if enabled != Some("enabled") {
         return RelayActivation::Off;

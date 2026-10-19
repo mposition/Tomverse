@@ -41,31 +41,46 @@ pub mod flow;
 pub mod io;
 pub mod wire;
 
-/// Starts the relay beside the bridge when its switch says so. The local
-/// AMUX client and base URL are the bridge's own (loopback only, no proxy,
-/// no redirect), and the app client is the bridge's `TomverseApi` with its
-/// sync token.
-pub fn start_from_env(
-    api: &crate::tomverse_api::TomverseApi,
-    local_client: &reqwest::Client,
-    local_base: &str,
-) {
+/// Exit status when the relay is enabled but its token is missing or
+/// malformed. The unit does not restart on it (`RestartPreventExitStatus=`):
+/// a configuration error waits for a person, not for the next minute.
+pub const DM_RELAY_MISCONFIGURED_EXIT: i32 = 2;
+
+/// Runs the relay as its own process: the binary's `--dm-relay` mode, one
+/// systemd unit (`scripts/systemd/tomverse-amux-dm-relay.service`). A worker
+/// bridge never runs it: every bridge unit reads the same environment file and
+/// the relay releases every local marker at the start of each tick, so a
+/// relay per bridge would release another relay's marker in the middle of its
+/// question. The local AMUX client and base URL are built the way a bridge
+/// builds them (loopback only, no proxy, no redirect), and the app client is
+/// the bridge's `TomverseApi` with its sync token. Off returns 0 and the
+/// relay's loop never returns.
+pub async fn run_from_env(
+    api: crate::tomverse_api::TomverseApi,
+    local_client: reqwest::Client,
+    local_base: String,
+) -> i32 {
     let enabled = std::env::var(io::DM_RELAY_ENV).ok();
     let token = std::env::var(io::DM_RELAY_LOCAL_TOKEN_ENV).ok();
     match io::relay_activation(enabled.as_deref(), token.as_deref()) {
-        io::RelayActivation::Off => {}
+        io::RelayActivation::Off => {
+            println!("amux dm relay is off");
+            0
+        }
         io::RelayActivation::Misconfigured(name) => {
             eprintln!("amux dm relay is not started: {name} is missing or malformed");
+            DM_RELAY_MISCONFIGURED_EXIT
         }
         io::RelayActivation::On { local_token } => {
             println!("amux dm relay started");
             let relay = io::Relay::new(
-                io::HttpApp::new(api.clone()),
-                io::HttpLocalAmux::new(local_client.clone(), local_base.to_owned(), local_token),
+                io::HttpApp::new(api),
+                io::HttpLocalAmux::new(local_client, local_base, local_token),
                 io::UnixBroker::system(),
                 wire::DM_SEND_OPTION_EFFECTS,
             );
-            tokio::spawn(io::run(relay));
+            io::run(relay).await;
+            0
         }
     }
 }
