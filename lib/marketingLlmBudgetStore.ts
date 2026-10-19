@@ -29,13 +29,14 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { MARKETING_RETENTION_SETTING } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
-  MARKETING_LLM_ADAPTER_PROFILE,
+  MARKETING_LLM_ADAPTER_PROFILES,
   MARKETING_LLM_ADAPTER_VERSION,
   MARKETING_LLM_PRICE_PINS,
   MARKETING_LLM_PROVIDER,
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
   marketingLlmConfigSnapshot,
+  marketingLlmPinAllows,
   marketingLlmConsumerDigest,
   marketingLlmDispatchDigest,
   marketingLlmRequestDigest,
@@ -187,7 +188,8 @@ export async function reserveMarketingLlmCall(
 
   if (bounds.late) return refused("deadline_too_close");
   if (env.killSwitchOn !== false) return refused("kill_switch");
-  if (input.payload.adapterProfile !== MARKETING_LLM_ADAPTER_PROFILE) return refused("adapter_profile_unknown");
+  const profile = MARKETING_LLM_ADAPTER_PROFILES.find((known) => known === input.payload.adapterProfile);
+  if (profile === undefined) return refused("adapter_profile_unknown");
   const cap = parseMarketingLlmMonthlyCap(env.monthlyCapRaw);
   if (cap === null) return refused("cap_unreadable");
   const pin = resolveMarketingLlmPin(
@@ -196,8 +198,10 @@ export async function reserveMarketingLlmCall(
     new Date(`${reserveAt}Z`),
   );
   if (!pin.ok) return refused(pin.code);
+  // A web-search call needs a pin that prices its searches and caps them.
+  if (!marketingLlmPinAllows(pin.pin, profile)) return refused("adapter_profile_unknown");
 
-  const reservation = marketingLlmReservation(pin.pin);
+  const reservation = marketingLlmReservation(pin.pin, profile);
   // The month's committed sum, and -- the last reading of the database clock
   // before the audit row -- whether the deadline has passed.
   const sum = await tx.$queryRaw<Array<{ total: bigint; inTime: boolean }>>(Prisma.sql`
@@ -212,6 +216,7 @@ export async function reserveMarketingLlmCall(
   const configSnapshot = marketingLlmConfigSnapshot({
     pin: pin.pin,
     adapterVersion: env.adapterVersion ?? MARKETING_LLM_ADAPTER_VERSION,
+    adapterProfile: profile,
   });
   const requestDigest = marketingLlmRequestDigest({ reservePayloadDigest: payloadDigest, configSnapshot });
   const callId = newCallId();

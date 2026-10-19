@@ -14,6 +14,13 @@ import { createHash, createHmac } from "node:crypto";
 
 export const MARKETING_LLM_PROVIDER = "openai";
 export const MARKETING_LLM_ADAPTER_PROFILE = "text-only-v1";
+/** A call that may run the provider's web search, bounded by the pin's search cap. */
+export const MARKETING_LLM_WEB_SEARCH_PROFILE = "web-search-v1";
+export const MARKETING_LLM_ADAPTER_PROFILES = [MARKETING_LLM_ADAPTER_PROFILE, MARKETING_LLM_WEB_SEARCH_PROFILE] as const;
+export type MarketingLlmAdapterProfile = (typeof MARKETING_LLM_ADAPTER_PROFILES)[number];
+
+/** The most web searches one call may run; the provider stops at the request's `max_tool_calls`. */
+export const MARKETING_LLM_MAX_WEB_SEARCH_CALLS = 10;
 export const MARKETING_LLM_SERVICE_TIER = "default";
 /** The adapter release the app expects; a reservation stores it in its snapshot. */
 export const MARKETING_LLM_ADAPTER_VERSION = "1";
@@ -97,6 +104,14 @@ export type MarketingLlmPricePin = {
   /** verifiedAt + 90 days. */
   expiresAt: string;
   source: string;
+  /**
+   * The provider's price for one web search call, at the worst tier. Present
+   * only on a pin that may be used with the web-search profile, with
+   * `maxWebSearchCalls`; a pin without them is text only.
+   */
+  webSearchMicroUsdPerCall?: number;
+  /** The `max_tool_calls` every web-search request on this pin sends. */
+  maxWebSearchCalls?: number;
 };
 
 /**
@@ -143,7 +158,7 @@ export const marketingLlmPricePinDigest = (pin: MarketingLlmPricePin): string =>
   digestOf({ ...pin, domain: "marketing-llm-price-pin-v1" });
 
 export type MarketingLlmConfigSnapshot = {
-  adapterProfile: typeof MARKETING_LLM_ADAPTER_PROFILE;
+  adapterProfile: MarketingLlmAdapterProfile;
   adapterVersion: string;
   serviceTier: typeof MARKETING_LLM_SERVICE_TIER;
   store: false;
@@ -156,8 +171,9 @@ export type MarketingLlmConfigSnapshot = {
 export const marketingLlmConfigSnapshot = (input: {
   pin: MarketingLlmPricePin;
   adapterVersion: string;
+  adapterProfile?: MarketingLlmAdapterProfile;
 }): MarketingLlmConfigSnapshot => ({
-  adapterProfile: MARKETING_LLM_ADAPTER_PROFILE,
+  adapterProfile: input.adapterProfile ?? MARKETING_LLM_ADAPTER_PROFILE,
   adapterVersion: input.adapterVersion,
   serviceTier: MARKETING_LLM_SERVICE_TIER,
   store: false,
@@ -182,6 +198,8 @@ export const marketingLlmAdapterConfigDigest = (snapshot: MarketingLlmConfigSnap
     projectId: snapshot.pin.projectId,
     region: snapshot.pin.region,
     pricePinDigest: snapshot.pricePinDigest,
+    // Absent for a text call, so the text profile's digests are as they were.
+    maxToolCalls: snapshot.adapterProfile === MARKETING_LLM_WEB_SEARCH_PROFILE ? snapshot.pin.maxWebSearchCalls : undefined,
   });
 
 export type MarketingLlmReservePayload = {
@@ -292,14 +310,24 @@ export type MarketingLlmReservation = {
 
 /**
  * The most one request can cost: the whole context window at the worst input
- * price plus the profile's output cap at the worst output price, rounded up.
- * BigInt so no product of two large integers loses a digit before the ceiling.
+ * price plus the profile's output cap at the worst output price, and for a
+ * web-search call every search the request allows at the search price,
+ * rounded up. Search results arrive as input tokens, which the whole context
+ * window already covers. BigInt so no product of two large integers loses a
+ * digit before the ceiling.
  */
-export const marketingLlmReservation = (pin: MarketingLlmPricePin): MarketingLlmReservation => {
+export const marketingLlmReservation = (
+  pin: MarketingLlmPricePin,
+  profile: MarketingLlmAdapterProfile = MARKETING_LLM_ADAPTER_PROFILE,
+): MarketingLlmReservation => {
   const input = BigInt(pin.contextWindowTokens) * BigInt(pin.worstInputMicroUsdPerMillion);
   const output = BigInt(pin.maxOutputTokens) * BigInt(pin.worstOutputMicroUsdPerMillion);
   const million = BigInt(1_000_000);
-  const total = input + output;
+  const searches =
+    profile === MARKETING_LLM_WEB_SEARCH_PROFILE
+      ? BigInt(pin.maxWebSearchCalls ?? 0) * BigInt(pin.webSearchMicroUsdPerCall ?? 0) * million
+      : BigInt(0);
+  const total = input + output + searches;
   const ceiling = (total + million - BigInt(1)) / million;
   return {
     reservedInputTokens: pin.contextWindowTokens,
@@ -341,7 +369,20 @@ export const marketingLlmPinProblems = (pin: MarketingLlmPricePin): string[] => 
   if (Date.parse(pin.expiresAt) - Date.parse(pin.verifiedAt) !== MARKETING_LLM_PIN_LIFETIME_MS) {
     problems.push("expiry_not_ninety_days");
   }
-  const reservation = marketingLlmReservation(pin);
+  const searchFields = [pin.webSearchMicroUsdPerCall, pin.maxWebSearchCalls].filter((value) => value !== undefined);
+  if (
+    searchFields.length === 1 ||
+    (searchFields.length === 2 &&
+      (searchFields.some((value) => !Number.isSafeInteger(value) || (value as number) < 1) ||
+        (pin.maxWebSearchCalls as number) > MARKETING_LLM_MAX_WEB_SEARCH_CALLS))
+  ) {
+    problems.push("web_search_fields");
+  }
+  // The row limits hold for the most expensive profile the pin allows.
+  const reservation = marketingLlmReservation(
+    pin,
+    marketingLlmPinAllows(pin, MARKETING_LLM_WEB_SEARCH_PROFILE) ? MARKETING_LLM_WEB_SEARCH_PROFILE : MARKETING_LLM_ADAPTER_PROFILE,
+  );
   if (reservation.reservedInputTokens > MARKETING_LLM_ROW_LIMITS.reservedInputTokensMax) {
     problems.push("context_window_over_row_limit");
   }
@@ -353,6 +394,16 @@ export const marketingLlmPinProblems = (pin: MarketingLlmPricePin): string[] => 
   }
   return problems;
 };
+
+/** Whether a pin may be used with a profile: web search needs the pin's search price and cap. */
+export const marketingLlmPinAllows = (pin: MarketingLlmPricePin, profile: string): boolean =>
+  profile === MARKETING_LLM_ADAPTER_PROFILE ||
+  (profile === MARKETING_LLM_WEB_SEARCH_PROFILE &&
+    Number.isSafeInteger(pin.webSearchMicroUsdPerCall) &&
+    Number.isSafeInteger(pin.maxWebSearchCalls) &&
+    (pin.webSearchMicroUsdPerCall as number) >= 1 &&
+    (pin.maxWebSearchCalls as number) >= 1 &&
+    (pin.maxWebSearchCalls as number) <= MARKETING_LLM_MAX_WEB_SEARCH_CALLS);
 
 export type MarketingLlmPinLookup =
   | { ok: true; pin: MarketingLlmPricePin }
