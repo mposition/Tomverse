@@ -71,6 +71,21 @@ test("contextual suggestions classify locally without returning prompt content",
   assert.deepEqual(Object.keys(suggestion || {}).sort(), ["key", "modelId", "reason"]);
 });
 
+test("Smart Auto never shows a contextual add-a-model suggestion", () => {
+  const research = { text: "코호트별 잔존율 추세를 근거와 함께 판단해 주세요", attachments: [] };
+  const document = {
+    text: "이 계약서의 위험 조항을 분석해줘",
+    attachments: [{ name: "contract.pdf", mediaType: "application/pdf" }],
+  };
+  assert.equal(getContextualModelSuggestion(research)?.reason, "research");
+  assert.equal(getContextualModelSuggestion({ ...research, selectionMode: "auto" }), null);
+  assert.equal(getContextualModelSuggestion({ ...document, selectionMode: "auto" }), null);
+  assert.equal(
+    getContextualModelSuggestion({ ...document, selectionMode: "manual" })?.reason,
+    "deep_analysis"
+  );
+});
+
 test("model finder combination always returns 2-3 distinct models with a primary matching the ranked top pick", () => {
   const answers = { tasks: ["documents", "coding"], priority: "fast" };
   const combo = getModelFinderCombination(answers);
