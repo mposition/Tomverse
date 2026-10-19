@@ -35,12 +35,17 @@ bridge는 하나가 아니다. `tomverse-bridge.service`가 codex 세션을 맡�
 
 파일: `scripts/amux-bridge-watchdog/`. 테스트: `tests/amuxBridgeWatchdog.test.mjs`.
 
-한 번 실행할 때 bridge unit 전부의 상태를 읽고 본문 없는 요청 하나를 보낸다. 대상은 `tomverse-bridge.service`(항상)와,
+한 번 실행할 때 bridge unit 전부의 상태를 읽고 본문 없는 요청 하나를 보낸다. 대상은 `tomverse-bridge.service`(enable되어 있는 동안 이름으로)와,
 로드된 `tomverse-amux-v22-bridge@*`·`tomverse-amux-v22-sidecar@*`·`tomverse-amux-bridge@*` 인스턴스 전부다.
 `tomverse-amux-bridge@*`는 정책 버전 55의 worker별 bridge(`wsl-execution-bridge.md`의 `--worker` 절)이고, 전환
 기간에는 옛 이름과 함께 본다. 시작하지 않은 인스턴스는 보통 로드되지 않으므로 템플릿을 설치만 한 동안에는 대상이
 아니다. 다만 `systemctl status tomverse-amux-bridge@<이름>`처럼 이름으로 조회하면 그 인스턴스가 잠시 로드되어
 `inactive`로 읽히고 down 신호가 나갈 수 있다.
+
+- `tomverse-bridge.service`는 `disabled`·`not-found`·`masked`일 때 이름으로 보지 않는다. v55 S3에서 codex 세션을
+  worker별 unit으로 옮기며 이 unit을 `disable`하고, S4에서 파일을 지운다. 그 밖의 답(읽지 못함 포함)이면 계속 본다.
+- 로드된 bridge unit이 **하나도 없으면** down이다. worker별 unit은 `[Install]`이 없어 재부팅 뒤 저절로 켜지지
+  않으므로, 그 상태를 빈 "전부 정상"으로 보내지 않는다.
 
 | 상태 | 보내는 것 | monitor |
 |---|---|---|

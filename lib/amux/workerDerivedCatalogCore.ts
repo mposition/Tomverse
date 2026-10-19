@@ -50,13 +50,16 @@ export const AMUX_WORKER_SESSION_LIST_LATCH = true;
 export const amuxWorkerSessionListOpen = (): boolean => AMUX_WORKER_SESSION_LIST_LATCH;
 
 /**
- * Orchestration policy version 55, section 1 (stage S1): the bridge-scope
- * route ships with its own code latch off. While it is false the route
- * answers `bridge_scope_off`, and a bridge started with `--worker` registers
- * nothing; bridges started without it never call the route. The activation
- * record (stage S3, a new policy version) turns it on.
+ * Orchestration policy version 55, section 1: the bridge-scope route's code
+ * latch. Stage S1 shipped it off, so the route answered `bridge_scope_off`
+ * and a bridge started with `--worker` registered nothing. Stage S3 turns it
+ * on (owner approval in chat, recorded in the PR, per the 2026-10-19
+ * direction). Bridges started without `--worker` never call the route, so
+ * this alone changes no assignment; the host then moves each worker to its
+ * own unit under section 3.1. Turning it off again stops new registrations
+ * but is not a rollback by itself (section 3.1).
  */
-export const AMUX_WORKER_BRIDGE_SCOPE_LATCH = false;
+export const AMUX_WORKER_BRIDGE_SCOPE_LATCH = true;
 export const amuxWorkerBridgeScopeOpen = (): boolean => AMUX_WORKER_BRIDGE_SCOPE_LATCH;
 
 /** Which bridge kind serves a worker (version 55, section 1). */

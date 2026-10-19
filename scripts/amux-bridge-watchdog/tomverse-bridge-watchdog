@@ -10,13 +10,17 @@
 #   otherwise (some activating,
 #   deactivating, unreadable)   -> nothing
 #
-# The units are tomverse-bridge.service (the codex sessions), which must always
-# be there, and every loaded instance of tomverse-amux-v22-bridge@ and
+# The units are tomverse-bridge.service (the codex sessions), watched by name
+# while it is enabled, and every loaded instance of tomverse-amux-v22-bridge@ and
 # tomverse-amux-v22-sidecar@ (one pair per v22 worker). A production deploy on
 # 2026-10-12 halted all five bridges at once; one unit alone would have missed
 # four of them. Orchestration policy version 55 adds one bridge per worker,
 # tomverse-amux-bridge@<worker>; every loaded instance of it is checked too.
-# The older names stay for the transition.
+# The older names stay for the transition. Stage S3 moves the codex sessions
+# to per-worker units and disables tomverse-bridge.service; from then on it is
+# no longer watched by name. A host with no bridge unit loaded at all -- after
+# a reboot, per-worker units are started by hand and none comes back on its
+# own -- is down, never an empty "all active".
 #
 # Sending nothing is a signal too: the monitor turns a silence longer than its
 # grace period into an alert, which is also what the host going down, losing
@@ -52,11 +56,18 @@ fi
 down=0
 pending=0
 
-# The main unit is always checked, listed or not: a unit that is not loaded
-# reads as inactive, which is a stop. The instances are whatever is loaded.
-# A listing that fails is not an empty listing: it leaves the instance units
-# unknown, so it counts as unreadable and the run cannot send up.
-units=("$main_unit")
+# The main unit is checked by name, listed or not, unless it was disabled or
+# removed on purpose (stage S3 and S4): a unit that is not loaded reads as
+# inactive, which is a stop. Any other answer, an unreadable one included,
+# keeps it watched. The instances are whatever is loaded. A listing that fails
+# is not an empty listing: it leaves the instance units unknown, so it counts
+# as unreadable and the run cannot send up.
+units=()
+main_file_state=$(systemctl is-enabled "$main_unit" 2>/dev/null || true)
+case "$main_file_state" in
+  disabled | not-found | masked) ;;
+  *) units+=("$main_unit") ;;
+esac
 if listing=$(systemctl list-units --all --plain --no-legend --type=service \
   "${unit_patterns[@]}" 2>&1); then
   while read -r name _; do
@@ -91,6 +102,11 @@ for unit in "${units[@]}"; do
       ;;
   esac
 done
+
+if ((${#units[@]} == 0 && pending == 0)); then
+  down=$((down + 1))
+  echo "tomverse-bridge-watchdog: no bridge unit is loaded"
+fi
 
 summary="${#units[@]} unit(s), $down down, $pending in transition or unreadable"
 if ((down > 0)); then
