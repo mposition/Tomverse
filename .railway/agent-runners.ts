@@ -122,16 +122,6 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
 ] as const;
 
 /**
- * The improvement scout's S0 probe has one variable, its switch.
- *
- * A service without a schedule runs on every deploy, so the probe does nothing
- * until the operator sets PRODUCT_RESEARCH_SCOUT_ENABLED; setting it redeploys
- * the service, and that deploy is the measurement. It reads no credential and
- * submits nowhere (docs/policy/product-research-agent.md §13).
- */
-const PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES = ["PRODUCT_RESEARCH_SCOUT_ENABLED"] as const;
-
-/**
  * The Scout walker's variables: its switch, where to send, and the secret to
  * send with. It holds no model key and no database credential -- the app
  * calls the model (docs/policy/product-research-agent.md §11).
@@ -522,37 +512,11 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     },
   },
   {
-    // The improvement scout's S0 probe (docs/policy/product-research-agent.md
-    // §13). One environment is enough: what it measures is whether Chromium
-    // keeps its sandbox in a Railway container and what production's public
-    // pages answer a Railway address, and every environment of this project
-    // runs in the same region. dev, because dev builds from develop; staging
-    // builds from `test`, which a service can only reach once a release
-    // candidate is promoted there (docs/ops/dev-test-lanes.md). Built from its
-    // own Dockerfile because Chromium and its system libraries come with
-    // Playwright's image, not with Railpack's.
-    key: "product_research_scout_probe",
-    service: "Product Research Scout Probe",
-    startCommand: "npm run agent:product-research-scout-s0-probe -- all",
-    cronSchedule: null,
-    dockerfile: {
-      path: "docker/product-research-scout.Dockerfile",
-      watchPatterns: [
-        "docker/product-research-scout.Dockerfile",
-        "scripts/agents/product-research-scout-s0-probe.mjs",
-        "lib/productResearchScout*",
-        "package-lock.json",
-      ],
-    },
-    environments: {
-      dev: PRODUCT_RESEARCH_SCOUT_PROBE_VARIABLES,
-    },
-  },
-  {
     // The Scout walker (docs/policy/product-research-agent.md §10, §13): once a
     // day at 18:00 UTC (04:00 Brisbane) it captures the public pages, generated
     // files and catalogue and posts each to its environment's app, which asks
-    // the model. Same image as the probe. dev first, where it sends to the dev
+    // the model. Its first run is also the check that Chromium keeps its
+    // sandbox in a Railway container. dev first, where it sends to the dev
     // app; production once main carries it. Not staging, which builds from
     // `test` (docs/ops/dev-test-lanes.md).
     key: "product_research_scout",
