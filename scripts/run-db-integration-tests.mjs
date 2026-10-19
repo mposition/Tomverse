@@ -478,6 +478,9 @@ run(
     // v19 session intake stores encrypted source provenance under the latest
     // owner scope while its canonical audit remains a dedicated system actor.
     "tests/integration/amux-v19-session-submission.db.test.ts",
+    // Subscription claims run on all four CLI channels, each bound to its own
+    // sign-in profile and to the reservation's channel and model.
+    "tests/integration/amux-v19-subscription-channels.db.test.ts",
     // Each prepared v19 direct-read reference records only its pinned SHA and
     // aggregate exclusion proof under same-transaction system evidence.
     "tests/integration/amux-v19-tracked-checkout-evidence.db.test.ts",
