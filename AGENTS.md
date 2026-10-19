@@ -26,7 +26,7 @@ Owner direction, 2026-10-19: Tomverse is an early startup with very few users an
 - Human approval is needed only for irreversible actions: real money leaving (enabling a paid call, raising a spending ceiling), anything leaving Tomverse (external posts, sends, publication), deleting user data, credentials and security boundaries, and production merges and deployments. Every other design choice is the owner's call in chat, implemented and recorded in one line in the commit or PR, with no policy revision, version bump, plan or prior approval record. Writing code, prototypes, tests or isolated local migrations never needs prior policy approval. Put risky features behind a default-off switch and ship them rather than blocking them.
 - Treat implementation, review, activation, merge, and deployment as separate steps. An approval needed for a later action blocks that action; it does not block already-authorized implementation and local verification. Draft release gates and missing production evidence do not by themselves mean a feature cannot be built.
 - When an actual rule blocks a step, identify the exact rule, affected action, and concrete risk briefly. Continue another authorized, testable part of the requested work. Ask only for the missing decision, once; do not send preparation or routine engineering judgment back to the owner.
-- Each finished diff gets its tests and one independent review. Review is not a planning loop: it runs once on the finished diff, not before code exists, and an accepted review is reused while the boundary it covered is unchanged.
+- Each finished diff gets its tests. Only a diff that touches an irreversible area (the approval list above, plus pricing, credits, migrations and the audit chain) also gets one independent review; every other diff is done when its tests and local checks pass. Review is not a planning loop: it runs once on the finished diff, not before code exists, and an accepted review is reused while the boundary it covered is unchanged.
 
 Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress. For an explicitly documentation-only or review-only request, deliver that requested artifact without inventing a code task.
 <!-- /development-execution -->
@@ -41,7 +41,7 @@ Report implemented and tested behavior separately from documentation, review, me
   삭제, 인증·비밀, 외부 게시, 감사 체인). 소스 위치 digest나 snapshot처럼 코드가 움직이면
   깨지는 고정값은 새로 만들지 않고, 기존 것은 개수·구조 검사로 대체해 나갑니다.
 - 이 절과 아래 색인의 상세 규칙이 충돌하면 이 절이 우선합니다. 되돌릴 수 없는 것을 지키는
-  계약(과금, 크레딧, 동의, 삭제, release blocker인 UI 계약)의 조건은 그대로입니다.
+  계약(과금, 크레딧, 동의, 삭제, Admin IA의 redirect 규칙)의 조건은 그대로입니다.
 
 # 보고와 진행 관리
 
@@ -70,7 +70,8 @@ Report implemented and tested behavior separately from documentation, review, me
 
 # 독립 검토와 모델 역할
 
-- 독립 검토는 위 Frontier 절대로 끝난 diff마다 한 번 받고, 그 검토가 덮은 경계가 바뀌지 않는 동안 다시 받지 않습니다.
+- 독립 검토는 되돌릴 수 없는 영역(위 Frontier 절의 승인 목록과 가격·크레딧·migration·감사 체인)을 건드린 diff만
+  한 번 받고, 그 검토가 덮은 경계가 바뀌지 않는 동안 다시 받지 않습니다. 그 밖의 diff는 테스트와 로컬 검사로 끝납니다.
   검토 서버를 씁니다: commit 후 `node "$HOME/bin/review.mjs" submit --author <자기 이름> --scope "<요약>"`,
   `wait <jobId>`를 종료 코드가 3이 아닐 때까지 반복합니다. 0 accept, 1 reject(고치고 새로 submit),
   2 unknown(다시 보내지 않고 사람에게 알림). 자세한 동작은 `tools/review-orchestrator/README.md`.
@@ -123,6 +124,6 @@ Report implemented and tested behavior separately from documentation, review, me
 | Prompt Refiner suggestion invariant | `docs/ui-contracts/prompt-refiner-suggestion.md`, `docs/ui-contracts/chat-e04-staging-fixture.md`, `docs/policy/prompt-refiner-observability.md` |
 | Chat starter catalogue invariant | `docs/ui-contracts/chat-starter-catalog.md` |
 
-`docs/ui-contracts/`의 계약(모바일 composer, drawer, 비교 action rail, typography, 이미지 생성 workspace, 설정 navigation, Admin IA의 redirect 규칙, Auto 선택, Prompt Refiner, starter catalogue)은 위반이 release blocker입니다. 해당 컴포넌트를 고칠 때 그 문서의 회귀 테스트를 함께 돌립니다.
+`docs/ui-contracts/`의 계약(모바일 composer, drawer, 비교 action rail, typography, 이미지 생성 workspace, 설정 navigation, Admin IA, Auto 선택, Prompt Refiner, starter catalogue)은 고쳐서 배포하면 되돌릴 수 있으므로 release blocker가 아닙니다. 해당 컴포넌트를 고칠 때 그 문서의 회귀 테스트를 함께 돌립니다. **예외는 Admin IA의 redirect 규칙 하나**입니다 — 은퇴한 `/admin/*` URL의 redirect를 지우면 북마크·runbook·감사 기록의 링크가 되돌릴 수 없이 끊기므로 위반은 release blocker입니다. 각 계약 문서의 "release blocker" 문장은 이 결정이 우선합니다(운영자 결정 2026-10-19).
 
 engineering agent 판정이 읽는 계약 상수·정책 테스트 목록은 `docs/agents/machine-index.md`에 있습니다(도구용, 읽지 않아도 됩니다).
