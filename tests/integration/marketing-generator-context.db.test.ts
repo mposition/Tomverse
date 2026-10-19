@@ -11,6 +11,7 @@ import { createApprovedMarketingCompetitor } from "@/lib/marketingCompetitorStor
 import { marketingGeneratorContextAllowed } from "@/lib/marketingGeneratorContext";
 import { createMarketingChannel, insertMarketingReport, runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
+import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
 
 const SECRET = "c".repeat(48);
@@ -239,4 +240,26 @@ test("A3 is given the pages a person approved, and those are the context's only 
     };
     assert.deepEqual(context.competitors.tracked[0].trackedPages, ["https://poe.com/pricing"]);
     assert.deepEqual(text.match(/https?:\/\/[^"]*/gu), ["https://poe.com/pricing"]);
+  }));
+
+test("the context carries the model selected in the Admin Console with its catalog pin, and nulls otherwise", () =>
+  withSecret(async () => {
+    const llm = async () => {
+      const response = await call({ generatorRunId: "run-3" });
+      assert.equal(response.status, 200);
+      return ((await response.json()) as { context: { llm: { model: string | null; pin: { model: string } | null } } })
+        .context.llm;
+    };
+    try {
+      assert.deepEqual(await llm(), { model: null, pin: null });
+      await setMarketingLlmSettings(prisma, "gpt-5.4-mini", "5");
+      const selected = await llm();
+      assert.equal(selected.model, "gpt-5.4-mini");
+      assert.equal(selected.pin?.model, "gpt-5.4-mini");
+      // A model the catalog cannot price within the ledger's limits is no selection at all.
+      await setMarketingLlmSettings(prisma, "gpt-6-luna", "5");
+      assert.deepEqual(await llm(), { model: null, pin: null });
+    } finally {
+      await clearMarketingLlmSettings(prisma);
+    }
   }));

@@ -32,7 +32,6 @@ import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
   MARKETING_LLM_ADAPTER_PROFILE,
   MARKETING_LLM_ADAPTER_VERSION,
-  MARKETING_LLM_PRICE_PINS,
   MARKETING_LLM_PROVIDER,
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
@@ -54,6 +53,7 @@ import {
   type MarketingLlmReservePayload,
   type MarketingLlmTerminalState,
 } from "@/lib/marketingLlmBudgetCore";
+import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import { MARKETING_RETENTION_ACTIONS, MarketingStoreRefusedError } from "@/lib/marketingStore";
 
 export const MARKETING_LLM_SYSTEM_ACTOR = "marketing-generator";
@@ -202,7 +202,7 @@ export async function reserveMarketingLlmCall(
   if (settings === null || cap === null) return refused("cap_unreadable");
   if (settings.model !== input.payload.model) return refused("model_not_selected");
   const pin = resolveMarketingLlmPin(
-    env.pins ?? MARKETING_LLM_PRICE_PINS,
+    env.pins ?? marketingLlmCatalogPins(),
     input.payload.model,
     new Date(`${reserveAt}Z`),
   );

@@ -23,7 +23,12 @@ import {
 } from "@/lib/marketingCompetitorStore";
 import { generatorProjection, type MarketingClaimProjection } from "@/lib/marketingClaims";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
-import { MARKETING_LLM_SETTINGS_KEY, parseMarketingLlmSettings } from "@/lib/marketingLlmBudgetCore";
+import {
+  MARKETING_LLM_SETTINGS_KEY,
+  parseMarketingLlmSettings,
+  type MarketingLlmPricePin,
+} from "@/lib/marketingLlmBudgetCore";
+import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
@@ -59,11 +64,12 @@ export type MarketingGeneratorContext = {
   readonly marketIntel: MarketingGeneratorReport | null;
   readonly competitors: MarketingGeneratorCompetitors;
   /**
-   * The model the operator selected in the Admin Console, or null when none is
-   * (or the setting cannot be read). The worker uses that model's pin; the
-   * ledger refuses any other.
+   * The model the operator selected in the Admin Console and its price pin
+   * from the chat catalog, or nulls when none is selected, the setting cannot
+   * be read or the catalog no longer prices it. The worker builds its requests
+   * from this pin; the ledger derives the same pin and refuses any other.
    */
-  readonly llm: { readonly model: string | null };
+  readonly llm: { readonly model: string | null; readonly pin: MarketingLlmPricePin | null };
 };
 
 /**
@@ -173,6 +179,11 @@ async function latestReport(
   return null;
 }
 
+const llmContext = (model: string | null): MarketingGeneratorContext["llm"] => {
+  const pin = model === null ? undefined : marketingLlmCatalogPins().find((candidate) => candidate.model === model);
+  return pin ? { model, pin } : { model: null, pin: null };
+};
+
 export async function readMarketingGeneratorContext(
   db: ContextReader,
 ): Promise<MarketingGeneratorContext> {
@@ -212,6 +223,6 @@ export async function readMarketingGeneratorContext(
     brief,
     marketIntel,
     competitors: { tracked, knownIds },
-    llm: { model: parseMarketingLlmSettings(llmSetting?.value)?.model ?? null },
+    llm: llmContext(parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
   };
 }

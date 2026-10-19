@@ -7,7 +7,7 @@ import {
   MARKETING_LLM_CLOSE_REASONS_BY_STATE,
   MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD,
   MARKETING_LLM_OBSERVED_CLOSE_REASONS,
-  MARKETING_LLM_PRICE_PINS,
+  marketingLlmReportedModelMatches,
   canonicalMarketingLlmJson,
   marketingLlmAdapterConfigDigest,
   marketingLlmBudgetSignature,
@@ -48,12 +48,16 @@ const pin = (overrides = {}) => ({
 
 const sha = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
-test("no model is pinned until S3e brings one with its price evidence", () => {
-  assert.deepEqual(MARKETING_LLM_PRICE_PINS, []);
-  assert.deepEqual(resolveMarketingLlmPin(MARKETING_LLM_PRICE_PINS, "anything", new Date()), {
-    ok: false,
-    code: "model_not_pinned",
-  });
+test("with no pin for a model nothing can be reserved against it", () => {
+  assert.deepEqual(resolveMarketingLlmPin([], "anything", new Date()), { ok: false, code: "model_not_pinned" });
+});
+
+test("a reported model is the pinned one when it is the same id or a dated snapshot of it", () => {
+  assert.equal(marketingLlmReportedModelMatches("gpt-5.4-mini", "gpt-5.4-mini"), true);
+  assert.equal(marketingLlmReportedModelMatches("gpt-5.4-mini", "gpt-5.4-mini-2026-03-17"), true);
+  for (const reported of ["gpt-5.4-mini-high", "gpt-5.4", "gpt-5.4-mini-2026-03", "gpt-5.4-mini-2026-03-17x", "gpt-6-luna"]) {
+    assert.equal(marketingLlmReportedModelMatches("gpt-5.4-mini", reported), false, reported);
+  }
 });
 
 test("canonical JSON sorts keys, omits absent values and refuses null and fractions", () => {
@@ -180,7 +184,7 @@ test("a pin is usable only when every field is well formed and inside the row li
   assert.deepEqual(marketingLlmPinProblems(pin()), []);
   assert.ok(marketingLlmPinProblems(pin({ tiers: ["flex", "default"] })).includes("tiers_format"));
   assert.ok(marketingLlmPinProblems(pin({ tiers: ["flex"] })).includes("default_tier_missing"));
-  assert.ok(marketingLlmPinProblems(pin({ expiresAt: "2026-12-31T00:00:00.000Z" })).includes("expiry_not_ninety_days"));
+  assert.ok(marketingLlmPinProblems(pin({ expiresAt: pin().verifiedAt })).includes("expiry_not_after_verified"));
   assert.ok(marketingLlmPinProblems(pin({ source: "http://example.invalid" })).includes("source_format"));
   assert.ok(marketingLlmPinProblems(pin({ contextWindowTokens: 2_000_001 })).includes("context_window_over_row_limit"));
   assert.ok(marketingLlmPinProblems(pin({ maxOutputTokens: 100_001 })).includes("output_cap_over_row_limit"));

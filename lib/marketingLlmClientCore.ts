@@ -34,6 +34,7 @@ import { randomUUID } from "node:crypto";
 import {
   MARKETING_LLM_ADAPTER_PROFILE,
   MARKETING_LLM_ADAPTER_VERSION,
+  MARKETING_LLM_KEY_SCOPED_PROJECT,
   MARKETING_LLM_SERVICE_TIER,
   marketingLlmAdapterConfigDigest,
   marketingLlmBudgetSignature,
@@ -277,7 +278,8 @@ export async function runMarketingLlmCall(
       headers: {
         authorization: `Bearer ${deps.apiKey}`,
         "content-type": "application/json",
-        "openai-project": input.pin.projectId,
+        // A project key already names its project; the header is only for a named one.
+        ...(input.pin.projectId === MARKETING_LLM_KEY_SCOPED_PROJECT ? {} : { "openai-project": input.pin.projectId }),
       },
       body: JSON.stringify(marketingLlmRequestBody(input.pin, input.messages)),
       signal: deps.signal,
