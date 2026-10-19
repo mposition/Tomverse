@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 const read = (path) => readFileSync(join(process.cwd(), path), "utf8");
-const dockerfile = read("docker/product-research-scout-probe.Dockerfile");
+const dockerfile = read("docker/product-research-scout.Dockerfile");
 const instructions = dockerfile
   .split("\n")
   .filter((line) => line.trim() && !line.trimStart().startsWith("#"));
@@ -60,5 +60,27 @@ test("the probe reads one variable, its switch, and the service declares only th
   assert.deepEqual(Object.keys(service.environments), ["dev"]);
   assert.deepEqual([...service.environments.dev], ["PRODUCT_RESEARCH_SCOUT_ENABLED"]);
   assert.equal(service.cronSchedule, null);
-  assert.equal(service.dockerfile.path, "docker/product-research-scout-probe.Dockerfile");
+  assert.equal(service.dockerfile.path, "docker/product-research-scout.Dockerfile");
+});
+
+test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no model key", async () => {
+  const walker = read("scripts/agents/product-research-scout.mjs");
+  const names = [...new Set([...walker.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]))].sort();
+  assert.deepEqual(names, [
+    "PRODUCT_RESEARCH_SCOUT_ENABLED",
+    "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
+    "PRODUCT_RESEARCH_SCOUT_INGEST_URL",
+  ]);
+
+  const { AGENT_RUNNER_SERVICES } = await import("../.railway/agent-runners.ts");
+  const service = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_scout");
+  assert.equal(service.cronSchedule, "0 18 * * *");
+  assert.equal(service.startCommand, "npm run agent:product-research-scout");
+  assert.equal(service.dockerfile.path, "docker/product-research-scout.Dockerfile");
+  assert.deepEqual(Object.keys(service.environments).sort(), ["dev", "production"]);
+  for (const variables of Object.values(service.environments)) assert.deepEqual([...variables].sort(), names);
+  // The image carries what the walker imports.
+  for (const path of ["scripts/agents/product-research-scout.mjs", "scripts/report-product-consistency-core.mjs"]) {
+    assert.ok(dockerfile.includes(`COPY ${path} ${path}`), path);
+  }
 });

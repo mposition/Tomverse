@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { adminFetch } from "@/lib/adminFetch";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
@@ -57,7 +58,7 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
     setRows((current) => ({ ...current, [suggestion.id]: { kind: "busy", action } }));
     let response: Response;
     try {
-      response = await fetch(`/api/admin/product-research/suggestions/${encodeURIComponent(suggestion.id)}`, {
+      response = await adminFetch(`/api/admin/product-research/suggestions/${encodeURIComponent(suggestion.id)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(action === "send" ? { action, requestId: sendRequestId(suggestion.id) } : { action }),
@@ -79,7 +80,43 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
     setRows((current) => ({ ...current, [suggestion.id]: { kind: "done", message } }));
   };
 
-  const status = !initial.enabled ? m.disabled : !initial.modelConfigured ? m.modelOff : null;
+  const [settings, setSettings] = useState(initial.settings);
+  const [draftModel, setDraftModel] = useState(initial.settings.modelId ?? "");
+  const [draftCap, setDraftCap] = useState(String(initial.settings.dailyCallCap));
+  const [saveState, setSaveState] = useState<
+    { readonly kind: "idle" | "saving" | "saved" } | { readonly kind: "failed"; readonly failure: AdminApiFailure }
+  >({ kind: "idle" });
+
+  const save = async () => {
+    const cap = Number.parseInt(draftCap, 10);
+    const next = { modelId: draftModel || null, dailyCallCap: Number.isInteger(cap) && cap >= 0 ? cap : 0 };
+    setSaveState({ kind: "saving" });
+    let response: Response;
+    try {
+      response = await adminFetch("/api/admin/product-research/scout-settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+    } catch {
+      setSaveState({ kind: "failed", failure: adminNetworkFailure(locale) });
+      return;
+    }
+    if (!response.ok) {
+      setSaveState({ kind: "failed", failure: await readAdminApiFailure(response, { fallback: m.failed, locale }) });
+      return;
+    }
+    setSettings(next);
+    setSaveState({ kind: "saved" });
+  };
+
+  const status = !initial.enabled
+    ? m.disabled
+    : !settings.modelId
+      ? m.modelOff
+      : settings.dailyCallCap === 0
+        ? m.capZero
+        : null;
 
   return (
     <section
@@ -92,6 +129,74 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
       <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
         {fill(m.counts, initial.counts)}
       </p>
+
+      <div className="mt-4 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800" data-testid="admin-product-research-scout-settings">
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.settingsHeading}</h3>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          {fill(m.usage, {
+            calls: initial.usageToday.calls,
+            cap: settings.dailyCallCap,
+            input: initial.usageToday.inputTokens.toLocaleString(),
+            output: initial.usageToday.outputTokens.toLocaleString(),
+          })}
+        </p>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="flex min-w-56 flex-col gap-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+            {m.modelLabel}
+            <select
+              className="min-h-11 rounded-lg border border-zinc-300 bg-transparent px-3 text-sm font-normal dark:border-zinc-700"
+              value={draftModel}
+              disabled={!initial.canConfigure || saveState.kind === "saving"}
+              onChange={(event) => setDraftModel(event.target.value)}
+            >
+              <option value="">{m.modelNone}</option>
+              {initial.modelOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name} ({option.provider})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+            {m.capLabel}
+            <input
+              type="number"
+              min={0}
+              max={500}
+              inputMode="numeric"
+              className="min-h-11 rounded-lg border border-zinc-300 bg-transparent px-3 text-sm font-normal dark:border-zinc-700"
+              value={draftCap}
+              disabled={!initial.canConfigure || saveState.kind === "saving"}
+              onChange={(event) => setDraftCap(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className={`${BUTTON} border-zinc-300 text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+            disabled={!initial.canConfigure || saveState.kind === "saving"}
+            onClick={save}
+          >
+            {saveState.kind === "saving" ? m.saving : m.save}
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{m.capHint}</p>
+        {initial.modelOptions.length === 0 ? (
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{m.noImageModels}</p>
+        ) : null}
+        {!initial.canConfigure ? (
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{m.configureNotAllowed}</p>
+        ) : null}
+        {saveState.kind === "saved" ? (
+          <p className="mt-1 text-xs text-zinc-700 dark:text-zinc-300" role="status">{m.saved}</p>
+        ) : null}
+        {saveState.kind === "failed" ? (
+          <AdminApiFailureNotice
+            failure={saveState.failure}
+            returnTo="/admin/engineering-agent?tab=product-research"
+            testId="admin-product-research-scout-settings-failure"
+          />
+        ) : null}
+      </div>
 
       {initial.open.length === 0 ? (
         <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">{m.empty}</p>

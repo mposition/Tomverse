@@ -238,9 +238,10 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 ## 11. 지키는 것 (개선 탐색)
 
 1. **밖으로 나가는 것이 없습니다.** 게시·발송·GitHub 쓰기가 없고, AMUX로 보내는 것은 운영자의 클릭입니다.
-2. **유료 호출은 꺼진 채로 배포합니다.** `PRODUCT_RESEARCH_SCOUT_LLM_MODEL_ID`가 이미지 입력이 되는 enabled 모델을
-   가리키기 전에는 아무것도 쓰지 않습니다. 켜는 것과 하루 상한은 운영자 승인입니다. 호출은 대상당 한 번, `maxRetries: 0`,
-   출력 상한이 있고, 로그에는 토큰 수만 남깁니다.
+2. **유료 호출은 꺼진 채로 배포합니다.** owner가 Admin에서 이미지 입력이 되는 enabled 모델을 고르고 하루 호출 상한(UTC 하루,
+   기본 0)을 정하기 전에는 아무것도 쓰지 않습니다. 두 설정은 비용을 정하므로 owner만, 최근 로그인 상태에서 바꾸며 이전·이후 값이
+   감사 기록에 남습니다. 호출은 대상당 한 번이고, 호출 전에 원장(`ProductResearchScoutLlmCall`)에 한 줄을 써서 상한을 차감하며,
+   `maxRetries: 0`과 출력 상한이 있고, 로그와 원장에는 토큰 수만 남깁니다.
 3. **walker는 제출 secret 하나만 갖습니다.** LLM 키·제품 DB 자격증명은 앱에만 있습니다.
 4. **production 공개 page를 게스트로, GET·HEAD로만 봅니다.** 클릭·입력·form 제출이 없습니다.
 5. **봇 차단·CAPTCHA를 우회하지 않습니다.** 챌린지나 오류 상태의 문서는 renderer에 닿기 전에 그 자리에서 멈춥니다(§12).
@@ -289,14 +290,15 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 
 ## 13. 변수와 켜는 순서
 
-| 변수 | 어디 | 무엇 |
+| 설정 | 어디 | 무엇 |
 |---|---|---|
 | `PRODUCT_RESEARCH_SCOUT_ENABLED` | 앱과 walker | 꺼짐은 unset·빈 문자열. 앱에서 꺼져 있으면 route는 404 |
 | `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET` | 앱과 walker | 32자 이상. Bearer로 비교 |
-| `PRODUCT_RESEARCH_SCOUT_LLM_MODEL_ID` | 앱 | 비어 있으면 모델 단계가 꺼지고 route는 `model_off`로 답함 |
+| `PRODUCT_RESEARCH_SCOUT_INGEST_URL` | walker | 그 환경 앱의 `https://…/api/internal/product-research/scout` |
+| 모델·하루 호출 상한 | Admin › Engineering agent › Product research (`AppSetting` 두 행) | owner가 정함. 모델이 없으면 route는 `model_off`, 상한을 다 쓰면 `daily_cap_reached`로 답함 |
 
-켜는 순서: Railway에서 Chromium sandbox를 한 번 확인(`Product Research Scout Probe`의 `all`) → 앱 변수 → 모델 지정과 하루
-상한(운영자 승인) → walker 스위치.
+켜는 순서: Railway에서 Chromium sandbox를 한 번 확인(`Product Research Scout Probe`의 `all`) → 앱 변수 → Admin에서 모델과 하루
+상한 지정(owner) → walker 스위치. walker는 Railway cron `Product Research Scout`로 매일 18:00 UTC(04:00 AEST)에 돕니다.
 
 ## 14. 보류 — 자격증명이나 유료 생성 승인이 필요한 것
 

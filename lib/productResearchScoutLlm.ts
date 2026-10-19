@@ -4,10 +4,10 @@
  * The same shape as the support-triage step (lib/supportTriageLlm.ts): build
  * the prompt, call once, validate the answer.
  *
- * Off unless PRODUCT_RESEARCH_SCOUT_LLM_MODEL_ID names an enabled runtime model
- * that accepts images; then nothing is spent. Spend is bounded by the walker:
- * one call per subject, about thirty subjects a day, `maxRetries: 0`, the
- * output cap below. Each call logs its token counts, never content.
+ * The model is the one an owner chose in Admin (lib/productResearchScoutSettings.ts);
+ * no model means the step is off and nothing is spent. Each call is taken from
+ * the daily cap before it runs, uses `maxRetries: 0` and the output cap below,
+ * and logs its token counts, never content.
  */
 import "server-only";
 
@@ -15,7 +15,7 @@ import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
 
 import { getActiveAiModel } from "@/lib/activeAiModel";
-import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
+import { getEnabledRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { modelSupportsImageInput } from "@/lib/models";
 import {
   SCOUT_OUTPUT_SCHEMA,
@@ -26,20 +26,32 @@ import {
   type ScoutSuggestion,
 } from "@/lib/productResearchScoutCore";
 
-export const PRODUCT_RESEARCH_SCOUT_LLM_MODEL_ENV = "PRODUCT_RESEARCH_SCOUT_LLM_MODEL_ID";
 export const SCOUT_LLM_MAX_OUTPUT_TOKENS = 2_000;
 export const SCOUT_LLM_TIMEOUT_MS = 90_000;
 
-export type ScoutLlm = {
-  readonly modelId: string;
-  readonly judge: (submission: ScoutSubmission, existingTitles: readonly string[]) => Promise<ScoutSuggestion[] | null>;
+export type ScoutModelOption = { readonly id: string; readonly name: string; readonly provider: string };
+
+/** The models an owner may choose: enabled, in the catalogue, and able to read images. */
+export async function scoutModelOptions(): Promise<ScoutModelOption[]> {
+  return (await getRuntimeModels())
+    .filter((model) => model.enabled && !model.catalogDeleted && modelSupportsImageInput(model))
+    .map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
+}
+
+export type ScoutJudgement = {
+  /** Null when the call failed or its answer could not be read. */
+  readonly suggestions: ScoutSuggestion[] | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
 };
 
-/** The configured model, or null when the scout's model step is off. */
-export const productResearchScoutLlmFromEnv = async (
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<ScoutLlm | null> => {
-  const modelId = env[PRODUCT_RESEARCH_SCOUT_LLM_MODEL_ENV]?.trim();
+export type ScoutLlm = {
+  readonly modelId: string;
+  readonly judge: (submission: ScoutSubmission, existingTitles: readonly string[]) => Promise<ScoutJudgement>;
+};
+
+/** The chosen model, or null when none is chosen or it can no longer read images. */
+export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | null> {
   if (!modelId) return null;
   const model = await getEnabledRuntimeModel(modelId);
   if (!model || !modelSupportsImageInput(model)) {
@@ -77,17 +89,22 @@ export const productResearchScoutLlmFromEnv = async (
         });
         const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
         const suggestions = parseScoutAnswer(generated.output, existingTitles);
+        const judgement = {
+          suggestions,
+          inputTokens: usage?.inputTokens ?? null,
+          outputTokens: usage?.outputTokens ?? null,
+        };
         console.info(
           JSON.stringify({
             event: "product_research_scout_llm_call",
             modelId: model.id,
             subject: submission.subject,
-            inputTokens: usage?.inputTokens ?? null,
-            outputTokens: usage?.outputTokens ?? null,
+            inputTokens: judgement.inputTokens,
+            outputTokens: judgement.outputTokens,
             kept: suggestions.length,
           }),
         );
-        return suggestions;
+        return judgement;
       } catch (error) {
         console.warn(
           JSON.stringify({
@@ -97,8 +114,8 @@ export const productResearchScoutLlmFromEnv = async (
             error: error instanceof Error ? error.name : "unknown",
           }),
         );
-        return null;
+        return { suggestions: null, inputTokens: null, outputTokens: null };
       }
     },
   };
-};
+}

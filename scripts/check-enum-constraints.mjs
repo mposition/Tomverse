@@ -1523,6 +1523,12 @@ const REGISTRY = {
     reason:
       "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
   },
+  ProductResearchScoutLlmCall_outcome_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SCOUT_LLM_CALL_OUTCOMES",
+    reason: "A Scout model call is started before it runs and settled ok or failed after; started rows count toward the daily cap.",
+  },
   ProductResearchSuggestion_kind_check: {
     owner: "list",
     module: "lib/productResearchScoutCore.ts",

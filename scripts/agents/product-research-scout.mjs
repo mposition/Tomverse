@@ -55,6 +55,13 @@ if (!outDir && (!/^https:\/\/[^/\s]+\/api\/internal\/product-research\/scout$/.t
   process.exit(1);
 }
 
+/** The whole run stops here, whatever it is doing; tomorrow covers what was left. */
+const RUN_DEADLINE_MS = 45 * 60_000;
+setTimeout(() => {
+  console.error(JSON.stringify({ event: "product_research_scout_deadline", minutes: RUN_DEADLINE_MS / 60_000 }));
+  process.exit(1);
+}, RUN_DEADLINE_MS).unref();
+
 const outcomes = { sent: 0, stored: 0, modelOff: 0, refused: 0, failed: 0, stopped: 0, skipped: 0 };
 
 async function deliver(subject) {

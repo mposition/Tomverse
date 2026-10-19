@@ -16,7 +16,8 @@ import {
   SCOUT_SUBMISSION_MAX_BYTES,
   admitScoutSubmission,
 } from "@/lib/productResearchScoutCore";
-import { productResearchScoutLlmFromEnv } from "@/lib/productResearchScoutLlm";
+import { scoutLlmFor } from "@/lib/productResearchScoutLlm";
+import { readScoutSettings, settleScoutCall, startScoutCall } from "@/lib/productResearchScoutSettings";
 import { insertSuggestions, recentSuggestionTitles } from "@/lib/productResearchScoutStore";
 
 // The product-research scout's one route (owner direction 2026-10-19,
@@ -25,8 +26,9 @@ import { insertSuggestions, recentSuggestionTitles } from "@/lib/productResearch
 // model what is worth improving, then stores what it says.
 //
 // The switch comes first (off means this path does not exist), then the
-// secret, then the body. The model call is the only paid step and is off until
-// PRODUCT_RESEARCH_SCOUT_LLM_MODEL_ID names a model.
+// secret, then the body. The model call is the only paid step: it is off until
+// an owner chooses a model in Admin, and each call is taken from the daily cap
+// the owner set before it runs.
 
 export async function POST(request: Request) {
   if (!isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV)) return productResearchNotFound();
@@ -45,18 +47,27 @@ export async function POST(request: Request) {
   if (!admission.ok) return productResearchJson({ refused: admission.code }, 400);
   const { submission } = admission;
 
-  const llm = await productResearchScoutLlmFromEnv();
-  if (!llm) return productResearchJson({ judged: false, reason: "model_off" });
-
   try {
+    const settings = await readScoutSettings();
+    const llm = await scoutLlmFor(settings.modelId);
+    if (!llm) return productResearchJson({ judged: false, reason: "model_off" });
+    const callId = await startScoutCall({ subject: submission.subject, modelId: llm.modelId, dailyCallCap: settings.dailyCallCap });
+    if (callId === null) return productResearchJson({ judged: false, reason: "daily_cap_reached" });
+
     const existing = await recentSuggestionTitles(submission.subject);
-    const suggestions = await llm.judge(submission, existing);
-    if (suggestions === null) return productResearchJson({ judged: false, reason: "model_failed" }, 502);
+    const judgement = await llm.judge(submission, existing);
+    await settleScoutCall(callId, {
+      ok: judgement.suggestions !== null,
+      inputTokens: judgement.inputTokens,
+      outputTokens: judgement.outputTokens,
+      kept: judgement.suggestions?.length ?? null,
+    });
+    if (judgement.suggestions === null) return productResearchJson({ judged: false, reason: "model_failed" }, 502);
     const stored = await insertSuggestions({
       kind: submission.kind,
       subject: submission.subject,
       modelId: llm.modelId,
-      suggestions,
+      suggestions: judgement.suggestions,
     });
     return productResearchJson({ judged: true, stored });
   } catch (error) {

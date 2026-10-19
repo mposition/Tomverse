@@ -48,7 +48,8 @@ export default async function AdminEngineeringAgentPage({
         hasAdminPermission(session, "engineering-agent:write"),
       );
   const observations = productResearch ? await readProductResearchConsole() : null;
-  // The Scout's suggestions share the tab and nothing else (§10): their own
+  // The Scout's suggestions share the tab and nothing else
+  // (docs/policy/product-research-agent.md §10): their own
   // read, their own panel, and the only controls on the tab.
   const scout = productResearch ? await readScoutConsole(session) : null;
 

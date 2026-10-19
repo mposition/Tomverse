@@ -299,7 +299,7 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
 `Product Research Scout Probe`는 개선 탐색의 S0 측정 전용 서비스입니다. walker도
 browser 서비스도 아니며, 아무 데도 제출하지 않고 자격증명을 읽지 않습니다.
 Tomverse Agents의 **dev 환경에만** 있고(dev는 `develop`에서 빌드합니다. staging은
-`test`에서 빌드하므로 release 후보가 올라가기 전에는 빌드할 것이 없습니다), Playwright 이미지(`docker/product-research-scout-probe.Dockerfile`)로
+`test`에서 빌드하므로 release 후보가 올라가기 전에는 빌드할 것이 없습니다), Playwright 이미지(`docker/product-research-scout.Dockerfile`)로
 빌드되며, 변수는 스위치 `PRODUCT_RESEARCH_SCOUT_ENABLED` 하나입니다.
 
 한 번 실행에서 세 가지를 잽니다(`npm run agent:product-research-scout-s0-probe -- all`).
@@ -332,8 +332,8 @@ Tomverse Agents의 **dev 환경에만** 있고(dev는 `develop`에서 빌드합�
    | 환경 | Tomverse Agents → **dev** |
    | 이름 | `Product Research Scout Probe` |
    | Source | GitHub `mposition/Tomverse`, branch `develop` |
-   | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout-probe.Dockerfile` |
-   | Build → Watch paths | `docker/product-research-scout-probe.Dockerfile`, `scripts/agents/product-research-scout-s0-probe.mjs`, `lib/productResearchScout*`, `package-lock.json` (이 넷만 — 비워 두면 무관한 develop 병합마다 재배포되고, 스위치가 켜져 있으면 그때마다 production page를 다시 엽니다) |
+   | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout.Dockerfile` |
+   | Build → Watch paths | `docker/product-research-scout.Dockerfile`, `scripts/agents/product-research-scout-s0-probe.mjs`, `lib/productResearchScout*`, `package-lock.json` (이 넷만 — 비워 두면 무관한 develop 병합마다 재배포되고, 스위치가 켜져 있으면 그때마다 production page를 다시 엽니다) |
    | Deploy → Start command | `npm run agent:product-research-scout-s0-probe -- all` |
    | Deploy → Cron schedule | 비움(일정 없음) |
    | Deploy → Restart policy | **Never** |
@@ -353,3 +353,32 @@ Tomverse Agents의 **dev 환경에만** 있고(dev는 `develop`에서 빌드합�
    다시 열기 때문입니다.
 
 빌드 로그의 이미지 크기와 이 JSON의 시간·메모리가 S0 (1)과 (10)의 입력입니다.
+
+## Scout walker (정책 §10, §13)
+
+`Product Research Scout`는 매일 18:00 UTC(04:00 AEST)에 도는 cron입니다. production 공개 page 20개, 생성 파일 4종,
+카탈로그를 모아 그 환경 앱의 `/api/internal/product-research/scout`로 하나씩 보내고, **앱이 모델을 부릅니다.** walker에는
+모델 키도 DB 자격증명도 없습니다. 이미지는 probe와 같은 `docker/product-research-scout.Dockerfile`입니다.
+
+### 켜는 순서 (운영자)
+
+1. **앱 변수**(그 환경의 Tomverse 서비스): `PRODUCT_RESEARCH_SCOUT_ENABLED`(아무 값),
+   `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(32자 이상, 새로 만든 값). 꺼져 있으면 route는 404입니다.
+2. **walker 서비스**(Tomverse Agents의 dev 환경): IaC apply로 만들지 대시보드에서 만들지는 운영자가 정합니다
+   (`docs/ops/dev-test-lanes.md`는 서비스 생성이 보이는 plan을 apply하지 말라고 적습니다). 대시보드라면 위 probe 표와 같고
+   다음만 다릅니다.
+
+   | 설정 | 값 |
+   |---|---|
+   | 이름 | `Product Research Scout` |
+   | Deploy → Start command | `npm run agent:product-research-scout` |
+   | Deploy → Cron schedule | `0 18 * * *` |
+   | Build → Watch paths | `docker/product-research-scout.Dockerfile`, `scripts/agents/product-research-scout.mjs`, `scripts/report-product-consistency-core.mjs`, `lib/productResearchScout*`, `lib/generatedArtifact*`, `package-lock.json` |
+   | Variables | `PRODUCT_RESEARCH_SCOUT_ENABLED`, `PRODUCT_RESEARCH_SCOUT_INGEST_URL`(그 환경 앱의 `https://…/api/internal/product-research/scout`), `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(1과 같은 값). 이 셋 말고는 없음 |
+
+3. **Admin에서 모델과 하루 상한**: Admin › Engineering agent › Product research의 "모델과 하루 상한"에서 이미지를 읽는
+   모델을 고르고 하루 호출 수를 정합니다(owner, 최근 로그인). 하루 약 25회면 한 번 실행을 다 판정합니다. 0이면 비용이 들지
+   않고, 모델이 없으면 walker는 돌아도 판정하지 않습니다.
+
+실행 결과는 walker 로그의 마지막 줄 `product_research_scout_run`(보낸 수, 저장한 제안 수, `model_off`·상한 도달·거절·실패
+수)과 Admin의 오늘 사용량에서 봅니다. 한 실행은 45분에 강제로 끝나고, 결과를 모르는 전송은 다시 보내지 않습니다.

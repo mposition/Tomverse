@@ -43,3 +43,24 @@ CREATE INDEX "ProductResearchSuggestion_status_createdAt_idx"
     ON "ProductResearchSuggestion"("status", "createdAt");
 CREATE INDEX "ProductResearchSuggestion_subject_createdAt_idx"
     ON "ProductResearchSuggestion"("subject", "createdAt");
+
+-- One row per Scout model call, written before the call and settled after it,
+-- so the daily cap the operator sets in Admin counts calls in flight. Token
+-- counts only; no content.
+CREATE TABLE "ProductResearchScoutLlmCall" (
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "subject" TEXT NOT NULL,
+    "modelId" TEXT NOT NULL,
+    "outcome" TEXT NOT NULL DEFAULT 'started',
+    "inputTokens" INTEGER,
+    "outputTokens" INTEGER,
+    "kept" INTEGER,
+
+    CONSTRAINT "ProductResearchScoutLlmCall_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "ProductResearchScoutLlmCall_outcome_check"
+        CHECK ("outcome" IN ('started', 'ok', 'failed'))
+);
+
+CREATE INDEX "ProductResearchScoutLlmCall_createdAt_idx"
+    ON "ProductResearchScoutLlmCall"("createdAt");

@@ -36,6 +36,12 @@ export type SuggestionSeverity = (typeof SUGGESTION_SEVERITIES)[number];
 export const SUGGESTION_STATUSES = ["open", "dismissed", "sent"] as const;
 export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
 
+/** A model call is recorded started before it runs and settled after. */
+export const SCOUT_LLM_CALL_OUTCOMES = ["started", "ok", "failed"] as const;
+
+/** Bounds for the daily model-call cap an owner sets in Admin. 0 means no calls. */
+export const SCOUT_DAILY_CALL_CAP_MAX = 500;
+
 export const SCOUT_SUBJECT_KINDS = ["page", "file", "catalogue"] as const;
 export type ScoutSubjectKind = (typeof SCOUT_SUBJECT_KINDS)[number];
 
