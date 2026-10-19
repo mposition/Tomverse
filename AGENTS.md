@@ -35,6 +35,28 @@ Follow required approvals, policy gates, and independent review for the changes 
 Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress. For an explicitly documentation-only or review-only request, deliver that requested artifact without inventing a code task.
 <!-- /development-execution -->
 
+# 먼저 만들고, 되돌릴 수 없는 것에만 게이트를 둡니다
+
+운영자 지시(2026-10-19). Tomverse는 매일 새로운 아이디어가 나오는 스타트업 플랫폼이고 사용자는 아직 거의 없습니다. 매일 새 아이디어를 **동작하는 기능으로 먼저** 보여 주는 것이 일입니다. 정책 개정이 개발 시간의 절반 이상을 쓰는 구조였고, 그것을 끝냅니다. 기본 자세는 공격적인 개발(Frontier Pioneer)입니다.
+
+- **사람의 승인이 필요한 것은 되돌릴 수 없는 일뿐입니다.**
+  - 실제 돈이 나가는 것(유료 호출 활성화, 상한 인상)
+  - 외부로 나가는 것(게시, 발송)
+  - 사용자 데이터 삭제
+  - 자격증명과 보안 경계
+  - production 병합과 배포
+- 그 밖의 설계 결정은 운영자가 대화에서 정하면 끝입니다: 표, 데이터 형식, 상한값, 수집 방식, 서비스 구성, 에이전트의 내부 설계. 구현하고, 결정은 commit이나 PR에 한 줄로 남깁니다. **이런 결정에 정책 개정, 정책 버전 증가, 계획 문서, 사전 승인 기록을 요구하지 않습니다.**
+- 정책 문서나 이 파일이 구현 세부(표 개수, 고정 페이지, 목록, 상한)를 적고 있는데 그 세부가 바뀌었다면, 그 서술이 낡은 것입니다. 코드와 같은 PR에서 서술을 고치되 별도 승인이나 버전은 필요 없습니다.
+- 위험한 기능은 막지 말고 스위치 뒤에 둡니다. 기본값을 꺼 두고 먼저 배포합니다.
+- **LLM이 할 수 있는 일은 LLM 호출로 풉니다(운영자 지시 2026-10-19).** Tomverse는 AI 플랫폼이고, LLM 호출로 개발 범위를 줄이는 것이 나아갈 방향입니다.
+  - 웹 검색, 추출, 분류, 문안, 조사, 매칭을 위해 crawler·parser·휴리스틱을 직접 짜지 않습니다.
+  - LLM 호출이 대신하는 기존의 손으로 짠 경로는 지웁니다. 코드 줄 수를 줄이는 것 자체가 목표입니다.
+  - 결정적 코드는 되돌릴 수 없는 경계에만 둡니다: 비용 상한과 원장, 외부 게시 전 사람 승인, 삭제, 자격증명·보안.
+  - 그 경계에서는 LLM 출력에 값싼 확인 하나를 거칩니다(예: 인용 URL이 승인된 host인지).
+  - 에이전트를 설계하거나 고칠 때도 같은 기준으로 판단합니다.
+- 먼저 만든다고 해서 책임을 넘기는 것이 아닙니다. 시험과, 완성된 diff에 대한 독립 검토 한 번은 그대로입니다.
+- 이 절과 다른 절이 충돌하면 이 절이 우선합니다. 이미 있는 계약 중 되돌릴 수 없는 것(과금, 크레딧, 동의, 삭제, release blocker인 UI 계약)을 지키는 조건은 그대로 둡니다.
+
 # 의미 있는 개발 사이클의 완료 보고
 
 작은 오타·단순 문구 수정 같은 소규모 작업을 제외하고, 의미 있는 규모의 Chat
@@ -1239,8 +1261,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **마케팅 승인은 `AdminActionApproval`을 쓰지 않습니다.** 시스템 초안을 사람
   1명이 승인하는 별도 계약입니다: docs/policy/marketing-automation.md §6.
 - **Instagram·TikTok은 자율 모드로 졸업하지 않습니다**(정책 문서의 O15).
-- 구현 단계와 각 단계의 대상 경로는 docs/policy/marketing-automation.md §14를 따르며, 새 경로는 그 단계의 PR이
-  이 절에 추가합니다.
+- 구현 단계는 docs/policy/marketing-automation.md §14가 대략의 순서입니다. 아래 경로 목록은 안내이고, 새 기능이 여기에
+  항목을 추가할 의무는 없습니다.
 - **S2a(읽기)**: `app/(site)/(application)/admin/marketing/**`,
   `app/api/admin/marketing/route.ts`, `lib/marketingConsoleRead.ts`,
   `lib/marketingConsoleSections.ts`, `components/admin/AdminMarketingPanel.tsx`,
@@ -1542,8 +1564,8 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   발급하지도 소비하지도 않습니다.
 - **판정 코드는 런타임 내장 모듈만 import합니다.** 초안·게시 서비스가 clone한
   트리의 의존성을 설치·실행하지 않고 그 코드를 불러 쓰기 때문입니다.
-- 구현 단계와 각 단계의 대상 경로는 docs/policy/engineering-agent.md §14를 따르며, 새 경로는 그 단계의 PR이
-  이 절에 추가합니다.
+- 구현 단계는 docs/policy/engineering-agent.md §14가 대략의 순서입니다. 아래 경로 목록은 안내이고, 새 기능이 여기에
+  항목을 추가할 의무는 없습니다.
 - **P1a(결정적 핵심)**: `lib/engineeringAgentCore.ts`,
   `tests/engineeringAgentCore.test.mjs`.
 - **P1b(소유권 manifest와 tier)**: `lib/agentAuthorityFiles.ts`, `lib/agentPushPolicy.ts`,
@@ -1596,11 +1618,11 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   않습니다. 자율 경로를 만들지 않습니다 — 그것은 v2 정책과 공통 기반 원칙 3의 별도 개정입니다.
 - **라우팅은 `lib/amux/decisionMakerCore.ts`의 `routeDmQuestion()` 한 곳입니다.** 모든 검사를
   실행하고 모든 거절 사유를 남기며, 결과는 `dm_proposal`과 `operator` 둘뿐입니다.
-- **용어 목록·비밀 경로 목록·경로 문법·출력 상한을 바꾸면 정책 버전이 바뀝니다.** 테스트의
-  고정값이 그 목록의 기준입니다.
+- 용어 목록·비밀 경로 목록·경로 문법·출력 상한은 테스트의 고정값이 기준입니다. 바꿀 때는 코드와 테스트를
+  함께 고치며, 정책 버전 개정은 필요 없습니다.
 - DM은 승인 게이트에서 사람으로 인정되지 않고, 운영자가 확정한 답도 승인 계약의 승인이 아닙니다.
-- 구현 단계와 각 단계의 대상 경로는 docs/policy/amux-decision-maker.md §12를 따르며, 새 경로는 그
-  단계의 PR이 이 절에 추가합니다.
+- 구현 단계는 docs/policy/amux-decision-maker.md §12가 대략의 순서입니다. 아래 경로 목록은 안내이고, 새 기능이
+  여기에 항목을 추가할 의무는 없습니다.
 - **S0(계정 격리 실측)**: `scripts/amux-decision-maker-s0/measure-isolation`,
   `scripts/amux-decision-maker-s0/isolation.conf.example`, `docs/ops/amux/decision-maker-s0.md`,
   `tests/amuxDecisionMakerS0Isolation.test.mjs`. 운영자가 Ubuntu runner에서 root로 실행하며 유료 turn이 없습니다
