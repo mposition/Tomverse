@@ -1966,13 +1966,12 @@ function MarketingRow({
   return (
     <>
       <RowHeading title={String(row.kind)} detail={String(row.sourceVersion)} />
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <Field
           label={m.colPeriod}
           value={`${stamp(row.periodStart) ?? m.none} - ${stamp(row.periodEnd) ?? m.none}`}
         />
         <Field label={m.colCreated} value={stamp(row.createdAt) ?? m.none} />
-        <Field label={m.colSource} value={String(row.sourceVersion)} />
       </div>
     </>
   );
