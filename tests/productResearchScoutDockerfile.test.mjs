@@ -50,6 +50,25 @@ test("neither the image, the probe nor the walker turns the Chromium sandbox off
   }
 });
 
+test("a failed launch reports the host's sandbox conditions as short values only", async () => {
+  const { sandboxHost } = await import("../lib/productResearchScoutBrowser.mjs");
+  const host = sandboxHost();
+  assert.deepEqual(Object.keys(host), [
+    "uid",
+    "maxUserNamespaces",
+    "unprivilegedUsernsClone",
+    "apparmorRestrictsUserns",
+    "noNewPrivs",
+    "seccomp",
+    "capBnd",
+  ]);
+  for (const [key, value] of Object.entries(host)) {
+    assert.ok(value === null || typeof value === "number" || (typeof value === "string" && value.length <= 32), key);
+  }
+  const walker = read("scripts/agents/product-research-scout.mjs");
+  assert.match(walker, /product_research_scout_browser_launch_failed", \.\.\.launchFailure\(error\), host: sandboxHost\(\)/);
+});
+
 test("the probe is a local tool: it reads only its switch, and no Railway service runs it", async () => {
   const probe = read("scripts/agents/product-research-scout-s0-probe.mjs");
   const names = [...probe.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]);
