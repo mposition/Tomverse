@@ -4,8 +4,10 @@ import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
 import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
+import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
@@ -40,7 +42,10 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
       {tab.id === "billing-finance-ops" ? (
         <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={await readBillingFinanceOpsConsole(canWrite)} />
       ) : (
-        <AdminAgentDigestsPanel key={tab.id} initial={await readAgentDigestConsole(canWrite)} />
+        <>
+          <AdminAgentDigestsPanel key={tab.id} initial={await readAgentDigestConsole(canWrite)} />
+          <QaReleaseMainCandidatesSection data={await readQaReleaseMainCandidates()} />
+        </>
       )}
     </div>
   );

@@ -8,7 +8,7 @@ const round = (overrides) =>
   decideQaReleaseLaneRound({
     latched: false,
     attemptOpen: false,
-    stagingDeployments: [{ status: "SUCCESS" }, { status: "SLEEPING" }],
+    developDeployments: [{ status: "SUCCESS" }, { status: "SLEEPING" }],
     selection: { pick: PICK, skipped: [] },
     ...overrides,
   });
@@ -25,15 +25,15 @@ test("a latch, an open attempt or unread lane state stops the round, in that ord
   assert.deepEqual(round({ latched: true, attemptOpen: null }), { action: "stop", reason: "state_unknown" });
 });
 
-test("any staging deployment in flight holds; unread deployments stop", () => {
+test("any dev deployment in flight holds; unread deployments stop", () => {
   for (const status of ["WAITING", "NEEDS_APPROVAL", "QUEUED", "INITIALIZING", "BUILDING", "DEPLOYING"]) {
     assert.deepEqual(
-      round({ stagingDeployments: [{ status: "SUCCESS" }, { status }] }),
+      round({ developDeployments: [{ status: "SUCCESS" }, { status }] }),
       { action: "hold", reason: "deployment_in_flight", inFlight: 1 },
       status,
     );
   }
-  assert.deepEqual(round({ stagingDeployments: null }), { action: "stop", reason: "deployments_unknown" });
+  assert.deepEqual(round({ developDeployments: null }), { action: "stop", reason: "deployments_unknown" });
 });
 
 test("no candidate is idle, not a stop", () => {
