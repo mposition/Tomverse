@@ -79,6 +79,6 @@ test("the AMUX idea text names the subject, the evidence and the change", () => 
   const text = suggestionIdeaText({ subject: "pricing.en", ...good });
   assert.equal(
     text,
-    "[개선 제안] 모바일 가격표 잘림\n대상: pricing.en · 영역: mobile · 심각도: high\n근거: 320px에서 표 오른쪽이 잘림\n제안: 표를 세로 카드로 바꿈",
+    "[Scout 제안] 모바일 가격표 잘림\n대상: pricing.en · 영역: mobile · 심각도: high\n근거: 320px에서 표 오른쪽이 잘림\n제안: 표를 세로 카드로 바꿈",
   );
 });

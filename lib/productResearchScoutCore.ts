@@ -207,7 +207,7 @@ export function suggestionIdeaText(input: {
   readonly suggestion: string;
 }): string {
   return [
-    `[개선 제안] ${input.title}`,
+    `[Scout 제안] ${input.title}`,
     `대상: ${input.subject} · 영역: ${input.area} · 심각도: ${input.severity}`,
     `근거: ${input.evidence}`,
     `제안: ${input.suggestion}`,
