@@ -4,7 +4,6 @@ const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const REPO = /^[A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100}$/;
 const validRepository = (value: string) => REPO.test(value) &&
   value.split("/").every((part) => part !== "." && part !== "..");
-const MAX_RESPONSE_BYTES = 256 * 1024;
 const READ_TIMEOUT_MS = 8_000;
 
 export class AmuxSessionReferencePinningError extends Error {
@@ -27,32 +26,13 @@ async function githubJson(path: string, token: string,
   if (response.status !== 200 || response.url && response.url !== endpoint ||
       response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") throw new AmuxSessionReferencePinningError();
-  const reader = response.body?.getReader();
-  if (!reader) throw new AmuxSessionReferencePinningError();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!(value instanceof Uint8Array)) throw new AmuxSessionReferencePinningError();
-      size += value.byteLength;
-      if (size > MAX_RESPONSE_BYTES) throw new AmuxSessionReferencePinningError();
-      chunks.push(value);
-    }
-    const body = Buffer.concat(chunks, size);
-    let parsed: unknown;
-    try { parsed = JSON.parse(body.toString("utf8")); }
-    finally { body.fill(0); }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new AmuxSessionReferencePinningError();
-    }
-    return parsed as Record<string, unknown>;
-  } finally {
-    for (const chunk of chunks) chunk.fill(0);
-    try { await reader.cancel(); } catch { /* No source data in diagnostics. */ }
-    reader.releaseLock();
+  // No size cap: a commit response carries its diff, and a large merge on the
+  // default branch must not refuse the idea. The read timeout still bounds it.
+  const parsed: unknown = await response.json();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new AmuxSessionReferencePinningError();
   }
+  return parsed as Record<string, unknown>;
 }
 
 /** Capture each allowed reference before the intake transaction. Only fixed
