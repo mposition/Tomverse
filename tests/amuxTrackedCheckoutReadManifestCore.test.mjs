@@ -6,10 +6,32 @@ import { inspectAmuxTrackedCheckoutReadManifest,
   parseAmuxTrackedCheckoutReadManifest } from
   "../lib/amux/ideaTrackedCheckoutReadManifestCore.ts";
 import { openAmuxContent, sealAmuxContent } from "../lib/amux/ideaCrypto.ts";
+import { AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+  AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE,
+  AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET,
+  auditRowActorKind, systemAuditActionAllowed } from
+  "../lib/adminAuditSystemActors.ts";
 
 const valid = () => ({ manifestId: randomUUID(), ideaId: randomUUID(),
   referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
   observed: { kind: "verified_success", readFiles: ["src/b.ts", "README.md"] } });
+
+test("Max manifest intent claim binding has one scoped audit action", () => {
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+    AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+    "AmuxIdeaSubmission"), false);
+  assert.equal(auditRowActorKind({
+    action: AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+    targetType: AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET,
+    actorUserId: null, actorEmail: null, ipAddress: null, userAgent: null,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE },
+  }), "system");
+});
 
 test("read manifest canonicalizes verified paths without an arbitrary file limit", () => {
   const inspected = inspectAmuxTrackedCheckoutReadManifest(valid());

@@ -128,3 +128,68 @@ export async function withAmuxTrackedCheckout<T>(
     await rm(checkout.directory, { recursive: true, force: true });
   }
 }
+
+export type AmuxPreparedTrackedCheckouts = {
+  directory: string;
+  files: string[];
+  references: Array<{ referenceOrdinal: number; commitSha: string;
+    excludedCount: number; excludedPathDigest: string;
+    excludedReasons: AmuxPreparedTrackedCheckout["excludedReasons"] }>;
+};
+
+/** Stage each immutable reference under its own directory in one scanned,
+ * read-only CLI mount. No partial set is exposed to the model. */
+export async function withAmuxTrackedCheckouts<T>(input: {
+  references: Array<{ referenceOrdinal: number; repositoryPath: string;
+    commitSha: string }>;
+  digestSecret: string;
+  signal?: AbortSignal;
+}, run: (checkout: AmuxPreparedTrackedCheckouts) => Promise<T>): Promise<T> {
+  if (!Array.isArray(input?.references) || input.references.length === 0 ||
+      input.references.some((reference, index) =>
+        reference?.referenceOrdinal !== index ||
+        !Number.isSafeInteger(reference.referenceOrdinal) ||
+        reference.referenceOrdinal > 2_147_483_647)) {
+    throw new AmuxTrackedCheckoutManifestError();
+  }
+  const directory = await mkdtemp(join(process.platform === "linux" ? "/tmp" : tmpdir(),
+    "amux-v19-checkout-"));
+  const files: string[] = [];
+  const references: AmuxPreparedTrackedCheckouts["references"] = [];
+  try {
+    for (const reference of input.references) {
+      if (input.signal?.aborted) throw new AmuxTrackedCheckoutManifestError();
+      const staged = await materializeAmuxTrackedCheckout({
+        repositoryPath: reference.repositoryPath,
+        commitSha: reference.commitSha,
+        digestSecret: input.digestSecret, signal: input.signal,
+      });
+      try {
+        const prefix = `reference-${reference.referenceOrdinal}`;
+        const targetRoot = join(directory, prefix);
+        await mkdir(targetRoot, { mode: 0o700 });
+        for (const path of staged.files) {
+          if (input.signal?.aborted) throw new AmuxTrackedCheckoutManifestError();
+          const destination = join(targetRoot, path);
+          await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+          await link(join(staged.directory, path), destination);
+          files.push(`${prefix}/${path}`);
+        }
+        references.push({ referenceOrdinal: reference.referenceOrdinal,
+          commitSha: reference.commitSha,
+          excludedCount: staged.excludedCount,
+          excludedPathDigest: staged.excludedPathDigest,
+          excludedReasons: staged.excludedReasons });
+      } finally {
+        await rm(staged.directory, { recursive: true, force: true });
+      }
+    }
+    if (input.signal?.aborted) throw new AmuxTrackedCheckoutManifestError();
+    const checkout: AmuxPreparedTrackedCheckouts = {
+      directory, files, references,
+    };
+    return await run(checkout);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}

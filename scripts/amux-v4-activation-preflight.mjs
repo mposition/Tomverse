@@ -15,6 +15,7 @@ export const CONTENT_COLUMNS = Object.freeze([
   ["AmuxIdeaAnalysisChunk", "freeformCiphertext", "freeformKeyId"],
   ["AmuxIdeaDraftUnit", "bodyCiphertext", "bodyKeyId"],
   ["AmuxIdeaTrackedCheckoutReadManifest", "ciphertext", "keyId"],
+  ["AmuxIdeaSessionAnalysisResult", "ciphertext", "keyId"],
   ["AmuxPortfolioNode", "titleCiphertext", "contentKeyId"],
   ["AmuxPortfolioNode", "descriptionCiphertext", "contentKeyId"],
   ["AmuxWorkItem", "v4TitleCiphertext", "v4TitleKeyId"],

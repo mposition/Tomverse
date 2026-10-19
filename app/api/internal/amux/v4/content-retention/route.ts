@@ -23,6 +23,10 @@ import { purgeDueAmuxV22TaskResults } from
   "@/lib/amux/v22TaskResultRetention";
 import { purgeDueAmuxOrphanReadManifestKeys } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestOrphanRetention";
+import { purgeDueAmuxSessionAnalysisResults } from
+  "@/lib/amux/ideaSessionAnalysisResultRetention";
+import { purgeDueAmuxOrphanSessionResultKeys } from
+  "@/lib/amux/ideaSessionAnalysisResultOrphanRetention";
 
 /** The isolated retention trigger has no product DB credential. */
 export async function POST(request: Request): Promise<Response> {
@@ -36,6 +40,8 @@ export async function POST(request: Request): Promise<Response> {
     process.env[AMUX_V4_CONTENT_RETENTION_ENV]);
   const v19Enabled = amuxV19ReadManifestRetentionEnabled(
     process.env[AMUX_V19_READ_MANIFEST_RETENTION_ENV]);
+  const v19ResultEnabled = v19Enabled &&
+    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION === "enabled";
   if (!v4Enabled && !v19Enabled) {
     return amuxJsonNoStore({ available: false,
       reason: "content_retention_disabled" }, 409);
@@ -67,8 +73,12 @@ export async function POST(request: Request): Promise<Response> {
       ? { manifests: await purgeDueAmuxReadManifests(),
         orphanKeys: await purgeDueAmuxOrphanReadManifestKeys() }
       : { available: false, reason: "v19_read_manifest_retention_disabled" };
+    const sessionResults = v19ResultEnabled
+      ? { results: await purgeDueAmuxSessionAnalysisResults(),
+        orphanKeys: await purgeDueAmuxOrphanSessionResultKeys() }
+      : { available: false, reason: "v19_session_result_retention_disabled" };
     return amuxJsonNoStore({ holdNotices, cancellation, raw, analysis,
-      taskResults, readManifests });
+      taskResults, readManifests, sessionResults });
   } catch {
     // The worker stops on unknown DB or S3 outcome. The response carries no
     // content, secret, object key, or suggestion to blind-retry this tick.

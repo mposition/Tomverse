@@ -62,6 +62,31 @@ test("refuses to certify search or listing from incomplete file events", () => {
   }
 });
 
+test("complete file-open trace certifies Grep/Glob and must include successful Reads", () => {
+  for (const name of ["Grep", "Glob"]) {
+    const observer = make();
+    observe(observer, use("tool_1", name, { pattern: "needle" }));
+    observe(observer, reply("tool_1"));
+    observe(observer, { type: "result", subtype: "success", is_error: false });
+    assert.deepEqual(observer.finish({ openTrace: { kind: "complete",
+      files: ["src/b.ts", "src/a.ts"] } }), {
+      kind: "complete", files: ["src/a.ts", "src/b.ts"],
+    });
+  }
+  const missing = make();
+  observe(missing, use("read_1", "Read", { file_path: file }));
+  observe(missing, reply("read_1"));
+  observe(missing, { type: "result", subtype: "success", is_error: false });
+  assert.deepEqual(missing.finish({ openTrace: { kind: "complete", files: [] } }),
+    { kind: "unverified" });
+  const invalid = make();
+  observe(invalid, use("tool_1", "Glob", { pattern: "*" }));
+  observe(invalid, reply("tool_1"));
+  observe(invalid, { type: "result", subtype: "success", is_error: false });
+  assert.deepEqual(invalid.finish({ openTrace: { kind: "unverified" } }),
+    { kind: "unverified" });
+});
+
 test("rejects unauthorized paths, tools, unmatched results and missing final result", () => {
   const cases = [
     [use("x", "Read", { file_path: `${directory}/src/../secrets.txt` })],
@@ -75,16 +100,34 @@ test("rejects unauthorized paths, tools, unmatched results and missing final res
     [use("x", "Read", { file_path: file }), reply("x"), reply("x")],
     [use("x", "Read", { file_path: file }),
       { type: "user", message: { content: [{ type: "tool_result",
-        tool_use_id: "x", content: "bytes" }] } }],
+        tool_use_id: "x", is_error: "false", content: "bytes" }] } }],
     [{ type: "assistant", message: { content: [{ type: "server_tool_use" }] } }],
   ];
   for (const events of cases) {
     const observer = make();
     for (const event of events) observe(observer, event);
     assert.deepEqual(complete(observer), { kind: "unverified" });
+    assert.equal(typeof observer.rejectReason(), "string");
   }
   const noFinal = make();
   assert.deepEqual(noFinal.finish(), { kind: "unverified" });
+  assert.equal(noFinal.rejectReason(), "result_missing");
+});
+
+test("a successful tool result without is_error counts, as the pinned CLI writes it", () => {
+  // CLI 2.1.288 builds `{tool_use_id, type: "tool_result", content}` for a
+  // successful tool and adds is_error only on failure.
+  const observer = make();
+  observe(observer, use("read_1", "Read", { file_path: file }));
+  observe(observer, { type: "user", message: { role: "user", content: [
+    { type: "tool_result", tool_use_id: "read_1", content: "untrusted bytes" }] } });
+  assert.deepEqual(complete(observer), { kind: "complete", files: ["src/a.ts"] });
+  assert.equal(observer.rejectReason(), null);
+  const failed = make();
+  observe(failed, use("read_1", "Read", { file_path: file }));
+  observe(failed, reply("read_1", true));
+  assert.deepEqual(complete(failed), { kind: "unverified" });
+  assert.equal(failed.rejectReason(), "tool_result_error");
 });
 
 test("malformed and trailing events invalidate a previously complete manifest", () => {
@@ -197,6 +240,18 @@ test("analysis stream returns result, measured usage and exact successful Read m
   });
 });
 
+test("analysis stream accepts Grep only with a complete checkout open trace", () => {
+  const events = [analysisInit, use("grep_1", "Grep", { pattern: "x" }),
+    reply("grep_1"), analysisResult];
+  assert.deepEqual(analyze(events, { openTrace: { kind: "complete",
+    files: ["src/a.ts"] } }), {
+    kind: "verified_success", rawModelOutput: analysisResult.result,
+    readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2,
+  });
+  assert.deepEqual(analyze(events, { openTrace: { kind: "unverified" } }),
+    { kind: "outcome_unknown" });
+});
+
 test("analysis stream accepts only the pinned inert Claude metadata shape", () => {
   const init = { ...analysisInit,
     plugins: ["a", "b"].map((name) => ({ path: `bundled/${name}`,
@@ -207,6 +262,70 @@ test("analysis stream accepts only the pinned inert Claude metadata shape", () =
   assert.deepEqual(analyze([{ ...init, plugins: [
     { ...init.plugins[0], path: "../outside" }, init.plugins[1],
   ] }, ...events.slice(1)]), { kind: "outcome_unknown" });
+});
+
+test("analysis stream accepts the descriptors the pinned CLI 2.1.288 reports, and no others", () => {
+  // Measured on the v19 runner without credentials (2026-10-19).
+  const plugin = (name) => ({ name, path: "builtin", source: `${name}@builtin` });
+  const init = { ...analysisInit, apiKeySource: "none", model: modelId,
+    plugins: ["cc-plugin-agents-md", "cc-plugin-telemetry",
+      "cc-plugin-plugin-authoring"].map(plugin),
+    agents: ["claude", "Explore", "general-purpose", "Plan"] };
+  const rest = [use("read_1", "Read", { file_path: file }),
+    { type: "user", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "read_1", content: "untrusted bytes" }] } },
+    analysisResult];
+  assert.equal(analyze([init, ...rest]).kind, "verified_success");
+  const refused = (changed) => {
+    const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
+      directory, files: ["src/a.ts"], modelId });
+    observer.observeChunk(Buffer.from([changed, ...rest].map(JSON.stringify).join("\n")));
+    assert.deepEqual(observer.finish({ exitCode: 0, stdoutComplete: true }),
+      { kind: "outcome_unknown" });
+    return observer.rejectReason().code;
+  };
+  assert.equal(refused({ ...init, plugins: [...init.plugins, plugin("cc-plugin-extra")] }),
+    "init_descriptors");
+  assert.equal(refused({ ...init, plugins: [plugin("cc-plugin-agents-md"),
+    plugin("cc-plugin-telemetry"), { ...plugin("cc-plugin-plugin-authoring"), path: "/home/x" }] }),
+  "init_descriptors");
+  assert.equal(refused({ ...init, agents: [...init.agents.slice(0, 3), "Writer"] }),
+    "init_descriptors");
+  assert.equal(refused({ ...init, tools: ["Read", "Grep", "Bash"] }), "init_tools");
+});
+
+test("analysis stream names an unexpected system event by the CLI's own vocabulary only", () => {
+  const rest = [use("read_1", "Read", { file_path: file }), reply("read_1"),
+    analysisResult];
+  const code = (subtype) => {
+    const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
+      directory, files: ["src/a.ts"], modelId });
+    observer.observeChunk(Buffer.from([analysisInit, { type: "system", subtype },
+      ...rest].map(JSON.stringify).join("\n")));
+    assert.deepEqual(observer.finish({ exitCode: 0, stdoutComplete: true }),
+      { kind: "outcome_unknown" });
+    return observer.rejectReason().code;
+  };
+  assert.equal(code("hook_started"), "system_event_hook_started");
+  assert.equal(code("private_customer_identifier"), "system_event_other");
+});
+
+test("analysis stream names the usage check that refused, with model names only", () => {
+  const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId });
+  const twoModels = { ...analysisResult, modelUsage: {
+    ...analysisResult.modelUsage,
+    "claude-haiku-4-5-20251001": { inputTokens: 5, outputTokens: 1,
+      cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } } };
+  observer.observeChunk(Buffer.from([analysisInit,
+    use("read_1", "Read", { file_path: file }), reply("read_1"), twoModels]
+    .map(JSON.stringify).join("\n")));
+  assert.deepEqual(observer.finish({ exitCode: 0, stdoutComplete: true }),
+    { kind: "outcome_unknown" });
+  const reason = observer.rejectReason();
+  assert.equal(reason.code, "usage_model_count");
+  assert.deepEqual([...reason.usageModels].sort(),
+    ["claude-haiku-4-5-20251001", modelId]);
 });
 
 test("analysis stream refuses incomplete file enumeration and untrusted result envelopes", () => {
@@ -245,4 +364,32 @@ test("analysis stream invalidates a result if bytes arrive after finish", () => 
     "verified_success");
   observer.observeChunk(Buffer.from("late"));
   assert.deepEqual(observer.finish(), { kind: "outcome_unknown" });
+});
+
+test("a content-free ui_invalidate event is accepted; one paid run names every failing check", () => {
+  // Measured in the sixth Max S0 call (CLI 2.1.288).
+  const rest = [use("read_1", "Read", { file_path: file }), reply("read_1")];
+  assert.equal(analyze([analysisInit, { type: "system", subtype: "ui_invalidate" },
+    ...rest, analysisResult]).kind, "verified_success");
+  const capability = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId });
+  capability.observeChunk(Buffer.from([analysisInit,
+    { type: "system", subtype: "ui_invalidate", tools: ["Bash"] }, ...rest, analysisResult]
+    .map(JSON.stringify).join("\n")));
+  assert.deepEqual(capability.finish({ exitCode: 0, stdoutComplete: true }),
+    { kind: "outcome_unknown" });
+  assert.equal(capability.rejectReason().code, "system_event_ui_invalidate");
+  const several = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId });
+  several.observeChunk(Buffer.from([analysisInit, { type: "system", subtype: "hook_started" },
+    use("grep_1", "Grep", { pattern: "x" }), reply("grep_1"),
+    { ...analysisResult, modelUsage: { ...analysisResult.modelUsage,
+      "claude-haiku-4-5-20251001": { inputTokens: 1, outputTokens: 1 } } }]
+    .map(JSON.stringify).join("\n")));
+  assert.deepEqual(several.finish({ exitCode: 0, stdoutComplete: true,
+    openTrace: { kind: "unverified", reason: "undecoded_open" } }), { kind: "outcome_unknown" });
+  const reason = several.rejectReason();
+  assert.equal(reason.code, "system_event_hook_started");
+  assert.ok(reason.also.includes("stream_trace_unverified"));
+  assert.ok(reason.also.includes("usage_model_count") || reason.also.includes("usage_incomplete"));
 });

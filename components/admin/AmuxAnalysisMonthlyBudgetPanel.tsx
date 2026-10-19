@@ -128,6 +128,8 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
       <dt>{m.month}</dt><dd>{snapshot.monthStart.slice(0, 7)}</dd>
       <dt>{m.current}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.limitMicroUsd)}</dd>
       <dt>{m.spent}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.spentMicroUsd)}</dd>
+      {snapshot.shadowOverrunMicroUsd !== "0" && <><dt>{m.shadowOverrun}</dt>
+        <dd>{analysisBudgetMicroUsdToUsd(snapshot.shadowOverrunMicroUsd)}</dd></>}
       <dt>{m.reserved}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.reservedMicroUsd)}</dd>
       <dt>{m.remaining}</dt><dd>{analysisBudgetMicroUsdToUsd(snapshot.remainingMicroUsd)}</dd>
       <dt>{m.version}</dt><dd>{snapshot.version}</dd>

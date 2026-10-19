@@ -252,6 +252,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Intake v19 pins checkout evidence to the submission audit without
   // changing the commit-deadline marker, classifier or deferred trigger.
   "20261018000000_amux_v19_reference_pin_guard",
+  // Intake v21 Max shadow budget mode and v19 session analysis results add
+  // columns, tables and guards; neither touches the commit-deadline marker,
+  // classifier or deferred trigger.
+  "20261018080000_amux_v19_max_shadow_budget",
+  "20261018110000_amux_v19_session_analysis_result",
   // AMUX Decision Maker S2-2b4: a direct answer's close and a delivery that
   // sent nothing. It adds no commit deadline: neither kind holds one, the
   // event guard's deadline lines are unchanged, and the ledger's deferred
@@ -512,15 +517,33 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
     "app/api/internal/amux/v19/analysis-budget/unknown/route.ts",
+    "app/api/internal/amux/v19/analysis-price/route.ts",
     "app/api/internal/amux/v19/analysis-stop/route.ts",
     "app/api/internal/amux/v19/checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/max-checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/max-read-manifest/route.ts",
     "app/api/internal/amux/v19/read-manifest/route.ts",
+    "app/api/internal/amux/v19/session-analysis-result/route.ts",
     "app/api/internal/amux/v19/session-analysis-stop/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
   ]);
+  // The v19 Max launcher routes own bounded receipt transactions too; each
+  // authenticates the dedicated launcher before any transaction opens.
+  for (const path of [
+    "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
+    "app/api/internal/amux/v19/analysis-price/route.ts",
+    "app/api/internal/amux/v19/max-checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/max-read-manifest/route.ts",
+    "app/api/internal/amux/v19/session-analysis-result/route.ts",
+  ]) {
+    const source = withoutComments(read(path));
+    assertBefore(source, "isAmuxV19MaxLauncherAuthorized(request");
+    assert.match(source, /\{ maxWait: [35]_000, timeout: 1[025]_000 \}/, path);
+  }
   const stopPoll = withoutComments(read(
     "app/api/internal/amux/v19/analysis-stop/route.ts"));
   assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
@@ -573,9 +596,19 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   assert.match(manifestGet, /maxWait: 3_000, timeout: 10_000/);
   const budgetReceipt = withoutComments(read(
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
-  assertBefore(budgetReceipt, "isAmuxV4AnalysisAgentAuthorized(request");
-  assertBefore(budgetReceipt, 'process.env[READ_ENV] !== "enabled"');
-  assert.match(budgetReceipt, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  // POST is the Max launcher's claim write; GET is the receipt read-back.
+  const budgetClaimPost = between(budgetReceipt, "export async function POST",
+    "export async function GET");
+  const budgetClaimGet = budgetReceipt.slice(budgetReceipt.indexOf(
+    "export async function GET"));
+  assertBefore(budgetClaimPost, "isAmuxV19MaxLauncherAuthorized(request");
+  assertBefore(budgetClaimPost, 'process.env[WRITE_ENV] !== "enabled"');
+  assertBefore(budgetClaimPost, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(budgetClaimPost, /\{ maxWait: 5_000, timeout: 15_000 \}/);
+  assertBefore(budgetClaimGet, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(budgetClaimGet, 'process.env[READ_ENV] !== "enabled"');
+  assert.ok(!budgetClaimGet.includes("process.env[WRITE_ENV]"));
+  assert.match(budgetClaimGet, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.

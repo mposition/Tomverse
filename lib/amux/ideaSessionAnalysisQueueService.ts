@@ -12,7 +12,8 @@ const PAGE_SIZE = 32;
 export async function listAmuxSessionAnalysisCandidates(
   cursor: AmuxSessionAnalysisQueueCursor | null,
 ): Promise<{ candidates: Array<{ reservationId: string; ideaId: string;
-  modelId: string; expiresAt: string }>; hasMore: boolean; nextCursor: string | null }> {
+  modelId: string; expiresAt: string; nextInvocationOrdinal: number }>;
+  hasMore: boolean; nextCursor: string | null }> {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
       SELECT set_config('statement_timeout', '2000', true) AS statement_limit,
@@ -34,14 +35,18 @@ export async function listAmuxSessionAnalysisCandidates(
         operatingScopeSettingId: latestScope.id },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: PAGE_SIZE + 1,
       select: { id: true, ideaId: true, modelId: true, createdAt: true,
-        idea: { select: { analysisDeadlineAt: true } } },
+        idea: { select: { analysisDeadlineAt: true } },
+        budgetClaims: { orderBy: { invocationOrdinal: "desc" }, take: 1,
+          select: { invocationOrdinal: true } } },
     });
     const candidates = rows.slice(0, PAGE_SIZE);
     const last = candidates.at(-1);
     return {
       candidates: candidates.map((row) => ({ reservationId: row.id,
         ideaId: row.ideaId, modelId: row.modelId,
-        expiresAt: row.idea.analysisDeadlineAt.toISOString() })),
+        expiresAt: row.idea.analysisDeadlineAt.toISOString(),
+        nextInvocationOrdinal: row.budgetClaims[0]
+          ? row.budgetClaims[0].invocationOrdinal + 1 : 0 })),
       hasMore: rows.length > PAGE_SIZE,
       nextCursor: rows.length > PAGE_SIZE && last
         ? encodeAmuxSessionAnalysisQueueCursor({ createdAt: last.createdAt,

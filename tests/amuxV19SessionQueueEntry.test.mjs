@@ -41,6 +41,7 @@ test("a later queue page is reached across process-style ticks", async (t) => {
       ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
       modelId: "claude-opus-5-5",
       expiresAt: "2026-10-18T00:00:00.000Z",
+      nextInvocationOrdinal: 0,
     }], hasMore: false, nextCursor: null });
     const page = body.after ? Number(body.after.slice(5)) + 1 : 1;
     return Response.json({ candidates: Array.from({ length: 32 }, () => ({
@@ -48,6 +49,7 @@ test("a later queue page is reached across process-style ticks", async (t) => {
       ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
       modelId: "unsupported-model",
       expiresAt: "2026-10-18T00:00:00.000Z",
+      nextInvocationOrdinal: 0,
     })), hasMore: true, nextCursor: `page-${page}` });
   };
   const input = { origin, agentSecret: "a".repeat(32),
@@ -61,6 +63,7 @@ test("a later queue page is reached across process-style ticks", async (t) => {
       ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
       modelId: "claude-opus-5-5",
       expiresAt: "2026-10-18T00:00:00.000Z",
+      nextInvocationOrdinal: 0,
     }, pin: { kind: "pinned", referenceCount: 1,
       commitSha: "a".repeat(40) } });
   assert.equal(await state.read(), null);
@@ -82,7 +85,8 @@ test("queue discovery refuses a candidate without its canonical pin", async (t) 
         candidates: [{ reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
           ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
           modelId: "claude-opus-5-5",
-          expiresAt: "2026-10-18T00:00:00.000Z" }],
+          expiresAt: "2026-10-18T00:00:00.000Z",
+          nextInvocationOrdinal: 0 }],
         hasMore: false, nextCursor: null,
       });
       return new Response(null, { status: 409 });
@@ -100,7 +104,8 @@ test("a zero-reference idea remains a discoverable analysis candidate", async (t
   t.after(() => rm(stateDirectory, { recursive: true, force: true }));
   const candidate = { reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
     ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z" };
+    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z",
+    nextInvocationOrdinal: 0 };
   const result = await runAmuxV19SessionQueueEntryOnce({
     origin, agentSecret: "a".repeat(32), stateDirectory,
     fetchImpl: async (url) => new URL(url).pathname.endsWith("/analysis-queue")
@@ -117,7 +122,8 @@ test("an unavailable pin does not starve a later claimable candidate", async (t)
   t.after(() => rm(stateDirectory, { recursive: true, force: true }));
   const first = { reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
     ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z" };
+    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z",
+    nextInvocationOrdinal: 0 };
   const second = { ...first,
     reservationId: "ec61a12d-d02a-478f-a499-aea9dd752271",
     ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b176" };
