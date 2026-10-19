@@ -1,11 +1,14 @@
 /**
  * The merge lane service's Railway port (docs/policy/qa-release-agent.md
- * version 4, section 8 item 4): every staging service's recent deployments,
- * read with a project token scoped to staging. Reads only.
+ * version 4, section 8 item 4): every service's recent deployments in the
+ * Railway environment that deploys develop, read with a project token scoped
+ * to it. Reads only. Since 2026-10-13 that environment is `dev`; staging
+ * (Test) deploys the `test` branch (docs/ops/dev-test-lanes.md), so watching
+ * it would wait for a deployment a develop merge never starts.
  *
  * The token names its own environment (`projectToken`); the port refuses to
- * read anything unless that environment is called "staging" -- a token for
- * another environment is a configuration error, never a smaller staging.
+ * read anything unless that environment is called "dev" -- a token for another
+ * environment is a configuration error, never a smaller dev.
  * Like the merge train, it also refuses an environment where no service
  * deploys from this repository, which would otherwise read as idle.
  *
@@ -16,6 +19,8 @@ import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import type { QaReleaseDeployment, QaReleaseMergeLanePorts } from "./qaReleaseMergeLaneServiceCore.ts";
 
 export const QA_RELEASE_RAILWAY_API = "https://backboard.railway.com/graphql/v2";
+/** The Railway environment that deploys develop (docs/ops/dev-test-lanes.md). */
+export const QA_RELEASE_DEVELOP_ENVIRONMENT = "dev";
 const REPOSITORY = "mposition/Tomverse";
 /** The merge train's depth per service (scripts/merge-train.mjs). */
 const DEPLOYMENTS_PER_SERVICE = 25;
@@ -52,7 +57,7 @@ export function createQaReleaseRailwayPorts(input: { http: QaReleaseHttp; token:
   };
 
   return {
-    async stagingDeployments(): Promise<QaReleaseDeployment[] | null> {
+    async developDeployments(): Promise<QaReleaseDeployment[] | null> {
       try {
         const scope = record((await query("query { projectToken { projectId environmentId } }")).projectToken);
         const projectId = str(scope.projectId);
@@ -66,7 +71,7 @@ export function createQaReleaseRailwayPorts(input: { http: QaReleaseHttp; token:
             )
           ).environment,
         );
-        if (environment.name !== "staging") return null;
+        if (environment.name !== QA_RELEASE_DEVELOP_ENVIRONMENT) return null;
         const services = edges(environment.serviceInstances);
         if (services.length === 0 || services.length > MAX_SERVICES) return null;
         if (!services.some((service) => service.source !== null && record(service.source).repo === REPOSITORY)) return null;

@@ -91,8 +91,8 @@ export type QaReleaseMergeLanePorts = {
     cancelledCommits: (commits: string[]) => Promise<Set<string>>;
   };
   railway: {
-    /** Every staging service's recent deployments; null when unread. */
-    stagingDeployments: () => Promise<QaReleaseDeployment[] | null>;
+    /** Every recent deployment in the environment that deploys develop (dev); null when unread. */
+    developDeployments: () => Promise<QaReleaseDeployment[] | null>;
   };
 };
 
@@ -156,7 +156,7 @@ async function judgeAwaitingDeploy(
   const sha = attempt.mergeCommitSha ?? "";
   let deployments: QaReleaseDeployment[] | null = null;
   try {
-    deployments = await ports.railway.stagingDeployments();
+    deployments = await ports.railway.developDeployments();
   } catch {
     deployments = null;
   }
@@ -245,7 +245,7 @@ export async function runQaReleaseMergeLaneRound(
 
   let deployments: QaReleaseDeployment[] | null;
   try {
-    deployments = await ports.railway.stagingDeployments();
+    deployments = await ports.railway.developDeployments();
   } catch {
     deployments = null;
   }
@@ -279,7 +279,7 @@ export async function runQaReleaseMergeLaneRound(
   const attemptId = issued.attemptId;
 
   // Re-read right before the merge (section 3 step 1, section 8 items 4 and 6):
-  // the pull request as GitHub has it now, staging free, and this service's
+  // the pull request as GitHub has it now, dev free, and this service's
   // own switches judged again. A difference on a pull request known to be
   // unmerged closes the attempt as not merged -- which it is -- rather than
   // leaving it to expire.
@@ -301,7 +301,7 @@ export async function runQaReleaseMergeLaneRound(
   ) {
     return abandon();
   }
-  const freshDeployments = await ports.railway.stagingDeployments().catch(() => null);
+  const freshDeployments = await ports.railway.developDeployments().catch(() => null);
   if (freshDeployments === null || inFlightDeployments(freshDeployments).length > 0) return abandon();
   if (decideQaReleaseServiceStart("mergeLane", env) !== "run") return abandon();
 

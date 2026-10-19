@@ -41,7 +41,7 @@ export const QA_RELEASE_MERGE_ATTEMPT_OUTCOMES = [
   "person_not_merged",
   /** A person confirmed every develop service serves the merge or a later commit containing it. */
   "person_deployed",
-  /** A person confirmed staging was restored by the runbook. */
+  /** A person confirmed dev was restored by the runbook. */
   "person_restored",
 ] as const;
 export type QaReleaseMergeAttemptOutcome = (typeof QA_RELEASE_MERGE_ATTEMPT_OUTCOMES)[number];
