@@ -105,10 +105,11 @@ export const parseAutoLlmRouterOutput = (
 };
 
 /**
- * The model that makes the call, from `CHAT_AUTO_LLM_ROUTER_MODEL_ID`.
+ * The model that makes the call, from the Admin Console setting
+ * (lib/autoLlmRouterSettings.ts).
  *
  * Unset means off: Auto keeps its deterministic choice and no extra call is
- * made. Turning it on is a deployment decision because each routed turn then
+ * made. Turning it on is an operator decision because each routed turn then
  * costs one more (small) provider request.
  */
 export const resolveAutoLlmRouterModel = (

@@ -2023,8 +2023,8 @@ async function handleChatPost(
                 .maxOutputTokens,
         });
         // Per prompt: a small model reads this message and reorders the
-        // Router's eligible set. Off unless CHAT_AUTO_LLM_ROUTER_MODEL_ID is
-        // set; any failure keeps the deterministic choice.
+        // Router's eligible set. Off unless Admin › Routing names a router
+        // model; any failure keeps the deterministic choice.
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
             deterministicAutoSelection.routed

@@ -5,6 +5,7 @@ import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
+import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
@@ -44,7 +45,7 @@ export async function pickAutoModelWithLlm(input: {
 }): Promise<string | null> {
     const routerModel = resolveAutoLlmRouterModel(
         input.models,
-        process.env.CHAT_AUTO_LLM_ROUTER_MODEL_ID
+        (await readAutoLlmRouterModelId()) ?? undefined
     );
     if (!routerModel) return null;
     const candidates = autoLlmRouterCandidates(
