@@ -74,7 +74,10 @@ export const MARKETING_LLM_RESPONSES_URL = "https://api.openai.com/v1/responses"
  * The provider request body for a web-search call: the system message as
  * instructions, the user message as input, one search tool limited to the
  * competitor's domains, and the search cap the reservation priced. No other
- * tool, no stored response, no stream.
+ * tool, no stored response, no stream. It asks for the search's sources
+ * (`web_search_call.action.sources`): a JSON-only answer often carries no
+ * inline `url_citation`, so the pages the search actually returned are what a
+ * fact's source is checked against.
  */
 export function marketingLlmWebSearchRequestBody(
   pin: MarketingLlmPricePin,
@@ -93,6 +96,7 @@ export function marketingLlmWebSearchRequestBody(
         user_location: { type: "approximate" },
       },
     ],
+    include: ["web_search_call.action.sources"],
     max_tool_calls: pin.maxWebSearchCalls,
     max_output_tokens: pin.maxOutputTokens,
     service_tier: MARKETING_LLM_SERVICE_TIER,
@@ -222,7 +226,10 @@ export function readMarketingLlmProviderAnswer(body: unknown): ProviderAnswer | 
   return { content, citations: [], model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };
 }
 
-/** The parts of a Responses answer the ledger is told, with its cited URLs, or null when one is missing. */
+/**
+ * The parts of a Responses answer the ledger is told, with the URLs the
+ * provider cited or its searches returned, or null when one is missing.
+ */
 export function readMarketingLlmWebSearchAnswer(body: unknown): ProviderAnswer | null {
   if (!body || typeof body !== "object") return null;
   const root = body as {
@@ -230,21 +237,31 @@ export function readMarketingLlmWebSearchAnswer(body: unknown): ProviderAnswer |
     service_tier?: unknown;
     status?: unknown;
     usage?: { input_tokens?: unknown; output_tokens?: unknown };
-    output?: Array<{ type?: unknown; content?: Array<{ type?: unknown; text?: unknown; annotations?: Array<{ type?: unknown; url?: unknown }> }> }>;
+    output?: Array<{
+      type?: unknown;
+      content?: Array<{ type?: unknown; text?: unknown; annotations?: Array<{ type?: unknown; url?: unknown }> }>;
+      action?: { type?: unknown; url?: unknown; sources?: Array<{ type?: unknown; url?: unknown }> };
+    }>;
   };
   const parts = (root.output ?? [])
     .filter((item) => item?.type === "message")
     .flatMap((item) => item.content ?? [])
     .filter((part) => part?.type === "output_text" && typeof part.text === "string");
   const content = parts.map((part) => part.text as string).join("");
-  const citations = [
-    ...new Set(
-      parts
-        .flatMap((part) => part.annotations ?? [])
-        .filter((annotation) => annotation?.type === "url_citation" && typeof annotation.url === "string")
-        .map((annotation) => annotation.url as string),
-    ),
-  ];
+  const cited = parts
+    .flatMap((part) => part.annotations ?? [])
+    .filter((annotation) => annotation?.type === "url_citation" && typeof annotation.url === "string")
+    .map((annotation) => annotation.url as string);
+  // The pages the provider's own searches returned or opened.
+  const retrieved = (root.output ?? [])
+    .filter((item) => item?.type === "web_search_call" && item.action && typeof item.action === "object")
+    .flatMap((item) => [
+      ...(Array.isArray(item.action?.sources) ? item.action.sources : [])
+        .filter((source) => source?.type === "url" && typeof source.url === "string")
+        .map((source) => source.url as string),
+      ...(item.action?.type === "open_page" && typeof item.action.url === "string" ? [item.action.url] : []),
+    ]);
+  const citations = [...new Set([...cited, ...retrieved])];
   const inputTokens = root.usage?.input_tokens;
   const outputTokens = root.usage?.output_tokens;
   if (

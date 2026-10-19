@@ -28,6 +28,9 @@ test("the model is asked to search the official domains, with the competitor as 
 test("a cited URL is kept as https on an official host, without the query and fragment the provider adds", () => {
   assert.equal(marketingA3SourceUrl("https://poe.com/pricing?utm_source=chatgpt.com#plans", HOSTS), PAGE);
   assert.equal(marketingA3SourceUrl("https://WWW.Poe.com/about", HOSTS), "https://www.poe.com/about");
+  // A trailing slash is the same page.
+  assert.equal(marketingA3SourceUrl("https://poe.com/pricing/", HOSTS), PAGE);
+  assert.equal(marketingA3SourceUrl("https://poe.com/", HOSTS), "https://poe.com/");
   for (const url of [
     "http://poe.com/pricing",
     "https://poe.com:8443/pricing",
@@ -72,6 +75,7 @@ test("only facts that parse and cite a URL the provider cited on an official hos
     { competitorId: "poe", factType: "plan_tier", value: { kind: "token", value: "pro" }, sourceUrl: PAGE, checkedAt },
   ]);
   assert.equal(read.unrepresentable, 5);
+  assert.deepEqual(read.dropped, { source_not_retrieved: 1, source_not_official_host: 1, shape: 1 });
 
   // A fenced answer is still read.
   const fence = "`".repeat(3);
@@ -81,7 +85,7 @@ test("only facts that parse and cite a URL the provider cited on an official hos
   assert.equal(readMarketingA3Answer(answer, { ...input, citations: [] }).facts.length, 0);
 
   for (const content of ["not json", "[]", "{}", '{"facts":"x"}']) {
-    assert.deepEqual(readMarketingA3Answer(content, input), { facts: [], unrepresentable: 0, unreadable: true });
+    assert.deepEqual(readMarketingA3Answer(content, input), { facts: [], unrepresentable: 0, unreadable: true, dropped: {} });
   }
 });
 
