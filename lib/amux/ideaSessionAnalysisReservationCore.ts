@@ -4,11 +4,12 @@ import {
   AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
 } from "../adminAuditSystemActors.ts";
+import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "./ideaAnalysisChannelCore.ts";
 
 export const AMUX_SESSION_ANALYSIS_RESERVATION_POLICY_VERSION = 19;
 export const AMUX_SESSION_ANALYSIS_RESERVATION_STATUSES = ["queued"] as const;
-export const AMUX_SESSION_ANALYSIS_RESERVATION_PROVIDERS =
-  ["openai", "anthropic"] as const;
+/** The CLI channel copied from the operating scope (owner decision 2026-10-20). */
+export const AMUX_SESSION_ANALYSIS_RESERVATION_PROVIDERS = AMUX_IDEA_ANALYSIS_PROVIDERS;
 export const AMUX_SESSION_ANALYSIS_RESERVATION_REASONING_EFFORTS =
   ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export const AMUX_SESSION_ANALYSIS_RESERVATION_STATUS =

@@ -1,8 +1,12 @@
-/** v19 Anthropic Max subscription admission only. The returned hold occupies
+import { isAmuxIdeaAnalysisProvider, type AmuxIdeaAnalysisProvider } from
+  "./ideaAnalysisChannelCore.ts";
+
+/** v19 subscription CLI admission only: any of the four channels, each on its
+ * subscription account (owner decision 2026-10-20). The returned hold occupies
  * the remaining monthly headroom; it is not a per-invocation cost ceiling. */
 export type SessionShadowBudgetBasis = {
   mode: "subscription_cli";
-  provider: "anthropic";
+  provider: AmuxIdeaAnalysisProvider;
   asOfIso: string;
   pricingVerifiedAt: string;
   pricingExpiresAt: string;
@@ -51,7 +55,7 @@ export function assessSessionShadowBudget(raw: unknown): SessionShadowBudgetDeci
     value = Object.create(null) as Record<string, unknown>;
     for (const key of keys) value[key] = descriptors[key]!.value;
   } catch { return hold("basis_invalid"); }
-  if (value.mode !== "subscription_cli" || value.provider !== "anthropic" ||
+  if (value.mode !== "subscription_cli" || !isAmuxIdeaAnalysisProvider(value.provider) ||
       !validInstant(value.asOfIso) || !validInstant(value.pricingVerifiedAt) ||
       !validInstant(value.pricingExpiresAt) ||
       !validAmount(value.consumedMicroUsd) || !validAmount(value.reservedMicroUsd) ||

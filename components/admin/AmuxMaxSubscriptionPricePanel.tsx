@@ -7,8 +7,11 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminCommonMessages } from "@/lib/adminMessages/common";
 import { adminAmuxMaxSubscriptionPriceMessages } from "@/lib/adminMessages/amuxMaxSubscriptionPrice";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { AMUX_IDEA_ANALYSIS_PROVIDER_LABELS } from "@/lib/amux/ideaAnalysisChannelCore";
+import { readAvailableFrontierModels, type AvailableFrontierModel } from "@/lib/amux/ideaFrontierCatalogUiCore";
 
 const endpoint = "/api/admin/amux/ideas/analysis-prices";
+const modelsEndpoint = "/api/admin/amux/ideas/frontier-models?mode=available";
 
 export type MaxSubscriptionPriceView = {
   profile: { inputMicroUsdPerMillion: number; outputMicroUsdPerMillion: number;
@@ -16,13 +19,16 @@ export type MaxSubscriptionPriceView = {
   latest: null | { id: string; version: number; status: string; expiresAt: string; admissible: boolean };
 };
 
-/** Reads the max-subscription profile reply; anything else is unreadable. */
-export function readMaxSubscriptionPriceView(value: unknown): MaxSubscriptionPriceView | null {
+/** Reads one model's max-subscription profile reply; anything else, including
+ * a reply for a different provider or model, is unreadable. */
+export function readMaxSubscriptionPriceView(value: unknown,
+  expected: { provider: string; modelId: string }): MaxSubscriptionPriceView | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const profile = row.profile as Record<string, unknown> | undefined;
   if (row.state !== "profile" || !profile || typeof profile !== "object" ||
-      profile.mode !== "subscription_cli" ||
+      profile.mode !== "subscription_cli" || profile.provider !== expected.provider ||
+      profile.modelId !== expected.modelId ||
       !["inputMicroUsdPerMillion", "outputMicroUsdPerMillion", "inputTokensCap", "outputTokensCap"]
         .every((key) => Number.isSafeInteger(profile[key]))) return null;
   const view = { profile: {
@@ -40,12 +46,57 @@ export function readMaxSubscriptionPriceView(value: unknown): MaxSubscriptionPri
 
 const usd = (micro: number) => (micro / 1_000_000).toFixed(2);
 
-/** amux-intake v19: the owner approves the subscription_cli price the Max
- * session runner reads before a claim. A lost answer is read back by its ID
- * and never sent again. */
+/** amux-intake v19 (owner decision 2026-10-20): the owner approves one
+ * subscription_cli price per approved Frontier model, on whichever of the four
+ * CLI channels runs it. Every price is the reviewed Opus 5.5 profile as a
+ * conservative estimate. A lost answer is read back by its ID and never sent
+ * again. */
 export function AmuxMaxSubscriptionPricePanel() {
   const m = useAdminMessages(adminAmuxMaxSubscriptionPriceMessages);
   const common = useAdminMessages(adminCommonMessages).apiFailure;
+  const [models, setModels] = useState<AvailableFrontierModel[] | null>(null);
+  const [modelsFailed, setModelsFailed] = useState(false);
+  const [requiresReauthentication, setRequiresReauthentication] = useState(false);
+  const onStatus = useCallback((status: number) => setRequiresReauthentication(status === 428), []);
+
+  const loadModels = useCallback(async () => {
+    const response = await adminFetch(modelsEndpoint, { cache: "no-store" });
+    // A refused step-up is shown as the reauthentication link alone.
+    if (response.status === 428) { setRequiresReauthentication(true); return; }
+    const parsed = readAvailableFrontierModels(response.status,
+      response.ok ? await response.json() : null);
+    if (!parsed) throw new Error("models_unavailable");
+    setModels(parsed); setModelsFailed(false);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => { void loadModels().catch(() => { if (active) setModelsFailed(true); }); });
+    return () => { active = false; };
+  }, [loadModels]);
+
+  return <section aria-labelledby="amux-max-subscription-price-title"
+    className="space-y-3 rounded-lg border p-4 text-sm border-zinc-700">
+    <h4 id="amux-max-subscription-price-title" className="font-semibold">{m.title}</h4>
+    <p>{m.hint}</p>
+    {modelsFailed || !models || models.length === 0
+      ? <p role="status" data-testid="amux-max-subscription-price-models">
+        {modelsFailed ? m.modelsUnavailable : !models ? m.loadingModels : m.noModels}</p>
+      : <ul className="space-y-3">{models.map((model) => <li key={model.approvalId}>
+        <SubscriptionPriceRow model={model} onStatus={onStatus} /></li>)}</ul>}
+    <button type="button" onClick={() => void loadModels().catch(() => setModelsFailed(true))}
+      className="min-h-11 rounded-lg border border-zinc-500 px-4">{m.refreshModels}</button>
+    {requiresReauthentication ? <p role="alert"><Link
+      href={adminRecentAuthenticationHref("/admin/amux-settings?tab=analysis")}
+      className="inline-flex min-h-11 items-center rounded-lg border border-amber-500 px-4">
+      {common.reauthenticate}</Link></p> : null}
+  </section>;
+}
+
+function SubscriptionPriceRow({ model, onStatus }: {
+  model: AvailableFrontierModel; onStatus: (status: number) => void;
+}) {
+  const m = useAdminMessages(adminAmuxMaxSubscriptionPriceMessages);
   const [view, setView] = useState<MaxSubscriptionPriceView | null>(null);
   const [readFailed, setReadFailed] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -53,15 +104,18 @@ export function AmuxMaxSubscriptionPricePanel() {
   const [busy, setBusy] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<"refused" | "saved" | null>(null);
-  const [requiresReauthentication, setRequiresReauthentication] = useState(false);
+  const { provider, modelId } = model;
+  const rowId = `amux-subscription-price-${model.approvalId}`;
 
   const refresh = useCallback(async () => {
-    const response = await adminFetch(`${endpoint}?profile=max-subscription`, { cache: "no-store" });
-    setRequiresReauthentication(response.status === 428);
-    const parsed = response.ok ? readMaxSubscriptionPriceView(await response.json()) : null;
+    const query = new URLSearchParams({ profile: "max-subscription", provider, modelId });
+    const response = await adminFetch(`${endpoint}?${query}`, { cache: "no-store" });
+    onStatus(response.status);
+    const parsed = response.ok
+      ? readMaxSubscriptionPriceView(await response.json(), { provider, modelId }) : null;
     if (!parsed) throw new Error("price_unavailable");
     setView(parsed); setReadFailed(false);
-  }, []);
+  }, [provider, modelId, onStatus]);
 
   useEffect(() => {
     let active = true;
@@ -75,7 +129,7 @@ export function AmuxMaxSubscriptionPricePanel() {
   const canRevoke = !!latest && latest.status === "approved" && !busy && !pendingId && revokeConfirmed;
 
   const settle = async (status: number) => {
-    setRequiresReauthentication(status === 428);
+    onStatus(status);
     setConfirmed(false); setRevokeConfirmed(false);
     await refresh().catch(() => setReadFailed(true));
   };
@@ -86,7 +140,7 @@ export function AmuxMaxSubscriptionPricePanel() {
     try {
       const response = await adminFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, expectedPreviousVersion: latest?.version ?? 0,
-          ownerConfirmedWorstTier: true, mode: "subscription_cli" }) });
+          ownerConfirmedWorstTier: true, mode: "subscription_cli", provider, modelId }) });
       const body: unknown = await response.json().catch(() => null);
       if (response.status === 201 && (body as { priceVersionId?: unknown } | null)?.priceVersionId === id) {
         setPendingId(null); setNotice("saved"); await settle(response.status); return;
@@ -123,10 +177,10 @@ export function AmuxMaxSubscriptionPricePanel() {
     finally { setBusy(false); }
   };
 
-  return <section aria-labelledby="amux-max-subscription-price-title"
-    className="space-y-3 rounded-lg border p-4 text-sm border-zinc-700">
-    <h4 id="amux-max-subscription-price-title" className="font-semibold">{m.title}</h4>
-    <p>{m.hint}</p>
+  return <section aria-labelledby={`${rowId}-title`}
+    className="space-y-2 rounded-lg border p-3 border-zinc-700" data-testid="amux-subscription-price-row">
+    <h5 id={`${rowId}-title`} className="font-semibold break-all">
+      {AMUX_IDEA_ANALYSIS_PROVIDER_LABELS[provider]} / <span className="font-mono">{modelId}</span></h5>
     {view ? <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
       <dt>{m.rates}</dt><dd className="font-mono">
         {usd(view.profile.inputMicroUsdPerMillion)} / {usd(view.profile.outputMicroUsdPerMillion)}</dd>
@@ -157,9 +211,5 @@ export function AmuxMaxSubscriptionPricePanel() {
     </div>
     {pendingId ? <p role="alert">{m.unknown} <span className="font-mono">{pendingId}</span></p> : null}
     {notice ? <p role={notice === "saved" ? "status" : "alert"}>{m[notice]}</p> : null}
-    {requiresReauthentication ? <p role="alert"><Link
-      href={adminRecentAuthenticationHref("/admin/amux-settings?tab=analysis")}
-      className="inline-flex min-h-11 items-center rounded-lg border border-amber-500 px-4">
-      {common.reauthenticate}</Link></p> : null}
   </section>;
 }

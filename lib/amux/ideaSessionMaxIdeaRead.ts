@@ -40,7 +40,6 @@ export async function readAmuxV19MaxIdeaInTx(
     const reservation = await tx.amuxIdeaSessionAnalysisReservation.findFirst({
       where: { id: input.reservationId, ideaId: input.ideaId,
         operatingScopeSettingId: latestScope.id, status: "queued",
-        modelProvider: "anthropic",
         budgetClaims: { some: { id: input.claimId, status: "in_flight",
           closedAt: null, resolutionAuditLogId: null,
           budgetMode: "max_shadow" } },

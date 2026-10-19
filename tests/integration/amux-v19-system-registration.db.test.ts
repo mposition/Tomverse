@@ -284,8 +284,12 @@ async function completedSessionIdea(options: {
   const transferKeys = await createAmuxContentKeyRing(
     [rawIdentity, transferIdentity], []);
   const browserNonce = randomBytes(32).toString("base64url");
+  const v4Provider = authority.scope.model.provider;
+  if (v4Provider !== "openai" && v4Provider !== "anthropic") {
+    throw new Error("The v4 transfer fixture needs an OpenAI or Anthropic scope model");
+  }
   const choice = { previewId, ideaId,
-    provider: authority.scope.model.provider,
+    provider: v4Provider,
     modelId: authority.scope.model.modelId,
     reasoningEffort: authority.scope.model.reasoningEffort,
     approvalId: selected.approvalId, approvalVersion: selected.approvalVersion };

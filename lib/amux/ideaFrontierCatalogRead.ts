@@ -10,6 +10,7 @@ import {
   type AmuxIdeaFrontierCatalogRow,
 } from "./ideaFrontierCatalogCore.ts";
 import {
+  checkAmuxIdeaFrontierModel,
   checkAmuxIdeaFrontierSelection,
   type AmuxIdeaFrontierApproval,
   type AmuxIdeaFrontierSelectionDecision,
@@ -182,4 +183,19 @@ export async function readCurrentAmuxIdeaFrontierSelectionFromTx(
   const catalog = await readVerifiedAmuxIdeaFrontierCatalogFromTx(tx, integrityKeys);
   if (catalog.decision !== "catalog_current") return catalog;
   return checkAmuxIdeaFrontierSelection(selected, catalog.approvals, catalog.databaseNow);
+}
+
+/** Same verified read for one provider/model at any effort, inside the
+ * caller's transaction (which should hold the audit-chain lock). */
+export async function readCurrentAmuxIdeaFrontierModelFromTx(
+  tx: Prisma.TransactionClient,
+  selected: { provider: string; modelId: string },
+): Promise<ReturnType<typeof checkAmuxIdeaFrontierModel>> {
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  if (integrityKeys.length === 0) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  const catalog = await readVerifiedAmuxIdeaFrontierCatalogFromTx(tx, integrityKeys);
+  if (catalog.decision !== "catalog_current") return catalog;
+  return checkAmuxIdeaFrontierModel(selected, catalog.approvals, catalog.databaseNow);
 }

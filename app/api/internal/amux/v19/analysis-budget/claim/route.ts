@@ -16,6 +16,11 @@ import { AmuxSessionBudgetClaimError, commitAmuxSessionBudgetClaim,
 import { prisma } from "@/lib/prisma";
 
 const CLAIM_CODE_LATCH = true;
+// The fixed Ubuntu launcher behind this route verifies only the Claude Max
+// OAuth sign-in (verifyAmuxV19ClaudeMaxAuthSource), so its claims are on the
+// anthropic channel. Another channel's launcher must first bind its provider
+// into the signed attestation; until then the service refuses those claims.
+const LAUNCHER_PROVIDER = "anthropic";
 const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE";
 const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
 const STOP_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
@@ -66,7 +71,8 @@ export async function POST(request: Request): Promise<Response> {
         reservationId: body.reservationId,
         invocationOrdinal: body.invocationOrdinal,
         priceVersionId: body.priceVersionId,
-        maxLauncherIdentity: { ideaId: body.ideaId, modelId: body.modelId,
+        maxLauncherIdentity: { ideaId: body.ideaId, provider: LAUNCHER_PROVIDER,
+          modelId: body.modelId,
           reasoningEffort: body.reasoningEffort, authEvidenceDigest },
         runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
           maxSubscriptionAuthenticated: true },

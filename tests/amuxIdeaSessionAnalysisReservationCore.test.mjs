@@ -19,7 +19,7 @@ test("session analysis reservation uses one closed queue and system-audit contra
   assert.equal(AMUX_SESSION_ANALYSIS_RESERVATION_POLICY_VERSION, 19);
   assert.deepEqual(AMUX_SESSION_ANALYSIS_RESERVATION_STATUSES, ["queued"]);
   assert.deepEqual(AMUX_SESSION_ANALYSIS_RESERVATION_PROVIDERS,
-    ["openai", "anthropic"]);
+    ["openai", "anthropic", "github-copilot", "cursor"]);
   assert.deepEqual(AMUX_SESSION_ANALYSIS_RESERVATION_REASONING_EFFORTS,
     ["low", "medium", "high", "xhigh", "max", "ultra"]);
   assert.equal(AMUX_SESSION_ANALYSIS_RESERVATION_STATUS, "queued");

@@ -44,9 +44,14 @@ approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 22
 approvedBy: mposition · approvedAt: 2026-10-18 · 정책 버전: 21
 
 운영자는 2026-10-18 대화에서 **Max 구독의 월 shadow 예산 초과 가능성**을 승인했다.
-이 결정은 v19의 Ubuntu 세션 분석 중 Anthropic Max 구독 인증 CLI 호출에만 적용한다.
+이 결정은 v19의 Ubuntu 세션 분석 중 구독 인증 CLI 호출에만 적용한다. 대상 채널은 운영자
+결정 2026-10-20으로 넷이다: Anthropic Claude CLI(Claude Max, `claude-max-oauth`), OpenAI
+Codex CLI(ChatGPT 구독, `codex-chatgpt`), GitHub Copilot CLI(`copilot-github`), Cursor
+CLI(`cursor-login`). DB와 코드의 `provider` 값은 모델 공급사가 아니라 이 실행 채널을 뜻하고,
+Copilot·Cursor의 모델 ID는 그 CLI가 받는 모델 이름이다. 승인된 어떤 Frontier 모델이든 구독
+가격은 검토된 Opus 5.5 프로필의 단가·상한·근거를 보수적 API 환산 추정치로 쓴다.
 API 키 호출, v4 분석, 다른 Agent, 사용자 크레딧과 실제 추가 청구 승인은 포함하지 않는다.
-Max 구독의 실제 추가 청구 여부는 확인된 사실로 간주하지 않는다. 병합·배포·인증 발급·운영
+구독의 실제 추가 청구 여부는 확인된 사실로 간주하지 않는다. 병합·배포·인증 발급·운영
 스위치 변경은 이 승인에 포함되지 않는다.
 
 1. **월 예산의 의미.** `agent/amux-intake`의 owner 설정 금액은 이 경로에서
@@ -54,7 +59,7 @@ Max 구독의 실제 추가 청구 여부는 확인된 사실로 간주하지 �
    입력·출력 토큰 상한이 없으므로, 한 호출의 최악 비용을 이 금액 아래로 묶는
    hard cap이라고 표시하거나 강제 가능한 상한이 있다고 주장하지 않는다. v4의
    API 실제 비용·호출 전 최악 비용 예약 규칙은 그대로 유지한다.
-2. **호출 전 판정.** 검증된 모델·요율 버전, Max 구독 인증, 유료 도구 차단,
+2. **호출 전 판정.** 검증된 모델·요율 버전, 그 채널의 구독 인증, 유료 도구 차단,
    운영 범위와 모든 기존 스위치·중지·결과 불명 Guard가 필요하다. 현재 월의
    관측 사용량과 미결 예약을 합친 값이 설정 금액 이상이면 시작하지 않는다.
    미만이면 남은 shadow 여유분 **전체**를 해당 호출에 점유시켜 다른 v4·v19
@@ -65,7 +70,10 @@ Max 구독의 실제 추가 청구 여부는 확인된 사실로 간주하지 �
    `verifyAmuxV19ClaudeMaxAuthSource`로 확인한 결과다. 전용 Agent 자격증명으로
    인증된 그 launcher의 exact-ID 청구만 앱이 받는다. 앱은 임의 요청 본문의
    `maxSubscriptionAuthenticated: true`를 인증 증거로 사용하지 않는다. 이 연결과
-   감사 결속이 구현되기 전에는 Max shadow 청구를 live로 열지 않는다.
+   감사 결속이 구현되기 전에는 Max shadow 청구를 live로 열지 않는다. 청구 감사의
+   `maxAuthProfile`은 청구 채널의 값이어야 하며 DB 트리거가 다시 확인한다. 다른 세
+   채널의 인증 증거와 launcher는 각 runner 단계에서 같은 방식으로 정하고, 그 전까지
+   앱의 청구 route는 Claude Max launcher의 `anthropic` 채널 청구만 받는다.
 3. **호출 후 관측.** CLI가 보고한 입력·출력 사용량을 검증된 요율로 환산해
    실제 shadow 사용량을 기록한다. 점유액보다 커도 측정값을 자르거나 성공을
    결과 불명으로 바꾸지 않는다. 초과분과 월 기준 초과 여부를 같은 트랜잭션의
@@ -639,7 +647,7 @@ canonical JSON은 기존 AMUX canonicalizer의 정렬 규칙을 쓴다. package 
 
 1. 운영자는 Admin Console에서 아이디어를 직접 입력하고, 모델로 보낼 **정확한 입력 범위**와 분석 모델을 회차마다 확인한다. Admin은 입력·분석 요청·상태·결과·승인의 창구다. 브라우저와 앱 route는 LLM을 호출하지 않는다.
 2. 제품 DB 자격증명이 없는 **운영자 PC의 로컬 Ubuntu Agent**가 기존 outbound WSL bridge 패턴으로 앱의 분석 대기열을 가져와 Codex CLI 또는 Claude CLI를 실행한다. 앱은 요청·결과의 단일 DB writer이고, 로컬 Agent는 DB에 직접 접속하거나 브라우저의 localhost 요청을 기다리지 않는다. 이 실행 위치는 공통 Agent 기반의 Railway 기본 원칙에 대한 좁은 개발-Agent 예외이므로, 구현 전에 그 원문 §6과 별도 정합성 개정·독립 검토가 필요하다.
-3. 적격 공급자는 현재 OpenAI와 Anthropic뿐이다. 모델 이름을 정책의 영구 허용 목록으로 고정하지 않는다. 운영자가 공급자별 Frontier 적격 모델을 승인·철회하며, 매 실행에서 적격 모델 하나를 직접 선택한다. 선택 모델을 쓸 수 없으면 작은 모델이나 다른 공급자로 조용히 대체하지 않는다. xAI·GLM 등은 별도 정책 개정 전에는 후보가 아니다.
+3. 적격 공급자는 OpenAI와 Anthropic이다. v19 세션 분석에는 운영자 결정 2026-10-20으로 실행 채널(CLI) 기준의 GitHub Copilot과 Cursor가 더해진다(v21 절). 이 v4 수동 분석 경로와 그 hold 원장은 지금도 OpenAI와 Anthropic만 받는다. 모델 이름을 정책의 영구 허용 목록으로 고정하지 않는다. 운영자가 공급자별 Frontier 적격 모델을 승인·철회하며, 매 실행에서 적격 모델 하나를 직접 선택한다. 선택 모델을 쓸 수 없으면 작은 모델이나 다른 공급자로 조용히 대체하지 않는다. xAI·GLM 등은 별도 정책 개정 전에는 후보가 아니다.
 4. 기존 상업용 **API 계정**의 계약·지역 확인 기록을 CLI 구독 인증의 허가로 간주하지 않는다. 로컬 CLI의 실제 인증 방식, 약관·DPA·처리 지역, 모델과 전송 범위는 합성 입력으로 S0 실측하고 라이브 호출 직전 결정적 검사에 연결한다. 특정 처리 지역을 보장한다고 표시하지 않는다. 중국 본토 접속·처리 지역·해당 지역 공급자는 제외한다.
 5. Agent의 GitHub 접근은 운영자가 권한을 가진 Tomverse 관련 **모든 저장소·PR·check의 읽기 전용** 범위다. 단, 읽기 자격증명을 가진 수집 경계가 필요한 repository/PR을 조회하고 크기·secret·개인정보 검사를 통과한 최소 발췌와 구조화 metadata로 전송 preview를 만든다. **이번 회차의 전송 preview에 없던 GitHub 발췌는 보내지 않는다.** 이어지는 분석 분량에서 새 발췌가 필요하면 별도 preview와 운영자 확인을 받는다. CLI 자식 프로세스는 **GitHub 읽기·쓰기 자격증명, 저장소 checkout, preview 밖 파일에 접근하지 못하고**, 비어 있는 격리 작업 디렉터리에서 확인된 preview payload만 입력받으며, 네트워크는 승인된 CLI 인증·모델 endpoint만 허용한다. 제품 DB·결제·사용자 credit·Chat provider 키도 CLI 환경·파일·credential helper·로그에 닿지 않아야 한다. 파일·도구·네트워크 격리를 합성 S0에서 실측하고 **매 호출 직전 환경·mount·도구·네트워크 허용 목록을 검사**하기 전에는 live runner를 열지 않는다.
 

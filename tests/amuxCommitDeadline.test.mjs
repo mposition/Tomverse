@@ -262,6 +262,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // event guard's deadline lines are unchanged, and the ledger's deferred
   // check does not cover either.
   "20261018120000_amux_decision_maker_delivery_gaps",
+  // Intake v19 subscription channels widen provider CHECKs and replace the
+  // v21 claim mode guard body; no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261020090000_amux_v19_subscription_channels",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
