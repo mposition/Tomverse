@@ -28,7 +28,9 @@ const digest = "a".repeat(64);
 const write = { claimId: input.claimId,
   resultAuditId: "clsyntheticresult123",
   settlementAuditId: "clsyntheticsettlement123",
-  digest, digestKeyId: "synthetic-digest" };
+  digest, digestKeyId: "synthetic-digest",
+  plan: { state: "plan_refused", reason: "invalid_result" },
+  registration: { state: "not_planned" } };
 const enable = () => {
   process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN = origin;
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
@@ -47,7 +49,8 @@ test("one Max result write returns the exact content-free receipt", async () => 
       return Response.json(write);
     } });
   assert.deepEqual(result, { kind: "recorded", recovered: false,
-    retryWrite: false, digest, digestKeyId: "synthetic-digest" });
+    retryWrite: false, digest, digestKeyId: "synthetic-digest",
+    planState: "plan_refused", registrationState: "not_planned" });
   assert.deepEqual(calls, ["POST"]);
 });
 
