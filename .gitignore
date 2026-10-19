@@ -80,6 +80,9 @@ docs/*
 !docs/policy/
 !docs/ops/
 !docs/release-gates/
+# docs/agents/ holds the full per-area agent instructions that AGENTS.md
+# indexes; AGENTS.md stays short so every session does not load them.
+!docs/agents/
 # docs/marketing/ holds the approved asset registry, which is a gate rather
 # than documentation: lib/marketingAssets.ts reads it, and a marketing post may
 # only use an asset it names. The file is named rather than the directory --
