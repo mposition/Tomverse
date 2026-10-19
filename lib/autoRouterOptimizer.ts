@@ -68,11 +68,11 @@ export const AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY = "auto.llmRouterOptimizerM
 
 /**
  * Room for the longest admitted guidance in any script plus its JSON wrapper:
- * 2 000 characters of Korean can take more than 2 000 tokens. At 1 200 the
+ * 3 000 characters of Korean can take more than 4 000 tokens. At 1 200 the
  * first Test cycle (2026-10-19, Claude Opus 4.8) threw before admission and was
  * charged the generate call's worst case.
  */
-const GENERATOR_MAX_OUTPUT_TOKENS = 4_000;
+const GENERATOR_MAX_OUTPUT_TOKENS = 6_000;
 const GENERATOR_TIMEOUT_MS = 90_000;
 const JUDGE_MAX_OUTPUT_TOKENS = 40;
 const JUDGE_TIMEOUT_MS = 30_000;
