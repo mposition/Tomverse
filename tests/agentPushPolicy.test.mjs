@@ -222,7 +222,8 @@ test("policy-named and policy-titled tests cannot be changed at T1", () => {
 
 test("the policy documents' named tests are found in the real tree", () => {
   const agents = readFileSync(new URL("../AGENTS.md", import.meta.url), "utf8");
-  const named = policyNamedTestPaths([agents]);
+  const machineIndex = readFileSync(new URL("../docs/agents/machine-index.md", import.meta.url), "utf8");
+  const named = policyNamedTestPaths([agents, machineIndex]);
   assert.ok(named.has("tests/typographyPolicy.test.mjs"));
   assert.ok(named.has("tests/e2e/mobile-short-viewport-drawer.spec.ts"));
 });

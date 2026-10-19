@@ -85,6 +85,7 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(entry.path))
       workflows.push({ path: entry.path, blobSha: entry.oid, text });
     if (entry.path === "AGENTS.md" ||
+        entry.path === "docs/agents/machine-index.md" ||
         entry.path === "scripts/security-regression-check.mjs" ||
         /^docs\/(?:policy|ui-contracts)\//.test(entry.path))
       policyDocuments.push(text);
