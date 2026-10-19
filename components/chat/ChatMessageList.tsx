@@ -36,6 +36,7 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { providerLabel } from "@/components/imports/importFormatting";
 import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
+import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -1341,6 +1342,12 @@ export function ChatMessageList({
                           language={lang as Parameters<typeof AutoRoutedByBadge>[0]["language"]}
                         />
                       </p>
+                    )}
+                    {!isUser && msg.routedModelId && msg.autoRewrite && (
+                      <AutoRewriteDisclosure
+                        rewrite={msg.autoRewrite}
+                        language={lang as Parameters<typeof AutoRewriteDisclosure>[0]["language"]}
+                      />
                     )}
                     {/*
                       The files this answer produced
