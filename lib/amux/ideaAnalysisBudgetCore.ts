@@ -11,6 +11,9 @@
  * The writer takes asOfIso from its database clock. The local CLI exception
  * and dark code-drafting gate are recorded in docs/policy/amux-intake.md v12.
  */
+import { isAmuxIdeaAnalysisProvider, type AmuxIdeaAnalysisProvider } from
+  "./ideaAnalysisChannelCore.ts";
+
 export const AMUX_V4_ANALYSIS_NAMESPACE = "agent/amux-intake" as const;
 /** Legacy bootstrap only, until an owner saves the first budget version. */
 export const AMUX_V4_ANALYSIS_INITIAL_MONTHLY_CAP_MICROUSD = "50000000" as const;
@@ -56,7 +59,7 @@ const ceilDivide = (value: bigint, divisor: bigint) =>
 export type AmuxIdeaAnalysisBudgetBasis = {
   namespace: typeof AMUX_V4_ANALYSIS_NAMESPACE;
   mode: "subscription_cli" | "api";
-  provider: "openai" | "anthropic";
+  provider: AmuxIdeaAnalysisProvider;
   modelId: string;
   pricingVersion: string;
   pricingVerifiedAt: string;
@@ -88,7 +91,7 @@ export type AmuxIdeaAnalysisBudgetBasis = {
 
 export type AmuxIdeaAnalysisBudgetDecision =
   | { decision: "reservation_candidate"; namespace: typeof AMUX_V4_ANALYSIS_NAMESPACE;
-      mode: "subscription_cli" | "api"; provider: "openai" | "anthropic"; modelId: string;
+      mode: "subscription_cli" | "api"; provider: AmuxIdeaAnalysisProvider; modelId: string;
       worstCaseMicroUsd: string; remainingAfterMicroUsd: string; pricingVersion: string;
       windowStartsAtIso: string;
       amountMeaning: "api_price_reservation_ceiling" | "cli_api_conversion_estimate" }
@@ -110,7 +113,7 @@ export function assessAmuxIdeaAnalysisBudget(
   if (!value ||
       value.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
       (value.mode !== "subscription_cli" && value.mode !== "api") ||
-      (value.provider !== "openai" && value.provider !== "anthropic") ||
+      !isAmuxIdeaAnalysisProvider(value.provider) ||
       typeof value.modelId !== "string" || !MODEL_ID.test(value.modelId) ||
       typeof value.pricingVersion !== "string" || !VERSION.test(value.pricingVersion) ||
       !utcIso(value.asOfIso) || !utcIso(value.pricingVerifiedAt) ||

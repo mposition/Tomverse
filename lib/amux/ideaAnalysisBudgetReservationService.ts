@@ -13,6 +13,7 @@ import { assessAmuxIdeaAnalysisBudget,
 import { readAnalysisMonthlyBudgetSetting } from "./ideaAnalysisBudgetSettingStore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "./ideaAnalysisPriceVersionRead.ts";
 import { writeAmuxAnalysisBudgetSystemAudit } from "./ideaAnalysisBudgetSystemAudit.ts";
+import { isAmuxV4AnalysisProvider } from "./ideaAnalysisChannelCore.ts";
 
 /** This reservation service is not a claim or a dispatch permission. The
  * owner-only reservation route calls it after its independent environment
@@ -263,6 +264,9 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     usageState: v4Unknown || sessionUnknown ? "unknown" : "known",
   });
   if (decision.decision !== "reservation_candidate") refuse("budget_hold", decision.reason);
+  // The v4 hold ledger admits only the Codex and Claude vendors; the GitHub
+  // Copilot and Cursor channels serve the v19 session runner alone.
+  if (!isAmuxV4AnalysisProvider(decision.provider)) refuse("integrity_unavailable");
   const reserve = BigInt(decision.worstCaseMicroUsd);
   const auditId = await writeAmuxAnalysisBudgetSystemAudit({
     tx, holdId: input.holdId, previewId: preview.id,

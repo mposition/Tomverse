@@ -1,13 +1,15 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { isAmuxIdeaAnalysisProvider } from "./ideaAnalysisChannelCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Content-free price selection for one queued Max reservation. The claim
+/** Content-free price selection for one queued subscription reservation, on
+ * the reservation's own CLI channel (owner decision 2026-10-20). The claim
  * transaction rechecks this version and every admission guard. */
 export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
   reservationId: string; ideaId: string;
@@ -38,20 +40,20 @@ export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
   });
   if (!reservation || reservation.ideaId !== input.ideaId ||
       reservation.status !== "queued" ||
-      reservation.modelProvider !== "anthropic" ||
+      !isAmuxIdeaAnalysisProvider(reservation.modelProvider) ||
       reservation.idea.submissionOrigin !== "session" ||
       !["submitted", "analyzing"].includes(reservation.idea.state) ||
       reservation.idea.cancelledAt !== null ||
       reservation.idea.analysisCompletedAt !== null ||
       now >= reservation.idea.analysisDeadlineAt) return { kind: "hold" };
   const row = await tx.amuxIdeaAnalysisPriceVersion.findFirst({
-    where: { provider: "anthropic", modelId: reservation.modelId,
+    where: { provider: reservation.modelProvider, modelId: reservation.modelId,
       mode: "subscription_cli", status: "approved", revokedAt: null },
     orderBy: { version: "desc" }, select: { id: true },
   });
   if (!row) return { kind: "hold" };
   const approved = await readApprovedAmuxIdeaAnalysisPriceVersion(tx, {
-    priceVersionId: row.id, provider: "anthropic",
+    priceVersionId: row.id, provider: reservation.modelProvider,
     modelId: reservation.modelId, now,
   });
   if (approved.decision !== "ready" ||

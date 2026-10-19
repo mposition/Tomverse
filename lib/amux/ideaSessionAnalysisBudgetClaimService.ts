@@ -8,6 +8,7 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE,
   assessAmuxIdeaAnalysisBudget } from "./ideaAnalysisBudgetCore.ts";
+import { amuxSubscriptionAuthProfile } from "./ideaAnalysisChannelCore.ts";
 import { assessSessionShadowBudget } from "./ideaSessionShadowBudgetCore.ts";
 import { readAnalysisMonthlyBudgetSetting } from
   "./ideaAnalysisBudgetSettingStore.ts";
@@ -84,7 +85,9 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   priceVersionId: string;
   runner: { tokenCapsEnforceable: boolean; billableToolsDisabled: boolean;
     maxSubscriptionAuthenticated?: boolean };
-  maxLauncherIdentity?: { ideaId: string; modelId: string;
+  /** The launcher that verified one channel's subscription sign-in. Its
+   * provider must be the reservation's channel (owner decision 2026-10-20). */
+  maxLauncherIdentity?: { ideaId: string; provider: string; modelId: string;
     reasoningEffort: string; authEvidenceDigest: string };
 }): Promise<{ claimId: string; reservationId: string; requestId: string;
   invocationOrdinal: number; reservedMicroUsd: string; auditId: string }> {
@@ -122,6 +125,8 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   if (input.runner.maxSubscriptionAuthenticated === true &&
       (!input.maxLauncherIdentity ||
        input.maxLauncherIdentity.ideaId !== reservation?.ideaId ||
+       input.maxLauncherIdentity.provider !== reservation?.modelProvider ||
+       amuxSubscriptionAuthProfile(reservation?.modelProvider) === null ||
        input.maxLauncherIdentity.modelId !== reservation?.modelId ||
        input.maxLauncherIdentity.reasoningEffort !== reservation?.reasoningEffort ||
        !/^[a-f0-9]{64}$/.test(input.maxLauncherIdentity.authEvidenceDigest))) {
@@ -212,15 +217,15 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     throw new AmuxSessionBudgetClaimError(failureStreak === "stopped"
       ? "not_ready" : "integrity_unavailable");
   }
-  // Keep the narrow Max mode predicate adjacent to the exception even though
-  // price admission above already rejects non-subscription versions.
+  // Keep the narrow subscription mode predicate adjacent to the exception even
+  // though price admission above already rejects non-subscription versions.
+  // Every channel is a subscription account (owner decision 2026-10-20).
   const maxShadow = price.price.mode === "subscription_cli" &&
-    price.price.provider === "anthropic" &&
     input.runner.maxSubscriptionAuthenticated === true &&
     input.runner.tokenCapsEnforceable === false;
   const usageState = v4Unknown || sessionUnknown ? "unknown" as const : "known" as const;
   const decision = maxShadow ? assessSessionShadowBudget({
-    mode: "subscription_cli", provider: "anthropic",
+    mode: "subscription_cli", provider: price.price.provider,
     asOfIso: now.toISOString(),
     pricingVerifiedAt: price.price.pricingVerifiedAt,
     pricingExpiresAt: price.price.pricingExpiresAt,
@@ -253,7 +258,7 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
     targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: input.claimId,
     summary: maxShadow
-      ? "Occupied monthly shadow headroom for one Max subscription analysis."
+      ? "Occupied monthly shadow headroom for one subscription CLI analysis."
       : "Claimed one bounded v19 session analysis against the shared Agent monthly budget.",
     metadata: { reservationId: input.reservationId,
       invocationOrdinal: input.invocationOrdinal,
@@ -263,7 +268,7 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
       reservedMicroUsd, budgetMode,
       ...(maxShadow ? { ideaId: reservation.ideaId,
         reasoningEffort: reservation.reasoningEffort,
-        maxAuthProfile: "claude-max-oauth",
+        maxAuthProfile: amuxSubscriptionAuthProfile(reservation.modelProvider),
         maxAuthEvidenceDigest: input.maxLauncherIdentity!.authEvidenceDigest } : {}),
       amountMeaning: decision.amountMeaning, modelCallStarted: false },
   });

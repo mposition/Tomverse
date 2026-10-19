@@ -1722,7 +1722,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
     },
   }));
-  const maxLauncherIdentity = { ideaId, modelId: maxModelId,
+  const maxLauncherIdentity = { ideaId, provider: "anthropic", modelId: maxModelId,
     reasoningEffort: "high",
     authEvidenceDigest: randomBytes(32).toString("hex") };
   await assert.rejects(prisma.$transaction((tx) => commitAmuxSessionBudgetClaim(tx, {

@@ -1,3 +1,4 @@
+import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "./ideaAnalysisChannelCore.ts";
 import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
 
 // The idea input's owner/name grammar (lib/amux/ideaInputCore.ts). It is
@@ -22,7 +23,7 @@ export const AMUX_OPERATING_SCOPE_POLICY_VERSION = 19;
 /** A structural bound on one setting row, not a limit on intake. */
 export const AMUX_OPERATING_SCOPE_REPOSITORY_MAX = 64;
 
-const PROVIDERS = ["openai", "anthropic"] as const;
+const PROVIDERS = AMUX_IDEA_ANALYSIS_PROVIDERS;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const REQUEST_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;

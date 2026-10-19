@@ -6,6 +6,9 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
+import { isAmuxIdeaAnalysisProvider, isAmuxV4AnalysisProvider,
+  type AmuxIdeaAnalysisProvider } from "./ideaAnalysisChannelCore.ts";
+import { readCurrentAmuxIdeaFrontierModelFromTx } from "./ideaFrontierCatalogRead.ts";
 
 const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
@@ -14,7 +17,7 @@ const MAX_INT = 2_147_483_647;
 
 export type AmuxIdeaAnalysisPriceApproval = {
   id: string;
-  provider: "openai" | "anthropic";
+  provider: AmuxIdeaAnalysisProvider;
   modelId: string;
   mode: "subscription_cli" | "api";
   expectedPreviousVersion: number;
@@ -30,7 +33,7 @@ export type AmuxIdeaAnalysisPriceApproval = {
 
 export class AmuxIdeaAnalysisPriceApprovalError extends Error {
   constructor(readonly code: "forbidden" | "invalid_price_evidence" |
-    "price_revision_changed" | "price_unavailable") {
+    "price_revision_changed" | "price_unavailable" | "model_not_approved") {
     super(code);
     this.name = "AmuxIdeaAnalysisPriceApprovalError";
   }
@@ -61,8 +64,11 @@ function requireValidApproval(input: AmuxIdeaAnalysisPriceApproval): void {
     typeof value === "number" && Number.isSafeInteger(value) &&
     value > 0 && value <= MAX_INT;
   if (!input || !ID.test(input.id) || !MODEL.test(input.modelId) ||
-      !["openai", "anthropic"].includes(input.provider) ||
+      !isAmuxIdeaAnalysisProvider(input.provider) ||
       !["subscription_cli", "api"].includes(input.mode) ||
+      // GitHub Copilot and Cursor are subscription channels only; an API
+      // price belongs to the v4 vendor path.
+      (input.mode === "api" && !isAmuxV4AnalysisProvider(input.provider)) ||
       !Number.isSafeInteger(input.expectedPreviousVersion) ||
       input.expectedPreviousVersion < 0 ||
       input.expectedPreviousVersion >= MAX_INT ||
@@ -84,7 +90,10 @@ function requireValidApproval(input: AmuxIdeaAnalysisPriceApproval): void {
  * future Admin route must bind these fields to the exact reviewed preview. */
 export async function commitAmuxIdeaAnalysisPriceApproval(
   tx: Prisma.TransactionClient,
-  input: { session: Session; request: Request; approval: AmuxIdeaAnalysisPriceApproval },
+  input: { session: Session; request: Request; approval: AmuxIdeaAnalysisPriceApproval;
+    /** The v19 subscription price is for a currently approved Frontier
+     * model; checked under the audit-chain lock so a revocation cannot race. */
+    requireCurrentFrontierModel?: true },
 ): Promise<{ priceVersionId: string; version: number; auditId: string }> {
   const actorUserId = await requireOwnerAndStepUp(input.session);
   requireValidApproval(input.approval);
@@ -98,6 +107,13 @@ export async function commitAmuxIdeaAnalysisPriceApproval(
   if (price.verifiedAt > now || price.expiresAt <= now ||
       price.verifiedAt >= price.expiresAt) {
     throw new AmuxIdeaAnalysisPriceApprovalError("invalid_price_evidence");
+  }
+  if (input.requireCurrentFrontierModel === true) {
+    const model = await readCurrentAmuxIdeaFrontierModelFromTx(tx,
+      { provider: price.provider, modelId: price.modelId });
+    if (model.decision !== "model_current") {
+      throw new AmuxIdeaAnalysisPriceApprovalError("model_not_approved");
+    }
   }
   const latest = await tx.amuxIdeaAnalysisPriceVersion.findFirst({
     where: { provider: price.provider, modelId: price.modelId, mode: price.mode },

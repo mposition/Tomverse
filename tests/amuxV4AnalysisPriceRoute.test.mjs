@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE,
+  amuxSubscriptionCliCostProfileMatches,
   amuxV4ApprovedCliCostProfileMatches,
   amuxV4ApprovedCliPriceEvidenceDigest } from
   "../lib/amux/ideaAnalysisApprovedCostProfile.ts";
@@ -86,9 +87,41 @@ test("the v19 Max runner's subscription_cli price uses the same reviewed rates",
     "../app/api/admin/amux/ideas/analysis-prices/route.ts", import.meta.url), "utf8");
   assert.match(route, /mode: z\.enum\(\["api", "subscription_cli"\]\)\.optional\(\)/);
   assert.match(route, /mode: body\.mode \?\? profile\.mode/);
-  assert.match(route, /"max-subscription": "subscription_cli"/);
-  assert.match(route, /amuxV4ApprovedCliCostProfileMatches\(latest, mode\)/);
+  assert.match(route, /amuxV4ApprovedCliCostProfileMatches\(latest\)/);
   const page = await readFile(new URL(
     "../app/(site)/(application)/admin/amux-settings/page.tsx", import.meta.url), "utf8");
   assert.match(page, /<AmuxOperatingScopePanel[^>]*\/>\s*<AmuxMaxSubscriptionPricePanel \/>/);
+});
+
+test("every approved Frontier model's subscription price is the reviewed Opus profile under its own channel", async () => {
+  const profile = AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
+  for (const model of [{ provider: "anthropic", modelId: "claude-opus-5-5" },
+    { provider: "openai", modelId: "gpt-6-luna" },
+    { provider: "github-copilot", modelId: "claude-sonnet-4.5" },
+    { provider: "cursor", modelId: "gpt-5" }]) {
+    const row = { ...profile, ...model, status: "approved", mode: "subscription_cli" };
+    assert.equal(amuxSubscriptionCliCostProfileMatches(row, model), true, model.provider);
+    for (const change of [{ mode: "api" }, { status: "revoked" },
+      { provider: model.provider === "cursor" ? "openai" : "cursor" },
+      { modelId: "other-model" }, { inputTokensCap: 999_999 },
+      { outputTokensCap: 128_001 }, { inputMicroUsdPerMillion: 7_999_999 },
+      { outputMicroUsdPerMillion: 20_000_001 }]) {
+      assert.equal(amuxSubscriptionCliCostProfileMatches({ ...row, ...change }, model), false);
+    }
+    assert.equal(amuxV4ApprovedCliCostProfileMatches(row), false,
+      "the v4 API profile check is unchanged");
+  }
+  const route = await readFile(new URL(
+    "../app/api/admin/amux/ideas/analysis-prices/route.ts", import.meta.url), "utf8");
+  // A subscription price names its model; the API price never takes one.
+  assert.match(route, /provider: provider\.optional\(\),\n {2}modelId: modelId\.optional\(\),/);
+  assert.match(route, /subscription !== \(body\.provider !== undefined\) \|\|\n\s+subscription !== \(body\.modelId !== undefined\)/);
+  assert.match(route, /provider: subscription \? body\.provider! : profile\.provider/);
+  assert.match(route, /requireCurrentFrontierModel: true as const/);
+  assert.match(route, /keyCount === 3 && profileName === "max-subscription"/);
+  assert.match(route, /amuxSubscriptionCliCostProfileMatches\(latest, selected\.data\)/);
+  const writer = await readFile(new URL(
+    "../lib/amux/ideaAnalysisPriceVersionWrite.ts", import.meta.url), "utf8");
+  assert.match(writer, /input\.requireCurrentFrontierModel === true[\s\S]*readCurrentAmuxIdeaFrontierModelFromTx\(tx,/);
+  assert.match(writer, /input\.mode === "api" && !isAmuxV4AnalysisProvider\(input\.provider\)/);
 });

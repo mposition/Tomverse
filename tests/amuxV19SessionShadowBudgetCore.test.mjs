@@ -25,10 +25,20 @@ test("Max shadow admission occupies all remaining headroom without asserting a h
   })), { decision: "hold", reason: "monthly_shadow_reached" });
 });
 
-test("Max exception refuses API, non-Anthropic, unknown and unpriced calls", () => {
+test("every subscription CLI channel may occupy headroom (owner decision 2026-10-20)", () => {
+  for (const provider of ["openai", "anthropic", "github-copilot", "cursor"]) {
+    assert.deepEqual(assessSessionShadowBudget(basis({ provider })), {
+      decision: "occupy_headroom", reservedMicroUsd: "35000000",
+      amountMeaning: "cli_shadow_headroom_not_ceiling",
+    }, provider);
+  }
+});
+
+test("subscription exception refuses API, unknown channels, unknown usage and unpriced calls", () => {
   for (const [change, reason] of [
     [{ mode: "api" }, "basis_invalid"],
-    [{ provider: "openai" }, "basis_invalid"],
+    [{ provider: "xai" }, "basis_invalid"],
+    [{ provider: "Anthropic" }, "basis_invalid"],
     [{ usageState: "unknown" }, "usage_unknown"],
     [{ billableToolsDisabled: false }, "non_token_cost_unbounded"],
     [{ worstTierVerified: false }, "price_unverified"],

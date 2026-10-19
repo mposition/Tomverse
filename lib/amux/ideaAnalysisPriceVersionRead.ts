@@ -6,6 +6,7 @@ import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { adminAuditEntryHashVariants,
   adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import type { AmuxIdeaAnalysisBudgetBasis } from "./ideaAnalysisBudgetCore.ts";
+import { isAmuxIdeaAnalysisProvider } from "./ideaAnalysisChannelCore.ts";
 
 type PriceBasis = Pick<AmuxIdeaAnalysisBudgetBasis,
   "mode" | "provider" | "modelId" | "pricingVersion" |
@@ -35,7 +36,7 @@ export async function readApprovedAmuxIdeaAnalysisPriceVersion(
       row.revocationAuditLogId !== null ||
       row.provider !== input.provider || row.modelId !== input.modelId ||
       (row.mode !== "subscription_cli" && row.mode !== "api") ||
-      (row.provider !== "openai" && row.provider !== "anthropic") ||
+      !isAmuxIdeaAnalysisProvider(row.provider) ||
       row.approvedAt > input.now || row.verifiedAt > input.now ||
       row.expiresAt <= input.now) {
     return { decision: "hold", reason: "price_unverified" };
