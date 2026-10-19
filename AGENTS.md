@@ -21,14 +21,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 Owner direction, 2026-10-19: Tomverse is an early startup with very few users and new ideas every day. Optimize development for fast, visible product learning. Spend the work on implementation and relevant verification; policy maintenance is supporting work, not the default deliverable.
 
 - For a feature or bug fix, implement the smallest useful behavior within the user's requested scope and run the relevant test or check. Resolve routine technical choices yourself. Present working behavior early, then iterate; do not make a complete design, new policy document, or speculative future risk a prerequisite for ordinary reversible development.
-- LLM-first scope reduction is Tomverse's default product engineering approach. Start semantic features with an existing LLM call, a focused prompt, structured output and existing tools. Do not build a custom classifier, scoring engine, planner, agent framework or workflow when model reasoning and existing tools can deliver the requested behavior. Keep deterministic code focused on authorization, budget enforcement, schema validation, persistence and essential orchestration. Reuse approved providers and budgets rather than enabling new paid calls implicitly.
+- LLM first. Tomverse is an AI platform and shrinks development scope through LLM calls. Start semantic features (search, extraction, classification, copy, research, matching) with an existing LLM call, a focused prompt, structured output and existing tools; do not hand-write a crawler, parser, heuristic, classifier, scoring engine, planner or agent workflow that a model call can replace. When a model call replaces a hand-written path, delete that path; fewer lines of code is a goal in itself. Keep deterministic code at the irreversible boundaries (cost caps and ledgers, human approval before an external post, deletion, credentials and security) and put one cheap check on model output there. A model-based design does not itself authorize a new paid run.
 - Read the code and binding instructions relevant to the next change. Reuse existing approvals and decisions. Do not start a fresh policy audit, rewrite approved contracts, or repeat independent reviews without a changed requirement, applicable rule, or unresolved finding.
-- Prior policy approval is required to enable or expand live agent authority, not to write code, prototypes, tests or isolated local migrations. Do not extend an autonomous worker's operating restrictions to every human-directed coding session or every product feature.
-- Treat implementation, review, activation, merge, and deployment as separate steps. An approval needed for a later action blocks that action only. Draft release gates and missing production evidence do not by themselves mean a feature cannot be built.
-- When an actual rule blocks a step, name the exact rule, action and risk briefly, continue another authorized part of the work, and ask only for the missing decision, once.
-- Independent review is required before enabling a new security, financial, destructive or autonomous permission boundary; ordinary reversible implementation uses local verification. Production data loss, secret exposure, new spending, external publication, merge and deployment keep their authorization boundaries.
+- Human approval is needed only for irreversible actions: real money leaving (enabling a paid call, raising a spending ceiling), anything leaving Tomverse (external posts, sends, publication), deleting user data, credentials and security boundaries, and production merges and deployments. Every other design choice is the owner's call in chat, implemented and recorded in one line in the commit or PR, with no policy revision, version bump, plan or prior approval record. Writing code, prototypes, tests or isolated local migrations never needs prior policy approval. Put risky features behind a default-off switch and ship them rather than blocking them.
+- Treat implementation, review, activation, merge, and deployment as separate steps. An approval needed for a later action blocks that action; it does not block already-authorized implementation and local verification. Draft release gates and missing production evidence do not by themselves mean a feature cannot be built.
+- When an actual rule blocks a step, identify the exact rule, affected action, and concrete risk briefly. Continue another authorized, testable part of the requested work. Ask only for the missing decision, once; do not send preparation or routine engineering judgment back to the owner.
+- Each finished diff gets its tests and one independent review. Review is not a planning loop: it runs once on the finished diff, not before code exists, and an accepted review is reused while the boundary it covered is unchanged.
 
-Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress.
+Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress. For an explicitly documentation-only or review-only request, deliver that requested artifact without inventing a code task.
 <!-- /development-execution -->
 
 # 먼저 만들고, 되돌릴 수 없는 것에만 게이트를 둡니다
@@ -79,7 +79,7 @@ Report implemented and tested behavior separately from documentation, review, me
 
 # 독립 검토와 모델 역할
 
-- 독립 검토는 위 Frontier 절이 정한 경계(새 보안·금전·파괴적·자율 권한)를 켤 때 한 번 받습니다.
+- 독립 검토는 위 Frontier 절대로 끝난 diff마다 한 번 받고, 그 검토가 덮은 경계가 바뀌지 않는 동안 다시 받지 않습니다.
   검토 서버를 씁니다: commit 후 `node "$HOME/bin/review.mjs" submit --author <자기 이름> --scope "<요약>"`,
   `wait <jobId>`를 종료 코드가 3이 아닐 때까지 반복합니다. 0 accept, 1 reject(고치고 새로 submit),
   2 unknown(다시 보내지 않고 사람에게 알림). 자세한 동작은 `tools/review-orchestrator/README.md`.
