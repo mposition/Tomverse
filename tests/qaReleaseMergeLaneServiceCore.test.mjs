@@ -64,7 +64,7 @@ const ports = (overrides = {}) => {
       commitsContaining: record("containing", overrides.containing ?? new Set()),
       cancelledCommits: record("cancelled", overrides.cancelled ?? new Set()),
     },
-    railway: { stagingDeployments: record("deployments", overrides.deployments === undefined ? [] : overrides.deployments) },
+    railway: { developDeployments: record("deployments", overrides.deployments === undefined ? [] : overrides.deployments) },
   };
   return { ports: p, calls };
 };
@@ -90,7 +90,7 @@ test("a free lane merges the oldest clear candidate with the head pinned and rep
   assert.deepEqual(reports(calls), [{ kind: "merge", result: "merged", mergeCommitSha: MERGE }]);
 });
 
-test("a latch, a staging deployment in flight or no candidate merges nothing", async () => {
+test("a latch, a dev deployment in flight or no candidate merges nothing", async () => {
   const latched = ports({ state: { dbNowMs: NOW, latched: true, openAttempt: null } });
   assert.equal((await runQaReleaseMergeLaneRound(ENV, latched.ports)).outcome, "latched");
   const busy = ports({ deployments: [{ serviceId: "web", serviceName: "web", status: "BUILDING", createdAt: "2026-10-04T23:00:00Z" }] });
@@ -111,7 +111,7 @@ test("an excluded candidate is skipped for the next, and its exclusion is judged
   assert.deepEqual(calls.filter((c) => c[0] === "exclusion").map((c) => c[1].number), [5, 7]);
 });
 
-test("a pull request that moved between issue and consume, a busy staging or a switch pulled closes the attempt unmerged", async () => {
+test("a pull request that moved between issue and consume, a busy dev or a switch pulled closes the attempt unmerged", async () => {
   for (const [label, overrides, env] of [
     ["head moved", { readPull: (n) => pull(n, { headRefOid: "c".repeat(40) }) }, ENV],
     ["base moved", { readPull: (n) => pull(n, { baseRefName: "main" }) }, ENV],

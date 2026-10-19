@@ -41,6 +41,8 @@
 // on its next push. Remove an entry once that pull request is closed; the
 // list only shrinks.
 
+import { pathToFileURL } from "node:url";
+
 export const GRANDFATHERED_MAIN_PULL_REQUESTS = Object.freeze([
     1798, // codex/to-main/amux-v4-foundation
     1858, // codex/ubuntu-bridge-policy
@@ -92,7 +94,6 @@ export const mainPullRequestDecision = (headBranch, pullRequestNumber) => {
 };
 
 // Run as a script: exit 1 with the reason when the head may not target main.
-const { pathToFileURL } = await import("node:url");
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const [head, number] = process.argv.slice(2);
     const { allowed, reason } = mainPullRequestDecision(head, number);

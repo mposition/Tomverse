@@ -192,6 +192,38 @@ export const splitOptimizerDecisions = <T>(decisions: readonly T[]) => {
     };
 };
 
+/**
+ * Why a proposal cannot stand in for the guidance, or null when it can. Only
+ * shape is reported, never the text: it is logged when a cycle ends
+ * candidate_invalid so the cause is not a guess.
+ */
+export const guidanceRejection = (raw: unknown) => {
+    if (typeof raw !== "string") return { reason: "not_text" as const };
+    const text = raw.replace(/\r\n?/g, "\n").trim();
+    const shape = { chars: text.length, lines: text.split("\n").length };
+    if (text.length < AUTO_ROUTER_GUIDANCE_MIN_CHARS) return { reason: "too_short" as const, ...shape };
+    if (text.length > AUTO_ROUTER_GUIDANCE_MAX_CHARS) return { reason: "too_long" as const, ...shape };
+    if (shape.lines > AUTO_ROUTER_GUIDANCE_MAX_LINES) return { reason: "too_many_lines" as const, ...shape };
+    return null;
+};
+
+/**
+ * What a failed optimizer call can say about itself without its content: the
+ * error's name and, for a structured-output failure, why the model stopped and
+ * how much text it wrote (a truncated object stops on "length").
+ */
+export const optimizerCallFailureDetail = (error: unknown) => {
+    const detail: { error: string; finishReason?: string; outputChars?: number } = {
+        error: error instanceof Error ? error.name : "unknown",
+    };
+    if (error && typeof error === "object") {
+        const { finishReason, text } = error as { finishReason?: unknown; text?: unknown };
+        if (typeof finishReason === "string") detail.finishReason = finishReason;
+        if (typeof text === "string") detail.outputChars = text.length;
+    }
+    return detail;
+};
+
 /** The proposal, trimmed, or null when it cannot stand in for the guidance. */
 export const admitGuidance = (raw: unknown): string | null => {
     if (typeof raw !== "string") return null;
