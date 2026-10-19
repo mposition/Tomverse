@@ -57,13 +57,13 @@ export function AmuxIntakePanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-intake-panel">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
-      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-intake-request">
+      <h2 className="text-lg font-semibold text-zinc-100">{messages.title}</h2>
+      <p className="text-sm text-zinc-300">{messages.description}</p>
+      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-100" htmlFor="amux-intake-request">
         {messages.requestLabel}
         <textarea
           id="amux-intake-request"
-          className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          className="min-h-40 w-full rounded-md border p-3 text-base border-zinc-600 bg-zinc-950 text-zinc-100"
           value={requestText}
           onChange={(event) => setRequestText(event.target.value)}
         />
@@ -71,7 +71,7 @@ export function AmuxIntakePanel() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="min-h-11 rounded-md px-4 text-sm font-medium disabled:opacity-50 bg-zinc-100 text-zinc-900"
           disabled={pending || requestText.trim().length === 0}
           onClick={() => send("preview")}
         >
@@ -79,7 +79,7 @@ export function AmuxIntakePanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending || !registerReady}
           aria-describedby="amux-intake-register-reason"
           onClick={() => send("register")}
@@ -87,16 +87,16 @@ export function AmuxIntakePanel() {
           {messages.register}
         </button>
       </div>
-      <p id="amux-intake-register-reason" className="text-sm text-zinc-700 dark:text-zinc-300">
+      <p id="amux-intake-register-reason" className="text-sm text-zinc-300">
         {registerReady ? messages.registerPermitted : messages.registerDisabled}
       </p>
       {refusedForStepUp ? (
-        <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
+        <a className="text-sm font-medium underline text-zinc-100" href={STEP_UP_HREF}>
           {messages.renewSignIn}
         </a>
       ) : null}
       {result ? (
-        <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
+        <div className="rounded-md border p-3 text-sm border-zinc-700 text-zinc-100" role="status">
           {result.error === "outcome_unknown" ? <p>{messages.outcomeUnknown}</p> : null}
           {result.error ? <p>{messages.error(result.error)}</p> : null}
           {result.code ? <p>{messages.error(result.code)}</p> : null}

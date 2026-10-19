@@ -121,7 +121,7 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
     finally { setBusy(false); }
   };
   return <section aria-labelledby="amux-analysis-monthly-budget-title"
-    className="space-y-3 rounded-lg border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+    className="space-y-3 rounded-lg border p-4 text-sm border-zinc-700">
     <h4 id="amux-analysis-monthly-budget-title" className="font-semibold">{m.title}</h4>
     <p>{m.hint}</p>
     {snapshot ? <dl className="grid grid-cols-2 gap-2">
@@ -137,7 +137,7 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
       <input id="amux-analysis-monthly-usd" type="text" inputMode="decimal" value={monthlyUsd}
         maxLength={16} disabled={locked} aria-describedby="amux-analysis-monthly-hint amux-analysis-monthly-error"
         aria-invalid={invalid || below} onChange={(e) => { setMonthlyUsd(e.target.value); setConfirmed(false); setNotice(null); }}
-        className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900" />
+        className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900" />
     </label>
     <p id="amux-analysis-monthly-hint">{m.inputHint}</p>
     <p id="amux-analysis-monthly-error" role="alert">{invalid ? m.invalid : below ? m.below : null}</p>

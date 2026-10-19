@@ -7,7 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import type { AmuxAdminCardRow } from "@/lib/amux/adminCardList";
 import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
 
-const cellClass = "border-b border-zinc-200 px-2 py-1 align-top dark:border-zinc-700";
+const cellClass = "border-b px-2 py-1 align-top border-zinc-700";
 
 export function AmuxCardListPanel({
   rows,
@@ -50,16 +50,16 @@ export function AmuxCardListPanel({
   }
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-card-list-panel">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-card-list-count">
+      <h2 className="text-lg font-semibold text-zinc-100">{messages.title}</h2>
+      <p className="text-sm text-zinc-300">{messages.description}</p>
+      <p className="text-sm text-zinc-300" data-testid="amux-card-list-count">
         {messages.shown(rows.length, total, limit)}
       </p>
       {rows.length === 0 ? (
-        <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.empty}</p>
+        <p className="text-sm text-zinc-300">{messages.empty}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-zinc-800 dark:text-zinc-100">
+          <table className="w-full text-left text-sm text-zinc-100">
             <thead>
               <tr>
                 <th scope="col" className={cellClass}>{messages.columnCard}</th>
@@ -79,9 +79,9 @@ export function AmuxCardListPanel({
                   <td className={cellClass}>
                     <span className="block font-medium" data-testid="amux-card-row-number">
                       {row.displayKey ?? messages.none}</span>
-                    <span className="block font-mono text-xs text-zinc-500 dark:text-zinc-400">{row.id}</span>
+                    <span className="block font-mono text-xs text-zinc-400">{row.id}</span>
                     {row.sourceKey && row.sourceKey !== row.id ? (
-                      <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                      <span className="block text-xs text-zinc-400">
                         {messages.sourceKey}: {row.sourceKey}</span>
                     ) : null}
                   </td>
@@ -114,7 +114,7 @@ export function AmuxCardListPanel({
         </div>
       )}
       {selectedTaskId && resultState && (
-        <section aria-live="polite" className="rounded border border-zinc-300 p-3 dark:border-zinc-700">
+        <section aria-live="polite" className="rounded border p-3 border-zinc-700">
           <p className="font-mono text-xs">{selectedTaskId}</p>
           {resultState === "available" ?
             <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm">{resultText}</pre> :

@@ -157,6 +157,7 @@
     "maintenance:marketing-publisher": "node scripts/run-marketing-publisher.mjs",
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
     "maintenance:pinned-deployment-execution": "node --conditions=react-server --import tsx scripts/run-pinned-deployment-execution.mjs",
+    "generate:admin-theme-css": "node scripts/generate-admin-theme-css.mjs",
     "generate:marketing-admission-code": "node scripts/generate-marketing-admission-code-manifest.mjs",
     "check:marketing-admission-code": "node scripts/check-marketing-admission-code.mjs",
     "report:marketing-facts-digest": "node --conditions=react-server --import tsx scripts/report-marketing-facts-digest-nulls.mjs",

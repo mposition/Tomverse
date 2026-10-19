@@ -17,10 +17,10 @@ export function AmuxCliUsagePanel({ view }: { view: {
   unmeasuredLowerBound: number;
 } | null }) {
   const m = useAdminMessages(adminAmuxCliUsageMessages);
-  return <section className="mx-auto w-full max-w-6xl rounded-lg border border-zinc-200 p-4 dark:border-zinc-700"
+  return <section className="mx-auto w-full max-w-6xl rounded-lg border p-4 border-zinc-700"
     data-testid="amux-cli-usage-panel">
     <h2 className="text-lg font-semibold">{m.title}</h2>
-    <p className="text-sm text-zinc-600 dark:text-zinc-300">{m.description}</p>
+    <p className="text-sm text-zinc-300">{m.description}</p>
     {view === null ? <p role="status">{m.unavailable}</p> : <>
       <p className="mt-2 text-sm" data-testid="amux-cli-usage-total">
         {m.totals(view.recorded, view.unmeasuredLowerBound)}

@@ -40,8 +40,6 @@ const ROWS = [
 const cellText = (m: Messages, entry: DmDeclarationAccuracyInstanceReport, row: (typeof ROWS)[number]) =>
   row === "daysSinceFirstProposal" ? daysText(m, entry) : dmReportMetricText(m, entry[row]);
 
-const cellClass = "border-b border-zinc-200 px-2 py-2 align-top dark:border-zinc-700";
-
 /**
  * AMUX › Execution › Decision Maker, §4's declaration accuracy report, without
  * hooks, so a test can call it and read the tree it returns.
@@ -61,55 +59,48 @@ export function AmuxDecisionMakerReportView({
 }) {
   return (
     <section
-      className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4"
+      className="flex min-w-0 flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-900 p-5"
       data-testid="amux-decision-maker-report-panel"
     >
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{m.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.description}</p>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.noEffect}</p>
+      <header className="flex flex-col gap-1.5">
+        <h2 className="text-base font-bold text-zinc-100">{m.title}</h2>
+        <p className="text-sm leading-6 text-zinc-400">{m.description}</p>
+        <p className="text-xs leading-5 text-zinc-500">{m.noEffect}</p>
+      </header>
       {report === null ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-dm-report-unavailable">
+        <p role="alert" className="text-sm text-red-300" data-testid="amux-dm-report-unavailable">
           {m.unavailable}
         </p>
       ) : (
         <>
-          <p className="text-xs text-zinc-600 dark:text-zinc-400" data-testid="amux-dm-report-computed-at">
-            {m.computedAt(dmReportInstant(report.dbNowMs))}
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm text-zinc-900 dark:text-zinc-100">
-              <thead>
-                <tr>
-                  <th scope="col" className={`${cellClass} font-medium`}>
-                    {m.measure}
-                  </th>
-                  {report.instances.map((entry) => (
-                    <th key={entry.instance} scope="col" className={`${cellClass} font-medium`}>
-                      {entry.instance}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {ROWS.map((row) => (
-                  <tr key={row} data-testid={`amux-dm-report-${row}`}>
-                    <th scope="row" className={`${cellClass} font-medium`}>
-                      {m[row]}
-                    </th>
-                    {report.instances.map((entry) => (
-                      <td
-                        key={entry.instance}
-                        className={cellClass}
+          {report.instances.map((entry) => (
+            <div key={entry.instance} className="flex flex-col gap-2">
+              <h3 className="font-mono text-sm font-semibold text-zinc-100" data-testid={`amux-dm-report-instance-${entry.instance}`}>
+                {entry.instance}
+              </h3>
+              <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {ROWS.map((row) => {
+                  const measured = row === "daysSinceFirstProposal"
+                    ? entry.daysSinceFirstProposal.status !== "insufficient_evidence"
+                    : entry[row].status !== "insufficient_evidence";
+                  return (
+                    <div key={row} className="flex min-w-0 flex-col gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-3" data-testid={`amux-dm-report-${row}`}>
+                      <dt className="text-xs leading-5 text-zinc-400">{m[row]}</dt>
+                      <dd
+                        className={measured ? "break-words text-lg font-bold text-zinc-100" : "break-words text-sm font-semibold text-zinc-500"}
                         data-testid={`amux-dm-report-${row}-${entry.instance}`}
                       >
                         {cellText(m, entry, row)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </div>
+          ))}
+          <p className="text-xs text-zinc-500" data-testid="amux-dm-report-computed-at">
+            {m.computedAt(dmReportInstant(report.dbNowMs))}
+          </p>
         </>
       )}
     </section>
