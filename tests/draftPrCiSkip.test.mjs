@@ -8,6 +8,8 @@ import { parse } from "yaml";
 // run nothing; a ready one, or a draft into develop, runs everything. See the header of .github/workflows/pr-fast-gate.yml for why.
 // The condition is copied into every job, so this keeps the copies honest.
 
+const PULL_REQUEST_ROLLUP =
+    "always() && github.event_name == 'pull_request' && (!github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))";
 const RUN_UNLESS_SKIPPED_DRAFT =
     "github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')";
 
@@ -55,7 +57,10 @@ for (const name of GUARDED) {
             }
             assert.ok(
                 condition === RUN_UNLESS_SKIPPED_DRAFT ||
-                    condition === `always() && (${RUN_UNLESS_SKIPPED_DRAFT})`,
+                    condition === `always() && (${RUN_UNLESS_SKIPPED_DRAFT})` ||
+                    // A rollup that exists only for branch protection runs on
+                    // pull requests and never on pushes.
+                    condition === PULL_REQUEST_ROLLUP,
                 `${name} job ${id} has if: ${condition || "(none)"}`
             );
         }
