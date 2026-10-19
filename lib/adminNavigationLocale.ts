@@ -209,9 +209,19 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       comments: { label: "댓글", description: "모니터가 올린 댓글 알림 중 아무도 답하지 않은 것" },
     },
   },
+  "product-research": {
+    label: "제품 리서치",
+    description: "Scout가 공개 페이지·생성 파일·카탈로그에서 찾은 개선 제안과 실행·비용",
+    aliases: ["스카우트", "개선 제안", "제안", "제품 리서치", "관측", "이슈 백로그", "회차"],
+    tabs: {
+      suggestions: { label: "개선 제안", description: "대상별로 묶은 열린 제안. 거절하거나 AMUX로 보냅니다" },
+      runs: { label: "실행과 비용", description: "Scout가 돌았는지, owner가 정한 모델과 하루 상한, 최근 7일" },
+      observations: { label: "이슈 관찰 기록", description: "관측 회차, 가장 최근 회차의 행, staging·production 창 계산값" },
+    },
+  },
   "engineering-agent": {
     label: "엔지니어링 에이전트",
-    description: "에이전트의 기록 — 엔지니어링 T2 초안과 run, 제품·리서치 관측 회차",
+    description: "엔지니어링 에이전트의 기록 — T2 초안, run, pull request, 모드",
     aliases: [
       "엔지니어링",
       "에이전트",
@@ -221,10 +231,6 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       "게시 서비스",
       "러너",
       "동결",
-      "제품 리서치",
-      "관측",
-      "이슈 백로그",
-      "회차",
     ],
     tabs: {
       queue: { label: "소유자 대기열", description: "사람을 기다리는 T2 초안, 결정, 상태 불일치" },
@@ -234,10 +240,6 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
         description: "에이전트가 결속한 것 — pull request, snapshot, 승인·병합 관측",
       },
       settings: { label: "모드", description: "모드, 동결, kill switch, 상한 대비 소유자 대기열" },
-      "product-research": {
-        label: "제품·리서치",
-        description: "관측 회차, 가장 최근 회차의 행, staging·production 창 계산값",
-      },
     },
   },
   "sre-ops": {

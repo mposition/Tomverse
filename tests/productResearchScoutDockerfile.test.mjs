@@ -92,6 +92,9 @@ test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no
   const { AGENT_RUNNER_SERVICES } = await import("../.railway/agent-runners.ts");
   const service = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_scout");
   assert.equal(service.cronSchedule, "0 18 * * *");
+  // The Admin "next run" reads this hour; the two move together.
+  const { SCOUT_SCHEDULE_UTC_HOUR } = await import("../lib/productResearchScoutCore.ts");
+  assert.equal(service.cronSchedule, `0 ${SCOUT_SCHEDULE_UTC_HOUR} * * *`);
   assert.equal(service.startCommand, "npm run agent:product-research-scout");
   assert.equal(service.dockerfile.path, "docker/product-research-scout.Dockerfile");
   assert.deepEqual(Object.keys(service.environments).sort(), ["dev", "production"]);

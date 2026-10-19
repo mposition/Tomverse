@@ -187,7 +187,7 @@ staging의 앱 스위치 → staging의 서비스 스위치 순서로 켭니다.
 
 ## 매일 보는 곳
 
-Admin Console → Operations → Engineering agent → **Product research** tab.
+Admin Console → Operations → **Product research** (`/admin/product-research`). 개선 제안, 실행과 비용, 이슈 관찰 기록 세 탭이고, 관측 기록은 세 번째 탭입니다. 예전 주소 `/admin/engineering-agent?tab=product-research`는 이 화면으로 redirect됩니다.
 
 **관측 섹션에는 버튼이 없습니다.** 이 Agent는 아무것도 제안하지 않으므로 승인할
 것도 거절할 것도 없습니다. 보이는 것은 예정 회차 목록(행이 없는 회차 포함), 가장
@@ -329,7 +329,7 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
    | Build → Watch paths | `docker/product-research-scout.Dockerfile`, `scripts/agents/product-research-scout.mjs`, `scripts/report-product-consistency-core.mjs`, `lib/productResearchScout*`, `lib/generatedArtifact*`, `package-lock.json` |
    | Variables | `PRODUCT_RESEARCH_SCOUT_ENABLED`, `PRODUCT_RESEARCH_SCOUT_INGEST_URL`(그 환경 앱의 `https://…/api/internal/product-research/scout`), `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(1과 같은 값). 이 셋 말고는 없음 |
 
-3. **Admin에서 모델과 하루 상한**: Admin › Engineering agent › Product research의 "모델과 하루 상한"에서 이미지를 읽는
+3. **Admin에서 모델과 하루 상한**: Admin › 제품 리서치 › 실행과 비용의 "모델과 하루 상한"에서 이미지를 읽는
    모델을 고르고 하루 호출 수를 정합니다(owner, 최근 로그인). 하루 약 25회면 한 번 실행을 다 판정합니다. 0이면 비용이 들지
    않고, 모델이 없으면 walker는 돌아도 판정하지 않습니다.
 
