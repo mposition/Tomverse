@@ -73,9 +73,8 @@ export const MARKETING_LLM_RESERVATION_TTL_MS = 15 * 60 * 1000;
 export const MARKETING_LLM_DISPATCH_TTL_MS = 60 * 60 * 1000;
 export const MARKETING_LLM_PIN_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 
-/** The most the environment may raise the cap to: US$100, policy v4 (D2). */
+/** The most the operator may set the cap to: US$100, policy v4 (D2). */
 export const MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD = 100_000_000;
-export const MARKETING_LLM_MONTHLY_CAP_ENV = "MARKETING_LLM_MONTHLY_USD_CAP";
 
 /** Row bounds the migration's CHECKs repeat; a pin outside them is unusable. */
 export const MARKETING_LLM_ROW_LIMITS = {
@@ -446,6 +445,51 @@ export const parseMarketingLlmMonthlyCap = (raw: string | undefined): number | n
   if (micro <= 0 || micro > MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD) return null;
   return micro;
 };
+
+// ---------------------------------------------------------------------------
+// The operator's settings: which pinned model the generator uses, and the
+// monthly cap. Set in the Admin Console (operator decision 2026-10-19), stored
+// as one AppSetting document so both are read together, inside the
+// reservation's transaction.
+
+export const MARKETING_LLM_SETTINGS_KEY = "marketing.llmSettings";
+
+export type MarketingLlmSettings = {
+  /** A pinned model id, or null: nothing is selected and nothing can spend. */
+  readonly model: string | null;
+  /** Decimal USD as `parseMarketingLlmMonthlyCap` reads it, or null: no cap, nothing can spend. */
+  readonly monthlyUsdCap: string | null;
+};
+
+export const MARKETING_LLM_SETTINGS_UNSET: MarketingLlmSettings = Object.freeze({ model: null, monthlyUsdCap: null });
+
+/**
+ * The stored document, or null when it is not one. Absent is unset. Strict: the
+ * two keys and nothing else, a model in the pin's id grammar, a cap the cap
+ * parser reads. A document this cannot read refuses every reservation.
+ */
+export const parseMarketingLlmSettings = (value: string | null | undefined): MarketingLlmSettings | null => {
+  if (value === null || value === undefined) return MARKETING_LLM_SETTINGS_UNSET;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed).sort();
+  if (keys.length !== 2 || keys[0] !== "model" || keys[1] !== "monthlyUsdCap") return null;
+  const { model, monthlyUsdCap } = parsed as Record<string, unknown>;
+  if (model !== null && (typeof model !== "string" || !PIN_TEXT.test(model))) return null;
+  if (monthlyUsdCap !== null && (typeof monthlyUsdCap !== "string" || parseMarketingLlmMonthlyCap(monthlyUsdCap) === null)) {
+    return null;
+  }
+  return { model, monthlyUsdCap } as MarketingLlmSettings;
+};
+
+/** The document the store writes: keys in one order, so equal settings are equal strings. */
+export const marketingLlmSettingsValue = (settings: MarketingLlmSettings): string =>
+  JSON.stringify({ model: settings.model, monthlyUsdCap: settings.monthlyUsdCap });
 
 /**
  * Where a settle report closes a call. Anything that contradicts the

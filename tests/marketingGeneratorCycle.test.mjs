@@ -12,9 +12,12 @@ import {
 import {
   MARKETING_GENERATOR_CALL_BUDGET_MS,
   marketingGeneratorAppPorts,
+  marketingGeneratorPinForContext,
+  MARKETING_GENERATOR_WORKER_VARIABLES,
   marketingGeneratorWorkerConfig,
   runMarketingGeneratorCycle,
 } from "@/lib/marketingGeneratorCycleCore";
+import { AGENT_RUNNER_SERVICES } from "../.railway/agent-runners.ts";
 import { superviseMarketingGeneratorRun } from "../scripts/marketing-generator-service.mjs";
 
 const SECRET = "g".repeat(48);
@@ -194,12 +197,11 @@ test("a 4xx the app did not write -- a proxy's HTML -- keeps its status and is n
   assert.equal(sent.length, 2);
 });
 
-test("the worker needs every variable, a long secret, HTTPS and a price pin for its model", () => {
+test("the worker needs every variable, a long secret, HTTPS and at least one price pin", () => {
   const env = {
     MARKETING_APP_URL: "https://tomverse.app",
     MARKETING_GENERATOR_SUBMIT_SECRET: SECRET,
     MARKETING_LLM_API_KEY: "sk-fixture",
-    MARKETING_GENERATOR_MODEL: "fixture-model",
   };
   const pins = [{ model: "fixture-model" }];
   assert.equal(marketingGeneratorWorkerConfig(env, pins).ok, true);
@@ -208,6 +210,15 @@ test("the worker needs every variable, a long secret, HTTPS and a price pin for 
   assert.match(marketingGeneratorWorkerConfig({ ...env, MARKETING_APP_URL: "http://tomverse.app" }, pins).reason, /HTTPS/);
   assert.equal(marketingGeneratorWorkerConfig({ ...env, MARKETING_APP_URL: "http://localhost:3000" }, pins).ok, true);
   assert.match(marketingGeneratorWorkerConfig(env, []).reason, /price pin/);
+});
+
+test("the model is the one the operator selected in the Admin Console, and it needs a pin", () => {
+  const pins = [{ model: "fixture-model" }, { model: "other-model" }];
+  assert.deepEqual(marketingGeneratorPinForContext({ llm: { model: "other-model" } }, pins), { ok: true, pin: pins[1] });
+  assert.match(marketingGeneratorPinForContext({ llm: { model: null } }, pins).reason, /no model is selected/);
+  assert.match(marketingGeneratorPinForContext({}, pins).reason, /no model is selected/);
+  assert.match(marketingGeneratorPinForContext(null, pins).reason, /no model is selected/);
+  assert.match(marketingGeneratorPinForContext({ llm: { model: "unpinned" } }, pins).reason, /no price pin/);
 });
 
 test("the shipped worker will not start: no model has a price pin yet", () => {
@@ -223,13 +234,12 @@ test("the shipped worker will not start: no model has a price pin yet", () => {
         MARKETING_APP_URL: "https://tomverse.app",
         MARKETING_GENERATOR_SUBMIT_SECRET: SECRET,
         MARKETING_LLM_API_KEY: "sk-fixture",
-        MARKETING_GENERATOR_MODEL: "any-model",
       },
       encoding: "utf8",
     },
   );
   assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /no price pin/);
+  assert.match(result.stderr, /no model has a price pin/);
 });
 
 test("a worker that does not finish is killed at the deadline", async () => {
@@ -258,4 +268,15 @@ test("a worker that finishes in time is not killed, and gets only its own variab
   });
   assert.equal(outcome.killedAtDeadline, false);
   assert.equal(outcome.code, 0);
+});
+
+test("the Railway service gives the worker exactly its variables, never on dev", () => {
+  const runners = AGENT_RUNNER_SERVICES.filter((runner) => runner.key === "marketing_generator");
+  assert.equal(runners.length, 1);
+  const [runner] = runners;
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/marketing-generator-service.mjs");
+  assert.deepEqual(Object.keys(runner.environments).sort(), ["production", "staging"]);
+  for (const variables of Object.values(runner.environments)) {
+    assert.deepEqual([...variables].sort(), [...MARKETING_GENERATOR_WORKER_VARIABLES].sort());
+  }
 });

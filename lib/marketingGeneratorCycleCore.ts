@@ -167,23 +167,22 @@ export const MARKETING_GENERATOR_WORKER_VARIABLES = [
   "MARKETING_APP_URL",
   "MARKETING_GENERATOR_SUBMIT_SECRET",
   "MARKETING_LLM_API_KEY",
-  "MARKETING_GENERATOR_MODEL",
 ] as const;
 
 export type MarketingGeneratorWorkerConfig<Pin> = {
   readonly appUrl: URL;
   readonly secret: string;
   readonly apiKey: string;
-  readonly pin: Pin;
+  readonly pins: readonly Pin[];
 };
 
 /**
  * The worker's configuration, or why it will not start.
  *
- * The model is named by the operator and must have a price pin -- a person's
- * decision, in code -- or the worker does nothing at all: without a pin the
- * app refuses every reservation anyway, and a worker that started would only
- * spend a run being refused.
+ * Without any price pin -- a person's decision, in code -- the worker does
+ * nothing at all: the app refuses every reservation anyway. Which pinned model
+ * it uses is the operator's Admin setting, read from the context
+ * (`marketingGeneratorPinForContext`).
  */
 export function marketingGeneratorWorkerConfig<Pin extends { readonly model: string }>(
   env: Readonly<Record<string, string | undefined>>,
@@ -201,9 +200,24 @@ export function marketingGeneratorWorkerConfig<Pin extends { readonly model: str
   }
   const local = appUrl.hostname === "localhost" || appUrl.hostname === "127.0.0.1";
   if (appUrl.protocol !== "https:" && !local) return { ok: false, reason: "MARKETING_APP_URL must use HTTPS" };
-  const pin = pins.find((candidate) => candidate.model === env.MARKETING_GENERATOR_MODEL);
-  if (!pin) return { ok: false, reason: "no price pin for MARKETING_GENERATOR_MODEL; a person adds one" };
-  return { ok: true, config: { appUrl, secret, apiKey: env.MARKETING_LLM_API_KEY as string, pin } };
+  if (pins.length === 0) return { ok: false, reason: "no model has a price pin; a person adds one" };
+  return { ok: true, config: { appUrl, secret, apiKey: env.MARKETING_LLM_API_KEY as string, pins } };
+}
+
+/**
+ * The pin for the model the operator selected in the Admin Console, read from
+ * the generator context, or why the run does nothing.
+ */
+export function marketingGeneratorPinForContext<Pin extends { readonly model: string }>(
+  context: unknown,
+  pins: readonly Pin[],
+): { readonly ok: true; readonly pin: Pin } | { readonly ok: false; readonly reason: string } {
+  const llm = context && typeof context === "object" ? (context as { llm?: unknown }).llm : undefined;
+  const model = llm && typeof llm === "object" ? (llm as { model?: unknown }).model : undefined;
+  if (typeof model !== "string") return { ok: false, reason: "no model is selected in the Admin Console" };
+  const pin = pins.find((candidate) => candidate.model === model);
+  if (!pin) return { ok: false, reason: "the selected model has no price pin" };
+  return { ok: true, pin };
 }
 
 /** The context, intake and report routes, over HTTP with the generator's secret. */
