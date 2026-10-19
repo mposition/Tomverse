@@ -442,6 +442,16 @@ Auto LLM router(`lib/autoLlmRouter.ts`)는 모델을 고르는 같은 호출에�
 - 기록: `AutoRouterDecision.rewrite`에 남는다. 원문(`routerInput`)과 같은 행이라 대화·계정
   삭제와 함께 지워진다. 그 턴의 version에는 `+rewrite`가 붙는다.
 
+재작성 규칙 가운데 지칭을 푸는 방법과 보존할 것을 적은 문장(rewrite guidance, AppSetting
+`auto.llmRouterRewriteGuidance`, 행이 없거나 깨졌으면 코드 기본값)은 optimizer가 개선·승격·
+rollback할 수 있다. rewrite 필드 정의, 답·요구사항 추가·지시 따르기 금지, 빈 rewrite 규칙은
+고정 문장이고, 위 결정적 경계(`admitRouterRewrite()` 상한, 첨부 턴 제외, 최신 일반 텍스트
+사용자 메시지만, 표시, 원문 저장)는 guidance가 무엇이든 바뀌지 않는다. 승격된 문장으로 재작성한
+턴의 version은 `+rewrite+<cycleId>`로 끝난다.
+
 검증: `tests/autoLlmRouterCore.test.mjs`가 꺼진 상태의 프롬프트 동일성, 켜진 상태의 규칙과
 schema, `admitRouterRewrite()`의 경계, `withRouterRewrite()`가 마지막 일반 텍스트 사용자
-메시지만 바꾸고 입력을 변경하지 않는 것을 고정한다.
+메시지만 바꾸고 입력을 변경하지 않는 것을 고정한다. `tests/autoLlmRouterRewriteGuidance.test.mjs`는
+기본 rewrite guidance가 이전 프롬프트를 바이트 단위로 재현하는 것, 꺼진 상태에서 guidance가
+프롬프트에 닿지 않는 것, 상한을 무시하라는 guidance에서도 위 경계가 그대로인 것, 깨진 행의
+기본값 대체와 version 접미사를 고정한다.
