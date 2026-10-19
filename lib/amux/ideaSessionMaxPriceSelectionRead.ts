@@ -13,8 +13,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * transaction rechecks this version and every admission guard. */
 export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
   reservationId: string; ideaId: string;
-}): Promise<{ kind: "ready"; priceVersionId: string; modelId: string;
-  reasoningEffort: string } | { kind: "hold" }> {
+}): Promise<{ kind: "ready"; priceVersionId: string; provider: string;
+  modelId: string; reasoningEffort: string } | { kind: "hold" }> {
   if (!UUID.test(input.reservationId) || !UUID.test(input.ideaId)) {
     return { kind: "hold" };
   }
@@ -58,7 +58,8 @@ export async function readAmuxV19MaxPriceSelection(tx: Tx, input: {
   });
   if (approved.decision !== "ready" ||
       approved.price.mode !== "subscription_cli") return { kind: "hold" };
+  // The channel tells the launcher which CLI and sign-in run this claim.
   return { kind: "ready", priceVersionId: row.id,
-    modelId: reservation.modelId,
+    provider: reservation.modelProvider, modelId: reservation.modelId,
     reasoningEffort: reservation.reasoningEffort };
 }

@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
+import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "@/lib/amux/ideaAnalysisChannelCore";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
   isAmuxV4AnalysisAgentAuthorized } from "@/lib/amux/ideaAnalysisQueueCore";
@@ -16,19 +17,18 @@ import { AmuxSessionBudgetClaimError, commitAmuxSessionBudgetClaim,
 import { prisma } from "@/lib/prisma";
 
 const CLAIM_CODE_LATCH = true;
-// The fixed Ubuntu launcher behind this route verifies only the Claude Max
-// OAuth sign-in (verifyAmuxV19ClaudeMaxAuthSource), so its claims are on the
-// anthropic channel. Another channel's launcher must first bind its provider
-// into the signed attestation; until then the service refuses those claims.
-const LAUNCHER_PROVIDER = "anthropic";
 const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE";
 const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
 const STOP_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
 const uuid = z.string().uuid();
 const identity = z.object({ requestId: uuid, reservationId: uuid,
   invocationOrdinal: z.number().int().min(0).max(2_147_483_647) }).strict();
+// `provider` is the CLI channel whose subscription sign-in the launcher
+// checked; it is inside the signed proof, and the claim service refuses it
+// unless it is the reservation's own channel.
 const claimBody = identity.extend({ claimId: uuid, ideaId: uuid,
   priceVersionId: z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/),
+  provider: z.enum(AMUX_IDEA_ANALYSIS_PROVIDERS),
   modelId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/),
   reasoningEffort: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/),
   authVerifiedAt: z.string().datetime(),
@@ -71,7 +71,7 @@ export async function POST(request: Request): Promise<Response> {
         reservationId: body.reservationId,
         invocationOrdinal: body.invocationOrdinal,
         priceVersionId: body.priceVersionId,
-        maxLauncherIdentity: { ideaId: body.ideaId, provider: LAUNCHER_PROVIDER,
+        maxLauncherIdentity: { ideaId: body.ideaId, provider: body.provider,
           modelId: body.modelId,
           reasoningEffort: body.reasoningEffort, authEvidenceDigest },
         runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,

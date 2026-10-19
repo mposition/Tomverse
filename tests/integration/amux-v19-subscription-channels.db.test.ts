@@ -259,7 +259,7 @@ for (const [index, [provider]] of CHANNELS.entries()) {
     const selection = await prisma.$transaction((tx) =>
       readAmuxV19MaxPriceSelection(tx, queued));
     assert.deepEqual(selection, { kind: "ready", priceVersionId: channel.priceVersionId,
-      modelId: channel.modelId, reasoningEffort: "high" });
+      provider: channel.provider, modelId: channel.modelId, reasoningEffort: "high" });
     const identity = { ideaId: queued.ideaId, modelId: channel.modelId,
       reasoningEffort: "high", authEvidenceDigest: randomBytes(32).toString("hex") };
     const claim = (provider: string) => (tx: Prisma.TransactionClient) =>

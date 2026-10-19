@@ -66,19 +66,26 @@ API 키 호출, v4 분석, 다른 Agent, 사용자 크레딧과 실제 추가 �
    호출이 동시에 예산을 쓰지 못하게 한다. 이 점유액은 비용 상한이나 실제
    청구액이 아니라 동시성·중단 판단용이다. 결과 불명은 재호출하지 않고
    점유와 중지 상태를 유지하며, 기존 exact-ID 증거와 owner 판정으로만 닫는다.
-   Max 인증 증거는 Ubuntu의 고정 launcher가 전용 OAuth 파일의 소유자·권한·경로를
-   `verifyAmuxV19ClaudeMaxAuthSource`로 확인한 결과다. 전용 Agent 자격증명으로
-   인증된 그 launcher의 exact-ID 청구만 앱이 받는다. 앱은 임의 요청 본문의
-   `maxSubscriptionAuthenticated: true`를 인증 증거로 사용하지 않는다. 이 연결과
-   감사 결속이 구현되기 전에는 Max shadow 청구를 live로 열지 않는다. 청구 감사의
-   `maxAuthProfile`은 청구 채널의 값이어야 하며 DB 트리거가 다시 확인한다. 다른 세
-   채널의 인증 증거와 launcher는 각 runner 단계에서 같은 방식으로 정하고, 그 전까지
-   앱의 청구 route는 Claude Max launcher의 `anthropic` 채널 청구만 받는다.
+   구독 인증 증거는 Ubuntu의 고정 launcher가 그 채널의 로그인 파일(Claude Max 전용
+   OAuth 토큰, Codex `~/.codex/auth.json`, Copilot `~/.copilot/config.json`, Cursor
+   `~/.config/cursor/auth.json`)의 소유자·권한·형식·만료를
+   `verifyAmuxV19ChannelAuthSource`로 확인한 결과이고, launcher는 그 채널(`provider`)을
+   서명된 증거에 넣는다. 전용 Agent 자격증명으로 인증된 그 launcher의 exact-ID
+   청구만, 서명된 채널이 예약의 채널과 같을 때만 앱이 받는다. 앱은 임의 요청 본문의
+   `maxSubscriptionAuthenticated: true`를 인증 증거로 사용하지 않는다. 청구 감사의
+   `maxAuthProfile`은 청구 채널의 값이어야 하며 DB 트리거가 다시 확인한다. sandbox에는
+   refresh 비밀이 없는 읽기 전용 인증 사본만 들어가고, 원본 로그인 파일은 쓰지 않는다.
+   Codex 채널은 runner의 bwrap 안에서 Codex 자체 read-only shell sandbox가 시작되지
+   않아(2026-10-20 실측) 운영자 결정 전까지 launcher가 청구하지 않는다.
 3. **호출 후 관측.** CLI가 보고한 입력·출력 사용량을 검증된 요율로 환산해
    실제 shadow 사용량을 기록한다. 점유액보다 커도 측정값을 자르거나 성공을
    결과 불명으로 바꾸지 않는다. 초과분과 월 기준 초과 여부를 같은 트랜잭션의
    Agent 비용 기록·해시 체인 감사에 남긴다. 관측값이 없거나 신뢰할 수 없으면
-   결과 불명으로 멈추며 비용을 추측하거나 자동 재시도하지 않는다.
+   결과 불명으로 멈추며 비용을 추측하거나 자동 재시도하지 않는다. 같은 정산
+   감사에 결과를 낸 채널(`cliProvider`), 실행한 CLI 사본의 sha256(`cliSha256`),
+   그리고 `modelAttestation`을 남긴다. CLI가 답한 모델을 보고하고 그것이 요청과
+   같으면 `served`(Claude·Copilot), 보고하지 않으면 요청 모델을 기록값으로 받아
+   `requested`(Codex·Cursor)다.
 4. **초과 뒤 동작.** 월의 관측 shadow 사용량이 설정 금액 이상이면 그 달의
    다음 분석은 대기한다. owner가 월 설정을 바꾸더라도 이미 관측한 초과 사용량은
    지우지 않는다. 운영자 화면에는 기준액·관측액·초과액을 구분해 표시한다.

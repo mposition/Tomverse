@@ -423,7 +423,7 @@ test("session analysis queue lists the live reservation and advances past its DB
   const first = await listAmuxSessionAnalysisCandidates(null);
   assert.deepEqual(first, {
     candidates: [{ reservationId: committedReservationId, ideaId: committedIdeaId,
-      modelId, expiresAt: idea.analysisDeadlineAt.toISOString(),
+      provider: "openai", modelId, expiresAt: idea.analysisDeadlineAt.toISOString(),
       nextInvocationOrdinal: 0 }],
     hasMore: false, nextCursor: null,
   });
@@ -1696,7 +1696,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     const selected = await getMaxPriceRoute(new Request(endpoint, { headers }));
     assert.equal(selected.status, 200);
     assert.deepEqual(await selected.json(), { kind: "ready", priceVersionId,
-      modelId: maxModelId, reasoningEffort: "high" });
+      provider: "anthropic", modelId: maxModelId, reasoningEffort: "high" });
     const wrong = await getMaxPriceRoute(new Request(
       endpoint.replace(ideaId, randomUUID()), { headers }));
     assert.equal(wrong.status, 409);
@@ -2004,14 +2004,29 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   try {
     savedResult = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'Australia/Brisbane'");
+      // The answer must come from the claim's own channel.
+      await assert.rejects(commitAmuxMaxSessionResult(tx, { ...resultIdentity,
+        rawModelOutput: "{\"units\":[]}", inputTokens: 1001, outputTokens: 1,
+        cliAttestation: { provider: "cursor", modelAttestation: "requested",
+          cliSha256: "f".repeat(64) }, keys: resultKeys }),
+      (error: unknown) => error instanceof AmuxMaxSessionResultError &&
+        error.code === "invalid_result");
       return commitAmuxMaxSessionResult(tx, { ...resultIdentity,
         rawModelOutput: "{\"units\":[]}", inputTokens: 1001,
-        outputTokens: 1, keys: resultKeys });
+        outputTokens: 1, cliAttestation: { provider: "anthropic",
+          modelAttestation: "served", cliSha256: "f".repeat(64) },
+        keys: resultKeys });
     });
   } finally {
     resultKeys.masterKey.fill(0);
     resultKeys.digestKey.fill(0);
   }
+  const settlementAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: savedResult.settlementAuditId }, select: { metadata: true } });
+  const settlementMetadata = settlementAudit.metadata as Record<string, unknown>;
+  assert.equal(settlementMetadata.cliProvider, "anthropic");
+  assert.equal(settlementMetadata.modelAttestation, "served");
+  assert.equal(settlementMetadata.cliSha256, "f".repeat(64));
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxMaxSessionResultReceipt(tx, resultIdentity)), {
     status: "committed", claimId: claim.claimId,

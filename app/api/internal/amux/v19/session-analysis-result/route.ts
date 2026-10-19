@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
+import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "@/lib/amux/ideaAnalysisChannelCore";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV } from
   "@/lib/amux/ideaAnalysisQueueCore";
@@ -36,10 +37,20 @@ const identity = z.object({ claimId: uuid, requestId: uuid,
   invocationOrdinal: z.number().int().safe().nonnegative(),
   referenceOrdinal: z.number().int().safe().nonnegative(),
   evidenceId: uuid, manifestId: uuid }).strict();
+// How the runner produced the answer (owner decision 2026-10-20): the claim's
+// CLI channel, whether that CLI named the answering model ("served") or the
+// requested model is the recorded one ("requested"), and the sha256 of the
+// exact CLI copy that ran. Recorded with the settlement, never trusted for cost.
+const cliAttestation = z.object({
+  provider: z.enum(AMUX_IDEA_ANALYSIS_PROVIDERS),
+  modelAttestation: z.enum(["served", "requested"]),
+  cliSha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
 const bodySchema = identity.extend({
   rawModelOutput: z.string().min(1),
   inputTokens: z.number().int().safe().nonnegative(),
   outputTokens: z.number().int().safe().nonnegative(),
+  cliAttestation,
 }).refine((body) => Buffer.byteLength(body.rawModelOutput, "utf8") <=
     65_536 && body.inputTokens + body.outputTokens > 0 &&
     Number.isSafeInteger(body.inputTokens + body.outputTokens));

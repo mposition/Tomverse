@@ -70,6 +70,33 @@ test("usage-only settlement refuses a Max success when result persistence is ena
   assert.deepEqual(await response.json(), { error: "session_result_required" });
 });
 
+test("a result without an exact CLI channel attestation is refused before database access", async () => {
+  process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
+  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE = "enabled";
+  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ = "enabled";
+  process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION = "enabled";
+  process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION = "enabled";
+  const body = { claimId: "d57eac94-9808-4688-a9f8-940aa3c22188",
+    requestId: "fd31e8e8-3e71-4af6-b0a2-c834170b9a92",
+    reservationId: "0b82536e-8cf9-4afa-a5b5-f022c73c9ec0",
+    ideaId: "aeb93a68-a941-40ed-9782-9abbb3f2139f",
+    invocationOrdinal: 0, referenceOrdinal: 0,
+    evidenceId: "59818d23-7798-4cfd-9d49-9a3f69653673",
+    manifestId: "13638989-a338-461d-9777-7b3fd3c595ab",
+    rawModelOutput: "{}", inputTokens: 1, outputTokens: 1 };
+  const attestation = { provider: "cursor", modelAttestation: "requested",
+    cliSha256: "e".repeat(64) };
+  for (const cliAttestation of [undefined,
+    { ...attestation, provider: "gemini" },
+    { ...attestation, modelAttestation: "assumed" },
+    { ...attestation, cliSha256: "E".repeat(64) },
+    { ...attestation, servedModelId: "auto" }]) {
+    const response = await POST(new Request(endpoint, { method: "POST", headers,
+      body: JSON.stringify(cliAttestation ? { ...body, cliAttestation } : body) }));
+    assert.equal(response.status, 400);
+  }
+});
+
 test("result receipt refuses noncanonical invocation ordinals before database access", async () => {
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
   process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ = "enabled";

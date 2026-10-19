@@ -8,11 +8,13 @@ import { buildAmuxSessionAnalysisQueueWhere } from "./ideaSessionAnalysisQueueWh
 
 const PAGE_SIZE = 32;
 
-/** Content-free queue hints; neither a claim nor permission to launch CLI. */
+/** Content-free queue hints; neither a claim nor permission to launch CLI.
+ * `provider` names the reservation's CLI channel. */
 export async function listAmuxSessionAnalysisCandidates(
   cursor: AmuxSessionAnalysisQueueCursor | null,
 ): Promise<{ candidates: Array<{ reservationId: string; ideaId: string;
-  modelId: string; expiresAt: string; nextInvocationOrdinal: number }>;
+  provider: string; modelId: string; expiresAt: string;
+  nextInvocationOrdinal: number }>;
   hasMore: boolean; nextCursor: string | null }> {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
@@ -34,7 +36,8 @@ export async function listAmuxSessionAnalysisCandidates(
       where: { ...buildAmuxSessionAnalysisQueueWhere(now, cursor),
         operatingScopeSettingId: latestScope.id },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: PAGE_SIZE + 1,
-      select: { id: true, ideaId: true, modelId: true, createdAt: true,
+      select: { id: true, ideaId: true, modelProvider: true, modelId: true,
+        createdAt: true,
         idea: { select: { analysisDeadlineAt: true } },
         budgetClaims: { orderBy: { invocationOrdinal: "desc" }, take: 1,
           select: { invocationOrdinal: true } } },
@@ -43,7 +46,7 @@ export async function listAmuxSessionAnalysisCandidates(
     const last = candidates.at(-1);
     return {
       candidates: candidates.map((row) => ({ reservationId: row.id,
-        ideaId: row.ideaId, modelId: row.modelId,
+        ideaId: row.ideaId, provider: row.modelProvider, modelId: row.modelId,
         expiresAt: row.idea.analysisDeadlineAt.toISOString(),
         nextInvocationOrdinal: row.budgetClaims[0]
           ? row.budgetClaims[0].invocationOrdinal + 1 : 0 })),

@@ -15,7 +15,7 @@ const identity = Object.freeze({ claimId: "9942fb52-4b78-4af6-931a-9eec8f66d394"
   requestId: "44c72436-c011-4cfc-b52f-e3345c22fc80",
   reservationId: "bf72ad14-585c-41bd-b25e-aab4c17a6d3c",
   ideaId: "53d6918e-b05d-4531-a1ab-704dd756cc40",
-  invocationOrdinal: 0, priceVersionId: "price-1",
+  invocationOrdinal: 0, priceVersionId: "price-1", provider: "anthropic",
   modelId: "claude-opus-5-5", reasoningEffort: "high" });
 const claim = { kind: "claimed", recovered: false, retryWrite: false,
   claimId: identity.claimId, requestId: identity.requestId,
@@ -58,6 +58,8 @@ function steps(overrides = {}) {
       assert.ok(text.includes(identity.claimId), "the claim is the preview id");
       assert.ok(text.includes("reference-0, reference-1"));
       assert.ok(text.includes("BEGIN_SHARED_CONTRACT_PATHS_JSON"));
+      assert.ok(text.includes("Use the Read, Grep and Glob tools"));
+      assert.equal(input.provider, identity.provider);
       assert.equal(input.modelId, identity.modelId);
       assert.match(input.digestSecret, /^[a-f0-9]{64}$/);
       return { kind: "verified_success", cliStarted: true,
@@ -69,6 +71,7 @@ function steps(overrides = {}) {
       assert.equal(input.excludedPathDigestKeyId,
         AMUX_V19_EXCLUDED_PATH_DIGEST_KEY_ID);
       assert.equal(observed.kind, "verified_success");
+      assert.equal(input.provider, identity.provider);
       assert.deepEqual(Object.keys(input.identity).sort(), ["claimId",
         "ideaId", "invocationOrdinal", "requestId", "reservationId"]);
       return { kind: "recorded", recovered: false, retryWrite: false,
@@ -102,6 +105,27 @@ test("one recorded cycle runs every step once and releases the halt", () =>
       registrationState: "write_disabled" });
     assert.deepEqual(fake.calls, ["claim", "readIdea", "analyse", "finalize"]);
     assert.equal(fake.released(), 1);
+  }));
+
+test("a Cursor claim's prompt names that CLI's read tools", () =>
+  withSwitches(async () => {
+    const cursorIdentity = { ...identity, provider: "cursor", modelId: "auto" };
+    let text;
+    const fake = steps({
+      claim: async () => ({ kind: "claimed", identity: cursorIdentity, claim,
+        retryWrite: false }),
+      readIdea: async () => ({ kind: "ready", prompt: pagePrompt(identity.claimId) }),
+      analyse: async (input) => {
+        assert.equal(input.provider, "cursor");
+        text = input.prompt(1).toString("utf8");
+        return { kind: "outcome_unknown", cliStarted: true };
+      },
+    });
+    assert.deepEqual(await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: "/state" }, fake.steps), { kind: "outcome_unknown",
+      stage: "analysis", claimId: identity.claimId });
+    assert.ok(text.includes("Use your read-only file tools (read, glob, grep, list)"));
+    assert.ok(!text.includes("Use the Read, Grep and Glob tools"));
   }));
 
 test("nothing after a claim is retried and only a recorded result releases the halt",

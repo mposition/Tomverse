@@ -89,6 +89,10 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
     try { await verifyAmuxV4StagedCliBinary(input.cliMount); }
     catch (error) { sandboxVerificationError = error; throw error; }
     return [];
+  },
+  // Used only by the non-Claude channel path, which this file does not run.
+  verifyAmuxPreparedCheckout: async () => {
+    throw new Error("unexpected channel checkout verification");
   } },
 });
 // The host launches bwrap through the open-trace runner (strace, FIFO and

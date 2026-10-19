@@ -31,8 +31,14 @@ export type AmuxMaxSessionResultIdentity = AmuxMaxCheckoutClaim & {
   ideaId: string; referenceOrdinal: number; evidenceId: string;
   manifestId: string;
 };
+/** How the runner produced the answer: the claim's CLI channel, whether that
+ * CLI named the answering model, and the sha256 of the CLI copy that ran. */
+export type AmuxMaxSessionCliAttestation = {
+  provider: string; modelAttestation: "served" | "requested"; cliSha256: string;
+};
 type ResultInput = AmuxMaxSessionResultIdentity & {
   rawModelOutput: string; inputTokens: number; outputTokens: number;
+  cliAttestation: AmuxMaxSessionCliAttestation;
   keys: AmuxContentKeys; unitIds?: readonly string[];
 };
 
@@ -150,6 +156,9 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
         Number.isSafeInteger(value) && value >= 0 &&
         value <= 2_147_483_647) ||
       input.inputTokens + input.outputTokens <= 0 ||
+      (input.cliAttestation?.modelAttestation !== "served" &&
+        input.cliAttestation?.modelAttestation !== "requested") ||
+      !/^[a-f0-9]{64}$/.test(input.cliAttestation?.cliSha256 ?? "") ||
       resultKeyId(input) !== amuxContentUnitKeyId({
         ideaId: input.ideaId, purpose: "analysis_result",
         subjectId: input.claimId })) {
@@ -158,6 +167,12 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
   }
   try {
     await preflightAmuxMaxSessionResult(tx, input);
+    // The answer must come from the claim's own channel.
+    const channel = await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+      where: { id: input.claimId }, select: { provider: true } });
+    if (!channel || channel.provider !== input.cliAttestation.provider) {
+      throw new AmuxMaxSessionResultError("invalid_result");
+    }
     const sealed = sealAmuxContent(bytes, "analysis_result",
       input.claimId, input.keys);
     const resultAuditId = await writeSystemAuditLog({ tx,
@@ -190,6 +205,7 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
       exactAgentClaim: { requestId: input.requestId,
         reservationId: input.reservationId, ideaId: input.ideaId,
         invocationOrdinal: input.invocationOrdinal },
+      cliAttestation: input.cliAttestation,
     });
     if (input.invocationOrdinal === 0) {
       const advanced = await tx.amuxIdeaSubmission.updateMany({

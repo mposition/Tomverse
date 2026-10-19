@@ -30,7 +30,9 @@ const observed = { kind: "verified_success", cliStarted: true,
   excludedReasons: { secret_path: 1, secret_content: 0,
     non_regular: 0, unscannable_content: 0 },
   readFiles: ["docs/guide.md"], rawModelOutput: "private answer",
-  inputTokens: 20, outputTokens: 10 };
+  inputTokens: 20, outputTokens: 10,
+  cliAttestation: { provider: "anthropic", modelAttestation: "served",
+    cliSha256: "d".repeat(64) } };
 const evidenceId = "fbd49038-b8e0-4796-8530-a2adcb7d0dbd";
 const input = (fetchImpl) => ({ origin: "https://amux.example.test/",
   identity, referenceOrdinal: 0, commitSha: observed.commitSha,
@@ -100,6 +102,7 @@ test("Max output is posted only after both exact source receipts", async () => {
       assert.equal(body.rawModelOutput, "private answer");
       assert.equal(body.evidenceId, evidenceId);
       assert.match(body.manifestId, /^[a-f0-9-]{36}$/);
+      assert.deepEqual(body.cliAttestation, observed.cliAttestation);
       return Response.json({ claimId: identity.claimId,
         resultAuditId: "clsyntheticresult123",
         settlementAuditId: "clsyntheticsettlement123",
@@ -119,6 +122,24 @@ test("Max output is posted only after both exact source receipts", async () => {
     "GET /api/internal/amux/v19/session-analysis-stop",
     "POST /api/internal/amux/v19/session-analysis-result",
   ]);
+});
+
+test("a verified answer without its claim channel's attestation writes nothing", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls++; throw new Error("network reached"); };
+  const unattested = { ...observed };
+  delete unattested.cliAttestation;
+  for (const [provider, seen] of [[undefined, unattested],
+    [undefined, { ...observed, cliAttestation: { ...observed.cliAttestation,
+      provider: "cursor" } }],
+    ["cursor", observed],
+    ["anthropic", { ...observed, cliAttestation: { ...observed.cliAttestation,
+      modelAttestation: "unknown" } }]]) {
+    assert.deepEqual(await finalizeAmuxV19MaxSessionResultWithReceipts(
+      { ...input(fetchImpl), ...(provider ? { provider } : {}) }, seen),
+    { kind: "outcome_unknown", retryWrite: false });
+  }
+  assert.equal(calls, 0);
 });
 
 test("stop and mismatched identity suppress output before evidence writes", async () => {
