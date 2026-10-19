@@ -5,6 +5,7 @@ import { AlertTriangle, Bot, ChevronRight, X } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxDecisionMakerDeliveryResolvePanel } from "@/components/admin/AmuxDecisionMakerDeliveryResolvePanel";
 import { AmuxDecisionMakerJudgmentPanel } from "@/components/admin/AmuxDecisionMakerJudgmentPanel";
 import { dmReportInstant } from "@/components/admin/AmuxDecisionMakerReportPanel";
 import {
@@ -277,6 +278,17 @@ export function AmuxDecisionMakerRequestDetailView({
             key={row.requestId}
             requestId={row.requestId}
             shown={detail.shown}
+            reloadHref={dmAdminRequestDetailHref(row.requestId)}
+          />
+        </footer>
+      ) : null}
+      {/* §9: a confirmed answer whose delivery is unknown waits on a person, who
+          checks the worker in AMUX and records what they found, once. */}
+      {delivery === "unknown" ? (
+        <footer className="border-t border-zinc-800 bg-zinc-900 px-6 py-4">
+          <AmuxDecisionMakerDeliveryResolvePanel
+            key={row.requestId}
+            requestId={row.requestId}
             reloadHref={dmAdminRequestDetailHref(row.requestId)}
           />
         </footer>
