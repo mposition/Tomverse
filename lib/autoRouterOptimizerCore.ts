@@ -166,6 +166,23 @@ export const rolledBackRouterGuidance = (
 export const autoLlmRouterVersionFor = (baseVersion: string, cycleId: string | null) =>
     cycleId ? `${baseVersion}+${cycleId}` : baseVersion;
 
+/**
+ * A cycle still marked running after this long was cut off -- typically by a
+ * redeploy, which ends the background calls with the container. The next
+ * reservation closes it at its full reservation; until then it is shown as
+ * interrupted, so it neither blocks a new run nor reads as still working.
+ */
+export const AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS = 15 * 60_000;
+
+export const optimizerCycleView = (
+    cycle: { status: string; failure: string | null; createdAt: Date },
+    now: Date
+): { status: string; failure: string | null } =>
+    cycle.status === "running" &&
+    now.getTime() - cycle.createdAt.getTime() > AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS
+        ? { status: "error", failure: "interrupted" }
+        : { status: cycle.status, failure: cycle.failure };
+
 /** Newest first in, alternating out: both halves span the same period. */
 export const splitOptimizerDecisions = <T>(decisions: readonly T[]) => {
     const sample = decisions.slice(0, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
