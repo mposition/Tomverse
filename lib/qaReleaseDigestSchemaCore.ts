@@ -79,7 +79,7 @@ export const QA_RELEASE_CI_WORKFLOWS = [
 export const QA_RELEASE_CI_JOBS = {
   "e2e.yml": ["playwright", "regression"],
   "nightly-visual-regression.yml": ["visual-regression"],
-  "admin-console-e2e.yml": ["admin-console-e2e"],
+  "admin-console-e2e.yml": ["admin-console-e2e-shard", "admin-console-e2e"],
   "deployed-commit-drift.yml": ["drift"],
   "back-merge-main-to-develop.yml": ["back-merge", "verify"],
 } as const satisfies Record<(typeof QA_RELEASE_CI_WORKFLOWS)[number], readonly string[]>;
