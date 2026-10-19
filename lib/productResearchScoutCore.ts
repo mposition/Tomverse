@@ -42,6 +42,22 @@ export const SCOUT_LLM_CALL_OUTCOMES = ["started", "ok", "failed"] as const;
 /** Bounds for the daily model-call cap an owner sets in Admin. 0 means no calls. */
 export const SCOUT_DAILY_CALL_CAP_MAX = 500;
 
+/**
+ * What one send of the walker came to, read from the scout route's answer.
+ * A day's cap is not a failure: once the route says the cap is reached the
+ * walker stops capturing and counts the rest as capped.
+ */
+export type ScoutSendOutcome = "judged" | "modelOff" | "capped" | "refused" | "failed";
+
+export function scoutSendOutcome(answer: unknown): ScoutSendOutcome {
+  const value = (answer ?? {}) as { judged?: unknown; reason?: unknown; refused?: unknown };
+  if (value.judged === true) return "judged";
+  if (value.reason === "model_off") return "modelOff";
+  if (value.reason === "daily_cap_reached") return "capped";
+  if (typeof value.refused === "string") return "refused";
+  return "failed";
+}
+
 export const SCOUT_SUBJECT_KINDS = ["page", "file", "catalogue"] as const;
 export type ScoutSubjectKind = (typeof SCOUT_SUBJECT_KINDS)[number];
 
@@ -218,4 +234,93 @@ export function suggestionIdeaText(input: {
     `근거: ${input.evidence}`,
     `제안: ${input.suggestion}`,
   ].join("\n");
+}
+
+// ---------------------------------------------------------------- the Admin view of runs
+
+/** The walker's Railway schedule: daily at 18:00 UTC (.railway/agent-runners.ts). */
+export const SCOUT_SCHEDULE_UTC_HOUR = 18;
+
+/** The first scheduled run after `now`. */
+export function nextScoutRunAt(now: Date): Date {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), SCOUT_SCHEDULE_UTC_HOUR);
+  return new Date(today > now.getTime() ? today : today + 86_400_000);
+}
+
+/** One ledger row as the Admin view reads it. */
+export type ScoutCallRow = {
+  readonly createdAt: Date;
+  readonly outcome: string;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly kept: number | null;
+};
+
+/** Calls closer together than this belong to one run of the walker. */
+export const SCOUT_RUN_GAP_MS = 30 * 60_000;
+
+export type ScoutRunSummary = {
+  readonly startedAt: string;
+  readonly endedAt: string;
+  readonly calls: number;
+  readonly failed: number;
+  /** Calls still `started`: the model has not answered, or the app stopped first. */
+  readonly unsettled: number;
+  readonly kept: number;
+};
+
+/**
+ * The newest run, read from the ledger: the newest call and every earlier call
+ * within SCOUT_RUN_GAP_MS of the next one. Null when nothing was ever called.
+ */
+export function latestScoutRun(rows: readonly ScoutCallRow[]): ScoutRunSummary | null {
+  const sorted = [...rows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  if (sorted.length === 0) return null;
+  const run = [sorted[0]];
+  for (const row of sorted.slice(1)) {
+    if (run[run.length - 1].createdAt.getTime() - row.createdAt.getTime() > SCOUT_RUN_GAP_MS) break;
+    run.push(row);
+  }
+  return {
+    startedAt: run[run.length - 1].createdAt.toISOString(),
+    endedAt: run[0].createdAt.toISOString(),
+    calls: run.length,
+    failed: run.filter((row) => row.outcome === "failed").length,
+    unsettled: run.filter((row) => row.outcome === "started").length,
+    kept: run.reduce((sum, row) => sum + (row.kept ?? 0), 0),
+  };
+}
+
+export type ScoutDaySummary = {
+  /** The UTC date, the same day the cap counts. */
+  readonly day: string;
+  readonly calls: number;
+  readonly failed: number;
+  readonly kept: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+};
+
+/** One row per UTC day for the last `days` days, newest first, days without calls included. */
+export function scoutDays(rows: readonly ScoutCallRow[], now: Date, days: number): ScoutDaySummary[] {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const summaries = Array.from({ length: days }, (_, index) => ({
+    day: new Date(today - index * 86_400_000).toISOString().slice(0, 10),
+    calls: 0,
+    failed: 0,
+    kept: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  }));
+  const byDay = new Map(summaries.map((summary) => [summary.day, summary]));
+  for (const row of rows) {
+    const summary = byDay.get(row.createdAt.toISOString().slice(0, 10));
+    if (!summary) continue;
+    summary.calls += 1;
+    if (row.outcome === "failed") summary.failed += 1;
+    summary.kept += row.kept ?? 0;
+    summary.inputTokens += row.inputTokens ?? 0;
+    summary.outputTokens += row.outputTokens ?? 0;
+  }
+  return summaries;
 }

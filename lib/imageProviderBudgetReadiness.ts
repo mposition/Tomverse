@@ -1,6 +1,7 @@
 import "server-only";
 
 import { isImageGenerationEnabled } from "@/lib/appSettings";
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import {
   resolveActiveImageProviderBudgets,
   type ResolvedImageProviderBudgetByProvider,
@@ -23,6 +24,8 @@ export type ImageProviderBudgetReadiness = {
  */
 export const getImageProviderBudgetReadiness =
   async (): Promise<ImageProviderBudgetReadiness> => {
+    // Providers enabled at runtime count too (lib/modelCatalog.ts).
+    await refreshImageModelCatalog();
     const providers = resolveActiveImageProviderBudgets(process.env, {
       production: process.env.NODE_ENV === "production",
     });

@@ -582,6 +582,10 @@ export function ImageGenerationWorkspace({
         });
       case "PLAN_FEATURE_NOT_INCLUDED":
         return t("chat.imageGenerationPlanGateTitle");
+      case "IMAGE_PRICE_CHANGED":
+        // An operator changed a price after this page was rendered. Nothing
+        // was reserved; the new price is shown after a reload.
+        return t("chat.imageGenerationErrorPriceChanged");
       default:
         return t("chat.imageGenerationErrorGeneric");
     }
@@ -714,6 +718,14 @@ export function ImageGenerationWorkspace({
           quality,
           idempotencyKey: crypto.randomUUID(),
           modelIds: selectedModelIds,
+          // The price versions this composer quoted; the server refuses the
+          // request if it would now charge a different one.
+          expectedPricingVersions: Object.fromEntries(
+            selectedModelIds.flatMap((modelId) => {
+              const version = getImageModel(modelId)?.pricingVersion;
+              return version ? [[modelId, version]] : [];
+            })
+          ),
           ...(conversationIdRef.current
             ? { conversationId: conversationIdRef.current }
             : {}),

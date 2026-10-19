@@ -48,6 +48,11 @@ export type AdminNavigationCounts = {
    */
   pendingMarketingApprovals: number | null;
   /**
+   * Scout suggestions still open (docs/policy/product-research-agent.md §10):
+   * each waits for a person to dismiss it or send it to AMUX.
+   */
+  openProductResearchSuggestions: number | null;
+  /**
    * AMUX escalations waiting on a person: `open` and `acknowledged`, the same
    * statuses the Assignment section lists (AMUX_ESCALATION_AWAITING_STATUSES).
    *
@@ -62,6 +67,12 @@ export type AdminNavigationCounts = {
    * halts can be cleared automatically and other halts need investigation.
    */
   openAmuxOrchestratorHalts: number | null;
+  /**
+   * AMUX Decision Maker requests waiting on a person in Admin: an open
+   * proposal to judge, or a confirmed answer whose delivery is unknown
+   * (dmAdminAttentionKind). They are drawn in Execution's attention lane.
+   */
+  awaitingAmuxDecisionMaker: number | null;
   /**
    * Reports that have not closed -- `open` and `reviewing` both, as named by
    * FEEDBACK_AWAITING_OPERATOR_STATUSES. Not `status: "open"`: a
@@ -95,8 +106,10 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   openModelLifecycle: null,
   overdueCampaignWaves: null,
   pendingMarketingApprovals: null,
+  openProductResearchSuggestions: null,
   openAmuxEscalations: null,
   openAmuxOrchestratorHalts: null,
+  awaitingAmuxDecisionMaker: null,
   openFeedback: null,
   supportFeedback: null,
   autoFixActionCases: null,
@@ -162,10 +175,20 @@ export const adminNavigationBadge = (
       return counts.overdueCampaignWaves;
     case "marketing":
       return counts.pendingMarketingApprovals;
+    case "productResearch":
+      return counts.openProductResearchSuggestions;
     case "amuxEscalations":
       return counts.openAmuxEscalations;
     case "amuxOrchestratorHalts":
       return counts.openAmuxOrchestratorHalts;
+    case "amuxDecisionMaker":
+      return counts.awaitingAmuxDecisionMaker;
+    case "amuxOwnerAttention":
+      // Both must be known, like amuxExecution: a figure that left out an
+      // unreadable count would read as less work than there is.
+      return counts.openAmuxEscalations === null || counts.awaitingAmuxDecisionMaker === null
+        ? null
+        : counts.openAmuxEscalations + counts.awaitingAmuxDecisionMaker;
     case "amuxExecution":
       // The Execution entry: escalations plus open orchestrator halts. Unlike
       // the partial sums above, both must be known. A halt stops the

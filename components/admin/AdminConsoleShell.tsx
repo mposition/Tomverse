@@ -28,6 +28,7 @@ import { adminShellMessages } from "@/lib/adminMessages/shell";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import type { AdminRole } from "@/lib/adminAuthCore";
 import { adminFetch } from "@/lib/adminFetch";
+import { adminThemeCookieValue, type AdminTheme } from "@/lib/adminTheme";
 
 /**
  * The automatic-refresh period, and the only place it is written down.
@@ -58,6 +59,8 @@ type Props = {
   version: string;
   apiStatus: "healthy" | "degraded" | "unknown";
   counts: AdminNavigationCounts;
+  /** The console theme the layout read from its cookie. */
+  theme: AdminTheme;
 };
 
 const statusTone = (status: Props["apiStatus"]) =>
@@ -83,6 +86,7 @@ function AdminConsoleChrome({
   version,
   apiStatus,
   counts,
+  theme: initialTheme,
 }: Props) {
   const pathname = usePathname();
   const router = useRouter();
@@ -92,6 +96,13 @@ function AdminConsoleChrome({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [drawerOpenCount, setDrawerOpenCount] = useState(0);
   const [commandOpen, setCommandOpen] = useState(false);
+  // The cookie is what the next document request renders from; the state is
+  // what this one shows, so a change needs no reload.
+  const [theme, setTheme] = useState<AdminTheme>(initialTheme);
+  const changeTheme = useCallback((next: AdminTheme) => {
+    document.cookie = adminThemeCookieValue(next);
+    setTheme(next);
+  }, []);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [notificationRows, setNotificationRows] = useState<NotificationRow[]>([]);
   const [loadingAlerts, setLoadingAlerts] = useState(false);
@@ -213,7 +224,7 @@ function AdminConsoleChrome({
   };
 
   return (
-    <div className="min-h-dvh bg-zinc-950 text-zinc-100">
+    <div className="min-h-dvh bg-zinc-950 text-zinc-100" data-admin-console data-admin-theme={theme}>
       {/*
         Every admin panel reports through dispatchAppToast(). The console had
         no listener, so validation failures, API errors and confirmations were
@@ -399,6 +410,8 @@ function AdminConsoleChrome({
             <AdminAccountMenu
               user={{ name: user.name, email: user.email }}
               role={role}
+              theme={theme}
+              onThemeChange={changeTheme}
             />
           </div>
         </header>
@@ -484,7 +497,7 @@ function AdminConsoleChrome({
           </div>
         </main>
 
-        <footer className="border-t border-zinc-800 bg-[#08090c] px-4 py-3 text-xs text-zinc-400 sm:px-6">
+        <footer className="border-t border-zinc-800 bg-zinc-950 px-4 py-3 text-xs text-zinc-400 sm:px-6">
           <div className="mx-auto flex max-w-[104rem] flex-wrap items-center gap-x-5 gap-y-2">
             <span className="font-black uppercase tracking-[0.14em] text-zinc-300">
               {environment}

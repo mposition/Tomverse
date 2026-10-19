@@ -143,7 +143,7 @@ export function AmuxOutcomeObservationForm(props: { taskId: string;
             (outcome === "passed" && Number(findingCount) !== 0)))}
       onClick={() => void submit()}>{m.recordObservation}</button>
     <p className="w-full text-xs text-zinc-500">{m.observationHelp}</p>
-    {error && <p role="alert" className="w-full text-red-700 dark:text-red-400">
+    {error && <p role="alert" className="w-full text-red-400">
       {error === "reauth" ? <Link className="underline"
         href={adminRecentAuthenticationHref("/admin/amux-execution?tab=cards")}>
         {m.reauth}</Link> : error === "unknown" ? m.unknownOutcome :

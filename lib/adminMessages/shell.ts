@@ -83,6 +83,8 @@ export const adminShellMessages = defineAdminMessages({
       signOutNote:
         "Signing out ends this session. It does not extend the administrator or high-risk sign-in windows.",
       language: "Console language",
+      theme: "Console theme",
+      themes: { dark: "Dark", light: "Light" },
     },
     tabs: {
       sections: (label: string) => `${label} sections`,
@@ -166,6 +168,8 @@ export const adminShellMessages = defineAdminMessages({
       signOutNote:
         "로그아웃하면 이 세션이 종료됩니다. 관리자 또는 고위험 작업 로그인 유효 시간은 연장되지 않습니다.",
       language: "콘솔 언어",
+      theme: "콘솔 테마",
+      themes: { dark: "Dark", light: "Light" },
     },
     tabs: {
       sections: (label: string) => `${label} 섹션`,

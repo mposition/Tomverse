@@ -305,7 +305,20 @@ const searchAnswer = (overrides = {}) => ({
   service_tier: "default",
   usage: { input_tokens: 9_000, output_tokens: 400 },
   output: [
-    { type: "web_search_call", id: "ws_1", status: "completed", action: { type: "search" } },
+    {
+      type: "web_search_call",
+      id: "ws_1",
+      status: "completed",
+      action: {
+        type: "search",
+        sources: [
+          { type: "url", url: "https://claude.com/pricing?utm_source=chatgpt.com" },
+          { type: "url", url: "https://support.claude.com/plans" },
+          { type: "other", url: "https://ignored.example" },
+        ],
+      },
+    },
+    { type: "web_search_call", id: "ws_2", status: "completed", action: { type: "open_page", url: "https://claude.com/max" } },
     {
       type: "message",
       content: [
@@ -326,6 +339,7 @@ const searchAnswer = (overrides = {}) => ({
 test("a web-search request is one domain-limited search tool, capped at the pin's search count", () => {
   const body = marketingLlmWebSearchRequestBody(SEARCH_PIN, MESSAGES, ["claude.com", "support.claude.com"]);
   assert.deepEqual(Object.keys(body).sort(), [
+    "include",
     "input",
     "instructions",
     "max_output_tokens",
@@ -337,6 +351,7 @@ test("a web-search request is one domain-limited search tool, capped at the pin'
     "tools",
   ]);
   assert.equal(body.max_tool_calls, 3);
+  assert.deepEqual(body.include, ["web_search_call.action.sources"]);
   assert.equal(body.store, false);
   assert.deepEqual(body.tools, [
     {
@@ -350,10 +365,14 @@ test("a web-search request is one domain-limited search tool, capped at the pin'
   assert.equal(body.input, MESSAGES[1].content);
 });
 
-test("a web-search answer is read with its cited URLs, once each, or not at all", () => {
+test("a web-search answer is read with the URLs it cited or its searches returned, once each, or not at all", () => {
   assert.deepEqual(readMarketingLlmWebSearchAnswer(searchAnswer()), {
     content: '{"facts":[]}',
-    citations: ["https://claude.com/pricing?utm_source=chatgpt.com"],
+    citations: [
+      "https://claude.com/pricing?utm_source=chatgpt.com",
+      "https://support.claude.com/plans",
+      "https://claude.com/max",
+    ],
     model: PIN.model,
     serviceTier: "default",
     inputTokens: 9_000,
@@ -378,7 +397,11 @@ test("a web-search call reserves under its own profile, calls the Responses API 
     { budget: b.port, transport: p.transport, apiKey: "sk-fixture", newId: ids },
   );
   assert.equal(outcome.status, "answered");
-  assert.deepEqual(outcome.citations, ["https://claude.com/pricing?utm_source=chatgpt.com"]);
+  assert.deepEqual(outcome.citations, [
+    "https://claude.com/pricing?utm_source=chatgpt.com",
+    "https://support.claude.com/plans",
+    "https://claude.com/max",
+  ]);
   assert.deepEqual(b.actions(), ["reserve", "dispatch", "settle"]);
   assert.equal(b.calls[0].fields.adapterProfile, "web-search-v1");
   assert.equal(

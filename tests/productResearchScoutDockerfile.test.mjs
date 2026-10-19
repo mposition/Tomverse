@@ -50,6 +50,25 @@ test("neither the image, the probe nor the walker turns the Chromium sandbox off
   }
 });
 
+test("a failed launch reports the host's sandbox conditions as short values only", async () => {
+  const { sandboxHost } = await import("../lib/productResearchScoutBrowser.mjs");
+  const host = sandboxHost();
+  assert.deepEqual(Object.keys(host), [
+    "uid",
+    "maxUserNamespaces",
+    "unprivilegedUsernsClone",
+    "apparmorRestrictsUserns",
+    "noNewPrivs",
+    "seccomp",
+    "capBnd",
+  ]);
+  for (const [key, value] of Object.entries(host)) {
+    assert.ok(value === null || typeof value === "number" || (typeof value === "string" && value.length <= 32), key);
+  }
+  const walker = read("scripts/agents/product-research-scout.mjs");
+  assert.match(walker, /product_research_scout_browser_launch_failed", \.\.\.launchFailure\(error\), host: sandboxHost\(\)/);
+});
+
 test("the probe is a local tool: it reads only its switch, and no Railway service runs it", async () => {
   const probe = read("scripts/agents/product-research-scout-s0-probe.mjs");
   const names = [...probe.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]);
@@ -73,6 +92,9 @@ test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no
   const { AGENT_RUNNER_SERVICES } = await import("../.railway/agent-runners.ts");
   const service = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_scout");
   assert.equal(service.cronSchedule, "0 18 * * *");
+  // The Admin "next run" reads this hour; the two move together.
+  const { SCOUT_SCHEDULE_UTC_HOUR } = await import("../lib/productResearchScoutCore.ts");
+  assert.equal(service.cronSchedule, `0 ${SCOUT_SCHEDULE_UTC_HOUR} * * *`);
   assert.equal(service.startCommand, "npm run agent:product-research-scout");
   assert.equal(service.dockerfile.path, "docker/product-research-scout.Dockerfile");
   assert.deepEqual(Object.keys(service.environments).sort(), ["dev", "production"]);

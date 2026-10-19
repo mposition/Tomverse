@@ -19,6 +19,7 @@ import {
   canOpenSavedIdea,
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
+  type IdeaSubmissionOrigin,
 } from "@/lib/amux/ideaSubmissionUiCore";
 import {
   clearConfirmedIdeaRequest,
@@ -55,7 +56,8 @@ type SourceScopeResult =
 type SubmissionState =
   | { kind: "idle" }
   | { kind: "pending"; requestId: string }
-  | { kind: "submitted"; requestId: string; ideaId: string; hasExternalSources: boolean }
+  | { kind: "submitted"; requestId: string; ideaId: string; hasExternalSources: boolean;
+      origin: IdeaSubmissionOrigin }
   | { kind: "outcome_unknown"; requestId: string }
   | { kind: "recovery_unavailable" }
   | { kind: "refused"; code: string };
@@ -77,13 +79,16 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
-  analysisStopAvailable,
+  analysisStopAvailable, sessionIntake = false,
   openRequestId = null, progressRows }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisResultAvailable: boolean; analysisBudgetAvailable: boolean;
   analysisStopAvailable: boolean; operatorId: string;
+  /** amux-intake v19 item 1: session intake is on, so a saved idea joins the
+   * automatic analysis queue instead of the v4 approval steps. */
+  sessionIntake?: boolean;
   /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
   openRequestId?: string | null;
   /** The Ideas main shows the list of ideas beside the input; omitted, the list is not drawn here. */
@@ -222,7 +227,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
         setContinuationChunkIndex(0);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
-          hasExternalSources: decision.hasExternalSources });
+          hasExternalSources: decision.hasExternalSources, origin: decision.origin });
       } else {
         setSubmission({ kind: "outcome_unknown", requestId });
       }
@@ -251,7 +256,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       setSourceRepository(""); setSourceCommitSha(""); setSourcePath("");
       setSourceScopeResult({ kind: "idle" });
       setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
-        hasExternalSources: decision.hasExternalSources });
+        hasExternalSources: decision.hasExternalSources, origin: decision.origin });
     } catch { setSavedRequestError(true); }
     finally { setReadBackPending(false); }
   }, [operatorId]);
@@ -299,9 +304,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     return () => { active = false; };
   }, [recoverFromReceipts]);
 
-  const submit = async () => {
+  const submit = async (inputChecked = false) => {
     if (!submissionAvailable || !recoveryChecked || inFlight.current ||
-        result?.outcome !== "input_checked" ||
+        (!inputChecked && result?.outcome !== "input_checked") ||
         submission.kind === "pending" || submission.kind === "outcome_unknown" ||
         submission.kind === "submitted") return;
     const refs = parsePullRequests(pullRequests);
@@ -330,7 +335,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
         setContinuationChunkIndex(0);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
-          hasExternalSources: decision.hasExternalSources });
+          hasExternalSources: decision.hasExternalSources, origin: decision.origin });
       } else if (decision.kind === "refused") {
         clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
         inFlight.current = false;
@@ -395,7 +400,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
       setContinuationChunkIndex(0);
       if (planReady) setPlanReadyIdeaId(ideaId);
-      setSubmission({ kind: "submitted", requestId, ideaId, hasExternalSources });
+      setSubmission({ kind: "submitted", requestId, ideaId, hasExternalSources,
+        origin: "owner" });
     },
     onUnknown: (requestId) => {
       setBuildDialog((current) => current && { ...current, tone: "unknown", requestId });
@@ -632,7 +638,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                   </button>
                   <button
                     type="button"
-                    onClick={submit}
+                    onClick={() => void submit()}
                     disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
                     className="min-h-11 rounded-lg border border-blue-400 px-4 text-sm font-medium text-blue-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
                   >
@@ -659,7 +665,20 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           {/* The model line and the one button. It stays mounted while a request is in flight (the status card
               replaces the idea card then, and this strip is only hidden), and moves below as the execution
               approval once the idea is saved. */}
-          {submission.kind !== "submitted" ? (
+          {submission.kind !== "submitted" && sessionIntake ? (
+            <div className={card === null ? "flex flex-wrap items-center gap-3" : "hidden"}
+              data-testid="amux-idea-session-submit">
+              <button type="button"
+                onClick={() => void (async () => { if (await checkInput()) await submit(true); })()}
+                disabled={!submissionAvailable || !recoveryChecked || pending || frozen ||
+                  idea.trim().length === 0 || ideaBytes > 8192}
+                className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50">
+                {messages.sessionSubmit}
+              </button>
+              <span className="text-xs text-zinc-400">{messages.sessionSubmitHint}</span>
+            </div>
+          ) : null}
+          {submission.kind !== "submitted" && !sessionIntake ? (
             <div className={card === null ? "block" : "hidden"} data-testid="amux-idea-compose-slot">{composePanel}</div>
           ) : null}
           {refusedForStepUp ? (
@@ -696,21 +715,25 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         ) : null}
       </div>
 
-      {submission.kind === "submitted" ? <AmuxInitialPlanPanel
+      {submission.kind === "submitted" && submission.origin === "session" ? (
+        <p role="status" className="rounded-xl border p-4 text-sm border-blue-500/30 text-zinc-200"
+          data-testid="amux-idea-session-queued">{messages.sessionQueued}</p>
+      ) : null}
+      {submission.kind === "submitted" && submission.origin !== "session" ? <AmuxInitialPlanPanel
         key={submission.ideaId}
         ideaId={submission.ideaId}
         operatorId={operatorId} available={initialPlanAvailable}
         declaredExternalSources={submission.hasExternalSources}
         onCommitted={onInitialPlanCommitted}
       /> : null}
-      {submission.kind === "submitted" ? composePanel : null}
+      {submission.kind === "submitted" && submission.origin !== "session" ? composePanel : null}
       {analysisResultAvailable && submission.kind === "submitted" ?
         <AmuxIdeaAnalysisResultPanel key={submission.ideaId}
           ideaId={submission.ideaId}
           watchToken={analysisWatch?.ideaId === submission.ideaId ? analysisWatch.token : 0}
           watchChunk={continuationChunkIndex}
           onContinuationReady={setContinuationChunkIndex} /> : null}
-      {submission.kind === "submitted" ? (
+      {submission.kind === "submitted" && submission.origin !== "session" ? (
         <section className="space-y-3 rounded-xl border p-4 border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-100">{messages.sourceScopeTitle}</h3>
           <p className="text-sm text-zinc-300">{messages.sourceScopeHint}</p>

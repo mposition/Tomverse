@@ -37,6 +37,7 @@ const NAV_LABELS = [
   "Email campaigns",
   "Email delivery",
   "Marketing",
+  "Product research",
   "Engineering agent",
   "SRE agent",
   "Agent digests",

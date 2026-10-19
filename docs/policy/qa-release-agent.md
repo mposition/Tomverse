@@ -15,6 +15,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 5 | 2026-10-05 mposition | 부록 A에 `components/admin/QaRelease*`를 더함 — S-M0에서 만든 병합 레인 Admin 화면(`components/admin/QaReleaseMergeLaneSection.tsx`, latch 표시와 사람의 latch 해제 양식)이 기존 패턴(`components/admin/AdminAgentDigests*`) 밖에 있어, 이 Agent의 판정 표시를 바꾸는 PR이 무인 병합 제외에서 빠지던 것을 바로잡음. 그 밖의 본문 변경 없음 |
 | 6 | 2026-10-05 mposition | 버전 5의 재기록, 본문 변경 없음 — 버전 5 승인 기록(#2093)이 2026-10-04 23:53 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 새 버전으로 다시 기록함 |
 | 7 | 2026-10-07 mposition | 버전 5·6의 재기록, 본문 변경 없음 — 버전 6 승인 기록(#2102)이 2026-10-06 22:18 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 병합할 UTC 날짜로 다시 기록함 |
+| 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
@@ -23,7 +24,8 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 운영자 `mposition`이 2026-10-02 대화 세션에서 버전 1과 버전 2를, 2026-10-03 대화 세션에서 버전 3과 버전 4를, 2026-10-05 대화 세션에서 버전 5와 버전 6을, 2026-10-07 대화 세션에서 버전 7을 승인했다. 이 문서는 이 Agent 구현의 규범 근거다. 다만
 **아래 승인 판정이 통과하기 전에는(이 승인 기록이 `develop`에 병합되기 전을 포함해) 그 버전이 처음 허용하는 단계의 어떤 코드도
 작성·병합하지 않는다.** 이 문서는 Claude가 설계하고 독립 검토(교차 vendor)로 `accept` 판정을 받은 비공개 설계서를 공개 계약으로
-옮긴 것이다. 되돌릴 수 없는 결정(AGENTS.md의 승인 목록)을 바꿀 때만 운영자 승인이 필요하고, 그 밖의 구현 세부는 운영자가 대화로 정해 코드 PR에 한 줄로 기록한다(2026-10-19). 승인은 단계별 착수 조건을 없애지 않으며, 어떤
+옮긴 것이다. 새 권한·자격증명·외부 행위를 늘리는 변경은 운영자 승인이 필요하다. 구현 세부가 바뀌어 낡은 서술은 AGENTS.md의
+Frontier 절에 따라 정책 버전 증가 없이 코드와 같은 PR에서 고친다(운영자 결정 2026-10-19). 승인은 단계별 착수 조건을 없애지 않으며, 어떤
 workflow·secret·branch protection·ruleset·GitHub App·Railway 변경도 그 자체로 허가하지 않습니다.
 
 승인은 아래 단계를 **모두** 통과해야 인정합니다. 판정은 기록(git·GitHub)만으로 재현할 수 있어야 하며, script
@@ -160,7 +162,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 
 ## 8. 병합 레인
 
-1. **범위.** develop(→ Railway `staging`)만 병합합니다. 한 번에 하나씩 병합하고, staging에 배포가 둘 이상 쌓이지 않게
+1. **범위.** develop(→ Railway `dev`)만 병합합니다. develop은 2026-10-13부터 `dev` 환경이 배포하고 staging(Test)은
+   `test` 브랜치를 배포합니다(`docs/ops/dev-test-lanes.md`). 한 번에 하나씩 병합하고, dev에 배포가 둘 이상 쌓이지 않게
    합니다. **main(→ `production`)은 사람이 GitHub에서 병합합니다**(`.github/RELEASE_CHECKLIST.md`의 7.9절, `docs/policy/trace-feedback-automation.md`
    §9.3, `docs/policy/engineering-agent.md`의 승인 증거와 같음). 레인은 "main으로 향하는 열린 PR"(`mainPullRequestDecision()`이
    허용한 head)과 production 상태를 Admin에 표시만 합니다. **이 목록은 병합 준비 판정이 아닙니다** — hotfix의 7.9.2 항목이나
@@ -184,14 +187,14 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    - head 브랜치 `agent/**`, `marketing-agent/**`, `feedback-autofix/**`, `feedback-autofix-main/**`, `autofix/**`,
      `visual-baseline/**`, `dependabot/**`.
    - 변경 파일 목록(전체 페이지, rename은 이전·이후 경로 둘 다)을 끝까지 읽지 못한 PR.
-   **migration을 포함한 PR도 무인 병합 대상입니다**(staging의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한
-   migration 기록을 되돌리지 않습니다. 그래서 staging 배포가 실패하면 레인은 latch하고, 운영자가 staging DB를 복구한 뒤에만
+   **migration을 포함한 PR도 무인 병합 대상입니다**(dev의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한
+   migration 기록을 되돌리지 않습니다. 그래서 dev 배포가 실패하면 레인은 latch하고, 운영자가 dev DB를 복구한 뒤에만
    latch를 풉니다. **복구 절차는 S-M2 진입 전에 runbook으로 있어야 합니다.** runbook은 다음을 새로 적습니다(기존 문서의 절을
-   빌려 쓰지 않습니다): 대상 환경이 staging임을 확인하는 단계, staging DB를 재생성하거나 백업에서 복원해 migration 이력을
+   빌려 쓰지 않습니다): 대상 환경이 dev임을 확인하는 단계, dev DB를 재생성하거나 백업에서 복원해 migration 이력을
    병합 직전 상태로 되돌리는 절차, **적용되지 않고 실패로 남은** migration 행에만 `prisma migrate resolve --rolled-back`을
    쓰는 조건(이미 적용된 migration은 resolve로 되돌릴 수 없으므로 DB 복원이 답입니다), 복구 뒤 schema 비교(drift 0) 확인. 그
    runbook이 없으면 S-M2에 들어가지 않습니다.
-4. **hold와 추적.** staging 환경의 모든 Railway 서비스 중 하나라도 `WAITING`·`NEEDS_APPROVAL`·`QUEUED`·`INITIALIZING`·
+4. **hold와 추적.** dev 환경의 모든 Railway 서비스 중 하나라도 `WAITING`·`NEEDS_APPROVAL`·`QUEUED`·`INITIALIZING`·
    `BUILDING`·`DEPLOYING`이면 병합하지 않습니다. 병합 직전에 다시 읽고 head를 고정해 병합합니다(3절의 `sha` 인자). develop을
    배포하는 서비스 **전부**가 merge commit을 배포해야 완료이고, `FAILED`·`CRASHED`·`SKIPPED`는 실패입니다. **(버전 4) 완료와 실패는
    merge train과 같은 `deploymentOutcome`의 `succeeded`·`failed`이고, 그 밖의 상태는 5항이 다룹니다.** 이 판정에 대해서는 앞 문장이
@@ -222,9 +225,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      끝냅니다. 고를 수 있는 것은 상태마다 둘뿐입니다.
      - 지시 발급·소비 상태: "PR이 develop에 병합되지 않았음"(닫음), 또는 "develop에 병합되었음"과 그 merge commit SHA(배포 대기로
        옮김 — 배포 추적은 위 규칙대로 계속됩니다).
-     - 배포 대기 상태: "develop을 배포하는 staging 서비스 전부가 이 merge commit이나 그것을 담은 뒤의 commit을 서비스 중"(성공으로
-       닫음), 또는 "3항의 runbook으로 staging을 병합 직전 상태로 복구했음"(실패로 닫음).
-     Admin은 그 시도의 attempt id·상태·PR·merge commit(있으면)·staging 배포 목록을 보여 주고, 시도를 바꾸는 갱신은 **보여 준
+     - 배포 대기 상태: "develop을 배포하는 dev 서비스 전부가 이 merge commit이나 그것을 담은 뒤의 commit을 서비스 중"(성공으로
+       닫음), 또는 "3항의 runbook으로 dev를 병합 직전 상태로 복구했음"(실패로 닫음).
+     Admin은 그 시도의 attempt id·상태·PR·merge commit(있으면)·dev 배포 목록을 보여 주고, 시도를 바꾸는 갱신은 **보여 준
      attempt id와 상태가 그대로일 때만** 한 행을 바꿉니다. **0행이면 트랜잭션 전체를 되돌리고**(latch도 풀리지 않음) 화면을 다시
      읽게 합니다. 고른 사실과 입력한 SHA는 같은 트랜잭션의 사람 감사에 남습니다. 확인은 사람의 판정이고 이 Agent는 그것을
      검증하지 않습니다. 그래서 배포가 남아 있는 동안 다음 병합이 쌓이지 않습니다. 위 규칙들은 latch가 걸린 동안에도 시도를
@@ -282,7 +285,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 | S2 | production 활성 | S1 30일, 침묵 오탐 0 |
 | S-M0 | 병합 레인 구현(dark), 시험 브랜치 관측(8절 7항·9항·10항, 관측용 App 키는 로컬만 — 11항) 뒤 develop 밖 모든 브랜치·develop ruleset 설정 | 이 정책 버전 3 승인, 공통 기반의 병합 레인 예외 반영 |
 | S-M1 | develop shadow(판정만, 병합 안 함) | S-M0 test 통과, **8절 7항·9항의 관측이 모두 기대대로이고 ruleset이 걸림**, 그 뒤에 실제 App 키·Railway 토큰 설정(8절 11항) |
-| S-M2 | develop 무인 병합 | S-M1 7일 이상 판정과 실제가 어긋난 건 0, 8절 8항의 변경 병합, 8절 3항의 staging 복구 runbook |
+| S-M2 | develop 무인 병합 | S-M1 3일 이상 판정과 실제가 어긋난 건 0, 8절 8항의 변경 병합, 8절 3항의 dev 복구 runbook(`docs/ops/qa-release-merge-lane-dev-recovery.md`) |
 | S-M3 | main 후보·production 상태 표시 | S-M2 운영 중. 병합 호출 없음 |
 
 되돌림: develop 레인 스위치를 끄는 revision을 기록하거나(본 앱이 다음 소비부터 거절), 서비스 활성화 변수를 끄거나, kill switch
@@ -299,12 +302,12 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 | digest | cron `0 21 * * *` UTC, hard timeout 15분, 침묵 기준 28시간, 본문 보존 90일, 재실행 권고 상한 2건·7일, issues 배열 40 / 30 / 30, CI 행은 job마다 창 안의 최신 실행 하나(상한 16) | 승인 |
 | CI | PostgreSQL 17 전용 job 하나(17 경로의 시험용) | 승인 |
 | Monitor | cron `*/30 * * * *`, 호출자 timeout 120초(route의 한 회차 예산 110초보다 김) | 승인(2026-10-03) |
-| 병합 레인 | cron `*/10 * * * *` UTC, 서비스 hard timeout 10분, S-M2 진입에 필요한 S-M1 기간 7일. **서비스가 부르는** 본 앱 트랜잭션은 셋이며 위 timeout 행의 식을 따릅니다. **지시 발급** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 최신 revision·스위치·latch·열린 시도를 한 문장으로 읽기, 시도 행 삽입(레인당 하나는 DB 제약), 감사 네 문장, 마감 검사. **지시 소비** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 지시 행을 잠그고 최신 revision·스위치·latch와 함께 한 문장으로 읽기, 소비하지 않은 행만 바꾸는 조건부 갱신, 감사 네 문장, 마감 검사. **결과 보고** A = 10 → 35초: timeout 설정, 감사 체인 잠금, 열린 시도만 바꾸는 조건부 갱신(최신 revision을 같은 문장에서 읽음), latch 기록, latch 알림 큐 행(한 문장), 감사 네 문장, 마감 검사. latch가 없는 경로는 문장이 더 적지만 **한도는 항상 A = 10으로 겁니다** — 같은 호출이 revision 불일치로 latch 경로가 될 수 있기 때문입니다. 결과 보고는 병합 결과, 배포 판정, 불명·미보고 시도의 PR 재조회 판정 세 종류이고 구성이 같습니다(8절 5항). merge commit SHA는 시도를 바꾸는 같은 조건부 갱신에서 기록합니다. **사람의 latch 해제**(Admin 행위) A = 9 → 32초: timeout 설정, 감사 체인 잠금, latch 행과 열린 시도를 한 문장으로 읽기, 사람이 고른 경우 보여 준 attempt id와 상태에 묶인 조건부 갱신으로 시도를 닫거나 옮기기(0행이면 트랜잭션을 되돌림), 사람 감사 네 문장, 그 감사 행을 가리키는 latch 해제 갱신(8절 5항). 시도를 건드리지 않는 경로는 문장이 하나 적지만 한도는 A = 9로 겁니다. 마감 검사는 없습니다(3절). 서비스 한 회차의 본 앱 호출은 **발급·소비·병합 결과 보고 셋(최악 99초 = 32 + 32 + 35)이거나, 열린 시도에 대한 결과 보고 하나(35초)**이고, 둘을 한 회차에서 함께 하지 않습니다(8절 5항). 어느 쪽도 hard timeout 안에 있습니다 | 승인(버전 4) |
+| 병합 레인 | cron `*/10 * * * *` UTC, 서비스 hard timeout 10분, S-M2 진입에 필요한 S-M1 기간 3일(운영자 결정 2026-10-19, 이전 7일). **서비스가 부르는** 본 앱 트랜잭션은 셋이며 위 timeout 행의 식을 따릅니다. **지시 발급** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 최신 revision·스위치·latch·열린 시도를 한 문장으로 읽기, 시도 행 삽입(레인당 하나는 DB 제약), 감사 네 문장, 마감 검사. **지시 소비** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 지시 행을 잠그고 최신 revision·스위치·latch와 함께 한 문장으로 읽기, 소비하지 않은 행만 바꾸는 조건부 갱신, 감사 네 문장, 마감 검사. **결과 보고** A = 10 → 35초: timeout 설정, 감사 체인 잠금, 열린 시도만 바꾸는 조건부 갱신(최신 revision을 같은 문장에서 읽음), latch 기록, latch 알림 큐 행(한 문장), 감사 네 문장, 마감 검사. latch가 없는 경로는 문장이 더 적지만 **한도는 항상 A = 10으로 겁니다** — 같은 호출이 revision 불일치로 latch 경로가 될 수 있기 때문입니다. 결과 보고는 병합 결과, 배포 판정, 불명·미보고 시도의 PR 재조회 판정 세 종류이고 구성이 같습니다(8절 5항). merge commit SHA는 시도를 바꾸는 같은 조건부 갱신에서 기록합니다. **사람의 latch 해제**(Admin 행위) A = 9 → 32초: timeout 설정, 감사 체인 잠금, latch 행과 열린 시도를 한 문장으로 읽기, 사람이 고른 경우 보여 준 attempt id와 상태에 묶인 조건부 갱신으로 시도를 닫거나 옮기기(0행이면 트랜잭션을 되돌림), 사람 감사 네 문장, 그 감사 행을 가리키는 latch 해제 갱신(8절 5항). 시도를 건드리지 않는 경로는 문장이 하나 적지만 한도는 A = 9로 겁니다. 마감 검사는 없습니다(3절). 서비스 한 회차의 본 앱 호출은 **발급·소비·병합 결과 보고 셋(최악 99초 = 32 + 32 + 35)이거나, 열린 시도에 대한 결과 보고 하나(35초)**이고, 둘을 한 회차에서 함께 하지 않습니다(8절 5항). 어느 쪽도 hard timeout 안에 있습니다 | 승인(버전 4) |
 
 ## 11. 사람에게 남는 일
 
 정책 승인과 병합, IaC apply, secret 설정과 회전 기록, GitHub App 발급(관측용과 실제용), 시험 브랜치 관측, ruleset 설정, latch 해제,
-**main 병합**, 제외된 develop PR의 처리, 병합된 commit의 revert, staging 복구, 판정과 서명. 그 밖에 이 Agent가 사람에게 일을
+**main 병합**, 제외된 develop PR의 처리, 병합된 commit의 revert, dev 복구, 판정과 서명. 그 밖에 이 Agent가 사람에게 일을
 만들지 않습니다.
 
 ## 부록 A. 이 Agent의 파일 (병합 레인의 제외 판정에 쓰는 경로 목록)

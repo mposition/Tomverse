@@ -112,7 +112,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
   본문은 조용히 무시하지 않고 거절합니다 — 무시하면 제출자는 서버가 검사했다고 믿습니다.
 - **보존 90일.** 그 전에 삭제하는 것은 DB가 거절하고, 지난 행은 기존 maintenance cleanup이 감사와 같은 트랜잭션에서
   지웁니다. 최신 행 예외는 없습니다.
-- 사람이 보는 곳은 Admin 공통 Agent digest 영역의 이 Agent 섹션 하나입니다. 승인·거절 버튼이 없습니다(결정할 항목이 없음).
+- 사람이 보는 곳은 Admin › 제품 리서치의 "이슈 관찰 기록" 탭 하나입니다(2026-10-19에 Engineering agent 화면에서 독립 메뉴로 옮김). 승인·거절 버튼이 없습니다(결정할 항목이 없음).
   화면이 "가장 최근 기록 회차"로 보여 주는 것은 **직전 예정 slot이 성공했을 때만** 그 slot입니다. 실패·기록 없음이면 이전
   성공의 행을 보여 주지 않습니다(§2 조건 8) — 어제의 관측은 틀린 것이 아니지만 지금의 backlog 상태에 대한 답이 아닙니다.
 
@@ -232,8 +232,8 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 3. **앱이 LLM을 한 번 부릅니다**(`lib/productResearchScoutLlm.ts`, support-triage와 같은 방식). 입력은 그 대상의 이미지와
    신호, 그리고 같은 대상에 이미 낸 제안 제목들(반복을 막기 위해서)이고, 출력은 제안 최대 5개(제목·영역·심각도·근거·제안)의
    JSON입니다. 판정 경계는 `lib/productResearchScoutCore.ts`가 검사합니다.
-4. 제안은 `ProductResearchSuggestion` 표에 쌓이고, Admin의 "개선 제안" 목록에서 운영자가 **거절**하거나
-   **AMUX로 보내기**를 누릅니다. 보낸 뒤의 분석·카드는 AMUX intake 규칙을 따릅니다.
+4. 제안은 `ProductResearchSuggestion` 표에 쌓이고, Admin › 제품 리서치 › "개선 제안" 탭에서 운영자가 **거절**하거나
+   **AMUX로 보내기**를 누릅니다(한 건씩 또는 골라서 한꺼번에). 보낸 뒤의 분석·카드는 AMUX intake 규칙을 따릅니다.
 
 ## 11. 지키는 것 (개선 탐색)
 
@@ -295,7 +295,7 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 | `PRODUCT_RESEARCH_SCOUT_ENABLED` | 앱과 walker | 꺼짐은 unset·빈 문자열. 앱에서 꺼져 있으면 route는 404 |
 | `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET` | 앱과 walker | 32자 이상. Bearer로 비교 |
 | `PRODUCT_RESEARCH_SCOUT_INGEST_URL` | walker | 그 환경 앱의 `https://…/api/internal/product-research/scout` |
-| 모델·하루 호출 상한 | Admin › Engineering agent › Product research (`AppSetting` 두 행) | owner가 정함. 모델이 없으면 route는 `model_off`, 상한을 다 쓰면 `daily_cap_reached`로 답함 |
+| 모델·하루 호출 상한 | Admin › 제품 리서치 › 실행과 비용 (`AppSetting` 두 행) | owner가 정함. 모델이 없으면 route는 `model_off`, 상한을 다 쓰면 `daily_cap_reached`로 답함 |
 
 켜는 순서: 앱 변수 → walker 서비스와 스위치 → Admin에서 모델과 하루 상한 지정(owner). walker의 첫 실행이 Railway 컨테이너에서
 Chromium sandbox가 뜨는지도 확인합니다. walker는 Railway cron `Product Research Scout`로 매일 18:00 UTC(04:00 AEST)에 돕니다.

@@ -13,7 +13,9 @@
  *
  * Migration 20261013100000_amux_worker_capability holds the same closed lists;
  * tests/amuxWorkerCapabilityCore.test.mjs reads it and fails when they drift.
- * Nothing here assigns anything until R2c.
+ * Since R2c the catalog every assignment path reads is derived from these
+ * capabilities (lib/amux/workerDerivedCatalogCore.ts); since R2e nothing is
+ * imported from the catalog variables -- an owner records each capability.
  */
 
 import {
@@ -22,7 +24,6 @@ import {
   amuxV22RequiredTool,
 } from "./v22WorkerClaimCore.ts";
 import {
-  AMUX_WORKER_CATALOG_EXEMPT,
   AMUX_WORKER_PROVIDER_CLASS_TABLE,
   amuxWorkerRoleRank,
   type AmuxWorkerRegistration,
@@ -80,9 +81,8 @@ export const AMUX_WORKER_CAPABILITY_AUDIT_TARGET_TYPE = "AmuxWorkerCapabilityEve
 /**
  * R2a shipped with its code latch off (version 31 section 8, version 35 section
  * 5); version 36 (approved 2026-10-13) is the operator's activation record and
- * sets it true, so the owner may record capabilities -- and nothing else opens:
- * assignment still follows the catalog variables until R2c. While it is false
- * the route refuses every write. Reading is never latched.
+ * sets it true, so the owner may record capabilities. While it is false the
+ * route refuses every write. Reading is never latched.
  */
 export const AMUX_WORKER_CAPABILITY_WRITES_LATCH = true;
 export const amuxWorkerCapabilityWritesOpen = (): boolean => AMUX_WORKER_CAPABILITY_WRITES_LATCH;
@@ -223,67 +223,6 @@ export function amuxWorkerCapabilityWithinCeiling(
   return { ...capability, routingTags, v22 };
 }
 
-// ---------------------------------------------------------------------------
-// Import from the catalog variables (version 35 section 2)
-
-export type AmuxCatalogCapabilityEntry = {
-  worker_name: string;
-  provider: string;
-  model?: string | null;
-  routing_roles: readonly string[];
-  tool_capabilities?: readonly string[];
-};
-
-export type AmuxV22CatalogCapabilityEntry = {
-  worker_name: string;
-  provider: string;
-  model: string;
-  routing_roles: readonly string[];
-  tool_capabilities: readonly string[];
-};
-
-export type AmuxWorkerCapabilityImportRow = {
-  workerName: string;
-  /** The capability the catalog variables describe, or null when none does. */
-  proposed: AmuxWorkerCapability | null;
-  refusal: AmuxWorkerCapabilityRefusal | null;
-};
-
-/**
- * What the one-time import would write: one proposal per registered,
- * non-retired worker the legacy catalog lists, with its v22 profile when the
- * v22 catalog has one, and the refusal the write would meet. Exempt names
- * (version 34) and names the registry does not hold are not imported. The
- * catalogs' hold flags are not capabilities and are not carried.
- */
-export function amuxWorkerCapabilityImport(
-  registrations: readonly AmuxWorkerRegistration[],
-  legacy: readonly AmuxCatalogCapabilityEntry[],
-  v22: readonly AmuxV22CatalogCapabilityEntry[] | null,
-): AmuxWorkerCapabilityImportRow[] {
-  const registered = new Map(registrations.map((row) => [row.workerName, row]));
-  const v22ByName = new Map((v22 ?? []).map((row) => [row.worker_name, row]));
-  const rows: AmuxWorkerCapabilityImportRow[] = [];
-  for (const entry of [...legacy].sort((a, b) => a.worker_name.localeCompare(b.worker_name))) {
-    if (AMUX_WORKER_CATALOG_EXEMPT.includes(entry.worker_name)) continue;
-    const registration = registered.get(entry.worker_name);
-    if (!registration || registration.desiredState === "retired") continue;
-    const profile = v22ByName.get(entry.worker_name) ?? null;
-    const proposed: AmuxWorkerCapability = {
-      model: entry.model?.trim() || null,
-      routingTags: uniqueSorted(entry.routing_roles.map((tag) => tag.trim().toLowerCase())),
-      toolCapabilities: uniqueSorted(entry.tool_capabilities ?? []),
-      v22: profile === null ? null : {
-        model: profile.model,
-        roles: uniqueSorted(profile.routing_roles),
-        tools: uniqueSorted(profile.tool_capabilities),
-      },
-    };
-    rows.push({ workerName: entry.worker_name, proposed, refusal: amuxWorkerCapabilityRefusal(registration, proposed) });
-  }
-  return rows;
-}
-
 /** Two capabilities are the same when every field is (lists compared as sets). */
 export function amuxWorkerCapabilitiesEqual(a: AmuxWorkerCapability | null, b: AmuxWorkerCapability | null): boolean {
   if (a === null || b === null) return a === b;
@@ -297,7 +236,7 @@ export function amuxWorkerCapabilitiesEqual(a: AmuxWorkerCapability | null, b: A
 }
 
 // ---------------------------------------------------------------------------
-// The Admin view (R2a)
+// The Admin view
 
 export type AmuxWorkerCapabilityAdminRow = {
   workerName: string;
@@ -305,74 +244,36 @@ export type AmuxWorkerCapabilityAdminRow = {
   roleCeiling: AmuxWorkerRoleCeiling;
   /** The newest recorded capability, or null when none is. */
   current: { revision: number; capability: AmuxWorkerCapability; changedAt: string } | null;
-  /** What the catalog variables describe for this worker, or null when they describe nothing. */
-  proposed: AmuxWorkerCapability | null;
-  /** The refusal the proposal would meet, or null. */
-  refusal: AmuxWorkerCapabilityRefusal | null;
-  /** Whether the proposal is already what is recorded. */
-  same: boolean;
-};
-
-export type AmuxWorkerCapabilityAdminView = {
-  writesLatch: boolean;
-  /**
-   * False when either catalog variable could not be read: nothing is
-   * proposed. A v22 variable that is set but does not parse is unreadable,
-   * never an empty list -- importing over it would erase recorded profiles.
-   */
-  catalogReadable: boolean;
-  rows: AmuxWorkerCapabilityAdminRow[];
 };
 
 /**
- * The v22 profiles the import reads: [] only when the variable is absent.
- * Any value that is present -- blank or whitespace included -- goes to the
- * parser, so a value it cannot read is null and blocks the import instead of
- * being proposed as "no profiles" over what is recorded.
+ * What AMUX › Execution › Workers shows of the capabilities: each registered,
+ * non-retired worker's newest recorded capability. Stage R2a's one-time
+ * import from the catalog variables went with the variables at R2e, so
+ * nothing here is read from the environment.
  */
-export function amuxWorkerCapabilityV22Catalog<T>(
-  raw: string | undefined,
-  parse: (raw: string) => readonly T[] | null,
-): readonly T[] | null {
-  return raw === undefined ? [] : parse(raw);
-}
+export type AmuxWorkerCapabilityAdminView = {
+  writesLatch: boolean;
+  rows: AmuxWorkerCapabilityAdminRow[];
+};
 
 /** One row per registered, non-retired worker, in name order. */
 export function buildAmuxWorkerCapabilityAdminView(input: {
   registrations: readonly AmuxWorkerRegistration[];
   current: ReadonlyMap<string, { revision: number; capability: AmuxWorkerCapability; changedAt: string }>;
-  legacy: readonly AmuxCatalogCapabilityEntry[] | null;
-  /** The v22 profiles; [] when the variable is unset, null when it is set and unreadable. */
-  v22: readonly AmuxV22CatalogCapabilityEntry[] | null;
   writesLatch?: boolean;
 }): AmuxWorkerCapabilityAdminView {
-  const catalogReadable = input.legacy !== null && input.v22 !== null;
-  const imports = catalogReadable ? amuxWorkerCapabilityImport(input.registrations, input.legacy!, input.v22) : [];
-  const proposals = new Map(imports.map((row) => [row.workerName, row]));
   const rows = [...input.registrations]
     .filter((registration) => registration.desiredState !== "retired")
     .sort((a, b) => a.workerName.localeCompare(b.workerName))
-    .map((registration): AmuxWorkerCapabilityAdminRow => {
-      const current = input.current.get(registration.workerName) ?? null;
-      const proposal = proposals.get(registration.workerName) ?? null;
-      return {
-        workerName: registration.workerName,
-        desiredState: registration.desiredState,
-        roleCeiling: registration.roleCeiling,
-        current,
-        proposed: proposal?.proposed ?? null,
-        refusal: proposal?.refusal ?? null,
-        same: proposal !== null && current !== null && amuxWorkerCapabilitiesEqual(current.capability, proposal.proposed),
-      };
-    });
-  return { writesLatch: input.writesLatch ?? amuxWorkerCapabilityWritesOpen(), catalogReadable, rows };
+    .map((registration): AmuxWorkerCapabilityAdminRow => ({
+      workerName: registration.workerName,
+      desiredState: registration.desiredState,
+      roleCeiling: registration.roleCeiling,
+      current: input.current.get(registration.workerName) ?? null,
+    }));
+  return { writesLatch: input.writesLatch ?? amuxWorkerCapabilityWritesOpen(), rows };
 }
-
-/** The proposals an owner may import now: readable, not refused, not already recorded. */
-export const amuxWorkerCapabilityImportsToWrite = (view: Pick<AmuxWorkerCapabilityAdminView, "rows">) =>
-  view.rows
-    .filter((row) => row.proposed !== null && row.refusal === null && !row.same)
-    .map((row) => ({ workerName: row.workerName, expectedRevision: row.current?.revision ?? 0, capability: row.proposed! }));
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -406,8 +307,7 @@ const DESIRED_STATES: readonly string[] = ["requested", "active", "paused", "ret
  * A body that does not parse is a failed read, never a guessed capability.
  */
 export function parseAmuxWorkerCapabilityAdminView(body: unknown): AmuxWorkerCapabilityAdminView | null {
-  if (!isPlainRecord(body) || typeof body.writesLatch !== "boolean" || typeof body.catalogReadable !== "boolean" ||
-      !Array.isArray(body.rows)) {
+  if (!isPlainRecord(body) || typeof body.writesLatch !== "boolean" || !Array.isArray(body.rows)) {
     return null;
   }
   const rows: AmuxWorkerCapabilityAdminRow[] = [];
@@ -417,7 +317,6 @@ export function parseAmuxWorkerCapabilityAdminView(body: unknown): AmuxWorkerCap
     }
     if (typeof row.desiredState !== "string" || !DESIRED_STATES.includes(row.desiredState) || row.desiredState === "retired") return null;
     if (typeof row.roleCeiling !== "string" || !ROLE_CEILINGS.includes(row.roleCeiling)) return null;
-    if (typeof row.same !== "boolean") return null;
     let current: AmuxWorkerCapabilityAdminRow["current"] = null;
     if (row.current !== null) {
       if (!isPlainRecord(row.current) || typeof row.current.revision !== "number" || !Number.isSafeInteger(row.current.revision) ||
@@ -428,23 +327,12 @@ export function parseAmuxWorkerCapabilityAdminView(body: unknown): AmuxWorkerCap
       if (capability === null) return null;
       current = { revision: row.current.revision, capability, changedAt: row.current.changedAt };
     }
-    let proposed: AmuxWorkerCapability | null = null;
-    if (row.proposed !== null) {
-      proposed = parseCapability(row.proposed);
-      if (proposed === null) return null;
-    }
-    if (row.refusal !== null && !(AMUX_WORKER_CAPABILITY_REFUSALS as readonly unknown[]).includes(row.refusal)) return null;
-    if (row.refusal !== null && proposed === null) return null;
     rows.push({
       workerName: row.workerName,
       desiredState: row.desiredState as AmuxWorkerCapabilityAdminRow["desiredState"],
       roleCeiling: row.roleCeiling as AmuxWorkerRoleCeiling,
       current,
-      proposed,
-      refusal: row.refusal as AmuxWorkerCapabilityRefusal | null,
-      same: row.same,
     });
   }
-  if (!body.catalogReadable && rows.some((row) => row.proposed !== null)) return null;
-  return { writesLatch: body.writesLatch, catalogReadable: body.catalogReadable, rows };
+  return { writesLatch: body.writesLatch, rows };
 }

@@ -12,6 +12,9 @@ import {
   DM_RESULT_LINE_MAX_BYTES,
   dmBrokerAnswer,
   dmEncodeLaunchRequest,
+  dmEncodeSnapshotAnswer,
+  dmIsSnapshotRequestLine,
+  dmParseSnapshotRequest,
   dmLauncherReadyFits,
   dmParseLaunchRequest,
   dmParseLauncherAnswer,
@@ -29,6 +32,7 @@ import {
   dmVendorGroupId,
   type DmLauncherHost,
 } from "./decisionMakerLauncherFs.ts";
+import { buildDmSnapshot, dmSnapshotHttpClient, type DmSnapshotHttp } from "./decisionMakerSnapshot.ts";
 import { dmCloseStream, dmReadLine, dmWriteLine } from "./decisionMakerSocketLine.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
 
@@ -51,7 +55,7 @@ import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
  *   4. §5: the request root holds nothing but requests in flight, the
  *      vendor's group is the one S0 made, and the request's directory is made
  *      empty, broker-owned, that group, `0750`. The card goes on stdin
- *      (§5a); the S2b snapshot is not part of this stage.
+ *      (§5a); the S2b snapshot, if any, is already inside the payload.
  *   5. Ask the instance's launcher (`ready`, then the request) and wait for
  *      its one answer, past the launcher unit's own hard limit.
  *   6. Always, once anything may have been made: delete the request directory
@@ -96,6 +100,8 @@ export type DmBrokerOptions = {
   /** Test host only. */
   timeouts?: Partial<DmBrokerTimeouts>;
   log?: (entry: DmBrokerLogEntry) => void;
+  /** Test host only: the snapshot's public reads. The system host uses the credential-free client. */
+  snapshotHttp?: DmSnapshotHttp;
 };
 
 const defaultLog = (entry: DmBrokerLogEntry) => {
@@ -177,9 +183,12 @@ const callLauncher = async (
   }
 };
 
+export type DmSnapshotBrokerAnswer = ReturnType<typeof dmEncodeSnapshotAnswer>;
+
 export type DecisionMakerBroker = {
   /** Serves one bridge connection to its end. Never rejects. */
-  handleConnection: (socket: Duplex) => Promise<DmBrokerAnswer>;
+  /** A launch is answered with its result; a snapshot request (stage S2b) with its lines. */
+  handleConnection: (socket: Duplex) => Promise<DmBrokerAnswer | DmSnapshotBrokerAnswer>;
   /** The request in flight per instance, for tests and the log. */
   inFlight: () => ReadonlyMap<DmInstanceScope, string>;
 };
@@ -192,6 +201,8 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
   const connect = options.connectLauncher ?? connectSystemLauncher;
   const timeouts: DmBrokerTimeouts = { ...SYSTEM_TIMEOUTS, ...options.timeouts };
   const log = options.log ?? defaultLog;
+  // A test host may fake the public reads only on a test root, like the launcher.
+  const snapshotHttp = host.root !== null && options.snapshotHttp !== undefined ? options.snapshotHttp : dmSnapshotHttpClient;
   const inFlight = new Map<DmInstanceScope, string>();
 
   /** Steps 3 to 6, for a request that is now this broker's. */
@@ -247,12 +258,33 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
     return answer(view, requestDirectory);
   };
 
-  const handleConnection = async (socket: Duplex): Promise<DmBrokerAnswer> => {
+  const handleConnection = async (socket: Duplex): Promise<DmBrokerAnswer | DmSnapshotBrokerAnswer> => {
     const started = Date.now();
     socket.on("error", () => {});
     let response: DmBrokerAnswer;
     try {
       const read = await dmReadLine(socket, DM_LAUNCH_LINE_MAX_BYTES, timeouts.requestRead);
+      // Stage S2b: a snapshot request touches no directory and no launcher.
+      if (read.ok && dmIsSnapshotRequestLine(read.line)) {
+        const request = dmParseSnapshotRequest(read.line);
+        const snapshot = request === null ? null : await buildDmSnapshot(request.paths, snapshotHttp).catch(() => null);
+        const answer = dmEncodeSnapshotAnswer(request?.requestId ?? null, snapshot);
+        log({
+          event: "amux_dm_broker_request",
+          requestId: answer.requestId,
+          instance: null,
+          launch: "snapshot",
+          reasons: [answer.reason ?? answer.state, ...Object.entries(answer.excluded).map(([reason, n]) => `${reason}:${n}`)],
+          transmission: "not_started",
+          result: "none",
+          cleanup: "verified",
+          residue: [],
+          durationMs: Date.now() - started,
+        });
+        await dmWriteLine(socket, answer, DM_LINE_WRITE_TIMEOUT_MS);
+        await dmCloseStream(socket, DM_LINE_WRITE_TIMEOUT_MS);
+        return answer;
+      }
       const parsed = read.ok ? dmParseLaunchRequest(read.line) : null;
       if (parsed === null || !parsed.ok) {
         response = dmBrokerAnswer({

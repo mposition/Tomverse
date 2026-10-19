@@ -9,7 +9,7 @@ export const adminAmuxDecisionMakerMessages = defineAdminMessages({
   en: {
     title: "Decision Maker switches",
     description:
-      "Policy version 1 is proposal-only: a Decision Maker drafts an answer, and nothing reaches a worker until a person confirms it here in Admin. These switches decide only whether a question may be routed to a Decision Maker. Until the bridge path exists (stage S2), no question is routed, whatever they show.",
+      "Policy version 1 is proposal-only: a Decision Maker drafts an answer, and nothing reaches a worker until a person confirms it here in Admin. These switches decide only whether a question may be routed to a Decision Maker.",
     killSwitch: "Kill switch",
     killSwitchHelp:
       "On stops the whole Decision Maker path: no routing, no process start, no confirmation. Reading records, rejecting a proposal and answering a worker yourself stay open.",
@@ -52,7 +52,7 @@ export const adminAmuxDecisionMakerMessages = defineAdminMessages({
   ko: {
     title: "Decision Maker 스위치",
     description:
-      "정책 1판은 제안 전용입니다. Decision Maker가 답을 제안해도 사람이 이 Admin에서 확정하기 전에는 worker에게 아무것도 가지 않습니다. 이 스위치는 질문을 Decision Maker에게 보낼 수 있는지만 정합니다. bridge 경로(S2 단계)가 생기기 전에는 여기 표시와 상관없이 어떤 질문도 Decision Maker에게 가지 않습니다.",
+      "정책 1판은 제안 전용입니다. Decision Maker가 답을 제안해도 사람이 이 Admin에서 확정하기 전에는 worker에게 아무것도 가지 않습니다. 이 스위치는 질문을 Decision Maker에게 보낼 수 있는지만 정합니다.",
     killSwitch: "Kill switch",
     killSwitchHelp:
       "켜면 Decision Maker 경로 전체가 멈춥니다. 라우팅, 프로세스 시작, 확정이 모두 거부됩니다. 기록 열람, 제안 거절, worker에게 직접 답하기는 그대로 됩니다.",
@@ -486,5 +486,82 @@ export const adminAmuxDecisionMakerJudgmentMessages = defineAdminMessages({
     unknown: "결과를 모릅니다. 다시 보내지 마세요. 이 요청을 다시 읽어 기록됐는지 확인하세요.",
     failed: "판정을 기록하지 못했습니다.",
     reload: "이 요청 다시 읽기",
+  },
+});
+
+/**
+ * Copy for the Decision Maker requests that wait on a person, drawn in
+ * AMUX › Execution's attention lane and opened as a side panel there.
+ */
+export const adminAmuxDecisionMakerAttentionMessages = defineAdminMessages({
+  en: {
+    summary: (count: number) => `${count} waiting on you`,
+    summaryDm: (count: number) => `Decision Maker ${count}`,
+    summaryCards: (count: number) => `Card reviews ${count}`,
+    jumpToLane: "Go to the attention lane",
+    groupDm: (count: number) => `Decision Maker · ${count}`,
+    groupCards: (count: number) => `Cards · ${count}`,
+    kinds: { proposal: "DM proposal", delivery_unknown: "Check delivery" },
+    proposalLabel: { proposal: "DM proposal", delivery_unknown: "Confirmed answer" },
+    irreversible: "Irreversible",
+    waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · waiting ${age}`,
+    more: (count: number) => `${count} more. See Operations settings › Decision Maker for the history.`,
+    bodiesHidden: "The question is shown to administrators who may judge it (ops:write).",
+    unavailable: "The Decision Maker requests could not be read. None is shown.",
+    open: (cardId: string, revision: number) => `Open ${cardId}, revision ${revision}`,
+    close: "Close",
+    dialog: (cardId: string, revision: number) => `${cardId}, revision ${revision}`,
+    dmChoice: "DM's choice",
+    moreContext: "Context",
+    deliveryUnknownNext:
+      "Nobody knows whether the confirmed answer reached the worker. Check the worker's session in AMUX before answering again.",
+    settingsPointer: "Requests to judge are in AMUX › Execution, in the attention lane.",
+    settingsOpen: (count: number) => `Open ${count} waiting`,
+    settingsNone: "Nothing waits on a person now.",
+    resolveTitle: "Record what happened to the answer",
+    resolveDelivered: "It reached the worker",
+    resolveNotDelivered: "It did not reach the worker",
+    resolveConfirm: "This is recorded once and cannot be changed. Record it?",
+    resolveSending: "Recording…",
+    resolveRecorded: { delivered: "Recorded as delivered.", not_delivered: "Recorded as not delivered. Answer the worker directly in AMUX." },
+    resolveRefused: { not_unknown: "This delivery is no longer unknown.", already_resolved: "Someone already recorded it.", not_confirmed: "There is no confirmed answer to resolve." } as Record<string, string>,
+    resolveUnknown: "It is not known whether this was recorded. Reload before trying again.",
+    resolveFailed: "It could not be recorded. Nothing was written.",
+    reload: "Reload",
+  },
+  ko: {
+    summary: (count: number) => `지금 판단할 것 ${count}건`,
+    summaryDm: (count: number) => `Decision Maker 판정 ${count}`,
+    summaryCards: (count: number) => `카드 검토 ${count}`,
+    jumpToLane: "Attention 열로 이동",
+    groupDm: (count: number) => `Decision Maker 판정 대기 · ${count}`,
+    groupCards: (count: number) => `카드 · ${count}`,
+    kinds: { proposal: "DM 제안", delivery_unknown: "전달 확인 필요" },
+    proposalLabel: { proposal: "DM 제안", delivery_unknown: "확정한 답" },
+    irreversible: "되돌릴 수 없음",
+    waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · ${age} 대기`,
+    more: (count: number) => `${count}건이 더 있습니다. 운영 설정 › Decision Maker의 기록에서 보세요.`,
+    bodiesHidden: "질문은 판정할 수 있는 관리자(ops:write)에게만 보입니다.",
+    unavailable: "Decision Maker 요청을 읽지 못했습니다. 아무것도 표시하지 않습니다.",
+    open: (cardId: string, revision: number) => `${cardId}, revision ${revision} 열기`,
+    close: "닫기",
+    dialog: (cardId: string, revision: number) => `${cardId}, revision ${revision}`,
+    dmChoice: "DM 선택",
+    moreContext: "맥락",
+    deliveryUnknownNext:
+      "확정한 답이 worker에게 전해졌는지 알 수 없습니다. 다시 답하기 전에 AMUX에서 worker 세션을 확인하세요.",
+    settingsPointer: "판정할 요청은 AMUX › 실행의 Attention 열에 있습니다.",
+    settingsOpen: (count: number) => `판정 대기 ${count}건 열기`,
+    settingsNone: "지금 사람을 기다리는 요청이 없습니다.",
+    resolveTitle: "답이 어떻게 됐는지 기록",
+    resolveDelivered: "worker에게 전달됨",
+    resolveNotDelivered: "worker에게 전달 안 됨",
+    resolveConfirm: "한 번만 기록되고 바꿀 수 없습니다. 기록할까요?",
+    resolveSending: "기록하는 중…",
+    resolveRecorded: { delivered: "전달됨으로 기록했습니다.", not_delivered: "전달 안 됨으로 기록했습니다. AMUX에서 worker에게 직접 답하세요." },
+    resolveRefused: { not_unknown: "이 전달은 더 이상 결과 불명이 아닙니다.", already_resolved: "다른 사람이 이미 기록했습니다.", not_confirmed: "해결할 확정 답이 없습니다." } as Record<string, string>,
+    resolveUnknown: "기록됐는지 알 수 없습니다. 다시 시도하기 전에 새로 고치세요.",
+    resolveFailed: "기록하지 못했습니다. 아무것도 쓰지 않았습니다.",
+    reload: "새로 고침",
   },
 });

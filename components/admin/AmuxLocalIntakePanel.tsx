@@ -85,15 +85,15 @@ export function AmuxLocalIntakePanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-local-intake-panel">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.backlogMeaning}</p>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.perCard}</p>
-      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-local-intake-package">
+      <h2 className="text-lg font-semibold text-zinc-100">{messages.title}</h2>
+      <p className="text-sm text-zinc-300">{messages.description}</p>
+      <p className="text-sm text-zinc-300">{messages.backlogMeaning}</p>
+      <p className="text-sm text-zinc-300">{messages.perCard}</p>
+      <label className="flex flex-col gap-2 text-sm font-medium text-zinc-100" htmlFor="amux-local-intake-package">
         {messages.draftLabel}
         <textarea
           id="amux-local-intake-package"
-          className="min-h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          className="min-h-40 w-full rounded-md border p-3 text-base border-zinc-600 bg-zinc-950 text-zinc-100"
           value={packageText}
           onChange={(event) => {
             setPackageText(event.target.value);
@@ -105,7 +105,7 @@ export function AmuxLocalIntakePanel() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
           disabled={pending}
           onClick={() => void downloadSnapshot()}
         >
@@ -113,18 +113,18 @@ export function AmuxLocalIntakePanel() {
         </button>
         <button
           type="button"
-          className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="min-h-11 rounded-md px-4 text-sm font-medium disabled:opacity-50 bg-zinc-100 text-zinc-900"
           disabled={pending || packageText.trim().length === 0}
           onClick={() => void send("/api/admin/amux/intake?action=local-preview")}
         >
           {messages.preview}
         </button>
       </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">
+      <p className="text-sm text-zinc-300">
         {registerReady ? messages.registerPermitted : messages.registerDisabled}
       </p>
       {refusedForStepUp ? (
-        <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
+        <a className="text-sm font-medium underline text-zinc-100" href={STEP_UP_HREF}>
           {messages.renewSignIn}
         </a>
       ) : null}
@@ -134,15 +134,15 @@ export function AmuxLocalIntakePanel() {
       {result?.code ? <p role="status">{messages.error(result.code)}</p> : null}
       <ul className="flex flex-col gap-3">
         {(result?.cards ?? []).map((card) => (
-          <li key={card.localId} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-700">
-            <p className="text-sm text-zinc-900 dark:text-zinc-100">
+          <li key={card.localId} className="rounded-md border p-3 border-zinc-700">
+            <p className="text-sm text-zinc-100">
               {messages.cardLine(card.localId ?? "", card.title ?? "", card.priority ?? "")}
             </p>
-            <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.notRegistered}</p>
+            <p className="text-sm text-zinc-300">{messages.notRegistered}</p>
             {card.code ? <p className="text-sm">{messages.error(card.code)}</p> : null}
             <button
               type="button"
-              className="mt-2 min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+              className="mt-2 min-h-11 rounded-md border px-4 text-sm font-medium disabled:opacity-50 border-zinc-600 text-zinc-100"
               disabled={pending || blocked || !card.digest || card.outcome === "reject"}
               onClick={() =>
                 void send(

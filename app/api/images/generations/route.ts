@@ -50,6 +50,10 @@ const createGenerationSchema = z
     // IMAGE_GROUP_MAX_MODELS, enforced in the service; this bound only stops
     // an absurd payload before it reaches it.
     modelIds: z.array(z.string().trim().min(1).max(120)).min(1).max(8).optional(),
+    // The pricingVersion the composer quoted per model (lib/modelCatalogCore.ts).
+    expectedPricingVersions: z
+      .record(z.string().trim().min(1).max(120), z.string().trim().min(1).max(120))
+      .optional(),
   })
   .strict();
 
@@ -77,6 +81,7 @@ export async function POST(req: Request) {
       conversationId: body.conversationId ?? null,
       idempotencyKey: body.idempotencyKey,
       modelIds: body.modelIds,
+      expectedPricingVersions: body.expectedPricingVersions,
     });
 
     // Post-response execution in the same long-lived Node process: the 202

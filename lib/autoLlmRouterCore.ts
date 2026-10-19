@@ -68,8 +68,12 @@ export const autoLlmRouterSession = (
 /** One id and one short sentence; the cap bounds a model that rambles. */
 export const AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS = 200;
 
-/** Past this the turn proceeds on the deterministic choice. */
-export const AUTO_LLM_ROUTER_TIMEOUT_MS = 3_000;
+/**
+ * Past this the turn proceeds on the deterministic choice. On Test (2026-10-19,
+ * gpt-6-luna at low effort) 4 of 26 calls hit the former 3 s deadline (p50 2.07 s,
+ * p90 3.0 s), so the live call now gets 5 s.
+ */
+export const AUTO_LLM_ROUTER_TIMEOUT_MS = 5_000;
 
 /**
  * The optimizer's replay of a past decision (lib/autoRouterOptimizer.ts). No
@@ -84,7 +88,7 @@ export const AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS = 15_000;
  * deliberation, and an OpenAI reasoning model left at its default effort was
  * measured in dev (2026-10-19, gpt-6-luna, 17 candidates) taking past 15 s on
  * the first call, while `low` answered in 1.9-2.3 s with no reasoning tokens;
- * 4 of 27 live router calls had hit the 3 s deadline and fallen back to the
+ * 4 of 27 live router calls had hit the then 3 s deadline and fallen back to the
  * rule's choice. Other providers keep their defaults.
  */
 export const autoLlmRouterProviderOptions = (provider: string) => ({

@@ -44,9 +44,12 @@ export type AdminNavBadgeKey =
   | "modelLifecycle"
   | "emailCampaigns"
   | "marketing"
+  | "productResearch"
   | "amuxEscalations"
   | "amuxOrchestratorHalts"
-  | "amuxExecution";
+  | "amuxExecution"
+  | "amuxDecisionMaker"
+  | "amuxOwnerAttention";
 
 export type AdminNavTab = {
   id: string;
@@ -353,6 +356,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Discovery",
         description: "Models a provider listed that nobody has decided about",
       },
+      {
+        id: "catalog",
+        label: "Image & coding catalog",
+        description: "Enable or hold image and coding models, price history, LLM drafts, the Code snapshot",
+      },
     ],
   },
   {
@@ -566,11 +574,48 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "product-research",
+    label: "Product research",
+    href: "/admin/product-research",
+    description:
+      "What the Scout suggests improving on the public pages, generated files and catalogue, and its runs and spending",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    badge: "productResearch",
+    aliases: [
+      "scout",
+      "improvement",
+      "suggestion",
+      "product research",
+      "observation",
+      "issue backlog",
+      "slot",
+    ],
+    tabs: [
+      {
+        id: "suggestions",
+        label: "Suggestions",
+        description: "Open Scout suggestions by page or file, to dismiss or send to AMUX",
+        badge: "productResearch",
+      },
+      {
+        id: "runs",
+        label: "Runs and cost",
+        description: "Whether the Scout ran, the model and daily cap an owner chose, and the last seven days",
+      },
+      {
+        id: "observations",
+        label: "Issue observations",
+        description:
+          "Observation slots, the newest one's rows, and the staging and production windows",
+      },
+    ],
+  },
+  {
     id: "engineering-agent",
     label: "Engineering agent",
     href: "/admin/engineering-agent",
-    description:
-      "The agents' record: engineering T2 drafts and runs, and the product-research observation slots",
+    description: "The engineering agent's record: T2 drafts, runs, pull requests and its mode",
     group: "Operations",
     writeRoles: ["owner", "ops"],
     aliases: [
@@ -582,13 +627,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "publisher",
       "runner",
       "freeze",
-      // The product-research section lives on this screen as a tab
-      // (docs/policy/product-research-agent.md §4), so the palette has to find
-      // it under its own words rather than under the engineering agent's.
-      "product research",
-      "observation",
-      "issue backlog",
-      "slot",
     ],
     tabs: [
       {
@@ -610,12 +648,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "settings",
         label: "Mode",
         description: "Mode, freeze, the kill switch and the owner queue against its caps",
-      },
-      {
-        id: "product-research",
-        label: "Product research",
-        description:
-          "Observation slots, the newest one's rows, and the staging and production windows",
       },
     ],
   },
@@ -811,8 +843,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     // registry change takes the owner role and a recent step-up in its route
     // (orchestration policy version 31, section 3).
     writeRoles: ["owner", "ops"],
-    // Halts belong to Operations settings, so this counts escalations only.
-    badge: "amuxEscalations",
+    // Halts belong to Operations settings, so this counts what waits on a
+    // person here: escalations and Decision Maker requests.
+    badge: "amuxOwnerAttention",
     aliases: [
       "amux",
       "cards",
@@ -833,6 +866,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Cards",
         description: "Every AMUX card stored in Tomverse and its execution state",
         viewRoles: ["owner"],
+        badge: "amuxDecisionMaker",
       },
       {
         id: "assignment",
@@ -1250,6 +1284,14 @@ export const adminRedirectTarget = (
   }
   const search = params.toString();
   return search ? `${path}?${search}` : path;
+};
+
+/**
+ * Product research left the engineering agent's screen for its own workspace
+ * (2026-10-19). The old tab link still opens it.
+ */
+export const ADMIN_ENGINEERING_AGENT_LEGACY_TABS: Readonly<Record<string, string>> = {
+  "product-research": "/admin/product-research?tab=suggestions",
 };
 
 /** The old section links remain bookmarks, never a second control surface. */

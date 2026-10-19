@@ -18,9 +18,9 @@ import type { QaReleaseMergeLaneLatchReason } from "./qaReleaseMergeLaneLatchCor
 const SHA = /^[0-9a-f]{40}$/;
 
 /**
- * One staging service's deployment as the lane observed it for this merge:
+ * One dev service's deployment as the lane observed it for this merge:
  * a service name, Railway's status and the deployed commit. Shown to a
- * person deciding whether staging serves the merge (section 8 item 5).
+ * person deciding whether dev serves the merge (section 8 item 5).
  */
 export type QaReleaseDeployObservation = { service: string; status: string; commitSha: string | null };
 

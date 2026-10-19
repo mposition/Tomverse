@@ -15,7 +15,6 @@ import {
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import {
-  amuxWorkerCapabilityImportsToWrite,
   buildAmuxWorkerCapabilityAdminView,
   type AmuxWorkerCapabilityAdminView,
 } from "@/lib/amux/workerCapabilityCore";
@@ -24,8 +23,9 @@ import { amuxWorkerCapabilityFormFromRow, type AmuxWorkerCapabilityForm } from "
 
 /**
  * AMUX › Execution › Workers, capabilities (orchestration policy version 35,
- * R2a), executed: the hook-free view is walked, and the import run is driven
- * with a fake io. What it offers, to whom, and when it stops.
+ * R2a), executed: the hook-free view is walked, and the single-change run
+ * behind an edit is driven with a fake io. What it offers, to whom, and when
+ * it stops. The catalog variables are not read (R2e).
  */
 
 const m = adminAmuxWorkerCapabilityMessages.en;
@@ -61,17 +61,9 @@ const REGISTRY = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => ({
   desiredState: entry.desiredState,
   revision: 1,
 }));
-const LEGACY = [
-  { worker_name: "claude-chore", provider: "claude", routing_roles: ["chore"] },
-  { worker_name: "claude-impl", provider: "claude", routing_roles: ["implementation"] },
-  { worker_name: "codex-impl", provider: "codex", routing_roles: ["implementation"] },
-];
-const V22 = [
-  { worker_name: "claude-chore", provider: "anthropic", model: "claude-opus-5-5", routing_roles: ["investigate"], tool_capabilities: ["repo_read"] },
-];
-const VIEW = buildAmuxWorkerCapabilityAdminView({ registrations: REGISTRY, current: new Map(), legacy: LEGACY, v22: V22, writesLatch: true });
+const VIEW = buildAmuxWorkerCapabilityAdminView({ registrations: REGISTRY, current: new Map(), writesLatch: true });
 
-const render = (overrides: Partial<{ view: AmuxWorkerCapabilityAdminView | null; isOwner: boolean; onImport: (imports: AmuxWorkerCapabilityImport[]) => void }> = {}) =>
+const render = (overrides: Partial<{ view: AmuxWorkerCapabilityAdminView | null; isOwner: boolean }> = {}) =>
   AmuxWorkerCapabilityView({
     m,
     view: "view" in overrides ? overrides.view! : VIEW,
@@ -80,35 +72,37 @@ const render = (overrides: Partial<{ view: AmuxWorkerCapabilityAdminView | null;
     notice: null,
     refusal: null,
     failure: null,
-    onImport: overrides.onImport ?? (() => {}),
     onReread: () => {},
   });
 
-test("the owner is offered exactly the proposals that can be recorded", () => {
-  let sent: AmuxWorkerCapabilityImport[] | null = null;
-  const tree = render({ onImport: (imports) => { sent = imports; } });
-  const [button] = byTestId(tree, "amux-worker-capability-import-run");
-  assert.equal(button.disabled, false);
-  assert.equal(textOf(button.children as ReactNode), m.importRun(3));
-  (button.onClick as () => void)();
-  assert.deepEqual(sent, amuxWorkerCapabilityImportsToWrite(VIEW));
-  assert.match(textOf(byTestId(tree, "amux-worker-capability-status-claude-chore")[0]!.children as ReactNode), /will be recorded/);
-  assert.match(textOf(byTestId(tree, "amux-worker-capability-status-cursor-impl")[0]!.children as ReactNode), /nothing to import/);
+test("each registered worker is listed with what is recorded; nothing comes from the catalog variables", () => {
+  const tree = render();
+  assert.equal(byTestId(tree, "amux-worker-capability-import").length, 0);
+  assert.equal(byTestId(tree, "amux-worker-capability-import-run").length, 0);
+  assert.equal(byTestId(tree, "amux-worker-capability-catalog-unreadable").length, 0);
+  for (const row of VIEW.rows) {
+    assert.equal(byTestId(tree, `amux-worker-capability-row-${row.workerName}`).length, 1, row.workerName);
+  }
+  assert.match(textOf(byTestId(tree, "amux-worker-capability-row-claude-chore")[0]!.children as ReactNode), /none/);
 });
 
-test("latched off, the control is disabled; a non-owner is offered nothing; an unread view offers only reading again", () => {
-  assert.equal(byTestId(render({ view: { ...VIEW, writesLatch: false } }), "amux-worker-capability-import-run")[0]!.disabled, true);
-  assert.equal(byTestId(render({ isOwner: false }), "amux-worker-capability-import").length, 0);
+test("an unread view offers only reading again", () => {
   const unread = render({ view: null });
   assert.equal(byTestId(unread, "amux-worker-capability-unavailable").length, 1);
-  assert.equal(byTestId(unread, "amux-worker-capability-import-run").length, 0);
+  assert.equal(byTestId(unread, "amux-worker-capability-reread").length, 1);
+  assert.equal(byTestId(unread, "amux-worker-capability-edit-claude-chore").length, 0);
 });
 
 const FAILURE = { kind: "failure", message: "failed" } as unknown as AdminApiFailure;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const receipt = (entry: AmuxWorkerCapabilityImport) =>
   json(200, { workerName: entry.workerName, revision: entry.expectedRevision + 1, action: "amux.worker.capability", eventId: "e-1" });
-const IMPORTS = amuxWorkerCapabilityImportsToWrite(VIEW);
+const capabilityOf = (tag: string) => ({ model: null, routingTags: [tag], toolCapabilities: [], v22: null });
+const IMPORTS: AmuxWorkerCapabilityImport[] = [
+  { workerName: "claude-chore", expectedRevision: 0, capability: capabilityOf("chore") },
+  { workerName: "claude-impl", expectedRevision: 0, capability: capabilityOf("implementation") },
+  { workerName: "codex-impl", expectedRevision: 0, capability: capabilityOf("implementation") },
+];
 
 const runWith = async (answers: Array<(entry: AmuxWorkerCapabilityImport) => Promise<Response>>, readResult: AmuxWorkerCapabilityAdminView | null) => {
   const updates: AmuxWorkerCapabilityUpdate[] = [];
@@ -170,15 +164,12 @@ test("a refusal by the ceiling rule, the latch or a stale revision stops on that
 test("the preview shows the tools, so a tools-only change is visible", () => {
   const view = buildAmuxWorkerCapabilityAdminView({
     registrations: REGISTRY,
-    current: new Map([["codex-impl", { revision: 1, capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" }]]),
-    legacy: [{ worker_name: "codex-impl", provider: "codex", routing_roles: ["implementation"], tool_capabilities: ["shell"] }],
-    v22: [],
+    current: new Map([["codex-impl", { revision: 1, capability: { model: null, routingTags: ["implementation"], toolCapabilities: ["shell"], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" }]]),
     writesLatch: true,
   });
   const tree = render({ view });
   const row = byTestId(tree, "amux-worker-capability-row-codex-impl")[0]!;
   assert.match(textOf(row.children as ReactNode), /tools: shell/);
-  assert.match(textOf(byTestId(tree, "amux-worker-capability-status-codex-impl")[0]!.children as ReactNode), /will be recorded/);
 });
 
 // Version 35 R2a, "Admin 편집" (version 36): the owner edits one worker's
@@ -195,7 +186,6 @@ const renderEditing = (editing: AmuxWorkerCapabilityForm | null, overrides: Part
     notice: null,
     refusal: null,
     failure: null,
-    onImport: () => {},
     onReread: () => {},
     editing,
     onEditStart: (row) => started.push(row.workerName),
@@ -248,7 +238,7 @@ test("an edit is one change against the recorded revision, receipt-checked and r
   const recorded = buildAmuxWorkerCapabilityAdminView({
     registrations: REGISTRY,
     current: new Map([["codex-impl", { revision: 3, capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" }]]),
-    legacy: [], v22: [], writesLatch: true,
+    writesLatch: true,
   });
   const row = recorded.rows.find((candidate) => candidate.workerName === "codex-impl")!;
   const form = { ...amuxWorkerCapabilityFormFromRow(row), tools: "shell" };

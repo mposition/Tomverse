@@ -108,13 +108,20 @@
 
 ## 6. 가격과 모델 자격
 
-- **관리형 코딩 모델은 전부 `lib/modelPricing.ts`에 명시적 가격 profile을 가집니다.**
-  `npm run check:model-pricing`의 fail-closed 규칙이 그대로 적용됩니다.
+- **관리형 코딩 모델은 명시적이고 검증된 가격을 가집니다.** 가격은 동적 카탈로그 행
+  (`ModelCatalogEntry` coding, `profile.pricing`: 단가·`creditWeight`·확인일·공식 출처)에 있고,
+  판정 함수(`judgeCodingModel`, `lib/modelCatalogCore.ts`)가 공식 도메인이 아닌 출처를 거절합니다.
+  가격이 없거나 검증되지 않은 행은 켤 수 없습니다(운영자 결정 2026-10-19: 코딩 모델을 배포 없이
+  추가할 수 있게 `lib/modelPricing.ts` profile을 필수로 두지 않음).
 - **약관 근거가 없는 모델은 코딩 카테고리에서 거절합니다.** provider의 재판매·코딩 에이전트
   용도 허용 근거(출처 URL·확인일)와 데이터 보존 정책 근거가 기록되지 않은 모델은 판정
   함수가 거절합니다. 비어 있는 근거를 "허용"으로 읽는 기본값을 두지 않습니다.
+  같은 판정이 `providerDataDestinations`의 해당 provider 행이 established(proven)인지도 봅니다.
 - **Code에 내려주는 카탈로그는 불변 스냅샷**(`version`·`contentHash`·`coverageUntil`)이며,
   **목록은 허가가 아닙니다** — 권한은 호출마다 서버가 다시 판정합니다.
+  발행은 Admin `/admin/models?tab=catalog`, 조회는 `GET /api/code/model-catalog`
+  (`?version=N`이면 바뀌지 않았을 때 `unchanged`), coverage가 지난 스냅샷은 503입니다.
+  태스크 예약 행은 그 태스크가 견적받은 스냅샷 `version`을 기록하고, 정산은 그 버전의 가격으로 합니다.
 
 ## 7. 제품 귀속
 

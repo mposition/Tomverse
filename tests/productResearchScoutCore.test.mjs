@@ -5,9 +5,14 @@ import {
   SCOUT_IMAGE_BASE64_MAX_CHARS,
   SUGGESTIONS_PER_SUBJECT_MAX,
   SUGGESTION_TITLE_MAX_CHARS,
+  SCOUT_RUN_GAP_MS,
   admitScoutSubmission,
+  latestScoutRun,
+  nextScoutRunAt,
+  scoutDays,
   parseScoutAnswer,
   scoutPromptText,
+  scoutSendOutcome,
   suggestionIdeaText,
 } from "../lib/productResearchScoutCore.ts";
 
@@ -81,4 +86,73 @@ test("the AMUX idea text names the subject, the evidence and the change", () => 
     text,
     "[Scout 제안] 모바일 가격표 잘림\n대상: pricing.en · 영역: mobile · 심각도: high\n근거: 320px에서 표 오른쪽이 잘림\n제안: 표를 세로 카드로 바꿈",
   );
+});
+
+test("the next run is today's 18:00 UTC until it passes, then tomorrow's", () => {
+  assert.equal(nextScoutRunAt(new Date("2026-10-19T11:44:00Z")).toISOString(), "2026-10-19T18:00:00.000Z");
+  assert.equal(nextScoutRunAt(new Date("2026-10-19T18:00:00Z")).toISOString(), "2026-10-20T18:00:00.000Z");
+  assert.equal(nextScoutRunAt(new Date("2026-10-19T23:59:00Z")).toISOString(), "2026-10-20T18:00:00.000Z");
+});
+
+const call = (iso, outcome = "ok", kept = 1, inputTokens = 100, outputTokens = 10) => ({
+  createdAt: new Date(iso),
+  outcome,
+  inputTokens,
+  outputTokens,
+  kept,
+});
+
+test("the newest run is the newest call and every call within the gap before it", () => {
+  assert.equal(latestScoutRun([]), null);
+  const rows = [
+    call("2026-10-19T08:56:20Z"),
+    call("2026-10-19T08:56:30Z", "ok", 2),
+    // More than SCOUT_RUN_GAP_MS later: a second run.
+    call("2026-10-19T11:44:44Z", "ok", 3),
+    call("2026-10-19T11:45:01Z", "failed", null, null, null),
+    call("2026-10-19T11:50:50Z", "started", null, null, null),
+  ];
+  assert.ok(Date.parse("2026-10-19T11:44:44Z") - Date.parse("2026-10-19T08:56:30Z") > SCOUT_RUN_GAP_MS);
+  assert.deepEqual(latestScoutRun(rows), {
+    startedAt: "2026-10-19T11:44:44.000Z",
+    endedAt: "2026-10-19T11:50:50.000Z",
+    calls: 3,
+    failed: 1,
+    unsettled: 1,
+    kept: 3,
+  });
+});
+
+test("the day table has one row per UTC day, newest first, days without calls included", () => {
+  const now = new Date("2026-10-19T11:50:00Z");
+  const days = scoutDays(
+    [
+      call("2026-10-19T11:44:44Z", "ok", 3, 1000, 100),
+      call("2026-10-19T08:56:20Z", "failed", null, 500, null),
+      call("2026-10-17T18:01:00Z", "ok", 2, 10, 1),
+      // Older than the window: left out.
+      call("2026-10-12T18:01:00Z", "ok", 9, 9, 9),
+    ],
+    now,
+    7,
+  );
+  assert.deepEqual(
+    days.map((day) => day.day),
+    ["2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16", "2026-10-15", "2026-10-14", "2026-10-13"],
+  );
+  assert.deepEqual(days[0], { day: "2026-10-19", calls: 2, failed: 1, kept: 3, inputTokens: 1500, outputTokens: 100 });
+  assert.deepEqual(days[1], { day: "2026-10-18", calls: 0, failed: 0, kept: 0, inputTokens: 0, outputTokens: 0 });
+  assert.equal(days[2].calls, 1);
+  assert.equal(days.reduce((sum, day) => sum + day.calls, 0), 3);
+});
+
+test("the walker counts a day's cap as capped, not as a failure", () => {
+  assert.equal(scoutSendOutcome({ judged: true, stored: 3 }), "judged");
+  assert.equal(scoutSendOutcome({ judged: true, stored: 0 }), "judged");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "model_off" }), "modelOff");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "daily_cap_reached" }), "capped");
+  assert.equal(scoutSendOutcome({ refused: "images" }), "refused");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "model_failed" }), "failed");
+  assert.equal(scoutSendOutcome({}), "failed");
+  assert.equal(scoutSendOutcome(null), "failed");
 });

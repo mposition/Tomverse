@@ -106,7 +106,7 @@ export function AmuxTaskCostCatalogApprovalPanel({ approvalAvailable }: {
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
-  return <section className="space-y-2 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+  return <section className="space-y-2 rounded-xl border p-4 text-sm border-zinc-700">
     <h3 className="font-semibold">{m.taskCatalogTitle}</h3>
     <p>{m.taskCatalogHint}</p>
     {!approvalAvailable ? <p role="status">{m.taskCatalogDisabled}</p> : null}

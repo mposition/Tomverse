@@ -1766,7 +1766,6 @@ test("routing snapshot offers no AMUX worker when none is registered", async () 
       },
     },
   });
-  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
   const restoreCatalog = await seedAmuxWorkerCatalog([]);
   try {
     const snapshot = await buildAmuxRoutingSnapshot(taskId, 0);
@@ -1777,8 +1776,6 @@ test("routing snapshot offers no AMUX worker when none is registered", async () 
     assert.equal(snapshot.candidates[0]?.worker.dispatch_ready, false);
   } finally {
     await restoreCatalog();
-    if (previousCatalog === undefined) delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    else process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
     await prisma.amuxWorkItem.delete({ where: { id: taskId } });
   }
 });
@@ -1796,7 +1793,6 @@ test("routing snapshot exposes registered workers without inventing runtime evid
       },
     },
   });
-  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
   const restoreCatalog = await seedAmuxWorkerCatalog([
     { worker_name: "codex-impl", model: "explicit-model", routing_roles: ["implementation"] },
     { worker_name: "claude-chore", routing_roles: ["multi_file", "chore"] },
@@ -1831,8 +1827,6 @@ test("routing snapshot exposes registered workers without inventing runtime evid
     }
   } finally {
     await restoreCatalog();
-    if (previousCatalog === undefined) delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    else process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
     await prisma.amuxWorkItem.delete({ where: { id: taskId } });
   }
 });
@@ -2145,13 +2139,12 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
   });
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
   const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
   // Version 35 (R2c): workers come from the registry the catalog is derived
-  // from, so they are seed workers; the fixture also writes the variable.
+  // from, so they are seed workers.
   await seedAmuxWorkerCatalog([{ worker_name: authoritativeWorker, routing_roles: ["implementation"] }]);
 
   try {
@@ -2227,12 +2220,6 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
     }
 
-    if (previousCatalog === undefined) {
-      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    } else {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
-    }
-
     if (previousExecutionApi === undefined) {
       delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
     } else {
@@ -2265,13 +2252,12 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
   });
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
   const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
   // Version 35 (R2c): workers come from the registry the catalog is derived
-  // from, so they are seed workers; the fixture also writes the variable.
+  // from, so they are seed workers.
   await seedAmuxWorkerCatalog([{ worker_name: worker, routing_roles: ["implementation"] }]);
 
   try {
@@ -2371,12 +2357,6 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
       delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     } else {
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
-    }
-
-    if (previousCatalog === undefined) {
-      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    } else {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
     }
 
     if (previousExecutionApi === undefined) {
@@ -4555,8 +4535,6 @@ test("claim API persists authoritative routing when consistent client evidence d
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
 
-  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-
   const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   const worker = "codex-impl";
@@ -4566,7 +4544,7 @@ test("claim API persists authoritative routing when consistent client evidence d
   process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
 
   // Version 35 (R2c): workers come from the registry the catalog is derived
-  // from, so they are seed workers; the fixture also writes the variable.
+  // from, so they are seed workers.
   await seedAmuxWorkerCatalog([
     { worker_name: worker, routing_roles: ["implementation"] },
     { worker_name: "claude-chore", routing_roles: ["reasoning"] },
@@ -4692,11 +4670,6 @@ test("claim API persists authoritative routing when consistent client evidence d
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
     }
 
-    if (previousCatalog === undefined) {
-      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    } else {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
-    }
     if (previousExecutionApi === undefined) {
       delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
     } else {
@@ -5168,9 +5141,8 @@ test("routing does not offer a worker that already owns an open card", async () 
   const free = "claude-impl";
   const owned = await createTodo("amux-route-owned");
   const next = await createTodo("amux-route-next");
-  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
   // Version 35 (R2c): workers come from the registry the catalog is derived
-  // from, so they are seed workers; the fixture also writes the variable.
+  // from, so they are seed workers.
   await seedAmuxWorkerCatalog([
     { worker_name: busy, routing_roles: ["implementation"] },
     { worker_name: free, routing_roles: ["implementation"] },
@@ -5218,11 +5190,6 @@ test("routing does not offer a worker that already owns an open card", async () 
     assert.deepEqual(readiness, { [busy]: false, [free]: true, "engineering-runner": false });
     assert.equal(snapshot.execution_ready, true);
   } finally {
-    if (previousCatalog === undefined) {
-      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-    } else {
-      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
-    }
     await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: { in: [busy, free] } } });
     await prisma.amuxWorkItem.updateMany({ where: { id: { in: [owned, next] } }, data: { status: "done" } });
   }

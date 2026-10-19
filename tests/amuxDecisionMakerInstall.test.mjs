@@ -65,13 +65,14 @@ test("§5: only the bridge's group reaches the broker's socket, which systemd ma
   assert.equal(directive(socket, "Service"), "amux-dm-broker.service");
 });
 
-test("§5: the broker runs as its own account, writes only the request root, and has local sockets only", () => {
+test("§5: the broker runs as its own account, writes only the request root, and reaches local sockets and, for S2b, the network", () => {
   const service = read("scripts/systemd/amux-dm-broker.service");
   assert.equal(directive(service, "User"), "amux-dm-broker");
   assert.equal(directive(service, "Group"), "amux-dm-broker");
   assert.equal(directive(service, "ExecStart"), "/usr/bin/node /opt/tomverse-amux-dm/broker.mjs");
   assert.deepEqual(directives(service, "ReadWritePaths"), [DM_REQUEST_ROOT]);
-  assert.equal(directive(service, "RestrictAddressFamilies"), "AF_UNIX");
+  // Stage S2b: the snapshot's public reads; the host egress rules hold it to GitHub.
+  assert.equal(directive(service, "RestrictAddressFamilies"), "AF_UNIX AF_INET AF_INET6");
   assert.equal(directive(service, "ProtectSystem"), "strict");
   assert.equal(directive(service, "NoNewPrivileges"), "true");
   assert.equal(directive(service, "CapabilityBoundingSet"), "");

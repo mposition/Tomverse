@@ -195,7 +195,7 @@ mock.module(mod("lib/amux/orchestratorHaltStore.ts"), { namedExports: {
 // The services read the assignment catalog (orchestration policy version 35,
 // section 3); while R2c is off it is the v22 variable, stood in for here.
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
-  readAmuxAssignmentCatalogs: async () => ({ source: "variables", workers: [], v22: [1, 2, 3].map((index) => ({
+  readAmuxAssignmentCatalogs: async () => ({ workers: [], v22: [1, 2, 3].map((index) => ({
     worker_name: `worker-${index}`, archived: false, paused: false,
     isolated: false, blocked: false,
   })) }),
