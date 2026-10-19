@@ -10,6 +10,7 @@ import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSy
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+    AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
     autoLlmRouterUserMessage,
     buildAutoLlmRouterSystem,
     resolveAutoLlmRouterModel,
@@ -613,6 +614,7 @@ async function runInBackground(input: {
                         previousAnswer: decision.routerContext,
                         candidates: decision.candidates,
                         session: decision.routerSession,
+                        timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
                     });
                     return {
                         value: routed.pick?.modelId ?? null,
