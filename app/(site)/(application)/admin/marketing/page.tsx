@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
 import { AdminMarketingPanel } from "@/components/admin/AdminMarketingPanel";
-import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminPageTabs, type AdminPageTabChip } from "@/components/admin/AdminPageTabs";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
@@ -38,23 +38,43 @@ export default async function AdminMarketingPage({
     hasAdminPermission(session, "marketing:write")
   );
 
+  // What each tab holds, from the overview the loader already read: the
+  // drafts waiting for a person (in the attention colour), the accounts, and
+  // the stage a section waits for. An unreadable count draws nothing.
+  const { pending, accounts } = initial.overview;
+  const chips: Record<string, AdminPageTabChip | undefined> = {
+    queue: pending && pending.count > 0 ? { label: String(pending.count), attention: true } : undefined,
+    accounts: accounts && accounts.total > 0 ? { label: String(accounts.total) } : undefined,
+    comments: { label: "S4" },
+    experiments: { label: "S5" },
+  };
+
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <AdminPageTabs
-        basePath="/admin/marketing"
-        tabs={TABS}
-        activeTabId={tab.id}
-        label="Marketing sections"
-        query={query}
-      />
       {/*
         Keyed by section so a client navigation between tabs remounts the
         panel with the new payload. Without it the panel's `useState(initial)`
         keeps the previous section's rows while the tab strip says otherwise,
         which is the section living in component state -- the thing the Admin
-        IA contract's second rule forbids.
+        IA contract's second rule forbids. The strip is still a server
+        component and still links `?tab=`; the panel only places it under its
+        overview.
       */}
-      <AdminMarketingPanel key={tab.id} initial={initial} />
+      <AdminMarketingPanel
+        key={tab.id}
+        initial={initial}
+        tabs={
+          <AdminPageTabs
+            basePath="/admin/marketing"
+            tabs={TABS}
+            activeTabId={tab.id}
+            label="Marketing sections"
+            query={query}
+            chips={chips}
+            variant="underline"
+          />
+        }
+      />
     </div>
   );
 }

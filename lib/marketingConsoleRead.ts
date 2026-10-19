@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
 import { readMarketingLlmSettings } from "@/lib/marketingLlmSettingsStore";
+import { readMarketingConsoleOverview, type MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
 import { marketingLlmModelOptions } from "@/lib/marketingLlmModelCatalog";
 import type { MarketingLlmSettings } from "@/lib/marketingLlmBudgetCore";
 import {
@@ -171,6 +172,8 @@ export type MarketingConsolePayload = {
    * `version` is what a change sends back; `models` is what may be chosen.
    */
   llm: MarketingConsoleLlmView;
+  /** The four numbers at the top of the console (lib/marketingConsoleOverview.ts). */
+  overview: MarketingConsoleOverview;
   /** Null outside staging; see `MarketingWebhookStagingView`. */
   webhookStaging: MarketingWebhookStagingView | null;
   /**
@@ -385,10 +388,11 @@ export async function readMarketingConsole(
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
   const availability = marketingSectionAvailability(section);
-  const [{ switches, configGeneration }, webhookStaging, llm] = await Promise.all([
+  const [{ switches, configGeneration }, webhookStaging, llm, overview] = await Promise.all([
     readSwitches(),
     readWebhookStaging(),
     readLlm(),
+    readMarketingConsoleOverview(),
   ]);
 
   if (!availability.available) {
@@ -401,6 +405,7 @@ export async function readMarketingConsole(
       switches,
       configGeneration,
       llm,
+      overview,
       webhookStaging,
       canWrite,
     };
@@ -438,6 +443,7 @@ export async function readMarketingConsole(
       switches,
       configGeneration,
       llm,
+      overview,
       webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
@@ -503,6 +509,7 @@ export async function readMarketingConsole(
       switches,
       configGeneration,
       llm,
+      overview,
       webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
@@ -570,6 +577,7 @@ export async function readMarketingConsole(
       switches,
       configGeneration,
       llm,
+      overview,
       webhookStaging,
       canWrite,
       rows: channels.map((channel) => ({
@@ -614,6 +622,7 @@ export async function readMarketingConsole(
       switches,
       configGeneration,
       llm,
+      overview,
       webhookStaging,
       canWrite,
       truncated: competitors.length > MARKETING_COMPETITOR_READ_LIMIT,
@@ -645,6 +654,7 @@ export async function readMarketingConsole(
     switches,
     configGeneration,
     llm,
+    overview,
     webhookStaging,
     canWrite,
     rows: reports.map((report) => ({

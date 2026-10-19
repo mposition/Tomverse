@@ -77,6 +77,8 @@ export type MarketingAction = {
   /** Said before the request, not after: this is the last chance to stop. */
   confirm?: string;
   danger?: boolean;
+  /** The row's main decision (approve, confirm): drawn as the one filled button. */
+  primary?: boolean;
   fields?: MarketingActionField[];
   body: (values: Record<string, string>) => unknown;
 };
@@ -224,7 +226,7 @@ export function MarketingActionRail({
   const opened = open ? byId.get(open) : null;
 
   return (
-    <div className="mt-3 border-t border-zinc-800 pt-3">
+    <div className="mt-4 border-t border-zinc-800 pt-4">
       <div className="flex flex-wrap gap-2">
         {actions.map((action) => (
           <button
@@ -240,10 +242,12 @@ export function MarketingActionRail({
             aria-expanded={
               action.fields && !action.unavailable ? open === action.id : undefined
             }
-            className={`inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-              action.danger
-                ? "border-red-500/40 text-red-200 hover:bg-red-500/10"
-                : "border-zinc-700 text-zinc-200 hover:bg-zinc-800"
+            className={`inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              action.primary
+                ? "border-blue-600 bg-blue-600 text-white hover:bg-blue-500"
+                : action.danger
+                  ? "border-red-500/30 text-red-300 hover:bg-red-500/10"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
             }`}
           >
             {busy === action.id ? (
@@ -261,7 +265,7 @@ export function MarketingActionRail({
               <li
                 key={action.id}
                 id={`marketing-why-${action.id}`}
-                className="text-[11px] text-zinc-500"
+                className="text-xs text-zinc-500"
               >
                 {action.label}: {action.unavailable}
               </li>
@@ -272,7 +276,7 @@ export function MarketingActionRail({
       {opened ? (
         <form
           data-testid={`marketing-form-${opened.id}`}
-          className="mt-3 grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3"
+          className="mt-3 grid gap-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
           onSubmit={(event) => {
             event.preventDefault();
             // Asked here as well as on a plain button. An action with fields
@@ -285,7 +289,7 @@ export function MarketingActionRail({
         >
           {(opened.fields ?? []).map((field) => (
             <label key={field.name} className="grid gap-1">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+              <span className="text-xs font-medium text-zinc-400">
                 {field.label}
               </span>
               {field.kind === "checkbox" ? (
@@ -312,7 +316,7 @@ export function MarketingActionRail({
                       [field.name]: event.target.value,
                     }))
                   }
-                  className="w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 >
                   <option value="">{m.actionChoose}</option>
                   {(field.options ?? []).map((option) => (
@@ -331,7 +335,7 @@ export function MarketingActionRail({
                     }))
                   }
                   rows={6}
-                  className="w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 />
               ) : (
                 <input
@@ -351,11 +355,11 @@ export function MarketingActionRail({
                       [field.name]: event.target.value,
                     }))
                   }
-                  className="w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 />
               )}
               {field.hint && field.kind !== "checkbox" ? (
-                <span className="text-[11px] text-zinc-500">{field.hint}</span>
+                <span className="text-xs text-zinc-500">{field.hint}</span>
               ) : null}
             </label>
           ))}
@@ -364,14 +368,14 @@ export function MarketingActionRail({
               type="submit"
               data-testid={`marketing-submit-${opened.id}`}
               disabled={busy !== null}
-              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-blue-600 bg-blue-600 px-3.5 py-2 text-[13px] font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {opened.label}
             </button>
             <button
               type="button"
               onClick={() => setOpen(null)}
-              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-zinc-800 px-3 py-2 text-xs font-bold text-zinc-400 transition hover:bg-zinc-800"
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-zinc-700 px-3.5 py-2 text-[13px] font-semibold text-zinc-300 transition hover:bg-zinc-800"
             >
               {m.actionCancel}
             </button>
