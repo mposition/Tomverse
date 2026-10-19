@@ -249,10 +249,16 @@ test("the month key is the UTC year and month", () => {
   assert.equal(marketingLlmMonthKey(new Date("2026-10-01T00:00:00.000Z")), "2026-10");
 });
 
-test("a web-search reservation adds every search the request allows, and a text reservation is unchanged", () => {
+test("a web-search reservation reads the window once per model pass and adds every search, and a text reservation is unchanged", () => {
   const searchPin = pin({ webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 });
   assert.equal(marketingLlmReservation(searchPin).reservedMicroUsd, 115_508);
-  assert.equal(marketingLlmReservation(searchPin, "web-search-v1").reservedMicroUsd, 115_508 + 30_000);
+  // Four passes (the first and one after each of three searches) of 128,000 x 0.8,
+  // the output cap once, and three searches: 409,600 + 13,107.2 + 30,000.
+  assert.deepEqual(marketingLlmReservation(searchPin, "web-search-v1"), {
+    reservedInputTokens: 512_000,
+    reservedOutputTokens: 4_096,
+    reservedMicroUsd: 452_708,
+  });
   // A pin without search fields prices no search, and is not allowed the profile.
   assert.equal(marketingLlmReservation(pin(), "web-search-v1").reservedMicroUsd, 115_508);
   assert.equal(marketingLlmPinAllows(pin(), "web-search-v1"), false);

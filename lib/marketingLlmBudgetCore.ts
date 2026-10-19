@@ -312,15 +312,20 @@ export type MarketingLlmReservation = {
  * The most one request can cost: the whole context window at the worst input
  * price plus the profile's output cap at the worst output price, and for a
  * web-search call every search the request allows at the search price,
- * rounded up. Search results arrive as input tokens, which the whole context
- * window already covers. BigInt so no product of two large integers loses a
- * digit before the ceiling.
+ * rounded up. A web-search call is billed input once per model pass -- the
+ * first, and one after each search, each of which may read up to the whole
+ * context window -- so its input is the window times (searches + 1).
+ * `max_output_tokens` bounds the whole response, reasoning included, so the
+ * output cap is not multiplied. BigInt so no product of two large integers
+ * loses a digit before the ceiling.
  */
 export const marketingLlmReservation = (
   pin: MarketingLlmPricePin,
   profile: MarketingLlmAdapterProfile = MARKETING_LLM_ADAPTER_PROFILE,
 ): MarketingLlmReservation => {
-  const input = BigInt(pin.contextWindowTokens) * BigInt(pin.worstInputMicroUsdPerMillion);
+  const passes = profile === MARKETING_LLM_WEB_SEARCH_PROFILE ? (pin.maxWebSearchCalls ?? 0) + 1 : 1;
+  const inputTokens = pin.contextWindowTokens * passes;
+  const input = BigInt(inputTokens) * BigInt(pin.worstInputMicroUsdPerMillion);
   const output = BigInt(pin.maxOutputTokens) * BigInt(pin.worstOutputMicroUsdPerMillion);
   const million = BigInt(1_000_000);
   const searches =
@@ -330,7 +335,7 @@ export const marketingLlmReservation = (
   const total = input + output + searches;
   const ceiling = (total + million - BigInt(1)) / million;
   return {
-    reservedInputTokens: pin.contextWindowTokens,
+    reservedInputTokens: inputTokens,
     reservedOutputTokens: pin.maxOutputTokens,
     reservedMicroUsd: Number(ceiling),
   };

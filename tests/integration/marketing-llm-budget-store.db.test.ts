@@ -133,16 +133,25 @@ test("a web-search reservation adds every search the pin allows, and a pin witho
   );
   assert.equal(web.status, "ok");
   if (web.status !== "ok") return;
-  assert.equal(web.value.reservedMicroUsd, RESERVATION + 3 * 10_000);
+  // Four passes over the window, the output cap once and three searches.
+  assert.equal(web.value.reservedMicroUsd, 452_708);
   const stored = await row(web.value.callId);
   assert.equal((stored.configSnapshot as Record<string, unknown>).adapterProfile, "web-search-v1");
+  assert.equal(stored.reservedInputTokens, 4 * 128_000);
   // Dispatch binds to the web-search config, search cap included.
+  const webAdapter = marketingLlmAdapterConfigDigest(
+    marketingLlmConfigSnapshot({ pin: webPin, adapterVersion: MARKETING_LLM_ADAPTER_VERSION, adapterProfile: "web-search-v1" }),
+  );
   assert.equal(
     marketingLlmAdapterConfigDigest(stored.configSnapshot as Parameters<typeof marketingLlmAdapterConfigDigest>[0]),
-    marketingLlmAdapterConfigDigest(
-      marketingLlmConfigSnapshot({ pin: webPin, adapterVersion: MARKETING_LLM_ADAPTER_VERSION, adapterProfile: "web-search-v1" }),
-    ),
+    webAdapter,
   );
+  // Input read over several passes -- more than one window -- still settles.
+  const webEnv = { ...OPEN, pins: [webPin] };
+  assert.equal((await dispatch(web.value.callId, 1, 1, webEnv, webAdapter)).status, "ok");
+  const settled = await settle(web.value.callId, 1, observation(1, { reportedInputTokens: 400_000 }), webEnv);
+  assert.equal(settled.status, "ok");
+  assert.equal((await row(web.value.callId)).state, "settled");
 
   // The text-only pin has no search price: no web search, and nothing written.
   const refused = await tx((client) =>

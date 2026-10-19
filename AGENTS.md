@@ -1511,8 +1511,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **S3f-R5b(A3 실행)**: `lib/marketingA3Core.ts`, `lib/marketingA3CycleCore.ts`, `scripts/marketing-generator-worker.mjs`,
   `tests/marketingA3Core.test.mjs`, `tests/marketingA3Cycle.test.mjs`. **경쟁사마다 LLM 웹 검색 한 번입니다**(운영자 결정
   2026-10-19: LLM이 할 수 있는 일은 LLM 호출로, 직접 crawling 코드는 지움). 검색은 그 경쟁사의 공식 domain으로
-  제한되고(`allowed_domains`) 호출당 검색 횟수는 pin의 `maxWebSearchCalls`로 묶이며, 원장은 token과 검색 단가를 합친 최대
-  비용을 예약합니다(adapter profile `web-search-v1`; pin에 검색 단가가 없으면 예약 거절). 사실의 경쟁사 id·확인 시각은 서비스가
+  제한되고(`allowed_domains`) 호출당 검색 횟수는 pin의 `maxWebSearchCalls`로 묶이며, 원장은 모델이 검색 뒤마다 다시 읽는 입력(컨텍스트 창 ×
+  (검색 수 + 1))과 출력 상한, 검색 단가를 합친 최대 비용을 예약합니다(adapter profile `web-search-v1`; pin에 검색 단가가 없으면 예약 거절). 사실의 경쟁사 id·확인 시각은 서비스가
   정하고, 출처는 공급사가 실제로 인용한 URL이면서 공식 host 위여야 합니다(query·fragment 제거). 결과를 모르는 호출이나 답이
   없는 제출은 실행 전체를 멈추고 보고서를 내지 않으며, 시간 몫(20분)을 넘기면 보고서 없이 A5로 넘어갑니다. pin이 없으면(D4)
   worker는 시작하지 않습니다.
