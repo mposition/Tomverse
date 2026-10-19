@@ -18,6 +18,8 @@ type Summary = {
   candidateWins: number;
   incumbentWins: number;
   ties: number;
+  /** Absent on a cycle recorded before answers were judged. */
+  undecided?: number;
   incumbentCredits: number;
   candidateCredits: number;
 };
@@ -32,6 +34,13 @@ type Cycle = {
   summary: Summary | null;
   spentMicroUsd: number;
   promotedAt: string | null;
+  syntheticCases?: {
+    message: string;
+    kind: "easy" | "hard" | null;
+    incumbentPick: string | null;
+    candidatePick: string | null;
+    verdict: string;
+  }[];
 };
 
 type OptimizerState = {
@@ -136,6 +145,7 @@ export function AdminAutoRouterOptimizerPanel() {
   const reason = (code: string | null) =>
     code ? (m.reasons as Record<string, string>)[code] ?? code : null;
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
+  const verdict = (value: string) => (m.verdicts as Record<string, string>)[value] ?? value;
 
   return (
     <section
@@ -300,9 +310,28 @@ export function AdminAutoRouterOptimizerPanel() {
               <p className="mt-1 text-xs text-zinc-400">
                 {cycle.summary.evaluated} {m.evaluated} · {cycle.summary.unchanged} {m.unchanged} ·{" "}
                 {cycle.summary.candidateWins} {m.candidateWins} · {cycle.summary.incumbentWins} {m.incumbentWins} ·{" "}
-                {cycle.summary.ties} {m.ties} · {m.credits} {cycle.summary.incumbentCredits} →{" "}
-                {cycle.summary.candidateCredits}
+                {cycle.summary.ties} {m.ties} ·{" "}
+                {cycle.summary.undecided !== undefined ? `${cycle.summary.undecided} ${m.undecided} · ` : ""}
+                {m.credits} {cycle.summary.incumbentCredits} → {cycle.summary.candidateCredits}
               </p>
+            ) : null}
+            {cycle.syntheticCases && cycle.syntheticCases.length > 0 ? (
+              <details className="mt-2" data-testid="admin-auto-router-optimizer-synthetic">
+                <summary className="cursor-pointer text-xs font-bold text-zinc-400">
+                  {m.syntheticCases} ({cycle.syntheticCases.length})
+                </summary>
+                <ul className="mt-2 space-y-2">
+                  {cycle.syntheticCases.map((item, index) => (
+                    <li key={index} className="text-xs text-zinc-300">
+                      <p className="whitespace-pre-wrap">{item.message}</p>
+                      <p className="mt-0.5 text-zinc-500">
+                        {item.kind ? `${(m.kinds as Record<string, string>)[item.kind] ?? item.kind} · ` : ""}
+                        {item.incumbentPick ?? "-"} → {item.candidatePick ?? "-"} · {verdict(item.verdict)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             ) : null}
             <p className="mt-1 text-xs text-zinc-500">
               {cycle.optimizerModelId} · {m.spent} {usd(cycle.spentMicroUsd)}
