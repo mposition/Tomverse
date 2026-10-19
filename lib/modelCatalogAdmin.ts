@@ -11,7 +11,9 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { IMAGE_MODEL_REGISTRY, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import { invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
 import {
+  canonicalJson,
   codingProfileSchema,
+  imageExecutionProfile,
   imageFullProfileSchema,
   imagePriceListSchema,
   imageProfileOverrideSchema,
@@ -118,6 +120,22 @@ export const updateCatalogEntry = async (input: {
       sortOrder: patch.sortOrder === undefined ? (before?.sortOrder ?? null) : patch.sortOrder,
       profile: profile === undefined ? (before?.profile ?? null) : profile,
     };
+
+    // A price revision was verified for one request profile. Changing what a
+    // runtime image model calls under that price would let a dearer model
+    // serve at the old one: once priced, the request profile is fixed and a
+    // different model is a new modelId with its own revision.
+    if (category === "image" && profile !== undefined && !IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId)) {
+      const previous = imageFullProfileSchema.safeParse(before?.profile);
+      const nextFull = imageFullProfileSchema.safeParse(next.profile);
+      const changed =
+        previous.success &&
+        (!nextFull.success ||
+          canonicalJson(imageExecutionProfile(previous.data)) !== canonicalJson(imageExecutionProfile(nextFull.data)));
+      if (changed && (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId } })) > 0) {
+        throw new CatalogRefusal("execution_profile_priced", ["use_a_new_model_id"]);
+      }
+    }
 
     // Turning a model on (or keeping it on while changing what it is) needs the judge.
     if (next.enabled === true && !next.holdReason) {

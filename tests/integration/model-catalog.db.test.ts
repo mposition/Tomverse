@@ -267,3 +267,43 @@ test("the database refuses a category it has no policy for", async () => {
     /ModelCatalogEntry_category_check/
   );
 });
+
+test("a priced runtime image model cannot change what it calls", async () => {
+  const modelId = "catalog-runtime-image";
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-catalog-a",
+    name: "Runtime Image",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["low"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  await updateCatalogEntry({ category: "image", modelId, patch: { profile }, session });
+  // Before any price: the profile is still a draft and may change.
+  await updateCatalogEntry({ category: "image", modelId, patch: { profile: { ...profile, name: "Renamed" } }, session });
+  await createImagePriceRevision({
+    modelId,
+    revision: {
+      pricingVersion: "runtime-v1",
+      prices: [{ quality: "low", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 }],
+      verification,
+    },
+    session,
+  });
+  // Once priced, a display change is fine and a request change is refused.
+  await updateCatalogEntry({ category: "image", modelId, patch: { profile: { ...profile, name: "Renamed again" } }, session });
+  await assert.rejects(
+    updateCatalogEntry({
+      category: "image",
+      modelId,
+      patch: { profile: { ...profile, apiModelId: "gpt-image-catalog-dearer" } },
+      session,
+    }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "execution_profile_priced"
+  );
+  const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.equal((row?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-catalog-a");
+});

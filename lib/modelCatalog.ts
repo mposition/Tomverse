@@ -101,7 +101,8 @@ let generation = 0;
 /**
  * Resolve the image catalogue and make it the one the registry lookups read.
  * Cached briefly so a burst of requests reads the database once; an operator's
- * change is live within IMAGE_CATALOG_TTL_MS (immediately on this instance).
+ * change is live within IMAGE_CATALOG_TTL_MS (on this instance, at the next
+ * refresh after the write invalidated the cache).
  *
  * A failed read keeps the last catalogue this process resolved: falling back
  * to the code seed would quietly lift an operator's hold. The seed is served
@@ -121,8 +122,10 @@ export const refreshImageModelCatalog = async (
   const load = (async () => {
     try {
       const { models } = await loadImageCatalog(new Date(now));
-      // An invalidation during this read means the result may predate a write.
-      if (started === generation) cached = { at: now, models };
+      // An invalidation during this read means the result may predate a
+      // write: it is neither cached nor installed over a fresher catalogue.
+      if (started !== generation) return models;
+      cached = { at: now, models };
       setActiveImageModelCatalog(models);
       return models;
     } catch (error) {

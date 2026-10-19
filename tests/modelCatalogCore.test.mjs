@@ -25,7 +25,7 @@ import {
   snapshotIsCurrent,
   stalePricingVersions,
 } from "../lib/modelCatalogCore.ts";
-import { codingDraftFromAnswer, imageDraftFromAnswer, pageToText } from "../lib/modelCatalogDraftLlm.ts";
+import { codingDraftFromAnswer, draftPricingVersion, imageDraftFromAnswer, pageToText } from "../lib/modelCatalogDraftLlm.ts";
 
 const NOW = new Date("2026-10-19T12:00:00Z");
 const enabledSeed = IMAGE_MODEL_REGISTRY.find((model) => model.disabledReason === null);
@@ -301,4 +301,13 @@ test("a reserved image request runs only with the profile it was priced with", (
 
 test("page text drops scripts and tags", () => {
   assert.equal(pageToText("<p>a</p><script>x()</script><style>.b{}</style> b"), "a b");
+});
+
+test("a draft's pricing version fits the revision schema for any API model id", () => {
+  const pattern = /^[A-Za-z0-9._:-]{1,80}$/;
+  for (const id of ["gpt-image-2", "fal-ai/flux-pro/v1.1-ultra", "x".repeat(200), "///"]) {
+    const version = draftPricingVersion(id, "2026-10-19");
+    assert.match(version, pattern, id);
+    assert.ok(version.endsWith("-2026-10-19-llm"));
+  }
 });

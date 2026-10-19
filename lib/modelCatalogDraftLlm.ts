@@ -211,10 +211,17 @@ export const imageDraftFromAnswer = (
   const parsed = imagePriceListSchema.safeParse(prices);
   if (!parsed.success) throw new DraftRefusal("draft_rejected", "invalid_prices");
   return {
-    pricingVersion: `${apiModelId}-${today()}-llm`,
+    pricingVersion: draftPricingVersion(apiModelId, today()),
     prices: parsed.data,
     verification: { verifiedAt: today(), sources: [...sources], thinkingCapMicroUsd: thinkingCap },
   };
+};
+
+/** A revision id the price schema accepts: API ids may carry '/' or run long. */
+export const draftPricingVersion = (apiModelId: string, day: string) => {
+  const suffix = `-${day}-llm`;
+  const base = apiModelId.replace(/[^A-Za-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "") || "model";
+  return base.slice(0, 80 - suffix.length) + suffix;
 };
 
 /** Turn the model's coding answer into a profile draft, or refuse it. */

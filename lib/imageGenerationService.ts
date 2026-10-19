@@ -812,6 +812,7 @@ export const requestImageGeneration = async (
               modelId: target.modelId,
               // What the provider call may send; checked again before the call.
               executionProfile: imageExecutionProfile(target.model),
+              thinkingCapMicroUsd: target.model.priceVerification.thinkingCapMicroUsd,
             },
             // The per-lot payload belongs to the group's single add-on
             // reservation; it is stored on the first target that holds
@@ -1160,6 +1161,17 @@ export const reservationOutputCostMicroUsd = (
     : null;
 };
 
+/**
+ * The thinking cost to settle: zero when the provider reported no thinking,
+ * the reserved cap when it did, and null (settle the whole reservation) when
+ * the snapshot predates the cap being recorded.
+ */
+export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: number): number | null => {
+  if (!(thinkingTokens > 0)) return 0;
+  const cap = (snapshot as { thinkingCapMicroUsd?: unknown } | null)?.thinkingCapMicroUsd;
+  return typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
+};
+
 const parseSize = (size: string): { width: number; height: number } => {
   const [width, height] = size.split("x").map((value) => Number(value));
   return { width: width || 0, height: height || 0 };
@@ -1398,10 +1410,13 @@ export const processImageGeneration = async (
           })
         );
       }
+      // Thinking has no per-token price here, so a request that thought is
+      // settled at the thinking cap the reservation held, never at zero.
+      const thinkingCost = settledThinkingCostMicroUsd(reservation.pricingSnapshot, result.thinkingTokens);
       const actualCostMicroUsd =
-        snapshotOutputCost === null
+        snapshotOutputCost === null || thinkingCost === null
           ? Number(reservation.reservedCostMicroUsd)
-          : snapshotOutputCost + promptCostMicroUsd(result.inputTokens);
+          : snapshotOutputCost + promptCostMicroUsd(result.inputTokens) + thinkingCost;
 
       const entries = parseReservationPayload(reservation.reservationPayload);
       if (entries.length > 0) {
