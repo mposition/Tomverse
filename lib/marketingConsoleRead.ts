@@ -3,11 +3,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
-import {
-  marketingLlmPinnedModels,
-  readMarketingLlmSettings,
-  type MarketingLlmPinnedModel,
-} from "@/lib/marketingLlmSettingsStore";
+import { readMarketingLlmSettings } from "@/lib/marketingLlmSettingsStore";
+import { marketingLlmModelOptions } from "@/lib/marketingLlmModelCatalog";
 import type { MarketingLlmSettings } from "@/lib/marketingLlmBudgetCore";
 import {
   MARKETING_WEBHOOK_SHADOW_KEY,
@@ -121,12 +118,22 @@ export type MarketingWebhookStagingView = {
 export type MarketingConsoleLlmView = {
   settings: MarketingLlmSettings | null;
   version: string | null;
-  pinnedModels: MarketingLlmPinnedModel[];
+  /** Every OpenAI model the catalog prices, with why one cannot be selected. */
+  models: Array<{ model: string; name: string; worstCallMicroUsd: number; unavailable: string | null }>;
 };
 
 const readLlm = async (): Promise<MarketingConsoleLlmView> => {
   const read = await readMarketingLlmSettings(prisma);
-  return { settings: read.settings, version: read.version, pinnedModels: marketingLlmPinnedModels() };
+  return {
+    settings: read.settings,
+    version: read.version,
+    models: marketingLlmModelOptions().map(({ model, name, worstCallMicroUsd, unavailable }) => ({
+      model,
+      name,
+      worstCallMicroUsd,
+      unavailable,
+    })),
+  };
 };
 
 export type MarketingConsolePayload = {
@@ -161,7 +168,7 @@ export type MarketingConsolePayload = {
   /**
    * The generator's model and monthly LLM cap (Admin Console, operator decision
    * 2026-10-19). `settings` is null when the stored document is unreadable;
-   * `version` is what a change sends back; `pinnedModels` is what may be chosen.
+   * `version` is what a change sends back; `models` is what may be chosen.
    */
   llm: MarketingConsoleLlmView;
   /** Null outside staging; see `MarketingWebhookStagingView`. */

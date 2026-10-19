@@ -3,16 +3,18 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 
 import {
-  MARKETING_LLM_PRICE_PINS,
   MARKETING_LLM_SETTINGS_KEY,
-  marketingLlmPinAllows,
   marketingLlmSettingsValue,
   parseMarketingLlmMonthlyCap,
   parseMarketingLlmSettings,
-  MARKETING_LLM_WEB_SEARCH_PROFILE,
   type MarketingLlmPricePin,
   type MarketingLlmSettings,
 } from "@/lib/marketingLlmBudgetCore";
+import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
+import {
+  MARKETING_LLM_SETTINGS_ACTION,
+  MarketingLlmSettingsRefusedError,
+} from "@/lib/marketingLlmSettingsCore";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
@@ -22,37 +24,12 @@ import type { MarketingTransaction } from "@/lib/marketingStore";
  * The one writer of `MARKETING_LLM_SETTINGS_KEY`. The cost ledger reads the
  * document inside every reservation, after the audit chain lock this write's
  * audit row also takes, and refuses a model that is not the selected one. A
- * model can only be selected when it has a price pin -- the pin is price
- * evidence and stays in code -- and the cap stays within the code's ceiling.
+ * model can only be selected when the chat price catalog gives it a pin the
+ * ledger accepts (lib/marketingLlmModelCatalog.ts), and the cap stays within
+ * the code's ceiling.
  */
 
-export const MARKETING_LLM_SETTINGS_ACTION = "marketing_setting.llm_changed";
-
-export class MarketingLlmSettingsRefusedError extends Error {
-  readonly code: string;
-
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "MarketingLlmSettingsRefusedError";
-    this.code = code;
-  }
-}
-
-export type MarketingLlmPinnedModel = {
-  readonly model: string;
-  readonly expiresAt: string;
-  readonly webSearch: boolean;
-};
-
-/** The models a person may select: every pinned one, with when its pin expires. */
-export const marketingLlmPinnedModels = (
-  pins: readonly MarketingLlmPricePin[] = MARKETING_LLM_PRICE_PINS,
-): MarketingLlmPinnedModel[] =>
-  pins.map((pin) => ({
-    model: pin.model,
-    expiresAt: pin.expiresAt,
-    webSearch: marketingLlmPinAllows(pin, MARKETING_LLM_WEB_SEARCH_PROFILE),
-  }));
+export { MARKETING_LLM_SETTINGS_ACTION, MarketingLlmSettingsRefusedError };
 
 export type MarketingLlmSettingsRead = {
   /** Null when the stored document is not one; a screen says so and refuses to save. */
@@ -85,9 +62,9 @@ export async function writeMarketingLlmSettings(
     readonly pins?: readonly MarketingLlmPricePin[];
   },
 ): Promise<MarketingLlmSettingsRead> {
-  const pins = input.pins ?? MARKETING_LLM_PRICE_PINS;
+  const pins = input.pins ?? marketingLlmCatalogPins();
   if (input.model !== null && !pins.some((pin) => pin.model === input.model)) {
-    throw new MarketingLlmSettingsRefusedError("model_not_pinned", "That model has no price pin");
+    throw new MarketingLlmSettingsRefusedError("model_not_pinned", "That model cannot be priced within the ledger's limits");
   }
   if (input.monthlyUsdCap !== null && parseMarketingLlmMonthlyCap(input.monthlyUsdCap) === null) {
     throw new MarketingLlmSettingsRefusedError(
