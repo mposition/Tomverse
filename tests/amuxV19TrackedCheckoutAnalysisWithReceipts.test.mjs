@@ -22,6 +22,7 @@ after(() => {
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const claimId = "ea86a25b-919f-4714-a3d8-45ef5a18b176";
 const reservationId = "ea86a25b-919f-4714-a3d8-45ef5a18b177";
+const requestId = "ea86a25b-919f-4714-a3d8-45ef5a18b178";
 const evidenceId = "fbd49038-b8e0-4796-8530-a2adcb7d0dbd";
 const observed = {
   kind: "verified_success", cliStarted: true,
@@ -34,7 +35,8 @@ const observed = {
 };
 const input = (fetchImpl) => ({ origin: "https://tomverse.test/",
   agentSecret: "v19_analysis_agent_secret_01234567890123456789",
-  ideaId, claimId, reservationId, referenceOrdinal: 0,
+  ideaId, claimId, reservationId, requestId,
+  invocationOrdinal: 0, referenceOrdinal: 0,
   commitSha: observed.commitSha,
   excludedPathDigestKeyId: "checkout-digest-v1", fetchImpl });
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -51,6 +53,9 @@ test("invalid receipt binding refuses before the CLI can run", async () => {
     { ...input(fetchImpl), ideaId: undefined },
     { ...input(fetchImpl), claimId: undefined },
     { ...input(fetchImpl), reservationId: undefined },
+    { ...input(fetchImpl), requestId: undefined },
+    { ...input(fetchImpl), requestId: requestId.toUpperCase() },
+    { ...input(fetchImpl), invocationOrdinal: undefined },
   ]) {
     assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysisWithReceipts(invalid),
       { kind: "refused" });
@@ -123,15 +128,53 @@ test("an enabled host refuses a different intake target before checkout", async 
     ]) {
       const result = await runAmuxV19TrackedCheckoutAnalysisWithReceipts(
         input(async (url) => {
-          paths.push(new URL(url).pathname);
+          const endpoint = new URL(url);
+          paths.push(endpoint.pathname);
+          if (endpoint.pathname.endsWith("/analysis-budget/claim")) {
+            assert.equal(endpoint.searchParams.get("requestId"), requestId);
+            assert.equal(endpoint.searchParams.get("reservationId"), reservationId);
+            assert.equal(endpoint.searchParams.get("invocationOrdinal"), "0");
+            return json({ status: "committed", claimId,
+              claimStatus: "in_flight" });
+          }
           return response;
         }));
       assert.deepEqual(result, { kind: "outcome_unknown", cliStarted: false });
     }
     assert.deepEqual(paths, [
+      "/api/internal/amux/v19/analysis-budget/claim",
       "/api/internal/amux/v19/checkout-reference",
+      "/api/internal/amux/v19/analysis-budget/claim",
       "/api/internal/amux/v19/checkout-reference",
     ]);
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    if (previousSwitch === undefined) delete process.env[switchName];
+    else process.env[switchName] = previousSwitch;
+  }
+});
+
+test("an enabled host cannot reach checkout without the exact active budget claim", async () => {
+  const switchName = "TOMVERSE_AMUX_V19_TRACKED_CHECKOUT_CLI";
+  const previousSwitch = process.env[switchName];
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { ...platform, value: "linux" });
+  process.env[switchName] = "enabled";
+  try {
+    for (const receipt of [
+      { status: "absent" }, { status: "partial" },
+      { status: "committed", claimId: ideaId, claimStatus: "in_flight" },
+      { status: "committed", claimId, claimStatus: "succeeded" },
+    ]) {
+      const paths = [];
+      const result = await runAmuxV19TrackedCheckoutAnalysisWithReceipts(
+        input(async (url) => {
+          paths.push(new URL(url).pathname);
+          return json(receipt);
+        }));
+      assert.deepEqual(result, { kind: "outcome_unknown", cliStarted: false });
+      assert.deepEqual(paths, ["/api/internal/amux/v19/analysis-budget/claim"]);
+    }
   } finally {
     Object.defineProperty(process, "platform", platform);
     if (previousSwitch === undefined) delete process.env[switchName];
