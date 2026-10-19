@@ -475,7 +475,7 @@ Planner·context manifest·moderation은 선행 작업 대기이고, store·nati
 - `docs/policy/goodwill-credit-grants.md`
 
 goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**이며, 대응 결제가
-없으므로 멱등성을 빌려올 수 없습니다. 설계 문서 §8의 여섯 가지(1회·기간 상한,
+없으므로 멱등성을 빌려올 수 없습니다. 설계 문서(docs/policy/goodwill-credit-grants.md §8)의 여섯 가지(1회·기간 상한,
 이중 승인 임계값, 만료, 소진 순서, 환불 상호작용, 사용자 가시성)는 finance-ops의
 결정이며 **정해지기 전에는 구현하지 않습니다.**
 
@@ -589,7 +589,7 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   남깁니다.
 - 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
 - **크레딧을 예약·환급하는 트랜잭션은 `lockCreditAccount(tx, userId)`를 가장
-  먼저 잡습니다**(정책 문서 §9). `reserveAddOnCredits()`는 읽어서 판정하고
+  먼저 잡습니다**(docs/policy/credit-and-cost-limits.md §9). `reserveAddOnCredits()`는 읽어서 판정하고
   차감하는데 `CreditLot.remainingCredits`에 CHECK도 사후 검사도 없어서, 잠금이
   없으면 같은 잔액을 읽은 두 경로가 모두 통과해 잔액이 음수가 됩니다. 순서도
   계약입니다 — workflow advisory 잠금(`memory-extraction:*` 등)보다 **앞**이며,
@@ -611,7 +611,7 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
 
 절대 조건:
 
-- **`kind`를 제품 정체성으로 재사용하지 않습니다**(계획서 §5). `kind`는
+- **`kind`를 제품 정체성으로 재사용하지 않습니다**(docs/policy/conversation-product-key.md §5). `kind`는
   `lib/conversationKindGuard.ts`가 소유하는 **서버 authorization·modality 경계**
   이고, `productKey`는 사용자가 수행하는 제품 작업입니다. 두 축은 직교하며 어느
   것도 다른 하나를 대체하지 않습니다.
@@ -632,7 +632,7 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   통과시킵니다. 누락은 공통 생성 서비스 · 직접 `conversation.create` 정적 검사 ·
   writer coverage 테스트가 막으며, 이 셋은 제약과 별개로 계속 필요합니다.
 - **`VALIDATE CONSTRAINT`와 `NOT NULL`은 각각 별도 migration이고 별도 증거를
-  갖습니다.** 정책 문서 §7의 조건이 충족되기 전에는 작성하지 않습니다.
+  갖습니다.** docs/policy/conversation-product-key.md §7의 조건이 충족되기 전에는 작성하지 않습니다.
   `tests/integration/conversation-product-key.db.test.ts`가 조기 전환을 실패로
   만듭니다.
 
@@ -988,7 +988,7 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 
 이미지 생성 관련 코드를 건드리기 전에 읽습니다.
 
-- `docs/policy/image-generation.md` (v2 개정 §11–§15 포함)
+- `docs/policy/image-generation.md` (v2 개정 docs/policy/image-generation.md §11–docs/policy/image-generation.md §15 포함)
 
 절대 조건:
 
@@ -1160,7 +1160,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   본문을 넣지 않습니다.
 - **Phase 3(자동 수정)은 인프라만 존재하고 운영은 비활성입니다**
   (`FEEDBACK_AUTOFIX_ENABLED` + sync secret + 수동 dispatch 3중 잠금,
-  정책 문서 §9.1). LLM confidence를 자동 게이트로 쓰지 않고, 결정적
+  docs/policy/trace-feedback-automation.md §9.1). LLM confidence를 자동 게이트로 쓰지 않고, 결정적
   Red→Green 증명 없는 자동 수정을 금지하며, 자동 생성 수정이 만드는 것은
   `develop` PR뿐이고 auto-merge는 켜지 않습니다. change policy는
   `lib/feedbackAutoFixPolicy.ts`가 정의하며 파이프라인 자기 자신을 수정
@@ -1194,7 +1194,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   standard lane은 outbox에 넣고 cron drain이 끝까지 재시도합니다. 수명이 10분인
   자격증명을 15분 주기 큐에 넣지 않습니다(§9.4a).
 - **enqueue는 호출자의 transaction 안에서 합니다.** fire-and-forget 발송을
-  되살리지 않습니다 — 그것이 이 시스템이 대체한 것입니다(§2.4).
+  되살리지 않습니다 — 그것이 이 시스템이 대체한 것입니다(docs/policy/email-notifications.md §2.4).
 - **security·billing 수신 설정은 끌 수 없습니다**(`LOCKED_EMAIL_PURPOSES`,
   DB CHECK). marketing은 동의가 있어야 보내고, 동의 철회는 purpose 범위
   suppression을 함께 씁니다.
@@ -1205,9 +1205,9 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   "보낼 수 있는가"를 그 함수로 말해야 합니다. 2026-09-15에 세 단계를 하나로 묶은
   조건 때문에 운영자가 쓴 답변이 아무에게도 가지 않았습니다.
 - **suppression은 주소 기준이라 계정 삭제 후에도 남습니다.** transactional은
-  hard bounce에서만 막고 complaint로는 막지 않습니다(§13.3). Resend의 suppression은
+  hard bounce에서만 막고 complaint로는 막지 않습니다(docs/policy/email-notifications.md §13.3). Resend의 suppression은
   계정·region 전체 범위라는 확인된 제약이 있으므로, marketing 활성화 전에
-  발송 계정 분리를 결정합니다(§5.3.1, A18).
+  발송 계정 분리를 결정합니다(docs/policy/email-notifications.md §5.3.1, A18).
 - **IP로 추정한 국가는 기록하고 판정에 쓰되, 더 강한 신호가 이깁니다**(소유자 승인
   2026-09-29, S0). 신호 우선순위는 결제 국가·자기 신고 → 직전 동의 시점의 관할권 →
   **IP 추정 국가**이고, 사용자는 설정에서 언제든 국가를 정정합니다(자기 신고가 추정을
@@ -1219,14 +1219,14 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   행위입니다. 코드가 status를 스스로 `active`로 올리지 않습니다(§12.5).
 - **자격증명 본문은 어디에도 남기지 않습니다.** 코드·magic link는
   `EmailEvent.payload`, `renderDataSnapshot`, 로그 어디에도 넣지 않습니다.
-  standard lane의 snapshot은 봉투 암호화하고 보관 기한이 지나면 지웁니다(§10.3).
+  standard lane의 snapshot은 봉투 암호화하고 보관 기한이 지나면 지웁니다(docs/policy/email-notifications.md §10.3).
 - **스트림마다 발송 도메인이 다릅니다.** marketing은 `MARKETING_EMAIL_FROM`이
   없으면 transactional 주소로 대체되지 않고 **거부**합니다 — 대체는 프로모션
   스팸 신고를 로그인 코드가 나가는 도메인에 얹는 일이고, 증상은 로그인 메일이
   안 온다는 신고로만 나타납니다. 두 스트림을 같은 도메인에 설정하면
   `/api/ready`가 실패합니다. 절차는 `docs/ops/email-sending-domains.md`.
 - **unsubscribe는 로그인 없이 한 번에 됩니다.** RFC 8058 one-click을 지원하고,
-  marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
+  marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(docs/policy/email-notifications.md §11.3).
 - marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.
 
 # 마케팅 자동화
