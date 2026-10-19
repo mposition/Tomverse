@@ -14,13 +14,14 @@ KillMode=control-group
 UMask=0077
 # docs/policy/amux-decision-maker.md §5: the broker writes only the request
 # directories, and its network is the bridge's and the launchers' local
-# sockets (S2b's GitHub fetch will need AF_INET/AF_INET6 here).
+# sockets plus, for the S2b snapshot, GitHub's two public hosts over HTTPS
+# (the host egress rules hold it to GITHUB_HOSTS of the S0 isolation config).
 ProtectSystem=strict
 ReadWritePaths=/var/lib/amux-dm/requests
 ProtectHome=read-only
 PrivateTmp=true
 PrivateDevices=true
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 NoNewPrivileges=true
 CapabilityBoundingSet=
 ProtectProc=invisible

@@ -47,13 +47,18 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use tokio::time::Instant;
 
+use super::snapshot::{
+    dm_snapshot_manifest_digest, read_snapshot_answer, snapshot_paths, snapshot_request_line,
+    DM_SNAPSHOT_WAIT,
+};
 use super::wire::{
-    dm_card, dm_option_set_digest, dm_payload, dm_payload_digest, dm_result_digest, is_option_id,
-    launch_line, lookup_settled, parse_assignment, parse_card_detail, parse_needsyou_list,
-    parse_recorded_event, parse_routed, parse_session_providers, parse_typed_ask_state,
-    read_app_answer, read_broker_exchange, result_binding, result_output, routing_binding,
-    submission_settled, transmit_outcome, AppAnswer, BrokerExchange, DmCardWire, DmRoutingBinding,
-    DmTransmissionWire, HttpAnswer, DM_PAYLOAD_MAX_BYTES, DM_RESULT_BODY_MAX_BYTES,
+    dm_card, dm_option_set_digest, dm_payload_digest, dm_payload_with_snapshot, dm_result_digest,
+    is_option_id, launch_line, lookup_settled, parse_assignment, parse_card_detail,
+    parse_needsyou_list, parse_recorded_event, parse_routed, parse_session_providers,
+    parse_typed_ask_state, read_app_answer, read_broker_exchange, result_binding, result_output,
+    routing_binding, submission_settled, transmit_outcome, AppAnswer, BrokerExchange, DmCardWire,
+    DmRoutingBinding, DmTransmissionWire, HttpAnswer, DM_PAYLOAD_MAX_BYTES,
+    DM_RESULT_BODY_MAX_BYTES,
 };
 
 // ---------------------------------------------------------------------------
@@ -626,16 +631,52 @@ where
     L: DmLocal + ?Sized,
     B: DmBroker + ?Sized,
 {
+    // 4a. Stage S2b: the repository snapshot of the card's paths, from the
+    // broker. A card that names no path asks for none; anything the relay
+    // cannot read is no snapshot, and the card goes alone. The wait ends at
+    // the result deadline or after DM_SNAPSHOT_WAIT, whichever comes first
+    // (the broker's own budget is 60 s): a broker that does not answer never
+    // holds the card past its window, and the deadline check below then
+    // discards the request and step 10 releases the marker.
+    let paths = snapshot_paths(&candidate.card);
+    let snapshot = if paths.is_empty() {
+        None
+    } else {
+        let until = deadline.min(Instant::now() + DM_SNAPSHOT_WAIT);
+        match tokio::time::timeout_at(
+            until,
+            broker.exchange(snapshot_request_line(request_id, &paths)),
+        )
+        .await
+        {
+            Ok(BrokerExchange::Answered(answer)) => read_snapshot_answer(&answer, request_id),
+            Ok(BrokerExchange::NotContacted | BrokerExchange::Lost) | Err(_) => None,
+        }
+    };
+
     // 4. The payload: made whole before anything is recorded, and the exact
-    // bytes digested are the bytes sent (§2-4).
-    let payload = dm_payload(&candidate.card);
+    // bytes digested are the bytes sent (§2-4) -- the snapshot's lines too.
+    let payload = dm_payload_with_snapshot(
+        &candidate.card,
+        snapshot
+            .as_ref()
+            .map_or(&[][..], |snapshot| snapshot.lines.as_slice()),
+    );
     if payload.len() > DM_PAYLOAD_MAX_BYTES {
         return discard(app, request_id, "payload_too_large").await;
     }
     if Instant::now() >= deadline {
         return discard(app, request_id, "deadline_passed").await;
     }
-    let transmission = DmTransmissionWire::card_only(dm_payload_digest(key, &payload));
+    let payload_digest = dm_payload_digest(key, &payload);
+    let transmission = match &snapshot {
+        Some(snapshot) => DmTransmissionWire::with_develop_snapshot(
+            snapshot.target_sha.clone(),
+            dm_snapshot_manifest_digest(key, &snapshot.manifest),
+            payload_digest,
+        ),
+        None => DmTransmissionWire::card_only(payload_digest),
+    };
 
     // 5. The transmission intent; only its recorded answer starts anything
     // (§10). Unknown: the card may or may not be recorded as sent, and it is
@@ -1107,6 +1148,154 @@ pub(crate) mod tests {
                 body.get("output").is_none()
                     && body.get("answer").is_none()
                     && body.get("text").is_none()
+            );
+        }
+    }
+
+    /// Stage S2b: a card naming a path asks the broker for the snapshot first.
+    fn snapshot_answer(lines: &[u8]) -> BrokerExchange {
+        BrokerExchange::Answered(
+            serde_json::to_vec(&json!({
+                "v": 1, "type": "snapshot", "requestId": REQUEST_ID, "state": "develop",
+                "targetSha": SNAPSHOT_SHA, "lines": base64::engine::general_purpose::STANDARD.encode(lines),
+                "reason": null, "excluded": {"secret_path": 1},
+            }))
+            .unwrap(),
+        )
+    }
+
+    const SNAPSHOT_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    fn snapshot_lines() -> Vec<u8> {
+        format!(
+            "{}\n{}\n",
+            json!({"snapshot": {"repository": "github.com/mposition/Tomverse", "commit": SNAPSHOT_SHA, "files": 1}}),
+            json!({"file": "docs/store.md", "blob": "a".repeat(40), "text": "SQLite is the store."})
+        )
+        .into_bytes()
+    }
+
+    fn candidate_with_path() -> Candidate {
+        let mut candidate = candidate();
+        candidate.card.context_paths = vec!["docs/store.md".into(), ".env".into()];
+        candidate
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_goes_after_the_card_and_the_intent_records_it_for_the_whole_payload() {
+        let app = happy_app();
+        let local = FakeLocal::marking();
+        let broker = FakeBroker::answering(|line| {
+            if serde_json::from_slice::<Value>(&line[..line.len() - 1]).unwrap()["type"]
+                == json!("snapshot")
+            {
+                snapshot_answer(&snapshot_lines())
+            } else {
+                broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+            }
+        });
+        let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+        assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+
+        let lines = broker.lines.lock().unwrap().clone();
+        assert_eq!(lines.len(), 2, "the snapshot request, then the launch");
+        let request: Value = serde_json::from_slice(&lines[0].0[..lines[0].0.len() - 1]).unwrap();
+        assert_eq!(
+            request,
+            json!({"v": 1, "type": "snapshot", "requestId": REQUEST_ID, "paths": ["docs/store.md", ".env"]})
+        );
+
+        let key = RequestKey::from_bytes(KEY);
+        let launch: Value = serde_json::from_slice(&lines[1].0[..lines[1].0.len() - 1]).unwrap();
+        let payload = base64::engine::general_purpose::STANDARD
+            .decode(launch["payload"].as_str().unwrap())
+            .unwrap();
+        // The lines go after the card, byte for byte, and the digest covers them.
+        assert!(payload.ends_with(&snapshot_lines()));
+        assert_eq!(
+            app.body(AppRoute::Transmissions)["transmission"],
+            json!({
+                "snapshotState": "develop",
+                "snapshotTargetSha": SNAPSHOT_SHA,
+                "snapshotManifestDigest": crate::dm_relay::snapshot::dm_snapshot_manifest_digest(
+                    &key, &[("docs/store.md".to_owned(), "a".repeat(40))]),
+                "inputPayloadDigest": dm_payload_digest(&key, &payload),
+            })
+        );
+    }
+
+    /// A broker whose snapshot answer never comes; a launch is answered.
+    struct SilentSnapshotBroker(FakeBroker);
+    #[async_trait]
+    impl DmBroker for SilentSnapshotBroker {
+        async fn exchange(&self, line: Vec<u8>) -> BrokerExchange {
+            if serde_json::from_slice::<Value>(&line[..line.len() - 1]).unwrap()["type"] == json!("snapshot") {
+                std::future::pending::<()>().await;
+            }
+            self.0.exchange(line).await
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_snapshot_is_waited_on_for_its_bound_then_the_card_goes_alone() {
+        let app = happy_app();
+        let local = FakeLocal::marking();
+        let broker = SilentSnapshotBroker(FakeBroker::answering(|_| {
+            broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+        }));
+        let started = Instant::now();
+        let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+        assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+        assert!(started.elapsed() >= DM_SNAPSHOT_WAIT && started.elapsed() < DM_SNAPSHOT_WAIT * 2);
+        assert_eq!(app.body(AppRoute::Transmissions)["transmission"]["snapshotState"], json!("none"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_snapshot_never_holds_the_card_past_its_window() {
+        let app = FakeApp::with(vec![
+            (AppRoute::Requests, routed("dm_proposal")),
+            (AppRoute::Assignments, assigned(Duration::from_secs(5))),
+            (AppRoute::AssignmentDiscard, recorded()),
+        ]);
+        let local = FakeLocal::marking();
+        let broker = SilentSnapshotBroker(FakeBroker::answering(|_| BrokerExchange::Lost));
+        let started = Instant::now();
+        let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+        // The window (5 s) ends first: no intent, the request discarded, the marker released.
+        assert_eq!(run.end, RelayEnd::Settled("deadline_passed"));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(!app.routes().contains(&AppRoute::Transmissions));
+        assert_eq!(local.routes(), vec![LocalRoute::SetPending, LocalRoute::ReleasePending]);
+    }
+
+    #[tokio::test]
+    async fn no_snapshot_from_the_broker_sends_the_card_alone() {
+        for answer in [
+            BrokerExchange::NotContacted,
+            BrokerExchange::Lost,
+            BrokerExchange::Answered(b"{}".to_vec()),
+        ] {
+            let app = happy_app();
+            let local = FakeLocal::marking();
+            let snapshot_answer = std::sync::Mutex::new(Some(answer));
+            let broker = FakeBroker::answering(move |line| {
+                if serde_json::from_slice::<Value>(&line[..line.len() - 1]).unwrap()["type"]
+                    == json!("snapshot")
+                {
+                    snapshot_answer.lock().unwrap().take().unwrap()
+                } else {
+                    broker_says(proposal(), "process_ended", json!({"status": "verified"}))
+                }
+            });
+            let run = relay_candidate(&app, &local, &broker, &candidate_with_path()).await;
+            assert_eq!(run, RelayRun::end(RelayEnd::Settled("result_recorded")));
+            assert_eq!(
+                app.body(AppRoute::Transmissions)["transmission"]["snapshotState"],
+                json!("none")
+            );
+            assert_eq!(
+                app.body(AppRoute::Transmissions)["transmission"]["snapshotManifestDigest"],
+                Value::Null
             );
         }
     }
