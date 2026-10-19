@@ -626,6 +626,21 @@ domains:
       carries no userId and is untouched, which is why the column stays
       nullable.
 
+  - domain: autoRouterDecision
+    prismaModel: AutoRouterDecision
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Labelled data from Auto's per-prompt model choice: the user's message as
+      sent to the router model, the candidates, the deterministic rule's choice
+      and the model the call picked. Kept to train a Tomverse triage that can
+      replace the call. Deleted with the conversation as well as the account.
+
   # --- anonymised at deletion, implemented ----------------------------------
   - domain: feedback
     prismaModel: Feedback

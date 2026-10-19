@@ -78,6 +78,12 @@ export const SELECTION_REASONS = [
     "fallback_order",
     /** A different model scored higher, but not by enough for long enough. */
     "sticky",
+    /**
+     * A model call read this prompt and chose among the eligible candidates.
+     * Set by `applyLlmModelPick` in lib/autoModelSelection.ts, never by the
+     * deterministic selection here.
+     */
+    "llm_pick",
 ] as const;
 
 export type SelectionReason = (typeof SELECTION_REASONS)[number];
