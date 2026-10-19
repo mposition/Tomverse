@@ -156,7 +156,7 @@ export default async function AdminAmuxExecutionPage({
         {tabs}
         {drawer}
         <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
-        <AmuxWorkerCapabilityPanel view={capabilities} />
+        <AmuxWorkerCapabilityPanel view={capabilities} isOwner={isOwner} />
       </div>
     );
   }
