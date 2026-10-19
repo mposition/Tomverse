@@ -5,12 +5,15 @@ import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
-import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
+import { readAutoLlmRouterModelId, readAutoLlmRouterRewrite } from "@/lib/autoLlmRouterSettings";
 import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
 import { autoLlmRouterVersionFor } from "@/lib/autoRouterOptimizerCore";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
+    AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS,
+    AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS,
+    AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS,
     AUTO_LLM_ROUTER_SESSION_PICKS,
     AUTO_LLM_ROUTER_TIMEOUT_MS,
     AUTO_LLM_ROUTER_VERSION,
@@ -44,30 +47,41 @@ export async function callAutoLlmRouter(input: {
     previousAnswer: string | null;
     candidates: readonly AutoLlmRouterCandidate[];
     session: AutoLlmRouterSession | null;
+    /** Ask the same call for a self-contained rewrite of the message. */
+    rewrite?: boolean;
 }): Promise<AutoLlmRouterCallResult> {
+    const rewrite = input.rewrite === true;
     try {
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
-            system: buildAutoLlmRouterSystem(input.guidance),
+            system: buildAutoLlmRouterSystem(input.guidance, { rewrite }),
             prompt: autoLlmRouterUserMessage(
                 input.prompt,
                 input.previousAnswer,
                 input.candidates,
                 input.session
             ),
-            maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+            maxOutputTokens: rewrite
+                ? AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS
+                : AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(AUTO_LLM_ROUTER_TIMEOUT_MS),
+            abortSignal: AbortSignal.timeout(
+                rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS
+            ),
             output: Output.object({
                 schema: jsonSchema(
-                    autoLlmRouterOutputSchema(input.candidates) as unknown as JSONSchema7
+                    autoLlmRouterOutputSchema(input.candidates, { rewrite }) as unknown as JSONSchema7
                 ),
                 name: "auto_model_choice",
             }),
             providerOptions: { openai: { strictJsonSchema: true } },
         });
         const usage = generated.usage as AutoLlmRouterCallResult["usage"];
-        const pick = parseAutoLlmRouterOutput(generated.output, input.candidates);
+        const pick = parseAutoLlmRouterOutput(
+            generated.output,
+            input.candidates,
+            rewrite ? input.prompt : null
+        );
         return { outcome: pick ? "picked" : "invalid", pick, usage };
     } catch {
         return { outcome: "error", pick: null, usage: undefined };
@@ -121,7 +135,7 @@ export async function pickAutoModelWithLlm(input: {
     userId: string | null;
     conversationId: string | null;
     traceId: string;
-}): Promise<string | null> {
+}): Promise<{ modelId: string; rewrite: string | null } | null> {
     const routerModel = resolveAutoLlmRouterModel(
         input.models,
         (await readAutoLlmRouterModelId()) ?? undefined
@@ -134,11 +148,17 @@ export async function pickAutoModelWithLlm(input: {
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
-    const [session, active] = await Promise.all([
+    const [session, active, rewriteOn] = await Promise.all([
         readRouterSession(input.conversationId),
         readActiveRouterGuidance(),
+        readAutoLlmRouterRewrite(),
     ]);
-    const version = autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, active.cycleId);
+    // Rewriting pays off on short, context-dependent turns; a long message is
+    // routed as it is.
+    const rewrite =
+        rewriteOn && input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
+    const version =
+        autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, active.cycleId) + (rewrite ? "+rewrite" : "");
     const startedAt = Date.now();
     const { outcome, pick, usage } = await callAutoLlmRouter({
         routerModel,
@@ -147,6 +167,7 @@ export async function pickAutoModelWithLlm(input: {
         previousAnswer: input.previousAnswer,
         candidates,
         session,
+        rewrite,
     });
     const latencyMs = Date.now() - startedAt;
     console.info(
@@ -160,6 +181,8 @@ export async function pickAutoModelWithLlm(input: {
             pickedModelId: pick?.modelId ?? null,
             hasContext: input.previousAnswer !== null,
             hasSession: session !== null,
+            rewriteAsked: rewrite,
+            rewriteKept: Boolean(pick?.rewrite),
             outcome,
             latencyMs,
         })
@@ -183,6 +206,7 @@ export async function pickAutoModelWithLlm(input: {
                     pickedModelId: pick?.modelId ?? null,
                     reason: pick?.reason ?? null,
                     sessionTopic: pick?.topic ?? null,
+                    rewrite: pick?.rewrite ?? null,
                     outcome,
                     latencyMs,
                     inputTokens: usage?.inputTokens ?? null,
@@ -199,5 +223,5 @@ export async function pickAutoModelWithLlm(input: {
                 );
             });
     }
-    return pick?.modelId ?? null;
+    return pick ? { modelId: pick.modelId, rewrite: pick.rewrite } : null;
 }

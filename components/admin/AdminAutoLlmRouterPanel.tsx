@@ -16,7 +16,7 @@ import {
 import { adminFetch } from "@/lib/adminFetch";
 
 type RouterModelOption = { id: string; name: string; provider: string };
-type RouterSetting = { modelId: string | null; options: RouterModelOption[] };
+type RouterSetting = { modelId: string | null; rewrite: boolean; options: RouterModelOption[] };
 
 const OFF = "";
 
@@ -29,6 +29,7 @@ export function AdminAutoLlmRouterPanel() {
   const { locale: apiLocale } = useAdminLocale();
   const [setting, setSetting] = useState<RouterSetting | null>(null);
   const [draft, setDraft] = useState(OFF);
+  const [rewriteDraft, setRewriteDraft] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
@@ -36,6 +37,7 @@ export function AdminAutoLlmRouterPanel() {
   const apply = (next: RouterSetting) => {
     setSetting(next);
     setDraft(next.modelId ?? OFF);
+    setRewriteDraft(next.rewrite);
   };
 
   const load = useCallback(async () => {
@@ -69,7 +71,7 @@ export function AdminAutoLlmRouterPanel() {
       const response = await adminFetch("/api/admin/auto-llm-router", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: draft === OFF ? null : draft }),
+        body: JSON.stringify({ modelId: draft === OFF ? null : draft, rewrite: rewriteDraft }),
       });
       if (!response.ok) {
         setFailure(
@@ -88,7 +90,7 @@ export function AdminAutoLlmRouterPanel() {
     }
   };
 
-  const unchanged = draft === (setting?.modelId ?? OFF);
+  const unchanged = draft === (setting?.modelId ?? OFF) && rewriteDraft === (setting?.rewrite ?? false);
 
   return (
     <section
@@ -137,6 +139,23 @@ export function AdminAutoLlmRouterPanel() {
           </span>
         ) : null}
       </div>
+      <label className="mt-4 flex min-h-11 items-start gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={rewriteDraft}
+          disabled={!setting || saving}
+          onChange={(event) => {
+            setRewriteDraft(event.target.checked);
+            setSaved(false);
+          }}
+          data-testid="admin-auto-llm-router-rewrite"
+          className="mt-0.5 h-5 w-5"
+        />
+        <span>
+          <span className="font-bold">{m.rewriteLabel}</span>
+          <span className="mt-1 block text-xs text-zinc-500">{m.rewriteDescription}</span>
+        </span>
+      </label>
       <p className="mt-3 text-xs text-zinc-500">{m.costNote}</p>
       {failure ? <AdminApiFailureNotice failure={failure} onRetry={() => void load()} /> : null}
     </section>
