@@ -5,15 +5,13 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
-import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
-  AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
   readAutoLlmRouterModelId,
   readAutoLlmRouterRewrite,
+  updateAutoLlmRouterModelId,
   updateAutoLlmRouterRewrite,
-  writeAutoLlmRouterModelId,
 } from "@/lib/autoLlmRouterSettings";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import {
@@ -94,22 +92,7 @@ export async function PUT(req: Request) {
     if (rewrite !== undefined && rewrite !== (await readAutoLlmRouterRewrite())) {
       await updateAutoLlmRouterRewrite({ session, request: req }, rewrite);
     }
-    const before = await readAutoLlmRouterModelId();
-    if (before === modelId) {
-      return NextResponse.json({ modelId, rewrite: await readAutoLlmRouterRewrite(), options });
-    }
-    await writeAutoLlmRouterModelId(modelId);
-    await writeAdminAuditLog({
-      session,
-      request: req,
-      action: "auto.llm_router_model.updated",
-      targetType: "AppSettings",
-      targetId: AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
-      summary: modelId
-        ? `Set the Auto LLM router model to ${modelId}.`
-        : "Turned the Auto LLM router off.",
-      metadata: { before, after: modelId },
-    });
+    await updateAutoLlmRouterModelId({ session, request: req }, modelId);
     return NextResponse.json({ modelId, rewrite: await readAutoLlmRouterRewrite(), options });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);

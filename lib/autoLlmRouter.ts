@@ -154,8 +154,9 @@ class RouterBudgetRefused extends Error {}
  * Holds the call's worst case under the provider's day and month budgets,
  * both or neither. False -- and no call -- when either is spent or the hold
  * cannot be written: the router fails closed on money, the turn does not.
+ * Exported for the database test.
  */
-async function reserveRouterCost(provider: string, microUsd: number, now: Date) {
+export async function reserveRouterCost(provider: string, microUsd: number, now: Date) {
     const budget = getProviderCostBudget(provider);
     const limits = [budget.day, budget.month];
     try {
@@ -182,9 +183,9 @@ async function reserveRouterCost(provider: string, microUsd: number, now: Date) 
  * Moves the hold to what the call actually cost: gives back what it did not
  * use, or adds what it used beyond the bound. Only called with usage the
  * provider reported; a failed or timed-out call keeps its whole hold, because
- * it may still have been billed.
+ * it may still have been billed. Exported for the database test.
  */
-async function settleRouterCost(provider: string, deltaMicroUsd: number, reservedAt: Date) {
+export async function settleRouterCost(provider: string, deltaMicroUsd: number, reservedAt: Date) {
     if (!Number.isSafeInteger(deltaMicroUsd) || deltaMicroUsd === 0) return;
     try {
         await prisma.$transaction(async (tx) => {
