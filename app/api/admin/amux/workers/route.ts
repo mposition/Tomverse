@@ -25,9 +25,8 @@ import {
 /**
  * The AMUX worker registry (orchestration policy version 31, section 3).
  *
- * GET is the registry, each worker's desired and effective state, and its
- * comparison with `TOMVERSE_AMUX_WORKER_CATALOG_JSON`, for any administrator.
- * Reading is never latched.
+ * GET is the registry and each worker's desired and effective state, for any
+ * administrator. Reading is never latched.
  *
  * POST is the owner recording one worker's desired state and role ceiling,
  * and nothing else. In order, before the body is read: the owner role, the

@@ -19,8 +19,17 @@ import { amuxV22ApiModelAccessResult } from
   "../../lib/amux/v22ApiModelAccessProtocol.mjs";
 import { runAmuxV22RecoveryCheckerOnce } from "../../lib/amux/v22RecoveryHost.mjs";
 import { inspectV4TaskCostCatalog } from "../../lib/amux/v4TaskCostCatalogCore.ts";
-import { getConfiguredAmuxV22WorkerCatalog } from "../../lib/amux/workerCatalogVariables.ts";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
+/**
+ * The v22 catalog the world's assignment catalog read returns: one worker's
+ * profile overlaid on its static entry, as the derived catalog lists it.
+ */
+const v22CatalogFor = (workerName: string) => [{
+  worker_name: workerName, provider: "anthropic", model: "claude-opus",
+  routing_roles: ["investigate"], tool_capabilities: ["repo_read"],
+  running: false, status: "stopped", dispatch_ready: false,
+  archived: false, paused: false, isolated: false, blocked: false }];
+let v22Catalog = v22CatalogFor("claude-test");
 const owner = {
   user: { id: "owner-1" },
   expires: "2099-01-01T00:00:00.000Z",
@@ -77,13 +86,7 @@ function reset() {
   process.env.TOMVERSE_AMUX_V22_RECOVERY_PROFILES_JSON = JSON.stringify({ version: 1,
     profiles: [{ alias: "profile-one", workerNames: ["claude-test"] },
       { alias: "profile-two", workerNames: ["codex-test"] }] });
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([{
-    worker_name: "claude-test", provider: "anthropic", model: "claude-opus",
-    routing_roles: ["investigate"], tool_capabilities: ["repo_read"],
-    archived: false, paused: false, isolated: false, blocked: false }]);
-  process.env.TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON = JSON.stringify([{
-    worker_name: "claude-test", provider: "anthropic", model: "claude-opus",
-    routing_roles: ["investigate"], tool_capabilities: ["repo_read"] }]);
+  v22Catalog = v22CatalogFor("claude-test");
   world.attempt = { id: attemptId, taskId: "task-1234", taskRevision: 7,
     worker: "claude-test", workerInstanceId: instanceId, workerGeneration: 2,
     endedAt: new Date("2026-10-13T00:59:00.000Z"), outcome: "expired", reason: "outcome_unknown",
@@ -293,7 +296,7 @@ function load() {
   mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
     readAmuxAssignmentCatalogs: async (client: unknown) => {
       assert.equal(client, tx);
-      return { source: "derived", workers: null, ceilings: null, v22: getConfiguredAmuxV22WorkerCatalog() };
+      return { workers: null, ceilings: null, v22: v22Catalog };
     },
   } });
   loaded = import(mod("lib/amux/v22TaskRecoveryService.ts")); return loaded;
@@ -434,13 +437,7 @@ async function prepareUnknownRiskSafeStop(protocolCapabilities = ["read_only_ret
     priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
     sourceEvidenceId: source.evidenceId!, sourceEvidenceDigest: source.evidenceDigest!,
     requestId: safeStopRequestId });
-  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([{
-    worker_name: "codex-test", provider: "anthropic", model: "claude-opus",
-    routing_roles: ["investigate"], tool_capabilities: ["repo_read"],
-    archived: false, paused: false, isolated: false, blocked: false }]);
-  process.env.TOMVERSE_AMUX_V22_WORKER_CATALOG_JSON = JSON.stringify([{
-    worker_name: "codex-test", provider: "anthropic", model: "claude-opus",
-    routing_roles: ["investigate"], tool_capabilities: ["repo_read"] }]);
+  v22Catalog = v22CatalogFor("codex-test");
   world.routeWorkerName = "codex-test";
   await submitSafeStop();
   return { service, source, riskRequestId };

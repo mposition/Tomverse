@@ -4,10 +4,8 @@
  *
  * Pure: the provider class table (section 2), the worker name grammar, the
  * desired states and the change rule a registry event must satisfy (section
- * 3), the effective assignment rule (section 3: desired `active`, no open
- * automatic-stop latch, latest observation ok), and the comparison of the
- * registry with the assignment catalog environment variable that ends R1
- * (section 8). No I/O.
+ * 3), and the effective assignment rule (section 3: desired `active`, no open
+ * automatic-stop latch, latest observation ok). No I/O.
  *
  * Every vocabulary here is compared with its CHECK by `npm run
  * check:enum-constraints`, and the change rule is the one the guard trigger of
@@ -15,9 +13,9 @@
  * tests/amuxWorkerRegistryCore.test.mjs reads that migration and fails when
  * the two drift.
  *
- * Nothing here decides an assignment today. Until R2 the assignment catalog is
- * still `TOMVERSE_AMUX_WORKER_CATALOG_JSON`; the registry is recorded and
- * compared with it, never read in its place.
+ * Since R2c (version 53) the assignment catalog is derived from this registry
+ * (lib/amux/workerDerivedCatalogCore.ts); R1's comparison with the catalog
+ * environment variable went with the variable at R2e.
  */
 
 /** Section 2's provider classes. A new class is a policy version. */
@@ -60,9 +58,9 @@ export const AMUX_WORKER_NAME_PATTERN = /^(claude|codex|cursor|copilot)-[a-z0-9]
 /**
  * How the assignment catalog names a worker: `AMUX_MACHINE_ID_PATTERN` in
  * lib/amux/claimContract.ts, copied so this module stays free of imports
- * (tests/amuxWorkerRegistryCore.test.mjs pins the two equal). A catalog name
- * outside the registry's grammar is legal there and appears in the comparison
- * as `unregistered`.
+ * (tests/amuxWorkerRegistryCore.test.mjs pins the two equal). It is wider
+ * than the registry's grammar: a runtime row may carry a name the registry
+ * cannot hold, such as the engineering adapter's runner.
  */
 export const AMUX_CATALOG_WORKER_NAME_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,118}[A-Za-z0-9])?$/;
 
@@ -377,113 +375,17 @@ export function amuxWorkerEffectiveState(input: {
   return { assignable: reasons.length === 0, reasons };
 }
 
-// ---------------------------------------------------------------------------
-// Registry vs the assignment catalog (R1's end condition)
-
 /**
- * The provider spellings the catalog uses for each class. The catalog is
- * lower-cased by `getConfiguredAmuxWorkerCatalog()` before it reaches here.
- */
-const CATALOG_PROVIDER_CLASS: Readonly<Record<string, AmuxWorkerProviderClass>> = Object.freeze({
-  claude: "claude",
-  anthropic: "claude",
-  codex: "codex",
-  openai: "codex",
-  cursor: "cursor",
-  copilot: "copilot",
-  "github-copilot": "copilot",
-});
-
-export const amuxCatalogProviderClass = (provider: string): AmuxWorkerProviderClass | null =>
-  Object.hasOwn(CATALOG_PROVIDER_CLASS, provider) ? CATALOG_PROVIDER_CLASS[provider] : null;
-
-export type AmuxCatalogWorker = {
-  worker_name: string;
-  provider: string;
-  archived: boolean;
-  paused: boolean;
-  isolated: boolean;
-  blocked: boolean;
-};
-
-export const AMUX_WORKER_CATALOG_VERDICTS = [
-  "match",
-  "exempt",
-  "registry_only",
-  "catalog_only",
-  "unregistered",
-  "provider_mismatch",
-] as const;
-
-/**
- * Version 34: catalog entries the comparison leaves out by name, because
- * another policy governs them. `engineering-runner` is the engineering
- * adapter's worker identity (versions 12 and 25, docs/policy/engineering-agent.md),
- * not a resident AMUX runner worker, and its name is outside the registry's
- * grammar. An exempt entry counts as agreement and is shown as such; it
- * changes nothing about the entry's assignment. Adding a name is a policy
+ * Version 34: catalog entries that are code constants rather than registry
+ * workers, because another policy governs them. `engineering-runner` is the
+ * engineering adapter's worker identity (versions 12 and 25,
+ * docs/policy/engineering-agent.md), not a resident AMUX runner worker, and
+ * its name is outside the registry's grammar, so the derived catalog carries
+ * it as a constant (lib/amux/workerDerivedCatalogCore.ts) and the selection
+ * ceiling check leaves it to its own policy. Adding a name is a policy
  * version.
  */
 export const AMUX_WORKER_CATALOG_EXEMPT: readonly string[] = Object.freeze(["engineering-runner"]);
-
-const isCatalogExempt = (workerName: string): boolean => AMUX_WORKER_CATALOG_EXEMPT.includes(workerName);
-export type AmuxWorkerCatalogVerdict = (typeof AMUX_WORKER_CATALOG_VERDICTS)[number];
-
-export type AmuxWorkerCatalogRow = {
-  workerName: string;
-  registryState: AmuxWorkerDesiredState | null;
-  catalog: "assignable" | "held" | "absent";
-  verdict: AmuxWorkerCatalogVerdict;
-};
-
-export type AmuxWorkerCatalogComparison =
-  | { status: "registry_unreadable" | "catalog_unreadable"; rows: [] }
-  | { status: "match" | "mismatch"; rows: AmuxWorkerCatalogRow[] };
-
-/**
- * Whether the registry and `TOMVERSE_AMUX_WORKER_CATALOG_JSON` agree on who
- * may be assigned. A worker agrees when the registry says `active` and the
- * catalog lists it assignable (present, not archived, paused, isolated or
- * blocked), or when neither does. A catalog entry with no registry event, or
- * whose provider is not the name's class, never agrees: the registry is the
- * single source (section 3) -- except a name version 34 exempts
- * (`AMUX_WORKER_CATALOG_EXEMPT`), which is `exempt` and counts as agreement.
- * Roles are not compared: the catalog's routing
- * tags and version 16's three roles are different vocabularies.
- *
- * `null` for either side is unreadable, never empty.
- */
-export function compareAmuxWorkerRegistryWithCatalog(
-  registry: readonly AmuxWorkerRegistration[] | null,
-  catalog: readonly AmuxCatalogWorker[] | null,
-): AmuxWorkerCatalogComparison {
-  if (registry === null) return { status: "registry_unreadable", rows: [] };
-  if (catalog === null) return { status: "catalog_unreadable", rows: [] };
-  const registered = new Map(registry.map((row) => [row.workerName, row]));
-  const listed = new Map(catalog.map((row) => [row.worker_name, row]));
-  const names = [...new Set([...registered.keys(), ...listed.keys()])].sort();
-  const rows = names.map((workerName): AmuxWorkerCatalogRow => {
-    const registration = registered.get(workerName) ?? null;
-    const entry = listed.get(workerName) ?? null;
-    const catalogState = entry === null ? "absent" :
-      entry.archived || entry.paused || entry.isolated || entry.blocked ? "held" : "assignable";
-    const registryState = registration?.desiredState ?? null;
-    let verdict: AmuxWorkerCatalogVerdict;
-    if (entry !== null && registration === null) {
-      verdict = isCatalogExempt(workerName) ? "exempt" : "unregistered";
-    }
-    else if (entry !== null && amuxCatalogProviderClass(entry.provider) !== amuxWorkerProviderClassOf(workerName)) {
-      verdict = "provider_mismatch";
-    } else if (registryState === "active") {
-      verdict = catalogState === "assignable" ? "match" : "registry_only";
-    } else {
-      verdict = catalogState === "assignable" ? "catalog_only" : "match";
-    }
-    return { workerName, registryState, catalog: catalogState, verdict };
-  });
-  const agrees = (verdict: AmuxWorkerCatalogVerdict) => verdict === "match" || verdict === "exempt";
-  return { status: rows.every((row) => agrees(row.verdict)) ? "match" : "mismatch", rows };
-}
 
 // ---------------------------------------------------------------------------
 // The Admin screen (R1)
@@ -492,9 +394,8 @@ export function compareAmuxWorkerRegistryWithCatalog(
  * Section 8: each stage ships with its code latch off; the operator's
  * activation record turns it on. R1 shipped it false; version 32 (approved
  * 2026-10-12) is that record and sets it true, so the owner may write the
- * registry -- and nothing else opens: assignment still follows the catalog
- * variable until R2. While it is false the registry route refuses every
- * write. Reading is never latched.
+ * registry. While it is false the registry route refuses every write. Reading
+ * is never latched.
  */
 export const AMUX_WORKER_REGISTRY_WRITES_LATCH = true;
 
@@ -523,28 +424,24 @@ export type AmuxWorkerRegistryAdminView = {
   /** False when a stored registry row is one the guard would not have accepted. */
   registryReadable: boolean;
   rows: AmuxWorkerRegistryAdminRow[];
-  comparison: AmuxWorkerCatalogComparison;
   /** Null while the registry cannot be read: nothing is offered for registration. */
   seed: AmuxWorkerRegistryAdminSeedRow[] | null;
 };
 
 /**
- * What AMUX › Execution › Workers shows, from one read of the registry and
- * the catalog environment variable. Section 3: the desired state and the
- * effective state are shown apart.
+ * What AMUX › Execution › Workers shows, from one read of the registry.
+ * Section 3: the desired state and the effective state are shown apart.
  */
 export function buildAmuxWorkerRegistryAdminView(input: {
   registrations: ReadonlyArray<AmuxWorkerRegistration & { changedAt: string }> | null;
   latches: ReadonlyMap<string, AmuxWorkerLatchEventKind>;
   observations: ReadonlyMap<string, AmuxWorkerObservationStatus>;
-  catalog: readonly AmuxCatalogWorker[] | null;
   writesLatch?: boolean;
 }): AmuxWorkerRegistryAdminView {
   const writesLatch = input.writesLatch ?? amuxWorkerRegistryWritesOpen();
   const registrations = input.registrations;
-  const comparison = compareAmuxWorkerRegistryWithCatalog(registrations, input.catalog);
   if (registrations === null) {
-    return { writesLatch, registryReadable: false, rows: [], comparison, seed: null };
+    return { writesLatch, registryReadable: false, rows: [], seed: null };
   }
   const rows = [...registrations]
     .sort((a, b) => a.workerName.localeCompare(b.workerName))
@@ -577,7 +474,7 @@ export function buildAmuxWorkerRegistryAdminView(input: {
     ...entry,
     registered: registered.has(entry.workerName),
   }));
-  return { writesLatch, registryReadable: true, rows, comparison, seed };
+  return { writesLatch, registryReadable: true, rows, seed };
 }
 
 /** The seed entries an owner may still register, in seed order. */
@@ -593,7 +490,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isBool = (value: unknown): value is boolean => typeof value === "boolean";
 const isIso = (value: unknown): value is string =>
   typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value));
-const CATALOG_STATES: readonly string[] = ["assignable", "held", "absent"];
 
 const parseAdminRow = (value: unknown): AmuxWorkerRegistryAdminRow | null => {
   if (!isRecord(value)) return null;
@@ -612,36 +508,6 @@ const parseAdminRow = (value: unknown): AmuxWorkerRegistryAdminRow | null => {
   return value as AmuxWorkerRegistryAdminRow;
 };
 
-const parseComparison = (value: unknown): AmuxWorkerCatalogComparison | null => {
-  if (!isRecord(value) || !Array.isArray(value.rows)) return null;
-  if (value.status === "registry_unreadable" || value.status === "catalog_unreadable") {
-    return value.rows.length === 0 ? { status: value.status, rows: [] } : null;
-  }
-  if (value.status !== "match" && value.status !== "mismatch") return null;
-  for (const row of value.rows) {
-    // A comparison row names a registry worker or a catalog entry. The catalog
-    // names its workers by the AMUX machine-id rule, which is wider than the
-    // registry's grammar, so only a registry name may carry a registry state.
-    if (!isRecord(row) || typeof row.workerName !== "string" ||
-        !AMUX_CATALOG_WORKER_NAME_PATTERN.test(row.workerName)) {
-      return null;
-    }
-    if (row.registryState !== null &&
-        (!isAmuxWorkerName(row.workerName) || !isAmuxWorkerDesiredState(row.registryState))) {
-      return null;
-    }
-    if (typeof row.catalog !== "string" || !CATALOG_STATES.includes(row.catalog)) return null;
-    if (!isOneOf(AMUX_WORKER_CATALOG_VERDICTS, row.verdict)) return null;
-    // The server marks a row exempt only for an exempt name the catalog lists
-    // and the registry cannot hold.
-    if (row.verdict === "exempt" &&
-        (!isCatalogExempt(row.workerName) || row.registryState !== null || row.catalog === "absent")) {
-      return null;
-    }
-  }
-  return value as AmuxWorkerCatalogComparison;
-};
-
 /**
  * The registry route's GET body, or null when it is not exactly that shape.
  * A body that does not parse is a failed read, never a guessed registry.
@@ -655,8 +521,6 @@ export function parseAmuxWorkerRegistryAdminView(body: unknown): AmuxWorkerRegis
     if (parsed === null) return null;
     rows.push(parsed);
   }
-  const comparison = parseComparison(body.comparison);
-  if (comparison === null) return null;
   let seed: AmuxWorkerRegistryAdminSeedRow[] | null = null;
   if (body.seed !== null) {
     if (!Array.isArray(body.seed) || body.seed.length !== AMUX_WORKER_REGISTRY_V31_SEED.length) return null;
@@ -672,5 +536,5 @@ export function parseAmuxWorkerRegistryAdminView(body: unknown): AmuxWorkerRegis
     }
   }
   if (!body.registryReadable && (seed !== null || rows.length > 0)) return null;
-  return { writesLatch: body.writesLatch, registryReadable: body.registryReadable, rows, comparison, seed };
+  return { writesLatch: body.writesLatch, registryReadable: body.registryReadable, rows, seed };
 }

@@ -70,20 +70,20 @@ mock.module(mod("lib/amux/dbBoundary.ts"), {
 });
 mock.module(mod("lib/amux/routing.ts"), {
   namedExports: {
-    getConfiguredAmuxWorkerCatalog: () => [{ worker_name: "claude-impl" }],
     buildAmuxRoutingSnapshot: async (taskId: string, revision: number) => {
       record("buildAmuxRoutingSnapshot", { taskId, revision });
       return routingWire.eligible;
     },
   },
 });
-// R2c (orchestration policy version 53): the routes check the name against the
-// derived catalog inside the runtime's own transaction, through these.
+// Orchestration policy version 35, section 3: the routes check the name
+// against the derived catalog inside the runtime's own transaction, through
+// this -- with no latch argument, since R2e removed R2c's latch.
 const DERIVED_CATALOG = ["claude-impl"];
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), {
   namedExports: {
-    amuxWorkerCatalogRefusal: async (_tx: unknown, name: string, open: boolean) => {
-      assert.equal(open, true);
+    amuxWorkerCatalogRefusal: async (_tx: unknown, name: string, ...rest: unknown[]) => {
+      assert.deepEqual(rest, []);
       return DERIVED_CATALOG.includes(name) ? null : "worker_not_configured";
     },
   },

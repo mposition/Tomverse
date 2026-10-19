@@ -408,9 +408,11 @@ test("the AMUX orchestrator is a long-running production service that cannot run
     "TOMVERSE_AMUX_CLAIM",
     "TOMVERSE_AMUX_ENABLED",
     "TOMVERSE_AMUX_SYNC_SECRET",
-    "TOMVERSE_AMUX_WORKER_CATALOG_JSON",
     "TOMVERSE_INTERNAL_URL",
   ]);
+  // Version 35, section 5 (R2e): the assignment catalog variable left the list,
+  // so an apply deletes it from the service instead of restoring it.
+  assert.ok(!runner.environments.production.includes("TOMVERSE_AMUX_WORKER_CATALOG_JSON"));
   for (const name of runner.environments.production) {
     assert.doesNotMatch(name, /EXECUTE|EXECUTOR|WSL|DATABASE|API_KEY/, `${name} would let the service run commands or reach a store`);
   }

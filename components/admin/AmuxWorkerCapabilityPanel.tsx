@@ -18,7 +18,6 @@ import {
   AMUX_WORKER_V22_ROLE_REQUIREMENTS,
   AMUX_WORKER_V22_ROLES,
   AMUX_WORKER_V22_TOOLS,
-  amuxWorkerCapabilityImportsToWrite,
   parseAmuxWorkerCapabilityAdminView,
   type AmuxWorkerCapability,
   type AmuxWorkerCapabilityAdminRow,
@@ -223,9 +222,9 @@ export function AmuxWorkerCapabilityEditor({
 
 /**
  * The capability section of AMUX › Execution › Workers, without hooks, so a
- * test can call it and read the tree it returns. The import control is the
- * owner's only, enabled only with the code latch on, something left to import
- * and nothing in flight.
+ * test can call it and read the tree it returns. It shows each registered
+ * worker's recorded capability; the owner edits one worker at a time. Stage
+ * R2a's import from the catalog variables went with the variables at R2e.
  */
 export function AmuxWorkerCapabilityView({
   m,
@@ -235,7 +234,6 @@ export function AmuxWorkerCapabilityView({
   notice,
   refusal,
   failure,
-  onImport,
   onReread,
   editing = null,
   onEditStart = () => {},
@@ -250,7 +248,6 @@ export function AmuxWorkerCapabilityView({
   notice: AmuxWorkerCapabilityNotice;
   refusal: AmuxWorkerCapabilityRefusalNotice;
   failure: AdminApiFailure | null;
-  onImport: (imports: AmuxWorkerCapabilityImport[]) => void;
   onReread: () => void;
   /** The form being edited, or null; the owner edits one worker at a time. */
   editing?: AmuxWorkerCapabilityForm | null;
@@ -259,7 +256,6 @@ export function AmuxWorkerCapabilityView({
   onEditCancel?: () => void;
   onEditSave?: (form: AmuxWorkerCapabilityForm) => void;
 }) {
-  const imports = view === null ? [] : amuxWorkerCapabilityImportsToWrite(view);
   const busy = pending !== null;
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-worker-capability-panel">
@@ -279,11 +275,6 @@ export function AmuxWorkerCapabilityView({
           <p className="text-sm text-zinc-300" data-testid="amux-worker-capability-latch">
             {view.writesLatch ? m.writesOn : m.writesOff}
           </p>
-          {view.catalogReadable ? null : (
-            <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-capability-catalog-unreadable">
-              {m.catalogUnreadable}
-            </p>
-          )}
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left text-sm text-zinc-100">
               <thead>
@@ -291,8 +282,6 @@ export function AmuxWorkerCapabilityView({
                   <th scope="col" className={headClass}>{m.column.worker}</th>
                   <th scope="col" className={headClass}>{m.column.ceiling}</th>
                   <th scope="col" className={headClass}>{m.column.current}</th>
-                  <th scope="col" className={headClass}>{m.column.proposed}</th>
-                  <th scope="col" className={headClass}>{m.column.status}</th>
                   {isOwner ? <th scope="col" className={headClass}><span className="sr-only">{m.edit}</span></th> : null}
                 </tr>
               </thead>
@@ -302,10 +291,6 @@ export function AmuxWorkerCapabilityView({
                     <th scope="row" className={`${cellClass} font-mono text-xs`}>{row.workerName}</th>
                     <td className={cellClass}>{row.roleCeiling}</td>
                     <td className={cellClass}>{describe(m, row.current?.capability ?? null)}</td>
-                    <td className={cellClass}>{describe(m, row.proposed)}</td>
-                    <td className={cellClass} data-testid={`amux-worker-capability-status-${row.workerName}`}>
-                      {row.proposed === null ? m.status.none : row.refusal ? m.status.refused(row.refusal) : row.same ? m.status.same : m.status.ready}
-                    </td>
                     {isOwner ? (
                       <td className={cellClass}>
                         <button
@@ -340,25 +325,6 @@ export function AmuxWorkerCapabilityView({
               />
             ) : null;
           })() : null}
-          {isOwner ? (
-            <div className="flex flex-col gap-2" data-testid="amux-worker-capability-import">
-              <h3 className="text-base font-semibold text-zinc-100">{m.importTitle}</h3>
-              <p className="text-sm text-zinc-300">{m.importHelp}</p>
-              {imports.length === 0 ? (
-                <p className="text-sm text-zinc-300">{m.importNothing}</p>
-              ) : (
-                <button
-                  type="button"
-                  className={`${buttonClass} w-fit`}
-                  disabled={busy || !view.writesLatch}
-                  onClick={() => onImport(imports)}
-                  data-testid="amux-worker-capability-import-run"
-                >
-                  {pending !== null && pending !== "reading" ? m.importRunning(pending.done, pending.total) : m.importRun(imports.length)}
-                </button>
-              )}
-            </div>
-          ) : null}
         </>
       )}
       {notice === "done" ? <p role="status" className="text-sm" data-testid="amux-worker-capability-done">{m.importDone}</p> : null}
@@ -578,7 +544,6 @@ export function AmuxWorkerCapabilityPanel({ view, isOwner }: { view: AmuxWorkerC
       notice={notice}
       refusal={refusal}
       failure={failure}
-      onImport={(imports) => void runAmuxWorkerCapabilityImport(imports, io, apply)}
       onReread={() => void runAmuxWorkerCapabilityReread(io, apply)}
       editing={editing}
       onEditStart={(row) => setEditing(amuxWorkerCapabilityFormFromRow(row))}

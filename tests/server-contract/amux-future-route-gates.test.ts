@@ -49,11 +49,14 @@ mock.module(moduleUrl("lib/amux/internalRoute.ts"), {
     AmuxResponseCapacityError: class extends Error {},
   },
 });
-mock.module(moduleUrl("lib/amux/routing.ts"), {
+// The lifecycle routes check the derived catalog inside the runtime's own
+// transaction (orchestration policy version 35, section 3), so reaching it
+// is a service call too.
+mock.module(moduleUrl("lib/amux/workerAssignmentCatalog.ts"), {
   namedExports: {
-    getConfiguredAmuxWorkerCatalog: () => {
+    amuxWorkerCatalogRefusal: () => {
       serviceCalls += 1;
-      return [];
+      throw new Error("unexpected catalog read");
     },
   },
 });

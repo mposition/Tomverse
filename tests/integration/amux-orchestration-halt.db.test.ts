@@ -164,51 +164,47 @@ const claimableCard = async (prefix: string) => {
   // derived from, so it is one of the seven seed workers.
   const worker = "codex-impl";
   await seedAmuxWorkerCatalog([{ worker_name: worker, routing_roles: ["implementation"] }]);
-  const catalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
-  return withEnv({ TOMVERSE_AMUX_WORKER_CATALOG_JSON: catalog }, async () => {
-    const instanceId = randomUUID();
-    const base = new Date();
-    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
-    const ready = await heartbeatAmuxWorkerRuntime({
-      workerName: worker,
-      instanceId,
-      generation: runtime.generation,
-      status: "idle",
-      dispatchReady: true,
-      now: new Date(base.getTime() + 100),
-    });
-    assert.equal(ready.accepted, true);
-    const snapshot = await buildAmuxRoutingSnapshot(taskId, 0);
-    if (!snapshot.eligible) throw new Error("expected an eligible snapshot");
-    const routing = scoreAmuxWorkers(snapshot.task, snapshot.candidates);
-    assert.equal(routing.selected_worker, worker);
-    return {
-      taskId,
+  const instanceId = randomUUID();
+  const base = new Date();
+  const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+  const ready = await heartbeatAmuxWorkerRuntime({
+    workerName: worker,
+    instanceId,
+    generation: runtime.generation,
+    status: "idle",
+    dispatchReady: true,
+    now: new Date(base.getTime() + 100),
+  });
+  assert.equal(ready.accepted, true);
+  const snapshot = await buildAmuxRoutingSnapshot(taskId, 0);
+  if (!snapshot.eligible) throw new Error("expected an eligible snapshot");
+  const routing = scoreAmuxWorkers(snapshot.task, snapshot.candidates);
+  assert.equal(routing.selected_worker, worker);
+  return {
+    taskId,
+    worker,
+    body: {
+      task_id: taskId,
       worker,
-      catalog,
-      body: {
-        task_id: taskId,
-        worker,
-        expected_revision: 0,
-        decision: {
-          scheduler_score: 32,
-          scoring_version: "amux-global-priority-v1",
-          signals: {
-            scheduler: {
-              pin: 0,
-              age_hours: 0,
-              type_weight: 12,
-              priority_weight: 20,
-              dependents: 0,
-              dependent_weight: 0,
-              drag: 0,
-            },
-            routing: { scoring_version: "amux-worker-router-v1", ...routing },
+      expected_revision: 0,
+      decision: {
+        scheduler_score: 32,
+        scoring_version: "amux-global-priority-v1",
+        signals: {
+          scheduler: {
+            pin: 0,
+            age_hours: 0,
+            type_weight: 12,
+            priority_weight: 20,
+            dependents: 0,
+            dependent_weight: 0,
+            drag: 0,
           },
+          routing: { scoring_version: "amux-worker-router-v1", ...routing },
         },
       },
-    };
-  });
+    },
+  };
 };
 
 const ownerSession = (): Session =>
@@ -312,7 +308,6 @@ test("a second admission of the same request id is refused and writes nothing", 
     {
       TOMVERSE_AMUX_SYNC_SECRET: secret,
       TOMVERSE_AMUX_EXECUTION_API_ENABLED: "1",
-      TOMVERSE_AMUX_WORKER_CATALOG_JSON: card.catalog,
     },
     async () => {
       const { requestId } = await admit(12_000);
@@ -335,7 +330,6 @@ test("an admitted claim writes its receipts in the claim's own transaction", asy
     {
       TOMVERSE_AMUX_SYNC_SECRET: secret,
       TOMVERSE_AMUX_EXECUTION_API_ENABLED: "1",
-      TOMVERSE_AMUX_WORKER_CATALOG_JSON: card.catalog,
     },
     async () => {
       const requestId = randomUUID();
