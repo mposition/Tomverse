@@ -71,6 +71,29 @@ export const AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS = 200;
 export const AUTO_LLM_ROUTER_TIMEOUT_MS = 3_000;
 
 /**
+ * The optimizer's replay of a past decision (lib/autoRouterOptimizer.ts). No
+ * one is waiting on it, and a replay cut off by the live turn's deadline would
+ * count as a failed route and could fail a cycle on latency rather than on
+ * the guidance it measures.
+ */
+export const AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS = 15_000;
+
+/**
+ * Provider options for the router call. Choosing one id from a list needs no
+ * deliberation, and an OpenAI reasoning model left at its default effort was
+ * measured in dev (2026-10-19, gpt-6-luna, 17 candidates) taking past 15 s on
+ * the first call, while `low` answered in 1.9-2.3 s with no reasoning tokens;
+ * 4 of 27 live router calls had hit the 3 s deadline and fallen back to the
+ * rule's choice. Other providers keep their defaults.
+ */
+export const autoLlmRouterProviderOptions = (provider: string) => ({
+    openai: {
+        strictJsonSchema: true,
+        ...(provider === "openai" ? { reasoningEffort: "low" as const } : {}),
+    },
+});
+
+/**
  * What the router model is told about one candidate.
  *
  * Catalogue facts only. `bestFor` is the catalogue's one-line description;

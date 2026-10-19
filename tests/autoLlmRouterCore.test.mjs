@@ -158,3 +158,11 @@ test("the router model is off unless configured with an enabled catalogue id", (
   assert.equal(resolveAutoLlmRouterModel(AVAILABLE_MODELS, "no-such-model"), null);
   assert.equal(resolveAutoLlmRouterModel(AVAILABLE_MODELS, "gpt-5-6-luna")?.id, "gpt-5-6-luna");
 });
+
+test("the router asks an OpenAI model for low reasoning effort and leaves others alone", async () => {
+  const { autoLlmRouterProviderOptions, AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS, AUTO_LLM_ROUTER_TIMEOUT_MS } =
+    await import("../lib/autoLlmRouterCore.ts");
+  assert.deepEqual(autoLlmRouterProviderOptions("openai"), { openai: { strictJsonSchema: true, reasoningEffort: "low" } });
+  assert.deepEqual(autoLlmRouterProviderOptions("anthropic"), { openai: { strictJsonSchema: true } });
+  assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
+});
