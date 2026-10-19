@@ -347,6 +347,15 @@ export const parseAutoLlmRouterOutput = (
  * made. Turning it on is an operator decision because each routed turn then
  * costs one more (small) provider request.
  */
+/**
+ * Whether a model may make the router call. Perplexity bills a search fee on
+ * every request on top of tokens (lib/modelPricing.ts), which the call's
+ * token-only cost bound below would understate; the router needs no search,
+ * so those models are not offered and a stored one reads as off.
+ */
+export const autoLlmRouterModelAllowed = (model: Pick<AiModel, "provider">) =>
+    model.provider !== "perplexity";
+
 export const resolveAutoLlmRouterModel = (
     models: readonly AiModel[],
     configuredModelId: string | undefined
@@ -354,7 +363,7 @@ export const resolveAutoLlmRouterModel = (
     const id = configuredModelId?.trim();
     if (!id) return null;
     const model = models.find((candidate) => candidate.id === id);
-    return model && model.enabled ? model : null;
+    return model && model.enabled && autoLlmRouterModelAllowed(model) ? model : null;
 };
 
 /**

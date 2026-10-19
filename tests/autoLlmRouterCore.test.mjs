@@ -252,3 +252,13 @@ test("a router call's worst case bounds input by bytes and output by its token c
     inputUsdPerMillionTokens: 0.01, outputUsdPerMillionTokens: 0.01,
   }), 1);
 });
+
+test("a model billed per request beyond tokens is never the router", async () => {
+  const { autoLlmRouterModelAllowed } = await import("../lib/autoLlmRouterCore.ts");
+  const sonar = AVAILABLE_MODELS.find((model) => model.provider === "perplexity");
+  assert.ok(sonar, "the catalogue needs a Perplexity model for this test");
+  assert.equal(autoLlmRouterModelAllowed(sonar), false);
+  assert.equal(resolveAutoLlmRouterModel([{ ...sonar, enabled: true }], sonar.id), null);
+  const tokenOnly = AVAILABLE_MODELS.find((model) => model.provider === "openai");
+  assert.equal(autoLlmRouterModelAllowed(tokenOnly), true);
+});

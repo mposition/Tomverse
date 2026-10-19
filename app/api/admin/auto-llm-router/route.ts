@@ -13,6 +13,7 @@ import {
   updateAutoLlmRouterModelId,
   updateAutoLlmRouterRewrite,
 } from "@/lib/autoLlmRouterSettings";
+import { autoLlmRouterModelAllowed } from "@/lib/autoLlmRouterCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import {
   apiSecurityResponse,
@@ -38,7 +39,7 @@ const updateSchema = z
 
 const routerModelOptions = async () =>
   (await getRuntimeModels())
-    .filter((model) => model.enabled && !model.catalogDeleted)
+    .filter((model) => model.enabled && !model.catalogDeleted && autoLlmRouterModelAllowed(model))
     .map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
 
 export async function GET(req: Request) {
