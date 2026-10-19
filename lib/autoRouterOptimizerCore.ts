@@ -88,17 +88,34 @@ export type OptimizerCycleResult = {
     cases: OptimizerCase[];
     summary: OptimizerSummary;
     spentMicroUsd: number;
+    /** By call kind, so each provider's budget is settled with its own calls. */
+    spentByKind: Record<OptimizerCallKind, number>;
+    /** Calls whose reported cost exceeded their worst-case bound. */
+    overrunCalls: number;
 };
+
+export type OptimizerCallKind = "generate" | "route" | "judge";
 
 /**
  * The guidance the router uses now, and the one before it for a one-step
  * rollback. `cycleId` null is the code default. Stored as JSON in AppSetting
  * `auto.llmRouterGuidance` (lib/autoLlmRouterGuidance.ts).
  */
-export type ActiveRouterGuidance = {
-    guidance: string;
-    cycleId: string | null;
-    previous: { guidance: string; cycleId: string | null } | null;
+export type RouterGuidanceStep = { guidance: string; cycleId: string | null };
+
+export type ActiveRouterGuidance = RouterGuidanceStep & {
+    /** Earlier guidance, newest first; rollback restores the first entry. */
+    history: RouterGuidanceStep[];
+};
+
+/** How many earlier guidances rollback can walk back through. */
+export const AUTO_ROUTER_GUIDANCE_HISTORY_MAX = 10;
+
+const parseStep = (value: unknown): RouterGuidanceStep | null => {
+    const step = value as Partial<RouterGuidanceStep> | null;
+    const guidance = admitGuidance(step?.guidance);
+    if (!guidance) return null;
+    return { guidance, cycleId: typeof step?.cycleId === "string" ? step.cycleId : null };
 };
 
 /** The stored value, or null when absent or not a valid guidance record. */
@@ -110,18 +127,39 @@ export const parseActiveRouterGuidance = (raw: string | null | undefined): Activ
     } catch {
         return null;
     }
-    const record = value as Partial<ActiveRouterGuidance> | null;
-    const guidance = admitGuidance(record?.guidance);
-    const cycleId = typeof record?.cycleId === "string" ? record.cycleId : null;
-    if (!guidance || !cycleId) return null;
-    const previousGuidance = admitGuidance(record?.previous?.guidance);
-    const previous = previousGuidance
-        ? {
-              guidance: previousGuidance,
-              cycleId: typeof record?.previous?.cycleId === "string" ? record.previous.cycleId : null,
-          }
-        : null;
-    return { guidance, cycleId, previous };
+    const current = parseStep(value);
+    if (!current?.cycleId) return null;
+    const history = (value as { history?: unknown }).history;
+    return {
+        ...current,
+        history: Array.isArray(history)
+            ? history.flatMap((step) => parseStep(step) ?? []).slice(0, AUTO_ROUTER_GUIDANCE_HISTORY_MAX)
+            : [],
+    };
+};
+
+/** The record after promoting `next`: the guidance in force goes on the history. */
+export const promotedRouterGuidance = (
+    active: ActiveRouterGuidance,
+    next: RouterGuidanceStep
+): ActiveRouterGuidance => ({
+    ...next,
+    history: [{ guidance: active.guidance, cycleId: active.cycleId }, ...active.history].slice(
+        0,
+        AUTO_ROUTER_GUIDANCE_HISTORY_MAX
+    ),
+});
+
+/** The record after one rollback, or null when the default is already in force. */
+export const rolledBackRouterGuidance = (
+    active: ActiveRouterGuidance,
+    defaultGuidance: string
+): ActiveRouterGuidance | null => {
+    if (active.cycleId === null) return null;
+    const [restored, ...rest] = active.history;
+    return restored
+        ? { ...restored, history: rest }
+        : { guidance: defaultGuidance, cycleId: null, history: [] };
 };
 
 /** Decision rows say which guidance produced them: the cycle that promoted it. */
@@ -293,15 +331,27 @@ export const optimizerGateFailure = (summary: OptimizerSummary): OptimizerFailur
     return null;
 };
 
-/** Worst-case micro-USD of one call: every input char a token, full output used. */
+/**
+ * Input tokens added to every call's bound for what the request carries
+ * besides the text: role framing, the JSON schema, provider wrapping.
+ */
+export const AUTO_ROUTER_CALL_OVERHEAD_TOKENS = 1_000;
+
+/**
+ * Worst-case micro-USD of one call: full output used, and an input token
+ * count bounded by the UTF-8 byte length of the text -- a byte-level
+ * tokenizer never needs more than one token per byte, which a character count
+ * does not bound for Korean or emoji -- plus the fixed overhead.
+ */
 export const worstCaseCallMicroUsd = (input: {
-    inputChars: number;
+    inputText: string;
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
 }) =>
     Math.ceil(
-        input.inputChars * input.inputUsdPerMillionTokens +
+        (new TextEncoder().encode(input.inputText).length + AUTO_ROUTER_CALL_OVERHEAD_TOKENS) *
+            input.inputUsdPerMillionTokens +
             input.maxOutputTokens * input.outputUsdPerMillionTokens
     );
 
@@ -322,16 +372,19 @@ export const callCostMicroUsd = (input: {
     );
 };
 
-/** The budget a new cycle may reserve, or the cap that refuses it. */
+/**
+ * The budget a new cycle reserves -- its whole worst case -- or the cap that
+ * refuses it. A cycle whose worst case does not fit one run's cap does not
+ * start: one that ran out part-way would have spent money on a result that can
+ * never pass.
+ */
 export const admitOptimizerReservation = (input: {
     worstCaseMicroUsd: number;
     spentTodayMicroUsd: number;
     spentThisMonthMicroUsd: number;
-}): { reservedMicroUsd: number } | { refused: "day_cap" | "month_cap" } => {
-    const reservedMicroUsd = Math.min(
-        input.worstCaseMicroUsd,
-        AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD
-    );
+}): { reservedMicroUsd: number } | { refused: "run_cap" | "day_cap" | "month_cap" } => {
+    const reservedMicroUsd = Math.ceil(input.worstCaseMicroUsd);
+    if (reservedMicroUsd > AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD) return { refused: "run_cap" };
     if (input.spentTodayMicroUsd + reservedMicroUsd > AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD) {
         return { refused: "day_cap" };
     }
@@ -376,13 +429,18 @@ export async function runOptimizerCycle(
     // still fits, so concurrent calls can never overrun the reservation. Out
     // of budget is not thrown: every started call is awaited, so every cost
     // is counted before the cycle reports what it spent.
+    // What a call actually cost is recorded as reported, never cut to its
+    // bound: an overrun is a fact the budgets downstream must see.
     let spent = 0;
     let committed = 0;
     let exhausted = false;
+    let overrunCalls = 0;
+    const spentByKind: Record<OptimizerCallKind, number> = { generate: 0, route: 0, judge: 0 };
     const call = async <T>(
-        worstCase: number,
+        kind: OptimizerCallKind,
         run: () => Promise<OptimizerCallResult<T>>
     ): Promise<T | null> => {
+        const worstCase = deps.worstCaseMicroUsd[kind];
         if (exhausted || committed + worstCase > deps.budgetMicroUsd) {
             exhausted = true;
             return null;
@@ -392,13 +450,15 @@ export async function runOptimizerCycle(
         let cost = worstCase;
         try {
             const result = await run();
-            cost = Math.min(Math.max(result.costMicroUsd, 0), worstCase);
+            cost = Math.max(result.costMicroUsd, 0);
             return result.value;
         } catch {
             return null;
         } finally {
+            if (cost > worstCase) overrunCalls += 1;
             spent += cost;
-            committed -= worstCase - cost;
+            spentByKind[kind] += cost;
+            committed += cost - worstCase;
         }
     };
 
@@ -415,9 +475,11 @@ export async function runOptimizerCycle(
         cases,
         summary: summarizeOptimizerCases(cases, byId),
         spentMicroUsd: spent,
+        spentByKind: { ...spentByKind },
+        overrunCalls,
     });
 
-    const proposal = await call(deps.worstCaseMicroUsd.generate, () =>
+    const proposal = await call("generate", () =>
         deps.generate(autoRouterGeneratorMessage(input.incumbentGuidance, train))
     );
     if (exhausted) return finish("budget_exhausted", null, []);
@@ -428,9 +490,9 @@ export async function runOptimizerCycle(
 
     const picks = await pool(
         evaluate.flatMap((decision) => [
-            () => call(deps.worstCaseMicroUsd.route, () =>
+            () => call("route", () =>
                 deps.route(input.incumbentGuidance, decision)),
-            () => call(deps.worstCaseMicroUsd.route, () =>
+            () => call("route", () =>
                 deps.route(candidateGuidance, decision)),
         ]),
         AUTO_ROUTER_OPTIMIZER_CONCURRENCY
@@ -444,9 +506,9 @@ export async function runOptimizerCycle(
             if (!incumbentPick || !candidatePick) return { ...base, verdict: "unrouted" };
             if (incumbentPick === candidatePick) return { ...base, verdict: "unchanged" };
             const [incumbentFirst, candidateFirst] = await Promise.all([
-                call(deps.worstCaseMicroUsd.judge, () =>
+                call("judge", () =>
                     deps.judge(autoRouterJudgeMessage(decision, incumbentPick, candidatePick))),
-                call(deps.worstCaseMicroUsd.judge, () =>
+                call("judge", () =>
                     deps.judge(autoRouterJudgeMessage(decision, candidatePick, incumbentPick))),
             ]);
             return { ...base, verdict: combineJudgeOrders(incumbentFirst, candidateFirst) };

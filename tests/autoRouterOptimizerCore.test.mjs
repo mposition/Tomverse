@@ -94,17 +94,23 @@ test("the gate names the first reason a proposal may not be promoted", () => {
   assert.equal(optimizerGateFailure(summary({ incumbentCredits: 0, candidateCredits: 0 })), null);
 });
 
-test("cost math charges unknown usage as the worst case", () => {
+test("the worst case bounds input tokens by UTF-8 bytes plus the request overhead", () => {
   const prices = { inputUsdPerMillionTokens: 0.2, outputUsdPerMillionTokens: 1.2 };
-  assert.equal(worstCaseCallMicroUsd({ inputChars: 1000, maxOutputTokens: 200, ...prices }), 440);
-  assert.equal(callCostMicroUsd({ inputTokens: 300, outputTokens: 50, worstCaseMicroUsd: 440, ...prices }), 120);
-  assert.equal(callCostMicroUsd({ inputTokens: undefined, outputTokens: 50, worstCaseMicroUsd: 440, ...prices }), 440);
+  // 10 ASCII bytes vs 10 Korean characters = 30 bytes; each plus 1,000 overhead tokens.
+  assert.equal(worstCaseCallMicroUsd({ inputText: "a".repeat(10), maxOutputTokens: 200, ...prices }), 442);
+  assert.equal(worstCaseCallMicroUsd({ inputText: "가".repeat(10), maxOutputTokens: 200, ...prices }), 446);
+  assert.equal(callCostMicroUsd({ inputTokens: 300, outputTokens: 50, worstCaseMicroUsd: 446, ...prices }), 120);
+  assert.equal(callCostMicroUsd({ inputTokens: undefined, outputTokens: 50, worstCaseMicroUsd: 446, ...prices }), 446);
 });
 
-test("a reservation is capped per run and refused past the day or month cap", () => {
+test("a reservation is the whole worst case, refused past the run, day or month cap", () => {
   assert.deepEqual(
-    admitOptimizerReservation({ worstCaseMicroUsd: 99_000_000, spentTodayMicroUsd: 0, spentThisMonthMicroUsd: 0 }),
-    { reservedMicroUsd: AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD }
+    admitOptimizerReservation({ worstCaseMicroUsd: 1_234.2, spentTodayMicroUsd: 0, spentThisMonthMicroUsd: 0 }),
+    { reservedMicroUsd: 1_235 }
+  );
+  assert.deepEqual(
+    admitOptimizerReservation({ worstCaseMicroUsd: AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD + 1, spentTodayMicroUsd: 0, spentThisMonthMicroUsd: 0 }),
+    { refused: "run_cap" }
   );
   assert.deepEqual(
     admitOptimizerReservation({ worstCaseMicroUsd: 2, spentTodayMicroUsd: AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD - 1, spentThisMonthMicroUsd: 0 }),
@@ -169,6 +175,21 @@ test("a cycle that finds cheaper equal picks passes, judging only differing case
   assert.equal(calls.route, 24);
   assert.equal(calls.judge, 12); // two orders for each of the six differing cases
   assert.equal(result.spentMicroUsd, 100 + 24 * 10 + 12 * 20);
+  assert.deepEqual(result.spentByKind, { generate: 100, route: 240, judge: 240 });
+  assert.equal(result.overrunCalls, 0);
+});
+
+test("a call that costs more than its bound is recorded in full and counted as an overrun", async () => {
+  const { deps } = fakeDeps({
+    judge: async (message) => {
+      const { choiceA } = JSON.parse(message);
+      return { value: choiceA === "light" ? "A" : "B", costMicroUsd: 95 }; // bound is 80
+    },
+  });
+  const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.equal(result.spentByKind.judge, 12 * 95);
+  assert.equal(result.overrunCalls, 12);
+  assert.equal(result.spentMicroUsd, 100 + 240 + 12 * 95);
 });
 
 test("a proposal equal to the current guidance stops before any routing", async () => {
@@ -215,13 +236,35 @@ test("a call that throws is charged its worst case and reads as no answer", asyn
 
 test("a stored guidance record is read only when it is complete and valid", async () => {
   const { parseActiveRouterGuidance, autoLlmRouterVersionFor } = await import("../lib/autoRouterOptimizerCore.ts");
-  const record = { guidance: NEW_GUIDANCE, cycleId: "c1", previous: { guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, cycleId: null } };
+  const record = { guidance: NEW_GUIDANCE, cycleId: "c1", history: [{ guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, cycleId: null }] };
   assert.deepEqual(parseActiveRouterGuidance(JSON.stringify(record)), record);
   assert.equal(parseActiveRouterGuidance(null), null);
   assert.equal(parseActiveRouterGuidance("{not json"), null);
   assert.equal(parseActiveRouterGuidance(JSON.stringify({ ...record, cycleId: null })), null);
   assert.equal(parseActiveRouterGuidance(JSON.stringify({ ...record, guidance: "short" })), null);
-  assert.deepEqual(parseActiveRouterGuidance(JSON.stringify({ ...record, previous: { guidance: 1 } })), { ...record, previous: null });
+  assert.deepEqual(parseActiveRouterGuidance(JSON.stringify({ ...record, history: [{ guidance: 1 }] })), { ...record, history: [] });
   assert.equal(autoLlmRouterVersionFor("auto-llm-router-v1", null), "auto-llm-router-v1");
   assert.equal(autoLlmRouterVersionFor("auto-llm-router-v1", "c1"), "auto-llm-router-v1+c1");
+});
+
+test("rollback walks back through every promotion, then to the default", async () => {
+  const { promotedRouterGuidance, rolledBackRouterGuidance, AUTO_ROUTER_GUIDANCE_HISTORY_MAX } =
+    await import("../lib/autoRouterOptimizerCore.ts");
+  const step = (n) => ({ guidance: `Rule ${n}: send greetings to light models and code to strong ones.`, cycleId: `c${n}` });
+  const base = { guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, cycleId: null, history: [] };
+  // default -> c1 -> c2 -> c3, then three rollbacks: c2, c1, default.
+  let active = [1, 2, 3].reduce((current, n) => promotedRouterGuidance(current, step(n)), base);
+  assert.equal(active.cycleId, "c3");
+  for (const expected of ["c2", "c1", null]) {
+    active = rolledBackRouterGuidance(active, AUTO_LLM_ROUTER_DEFAULT_GUIDANCE);
+    assert.equal(active.cycleId, expected);
+  }
+  assert.equal(active.guidance, AUTO_LLM_ROUTER_DEFAULT_GUIDANCE);
+  assert.equal(rolledBackRouterGuidance(active, AUTO_LLM_ROUTER_DEFAULT_GUIDANCE), null);
+
+  // The history is bounded; past the bound the oldest step is the one dropped.
+  const long = Array.from({ length: 15 }, (_, i) => i + 1)
+    .reduce((current, n) => promotedRouterGuidance(current, step(n)), base);
+  assert.equal(long.history.length, AUTO_ROUTER_GUIDANCE_HISTORY_MAX);
+  assert.equal(long.history[0].cycleId, "c14");
 });

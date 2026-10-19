@@ -1,7 +1,8 @@
 -- One improvement cycle of the Auto LLM router's guidance
 -- (lib/autoRouterOptimizerCore.ts): the proposal, the per-case verdicts, the
 -- gate summary and what the cycle reserved and spent against the CHAT-01
--- optimizer caps.
+-- optimizer caps and each provider's own budget (`providerReservations`,
+-- settled when the cycle finishes; an interrupted cycle keeps its reservation).
 --
 -- No user content and no user link: evaluated decisions are named by
 -- AutoRouterDecision id only, so deleting an account or conversation removes
@@ -24,6 +25,7 @@ CREATE TABLE "AutoRouterOptimizerCycle" (
     "cases" JSONB,
     "summary" JSONB,
     "reservedMicroUsd" INTEGER NOT NULL,
+    "providerReservations" JSONB,
     "spentMicroUsd" INTEGER NOT NULL DEFAULT 0,
     "promotedAt" TIMESTAMP(3),
 

@@ -10,6 +10,7 @@ import {
   readActiveRouterGuidance,
 } from "@/lib/autoLlmRouterGuidance";
 import {
+  finishOptimizerCycle,
   promoteAutoRouterOptimizerCycle,
   reserveOptimizerCycle,
   rollBackAutoRouterGuidance,
@@ -19,6 +20,7 @@ import {
   AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
   AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
 } from "@/lib/autoRouterOptimizerCore";
+import { getProviderCostBudget } from "@/lib/providerCostBudget";
 
 // The money and audit steps of the Auto router optimizer, on a real database.
 // No model is called: the cycle's calls are covered by
@@ -31,9 +33,23 @@ const session = {
 const actor = { session, request: new Request("https://tomverse.test/api/admin/auto-llm-router/optimizer") };
 const PROPOSAL = "Send greetings and small talk to the lightest model.\nSend code and maths to a strong model.";
 
+// Two test-only providers with explicit budgets, so the shared provider
+// buckets of real providers are never touched.
+const OPTIMIZER_PROVIDER = "optimizertest";
+const ROUTER_PROVIDER = "routertest";
+const environment = {
+  ...process.env,
+  CHAT_PROVIDER_OPTIMIZERTEST_COST_MICROUSD_PER_DAY: "900000000",
+  CHAT_PROVIDER_OPTIMIZERTEST_COST_MICROUSD_PER_MONTH: "9000000000",
+  CHAT_PROVIDER_ROUTERTEST_COST_MICROUSD_PER_DAY: "900000000",
+  CHAT_PROVIDER_ROUTERTEST_COST_MICROUSD_PER_MONTH: "9000000000",
+};
+const providerKeys = [`provider:${OPTIMIZER_PROVIDER}`, `provider:${ROUTER_PROVIDER}`];
+
 const reset = async () => {
   await prisma.autoRouterOptimizerCycle.deleteMany({});
   await prisma.appSetting.deleteMany({ where: { key: AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY } });
+  await prisma.chatUsageBucket.deleteMany({ where: { key: { in: providerKeys } } });
 };
 beforeEach(reset);
 after(async () => {
@@ -41,15 +57,24 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+/** `worstCaseMicroUsd` split 60/40 between the optimizer and router providers. */
 const reserve = (worstCaseMicroUsd: number, now?: Date) =>
   reserveOptimizerCycle({
     actor,
     optimizerModelId: "optimizer-model",
     routerModelId: "router-model",
     incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
-    worstCaseMicroUsd,
+    providers: [
+      { provider: OPTIMIZER_PROVIDER, microUsd: Math.round(worstCaseMicroUsd * 0.6) },
+      { provider: ROUTER_PROVIDER, microUsd: worstCaseMicroUsd - Math.round(worstCaseMicroUsd * 0.6) },
+    ],
     now,
+    environment,
   });
+
+const bucket = async (provider: string, period: "provider-cost-day" | "provider-cost-month") =>
+  (await prisma.chatUsageBucket.findMany({ where: { key: `provider:${provider}`, period } }))
+    .reduce((sum, row) => sum + Number(row.count), 0);
 
 const seedCycle = (data: {
   status: string;
@@ -75,14 +100,53 @@ const seedCycle = (data: {
 const auditFor = (cycleId: string, action: string) =>
   prisma.adminAuditLog.count({ where: { targetId: cycleId, action } });
 
-test("a reservation is capped per run, audited with the cycle, and one runs at a time", async () => {
-  const first = await reserve(AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD * 3);
+test("a reservation holds its worst case, is audited with the cycle, and one runs at a time", async () => {
+  assert.deepEqual(await reserve(AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD + 1), { refused: "run_cap" });
+
+  const first = await reserve(10_000);
   assert.ok("cycle" in first);
-  assert.equal(first.cycle.reservedMicroUsd, AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD);
+  assert.equal(first.cycle.reservedMicroUsd, 10_000);
   assert.equal(await auditFor(first.cycle.id, "auto.llm_router_optimizer.cycle_started"), 1);
+  // Each provider's own day and month budget holds its share.
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-day"), 6_000);
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-month"), 6_000);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), 4_000);
 
   assert.deepEqual(await reserve(1_000), { refused: "already_running" });
   assert.equal(await prisma.autoRouterOptimizerCycle.count(), 1);
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-day"), 6_000);
+});
+
+test("a full provider budget refuses the cycle and leaves nothing behind", async () => {
+  const dayLimit = getProviderCostBudget(ROUTER_PROVIDER, environment).day;
+  const today = new Date();
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: `provider:${ROUTER_PROVIDER}`,
+      period: "provider-cost-day",
+      periodStart: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())),
+      count: BigInt(dayLimit - 1_000),
+    },
+  });
+  assert.deepEqual(await reserve(10_000), { refused: "provider_budget" });
+  // The optimizer provider's share, taken first, rolled back with the rest.
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-day"), 0);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), dayLimit - 1_000);
+  assert.equal(await prisma.autoRouterOptimizerCycle.count(), 0);
+});
+
+test("a finished cycle settles each provider to what it spent, exactly once", async () => {
+  const started = await reserve(10_000);
+  assert.ok("cycle" in started);
+  const spentByProvider = new Map([[OPTIMIZER_PROVIDER, 1_200]]);
+  const data = { status: "passed", spentMicroUsd: 1_200, finishedAt: new Date() };
+  assert.equal(await finishOptimizerCycle({ cycleId: started.cycle.id, data, spentByProvider }), true);
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-day"), 1_200);
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-month"), 1_200);
+  assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), 0);
+  // A second settlement of the same cycle changes nothing.
+  assert.equal(await finishOptimizerCycle({ cycleId: started.cycle.id, data, spentByProvider }), false);
+  assert.equal(await bucket(OPTIMIZER_PROVIDER, "provider-cost-day"), 1_200);
 });
 
 test("a cycle cut off by a restart is closed at its full reservation, then a new one may start", async () => {
@@ -97,6 +161,14 @@ test("a cycle cut off by a restart is closed at its full reservation, then a new
   assert.equal(closed.status, "error");
   assert.equal(closed.failure, "interrupted");
   assert.equal(closed.spentMicroUsd, 5_000);
+  // A late result from the interrupted cycle is not recorded and gives nothing back.
+  const late = await finishOptimizerCycle({
+    cycleId: stale.id,
+    data: { status: "passed", spentMicroUsd: 10, finishedAt: new Date() },
+    spentByProvider: new Map(),
+  });
+  assert.equal(late, false);
+  assert.equal((await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: stale.id } })).status, "error");
 });
 
 test("the day and month caps refuse a reservation that would cross them", async () => {
@@ -136,7 +208,7 @@ test("promotion is a compare-and-set on the guidance the cycle measured", async 
   const active = await readActiveRouterGuidance();
   assert.equal(active.guidance, PROPOSAL);
   assert.equal(active.cycleId, cycle.id);
-  assert.deepEqual(active.previous, { guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, cycleId: null });
+  assert.deepEqual(active.history, [{ guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, cycleId: null }]);
   assert.equal(await auditFor(cycle.id, "auto.llm_router_guidance.promoted"), 1);
   assert.ok((await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: cycle.id } })).promotedAt);
 

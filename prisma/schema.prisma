@@ -4599,6 +4599,8 @@ model AutoRouterOptimizerCycle {
   summary           Json?
   /// Worst case reserved against the day and month caps when the cycle started.
   reservedMicroUsd  Int
+  /// [{ provider, microUsd, dayStart, monthStart }] held in each provider budget until settled.
+  providerReservations Json?
   spentMicroUsd     Int       @default(0)
   promotedAt        DateTime?
 

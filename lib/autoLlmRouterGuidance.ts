@@ -20,7 +20,7 @@ export const AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY = "auto.llmRouterGuidance";
 export const DEFAULT_ROUTER_GUIDANCE: ActiveRouterGuidance = {
     guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
     cycleId: null,
-    previous: null,
+    history: [],
 };
 
 type Reader = Pick<Prisma.TransactionClient, "appSetting">;
