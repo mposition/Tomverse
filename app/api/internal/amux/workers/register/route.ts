@@ -14,9 +14,7 @@ import {
 } from "@/lib/amux/internalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
-import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
 import { amuxWorkerCatalogRefusal } from "@/lib/amux/workerAssignmentCatalog";
-import { amuxWorkerDerivedCatalogAssignmentOpen } from "@/lib/amux/workerDerivedCatalogCore";
 import {
   AmuxWorkerRegistrationRefusedError,
   registerAmuxWorkerRuntime,
@@ -51,44 +49,16 @@ export async function POST(request: Request) {
     try {
       const body = await readLimitedJson(request, 2 * 1_024, requestSchema);
 
-      // Orchestration policy version 35, section 3 (R2c): with the derived
-      // catalog's code latch on, the name is checked against it inside the
-      // registration's own transaction; until then, against the variable here.
-      const derived = amuxWorkerDerivedCatalogAssignmentOpen();
-      const catalog = derived ? [] : getConfiguredAmuxWorkerCatalog();
-
-      if (!derived && !catalog) {
-        return Response.json(
-          {
-            registered: false,
-            reason: "worker_catalog_unavailable",
-          },
-          {
-            status: 409,
-            headers: { "Cache-Control": "no-store" },
-          },
-        );
-      }
-
-      if (!derived && !catalog?.some((worker) => worker.worker_name === body.worker_name)) {
-        return Response.json(
-          {
-            registered: false,
-            reason: "worker_not_configured",
-          },
-          {
-            status: 409,
-            headers: { "Cache-Control": "no-store" },
-          },
-        );
-      }
-
+      // Orchestration policy version 35, section 3: the name is checked
+      // against the catalog derived from the registry, inside the
+      // registration's own transaction. An absent catalog or an unlisted name
+      // is refused (worker_catalog_unavailable, worker_not_configured).
       const runtime = await registerAmuxWorkerRuntime(
         body.worker_name,
         body.instance_id,
         undefined,
         undefined,
-        derived ? (tx) => amuxWorkerCatalogRefusal(tx, body.worker_name, true) : undefined,
+        (tx) => amuxWorkerCatalogRefusal(tx, body.worker_name),
       );
 
       return Response.json(

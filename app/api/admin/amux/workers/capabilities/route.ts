@@ -25,9 +25,8 @@ import {
 /**
  * AMUX worker capabilities (orchestration policy version 35, section 2).
  *
- * GET is each registered worker's recorded capability beside the import
- * proposal from the catalog variables, for any administrator. Reading is
- * never latched.
+ * GET is each registered worker's recorded capability, for any
+ * administrator. Reading is never latched.
  *
  * POST is the owner recording one worker's capability, and nothing else. In
  * order, before the body is read: the owner role, R2a's code latch

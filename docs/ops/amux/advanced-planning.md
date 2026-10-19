@@ -36,8 +36,9 @@ scheduler 입력을 서버 권위로 만든다. Incident brake와 기존 증거 
 - due/project/review/cost처럼 admission을 바꾸는 task 사실은 nullable explicit
   column과 revision CAS로 보존한다. `classification`은 분류 근거이지 영구 정책
   identity의 대체물이 아니다.
-- worker capability는 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`에서 엄격히
-  검증한다. quota 관측은 인증된 internal API로 append-only 저장하되, 관측의
+- worker capability는 등록부의 능력 기록에서 유도한 배정 카탈로그로 엄격히
+  검증한다(정책 버전 35 3항. R2e부터 카탈로그 환경 변수는 읽지 않는다).
+  quota 관측은 인증된 internal API로 append-only 저장하되, 관측의
   worker/provider 조합이 같은 catalog와 일치해야 한다.
 - incident 현재 상태는 `AppSetting`, 전이는 append-only audit chain이 소유한다.
 - project/team window와 budget은 durable policy row가 소유한다. 숫자가 정해지지
