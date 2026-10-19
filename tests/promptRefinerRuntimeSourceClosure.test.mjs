@@ -596,15 +596,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-19, correcting the Chat optimizer schema separator restores the
 // marketing fingerprint and removes the mistaken provenance comment. The
 // already reviewed computed access inventory is unchanged; its positions move.
+// 2026-10-19, AMUX intake v19 Max shadow and session-result audit actions
+// extend lib/adminAuditSystemActors.ts above the same computed access. Count
+// 228 and the position-free inventory are unchanged; only positions move.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
-// AMUX v19 repository-read and session-reservation additions shift source
-// positions in the reviewed closure. The position-free digest stays fixed.
-const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e6cedea8264b539dee2dba2d661a6ce",
-  "60d3e5d5194b2b02a055744ef746ac894",
-].join("");
+// 2026-10-19 owner direction (AGENTS.md gate-test principle): the positional
+// snapshot digest is retired. It changed whenever any file in the closure
+// moved a line, while the count and the position-free inventory above
+// already fail on a new, removed or changed computed access.
 
 const unwrapStaticExpression = (node) => {
   let current = node;
@@ -1591,11 +1592,6 @@ test("runtime source allowlist is exactly the deterministic local runtime import
       .digest("hex"),
     REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256,
     "non-static element access inventory changed beyond source positions"
-  );
-  assert.equal(
-    dynamicAccesses.digest,
-    REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256,
-    "non-static element access snapshot changed; unreviewed computed access is fail-closed"
   );
   const expected = [...fixedNonImportPaths, ...runtimeImportClosure()];
   const actual = [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS];

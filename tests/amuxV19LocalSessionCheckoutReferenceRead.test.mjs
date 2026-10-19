@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { readAmuxV19SessionCheckoutReference } from
+import { readAmuxV19SessionCheckoutReference,
+  readAmuxV19MaxCheckoutReference } from
   "../lib/amux/ideaLocalSessionCheckoutReferenceRead.mjs";
 
 const name = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN";
@@ -50,6 +51,32 @@ test("a PR target retains its repository, number and pinned head SHA", async () 
     ...input(async () => Response.json({ ...target,
       pinnedCommitSha: "b".repeat(64) })), referenceOrdinal: 1,
   }), { ...target, pinnedCommitSha: "b".repeat(64) });
+});
+
+test("Max launcher uses only its dedicated identity for the exact reference", async () => {
+  const name = "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET";
+  const previous = process.env[name];
+  const maxSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
+  const target = { referenceCount: 1, kind: "repository",
+    repository: "mposition/Tomverse", pullRequestNumber: null,
+    pinnedCommitSha: sha };
+  try {
+    delete process.env[name];
+    assert.deepEqual(await readAmuxV19MaxCheckoutReference(input(
+      async () => { throw new Error("unexpected network"); })),
+    { kind: "unavailable" });
+    process.env[name] = maxSecret;
+    const selected = await readAmuxV19MaxCheckoutReference(input(
+      async (_url, request) => {
+        assert.equal(request.headers.authorization, `Bearer ${maxSecret}`);
+        assert.equal(request.headers["x-amux-agent-id"], "amux-intake-max");
+        return Response.json(target);
+      }));
+    assert.deepEqual(selected, target);
+  } finally {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  }
 });
 
 test("missing authority, malformed targets and uncertain transport fail closed", async () => {

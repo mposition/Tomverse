@@ -153,6 +153,25 @@ test("v19 bridge rejects a command with a broader Read grant", () => {
   assert.equal(rejected, true);
 });
 
+test("v19 bridge rejects --bare because it disables Max OAuth", () => {
+  const cli = planAmuxTrackedCheckoutSandbox(valid).cli;
+  let rejected = false;
+  try {
+    runInNewContext(AMUX_V19_LOCAL_BRIDGE_SOURCE, {
+      require: () => ({}),
+      process: {
+        cwd: () => valid.checkoutDirectory,
+        argv: ["/usr/bin/node", cli.binary, "--bare", ...cli.args],
+        stderr: { write: () => {} },
+        exit: () => { rejected = true; throw new Error("rejected"); },
+      },
+    });
+  } catch (error) {
+    assert.equal(error.message, "rejected");
+  }
+  assert.equal(rejected, true);
+});
+
 test("v19 checkout verification rejects extra, missing, linked and writable files", {
   skip: process.platform !== "linux",
 }, async (t) => {

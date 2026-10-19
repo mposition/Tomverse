@@ -6,10 +6,61 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { planAmuxTrackedCheckoutClaudeCli } from "../lib/amux/ideaTrackedCheckoutCli.ts";
-import { materializeAmuxTrackedCheckout, withAmuxTrackedCheckout } from "../lib/amux/ideaTrackedCheckoutMaterialize.ts";
+import { materializeAmuxTrackedCheckout, withAmuxTrackedCheckout,
+  withAmuxTrackedCheckouts } from "../lib/amux/ideaTrackedCheckoutMaterialize.ts";
 
 const git = (directory, ...args) => execFileSync("git", ["-C", directory, ...args], {
   encoding: "utf8", windowsHide: true,
+});
+
+test("multiple pinned references share one isolated mount without mixing revisions", async () => {
+  const repositoryPath = await mkdtemp(join(tmpdir(), "amux-multi-repo-"));
+  let mountedPath;
+  try {
+    git(repositoryPath, "init", "--quiet");
+    git(repositoryPath, "config", "core.autocrlf", "false");
+    git(repositoryPath, "config", "user.name", "AMUX Test");
+    git(repositoryPath, "config", "user.email", "amux-test@example.invalid");
+    await writeFile(join(repositoryPath, "TRACE.txt"), "first revision\n");
+    await writeFile(join(repositoryPath, ".env"), "excluded\n");
+    git(repositoryPath, "add", "TRACE.txt", ".env");
+    git(repositoryPath, "commit", "--quiet", "-m", "first");
+    const first = git(repositoryPath, "rev-parse", "HEAD").trim();
+    await writeFile(join(repositoryPath, "TRACE.txt"), "second revision\n");
+    git(repositoryPath, "add", "TRACE.txt");
+    git(repositoryPath, "commit", "--quiet", "-m", "second");
+    const second = git(repositoryPath, "rev-parse", "HEAD").trim();
+    const references = [first, second].map((commitSha, referenceOrdinal) => ({
+      referenceOrdinal, repositoryPath, commitSha,
+    }));
+    await withAmuxTrackedCheckouts({ references,
+      digestSecret: "d".repeat(32) }, async (prepared) => {
+      mountedPath = prepared.directory;
+      assert.deepEqual(prepared.files,
+        ["reference-0/TRACE.txt", "reference-1/TRACE.txt"]);
+      assert.deepEqual(prepared.references.map((ref) => ref.commitSha),
+        [first, second]);
+      assert.deepEqual(prepared.references.map((ref) => ref.excludedCount),
+        [1, 1]);
+      assert.equal(await readFile(join(mountedPath, "reference-0", "TRACE.txt"), "utf8"),
+        "first revision\n");
+      assert.equal(await readFile(join(mountedPath, "reference-1", "TRACE.txt"), "utf8"),
+        "second revision\n");
+      await assert.rejects(() => access(join(mountedPath, "reference-0", ".env")),
+        { code: "ENOENT" });
+      if (process.platform === "linux") {
+        const { verifyAmuxPreparedCheckout } = await import(
+          "../lib/amux/ideaTrackedCheckoutSandbox.mjs");
+        await verifyAmuxPreparedCheckout(prepared);
+      }
+    });
+    await assert.rejects(() => access(mountedPath), { code: "ENOENT" });
+    await assert.rejects(() => withAmuxTrackedCheckouts({
+      references: [references[1], references[0]],
+      digestSecret: "d".repeat(32) }, async () => {}), /invalid_tree/);
+  } finally {
+    await rm(repositoryPath, { recursive: true, force: true });
+  }
 });
 
 test("checkout contains only scanned bytes from the pinned tracked tree", async () => {

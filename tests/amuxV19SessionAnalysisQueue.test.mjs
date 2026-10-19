@@ -60,7 +60,8 @@ test("v19 session queue refuses unauthorized or disabled requests before DB", as
   const POST = imported.POST ?? imported.default.POST;
   const keys = [AMUX_V4_ANALYSIS_AGENT_SECRET_ENV, AMUX_V4_ANALYSIS_QUEUE_READ_ENV,
     AMUX_SESSION_INTAKE_ENV, "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ",
-    "TOMVERSE_AMUX_SYNC_SECRET"];
+    "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
+    "TOMVERSE_AMUX_V19_MAX_ANALYSIS_QUEUE_READ"];
   const previous = new Map(keys.map((key) => [key, process.env[key]]));
   try {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
@@ -74,6 +75,22 @@ test("v19 session queue refuses unauthorized or disabled requests before DB", as
     assert.equal((await POST(request())).status, 415);
     assert.equal((await POST(request({ after: "!" }))).status, 400);
     assert.equal((await POST(request({ unexpected: true }))).status, 400);
+    const maxSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
+    process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = maxSecret;
+    const maxRequest = (body) => new Request(endpoint, { method: "POST",
+      headers: { authorization: `Bearer ${maxSecret}`,
+        "x-amux-agent-id": "amux-intake-max",
+        "content-type": "application/json" },
+      body: JSON.stringify(body) });
+    assert.equal((await POST(maxRequest({ after: "!" }))).status, 409);
+    process.env.TOMVERSE_AMUX_V19_MAX_ANALYSIS_QUEUE_READ = "enabled";
+    assert.equal((await POST(maxRequest({ after: "!" }))).status, 400);
+    process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
+    assert.equal((await POST(new Request(endpoint, { method: "POST",
+      headers: { authorization: `Bearer ${secret}`,
+        "x-amux-agent-id": "amux-intake-max",
+        "content-type": "application/json" },
+      body: JSON.stringify({ after: "!" }) }))).status, 401);
     process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
     assert.equal((await POST(request({}))).status, 401);
   } finally {

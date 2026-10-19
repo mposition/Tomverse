@@ -91,6 +91,19 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
     return [];
   } },
 });
+// The host launches bwrap through the open-trace runner (strace, FIFO and
+// seccomp). Its own behaviour is covered by amuxTrackedCheckoutTraceRunner;
+// here a launch counts as the one child spawn and traces nothing.
+mock.module(mod("lib/amux/ideaTrackedCheckoutTraceRunner.mjs"), {
+  namedExports: { launchAmuxV19TracedSandbox: async () => {
+    spawnCount += 1;
+    // Impossible OS PID and an already-exited child keep host kill paths inert.
+    return { child: { pid: Number.MAX_SAFE_INTEGER, exitCode: 0, signalCode: null,
+      once() { return this; } },
+    finishTrace: async () => ({ kind: "complete", files: [] }),
+    cleanup: async () => {} };
+  } },
+});
 
 const { AMUX_V19_TRACKED_CHECKOUT_CLI_ENV, AmuxTrackedCheckoutHostError,
   runAmuxV19TrackedCheckoutAnalysis } = await import(

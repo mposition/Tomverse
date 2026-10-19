@@ -11,6 +11,8 @@ import {
   inspectAmuxTrackedCheckoutEvidence,
 } from "../lib/amux/ideaTrackedCheckoutEvidenceCore.ts";
 import {
+  AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION,
+  AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE,
   auditRowActorKind,
   systemAuditActionAllowed,
 } from "../lib/adminAuditSystemActors.ts";
@@ -28,6 +30,21 @@ const valid = () => ({
     non_regular: 1,
     unscannable_content: 2,
   },
+});
+
+test("Max checkout claim binding has one scoped audit action", () => {
+  assert.equal(systemAuditActionAllowed(AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
+    AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION,
+    AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
+    AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION, "AmuxIdeaSubmission"), false);
+  assert.equal(auditRowActorKind({
+    action: AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION,
+    targetType: AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET,
+    actorUserId: null, actorEmail: null, ipAddress: null, userAgent: null,
+    metadata: { systemActor: AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
+      actorScope: AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE },
+  }), "system");
 });
 
 test("tracked checkout evidence accepts only content-free aggregate proof", () => {

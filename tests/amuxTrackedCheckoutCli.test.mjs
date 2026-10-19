@@ -16,11 +16,11 @@ test("v19 CLI plan exposes only cwd-scoped file tools without a turn or time cap
     "Read(//tmp/amux-v19-checkout-Ab12c3/**),Grep,Glob",
     "--disallowedTools", "Read(//run/**),Read(//proc/**),Read(//tmp/.claude/**)"]);
   assert.ok(!plan.args.includes("--allowedTools=Read,Grep,Glob"));
-  for (const flag of ["--restricted", "--bare", "--safe-mode", "--strict-mcp-config",
+  for (const flag of ["--restricted", "--safe-mode", "--strict-mcp-config",
     "--no-session-persistence", "--disable-slash-commands", "--no-chrome"])
     assert.ok(plan.args.includes(flag), flag);
   for (const forbidden of ["Bash", "Edit", "Write", "--max-turns", "--max-budget-usd",
-    "--add-dir", "--dangerously-skip-permissions"])
+    "--add-dir", "--dangerously-skip-permissions", "--bare"])
     assert.ok(!plan.args.includes(forbidden), forbidden);
 });
 

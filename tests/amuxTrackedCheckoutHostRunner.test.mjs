@@ -9,6 +9,15 @@ const valid = () => ({ modelId: "claude-opus-5-5", reasoningEffort: "high",
   prompt: Buffer.from("synthetic prompt"), repositoryPath: "/missing/repository",
   commitSha: "a".repeat(40), digestSecret: "x".repeat(32),
   stopCheck: async () => true });
+const validMulti = () => {
+  const base = valid();
+  delete base.repositoryPath;
+  delete base.commitSha;
+  return { ...base, references: [0, 1].map((referenceOrdinal) => ({
+    referenceOrdinal, repositoryPath: "/missing/repository",
+    commitSha: "a".repeat(40),
+  })) };
+};
 
 test("stop polling fails closed on refusal, transport failure and timeout", async () => {
   assert.equal(await amuxV19StopRequested(async () => false), false);
@@ -51,11 +60,44 @@ test("tracked checkout supervisor refuses an unapproved model and effort", async
       { modelId: "claude-unreviewed" }, { reasoningEffort: "low" },
       { prompt: Buffer.alloc(0) }, { stopCheck: null },
       { repositoryPath: "relative/repository" }, { commitSha: "latest" },
+      { references: [{ referenceOrdinal: 0,
+        repositoryPath: "relative/repository", commitSha: "a".repeat(40) }] },
+      { references: [{ referenceOrdinal: 1,
+        repositoryPath: "/missing/repository", commitSha: "a".repeat(40) }] },
       { digestSecret: "short" },
     ]) {
       assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis({ ...valid(),
         ...change }), { kind: "refused" });
     }
+  } finally {
+    if (prior === undefined) delete process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
+    else process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] = prior;
+  }
+});
+
+test("multiple pinned references remain closed without the host switch", async () => {
+  const prior = process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
+  try {
+    delete process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
+    assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(validMulti()),
+      { kind: "refused" });
+  } finally {
+    if (prior === undefined) delete process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
+    else process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] = prior;
+  }
+});
+
+test("multiple references refuse a mixed single-reference authority", async () => {
+  const prior = process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
+  try {
+    process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] = "enabled";
+    assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis({
+      ...validMulti(), repositoryPath: "/missing/repository",
+    }), { kind: "refused" });
+    assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis({
+      ...validMulti(), references: [{ referenceOrdinal: 1,
+        repositoryPath: "/missing/repository", commitSha: "a".repeat(40) }],
+    }), { kind: "refused" });
   } finally {
     if (prior === undefined) delete process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
     else process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] = prior;

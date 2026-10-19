@@ -113,8 +113,11 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 // The v19 read-manifest retirement fence adds a conditional-write recovery
 // export in the same key-store file. This preview imports only its key loader;
 // the 13-file closure, read-only transaction and outbound-call scan are fixed.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "1ab76bdaec8f26996b78253414b67d207bed1fe44c77756bb6b4cb65b36b3ace";
-const SOURCE_SCOPE_DISABLED_DIGEST = "f732c7a24fb74eccafaeb132930117df5bd2fc743240c373bbf6611287e6ef7d";
+// Re-pinned for intake v19 session results: lib/amux/ideaKeyStore.ts now also
+// fences an orphan analysis-result key. The preview services only load keys
+// (loadAmuxContentUnitKeys); the closure file list is unchanged.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "a905558c830f5209832ff49b22c35f1c5d484b3f735da18001003a40ba4ebc77";
+const SOURCE_SCOPE_DISABLED_DIGEST = "26199694df292f77f04179ecd6ffa2af408c3c7018f3513f4d80959af7629554";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -172,8 +175,9 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // reader. Its 17-file closure and read-only route/service guards remain fixed.
 // The fixed-fence retirement functions remain unreachable from this reader.
 // Its 17-file closure and both latch-state writer checks are unchanged.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "5279c0d44fa01e4861b1b5e4024dfa7c25dc80416197ba02cec4667b5fda6258";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "5e7236a60559efd9ad1d8511522efb5d4991b4de58e1a93d2ce48a66a6e14bd2";
+// Re-pinned with the source-scope digests above for the same ideaKeyStore change.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "cfbb8438b362045ced485e5f8302c502ece90c895da6ca28b5dd7fdbcdd84b45";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "08c17ba9d23e4078efc80bdce73f7bfdc96674ac4a1ae4adb4859a795be7ae1a";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

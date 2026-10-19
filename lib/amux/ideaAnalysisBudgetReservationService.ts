@@ -229,8 +229,9 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   });
   const lockedWindow = await tx.$queryRaw<Array<{
     spentMicroUsd: bigint; reservedMicroUsd: bigint; limitMicroUsd: bigint;
+    shadowOverrunMicroUsd: bigint;
   }>>`
-    SELECT "spentMicroUsd", "reservedMicroUsd", "limitMicroUsd"
+    SELECT "spentMicroUsd", "reservedMicroUsd", "limitMicroUsd", "shadowOverrunMicroUsd"
     FROM "AmuxIdeaAnalysisBudgetWindow"
     WHERE "namespace" = ${AMUX_V4_ANALYSIS_NAMESPACE}
       AND "monthStart" = ${monthStart}
@@ -257,7 +258,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     asOfIso: now.toISOString(),
     windowStartsAtIso: monthStart.toISOString(),
     monthlyLimitMicroUsd: window.limitMicroUsd.toString(),
-    consumedMicroUsd: window.spentMicroUsd.toString(),
+    consumedMicroUsd: (window.spentMicroUsd + window.shadowOverrunMicroUsd).toString(),
     reservedMicroUsd: window.reservedMicroUsd.toString(),
     usageState: v4Unknown || sessionUnknown ? "unknown" : "known",
   });

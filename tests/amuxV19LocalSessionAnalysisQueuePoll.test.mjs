@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV,
-  pollAmuxV19SessionAnalysisCandidateIds } from
+  pollAmuxV19SessionAnalysisCandidateIds,
+  pollAmuxV19MaxSessionAnalysisCandidateIds } from
   "../lib/amux/ideaLocalSessionAnalysisQueuePoll.mjs";
 
 const origin = "https://staging.tomverse.example/";
@@ -11,9 +12,45 @@ const candidate = (index) => ({
   reservationId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
   ideaId: `idea_${index}`, modelId: "frontier-model",
   expiresAt: "2026-10-18T00:00:00.000Z",
+  nextInvocationOrdinal: 0,
 });
 const page = { candidates: Array.from({ length: 32 }, (_, index) => candidate(index)),
   hasMore: true, nextCursor: "next_page_1" };
+
+test("Max queue poll sends only its dedicated launcher credential", async () => {
+  const originKey = AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV;
+  const maxKey = "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET";
+  const priorOrigin = process.env[originKey];
+  const priorMax = process.env[maxKey];
+  const maxSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
+  try {
+    process.env[originKey] = origin;
+    delete process.env[maxKey];
+    let calls = 0;
+    assert.deepEqual(await pollAmuxV19MaxSessionAnalysisCandidateIds({ origin,
+      fetchImpl: async () => { calls++; return Response.json(page); },
+    }), { kind: "refused" });
+    assert.equal(calls, 0);
+    process.env[maxKey] = maxSecret;
+    const result = await pollAmuxV19MaxSessionAnalysisCandidateIds({ origin,
+      fetchImpl: async (_url, options) => {
+        calls++;
+        assert.equal(options.headers.authorization, `Bearer ${maxSecret}`);
+        assert.equal(options.headers["x-amux-agent-id"], "amux-intake-max");
+        return Response.json({ candidates: [candidate(0)],
+          hasMore: false, nextCursor: null });
+      },
+    });
+    assert.deepEqual(result, { kind: "candidates",
+      candidates: [candidate(0)], hasMore: false, nextCursor: null });
+    assert.equal(calls, 1);
+  } finally {
+    if (priorOrigin === undefined) delete process.env[originKey];
+    else process.env[originKey] = priorOrigin;
+    if (priorMax === undefined) delete process.env[maxKey];
+    else process.env[maxKey] = priorMax;
+  }
+});
 const poll = (input) => pollAmuxV19SessionAnalysisCandidateIds({
   origin, agentSecret: secret, ...input,
 });
@@ -91,6 +128,10 @@ test("local v19 poll rejects redirects, unbounded or content-bearing responses",
       { ...page, candidates: [{ ...candidate(0), prompt: "bad" },
         ...page.candidates.slice(1)] },
       { ...page, candidates: [{ ...candidate(0), reservationId: "bad/id" },
+        ...page.candidates.slice(1)] },
+      { ...page, candidates: [{ ...candidate(0), nextInvocationOrdinal: -1 },
+        ...page.candidates.slice(1)] },
+      { ...page, candidates: [{ ...candidate(0), nextInvocationOrdinal: 2_147_483_648 },
         ...page.candidates.slice(1)] },
       { ...page, huge: "x".repeat(65_536) },
     ]) {

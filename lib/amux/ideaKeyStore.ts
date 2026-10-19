@@ -22,9 +22,11 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const KEY_BYTES = 32;
 const STORED_BYTES = MAGIC.length + IV_BYTES + TAG_BYTES + KEY_BYTES;
-// This fixed, non-secret body occupies a retired read-manifest key's object
+// This fixed, non-secret body occupies a retired intake key's object
 // coordinate so an earlier conditional PutObject cannot recreate key material.
-const RETIRED_READ_MANIFEST_KEY = Buffer.from("AMUX-READ-MANIFEST-KEY-RETIRED-v1", "ascii");
+const RETIRED_INTAKE_KEY = Buffer.from("AMUX-READ-MANIFEST-KEY-RETIRED-v1", "ascii");
+const retiresOrphanKey = (purpose: AmuxContentPurpose) =>
+  purpose === "repository_read_manifest" || purpose === "analysis_result";
 
 export type AmuxContentKeyIdentity = {
   ideaId: string;
@@ -249,7 +251,7 @@ export async function verifyAmuxContentUnitKeyAbsent(
 export async function retireClaimedAmuxReadManifestKey(
   input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  if (input.purpose !== "repository_read_manifest") {
+  if (!retiresOrphanKey(input.purpose)) {
     throw new AmuxIdeaKeyStoreError("integrity_unavailable");
   }
   const { objectKey } = identity(input);
@@ -257,7 +259,7 @@ export async function retireClaimedAmuxReadManifestKey(
   const abortSignal = AbortSignal.timeout(30_000);
   try {
     await client.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey,
-      Body: RETIRED_READ_MANIFEST_KEY,
+      Body: RETIRED_INTAKE_KEY,
       ContentType: "application/octet-stream", CacheControl: "no-store" }),
     { abortSignal });
     await finishClaimedReadManifestRetirement(client, bucket, objectKey,
@@ -272,7 +274,7 @@ export async function retireClaimedAmuxReadManifestKey(
 export async function verifyAmuxReadManifestKeyRetired(
   input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  if (input.purpose !== "repository_read_manifest") {
+  if (!retiresOrphanKey(input.purpose)) {
     throw new AmuxIdeaKeyStoreError("integrity_unavailable");
   }
   const { objectKey } = identity(input);
@@ -292,7 +294,7 @@ export async function verifyAmuxReadManifestKeyRetired(
 export async function finishClaimedAmuxReadManifestKeyRetirement(
   input: AmuxContentKeyIdentity, env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  if (input.purpose !== "repository_read_manifest") {
+  if (!retiresOrphanKey(input.purpose)) {
     throw new AmuxIdeaKeyStoreError("integrity_unavailable");
   }
   const { objectKey } = identity(input);
@@ -302,7 +304,7 @@ export async function finishClaimedAmuxReadManifestKeyRetirement(
     if (await inspectRetiredFence(client, bucket, objectKey,
       abortSignal) === "needs_fence") {
       await client.send(new PutObjectCommand({ Bucket: bucket,
-        Key: objectKey, Body: RETIRED_READ_MANIFEST_KEY,
+        Key: objectKey, Body: RETIRED_INTAKE_KEY,
         ContentType: "application/octet-stream", CacheControl: "no-store" }),
       { abortSignal });
     }
@@ -313,6 +315,14 @@ export async function finishClaimedAmuxReadManifestKeyRetirement(
     throw new AmuxIdeaKeyStoreError("outcome_unknown");
   } finally { client.destroy(); }
 }
+
+/** The same conditional-create fence protects an orphan Max result key. */
+export const retireClaimedAmuxSessionResultKey =
+  retireClaimedAmuxReadManifestKey;
+export const verifyAmuxSessionResultKeyRetired =
+  verifyAmuxReadManifestKeyRetired;
+export const finishClaimedAmuxSessionResultKeyRetirement =
+  finishClaimedAmuxReadManifestKeyRetirement;
 
 function isCloudflareR2(env: NodeJS.ProcessEnv): boolean {
   try {
@@ -338,7 +348,7 @@ async function inspectRetiredFence(client: S3Client, bucket: string,
   if (!result.Body) throw new AmuxIdeaKeyStoreError("outcome_unknown");
   const bytes = Buffer.from(await result.Body.transformToByteArray());
   try {
-    return bytes.equals(RETIRED_READ_MANIFEST_KEY) ?
+    return bytes.equals(RETIRED_INTAKE_KEY) ?
       "retired" : "needs_fence";
   } finally { bytes.fill(0); }
 }
