@@ -23,6 +23,7 @@ import {
   catalogEntryPatchSchema,
   createImagePriceRevision,
   priceRevisionSchema,
+  storeCatalogDraft,
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
 import { judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
@@ -34,7 +35,6 @@ import {
   MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
 } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@prisma/client";
 
 // The dynamic model catalogue (image and coding; chat is a read-only view of
 // the model registry; video has no activation policy yet). Every write commits
@@ -199,18 +199,7 @@ export async function POST(req: Request) {
       body.category === "image"
         ? await llm.draftImagePrices({ provider: body.provider, apiModelId: body.apiModelId, pages })
         : await llm.draftCodingProfile({ provider: body.provider, apiModelId: body.apiModelId, pages });
-    const data = {
-      draft: draft as Prisma.InputJsonValue,
-      draftSource: "llm",
-      draftCreatedAt: new Date(),
-      updatedById: session.user?.id ?? null,
-      updatedByEmail: session.user?.email ?? null,
-    };
-    await prisma.modelCatalogEntry.upsert({
-      where: { category_modelId: { category: body.category, modelId: body.modelId } },
-      create: { category: body.category, modelId: body.modelId, ...data },
-      update: data,
-    });
+    await storeCatalogDraft({ category: body.category, modelId: body.modelId, draft, session, request: req });
     return NextResponse.json({ ok: true, draft });
   } catch (error) {
     return refusalResponse(error) ?? NextResponse.json({ error: "Catalog action failed." }, { status: 500 });

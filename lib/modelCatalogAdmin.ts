@@ -8,7 +8,7 @@ import type { Session } from "next-auth";
 import { z } from "zod";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
+import { IMAGE_MODEL_REGISTRY, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import { invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
 import {
   codingProfileSchema,
@@ -17,6 +17,7 @@ import {
   imageProfileOverrideSchema,
   imageVerificationSchema,
   isOfficialSourceUrl,
+  judgeImageModel,
   MODEL_ID_PATTERN,
   resolveImageCatalog,
   type StoredCatalogCategory,
@@ -92,12 +93,15 @@ export const updateCatalogEntry = async (input: {
   patch: CatalogEntryPatch;
   session: Session;
   request?: Request;
+  tx?: Prisma.TransactionClient;
 }) => {
   const { category, modelId, patch, session } = input;
   if (!MODEL_ID_PATTERN.test(modelId)) throw new CatalogRefusal("invalid_model_id", [], 400);
   const profile = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
 
-  const result = await prisma.$transaction(async (tx) => {
+  const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogEntry.upsert>>>) =>
+    input.tx ? body(input.tx) : prisma.$transaction(body);
+  const result = await run(async (tx) => {
     const before = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category, modelId } },
     });
@@ -175,6 +179,7 @@ export const createImagePriceRevision = async (input: {
   session: Session;
   request?: Request;
   now?: Date;
+  tx?: Prisma.TransactionClient;
 }) => {
   const now = input.now ?? new Date();
   const { modelId, revision, session } = input;
@@ -184,7 +189,9 @@ export const createImagePriceRevision = async (input: {
     throw new CatalogRefusal("retroactive_price", [], 400);
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogPriceRevision.create>>>) =>
+    input.tx ? body(input.tx) : prisma.$transaction(body);
+  const result = await run(async (tx) => {
     const row = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category: "image", modelId } },
     });
@@ -203,6 +210,24 @@ export const createImagePriceRevision = async (input: {
       },
     });
     if (duplicate) throw new CatalogRefusal("pricing_version_reused", [], 409);
+
+    // Judge the model at the new price before storing it: a revision below the
+    // credit floor or with an unbounded worst case is refused here, not
+    // discovered later as a model that quietly stopped serving.
+    const base = seed ?? null;
+    const candidate = base
+      ? { ...base, disabledReason: null, prices: revision.prices, pricingVersion: revision.pricingVersion, priceVerification: revision.verification }
+      : null;
+    if (candidate) {
+      const admission = judgeImageModel(candidate as never, {
+        minimumCredits: minimumCreditsForImageOption,
+        // Budget is an enable-time question; a price is judged on its own.
+        providerBudgetReady: () => true,
+      });
+      if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons);
+    } else if (revision.verification.thinkingCapMicroUsd === null) {
+      throw new CatalogRefusal("not_admitted", ["worst_case_cost_unbounded"]);
+    }
 
     const created = await tx.modelCatalogPriceRevision.create({
       data: {
@@ -250,32 +275,72 @@ export const applyCatalogDraft = async (input: {
   session: Session;
   request?: Request;
 }) => {
-  const row = await prisma.modelCatalogEntry.findUnique({
-    where: { category_modelId: { category: input.category, modelId: input.modelId } },
-  });
-  if (!row?.draft) throw new CatalogRefusal("no_draft", [], 404);
-  if (input.category === "coding") {
-    const parsed = codingProfileSchema.safeParse(row.draft);
-    if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
-    await updateCatalogEntry({
-      category: "coding",
-      modelId: input.modelId,
-      patch: { profile: parsed.data },
-      session: input.session,
-      request: input.request,
+  // One transaction: the draft read, its application and its removal commit
+  // together, so a draft written in between is neither applied nor lost.
+  await prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ draft: unknown }[]>`
+      SELECT "draft" FROM "ModelCatalogEntry"
+      WHERE "category" = ${input.category} AND "modelId" = ${input.modelId}
+      FOR UPDATE`;
+    const draft = rows[0]?.draft;
+    if (!draft) throw new CatalogRefusal("no_draft", [], 404);
+    if (input.category === "coding") {
+      const parsed = codingProfileSchema.safeParse(draft);
+      if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
+      await updateCatalogEntry({
+        category: "coding",
+        modelId: input.modelId,
+        patch: { profile: parsed.data },
+        session: input.session,
+        request: input.request,
+        tx,
+      });
+    } else {
+      const parsed = priceRevisionSchema.safeParse(draft);
+      if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
+      await createImagePriceRevision({
+        modelId: input.modelId,
+        revision: parsed.data,
+        session: input.session,
+        request: input.request,
+        tx,
+      });
+    }
+    await tx.modelCatalogEntry.update({
+      where: { category_modelId: { category: input.category, modelId: input.modelId } },
+      data: { draft: Prisma.DbNull, draftSource: null, draftCreatedAt: null },
     });
-  } else {
-    const parsed = priceRevisionSchema.safeParse(row.draft);
-    if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
-    await createImagePriceRevision({
-      modelId: input.modelId,
-      revision: parsed.data,
-      session: input.session,
-      request: input.request,
-    });
-  }
-  await prisma.modelCatalogEntry.update({
-    where: { category_modelId: { category: input.category, modelId: input.modelId } },
-    data: { draft: Prisma.DbNull, draftSource: null, draftCreatedAt: null },
   });
+  if (input.category === "image") invalidateImageModelCatalog();
 };
+
+/** Store a model-written draft, with its audit row. Nothing it holds serves until applied. */
+export const storeCatalogDraft = async (input: {
+  category: StoredCatalogCategory;
+  modelId: string;
+  draft: unknown;
+  session: Session;
+  request?: Request;
+}) =>
+  prisma.$transaction(async (tx) => {
+    const data = {
+      draft: input.draft as Prisma.InputJsonValue,
+      draftSource: "llm",
+      draftCreatedAt: new Date(),
+    };
+    await tx.modelCatalogEntry.upsert({
+      where: { category_modelId: { category: input.category, modelId: input.modelId } },
+      create: { category: input.category, modelId: input.modelId, ...data },
+      update: data,
+    });
+    await writeAdminAuditLog({
+      session: input.session,
+      request: input.request,
+      action: "model_catalog.draft_stored",
+      targetType: "ModelCatalogEntry",
+      targetId: `${input.category}:${input.modelId}`,
+      summary: `Stored an LLM draft for ${input.category} model ${input.modelId}.`,
+      metadata: { category: input.category, modelId: input.modelId },
+      tx,
+    });
+  });

@@ -64,7 +64,8 @@ test("NULL inherits, a hold disables, and an override changes only what it names
   ]);
   const model = models.find((m) => m.id === enabledSeed.id);
   assert.equal(model.disabledReason, "operational_hold");
-  assert.equal(model.disabledNote, "provider incident");
+  // The operator's note stays on the admin surface; browsers get the code note.
+  assert.equal(model.disabledNote, enabledSeed.disabledNote);
   assert.equal(model.name, "Renamed");
   assert.deepEqual(model.prices, enabledSeed.prices);
   assert.equal(model.pricingVersion, enabledSeed.pricingVersion);
@@ -137,6 +138,26 @@ test("a model that exists only in the database needs a full profile and a price"
   assert.equal(added.provider, "openai");
 });
 
+test("a revision below the floor never serves, even when the row says inherit or there is no row", () => {
+  // Review finding 2026-10-19: the judge used to run only for enabled: true.
+  const cheap = {
+    ...revision(enabledSeed.id, "v-floor", "2026-10-01T00:00:00Z", 1),
+    prices: [{ quality: "high", size: "1024x1024", credits: 1, outputCostMicroUsd: 2_000_000 }],
+  };
+  for (const rows of [[], [row(enabledSeed.id, { enabled: null })]]) {
+    const { models } = resolve(rows, [cheap]);
+    assert.notEqual(models.find((m) => m.id === enabledSeed.id).disabledReason, null);
+  }
+});
+
+test("revisions with the same effectiveFrom resolve the same way everywhere: the later write wins", () => {
+  const at = "2026-10-01T00:00:00Z";
+  const a = { ...revision(enabledSeed.id, "v-a", at), createdAt: new Date("2026-09-30T00:00:00Z") };
+  const b = { ...revision(enabledSeed.id, "v-b", at), createdAt: new Date("2026-09-30T00:00:01Z") };
+  assert.equal(effectiveRevisions([a, b], NOW).get(enabledSeed.id).pricingVersion, "v-b");
+  assert.equal(effectiveRevisions([b, a], NOW).get(enabledSeed.id).pricingVersion, "v-b");
+});
+
 test("credits below the policy floor are refused", () => {
   const cheap = revision(enabledSeed.id, "v-cheap", "2026-10-01T00:00:00Z", 1);
   const { models } = resolve([row(enabledSeed.id, { enabled: true })], [cheap]);
@@ -148,6 +169,12 @@ test("sources must be the provider's own https documentation", () => {
   assert.equal(isOfficialSourceUrl("openai", "http://developers.openai.com/pricing"), false);
   assert.equal(isOfficialSourceUrl("openai", "https://openai.com.example.org/pricing"), false);
   assert.equal(isOfficialSourceUrl("openai", "https://ai.google.dev/pricing"), false);
+  // Exact hosts: a user forum on a provider subdomain is not documentation.
+  assert.equal(isOfficialSourceUrl("openai", "https://community.openai.com/t/1"), false);
+  assert.equal(isOfficialSourceUrl("openai", "https://openai.com:8443/pricing"), false);
+  // A provider name that is an Object prototype key is unknown, not a crash.
+  assert.equal(isOfficialSourceUrl("toString", "https://openai.com/x"), false);
+  assert.equal(isOfficialSourceUrl("constructor", "https://openai.com/x"), false);
 });
 
 test("the registry lookups read the active catalogue and fall back to the seed", () => {
@@ -174,9 +201,10 @@ const codingProfile = (overrides = {}) => ({
   ...overrides,
 });
 
-const codingDeps = (established = true) => ({
+const codingDeps = (established = true, floor = 1) => ({
   knownProvider: (p) => p === "openai",
   providerDestinationEstablished: () => established,
+  creditFloor: () => floor,
 });
 
 test("a coding model needs terms, retention and an established data destination", () => {
@@ -192,6 +220,9 @@ test("a coding model needs terms, retention and an established data destination"
     codingDeps()
   );
   assert.ok(blog.reasons.includes("retention_source_unofficial"));
+  // A credit weight below what the worst turn costs is refused.
+  assert.ok(judgeCodingModel(codingProfile(), codingDeps(true, 9)).reasons.includes("credits_below_floor:9"));
+  assert.ok(judgeCodingModel(codingProfile(), codingDeps(true, null)).reasons.includes("credit_floor_unbounded"));
 });
 
 test("the snapshot hash names content, not key order or row order", () => {
@@ -241,12 +272,13 @@ test("an LLM coding answer cannot cite a page it did not fetch", () => {
     },
     "openai",
     "gpt-coding",
-    sources
+    sources,
+    () => 7
   );
   assert.equal(draft.terms.allowsResaleAndCodingAgent, false);
   assert.equal(draft.terms.url, sources[0]);
   assert.equal(draft.retention.url, sources[0]);
-  assert.ok(draft.pricing.creditWeight >= 1);
+  assert.equal(draft.pricing.creditWeight, 7);
 });
 
 test("page text drops scripts and tags", () => {

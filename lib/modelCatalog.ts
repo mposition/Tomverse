@@ -27,9 +27,11 @@ import {
   snapshotCoverageUntil,
   type CodingAdmission,
   type CodingCatalogRow,
+  type CodingProfile,
   type ImageAdmission,
   type ResolvedImageCatalog,
 } from "@/lib/modelCatalogCore";
+import { suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
@@ -50,11 +52,29 @@ export const judgeImage = (model: ImageModelProfile): ImageAdmission =>
     providerBudgetReady: imageProviderBudgetReady,
   });
 
+/**
+ * Credits the worst coding turn costs at a profile's price, from the chat
+ * catalogue's own rule (suggestCreditFloor). A coding task can fill the whole
+ * context window, so the worst input is the model's context, not chat's 128k;
+ * Anthropic's cache write premium is the input multiplier there.
+ */
+export const codingCreditFloor = (profile: CodingProfile): number | null => {
+  const floor = suggestCreditFloor({
+    inputUsdPerMillionTokens: profile.pricing.inputUsdPerMTok,
+    outputUsdPerMillionTokens: profile.pricing.outputUsdPerMTok,
+    maxOutputTokens: profile.capabilities.maxOutputTokens,
+    inputPriceMultiplier: profile.provider === "anthropic" ? 1.25 : 1,
+    worstCaseInputTokens: profile.capabilities.maxContextTokens,
+  });
+  return "credits" in floor ? floor.credits : null;
+};
+
 export const judgeCoding = (row: CodingCatalogRow): CodingAdmission =>
   judgeCodingModel(row, {
     knownProvider: isAiProvider,
     providerDestinationEstablished: (provider) =>
       isAiProvider(provider) && providerDestinationIsEstablished(provider as AiProvider),
+    creditFloor: codingCreditFloor,
   });
 
 export const loadImageCatalog = async (now = new Date()): Promise<ResolvedImageCatalog> => {
@@ -62,6 +82,7 @@ export const loadImageCatalog = async (now = new Date()): Promise<ResolvedImageC
     prisma.modelCatalogEntry.findMany({ where: { category: "image" } }),
     prisma.modelCatalogPriceRevision.findMany({
       where: { category: "image", effectiveFrom: { lte: now } },
+      orderBy: [{ effectiveFrom: "asc" }, { createdAt: "asc" }],
     }),
   ]);
   return resolveImageCatalog({
@@ -74,11 +95,17 @@ export const loadImageCatalog = async (now = new Date()): Promise<ResolvedImageC
 };
 
 let cached: { at: number; models: readonly ImageModelProfile[] } | null = null;
+let inFlight: Promise<readonly ImageModelProfile[]> | null = null;
+let generation = 0;
 
 /**
  * Resolve the image catalogue and make it the one the registry lookups read.
  * Cached briefly so a burst of requests reads the database once; an operator's
- * change is live within IMAGE_CATALOG_TTL_MS.
+ * change is live within IMAGE_CATALOG_TTL_MS (immediately on this instance).
+ *
+ * A failed read keeps the last catalogue this process resolved: falling back
+ * to the code seed would quietly lift an operator's hold. The seed is served
+ * only if the database has never been read.
  */
 export const refreshImageModelCatalog = async (
   options: { force?: boolean } = {}
@@ -89,26 +116,38 @@ export const refreshImageModelCatalog = async (
     setActiveImageModelCatalog(cached.models);
     return cached.models;
   }
-  try {
-    const { models } = await loadImageCatalog(new Date(now));
-    cached = { at: now, models };
-    setActiveImageModelCatalog(models);
-    return models;
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "model_catalog_image_read_failed",
-        served: "code_seed",
-        error: error instanceof Error ? error.message : "unknown",
-      })
-    );
-    setActiveImageModelCatalog(IMAGE_MODEL_REGISTRY);
-    return IMAGE_MODEL_REGISTRY;
-  }
+  if (inFlight && !options.force) return inFlight;
+  const started = generation;
+  const load = (async () => {
+    try {
+      const { models } = await loadImageCatalog(new Date(now));
+      // An invalidation during this read means the result may predate a write.
+      if (started === generation) cached = { at: now, models };
+      setActiveImageModelCatalog(models);
+      return models;
+    } catch (error) {
+      const kept = cached?.models ?? IMAGE_MODEL_REGISTRY;
+      console.error(
+        JSON.stringify({
+          event: "model_catalog_image_read_failed",
+          served: cached ? "last_resolved" : "code_seed",
+          error: error instanceof Error ? error.message : "unknown",
+        })
+      );
+      setActiveImageModelCatalog(kept);
+      return kept;
+    } finally {
+      inFlight = null;
+    }
+  })();
+  inFlight = load;
+  return load;
 };
 
 export const invalidateImageModelCatalog = () => {
-  cached = null;
+  generation += 1;
+  if (cached) cached = { ...cached, at: 0 };
+  inFlight = null;
 };
 
 // --- coding ------------------------------------------------------------------

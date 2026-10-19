@@ -27,7 +27,7 @@ import {
   OFFICIAL_SOURCE_HOSTS,
   type CodingProfile,
 } from "@/lib/modelCatalogCore";
-import { suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { codingCreditFloor } from "@/lib/modelCatalog";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 
 export const MODEL_CATALOG_DRAFT_LLM_MODEL_ENV = "MODEL_CATALOG_DRAFT_LLM_MODEL_ID";
@@ -57,6 +57,25 @@ export const pageToText = (body: string): string =>
     .trim()
     .slice(0, PAGE_TEXT_CHARS);
 
+/** Read at most PAGE_MAX_BYTES, whatever the server claims about length. */
+const readBounded = async (response: Response): Promise<string | null> => {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > PAGE_MAX_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+};
+
 /** Fetch one official page: https, the provider's own hosts, no redirects, bounded. */
 export const fetchOfficialPage = async (provider: string, url: string): Promise<DraftPage> => {
   if (!isOfficialSourceUrl(provider, url)) throw new DraftRefusal("unofficial_source", url);
@@ -80,7 +99,8 @@ export const fetchOfficialPage = async (provider: string, url: string): Promise<
     await response.body?.cancel().catch(() => undefined);
     throw new DraftRefusal("page_too_large", url);
   }
-  const body = (await response.text()).slice(0, PAGE_MAX_BYTES);
+  const body = await readBounded(response);
+  if (body === null) throw new DraftRefusal("page_too_large", url);
   return { url, text: pageToText(body) };
 };
 
@@ -197,26 +217,13 @@ export const imageDraftFromAnswer = (
   };
 };
 
-const codingCreditFloor = (
-  pricing: { inputUsdPerMTok?: number; outputUsdPerMTok?: number } | undefined,
-  maxOutputTokens: number | undefined
-): number => {
-  const floor = suggestCreditFloor({
-    inputUsdPerMillionTokens: pricing?.inputUsdPerMTok ?? null,
-    outputUsdPerMillionTokens: pricing?.outputUsdPerMTok ?? null,
-    maxOutputTokens: maxOutputTokens ?? null,
-  });
-  // No class covers it (or the price is unknown): no number that would serve.
-  if (!("credits" in floor)) throw new DraftRefusal("draft_rejected", `credit_floor:${floor.reason}`);
-  return floor.credits;
-};
-
 /** Turn the model's coding answer into a profile draft, or refuse it. */
 export const codingDraftFromAnswer = (
   answer: unknown,
   provider: string,
   apiModelId: string,
-  sources: readonly string[]
+  sources: readonly string[],
+  creditFloor: (profile: CodingProfile) => number | null
 ): CodingProfile => {
   const value = answer as {
     name: string;
@@ -237,10 +244,9 @@ export const codingDraftFromAnswer = (
     pricing: {
       inputUsdPerMTok: value?.pricing?.inputUsdPerMTok,
       outputUsdPerMTok: value?.pricing?.outputUsdPerMTok,
-      // The chat catalogue's own floor (suggestCreditFloor): the cheapest
-      // class that covers the worst turn. A floor, not a sale price -- the
-      // operator may raise it before applying the draft.
-      creditWeight: codingCreditFloor(value?.pricing, value?.capabilities?.maxOutputTokens),
+      // Replaced below by the floor the judge uses (codingCreditFloor). A
+      // floor, not a sale price: the operator may raise it before applying.
+      creditWeight: 1,
       verifiedAt: today(),
       sources: [...sources],
     },
@@ -255,7 +261,10 @@ export const codingDraftFromAnswer = (
   };
   const parsed = codingProfileSchema.safeParse(draft);
   if (!parsed.success) throw new DraftRefusal("draft_rejected", parsed.error.issues.map((i) => i.path.join(".")).join(","));
-  return parsed.data;
+  // The floor is computed from the parsed profile with the same rule the judge uses.
+  const floor = creditFloor(parsed.data);
+  if (floor === null) throw new DraftRefusal("draft_rejected", "credit_floor_unbounded");
+  return { ...parsed.data, pricing: { ...parsed.data.pricing, creditWeight: floor } };
 };
 
 /** The configured model, or null when drafting is off. */
@@ -302,7 +311,7 @@ export const catalogDraftLlmFromEnv = async (
     draftImagePrices: async ({ provider, apiModelId, pages }) =>
       imageDraftFromAnswer(await call("image", provider, apiModelId, pages), pages.map((p) => p.url), apiModelId),
     draftCodingProfile: async ({ provider, apiModelId, pages }) =>
-      codingDraftFromAnswer(await call("coding", provider, apiModelId, pages), provider, apiModelId, pages.map((p) => p.url)),
+      codingDraftFromAnswer(await call("coding", provider, apiModelId, pages), provider, apiModelId, pages.map((p) => p.url), codingCreditFloor),
   };
 };
 

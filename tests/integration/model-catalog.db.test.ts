@@ -9,8 +9,10 @@ import {
   refreshImageModelCatalog,
 } from "@/lib/modelCatalog";
 import {
+  applyCatalogDraft,
   CatalogRefusal,
   createImagePriceRevision,
+  storeCatalogDraft,
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
 import { prisma } from "@/lib/prisma";
@@ -127,6 +129,19 @@ test("a price revision is append-only, not retroactive, and cites official sourc
   );
   await assert.rejects(prisma.modelCatalogPriceRevision.delete({ where: { id: created.id } }), /append-only/);
 
+  // Below the credit floor: refused before it is stored (review finding 2026-10-19).
+  await assert.rejects(
+    createImagePriceRevision({
+      modelId: enabledSeed.id,
+      revision: {
+        pricingVersion: "below-floor",
+        prices: [{ quality: "high", size: "1024x1024", credits: 1, outputCostMicroUsd: 2_000_000 }],
+        verification,
+      },
+      session,
+    }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "not_admitted"
+  );
   await assert.rejects(
     createImagePriceRevision({
       modelId: enabledSeed.id,
@@ -219,6 +234,22 @@ test("a coding model is published in an immutable snapshot only once admitted an
     updateCatalogEntry({ category: "coding", modelId: "gpt-catalog-test", patch: { profile: refused }, session }),
     (error: unknown) =>
       error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("terms_do_not_allow")
+  );
+});
+
+test("a stored draft is audited, applied in one step, and cleared", async () => {
+  const draftsBefore = await auditCount("model_catalog.draft_stored");
+  await storeCatalogDraft({ category: "coding", modelId: "gpt-draft-test", draft: codingProfile, session });
+  assert.equal(await auditCount("model_catalog.draft_stored"), draftsBefore + 1);
+  await applyCatalogDraft({ category: "coding", modelId: "gpt-draft-test", session });
+  const row = await prisma.modelCatalogEntry.findUnique({
+    where: { category_modelId: { category: "coding", modelId: "gpt-draft-test" } },
+  });
+  assert.equal(row?.draft, null);
+  assert.equal((row?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-catalog-test");
+  await assert.rejects(
+    applyCatalogDraft({ category: "coding", modelId: "gpt-draft-test", session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "no_draft"
   );
 });
 

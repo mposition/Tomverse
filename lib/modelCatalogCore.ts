@@ -46,20 +46,25 @@ export const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
  */
 export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> = {
   openai: ["openai.com", "developers.openai.com", "platform.openai.com"],
-  anthropic: ["anthropic.com", "docs.anthropic.com", "docs.claude.com", "claude.com"],
+  anthropic: ["www.anthropic.com", "anthropic.com", "docs.anthropic.com", "docs.claude.com", "www.claude.com"],
   google: ["ai.google.dev", "cloud.google.com"],
   xai: ["docs.x.ai", "x.ai"],
   fal: ["fal.ai"],
-  deepseek: ["api-docs.deepseek.com", "deepseek.com"],
+  deepseek: ["api-docs.deepseek.com"],
   mistral: ["docs.mistral.ai", "mistral.ai"],
-  moonshot: ["platform.moonshot.ai", "moonshot.ai"],
-  qwen: ["alibabacloud.com", "help.aliyun.com"],
-  zhipu: ["docs.z.ai", "z.ai", "bigmodel.cn"],
-  minimax: ["platform.minimax.io", "minimax.io"],
-  groq: ["console.groq.com", "groq.com"],
-  perplexity: ["docs.perplexity.ai", "perplexity.ai"],
+  moonshot: ["platform.moonshot.ai"],
+  qwen: ["www.alibabacloud.com", "help.aliyun.com"],
+  zhipu: ["docs.z.ai"],
+  minimax: ["platform.minimax.io"],
+  groq: ["console.groq.com"],
+  perplexity: ["docs.perplexity.ai"],
 };
 
+/**
+ * Exact hosts only: a subdomain wildcard would admit user-written pages
+ * (community.openai.com) as "official", and this list is also the fetch
+ * allowlist for LLM drafts. No port, https only.
+ */
 export const isOfficialSourceUrl = (provider: string, url: string): boolean => {
   let parsed: URL;
   try {
@@ -67,9 +72,9 @@ export const isOfficialSourceUrl = (provider: string, url: string): boolean => {
   } catch {
     return false;
   }
-  if (parsed.protocol !== "https:") return false;
-  const hosts = OFFICIAL_SOURCE_HOSTS[provider] ?? [];
-  return hosts.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
+  if (parsed.protocol !== "https:" || parsed.port !== "" || parsed.username || parsed.password) return false;
+  if (!Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider)) return false;
+  return OFFICIAL_SOURCE_HOSTS[provider].includes(parsed.hostname);
 };
 
 // --- schemas ---------------------------------------------------------------
@@ -193,6 +198,8 @@ export type PriceRevisionInput = {
   prices: unknown;
   verification: unknown;
   effectiveFrom: Date;
+  /** Breaks a tie between revisions with the same effectiveFrom: the later write wins everywhere. */
+  createdAt?: Date;
 };
 
 export type ImageAdmission = { admitted: true } | { admitted: false; reasons: readonly string[] };
@@ -243,9 +250,14 @@ export const effectiveRevisions = (
   for (const revision of revisions) {
     if (revision.effectiveFrom.getTime() > now.getTime()) continue;
     const current = byModel.get(revision.modelId);
-    if (!current || revision.effectiveFrom.getTime() > current.effectiveFrom.getTime()) {
-      byModel.set(revision.modelId, revision);
-    }
+    const later =
+      !current ||
+      revision.effectiveFrom.getTime() > current.effectiveFrom.getTime() ||
+      (revision.effectiveFrom.getTime() === current.effectiveFrom.getTime() &&
+        ((revision.createdAt?.getTime() ?? 0) > (current.createdAt?.getTime() ?? 0) ||
+          ((revision.createdAt?.getTime() ?? 0) === (current.createdAt?.getTime() ?? 0) &&
+            revision.pricingVersion > current.pricingVersion)));
+    if (later) byModel.set(revision.modelId, revision);
   }
   return byModel;
 };
@@ -331,7 +343,8 @@ export const resolveImageCatalog = (input: {
       if (override.success) model = { ...model, ...override.data };
       else problems.push({ modelId: base.id, problem: "invalid_override" });
     }
-    const priced = applyRevision(model, revisions.get(base.id));
+    const revision = revisions.get(base.id);
+    const priced = applyRevision(model, revision);
     if (!priced) {
       problems.push({ modelId: base.id, problem: "invalid_price_revision" });
       continue;
@@ -341,16 +354,22 @@ export const resolveImageCatalog = (input: {
     let disabledReason: ImageModelDisabledReason | null = model.disabledReason;
     if (row?.holdReason || row?.enabled === false) {
       disabledReason = "operational_hold";
-    } else if (row?.enabled === true) {
-      const admission = input.judge({ ...model, disabledReason: null });
-      disabledReason = admission.admitted ? null : reasonFor(admission.reasons);
+    } else {
+      const wouldServe = row?.enabled === true || disabledReason === null;
+      // The code seed as committed is checked by check:image-pricing. Anything
+      // an operator added -- a row, a price revision, a whole model -- is
+      // judged here before it can serve, so a revision priced below the floor
+      // never serves just because the row said "inherit".
+      const operatorTouched = Boolean(row) || Boolean(revision) || !seedIds.has(base.id);
+      if (wouldServe && operatorTouched) {
+        const admission = input.judge({ ...model, disabledReason: null });
+        disabledReason = admission.admitted ? null : reasonFor(admission.reasons);
+      }
     }
+    // A hold reason is an operator note: it stays on the admin surface and is
+    // not sent to browsers as the model's public disabledNote.
     resolved.push({
-      model: {
-        ...model,
-        disabledReason,
-        ...(row?.holdReason ? { disabledNote: row.holdReason } : {}),
-      },
+      model: { ...model, disabledReason },
       order: row?.sortOrder ?? order,
     });
   }
@@ -380,9 +399,14 @@ export const judgeCodingModel = (
   deps: {
     knownProvider: (provider: string) => boolean;
     providerDestinationEstablished: (provider: string) => boolean;
+    /** The credits the worst task turn costs at this price, or null when it cannot be bounded. */
+    creditFloor: (profile: CodingProfile) => number | null;
   }
 ): CodingAdmission => {
   const reasons: string[] = [];
+  const floor = deps.creditFloor(profile);
+  if (floor === null) reasons.push("credit_floor_unbounded");
+  else if (profile.pricing.creditWeight < floor) reasons.push(`credits_below_floor:${floor}`);
   if (!deps.knownProvider(profile.provider)) reasons.push("unknown_provider");
   if (!deps.providerDestinationEstablished(profile.provider)) reasons.push("provider_destination_unproven");
   if (!profile.terms.allowsResaleAndCodingAgent) reasons.push("terms_do_not_allow");

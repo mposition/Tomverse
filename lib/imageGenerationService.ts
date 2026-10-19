@@ -1710,6 +1710,13 @@ export const retryImageGenerationTarget = async (
     };
   }
 
+  // The retry button shows what the failed attempt reserved, so the retry is
+  // bound to that attempt's price version: a price changed in between answers
+  // IMAGE_PRICE_CHANGED instead of charging an amount the user was not shown.
+  const failedReservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId: current.id },
+    select: { pricingVersion: true },
+  });
   const result = await requestImageGeneration(
     {
       userId: input.userId,
@@ -1719,6 +1726,9 @@ export const retryImageGenerationTarget = async (
       conversationId: target.group.conversationId,
       idempotencyKey: `retry-${input.retryIdempotencyKey}`.slice(0, 64),
       modelIds: [target.modelId],
+      ...(failedReservation
+        ? { expectedPricingVersions: { [target.modelId]: failedReservation.pricingVersion } }
+        : {}),
     },
     now
   );
