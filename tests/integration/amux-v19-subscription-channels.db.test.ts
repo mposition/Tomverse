@@ -51,7 +51,9 @@ const ownerEmail = "amux-channel-owner@example.test";
 process.env.ADMIN_USER_IDS = ownerId;
 process.env.ADMIN_EMAILS = ownerEmail;
 process.env.ADMIN_OWNER_EMAILS = ownerEmail;
-process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-subscription-channel-audit-key-2026";
+// The same key as the other v19 suites in the shared amux lane: the Frontier
+// catalog read verifies every approval row's audit, including theirs.
+process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-intake-operating-scope-audit-key-2026";
 const session = {
   user: { id: ownerId, email: ownerEmail, authenticatedAt: new Date().toISOString() },
   expires: new Date(Date.now() + 60 * 60_000).toISOString(),
@@ -191,9 +193,12 @@ const CHANNELS = [["openai", "synthetic-codex-" + randomUUID()],
   ["anthropic", "synthetic-claude-" + randomUUID()]] as const;
 const channels: Channel[] = [];
 
+// CI runs this suite in the shared amux lane after session-submission, whose
+// append-only scope rows stay; selectScope() writes on top of the latest one,
+// and after() puts the scope that was current back for the suites that follow.
+let priorScope: AmuxOperatingScopeAuthority | null = null;
 before(async () => {
-  assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), 0,
-    "use the fresh DB runner before any persistent scope fixture");
+  priorScope = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
   for (const [provider, modelId] of CHANNELS) {
     channels.push({ ...await approveChannel(provider, modelId),
       authority: undefined as unknown as AmuxOperatingScopeAuthority });
@@ -201,6 +206,12 @@ before(async () => {
 });
 
 after(async () => {
+  if (priorScope) {
+    const current = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
+    await prisma.$transaction((tx) => commitAmuxOperatingScope(tx, {
+      session, request, id: randomUUID(), expectedPreviousVersion: current?.version ?? 0,
+      scope: priorScope!.scope, ownerConfirmed: true }));
+  }
   masterKey.fill(0);
   digestKey.fill(0);
   await prisma.$disconnect();
@@ -211,9 +222,13 @@ test("Frontier approvals, scope, reservation and price accept all four CLI chann
     where: { status: "approved" }, select: { provider: true } });
   assert.deepEqual([...new Set(rows.map((row) => row.provider))].sort(),
     ["anthropic", "cursor", "github-copilot", "openai"]);
+  // Only this suite's prices: earlier suites in the shared lane leave theirs.
   const prices = await prisma.amuxIdeaAnalysisPriceVersion.findMany({
-    where: { mode: "subscription_cli", status: "approved" }, select: { provider: true } });
-  assert.equal(prices.length, 4);
+    where: { mode: "subscription_cli", status: "approved",
+      id: { in: channels.map((channel) => channel.priceVersionId) } },
+    select: { provider: true } });
+  assert.deepEqual(prices.map((price) => price.provider).sort(),
+    ["anthropic", "cursor", "github-copilot", "openai"]);
   // The applied constraints: four channels on the v19 path, two on the v4 hold.
   const definitions = await prisma.$queryRaw<Array<{ name: string; definition: string }>>`
     SELECT conname AS "name", pg_get_constraintdef(oid) AS "definition" FROM pg_constraint
