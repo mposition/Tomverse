@@ -380,6 +380,10 @@ export const TRIAGE_LANES = Object.freeze([
 ] as const);
 export type TriageLane = (typeof TRIAGE_LANES)[number];
 
+/** Where a ready suggestion's lane came from: the keyword rule, or the LLM step (2026-10-19). */
+export const LANE_SOURCES = Object.freeze(["keyword", "llm"] as const);
+export type LaneSource = (typeof LANE_SOURCES)[number];
+
 /** Codes from fixed per-locale keyword lists; a report's text never becomes anything else. */
 export const KEYWORD_FLAGS = Object.freeze([
   "money",

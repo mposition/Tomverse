@@ -9808,6 +9808,12 @@ model SupportTriageSuggestion {
   attemptCount    Int       @default(0)
   lane            String?
   keywordFlags    String[]  @default([])
+  /// Where the lane came from: keyword or llm (migration 20261019100000).
+  laneSource      String?
+  /// Open reports the LLM named as duplicates, at most five.
+  duplicateOfFeedbackIds String[] @default([])
+  /// A reply draft for the operator to review; never sent by itself.
+  replyDraft      String?
   ownerQueueState String    @default("not_queued")
   displayedAt     DateTime?
   createdAt       DateTime  @default(now())

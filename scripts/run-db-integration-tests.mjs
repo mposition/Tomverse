@@ -418,6 +418,9 @@ run(
     // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
     // supersede on a changed input, nothing for a closed or deleted report.
     "tests/integration/support-triage-worker.db.test.ts",
+    // Support-triage LLM step: the model answer written with the ready row, the
+    // human-lane floor, and the keyword lane when there is no answer.
+    "tests/integration/support-triage-llm.db.test.ts",
     // Support-triage new groups: one kind per group, the higher kind first, a
     // tombstoned key stops a second group, a member lost to a concurrent pass
     // empties and invalidates the group, and the pass membership budget.

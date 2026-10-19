@@ -1523,6 +1523,13 @@ const REGISTRY = {
     reason:
       "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
   },
+  SupportTriageSuggestion_laneSource_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "LANE_SOURCES",
+    reason:
+      "Where a ready suggestion's lane came from. llm when the model answered and no money or trust-and-safety keyword held the human lane; keyword otherwise.",
+  },
   SupportTriageSuggestion_ownerQueueState_check: {
     owner: "list",
     module: "lib/supportTriageCore.ts",
