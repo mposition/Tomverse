@@ -767,6 +767,21 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
   // absent: it is a free-form Json bag whose keys are not enumerated anywhere,
   // and passing an unreviewed field bag through is the one thing an allowlist
   // is for. Giving it a declared shape is what would let it be exported.
+  // The message Auto read and the model it chose. The candidates, the rule's
+  // choice and the router model are routing internals.
+  autoRouterDecision: (userId) =>
+    prisma.autoRouterDecision.findMany({
+      where: { userId },
+      select: {
+        conversationId: true,
+        routerInput: true,
+        pickedModelId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   productAnalyticsEvent: (userId) =>
     prisma.productAnalyticsEvent.findMany({
       where: { userId },

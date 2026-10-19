@@ -38,7 +38,6 @@ import { autoProductBoundary } from "@/lib/autoProductBoundary";
 import type { ProductKeyReadMode } from "@/lib/productKeyReadMode";
 import {
   storedSelectionMode,
-  stickyStateFor,
   type ConversationRoutingState,
 } from "@/lib/conversationSelectionMode";
 import {
@@ -114,6 +113,8 @@ export type AutoSelection =
        * already refused.
        */
       fallbackCandidateModelIds: readonly string[];
+      /** Estimated credits per model for this turn, for the LLM pick. */
+      candidateCreditsByModelId: Readonly<Record<string, number>>;
       record: RouterDecisionRecord;
       versions: RouterVersions;
       cohort: Extract<AutoCohortDecision, { eligible: true }>;
@@ -318,7 +319,11 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
       availableCredits: input.availableCredits,
       creditsByModelId: input.creditsByModelId,
       attachmentTokensFor: input.attachmentTokensFor,
-      sticky: stickyStateFor(input.conversation),
+      // Auto chooses per prompt, not per conversation. The stored sticky
+      // state is still written after a turn, but it no longer pins the next
+      // one: with every quality band neutral it could never be overturned,
+      // so the first turn's model answered the whole conversation.
+      sticky: null,
       signals: input.signals,
     },
     input.now
@@ -379,8 +384,42 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
       allocationMode: useHash ? "explore_bounded" : "deterministic",
       allocationSeedGrain: useHash ? "session" : null,
     },
+    candidateCreditsByModelId: billedCreditsByModelId,
     versions: ROUTER_VERSIONS,
     cohort,
+  };
+};
+
+/**
+ * Replace the deterministic choice with the one a model call made for this
+ * prompt (lib/autoLlmRouter.ts).
+ *
+ * The pick only reorders the Router's own eligible set: a model the filters
+ * refused -- plan, credits, context window, health, web search -- cannot be
+ * chosen however the call answers. A null or unknown pick leaves the
+ * deterministic selection exactly as it was.
+ */
+export const applyLlmModelPick = (
+  selection: AutoSelection,
+  pickedModelId: string | null
+): AutoSelection => {
+  if (!selection.routed || !pickedModelId) return selection;
+  if (!selection.record.eligibleModelIds.includes(pickedModelId)) return selection;
+  const ranked = [selection.modelId, ...selection.fallbackCandidateModelIds];
+  return {
+    ...selection,
+    modelId: pickedModelId,
+    sticky: { modelId: pickedModelId, turnsFavouringChallenger: 0 },
+    stickyMemoryModelId: undefined,
+    fallbackCandidateModelIds: ranked.filter((modelId) => modelId !== pickedModelId),
+    record: {
+      ...selection.record,
+      selectedModelId: pickedModelId,
+      selectionReason: "llm_pick",
+      selectionDecidedBy: null,
+      allocationMode: "deterministic",
+      allocationSeedGrain: null,
+    },
   };
 };
 

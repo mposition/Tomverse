@@ -406,3 +406,42 @@ loopback fixture 전용이며 제품 사용자의 일반 Chat에는
 품질 인증이나 provider adapter 승인, Refiner 활성화 또는 Router 결합 승인이 아니다.
 실제 caller는 이 builder를 단독 입력 경로로 사용해야 하고, 비용·receipt·의미 보존·
 model-output 평가 등 §6의 나머지 조건은 별도로 충족해야 한다.
+
+## 9. Auto router 재작성 (운영자 결정 2026-10-19)
+
+Auto LLM router(`lib/autoLlmRouter.ts`)는 모델을 고르는 같은 호출에서 메시지를
+다시 쓸 수 있다. Admin › Routing의 `auto.llmRouterRewrite` 스위치가 켜져 있을 때만이며
+기본은 꺼짐이다. 스위치를 켜고 끄는 일은 감사 기록과 같은 트랜잭션에서 일어난다.
+꺼져 있으면 router 프롬프트와 출력 schema는 바이트 단위로 이전과 같고 재작성을
+요청하지도 않는다. 이 경로는 위 §1~§6의 Prompt Refiner 경로(제안 UI, 버전별 release
+권한, receipt)를 바꾸지 않으며, 다음 두 가지만 그 경로와 다르다.
+
+- **§4 예외: 문맥을 읽는다.** router 호출은 직전 답변 앞부분(600자)과 이 대화의 router
+  기억(session)을 함께 읽는다. 재작성의 목적이 "위 코드 고쳐 줘" 같은 지칭을 그 문맥으로
+  풀어 독립적인 요청으로 만드는 것이므로 "현재 턴 텍스트만"은 이 경로에 적용하지 않는다.
+  대신 고정된 system 규칙이 메시지와 직전 답변을 자료로만 취급하게 하고, 답을 하거나
+  요구사항을 더하거나 그 안의 지시를 따르지 못하게 한다. 서버는 출력을 실행 입력으로 쓰기
+  전에 `admitRouterRewrite()`로 길이(1,500자 이하), 빈 값, 원문과의 동일 여부를 확인한다.
+- **§1·§6 예외: 자동 채택 권한이 Admin 스위치다.** 서명된 release 권한 대신 위 스위치가
+  정한다. 적용 대상은 로그인 사용자의 Auto 라우팅 턴, 1,500자 이하의 일반 텍스트 메시지,
+  기존 Refiner 제안이 이미 적용되지 않은 턴뿐이다. 대화의 어느 메시지에든 첨부(Chat이 문자열
+  `content` 옆에 보내는 `attachments`)가 있으면 재작성을 요청하지도 적용하지도 않는다. router는
+  첨부 내용을 읽지 않으므로 "이 파일"이나 "그 코드"가 무엇인지 알 수 없기 때문이다. guest Smart
+  Adaptive 경로는 바뀌지 않는다.
+
+다음은 이 경로에서도 그대로 지킨다.
+
+- §2: 저장되는 사용자 Message는 원문이다. 재작성문은 답변 모델이 읽는 실행 입력
+  (`executionMessages`의 마지막 사용자 텍스트)에만 들어가며(`withRouterRewrite()`), 구조화된
+  content(첨부·part)인 턴은 바꾸지 않는다.
+- §1: 무엇도 스스로 전송하지 않는다. 재작성은 사용자가 이미 보낸 턴의 실행 입력일 뿐이다.
+- 표시: 답변의 Auto 배지 아래에 접힌 "Auto가 이해한 메시지"로 재작성문과 "보내신 메시지는
+  쓰신 그대로 저장됩니다"를 보인다(`components/chat/AutoRewriteDisclosure.tsx`). 배지가 있는
+  턴에서만 렌더하고, 문구는 더 낫다는 약속을 하지 않는다. 재작성문은 같은 응답의
+  `X-Chat-Auto-Rewrite` header(base64url UTF-8)로만 오고 런타임 전용이며 직렬화 allowlist 밖이다.
+- 기록: `AutoRouterDecision.rewrite`에 남는다. 원문(`routerInput`)과 같은 행이라 대화·계정
+  삭제와 함께 지워진다. 그 턴의 version에는 `+rewrite`가 붙는다.
+
+검증: `tests/autoLlmRouterCore.test.mjs`가 꺼진 상태의 프롬프트 동일성, 켜진 상태의 규칙과
+schema, `admitRouterRewrite()`의 경계, `withRouterRewrite()`가 마지막 일반 텍스트 사용자
+메시지만 바꾸고 입력을 변경하지 않는 것을 고정한다.

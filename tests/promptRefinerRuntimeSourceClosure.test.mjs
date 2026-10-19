@@ -491,10 +491,10 @@ const compilerOptions = parsedConfig.options;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
-const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "92292132d4526ae903a3fb17bb7c8e43",
-  "33e4d2d3ae52e9588da59826c6a82603",
-].join("");
+// 2026-10-19 owner direction (AGENTS.md gate-test principle): the positional
+// snapshot digest is retired. It changed whenever any file in the closure
+// moved a line, while the count and the position-free inventory above
+// already fail on a new, removed or changed computed access.
 
 const unwrapStaticExpression = (node) => {
   let current = node;
@@ -1481,11 +1481,6 @@ test("runtime source allowlist is exactly the deterministic local runtime import
       .digest("hex"),
     REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256,
     "non-static element access inventory changed beyond source positions"
-  );
-  assert.equal(
-    dynamicAccesses.digest,
-    REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256,
-    "non-static element access snapshot changed; unreviewed computed access is fail-closed"
   );
   const expected = [...fixedNonImportPaths, ...runtimeImportClosure()];
   const actual = [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS];
