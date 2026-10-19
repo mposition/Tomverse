@@ -71,10 +71,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  admin-console-e2e:
+  # Two shards since 2026-10-19: the suite grew to ~11 minutes of Playwright
+  # plus a ~3 minute uncached build, and on every develop push it was the
+  # slowest check Railway's Wait for CI held the dev deployment for. Each
+  # shard has its own runner and its own PostgreSQL service, so the suite's
+  # one-worker rule (it resets one database) still holds inside each shard.
+  # The required check keeps its name on the rollup job below.
+  admin-console-e2e-shard:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    name: Admin Console E2E (PostgreSQL)
+    name: Admin Console E2E (PostgreSQL, shard ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+        shards: [2]
     # Measured ~3 minutes of Playwright plus a production build. 25 minutes
     # leaves room for a cold npm and browser cache while still stopping a hung
     # web server rather than letting it burn the runner's full allowance.
@@ -290,7 +301,7 @@ jobs:
       # mean. A mean of 7 minutes was always true while the tail was failing.
       - name: Run the Admin Console E2E suite
         timeout-minutes: 20
-        run: npm run test:e2e:admin:run
+        run: npm run test:e2e:admin:run -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       # Uploaded on every run that was not cancelled, not only on failure.
       #
@@ -306,9 +317,26 @@ jobs:
         timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
-          name: admin-console-e2e-${{ github.run_id }}
+          name: admin-console-e2e-${{ github.run_id }}-shard-${{ matrix.shard }}
           path: |
             test-results-admin
             playwright-report-admin
           if-no-files-found: ignore
           retention-days: 14
+
+  # The name branch protection requires on develop and main. A matrix renames
+  # its checks, so the original name stays here as the conjunction of the
+  # shards; always() so a failed or cancelled shard reports red, not pending.
+  admin-console-e2e:
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    name: Admin Console E2E (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [admin-console-e2e-shard]
+    steps:
+      - name: Require every shard to have passed
+        env:
+          RESULT: ${{ needs.admin-console-e2e-shard.result }}
+        run: |
+          echo "Shards: $RESULT"
+          test "$RESULT" = "success"
