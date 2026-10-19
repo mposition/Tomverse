@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { Loader2, Lock, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useState, type ReactNode } from "react";
+import { AlertTriangle, ArrowRight, Check, ChevronDown, Loader2, Lock, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
   MARKETING_CHECKED,
@@ -25,6 +26,7 @@ import {
   type MarketingConsoleSection,
 } from "@/lib/marketingConsoleSections";
 import { adminFetch } from "@/lib/adminFetch";
+import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
@@ -49,6 +51,8 @@ export type MarketingConsoleView = {
   configGeneration: number | null;
   /** The generator's model and monthly LLM cap (lib/marketingConsoleRead.ts). */
   llm: LlmView;
+  /** The four numbers at the top (lib/marketingConsoleOverview.ts). */
+  overview: MarketingConsoleOverview;
   /** Staging only; null everywhere else (lib/marketingConsoleRead.ts). */
   webhookStaging: WebhookStagingView | null;
   /** Rows were left out at the section's limit (lib/marketingConsoleRead.ts). */
@@ -156,11 +160,19 @@ const hostList = (value: string) =>
  * so a change is a decision about the row the operator was looking at rather
  * than whichever row is there when the request lands.
  */
-export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView }) {
+export function AdminMarketingPanel({
+  initial,
+  tabs,
+}: {
+  initial: MarketingConsoleView;
+  /** The section strip, a server component the page renders and this panel places. */
+  tabs?: ReactNode;
+}) {
   const m = useAdminMessages(adminMarketingMessages);
   const [view, setView] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [channel, setChannel] = useState<string>("");
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -185,141 +197,402 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
     }
   }, [initial.section, m.loadFailed]);
 
-  const heading = {
-    queue: { title: m.queueTitle, description: m.queueDescription },
-    published: { title: m.publishedTitle, description: m.publishedDescription },
-    accounts: { title: m.accountsTitle, description: m.accountsDescription },
-    reports: { title: m.reportsTitle, description: m.reportsDescription },
-    competitors: { title: m.competitorsTitle, description: m.competitorsDescription },
-    experiments: { title: m.experimentsTitle, description: m.experimentsDescription },
-    comments: { title: m.commentsTitle, description: m.commentsDescription },
-  }[view.section];
-
   const unavailable = view.availability.available ? null : view.availability;
+  const done = () => void refresh();
+  // A filter over the rows this page already read, never a new query: the
+  // list says how many it holds, and the filter only narrows what is drawn.
+  const channels = [...new Set(view.rows.map((row) => str(row.channel)).filter(Boolean))].sort();
+  const rows = channel ? view.rows.filter((row) => str(row.channel) === channel) : view.rows;
+  const now = view.overview.readAt;
 
+  // Three bands, in the order an operator asks the questions: what needs me
+  // (the overview), what is in this section (the list, under its tabs), and
+  // what is switched on and what it costs (the settings rail). The rail is
+  // beside the list on a wide screen and below it on a narrow one.
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Marketing
-          </p>
-          <h2 className="mt-2 text-2xl font-black text-white">{heading.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            {heading.description}
-          </p>
-          <p className="mt-2 text-xs text-zinc-500">
-            {view.canWrite ? m.writesNote : m.readOnlyNote}
-          </p>
+    <section className="flex min-w-0 flex-col gap-6" data-testid="marketing-console">
+      <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs text-zinc-500">{m.consoleEyebrow}</p>
+          <h2 className="mt-1 text-2xl font-bold text-white">{m.consoleTitle}</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">{m.consoleDescription}</p>
+          {view.canWrite ? null : <p className="mt-1 text-xs text-zinc-500">{m.readOnlyNote}</p>}
         </div>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={busy}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5" />
-          )}
-          {m.refresh}
-        </button>
-      </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <MarketingTag tone="neutral">{view.overview.environment}</MarketingTag>
+          <span className="text-xs text-zinc-500">
+            {m.updatedAt.replace("{time}", `${(stamp(now) ?? "").slice(11)} UTC`)}
+          </span>
+          <button
+            type="button"
+            onClick={done}
+            disabled={busy}
+            className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-[13px] font-semibold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {m.refresh}
+          </button>
+        </div>
+      </header>
 
-      <MarketingSwitchStrip
-        switches={view.switches}
-        canWrite={view.canWrite}
-        configGeneration={view.configGeneration}
-        section={view.section}
-        onDone={() => void refresh()}
-        m={m}
-      />
+      <MarketingOverview view={view} m={m} />
 
-      <MarketingLlmSettings
-        llm={view.llm}
-        canWrite={view.canWrite}
-        section={view.section}
-        onDone={() => void refresh()}
-        m={m}
-      />
-
-      {view.webhookStaging ? (
-        <MarketingWebhookStaging
-          staging={view.webhookStaging}
-          canWrite={view.canWrite}
-          section={view.section}
-          onDone={() => void refresh()}
-          m={m}
-        />
-      ) : null}
-
-      {view.canWrite ? (
-        <MarketingWebhookVerificationSign
-          section={view.section}
-          onDone={() => void refresh()}
-          m={m}
-        />
-      ) : null}
-
-      {view.canWrite ? <MarketingWebhookProduction section={view.section} /> : null}
-
-      {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
-
-      {unavailable ? (
-        <p className="mt-4 flex items-start gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4 text-sm leading-6 text-zinc-300">
-          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
-          {unavailable.stage === "S4" ? m.unavailableS4 : m.unavailableS5}
+      {error ? (
+        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          {error}
         </p>
-      ) : (
-        <>
-          {view.section === "accounts" && view.canWrite ? (
-            <MarketingAccountCreate
-              section={view.section}
-              onDone={() => void refresh()}
-              m={m}
-            />
-          ) : null}
-          {view.section === "competitors" && view.canWrite ? (
-            <MarketingCompetitorCreate
-              section={view.section}
-              onDone={() => void refresh()}
-              m={m}
-            />
-          ) : null}
-          <p className="mt-4 text-xs text-zinc-500">
-            {(view.ordering === "by-status" ? m.showingByStatus : m.showing).replace(
-              "{count}",
-              String(view.pageSize)
-            )}
-          </p>
-          {view.truncated ? (
-            <p className="mt-1 text-xs font-bold text-amber-300">{m.truncatedAtLimit}</p>
-          ) : null}
-          {view.rows.length === 0 ? (
-            <p className="mt-4 text-sm text-zinc-400">{m.empty}</p>
+      ) : null}
+
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="flex min-w-0 flex-col gap-4">
+          {tabs}
+          {unavailable ? (
+            <p className="flex items-start gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm leading-6 text-zinc-300">
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+              {unavailable.stage === "S4" ? m.unavailableS4 : m.unavailableS5}
+            </p>
           ) : (
-            <div className="mt-4 grid gap-2">
-              {view.rows.map((row) => (
-                <article
-                  key={String(row.id)}
-                  data-testid="marketing-row"
-                  className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
-                >
-                  <MarketingRow section={view.section} row={row} m={m} />
-                  <MarketingActionRail
-                    actions={view.canWrite ? rowActions(view.section, row, m) : []}
+            <>
+              {view.section === "accounts" && view.canWrite ? (
+                <MarketingAccountCreate section={view.section} onDone={done} m={m} />
+              ) : null}
+              {view.section === "competitors" && view.canWrite ? (
+                <MarketingCompetitorCreate section={view.section} onDone={done} m={m} />
+              ) : null}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-zinc-500">
+                  {(view.ordering === "by-status" ? m.showingByStatus : m.showing).replace(
+                    "{count}",
+                    String(view.pageSize)
+                  )}
+                  {" · "}
+                  {m.shownCount.replace("{n}", String(rows.length))}
+                </p>
+                {channels.length > 1 ? (
+                  <label className="relative inline-flex items-center">
+                    <span className="sr-only">{m.filterChannel}</span>
+                    <select
+                      data-testid="marketing-channel-filter"
+                      value={channel}
+                      onChange={(event) => setChannel(event.target.value)}
+                      className="min-h-11 cursor-pointer appearance-none rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:border-zinc-700 focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="">{m.filterAllChannels}</option>
+                      {channels.map((value) => (
+                        <option key={value} value={value}>
+                          {channelName(value)}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-2.5 h-4 w-4 text-zinc-500" />
+                  </label>
+                ) : null}
+                {view.truncated ? (
+                  <p className="w-full text-xs font-semibold text-amber-300">{m.truncatedAtLimit}</p>
+                ) : null}
+              </div>
+              {rows.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-400">
+                  {m.empty}
+                </p>
+              ) : (
+                <div className="grid gap-3">
+                  {rows.map((row) => (
+                    <article
+                      key={String(row.id)}
+                      data-testid="marketing-row"
+                      className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+                    >
+                      <MarketingRow section={view.section} row={row} now={now} m={m} />
+                      <MarketingActionRail
+                        actions={view.canWrite ? rowActions(view.section, row, m) : []}
+                        section={view.section}
+                        onDone={done}
+                        m={m}
+                      />
+                    </article>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <aside className="flex min-w-0 flex-col gap-4" aria-label={m.automationTitle}>
+          <MarketingSwitchStrip
+            switches={view.switches}
+            canWrite={view.canWrite}
+            configGeneration={view.configGeneration}
+            section={view.section}
+            onDone={done}
+            m={m}
+          />
+          <MarketingLlmSettings
+            llm={view.llm}
+            spend={view.overview.llm}
+            canWrite={view.canWrite}
+            section={view.section}
+            onDone={done}
+            m={m}
+          />
+          {view.webhookStaging || view.canWrite ? (
+            <div data-testid="marketing-webhook-card" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-[15px] font-semibold text-white">{m.webhookCardTitle}</h3>
+                <MarketingTag tone={view.switches.webhookShadow === "on" ? "success" : "neutral"}>
+                  {view.switches.webhookShadow === "on" ? m.switchOn : m.switchOff}
+                </MarketingTag>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">{m.webhookCardHint}</p>
+              <div className="mt-4 grid gap-5 [&>*+*]:border-t [&>*+*]:border-zinc-800 [&>*+*]:pt-5">
+                {view.webhookStaging ? (
+                  <MarketingWebhookStaging
+                    staging={view.webhookStaging}
+                    canWrite={view.canWrite}
                     section={view.section}
-                    onDone={() => void refresh()}
+                    onDone={done}
                     m={m}
                   />
-                </article>
-              ))}
+                ) : null}
+                {view.canWrite ? (
+                  <MarketingWebhookVerificationSign section={view.section} onDone={done} m={m} />
+                ) : null}
+                {view.canWrite ? <MarketingWebhookProduction section={view.section} /> : null}
+              </div>
             </div>
-          )}
-        </>
-      )}
+          ) : null}
+        </aside>
+      </div>
     </section>
+  );
+}
+
+const usd = (micro: number) => `$${(micro / 1_000_000).toFixed(2)}`;
+
+/**
+ * How long ago (or how long until) an instant was, measured from when the page
+ * was read on the server -- not from the browser's clock -- so the server's
+ * render and the browser's say the same thing.
+ */
+const relative = (iso: unknown, now: string, m: Record<string, string>): string | null => {
+  if (typeof iso !== "string") return null;
+  const at = Date.parse(iso);
+  const reference = Date.parse(now);
+  if (Number.isNaN(at) || Number.isNaN(reference)) return null;
+  const ahead = at > reference;
+  const minutes = Math.round(Math.abs(reference - at) / 60_000);
+  if (minutes < 1) return m.timeJustNow;
+  if (minutes < 60) return (ahead ? m.timeMinutesLeft : m.timeMinutesAgo).replace("{n}", String(minutes));
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return (ahead ? m.timeHoursLeft : m.timeHoursAgo).replace("{n}", String(hours));
+  return (ahead ? m.timeDaysLeft : m.timeDaysAgo).replace("{n}", String(Math.round(hours / 24)));
+};
+
+/** A small pill whose colour says what kind of state it is. */
+export function MarketingTag({
+  tone,
+  children,
+}: {
+  tone: "success" | "warning" | "danger" | "accent" | "neutral";
+  children: ReactNode;
+}) {
+  const colour = {
+    success: "bg-emerald-500/15 text-emerald-300",
+    warning: "bg-amber-500/15 text-amber-300",
+    danger: "bg-red-500/15 text-red-300",
+    accent: "bg-blue-500/15 text-blue-300",
+    neutral: "bg-zinc-800 text-zinc-400",
+  }[tone];
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${colour}`}>
+      {children}
+    </span>
+  );
+}
+
+const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "accent" | "neutral"> = {
+  drafted: "neutral",
+  guard_rejected: "danger",
+  pending_approval: "accent",
+  approved: "success",
+  rejected: "neutral",
+  approval_expired: "warning",
+  scheduled: "accent",
+  publishing: "accent",
+  published: "success",
+  failed: "danger",
+  outcome_unknown: "warning",
+  verified: "success",
+  removed_by_platform: "warning",
+  deleted: "neutral",
+  connect_pending: "warning",
+  approval_mode: "success",
+  autonomous_mode: "accent",
+  paused: "warning",
+  disconnected: "danger",
+  proposed: "warning",
+  retired: "neutral",
+};
+
+/** A status as words, in the colour of what it means; an unknown one as itself. */
+function StatusTag({ status, m }: { status: unknown; m: Record<string, string> }) {
+  const value = typeof status === "string" ? status : "";
+  return (
+    <MarketingTag tone={STATUS_TONE[value] ?? "neutral"}>
+      {m[`status_${value}`] ?? (value.replaceAll("_", " ") || m.none)}
+    </MarketingTag>
+  );
+}
+
+function StatCard({ label, testId, children }: { label: string; testId: string; children: ReactNode }) {
+  return (
+    <div data-testid={testId} className="flex min-w-0 flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <p className="text-[13px] font-medium text-zinc-400">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+const StatValue = ({ value, unit, tone }: { value: ReactNode; unit?: string; tone?: "accent" }) => (
+  <p className="flex items-baseline gap-1.5">
+    <span className={`text-3xl font-semibold tabular-nums ${tone === "accent" ? "text-blue-300" : "text-white"}`}>
+      {value}
+    </span>
+    {unit ? <span className="text-sm text-zinc-400">{unit}</span> : null}
+  </p>
+);
+
+const StatCaption = ({ children }: { children: ReactNode }) => (
+  <p className="text-xs leading-5 text-zinc-500">{children}</p>
+);
+
+/**
+ * The four numbers an operator opens this page for. Each was read on its own
+ * (lib/marketingConsoleOverview.ts); one that could not be read says so rather
+ * than showing zero.
+ */
+function MarketingOverview({ view, m }: { view: MarketingConsoleView; m: Record<string, string> }) {
+  const { pending, llm, lastRun, accounts, competitors, readAt } = view.overview;
+  const capRaw = view.llm.settings?.monthlyUsdCap ?? null;
+  const capMicro = capRaw === null ? null : Math.round(Number(capRaw) * 1_000_000);
+  const used = llm && capMicro ? Math.min(100, (llm.countedMicroUsd / capMicro) * 100) : 0;
+  const unreadable = <p className="text-sm font-semibold text-amber-300">{m.overviewUnreadable}</p>;
+
+  return (
+    <div data-testid="marketing-overview" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatCard label={m.overviewPending} testId="marketing-overview-pending">
+        {pending ? (
+          <>
+            <StatValue value={pending.count} unit={m.unitCount} tone={pending.count > 0 ? "accent" : undefined} />
+            <StatCaption>
+              {pending.oldestAt
+                ? m.overviewPendingAge.replace("{age}", relative(pending.oldestAt, readAt, m) ?? m.none)
+                : m.overviewPendingNone}
+            </StatCaption>
+            {pending.count > 0 ? (
+              <Link
+                href="/admin/marketing?tab=queue"
+                className="inline-flex min-h-11 items-center gap-1 self-start text-[13px] font-semibold text-blue-300 hover:underline"
+              >
+                {m.overviewReview}
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            ) : null}
+          </>
+        ) : (
+          unreadable
+        )}
+      </StatCard>
+
+      <StatCard label={m.overviewSpend} testId="marketing-overview-spend">
+        {llm ? (
+          <>
+            <StatValue
+              value={usd(llm.countedMicroUsd)}
+              unit={capMicro ? m.overviewSpendOf.replace("{cap}", usd(capMicro)) : m.overviewNoCap}
+            />
+            {capMicro ? <SpendMeter percent={used} label={m.overviewSpend} /> : null}
+            <StatCaption>
+              {m.overviewSpendModel
+                .replace("{model}", view.llm.settings?.model ?? m.llmUnset)
+                .replace("{calls}", String(llm.calls))
+                .replace("{percent}", String(Math.round(used)))}
+              <br />
+              {m.overviewSpendTokens.replace("{tokens}", usd(llm.tokenMicroUsd))}
+            </StatCaption>
+          </>
+        ) : (
+          unreadable
+        )}
+      </StatCard>
+
+      <StatCard label={m.overviewRun} testId="marketing-overview-run">
+        {lastRun === null ? (
+          unreadable
+        ) : lastRun.at === null ? (
+          <StatCaption>{m.overviewRunNever}</StatCaption>
+        ) : (
+          <>
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="text-3xl font-semibold tabular-nums text-white">
+                {(stamp(lastRun.at) ?? "").slice(11)}
+              </span>
+              {lastRun.factsKept === null ? null : lastRun.factsKept > 0 ? (
+                <MarketingTag tone="success">
+                  <Check className="h-3 w-3" />
+                  {m.overviewRunOk}
+                </MarketingTag>
+              ) : (
+                <MarketingTag tone="warning">
+                  <AlertTriangle className="h-3 w-3" />
+                  {m.overviewRunNoFacts}
+                </MarketingTag>
+              )}
+            </p>
+            <StatCaption>
+              {`${(stamp(lastRun.at) ?? "").slice(0, 10)} UTC · `}
+              {m.overviewRunCounts
+                .replace("{competitors}", competitors ? String(competitors.approved) : m.none)
+                .replace("{kept}", lastRun.factsKept === null ? m.none : String(lastRun.factsKept))
+                .replace("{dropped}", lastRun.factsDropped === null ? m.none : String(lastRun.factsDropped))}
+            </StatCaption>
+          </>
+        )}
+      </StatCard>
+
+      <StatCard label={m.overviewAccounts} testId="marketing-overview-accounts">
+        {accounts ? (
+          <>
+            <StatValue value={accounts.total} unit={m.unitAccounts} />
+            <StatCaption>
+              {m.overviewAccountsCaption
+                .replace("{approval}", String(accounts.byStatus.approval_mode ?? 0))
+                .replace("{autonomous}", String(accounts.byStatus.autonomous_mode ?? 0))
+                .replace("{paused}", String(accounts.byStatus.paused ?? 0))}
+            </StatCaption>
+          </>
+        ) : (
+          unreadable
+        )}
+      </StatCard>
+    </div>
+  );
+}
+
+/** How much of the monthly cap is counted, in the colour of how close it is. */
+function SpendMeter({ percent, label }: { percent: number; label: string }) {
+  const colour = percent >= 90 ? "bg-red-500" : percent >= 70 ? "bg-amber-500" : "bg-blue-500";
+  return (
+    <div
+      className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
+      role="meter"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(percent)}
+      aria-label={label}
+    >
+      <div className={`h-full rounded-full ${colour}`} style={{ width: `${Math.max(percent, 1)}%` }} />
+    </div>
   );
 }
 
@@ -353,10 +626,15 @@ function MarketingSwitchStrip({
   onDone: () => void;
   m: Record<string, string>;
 }) {
-  const labels: [string, string][] = [
-    ["drafts", m.switchDrafts],
-    ["publish", m.switchPublish],
-    ["autoPublish", m.switchAutoPublish],
+  // The three an operator can move, each with what it does and a switch, then
+  // the three that are only read here, folded away: they matter when something
+  // looks wrong, not on every visit.
+  const main: { key: string; name: (typeof MARKETING_CONSOLE_SWITCH_CONTROLS)[number]["name"]; label: string; hint: string }[] = [
+    { key: "drafts", name: "drafts", label: m.switchDrafts, hint: m.switchDraftsHint },
+    { key: "publish", name: "publish", label: m.switchPublish, hint: m.switchPublishHint },
+    { key: "autoPublish", name: "autonomous", label: m.switchAutoPublish, hint: m.switchAutoPublishHint },
+  ];
+  const advanced: [string, string][] = [
     ["experiments", m.switchExperiments],
     ["webhookShadow", m.switchWebhookShadow],
     ["webhookApplyScope", m.switchWebhookApply],
@@ -375,86 +653,106 @@ function MarketingSwitchStrip({
   // never drawn as though something were switched on.
   const tone = (value: SwitchState) =>
     value === "on"
-      ? "text-emerald-300"
+      ? "success"
       : value === "unreadable" || value === "scope-invalid"
-        ? "text-amber-300"
-        : "text-zinc-400";
+        ? "warning"
+        : "neutral";
+  const stateOf = (key: string) => switches[key] ?? "unreadable";
 
-  const switchLabel = (name: string) =>
-    ({
-      drafts: m.switchDrafts,
-      publish: m.switchPublish,
-      autonomous: m.switchAutoPublish,
-    })[name] ?? name;
-
-  const toggles: MarketingAction[] =
-    !canWrite || configGeneration === null
-      ? []
-      : MARKETING_CONSOLE_SWITCH_CONTROLS.flatMap((control) => {
-          const state = switches[control.state];
-          if (state !== "on" && state !== "off") return [];
-          const turningOn = state === "off";
-          return [
-            {
-              id: `switch-${control.name}`,
-              label: (turningOn ? m.switchTurnOn : m.switchTurnOff).replace(
-                "{switch}",
-                switchLabel(control.name)
-              ),
-              path: "/api/admin/marketing/settings",
-              // The route exports PATCH. Sending POST answered 405, which
-              // reached the operator as "that did not go through" -- three
-              // switches that looked broken rather than misaddressed.
-              method: "PATCH",
-              // Two switches the writer is certain to refuse, each drawn
-              // disabled with its reason rather than hidden: someone looking
-              // for a switch should find out why it is not theirs to move,
-              // and a control whose only outcome is a 409 teaches them that
-              // this screen's buttons are guesses.
-              //
-              // Publishing cannot go on before the publisher exists (S2c);
-              // the writer answers `publisher_capability_unavailable`.
-              // Autonomous cannot go on while drafts or publishing are off;
-              // the writer answers `autonomous_needs_drafts_and_publish`.
-              unavailable: !turningOn
-                ? undefined
-                : control.name === "publish"
-                  ? m.switchPublishUnavailable
-                  : control.name === "autonomous" &&
-                      (switches.drafts !== "on" || switches.publish !== "on")
-                    ? m.switchAutonomousNeedsBoth
-                    : undefined,
-              confirm: turningOn ? m.switchConfirmOn : undefined,
-              body: () => ({
-                switch: control.name,
-                enabled: turningOn,
-                expectedConfigGeneration: configGeneration,
-              }),
-            },
-          ];
-        });
+  // One switch per row. A switch whose state cannot be read, or a viewer who
+  // may not write, gets no control at all: a switch has to show the real
+  // position, and there is no real position to show.
+  const toggleFor = (control: (typeof main)[number]): MarketingAction | null => {
+    const state = switches[control.key];
+    if (!canWrite || configGeneration === null || (state !== "on" && state !== "off")) return null;
+    const turningOn = state === "off";
+    return {
+      id: `switch-${control.name}`,
+      label: (turningOn ? m.switchTurnOn : m.switchTurnOff).replace("{switch}", control.label),
+      path: "/api/admin/marketing/settings",
+      // The route exports PATCH. Sending POST answered 405, which reached the
+      // operator as "that did not go through" -- three switches that looked
+      // broken rather than misaddressed.
+      method: "PATCH",
+      checked: state === "on",
+      // Two switches the writer is certain to refuse, each drawn disabled with
+      // its reason rather than hidden: someone looking for a switch should
+      // find out why it is not theirs to move, and a control whose only
+      // outcome is a 409 teaches them that this screen's buttons are guesses.
+      //
+      // Publishing cannot go on before the publisher exists (S2c); the writer
+      // answers `publisher_capability_unavailable`. Autonomous cannot go on
+      // while drafts or publishing are off; the writer answers
+      // `autonomous_needs_drafts_and_publish`.
+      unavailable: !turningOn
+        ? undefined
+        : control.name === "publish"
+          ? m.switchPublishUnavailable
+          : control.name === "autonomous" && (switches.drafts !== "on" || switches.publish !== "on")
+            ? m.switchAutonomousNeedsBoth
+            : undefined,
+      confirm: turningOn ? m.switchConfirmOn : undefined,
+      body: () => ({
+        switch: control.name,
+        enabled: turningOn,
+        expectedConfigGeneration: configGeneration,
+      }),
+    };
+  };
 
   return (
-    <div
-      data-testid="marketing-switches"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-3"
-    >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
-        {m.switchesTitle}
-      </p>
-      <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-        {labels.map(([key, label]) => (
-          <div key={key} className="flex items-baseline justify-between gap-2">
-            <dt className="truncate text-xs text-zinc-400">{label}</dt>
-            <dd
-              data-state={switches[key] ?? "unreadable"}
-              className={`text-xs font-bold ${tone(switches[key] ?? "unreadable")}`}
-            >
-              {word(switches[key] ?? "unreadable")}
-            </dd>
-          </div>
-        ))}
+    <div data-testid="marketing-switches" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <h3 className="text-[15px] font-semibold text-white">{m.automationTitle}</h3>
+      <p className="mt-1 text-xs leading-5 text-zinc-500">{m.automationHint}</p>
+      <dl className="mt-4 grid gap-4">
+        {main.map((control) => {
+          const action = toggleFor(control);
+          return (
+            <div key={control.key} className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <dt className="text-sm font-medium text-zinc-100">{control.label}</dt>
+                  <dd data-state={stateOf(control.key)}>
+                    <MarketingTag tone={tone(stateOf(control.key))}>{word(stateOf(control.key))}</MarketingTag>
+                  </dd>
+                </div>
+                {action?.unavailable ? (
+                  <p id={`marketing-why-${action.id}`} className="mt-1 text-xs leading-5 text-amber-300">
+                    {action.unavailable}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">{control.hint}</p>
+                )}
+              </div>
+              {action ? (
+                <MarketingActionRail
+                  actions={[action]}
+                  section={section}
+                  onDone={onDone}
+                  m={m}
+                  appearance="switch"
+                />
+              ) : null}
+            </div>
+          );
+        })}
       </dl>
+      <details className="group mt-4 border-t border-zinc-800 pt-3">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between text-[13px] font-medium text-zinc-400 hover:text-zinc-200">
+          {m.switchAdvancedCount.replace("{count}", String(advanced.length))}
+          <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
+        </summary>
+        <dl className="mt-2 grid gap-2">
+          {advanced.map(([key, label]) => (
+            <div key={key} className="flex items-center justify-between gap-3">
+              <dt className="text-[13px] text-zinc-400">{label}</dt>
+              <dd data-state={stateOf(key)}>
+                <MarketingTag tone={tone(stateOf(key))}>{word(stateOf(key))}</MarketingTag>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </details>
       {/*
         Only when the version is genuinely unreadable. A reader who may not
         write has no missing version -- they have no business changing these
@@ -462,14 +760,8 @@ function MarketingSwitchStrip({
         looking for a fault that is not there.
       */}
       {canWrite && configGeneration === null ? (
-        <p className="mt-2 text-[11px] text-amber-300">{m.switchNoGeneration}</p>
+        <p className="mt-3 text-xs text-amber-300">{m.switchNoGeneration}</p>
       ) : null}
-      <MarketingActionRail
-        actions={toggles}
-        section={section}
-        onDone={onDone}
-        m={m}
-      />
     </div>
   );
 }
@@ -477,18 +769,20 @@ function MarketingSwitchStrip({
 /**
  * The generator's model and monthly LLM cap, set here instead of in Railway
  * variables (operator decision 2026-10-19). The models are the OpenAI ones the
- * chat price catalog prices; one the ledger's limits refuse is listed with the
- * reason and not offered. The cost ledger reads these inside every
- * reservation, so a change applies to the next call.
+ * chat price catalog prices; only one the ledger's limits accept can be
+ * selected. The cost ledger reads these inside every reservation, so a change
+ * applies to the next call.
  */
 function MarketingLlmSettings({
   llm,
+  spend,
   canWrite,
   section,
   onDone,
   m,
 }: {
   llm: LlmView;
+  spend: MarketingConsoleOverview["llm"];
   canWrite: boolean;
   section: string;
   onDone: () => void;
@@ -496,6 +790,9 @@ function MarketingLlmSettings({
 }) {
   const settings = llm.settings;
   const models = llm.models.filter((option) => option.unavailable === null);
+  const selected = llm.models.find((option) => option.model === settings?.model) ?? null;
+  const capMicro = settings?.monthlyUsdCap ? Math.round(Number(settings.monthlyUsdCap) * 1_000_000) : null;
+  const percent = spend && capMicro ? Math.min(100, (spend.countedMicroUsd / capMicro) * 100) : 0;
   const action: MarketingAction[] = !canWrite
     ? []
     : [
@@ -529,46 +826,44 @@ function MarketingLlmSettings({
           }),
         },
       ];
+  const row = (label: string, value: ReactNode, testId?: string, mono?: boolean) => (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-[13px] text-zinc-400">{label}</dt>
+      <dd
+        data-testid={testId}
+        className={`truncate text-[13px] font-medium tabular-nums text-zinc-100 ${mono ? "font-mono" : ""}`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
 
   return (
-    <div data-testid="marketing-llm-settings" className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-3">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{m.llmTitle}</p>
+    <div data-testid="marketing-llm-settings" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <h3 className="text-[15px] font-semibold text-white">{m.llmTitle}</h3>
       {settings === null ? (
-        <p className="mt-2 text-xs text-amber-300">{m.llmUnreadable}</p>
+        <p className="mt-3 text-xs text-amber-300">{m.llmUnreadable}</p>
       ) : (
-        <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <dt className="text-xs text-zinc-400">{m.llmModel}</dt>
-            <dd data-testid="marketing-llm-model" className="truncate font-mono text-xs font-bold text-zinc-200">
-              {settings.model ?? m.llmUnset}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-2">
-            <dt className="text-xs text-zinc-400">{m.llmCap}</dt>
-            <dd data-testid="marketing-llm-cap" className="text-xs font-bold text-zinc-200">
-              {settings.monthlyUsdCap ?? m.llmUnset}
-            </dd>
-          </div>
+        <dl className="mt-4 grid gap-2.5">
+          {row(m.llmModel, settings.model ?? m.llmUnset, "marketing-llm-model", true)}
+          {row(m.llmCap, capMicro ? usd(capMicro) : m.llmUnset, "marketing-llm-cap")}
+          {spend ? (
+            <>
+              {row(m.llmUsed, `${usd(spend.countedMicroUsd)}${capMicro ? `  ·  ${Math.round(percent)}%` : ""}`)}
+              {capMicro ? <SpendMeter percent={percent} label={m.llmUsed} /> : null}
+            </>
+          ) : null}
+          {selected ? row(m.llmWorstSearch, usd(selected.worstCallMicroUsd)) : null}
         </dl>
       )}
-      {llm.models.length > 0 ? (
-        <ul data-testid="marketing-llm-models" className="mt-2 space-y-0.5 text-[11px] text-zinc-500">
-          {llm.models.map((option) => (
-            <li key={option.model} data-available={option.unavailable === null}>
-              <span className="font-mono">{option.model}</span>
-              {" · "}
-              {m.llmWorstCall.replace("{usd}", (option.worstCallMicroUsd / 1_000_000).toFixed(2))}
-              {option.unavailable === null ? null : (
-                <span className="text-amber-300">{` · ${m.llmUnavailable.replace("{reason}", option.unavailable)}`}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
       {settings === null || settings.model === null || settings.monthlyUsdCap === null ? (
-        <p className="mt-2 text-[11px] text-zinc-500">{m.llmNothingSpends}</p>
+        <p className="mt-3 rounded-lg bg-zinc-800/60 px-3 py-2 text-xs leading-5 text-zinc-400">
+          {m.llmNothingSpends}
+        </p>
       ) : null}
-      <MarketingActionRail actions={action} section={section} onDone={onDone} m={m} />
+      <div className="mt-4">
+        <MarketingActionRail actions={action} section={section} onDone={onDone} m={m} appearance="block" />
+      </div>
     </div>
   );
 }
@@ -622,9 +917,8 @@ export function MarketingWebhookVerificationSign({
   return (
     <div
       data-testid="marketing-webhook-verification-sign"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{m.webhookSignTitle}</p>
+      <p className="text-sm font-semibold text-zinc-100">{m.webhookSignTitle}</p>
       <p className="mt-1 text-xs text-zinc-500">{m.webhookSignNote}</p>
       <MarketingActionRail actions={sign} section={section} onDone={onDone} m={m} />
     </div>
@@ -727,9 +1021,8 @@ export function MarketingWebhookStaging({
   return (
     <div
       data-testid="marketing-webhook-staging"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+      <p className="text-sm font-semibold text-zinc-100">
         {m.webhookStagingTitle}
       </p>
       <p className="mt-1 text-xs text-zinc-500">{m.webhookStagingNote}</p>
@@ -898,9 +1191,9 @@ function MarketingAccountCreate({
   return (
     <div
       data-testid="marketing-account-create"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+      className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+      <p className="text-[15px] font-semibold text-white">
         {m.createAccountTitle}
       </p>
       <p className="mt-1 text-xs text-zinc-500">{m.createAccountNote}</p>
@@ -948,9 +1241,9 @@ function MarketingCompetitorCreate({
   return (
     <div
       data-testid="marketing-competitor-create"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+      className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+      <p className="text-[15px] font-semibold text-white">
         {m.createCompetitorTitle}
       </p>
       <p className="mt-1 text-xs text-zinc-500">{m.createCompetitorNote}</p>
@@ -992,6 +1285,7 @@ function competitorActions(row: Row, m: Record<string, string>): MarketingAction
   const pages = Array.isArray(row.trackedPages) ? (row.trackedPages as string[]) : [];
   const approve: MarketingAction = {
     id: "competitor-approve",
+    primary: true,
     label: m.actApproveCompetitor,
     path: COMPETITOR_DECISION(row.id),
     fields: [
@@ -1056,6 +1350,8 @@ const legalHoldAction = (row: Row, m: Record<string, string>): MarketingAction =
   const held = row.legalHold === true;
   return {
     id: held ? "legal-hold-release" : "legal-hold-set",
+    align: "end",
+    icon: "pause",
     label: held ? m.actReleaseHold : m.actSetHold,
     path: POST(row.id, "legal-hold"),
     confirm: held ? m.confirmReleaseHold : undefined,
@@ -1068,6 +1364,8 @@ function queueActions(row: Row, m: Record<string, string>): MarketingAction[] {
   if (row.status === "pending_approval") {
     actions.push({
       id: "approve",
+      primary: true,
+      icon: "check",
       label: m.actApprove,
       path: POST(row.id, "approve"),
       fields: [
@@ -1155,6 +1453,7 @@ function publishedActions(row: Row, m: Record<string, string>): MarketingAction[
   if (status === "approved") {
     actions.push({
       id: "schedule",
+      primary: true,
       label: m.actSchedule,
       path: POST(row.id, "schedule"),
       fields: [
@@ -1295,6 +1594,7 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
   if (status === "connect_pending") {
     actions.push({
       id: "confirm-connection",
+      primary: true,
       label: m.actConfirmConnection,
       path: ACCOUNT(row.id, "confirm-connection"),
       body: () => ({ expectedConnectionGeneration: generation }),
@@ -1463,46 +1763,90 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
-        {label}
-      </p>
-      <p className="mt-0.5 truncate text-sm text-zinc-200">{value}</p>
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-0.5 truncate text-[13px] text-zinc-200">{value}</p>
     </div>
   );
 }
 
+/** The line that says whose row this is, with its state on the right. */
+function RowHeading({ title, detail, children }: { title: string; detail?: string; children?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-sm font-semibold text-zinc-100">{title}</span>
+        {detail ? <span className="shrink-0 font-mono text-xs text-zinc-500">{detail}</span> : null}
+      </p>
+      <span className="flex shrink-0 flex-wrap items-center gap-1.5">{children}</span>
+    </div>
+  );
+}
+
+const CHANNEL_NAMES: Record<string, string> = {
+  linkedin: "LinkedIn",
+  x: "X",
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  threads: "Threads",
+  facebook: "Facebook",
+  youtube: "YouTube",
+  bluesky: "Bluesky",
+};
+const channelName = (value: unknown) => CHANNEL_NAMES[str(value)] ?? str(value);
+
+const guardWord = (decision: unknown, m: Record<string, string>) => {
+  const tone = guardTone(decision);
+  return tone === "success" ? m.guardPass : tone === "danger" ? m.guardBlock : m.guardReview;
+};
+
+const guardTone = (decision: unknown): "success" | "warning" | "danger" | "neutral" => {
+  const value = typeof decision === "string" ? decision : "";
+  if (/pass|allow|approve/u.test(value)) return "success";
+  if (/block|reject|deny|refuse/u.test(value)) return "danger";
+  return value ? "warning" : "neutral";
+};
+
 function MarketingRow({
   section,
   row,
+  now,
   m,
 }: {
   section: MarketingConsoleSection;
   row: Row;
+  /** When the page was read: relative times are measured from here. */
+  now: string;
   m: Record<string, string>;
 }) {
   if (section === "queue") {
+    const codes = ((row.guardCodes as string[]) ?? []).filter(Boolean);
+    const guard = guardTone(row.guardDecision);
     return (
       <>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label={m.colAccount} value={`${row.accountSlug} / ${row.channel}`} />
-          <Field label={m.colLocale} value={String(row.locale)} />
-          <Field label={m.colStatus} value={`${row.status} / ${row.mode}`} />
-          <Field
-            label={m.colVerdict}
-            value={
-              [row.guardDecision as string, ...(row.guardCodes as string[])]
-                .filter(Boolean)
-                .join(", ") || m.none
-            }
-          />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 rounded-md border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-xs font-medium text-zinc-200">
+              {channelName(row.channel)}
+            </span>
+            <span className="truncate text-[13px] font-semibold text-zinc-100">{str(row.accountSlug)}</span>
+            <span className="shrink-0 font-mono text-[11px] uppercase text-zinc-500">{str(row.locale)}</span>
+          </p>
+          <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+            {row.status === "pending_approval" ? null : <StatusTag status={row.status} m={m} />}
+            {row.legalHold === true ? <MarketingTag tone="warning">{m.legalHeld}</MarketingTag> : null}
+            <MarketingTag tone={guard}>
+              {guard === "success" ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+              Guard {guardWord(row.guardDecision, m)}
+              {codes.length > 0 ? ` · ${codes.join(" · ")}` : ""}
+            </MarketingTag>
+          </span>
         </div>
-        <p className="mt-3 text-sm leading-6 text-zinc-300">
-          {text(row.excerpt) ?? m.none}
-        </p>
-        <p className="mt-2 text-xs text-zinc-500">
-          {m.colCreated} {stamp(row.createdAt) ?? m.none} UTC / {m.colExpires}{" "}
-          {stamp(row.approvalExpiresAt) ?? m.none}
-          {row.legalHold === true ? ` / ${m.legalHeld}` : ""}
+        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-100">{text(row.excerpt) ?? m.none}</p>
+        <p className="mt-3 text-xs text-zinc-500" title={`${stamp(row.createdAt) ?? ""} UTC`}>
+          {m.queueMeta
+            .replace("{created}", relative(row.createdAt, now, m) ?? m.none)
+            .replace("{expires}", relative(row.approvalExpiresAt, now, m) ?? m.none)
+            .replace("{claims}", typeof row.claimCount === "number" ? String(row.claimCount) : m.none)}
         </p>
       </>
     );
@@ -1511,9 +1855,11 @@ function MarketingRow({
   if (section === "published") {
     return (
       <>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label={m.colAccount} value={`${row.accountSlug} / ${row.channel}`} />
-          <Field label={m.colStatus} value={`${row.status} / ${row.mode}`} />
+        <RowHeading title={str(row.accountSlug)} detail={`${str(row.channel)} · ${String(row.mode)}`}>
+          {row.legalHold === true ? <MarketingTag tone="warning">{m.legalHeld}</MarketingTag> : null}
+          <StatusTag status={row.status} m={m} />
+        </RowHeading>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label={m.colScheduled} value={stamp(row.scheduledAt) ?? m.none} />
           <Field label={m.colPublished} value={stamp(row.publishedAt) ?? m.none} />
           <Field
@@ -1524,8 +1870,8 @@ function MarketingRow({
                 : m.none
             }
           />
-          <Field label={m.colUrl} value={text(row.externalUrl) ?? m.none} />
           <Field label={m.colAttempts} value={String(row.publishAttempt ?? 0)} />
+          <Field label={m.colUrl} value={text(row.externalUrl) ?? m.none} />
           <Field
             label={m.colProblem}
             value={
@@ -1536,42 +1882,39 @@ function MarketingRow({
             }
           />
         </div>
-        {row.legalHold === true ? (
-          <p className="mt-2 text-xs font-bold text-amber-300">{m.legalHeld}</p>
-        ) : null}
       </>
     );
   }
 
   if (section === "accounts") {
     return (
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field
-          label={m.colAccount}
-          value={`${row.accountSlug} / ${row.channel} / ${row.provider}`}
-        />
-        <Field label={m.colStatus} value={String(row.status)} />
-        <Field
-          label={m.colLocale}
-          value={`${row.defaultLocale} (${(row.allowedLocales as string[]).join(", ")})`}
-        />
-        <Field
-          label={m.colCaps}
-          value={`${row.dailyCapOverride ?? m.noCap} / ${row.weeklyCapOverride ?? m.noCap}`}
-        />
-        <Field
-          label={m.colPaused}
-          value={
-            stamp(row.pausedAt)
-              ? `${stamp(row.pausedAt)} (${row.pauseReasonCode ?? m.none}, from ${row.pausedFromMode ?? m.none})`
-              : m.notPaused
-          }
-        />
-        <Field
-          label={m.colIdentity}
-          value={`v${row.policyVersion} / e${row.graduationEpoch} / c${row.connectionGeneration}`}
-        />
-      </div>
+      <>
+        <RowHeading title={str(row.accountSlug)} detail={`${str(row.channel)} · ${str(row.provider)}`}>
+          <StatusTag status={row.status} m={m} />
+        </RowHeading>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field
+            label={m.colLocale}
+            value={`${row.defaultLocale} (${(row.allowedLocales as string[]).join(", ")})`}
+          />
+          <Field
+            label={m.colCaps}
+            value={`${row.dailyCapOverride ?? m.noCap} / ${row.weeklyCapOverride ?? m.noCap}`}
+          />
+          <Field
+            label={m.colPaused}
+            value={
+              stamp(row.pausedAt)
+                ? `${stamp(row.pausedAt)} (${row.pauseReasonCode ?? m.none}, from ${row.pausedFromMode ?? m.none})`
+                : m.notPaused
+            }
+          />
+          <Field
+            label={m.colIdentity}
+            value={`v${row.policyVersion} / e${row.graduationEpoch} / c${row.connectionGeneration}`}
+          />
+        </div>
+      </>
     );
   }
 
@@ -1580,24 +1923,39 @@ function MarketingRow({
     const evidence = Array.isArray(row.evidenceUrls) ? (row.evidenceUrls as string[]) : [];
     return (
       <>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label={m.colCompetitor} value={`${str(row.displayName)} (${str(row.id)})`} />
-          <Field label={m.colStatus} value={`${str(row.status)} / ${str(row.proposedBy)}`} />
-          <Field label={m.colHosts} value={hosts.join(", ") || m.none} />
-          <Field label={m.colDecided} value={stamp(row.decidedAt) ?? m.none} />
-        </div>
-        {Array.isArray(row.trackedPages) && row.trackedPages.length > 0 ? (
-          <p className="mt-2 break-all text-xs text-zinc-400">
-            {m.colTrackedPages} {(row.trackedPages as string[]).join(" / ")}
+        <RowHeading title={str(row.displayName)} detail={str(row.id)}>
+          <span className="text-xs text-zinc-500">{str(row.proposedBy)}</span>
+          <StatusTag status={row.status} m={m} />
+        </RowHeading>
+        {hosts.length > 0 ? (
+          <p className="mt-3 flex flex-wrap gap-1.5" aria-label={m.colHosts}>
+            {hosts.map((host) => (
+              <span
+                key={host}
+                className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-0.5 font-mono text-xs text-zinc-300"
+              >
+                {host}
+              </span>
+            ))}
           </p>
         ) : null}
         {/*
           A3's own words and the pages it cites, shown as text: they are what
           the generator read, which is data to judge, not links to follow.
         */}
-        <p className="mt-3 text-sm leading-6 text-zinc-300">{text(row.rationale) ?? m.none}</p>
+        {text(row.rationale) ? (
+          <p className="mt-3 text-sm leading-6 text-zinc-300">{text(row.rationale)}</p>
+        ) : null}
+        <p className="mt-3 text-xs text-zinc-500">
+          {m.colDecided} {stamp(row.decidedAt) ?? m.none}
+        </p>
+        {Array.isArray(row.trackedPages) && row.trackedPages.length > 0 ? (
+          <p className="mt-1 break-all text-xs text-zinc-500">
+            {m.colTrackedPages} {(row.trackedPages as string[]).join(" / ")}
+          </p>
+        ) : null}
         {evidence.length > 0 ? (
-          <p className="mt-2 break-all text-xs text-zinc-500">
+          <p className="mt-1 break-all text-xs text-zinc-500">
             {m.colEvidence} {evidence.join(" / ")}
           </p>
         ) : null}
@@ -1606,14 +1964,15 @@ function MarketingRow({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Field label={m.colKind} value={String(row.kind)} />
-      <Field
-        label={m.colPeriod}
-        value={`${stamp(row.periodStart) ?? m.none} - ${stamp(row.periodEnd) ?? m.none}`}
-      />
-      <Field label={m.colCreated} value={stamp(row.createdAt) ?? m.none} />
-      <Field label={m.colSource} value={String(row.sourceVersion)} />
-    </div>
+    <>
+      <RowHeading title={String(row.kind)} detail={String(row.sourceVersion)} />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Field
+          label={m.colPeriod}
+          value={`${stamp(row.periodStart) ?? m.none} - ${stamp(row.periodEnd) ?? m.none}`}
+        />
+        <Field label={m.colCreated} value={stamp(row.createdAt) ?? m.none} />
+      </div>
+    </>
   );
 }
