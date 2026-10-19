@@ -1104,7 +1104,7 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 | 사유 코드 | 조건 | 접수(4)가 있는가 |
 |---|---|---|
 | `claim_outcome_unknown` | claim이 1에 없는 응답을 받았거나 응답을 받지 못했다 | 있다(서버에 닿았다면) |
-| `recovery_outcome_unknown` | recover가 위와 같다 | 있다(서버에 닿았다면) |
+| `recovery_outcome_unknown` | recover가 위와 같다. 2026-10-20 개정으로 더는 열지 않는다(v33 2a항) | 있다(서버에 닿았다면) |
 | `promotion_outcome_unknown` | 자동 승격 tick이 위와 같다. 409 `outcome_unknown`·`expiry_outcome_unknown`은 여기다 | 있다(서버에 닿았다면) |
 | `unacked_write_receipt` | 4의 판정에서 사람 확인이 필요하거나, 1의 503 셋에 대한 ack가 거절됐다 | 있다 |
 | `contract_violation` | 쓰기가 아닌 호출(선택 읽기, ack, 정지 기록·상태 읽기)이 본문이 계약과 다른 2xx·400·409를 받았거나, 401·403을 받았다 | 없다 |
@@ -1652,13 +1652,19 @@ v27의 여섯은 R5의 활성화 전까지 v27 절 5의 제약을 그대로 받�
 
 DB trigger는 1~5의 행 모양과 두 감사의 action·target·system actor, `no_commit`, 영수증 0, 사유 allowlist를 다시 검사한다. 애플리케이션이 `clearedAt`이나 `clearKind`만 쓰거나 시스템 actor를 사람 행위로 꾸며도 거절해야 한다. 이미 `no_commit`으로 닫힌 접수에 열린 halt가 남은 경우도 동일 증거를 재검증해 자동 종결한다. 이 경우 원래 쓰기를 다시 판정하거나 실행하지 않고, 기존 `write_resolved` 감사를 evidence로 결속한 새 `halt_auto_cleared` 감사만 같은 자동 종결 transaction에 남긴다.
 
-`unacked_write_receipt`, `contract_violation`, `selection_read_failures`, 접수 없음, deadline 전, ack된 접수, `human_confirmed`, 영수증 1개 이상, 일치하지 않는 request·halt, 감사 또는 증거 부재는 자동 종결하지 않는다. 단순 시간 경과, 빈 halt 목록, 개발 서버 재호출은 근거가 아니다.
+`unacked_write_receipt`, `contract_violation`, `selection_read_failures`, deadline 전, ack된 접수, `human_confirmed`, 영수증 1개 이상, 일치하지 않는 request·halt, 감사 또는 증거 부재는 자동 종결하지 않는다. 단순 시간 경과, 빈 halt 목록, 개발 서버 재호출은 근거가 아니다.
+
+**접수 없음(2026-10-20 개정, 운영자 결정).** 위 세 사유의 열린 halt인데 같은 요청의 접수 행이 없으면(요청이 서버에 닿지 않았다), 서버는 halt 행을 잠근 뒤 그 요청 id로 접수를 직접 쓴다(instance id는 nil UUID, 호출 종류는 사유에서, 예산 1초). 시스템 감사는 `amux.orchestrator.write_placeholder_admitted`다. 요청 id가 접수의 기본 키이므로 이 행과 실제 요청의 접수 중 하나만 커밋된다. 실제 요청이 이겼으면 이 쓰기는 아무것도 하지 않고 보통 판정이 그 접수를 다룬다. 이 행이 이겼으면 늦게 온 실제 요청은 변경 전에 `duplicate_request`로 거절되므로 영수증 0이 그 요청의 사실이다. 그 뒤의 정지 상태 읽기가 위 1~5로 `no_commit` 종결과 자동 해제를 한다. DB trigger와 migration은 바뀌지 않는다.
 
 ### 2. 사람 해제와 기록
 
 v20 7항의 사람 해제는 유지한다. `clearKind = human`, `clearedByUserId`, 사람 감사 `amux.orchestrator.halt_cleared`를 같은 transaction에 남긴다. 관련 접수가 아직 열려 있으면 `human_confirmed`로 닫는다. 자동 종결은 관리자 id를 만들지 않고, 사람 감사를 시스템 감사로 대체해 쓰지 않는다.
 
 halt read model은 `clearKind`, clear audit id, 자동 종결이면 resolution evidence audit id를 돌려준다. Rust Orchestrator는 자기 메모리 halt를 놓기 전에 `system_no_commit`의 reason allowlist, 동일 halt·request key, `no_commit`, 두 감사 id가 모두 있는 서버 증거를 확인한다. `cleared: true`만으로 자동 종결을 믿지 않는다. 사람 해제도 `human` clear kind와 사람 감사 id가 있어야 한다. 다른 열린 halt, 미정 접수, 사람 확인 필요 접수가 하나라도 있으면 전체 scheduling은 계속 막는다.
+
+### 2a. 회수는 결과 불명이어도 정지하지 않는다(2026-10-20 개정, 운영자 결정)
+
+회수 sweep은 이미 만료된 claim·실행·시작 안 된 v22 배정만 풀고, 다음 sweep은 그때의 보드를 다시 읽는다. 그래서 orchestrator는 회수 응답이 1항 밖이어도 정지하지 않고 그 회차를 건너뛴다(ack하지 않고, 다음 주기에 새 요청 id로 다시 회수한다). 서버는 기한+5초가 지난 회수 접수를 영수증 0이면 `no_commit`으로, 영수증이 있으면 사람 대신 시스템 ack(`ackedAt`, 시스템 감사 `amux.orchestrator.write_auto_acknowledged`)로 닫는다. 회수 접수는 사람 확인 목록에 들어가지 않는다. 이미 열린 옛 `recovery_outcome_unknown` halt 중 영수증이 있는 것은 사람 해제 그대로다. claim과 자동 승격 tick은 바뀌지 않는다.
 
 ### 3. 운영 화면
 

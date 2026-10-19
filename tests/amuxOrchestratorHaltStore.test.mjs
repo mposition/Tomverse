@@ -270,8 +270,11 @@ test("the three tables have no column for user content or free text", () => {
   // Every audit entry of this version goes through the allowlist.
   const store = withoutComments(read(STORE));
   const auditCalls = store.match(/(writeAmuxOrchestratorSystemAudit|writeAdminAuditLog)\(/g) ?? [];
-  assert.equal(auditCalls.length, 4);
-  assert.equal((store.match(/metadata: amuxOrchestratorAuditMetadata\(/g) ?? []).length, 4);
+  assert.ok(auditCalls.length > 0);
+  assert.equal(
+    (store.match(/metadata: amuxOrchestratorAuditMetadata\(/g) ?? []).length,
+    auditCalls.length,
+  );
 });
 
 test("a mutation of an admitted write locks the admission before its work and writes its receipts in its fence", () => {

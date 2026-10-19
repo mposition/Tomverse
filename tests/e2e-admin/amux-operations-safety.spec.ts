@@ -3,9 +3,11 @@ import { adminFixtureDatabase } from "./support/database";
 
 const HALT_ID = "381491f1-0e11-4122-8000-000000000001";
 const REQUEST_ID = "381491f1-0e11-4122-8000-000000000002";
-const createMissingAdmissionHalt = () => adminFixtureDatabase().amuxOrchestratorHalt.create({ data: {
+// 2026-10-20 amendment: a result-unknown halt without an admission is the server's to
+// clear, so the manual path is exercised with a reason outside that list.
+const createMissingAdmissionHalt = (reasonCode = "unacked_write_receipt") => adminFixtureDatabase().amuxOrchestratorHalt.create({ data: {
   id: HALT_ID, haltKey: REQUEST_ID, requestId: REQUEST_ID,
-  reasonCode: "recovery_outcome_unknown", openedAt: new Date(),
+  reasonCode, openedAt: new Date(),
 } });
 
 test("legacy halt and Decision Maker bookmarks retain their exact operations-settings section", async ({ page, signInAs }) => {
@@ -27,7 +29,7 @@ test("legacy halt and Decision Maker bookmarks retain their exact operations-set
   await expect(switches).toBeVisible();
 });
 
-test("missing admission needs all operator checks, the exact key, and a server-confirmed clear", async ({ page, signInAs }, testInfo) => {
+test("a halt outside the automatic list needs all operator checks, the exact key, and a server-confirmed clear", async ({ page, signInAs }, testInfo) => {
   await createMissingAdmissionHalt();
   await signInAs("owner");
   await page.goto("/admin/amux-settings?tab=safety");
@@ -63,7 +65,7 @@ test("ops may inspect recovery evidence but cannot clear a halt through UI or AP
 });
 
 test("an open no_commit halt with incomplete automatic evidence keeps the owner's manual path", async ({ page, signInAs }) => {
-  await createMissingAdmissionHalt();
+  await createMissingAdmissionHalt("recovery_outcome_unknown");
   const now = Date.now();
   await adminFixtureDatabase().amuxOrchestratorWrite.create({ data: {
     requestId: REQUEST_ID, instanceId: "381491f1-0e11-4122-8000-000000000003", callKind: "recover",
