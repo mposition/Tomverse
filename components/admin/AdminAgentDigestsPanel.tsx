@@ -33,30 +33,30 @@ export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsol
 
   return (
     <section className="flex min-w-0 flex-col gap-5">
-      <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="flex items-center gap-2 text-sm text-zinc-400">
         <Lock className="h-4 w-4" aria-hidden="true" />
         {m.readOnlyNote}
       </p>
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.controlTitle}</h2>
+        <h2 className="text-base font-semibold text-zinc-100">{m.controlTitle}</h2>
         {initial.control ? (
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm" data-testid="agent-digest-control">
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.revision}</dt>
+            <dt className="text-zinc-400">{m.revision}</dt>
             <dd>{initial.control.revision}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.digestEnabled}</dt>
+            <dt className="text-zinc-400">{m.digestEnabled}</dt>
             <dd>{onOff(initial.control.digestEnabled)}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.mergeLaneEnabled}</dt>
+            <dt className="text-zinc-400">{m.mergeLaneEnabled}</dt>
             <dd>{onOff(initial.control.mergeLaneEnabled)}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.developLaneOn}</dt>
+            <dt className="text-zinc-400">{m.developLaneOn}</dt>
             <dd>{onOff(initial.control.developLaneOn)}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.iacCommit}</dt>
+            <dt className="text-zinc-400">{m.iacCommit}</dt>
             <dd className="break-all font-mono text-xs">{initial.control.iacCommit ?? m.none}</dd>
-            <dt className="text-zinc-600 dark:text-zinc-400">{m.recordedAt}</dt>
+            <dt className="text-zinc-400">{m.recordedAt}</dt>
             <dd>{initial.control.createdAt}</dd>
           </dl>
         ) : (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.controlNone}</p>
+          <p className="text-sm text-zinc-400">{m.controlNone}</p>
         )}
       </div>
 
@@ -68,25 +68,25 @@ export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsol
       <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} />
 
       <div className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.digestsTitle}</h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
+        <h2 className="text-base font-semibold text-zinc-100">{m.digestsTitle}</h2>
+        <p className="text-sm text-zinc-400">{fill(m.showingNewest, { count: initial.limit })}</p>
         {initial.digests.length === 0 ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.emptyDigests}</p>
+          <p className="text-sm text-zinc-400">{m.emptyDigests}</p>
         ) : (
           <ul className="flex flex-col gap-3" data-testid="agent-digest-list">
             {initial.digests.map((row) => (
-              <li key={row.id} className="rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
-                <p className="font-medium text-zinc-900 dark:text-zinc-100">
+              <li key={row.id} className="rounded-lg border p-3 text-sm border-zinc-800">
+                <p className="font-medium text-zinc-100">
                   {m.digestDate}: {row.digestDate ?? m.none}
                 </p>
-                <p className="text-zinc-600 dark:text-zinc-400">
+                <p className="text-zinc-400">
                   {m.stored}: {row.createdAt} · {m.size}: {row.sizeBytes} B ·{" "}
                   <span className="break-all font-mono text-xs">{row.payloadSha256}</span>
                 </p>
-                {row.body === "expired" ? <p className="text-zinc-600 dark:text-zinc-400">{m.bodyExpired}</p> : null}
-                {row.body === "unreadable" ? <p className="text-amber-800 dark:text-amber-300">{m.bodyUnreadable}</p> : null}
+                {row.body === "expired" ? <p className="text-zinc-400">{m.bodyExpired}</p> : null}
+                {row.body === "unreadable" ? <p className="text-amber-300">{m.bodyUnreadable}</p> : null}
                 {row.summary ? (
-                  <div className="mt-2 flex flex-col gap-1 text-zinc-700 dark:text-zinc-300">
+                  <div className="mt-2 flex flex-col gap-1 text-zinc-300">
                     <p>
                       {m.gates}:{" "}
                       {Object.entries(row.summary.gatesByVerdict)
@@ -204,22 +204,22 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+      className="flex flex-col gap-3 rounded-lg border p-3 border-zinc-800"
       data-testid="qa-release-control-form"
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
       }}
     >
-      <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.formTitle}</h2>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.formNote}</p>
+      <h2 className="text-base font-semibold text-zinc-100">{m.formTitle}</h2>
+      <p className="text-sm text-zinc-400">{m.formNote}</p>
       {checkbox(m.digestEnabled, digestEnabled, setDigestEnabled, "qa-release-control-digest")}
       {checkbox(m.mergeLaneEnabled, mergeLaneEnabled, setMergeLaneEnabled, "qa-release-control-merge-lane")}
       {checkbox(m.developLaneOn, developLaneOn, setDevelopLaneOn, "qa-release-control-develop-lane")}
       <label className="flex flex-col gap-1 text-sm">
         {m.iacCommit}
         <input
-          className="rounded border border-zinc-300 px-2 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+          className="rounded border px-2 py-2 font-mono text-xs border-zinc-700 bg-zinc-900"
           value={iacCommit}
           onChange={(event) => setIacCommit(event.target.value)}
           placeholder={m.iacCommitHint}
@@ -235,7 +235,7 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
             {m[field]}
             <input
               type="datetime-local"
-              className="rounded border border-zinc-300 px-2 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded border px-2 py-2 border-zinc-700 bg-zinc-900"
               value={rotated[field]}
               onChange={(event) => {
                 const value = event.target.value;
@@ -247,7 +247,7 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
         ))}
       </fieldset>
       {reauthenticationRequired ? (
-        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-300">
           {m.reauthenticationRequired}
           <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
             {m.signInAgain}
@@ -258,7 +258,7 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
         <p
           role="status"
           className={
-            notice.tone === "ok" ? "text-sm text-zinc-700 dark:text-zinc-300" : "text-sm text-red-700 dark:text-red-300"
+            notice.tone === "ok" ? "text-sm text-zinc-300" : "text-sm text-red-300"
           }
         >
           {notice.text}
@@ -267,7 +267,7 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
       <button
         type="submit"
         disabled={busy}
-        className="min-h-11 self-start rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+        className="min-h-11 self-start rounded-md px-4 text-sm font-medium disabled:opacity-60 bg-zinc-100 text-zinc-900"
         data-testid="qa-release-control-save"
       >
         {m.save}

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminConsoleShell } from "@/components/admin/AdminConsoleShell";
@@ -10,6 +10,8 @@ import { getAdminLocale } from "@/lib/adminLocaleServer";
 import { adminReauthenticationHref } from "@/lib/adminReauthenticationCore";
 import { getAdminNavigationCounts } from "@/lib/adminNavigationCounts";
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { ADMIN_THEME_COOKIE, resolveAdminTheme } from "@/lib/adminTheme";
+import "./admin-theme.css";
 
 export const metadata: Metadata = {
   title: "Administration",
@@ -38,10 +40,13 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
     );
   }
   const role = getAdminRole(session) || "readonly";
-  const [{ counts, healthy }, locale] = await Promise.all([
+  const [{ counts, healthy }, locale, cookieStore] = await Promise.all([
     getAdminNavigationCounts(),
     getAdminLocale(),
+    cookies(),
   ]);
+  // Read here so the first paint is already in the chosen theme.
+  const theme = resolveAdminTheme(cookieStore.get(ADMIN_THEME_COOKIE)?.value);
 
   // The badge an operator reads before acting has to agree with the rules the
   // server is actually applying, so it comes from the same resolver. Its own
@@ -71,6 +76,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
         version={version}
         apiStatus={healthy ? "healthy" : "degraded"}
         counts={counts}
+        theme={theme}
       >
         {children}
       </AdminConsoleShell>

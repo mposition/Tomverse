@@ -1,5 +1,6 @@
 "use client";
 
+import { Check, ChevronRight, Pencil, X } from "lucide-react";
 import { useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
@@ -164,7 +165,12 @@ export async function runDmJudgment(
 }
 
 const buttonClass =
-  "min-h-11 rounded border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50";
+const buttonTone: Record<DmJudgmentKindChoice, string> = {
+  confirm: "flex-1 border-blue-600 bg-blue-600 text-white hover:bg-blue-500",
+  edit_confirm: "border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
+  reject: "border-red-800 text-red-200 hover:bg-red-950/50",
+};
 
 /**
  * The judgment controls for one open proposal (docs/policy/amux-decision-maker.md
@@ -205,89 +211,103 @@ export function AmuxDecisionMakerJudgmentView({
           : null;
   return (
     <section
-      className="flex flex-col gap-3 rounded border border-zinc-200 p-3 dark:border-zinc-700"
+      className="flex flex-col gap-3"
       data-testid="amux-dm-judgment"
       data-request-id={requestId}
       data-phase={state.phase}
+      aria-label={m.title}
     >
-      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.title}</h3>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.description}</p>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-dm-judgment-not-approval">
+      <p className="text-xs leading-5 text-zinc-400" data-testid="amux-dm-judgment-not-approval">
         {m.notApproval}
       </p>
       {irreversible ? (
-        <p className="text-sm font-semibold text-red-800 dark:text-red-200" data-testid="amux-dm-judgment-irreversible">
+        <p className="text-xs font-semibold text-red-300" data-testid="amux-dm-judgment-irreversible">
           {m.irreversible}
         </p>
       ) : null}
 
-      <fieldset className="flex flex-col gap-1" disabled={locked}>
-        <legend className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{m.accuracyLegend}</legend>
-        {DM_DECLARATION_ACCURACIES.map((value) => (
-          <label key={value} className="flex min-h-11 items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name={`amux-dm-accuracy-${requestId}`}
-              value={value}
-              checked={draft.accuracy === value}
-              onChange={() => onDraft({ ...draft, accuracy: value, mismatchedItems: value === "mismatched" ? draft.mismatchedItems : [] })}
-              data-testid={`amux-dm-judgment-accuracy-${value}`}
-            />
-            {m.accuracies[value]}
-          </label>
-        ))}
-        {draft.accuracy === "mismatched" ? (
-          <fieldset className="flex flex-col gap-1 pl-6">
-            <legend className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{m.itemsLegend}</legend>
-            {DM_DECLARATION_ITEMS.map((item) => (
-              <label key={item} className="flex min-h-11 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={draft.mismatchedItems.includes(item)}
-                  onChange={(event) =>
-                    onDraft({
-                      ...draft,
-                      mismatchedItems: event.target.checked
-                        ? [...draft.mismatchedItems, item]
-                        : draft.mismatchedItems.filter((entry) => entry !== item),
-                    })
-                  }
-                  data-testid={`amux-dm-judgment-item-${item}`}
-                />
-                {m.items[item]}
-              </label>
-            ))}
-          </fieldset>
-        ) : null}
-      </fieldset>
+      <details className="group rounded-lg border border-zinc-800" open={draft.accuracy !== "not_judged" || undefined}>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm font-medium text-zinc-200">
+          <ChevronRight className="h-4 w-4 text-zinc-500 transition group-open:rotate-90" aria-hidden />
+          <span className="flex-1">{m.accuracyLegend}</span>
+          <span className="text-xs text-zinc-400">{m.accuracies[draft.accuracy]}</span>
+        </summary>
+        <fieldset className="flex flex-col gap-1 border-t border-zinc-800 px-3 py-2" disabled={locked}>
+          <legend className="sr-only">{m.accuracyLegend}</legend>
+          {DM_DECLARATION_ACCURACIES.map((value) => (
+            <label key={value} className="flex min-h-11 items-center gap-2 text-sm text-zinc-200">
+              <input
+                type="radio"
+                name={`amux-dm-accuracy-${requestId}`}
+                value={value}
+                checked={draft.accuracy === value}
+                onChange={() => onDraft({ ...draft, accuracy: value, mismatchedItems: value === "mismatched" ? draft.mismatchedItems : [] })}
+                data-testid={`amux-dm-judgment-accuracy-${value}`}
+              />
+              {m.accuracies[value]}
+            </label>
+          ))}
+          {draft.accuracy === "mismatched" ? (
+            <fieldset className="flex flex-col gap-1 pl-6">
+              <legend className="text-xs font-medium text-zinc-400">{m.itemsLegend}</legend>
+              {DM_DECLARATION_ITEMS.map((item) => (
+                <label key={item} className="flex min-h-11 items-center gap-2 text-sm text-zinc-200">
+                  <input
+                    type="checkbox"
+                    checked={draft.mismatchedItems.includes(item)}
+                    onChange={(event) =>
+                      onDraft({
+                        ...draft,
+                        mismatchedItems: event.target.checked
+                          ? [...draft.mismatchedItems, item]
+                          : draft.mismatchedItems.filter((entry) => entry !== item),
+                      })
+                    }
+                    data-testid={`amux-dm-judgment-item-${item}`}
+                  />
+                  {m.items[item]}
+                </label>
+              ))}
+            </fieldset>
+          ) : null}
+        </fieldset>
+      </details>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-900 dark:text-zinc-100">{m.answerLabel}</span>
-        <textarea
-          className="min-h-24 rounded border border-zinc-300 p-2 text-base dark:border-zinc-600 dark:bg-zinc-900"
-          value={draft.operatorAnswer}
-          disabled={locked}
-          onChange={(event) => onDraft({ ...draft, operatorAnswer: event.target.value })}
-          data-testid="amux-dm-judgment-answer"
-        />
-        <span className="text-xs text-zinc-600 dark:text-zinc-400">{m.answerBytes(utf8Bytes(draft.operatorAnswer))}</span>
-      </label>
+      <details className="group rounded-lg border border-zinc-800" open={draft.operatorAnswer.length > 0 || undefined}>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm font-medium text-zinc-200">
+          <ChevronRight className="h-4 w-4 text-zinc-500 transition group-open:rotate-90" aria-hidden />
+          {m.answerLabel}
+        </summary>
+        <label className="flex flex-col gap-1 border-t border-zinc-800 px-3 py-3 text-sm">
+          <span className="sr-only">{m.answerLabel}</span>
+          <textarea
+            className="min-h-24 rounded-lg border border-zinc-700 bg-zinc-950 p-2 text-base text-zinc-100"
+            value={draft.operatorAnswer}
+            disabled={locked}
+            onChange={(event) => onDraft({ ...draft, operatorAnswer: event.target.value })}
+            data-testid="amux-dm-judgment-answer"
+          />
+          <span className="text-xs text-zinc-400">{m.answerBytes(utf8Bytes(draft.operatorAnswer))}</span>
+        </label>
+      </details>
 
       <div className="flex flex-wrap gap-2">
         {(["confirm", "edit_confirm", "reject"] as const).map((kind) => {
           const why = problem(kind);
           const label = kind === "confirm" ? m.confirm : kind === "edit_confirm" ? m.editConfirm : m.reject;
+          const Icon = kind === "confirm" ? Check : kind === "edit_confirm" ? Pencil : X;
           return (
             <button
               key={kind}
               type="button"
-              className={buttonClass}
+              className={`${buttonClass} ${buttonTone[kind]}`}
               disabled={locked || why !== null}
               title={why ?? undefined}
               aria-describedby={why !== null ? `amux-dm-judgment-why-${kind}` : undefined}
               onClick={() => onSend(kind)}
               data-testid={`amux-dm-judgment-${kind}`}
             >
+              <Icon className="h-4 w-4" aria-hidden />
               {label}
             </button>
           );
@@ -296,22 +316,22 @@ export function AmuxDecisionMakerJudgmentView({
       {(["confirm", "edit_confirm", "reject"] as const).map((kind) => {
         const why = problem(kind);
         return why !== null && !locked ? (
-          <p key={kind} id={`amux-dm-judgment-why-${kind}`} className="text-xs text-zinc-600 dark:text-zinc-400">
+          <p key={kind} id={`amux-dm-judgment-why-${kind}`} className="text-xs text-zinc-400">
             {why}
           </p>
         ) : null;
       })}
 
       {state.phase === "sending" ? (
-        <p role="status" className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-dm-judgment-sending">
+        <p role="status" className="text-sm text-zinc-300" data-testid="amux-dm-judgment-sending">
           {m.sending}
         </p>
       ) : null}
       {settled !== null ? (
-        <div role="status" className="flex flex-col gap-1 text-sm text-zinc-900 dark:text-zinc-100" data-testid="amux-dm-judgment-settled">
+        <div role="status" className="flex flex-col gap-1 text-sm text-zinc-100" data-testid="amux-dm-judgment-settled">
           <p>{settled}</p>
           {/* A full reload, so the page reads the ledger again. */}
-          <a href={reloadHref} className="text-blue-700 underline dark:text-blue-300" data-testid="amux-dm-judgment-reload">
+          <a href={reloadHref} className="text-blue-300 underline" data-testid="amux-dm-judgment-reload">
             {m.reload}
           </a>
         </div>

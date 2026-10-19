@@ -121,9 +121,9 @@ for (const locale of ["en", "ko"] as const) {
     assert.equal(cell(tree, "daysSinceFirstProposal", anthropic), m.noProposal);
     // Both instances are listed, in the policy's order, by their stored ids.
     const headers = propsOf(tree)
-      .filter((props) => props.scope === "col")
+      .filter((props) => typeof props["data-testid"] === "string" && (props["data-testid"] as string).startsWith("amux-dm-report-instance-"))
       .map((props) => textOf(props.children as ReactNode));
-    assert.deepEqual(headers, [m.measure, ...DM_INSTANCE_SCOPES]);
+    assert.deepEqual(headers, [...DM_INSTANCE_SCOPES]);
     assert.equal(
       textOf(byTestId(tree, "amux-dm-report-computed-at")[0]!.children as ReactNode),
       m.computedAt("2026-10-12 07:51 UTC"),

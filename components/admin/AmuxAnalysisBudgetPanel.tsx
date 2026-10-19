@@ -203,7 +203,7 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available, stopAvailable }:
     finally { setBusy(false); }
   };
 
-  return <section className="space-y-3 rounded-xl border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+  return <section className="space-y-3 rounded-xl border p-4 text-sm border-zinc-700">
     <h4 className="font-semibold">{m.title}</h4>
     {!available ? <p>{m.unavailable}</p> : null}
     {available && (!price || !hold) && !failure ? <p role="status">{m.loading}</p> : null}

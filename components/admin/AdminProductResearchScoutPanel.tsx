@@ -21,9 +21,9 @@ const fill = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce((text, [key, value]) => text.replace(`{${key}}`, String(value)), template);
 
 const SEVERITY_CLASS: Record<string, string> = {
-  high: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300",
-  medium: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  low: "border-zinc-400/40 bg-zinc-500/10 text-zinc-700 dark:text-zinc-300",
+  high: "border-red-500/40 bg-red-500/10 text-red-300",
+  medium: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  low: "border-zinc-400/40 bg-zinc-500/10 text-zinc-300",
 };
 
 const BUTTON =
@@ -120,19 +120,19 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
 
   return (
     <section
-      className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
+      className="rounded-lg border p-4 border-zinc-800"
       data-testid="admin-product-research-scout"
     >
-      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.heading}</h2>
-      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{m.intro}</p>
-      {status ? <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{status}</p> : null}
-      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+      <h2 className="text-sm font-semibold text-zinc-100">{m.heading}</h2>
+      <p className="mt-1 text-sm text-zinc-400">{m.intro}</p>
+      {status ? <p className="mt-2 text-sm text-amber-300">{status}</p> : null}
+      <p className="mt-2 text-xs text-zinc-400">
         {fill(m.counts, initial.counts)}
       </p>
 
-      <div className="mt-4 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800" data-testid="admin-product-research-scout-settings">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.settingsHeading}</h3>
-        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+      <div className="mt-4 rounded-lg border p-3 border-zinc-800" data-testid="admin-product-research-scout-settings">
+        <h3 className="text-sm font-semibold text-zinc-100">{m.settingsHeading}</h3>
+        <p className="mt-1 text-xs text-zinc-400">
           {fill(m.usage, {
             calls: initial.usageToday.calls,
             cap: settings.dailyCallCap,
@@ -141,10 +141,10 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
           })}
         </p>
         <div className="mt-3 flex flex-wrap items-end gap-3">
-          <label className="flex min-w-56 flex-col gap-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+          <label className="flex min-w-56 flex-col gap-1 text-xs font-semibold text-zinc-300">
             {m.modelLabel}
             <select
-              className="min-h-11 rounded-lg border border-zinc-300 bg-transparent px-3 text-sm font-normal dark:border-zinc-700"
+              className="min-h-11 rounded-lg border bg-transparent px-3 text-sm font-normal border-zinc-700"
               value={draftModel}
               disabled={!initial.canConfigure || saveState.kind === "saving"}
               onChange={(event) => setDraftModel(event.target.value)}
@@ -157,14 +157,14 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
               ))}
             </select>
           </label>
-          <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+          <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-zinc-300">
             {m.capLabel}
             <input
               type="number"
               min={0}
               max={500}
               inputMode="numeric"
-              className="min-h-11 rounded-lg border border-zinc-300 bg-transparent px-3 text-sm font-normal dark:border-zinc-700"
+              className="min-h-11 rounded-lg border bg-transparent px-3 text-sm font-normal border-zinc-700"
               value={draftCap}
               disabled={!initial.canConfigure || saveState.kind === "saving"}
               onChange={(event) => setDraftCap(event.target.value)}
@@ -172,22 +172,22 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
           </label>
           <button
             type="button"
-            className={`${BUTTON} border-zinc-300 text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+            className={`${BUTTON} border-zinc-700 text-zinc-200 hover:bg-zinc-800`}
             disabled={!initial.canConfigure || saveState.kind === "saving"}
             onClick={save}
           >
             {saveState.kind === "saving" ? m.saving : m.save}
           </button>
         </div>
-        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{m.capHint}</p>
+        <p className="mt-2 text-xs text-zinc-400">{m.capHint}</p>
         {initial.modelOptions.length === 0 ? (
-          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{m.noImageModels}</p>
+          <p className="mt-1 text-xs text-amber-300">{m.noImageModels}</p>
         ) : null}
         {!initial.canConfigure ? (
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{m.configureNotAllowed}</p>
+          <p className="mt-1 text-xs text-zinc-400">{m.configureNotAllowed}</p>
         ) : null}
         {saveState.kind === "saved" ? (
-          <p className="mt-1 text-xs text-zinc-700 dark:text-zinc-300" role="status">{m.saved}</p>
+          <p className="mt-1 text-xs text-zinc-300" role="status">{m.saved}</p>
         ) : null}
         {saveState.kind === "failed" ? (
           <AdminApiFailureNotice
@@ -199,7 +199,7 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
       </div>
 
       {initial.open.length === 0 ? (
-        <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">{m.empty}</p>
+        <p className="mt-4 text-sm text-zinc-400">{m.empty}</p>
       ) : (
         <ul className="mt-4 flex flex-col gap-3">
           {initial.open.map((suggestion) => {
@@ -209,7 +209,7 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
             return (
               <li
                 key={suggestion.id}
-                className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
+                className="rounded-lg border p-4 border-zinc-800"
                 data-testid="admin-product-research-scout-suggestion"
               >
                 <div className="flex flex-wrap items-center gap-2">
@@ -218,12 +218,12 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
                   >
                     {m.severity[suggestion.severity as keyof typeof m.severity] ?? suggestion.severity}
                   </span>
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="text-xs text-zinc-400">
                     {m.subject}: <span className="font-mono">{suggestion.subject}</span> · {suggestion.area}
                   </span>
                 </div>
-                <h3 className="mt-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{suggestion.title}</h3>
-                <dl className="mt-2 grid gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+                <h3 className="mt-2 text-sm font-semibold text-zinc-100">{suggestion.title}</h3>
+                <dl className="mt-2 grid gap-1 text-sm text-zinc-300">
                   <div>
                     <dt className="inline font-semibold">{m.evidence}: </dt>
                     <dd className="inline">{suggestion.evidence}</dd>
@@ -235,14 +235,14 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
                 </dl>
 
                 {done ? (
-                  <p className="mt-3 text-sm text-zinc-700 dark:text-zinc-300" role="status">
+                  <p className="mt-3 text-sm text-zinc-300" role="status">
                     {row.message}
                   </p>
                 ) : (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className={`${BUTTON} border-zinc-300 text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800`}
+                      className={`${BUTTON} border-zinc-700 text-zinc-200 hover:bg-zinc-800`}
                       disabled={busy || !initial.canDismiss}
                       title={initial.canDismiss ? undefined : m.dismissNotAllowed}
                       onClick={() => act(suggestion, "dismiss")}
@@ -261,7 +261,7 @@ export function AdminProductResearchScoutPanel({ initial }: { initial: ScoutCons
                   </div>
                 )}
                 {!done && (!initial.canDismiss || !initial.canSend) ? (
-                  <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  <p className="mt-2 text-xs text-zinc-400">
                     {!initial.canSend ? m.sendNotAllowed : m.dismissNotAllowed}
                   </p>
                 ) : null}

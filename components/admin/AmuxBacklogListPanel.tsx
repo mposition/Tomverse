@@ -11,8 +11,8 @@ export async function AmuxBacklogListPanel({ data, search, valid }: {
   data: AmuxBacklogList | null; search: string; valid: boolean;
 }) {
   const m = await getAdminMessages(adminAmuxBacklogListMessages);
-  const iconClass = "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800";
-  const cellClass = "border-b border-zinc-200 px-3 py-3 dark:border-zinc-800";
+  const iconClass = "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-700 hover:bg-zinc-800";
+  const cellClass = "border-b px-3 py-3 border-zinc-800";
   return <section className="flex min-w-0 flex-col gap-4" data-testid="amux-backlog-list">
     <h2 className="text-lg font-semibold">{m.title}</h2>
     {!data && valid ? <p>
@@ -26,7 +26,7 @@ export async function AmuxBacklogListPanel({ data, search, valid }: {
         <label className="flex min-w-0 flex-col gap-1 text-sm">
           {m.search}
           <input key={search} type="search" name="cardNumber" defaultValue={search} maxLength={128}
-            placeholder={m.searchPlaceholder} className="h-9 w-72 max-w-full rounded-md border border-zinc-300 bg-transparent px-3 dark:border-zinc-700" />
+            placeholder={m.searchPlaceholder} className="h-9 w-72 max-w-full rounded-md border bg-transparent px-3 border-zinc-700" />
         </label>
         <button type="submit" className={iconClass} aria-label={m.search} title={m.search}>
           <Search size={16} />
@@ -36,7 +36,7 @@ export async function AmuxBacklogListPanel({ data, search, valid }: {
         </Link>}
       </form>
       {!valid ? <p role="alert">{m.invalidSearch}</p> : data && <>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400" data-testid="amux-backlog-count">
+        <p className="text-sm text-zinc-400" data-testid="amux-backlog-count">
           {m.shown(data.rows.length, data.total)}
         </p>
         {data.rows.length === 0 ? <p>{search ? m.noMatches : m.empty}</p> :
@@ -62,7 +62,7 @@ export async function AmuxBacklogListPanel({ data, search, valid }: {
                 </span></td>
                 <td className={`${cellClass} text-right tabular-nums`}>
                   {row.score ?? m.unscored}
-                  {row.score !== null && !row.scoreFresh && <span className="block text-xs text-amber-600 dark:text-amber-400">{m.stale}</span>}
+                  {row.score !== null && !row.scoreFresh && <span className="block text-xs text-amber-400">{m.stale}</span>}
                 </td>
               </tr>)}</tbody>
             </table>

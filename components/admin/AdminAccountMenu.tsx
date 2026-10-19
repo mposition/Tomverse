@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { signOut } from "next-auth/react";
-import { Check, ExternalLink, Languages, LogOut, UserRound } from "lucide-react";
+import { Check, ExternalLink, Languages, LogOut, SunMoon, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdminRole } from "@/lib/adminAuthCore";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { ADMIN_LOCALES, type AdminLocale } from "@/lib/adminLocale";
 import { adminShellMessages } from "@/lib/adminMessages/shell";
+import { ADMIN_THEMES, type AdminTheme } from "@/lib/adminTheme";
 
 /**
  * Each language names itself, in its own language, in both consoles: an
@@ -24,6 +25,8 @@ const MENU_ITEM_SELECTOR = "[role='menuitem'], [role='menuitemradio']";
 type Props = {
   user: { name: string | null; email: string | null };
   role: AdminRole;
+  theme: AdminTheme;
+  onThemeChange: (theme: AdminTheme) => void;
 };
 
 /**
@@ -41,7 +44,7 @@ type Props = {
  * window. The step-up clock is `authenticatedAt` on a freshly minted JWT, so
  * the only thing that moves it is a real sign-in.
  */
-export function AdminAccountMenu({ user, role }: Props) {
+export function AdminAccountMenu({ user, role, theme, onThemeChange }: Props) {
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -201,6 +204,32 @@ export function AdminAccountMenu({ user, role }: Props) {
                   {locale === option ? <Check className="h-4 w-4" /> : null}
                 </span>
                 {LOCALE_SELF_NAMES[option]}
+              </button>
+            ))}
+          </div>
+          <div className="my-1 border-t border-zinc-800" />
+          <div role="group" aria-label={m.theme}>
+            <p className="flex items-center gap-2 px-3 pb-1 pt-1.5 text-xs font-bold text-zinc-400">
+              <SunMoon className="h-3.5 w-3.5" aria-hidden />
+              {m.theme}
+            </p>
+            {ADMIN_THEMES.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={theme === option}
+                data-testid={`admin-account-menu-theme-${option}`}
+                onClick={() => {
+                  close(true);
+                  onThemeChange(option);
+                }}
+                className={itemClass}
+              >
+                <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
+                  {theme === option ? <Check className="h-4 w-4" /> : null}
+                </span>
+                {m.themes[option]}
               </button>
             ))}
           </div>

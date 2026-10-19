@@ -42,10 +42,10 @@ export type AmuxWorkerCapabilityPending = { done: number; total: number } | "rea
 export type AmuxWorkerCapabilityNotice = "done" | "stopped" | "outcome_unknown" | "unread" | null;
 export type AmuxWorkerCapabilityRefusalNotice = { workerName: string; code: string } | null;
 
-const cellClass = "border-b border-zinc-200 px-2 py-2 align-top dark:border-zinc-700";
-const headClass = `${cellClass} text-xs font-semibold text-zinc-600 dark:text-zinc-400`;
+const cellClass = "border-b px-2 py-2 align-top border-zinc-700";
+const headClass = `${cellClass} text-xs font-semibold text-zinc-400`;
 const buttonClass =
-  "inline-flex min-h-11 items-center rounded-md border border-zinc-400 px-3 py-1 text-xs font-bold disabled:opacity-60 dark:border-zinc-500";
+  "inline-flex min-h-11 items-center rounded-md border px-3 py-1 text-xs font-bold disabled:opacity-60 border-zinc-500";
 
 const describe = (m: Messages, capability: AmuxWorkerCapability | null) => {
   if (capability === null) return m.none;
@@ -57,8 +57,8 @@ const describe = (m: Messages, capability: AmuxWorkerCapability | null) => {
 };
 
 const inputClass =
-  "min-h-11 w-full rounded-md border border-zinc-400 bg-white px-2 py-1 text-base text-zinc-900 dark:border-zinc-500 dark:bg-zinc-900 dark:text-zinc-100";
-const checkLabelClass = "flex min-h-11 items-center gap-2 text-sm text-zinc-800 dark:text-zinc-200";
+  "min-h-11 w-full rounded-md border px-2 py-1 text-base border-zinc-500 bg-zinc-900 text-zinc-100";
+const checkLabelClass = "flex min-h-11 items-center gap-2 text-sm text-zinc-200";
 
 /**
  * The owner's edit form for one worker (version 35 R2a, "Admin 편집"). Every
@@ -89,7 +89,7 @@ export function AmuxWorkerCapabilityEditor({
   const id = (field: string) => `amux-worker-capability-edit-${row.workerName}-${field}`;
   return (
     <form
-      className="flex flex-col gap-3 rounded-md border border-zinc-300 p-3 dark:border-zinc-600"
+      className="flex flex-col gap-3 rounded-md border p-3 border-zinc-600"
       data-testid="amux-worker-capability-editor"
       aria-labelledby={id("title")}
       onSubmit={(event) => {
@@ -97,9 +97,9 @@ export function AmuxWorkerCapabilityEditor({
         if (refusal === null && changes && !busy && writesLatch) onSave(form);
       }}
     >
-      <h3 id={id("title")} className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.editTitle(row.workerName)}</h3>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.editHelp}</p>
-      <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-200" htmlFor={id("model")}>
+      <h3 id={id("title")} className="text-base font-semibold text-zinc-100">{m.editTitle(row.workerName)}</h3>
+      <p className="text-sm text-zinc-300">{m.editHelp}</p>
+      <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={id("model")}>
         {m.field.model}
         <input
           id={id("model")}
@@ -111,7 +111,7 @@ export function AmuxWorkerCapabilityEditor({
         />
       </label>
       <fieldset className="flex flex-col gap-1">
-        <legend className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.field.tags}</legend>
+        <legend className="text-sm font-semibold text-zinc-100">{m.field.tags}</legend>
         <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
           {AMUX_WORKER_ROUTING_TAGS.map((tag) => (
             <label key={tag} className={checkLabelClass}>
@@ -123,12 +123,12 @@ export function AmuxWorkerCapabilityEditor({
                 data-testid={`amux-worker-capability-edit-tag-${tag}`}
               />
               <span className="font-mono text-xs">{tag}</span>
-              <span className="text-xs text-zinc-600 dark:text-zinc-400">{m.requirement[AMUX_WORKER_ROUTING_TAG_REQUIREMENTS[tag]!]}</span>
+              <span className="text-xs text-zinc-400">{m.requirement[AMUX_WORKER_ROUTING_TAG_REQUIREMENTS[tag]!]}</span>
             </label>
           ))}
         </div>
       </fieldset>
-      <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-200" htmlFor={id("tools")}>
+      <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={id("tools")}>
         {m.field.tools}
         <input
           id={id("tools")}
@@ -149,8 +149,8 @@ export function AmuxWorkerCapabilityEditor({
         {m.field.v22}
       </label>
       {form.v22Enabled ? (
-        <div className="flex flex-col gap-3 border-l-2 border-zinc-300 pl-3 dark:border-zinc-600">
-          <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-200" htmlFor={id("v22-model")}>
+        <div className="flex flex-col gap-3 border-l-2 pl-3 border-zinc-600">
+          <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={id("v22-model")}>
             {m.field.v22Model}
             <input
               id={id("v22-model")}
@@ -162,7 +162,7 @@ export function AmuxWorkerCapabilityEditor({
             />
           </label>
           <fieldset className="flex flex-col gap-1">
-            <legend className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.field.v22Roles}</legend>
+            <legend className="text-sm font-semibold text-zinc-100">{m.field.v22Roles}</legend>
             {AMUX_WORKER_V22_ROLES.map((role) => (
               <label key={role} className={checkLabelClass}>
                 <input
@@ -173,12 +173,12 @@ export function AmuxWorkerCapabilityEditor({
                   data-testid={`amux-worker-capability-edit-v22-role-${role}`}
                 />
                 <span className="font-mono text-xs">{role}</span>
-                <span className="text-xs text-zinc-600 dark:text-zinc-400">{m.requirement[AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]!]}</span>
+                <span className="text-xs text-zinc-400">{m.requirement[AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]!]}</span>
               </label>
             ))}
           </fieldset>
           <fieldset className="flex flex-col gap-1">
-            <legend className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.field.v22Tools}</legend>
+            <legend className="text-sm font-semibold text-zinc-100">{m.field.v22Tools}</legend>
             {AMUX_WORKER_V22_TOOLS.map((tool) => (
               <label key={tool} className={checkLabelClass}>
                 <input
@@ -194,15 +194,15 @@ export function AmuxWorkerCapabilityEditor({
           </fieldset>
         </div>
       ) : null}
-      <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-worker-capability-edit-preview">
+      <p className="text-sm text-zinc-300" data-testid="amux-worker-capability-edit-preview">
         {describe(m, amuxWorkerCapabilityFromForm(form))}
       </p>
       {refusal ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-worker-capability-edit-refusal">
+        <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-capability-edit-refusal">
           {m.editRefusal(refusal)}
         </p>
       ) : !changes ? (
-        <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-worker-capability-edit-unchanged">{m.editUnchanged}</p>
+        <p className="text-sm text-zinc-300" data-testid="amux-worker-capability-edit-unchanged">{m.editUnchanged}</p>
       ) : null}
       <div className="flex flex-wrap gap-2">
         <button
@@ -263,11 +263,11 @@ export function AmuxWorkerCapabilityView({
   const busy = pending !== null;
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-worker-capability-panel">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{m.title}</h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.description}</p>
+      <h2 className="text-lg font-semibold text-zinc-100">{m.title}</h2>
+      <p className="text-sm text-zinc-300">{m.description}</p>
       {view === null ? (
         <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-worker-capability-unavailable">
+          <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-capability-unavailable">
             {m.unavailable}
           </p>
           <button type="button" className={`${buttonClass} w-fit`} disabled={busy} onClick={onReread} data-testid="amux-worker-capability-reread">
@@ -276,16 +276,16 @@ export function AmuxWorkerCapabilityView({
         </div>
       ) : (
         <>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-worker-capability-latch">
+          <p className="text-sm text-zinc-300" data-testid="amux-worker-capability-latch">
             {view.writesLatch ? m.writesOn : m.writesOff}
           </p>
           {view.catalogReadable ? null : (
-            <p role="alert" className="text-sm text-amber-700 dark:text-amber-300" data-testid="amux-worker-capability-catalog-unreadable">
+            <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-capability-catalog-unreadable">
               {m.catalogUnreadable}
             </p>
           )}
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm text-zinc-900 dark:text-zinc-100">
+            <table className="w-full border-collapse text-left text-sm text-zinc-100">
               <thead>
                 <tr>
                   <th scope="col" className={headClass}>{m.column.worker}</th>
@@ -342,10 +342,10 @@ export function AmuxWorkerCapabilityView({
           })() : null}
           {isOwner ? (
             <div className="flex flex-col gap-2" data-testid="amux-worker-capability-import">
-              <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.importTitle}</h3>
-              <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.importHelp}</p>
+              <h3 className="text-base font-semibold text-zinc-100">{m.importTitle}</h3>
+              <p className="text-sm text-zinc-300">{m.importHelp}</p>
               {imports.length === 0 ? (
-                <p className="text-sm text-zinc-700 dark:text-zinc-300">{m.importNothing}</p>
+                <p className="text-sm text-zinc-300">{m.importNothing}</p>
               ) : (
                 <button
                   type="button"
@@ -364,13 +364,13 @@ export function AmuxWorkerCapabilityView({
       {notice === "done" ? <p role="status" className="text-sm" data-testid="amux-worker-capability-done">{m.importDone}</p> : null}
       {notice === "stopped" ? <p role="status" className="text-sm" data-testid="amux-worker-capability-stopped">{m.importStopped}</p> : null}
       {notice === "outcome_unknown" ? (
-        <p role="alert" className="text-sm text-amber-700 dark:text-amber-300" data-testid="amux-worker-capability-outcome-unknown">{m.importOutcomeUnknown}</p>
+        <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-capability-outcome-unknown">{m.importOutcomeUnknown}</p>
       ) : null}
       {notice === "unread" ? (
-        <p role="alert" className="text-sm text-amber-700 dark:text-amber-300" data-testid="amux-worker-capability-run-unread">{m.importUnread}</p>
+        <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-capability-run-unread">{m.importUnread}</p>
       ) : null}
       {refusal ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-300" data-testid="amux-worker-capability-refused">
+        <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-capability-refused">
           {m.importRefused(refusal.workerName, refusal.code)}
         </p>
       ) : null}
