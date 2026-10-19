@@ -6,22 +6,73 @@ import { getActiveAiModel } from "@/lib/activeAiModel";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
+import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
+import { autoLlmRouterVersionFor } from "@/lib/autoRouterOptimizerCore";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
     AUTO_LLM_ROUTER_SESSION_PICKS,
-    AUTO_LLM_ROUTER_SYSTEM,
     AUTO_LLM_ROUTER_TIMEOUT_MS,
     AUTO_LLM_ROUTER_VERSION,
     autoLlmRouterCandidates,
     autoLlmRouterOutputSchema,
     autoLlmRouterSession,
     autoLlmRouterUserMessage,
+    buildAutoLlmRouterSystem,
     parseAutoLlmRouterOutput,
     resolveAutoLlmRouterModel,
+    type AutoLlmRouterCandidate,
     type AutoLlmRouterPick,
     type AutoLlmRouterSession,
 } from "@/lib/autoLlmRouterCore";
+
+export type AutoLlmRouterCallResult = {
+    outcome: "picked" | "invalid" | "error";
+    pick: AutoLlmRouterPick | null;
+    usage: { inputTokens?: number; outputTokens?: number } | undefined;
+};
+
+/**
+ * One router call with the given guidance. Shared by the live turn and the
+ * optimizer's replay (lib/autoRouterOptimizer.ts), so a cycle measures the
+ * same request the product sends. Never throws.
+ */
+export async function callAutoLlmRouter(input: {
+    routerModel: AiModel;
+    guidance: string;
+    prompt: string;
+    previousAnswer: string | null;
+    candidates: readonly AutoLlmRouterCandidate[];
+    session: AutoLlmRouterSession | null;
+}): Promise<AutoLlmRouterCallResult> {
+    try {
+        const generated = await generateText({
+            model: getActiveAiModel(input.routerModel),
+            system: buildAutoLlmRouterSystem(input.guidance),
+            prompt: autoLlmRouterUserMessage(
+                input.prompt,
+                input.previousAnswer,
+                input.candidates,
+                input.session
+            ),
+            maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+            maxRetries: 0,
+            abortSignal: AbortSignal.timeout(AUTO_LLM_ROUTER_TIMEOUT_MS),
+            output: Output.object({
+                schema: jsonSchema(
+                    autoLlmRouterOutputSchema(input.candidates) as unknown as JSONSchema7
+                ),
+                name: "auto_model_choice",
+            }),
+            providerOptions: { openai: { strictJsonSchema: true } },
+        });
+        const usage = generated.usage as AutoLlmRouterCallResult["usage"];
+        const pick = parseAutoLlmRouterOutput(generated.output, input.candidates);
+        return { outcome: pick ? "picked" : "invalid", pick, usage };
+    } catch {
+        return { outcome: "error", pick: null, usage: undefined };
+    }
+}
 
 /**
  * The router's memory of this conversation: its own latest decisions here.
@@ -83,43 +134,25 @@ export async function pickAutoModelWithLlm(input: {
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
-    const session = await readRouterSession(input.conversationId);
+    const [session, active] = await Promise.all([
+        readRouterSession(input.conversationId),
+        readActiveRouterGuidance(),
+    ]);
+    const version = autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, active.cycleId);
     const startedAt = Date.now();
-    let outcome: "picked" | "invalid" | "error" = "error";
-    let pick: AutoLlmRouterPick | null = null;
-    let usage: { inputTokens?: number; outputTokens?: number } | undefined;
-    try {
-        const generated = await generateText({
-            model: getActiveAiModel(routerModel),
-            system: AUTO_LLM_ROUTER_SYSTEM,
-            prompt: autoLlmRouterUserMessage(
-                input.prompt,
-                input.previousAnswer,
-                candidates,
-                session
-            ),
-            maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
-            maxRetries: 0,
-            abortSignal: AbortSignal.timeout(AUTO_LLM_ROUTER_TIMEOUT_MS),
-            output: Output.object({
-                schema: jsonSchema(
-                    autoLlmRouterOutputSchema(candidates) as unknown as JSONSchema7
-                ),
-                name: "auto_model_choice",
-            }),
-            providerOptions: { openai: { strictJsonSchema: true } },
-        });
-        usage = generated.usage as typeof usage;
-        pick = parseAutoLlmRouterOutput(generated.output, candidates);
-        outcome = pick ? "picked" : "invalid";
-    } catch {
-        outcome = "error";
-    }
+    const { outcome, pick, usage } = await callAutoLlmRouter({
+        routerModel,
+        guidance: active.guidance,
+        prompt: input.prompt,
+        previousAnswer: input.previousAnswer,
+        candidates,
+        session,
+    });
     const latencyMs = Date.now() - startedAt;
     console.info(
         JSON.stringify({
             event: "chat_auto_llm_router",
-            version: AUTO_LLM_ROUTER_VERSION,
+            version,
             traceId: input.traceId,
             routerModelId: routerModel.id,
             candidateCount: candidates.length,
@@ -136,7 +169,7 @@ export async function pickAutoModelWithLlm(input: {
         void prisma.autoRouterDecision
             .create({
                 data: {
-                    version: AUTO_LLM_ROUTER_VERSION,
+                    version,
                     traceId: input.traceId,
                     userId: input.userId,
                     conversationId: input.conversationId,

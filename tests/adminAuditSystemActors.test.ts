@@ -126,6 +126,7 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-checker",
     "amux-v22-recovery-controller",
     "amux-v22-api-model-access",
+    "auto-router-optimizer",
     "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
@@ -426,4 +427,17 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.reserved", "MarketingReport"), false);
   // Other actors are unaffected by the generator's scope.
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
+});
+
+test("the Auto router optimizer actor may only start a cycle and promote one", () => {
+  assert.equal(isSystemAuditActor("auto-router-optimizer"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_optimizer.cycle_started", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), true);
+  // Rollback stays a person's action, and no other target is in scope.
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_guidance.promoted", "AppSettings"), false);
 });
