@@ -39,7 +39,7 @@ test("a later queue page is reached across process-style ticks", async (t) => {
     if (body.after === "page-8") return Response.json({ candidates: [{
       reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
       ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-      modelId: "claude-opus-5-5",
+      provider: "anthropic", modelId: "claude-opus-5-5",
       expiresAt: "2026-10-18T00:00:00.000Z",
       nextInvocationOrdinal: 0,
     }], hasMore: false, nextCursor: null });
@@ -47,7 +47,7 @@ test("a later queue page is reached across process-style ticks", async (t) => {
     return Response.json({ candidates: Array.from({ length: 32 }, () => ({
       reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
       ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-      modelId: "unsupported-model",
+      provider: "anthropic", modelId: "unsupported-model",
       expiresAt: "2026-10-18T00:00:00.000Z",
       nextInvocationOrdinal: 0,
     })), hasMore: true, nextCursor: `page-${page}` });
@@ -61,7 +61,7 @@ test("a later queue page is reached across process-style ticks", async (t) => {
     { kind: "discovered", candidate: {
       reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
       ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-      modelId: "claude-opus-5-5",
+      provider: "anthropic", modelId: "claude-opus-5-5",
       expiresAt: "2026-10-18T00:00:00.000Z",
       nextInvocationOrdinal: 0,
     }, pin: { kind: "pinned", referenceCount: 1,
@@ -84,7 +84,7 @@ test("queue discovery refuses a candidate without its canonical pin", async (t) 
       if (path.endsWith("/analysis-queue")) return Response.json({
         candidates: [{ reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
           ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-          modelId: "claude-opus-5-5",
+          provider: "anthropic", modelId: "claude-opus-5-5",
           expiresAt: "2026-10-18T00:00:00.000Z",
           nextInvocationOrdinal: 0 }],
         hasMore: false, nextCursor: null,
@@ -104,7 +104,7 @@ test("a zero-reference idea remains a discoverable analysis candidate", async (t
   t.after(() => rm(stateDirectory, { recursive: true, force: true }));
   const candidate = { reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
     ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z",
+    provider: "anthropic", modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z",
     nextInvocationOrdinal: 0 };
   const result = await runAmuxV19SessionQueueEntryOnce({
     origin, agentSecret: "a".repeat(32), stateDirectory,
@@ -122,7 +122,7 @@ test("an unavailable pin does not starve a later claimable candidate", async (t)
   t.after(() => rm(stateDirectory, { recursive: true, force: true }));
   const first = { reservationId: "ec61a12d-d02a-478f-a499-aea9dd752270",
     ideaId: "ea86a25b-919f-4714-a3d8-45ef5a18b175",
-    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z",
+    provider: "anthropic", modelId: "claude-opus-5-5", expiresAt: "2026-10-18T00:00:00.000Z",
     nextInvocationOrdinal: 0 };
   const second = { ...first,
     reservationId: "ec61a12d-d02a-478f-a499-aea9dd752271",

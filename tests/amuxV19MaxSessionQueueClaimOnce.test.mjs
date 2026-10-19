@@ -7,9 +7,10 @@ import { claimAmuxV19MaxQueueSelectionOnce } from
 const reservationId = "9a7b23e5-106b-4ce0-9586-747070acc38c";
 const ideaId = "51c2e3a3-518d-441c-a276-c6644c733dd4";
 const selection = { kind: "discovered",
-  candidate: { reservationId, ideaId, modelId: "claude-opus-5-5",
+  candidate: { reservationId, ideaId, provider: "anthropic",
+    modelId: "claude-opus-5-5",
     expiresAt: "2099-10-18T01:00:00.000Z", nextInvocationOrdinal: 0 },
-  price: { kind: "ready", priceVersionId: "price-v19-1",
+  price: { kind: "ready", priceVersionId: "price-v19-1", provider: "anthropic",
     modelId: "claude-opus-5-5", reasoningEffort: "high" } };
 
 test("fresh queue selection becomes exactly one guarded claim", async () => {

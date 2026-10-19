@@ -31,6 +31,10 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
   requiredBudgetMode?: "bounded" | "max_shadow";
   exactAgentClaim?: { requestId: string; reservationId: string;
     ideaId: string; invocationOrdinal: number };
+  /** A subscription CLI result's channel, model attestation and CLI sha256,
+   * recorded with the settlement it measured (owner decision 2026-10-20). */
+  cliAttestation?: { provider: string; modelAttestation: "served" | "requested";
+    cliSha256: string };
 }): Promise<{ claimId: string; status: "succeeded" | "failed" |
   "outcome_unknown"; settledMicroUsd: string | null; auditId: string }> {
   if (!UUID.test(input.claimId) || (input.exactAgentClaim &&
@@ -161,6 +165,9 @@ export async function commitAmuxSessionBudgetOutcome(tx: Tx, input: {
           window.spentMicroUsd + boundedSpent + window.shadowOverrunMicroUsd +
             shadowOverrun >= window.limitMicroUsd,
       } : {}),
+      ...(input.cliAttestation ? { cliProvider: input.cliAttestation.provider,
+        modelAttestation: input.cliAttestation.modelAttestation,
+        cliSha256: input.cliAttestation.cliSha256 } : {}),
       amountMeaning: claim.budgetMode === "max_shadow"
         ? "cli_shadow_observed_not_ceiling" : "cli_api_conversion_estimate" },
   });

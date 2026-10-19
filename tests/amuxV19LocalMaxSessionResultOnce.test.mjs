@@ -23,7 +23,9 @@ const input = { claimId: "d57eac94-9808-4688-a9f8-940aa3c22188",
   evidenceId: "59818d23-7798-4cfd-9d49-9a3f69653673",
   manifestId: "13638989-a338-461d-9777-7b3fd3c595ab",
   rawModelOutput: "{\"units\":[]}",
-  inputTokens: 100, outputTokens: 10 };
+  inputTokens: 100, outputTokens: 10,
+  cliAttestation: { provider: "github-copilot", modelAttestation: "served",
+    cliSha256: "c".repeat(64) } };
 const digest = "a".repeat(64);
 const write = { claimId: input.claimId,
   resultAuditId: "clsyntheticresult123",
@@ -91,4 +93,21 @@ test("invalid binding is refused before network access", async () => {
     input: { ...input, evidenceId: "not-an-id" },
     fetchImpl: () => { throw new Error("network reached"); } }),
   { kind: "refused", retryWrite: false });
+});
+
+test("a result without its CLI channel attestation is refused before network access", async () => {
+  enable();
+  const withoutAttestation = { ...input };
+  delete withoutAttestation.cliAttestation;
+  for (const cliAttestation of [undefined, null,
+    { ...input.cliAttestation, provider: "gemini" },
+    { ...input.cliAttestation, modelAttestation: "assumed" },
+    { ...input.cliAttestation, cliSha256: "short" },
+    { ...input.cliAttestation, extra: true }]) {
+    assert.deepEqual(await recordAmuxV19MaxSessionResultOnce({ origin,
+      input: cliAttestation === undefined ? withoutAttestation
+        : { ...input, cliAttestation },
+      fetchImpl: () => { throw new Error("network reached"); } }),
+    { kind: "refused", retryWrite: false });
+  }
 });

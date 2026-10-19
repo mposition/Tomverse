@@ -66,7 +66,7 @@ test("claim body cannot supply its own Max authentication assertion", async () =
       requestId: "44c72436-c011-4cfc-b52f-e3345c22fc80",
       reservationId: "bf72ad14-585c-41bd-b25e-aab4c17a6d3c",
       ideaId: "53d6918e-b05d-4531-a1ab-704dd756cc40",
-      invocationOrdinal: 0, modelId: "claude-opus-5-5",
+      invocationOrdinal: 0, provider: "anthropic", modelId: "claude-opus-5-5",
       reasoningEffort: "high", priceVersionId: "approved-price" };
     const authVerifiedAt = new Date().toISOString();
     const authProof = signAmuxV19MaxClaimAttestation(secret, identity,
@@ -85,6 +85,17 @@ test("claim body cannot supply its own Max authentication assertion", async () =
     const stale = new Date(Date.now() - 6 * 60_000).toISOString();
     assert.equal(verifyAmuxV19MaxClaimAttestation(secret, identity, stale,
       signAmuxV19MaxClaimAttestation(secret, identity, stale)), null);
+    // The channel is part of the signed proof and must be a known channel.
+    const withoutProvider: Partial<typeof identity> = { ...identity };
+    delete withoutProvider.provider;
+    assert.equal((await POST(request({ ...withoutProvider, authVerifiedAt,
+      authProof }))).status, 400);
+    assert.equal((await POST(request({ ...identity, provider: "cursor",
+      authVerifiedAt, authProof }))).status, 400);
+    const gemini = { ...identity, provider: "gemini" };
+    assert.equal((await POST(request({ ...gemini, authVerifiedAt,
+      authProof: signAmuxV19MaxClaimAttestation(secret, gemini,
+        authVerifiedAt) }))).status, 400);
   });
 });
 

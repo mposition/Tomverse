@@ -10,7 +10,9 @@ const origin = "https://staging.tomverse.example/";
 const secret = "local_v19_session_012345678901234567890123456";
 const candidate = (index) => ({
   reservationId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
-  ideaId: `idea_${index}`, modelId: "frontier-model",
+  ideaId: `idea_${index}`,
+  provider: ["anthropic", "openai", "github-copilot", "cursor"][index % 4],
+  modelId: "frontier-model",
   expiresAt: "2026-10-18T00:00:00.000Z",
   nextInvocationOrdinal: 0,
 });
@@ -129,6 +131,11 @@ test("local v19 poll rejects redirects, unbounded or content-bearing responses",
         ...page.candidates.slice(1)] },
       { ...page, candidates: [{ ...candidate(0), reservationId: "bad/id" },
         ...page.candidates.slice(1)] },
+      // Every candidate names one of the four subscription CLI channels.
+      { ...page, candidates: [{ ...candidate(0), provider: "gemini" },
+        ...page.candidates.slice(1)] },
+      { ...page, candidates: [Object.fromEntries(Object.entries(candidate(0))
+        .filter(([key]) => key !== "provider")), ...page.candidates.slice(1)] },
       { ...page, candidates: [{ ...candidate(0), nextInvocationOrdinal: -1 },
         ...page.candidates.slice(1)] },
       { ...page, candidates: [{ ...candidate(0), nextInvocationOrdinal: 2_147_483_648 },

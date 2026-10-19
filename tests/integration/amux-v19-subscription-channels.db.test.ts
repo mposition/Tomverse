@@ -274,7 +274,7 @@ for (const [index, [provider]] of CHANNELS.entries()) {
     const selection = await prisma.$transaction((tx) =>
       readAmuxV19MaxPriceSelection(tx, queued));
     assert.deepEqual(selection, { kind: "ready", priceVersionId: channel.priceVersionId,
-      modelId: channel.modelId, reasoningEffort: "high" });
+      provider: channel.provider, modelId: channel.modelId, reasoningEffort: "high" });
     const identity = { ideaId: queued.ideaId, modelId: channel.modelId,
       reasoningEffort: "high", authEvidenceDigest: randomBytes(32).toString("hex") };
     const claim = (provider: string) => (tx: Prisma.TransactionClient) =>
@@ -322,7 +322,7 @@ for (const [index, [provider]] of CHANNELS.entries()) {
   });
 }
 
-test("the fixed Claude Max launcher route cannot claim another channel's reservation", async () => {
+test("a launcher that signed another channel cannot claim this reservation", async () => {
   const copilot = channels.find((channel) => channel.provider === "github-copilot")!;
   await selectScope(copilot);
   const authority = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
@@ -340,7 +340,8 @@ test("the fixed Claude Max launcher route cannot claim another channel's reserva
     process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const identity = { claimId: randomUUID(), requestId: randomUUID(),
       reservationId: queued.reservationId, ideaId: queued.ideaId, invocationOrdinal: 0,
-      priceVersionId: copilot.priceVersionId, modelId: copilot.modelId, reasoningEffort: "high" };
+      priceVersionId: copilot.priceVersionId, provider: "anthropic",
+      modelId: copilot.modelId, reasoningEffort: "high" };
     const authVerifiedAt = new Date().toISOString();
     const response = await postMaxClaimRoute(new Request(
       "https://test.invalid/api/internal/amux/v19/analysis-budget/claim", {

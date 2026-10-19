@@ -216,6 +216,40 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
   }
 });
 
+test("a v19 proxy holds the Cursor CLI's simultaneous tunnels but stays bounded", async () => {
+  const echo = createTcpServer((socket) => socket.pipe(socket));
+  const echoPort = await listen(echo);
+  const proxy = createAmuxV19EgressProxy(["api2.cursor.sh"], {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  });
+  const proxyPort = await listen(proxy);
+  const request = "CONNECT api2.cursor.sh:443 HTTP/1.1\r\nHost: api2.cursor.sh:443\r\n\r\n";
+  const sockets = [];
+  // Resolves with the proxy's first reply, or "closed" when it drops the socket.
+  const openTunnel = () => new Promise((resolve) => {
+    const socket = connectTcp({ host: "127.0.0.1", port: proxyPort });
+    sockets.push(socket);
+    socket.once("error", () => resolve("closed"));
+    socket.once("close", () => resolve("closed"));
+    socket.once("connect", () => socket.write(request));
+    socket.once("data", (bytes) => resolve(bytes.toString()));
+  });
+  try {
+    // Measured: Cursor opened up to nine approved tunnels at once.
+    const answers = await Promise.all(Array.from({ length: 9 }, openTunnel));
+    assert.ok(answers.every((answer) => /200 Connection Established/.test(answer)));
+    const more = await Promise.all(Array.from({ length: 7 }, openTunnel));
+    assert.ok(more.every((answer) => /200 Connection Established/.test(answer)));
+    // Sixteen is the bound: the next tunnel is never established.
+    assert.doesNotMatch(await openTunnel(), /200 Connection Established/);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await close(proxy);
+    await close(echo);
+  }
+});
+
 test("v19 direct-read tunnel carries more than the v4 byte ceiling", async () => {
   const echo = createTcpServer((socket) => socket.pipe(socket));
   const echoPort = await listen(echo);

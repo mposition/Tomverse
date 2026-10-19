@@ -36,13 +36,28 @@ test("read-only Max price hint binds exact reservation and dedicated launcher", 
         assert.equal(new URL(url).searchParams.get("reservationId"), reservationId);
         assert.equal(new URL(url).searchParams.get("ideaId"), ideaId);
         return Response.json({ kind: "ready", priceVersionId: "approved-max-v1",
-          modelId: "claude-opus-5-5", reasoningEffort: "high" });
+          provider: "anthropic", modelId: "claude-opus-5-5", reasoningEffort: "high" });
       },
     });
     assert.equal(calls, 1);
     assert.deepEqual(result, { kind: "ready",
-      priceVersionId: "approved-max-v1", modelId: "claude-opus-5-5",
-      reasoningEffort: "high" });
+      priceVersionId: "approved-max-v1", provider: "anthropic",
+      modelId: "claude-opus-5-5", reasoningEffort: "high" });
+  }));
+
+test("the price hint names its CLI channel or stays unavailable", async () =>
+  withEnv(async () => {
+    const answer = (body) => readAmuxV19MaxPriceSelection({ origin, reservationId,
+      ideaId, fetchImpl: async () => Response.json(body) });
+    const ready = { kind: "ready", priceVersionId: "approved-cursor-v1",
+      provider: "cursor", modelId: "gpt-5.6-sol-high", reasoningEffort: "high" };
+    assert.deepEqual(await answer(ready), ready);
+    const withoutProvider = { ...ready };
+    delete withoutProvider.provider;
+    for (const body of [withoutProvider, { ...ready, provider: "gemini" },
+      { ...ready, extra: 1 }]) {
+      assert.deepEqual(await answer(body), { kind: "unavailable" });
+    }
   }));
 
 test("unbound origin refuses before network and malformed price stays unavailable", async () =>
@@ -55,8 +70,8 @@ test("unbound origin refuses before network and malformed price stays unavailabl
     assert.equal(calls, 0);
     assert.deepEqual(await readAmuxV19MaxPriceSelection({ origin,
       reservationId, ideaId, fetchImpl: async () => Response.json({
-        kind: "ready", priceVersionId: "bad price", modelId: "claude-opus-5-5",
-        reasoningEffort: "high",
+        kind: "ready", priceVersionId: "bad price", provider: "anthropic",
+        modelId: "claude-opus-5-5", reasoningEffort: "high",
       }),
     }), { kind: "unavailable" });
   }));

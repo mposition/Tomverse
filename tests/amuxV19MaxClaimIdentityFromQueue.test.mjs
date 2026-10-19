@@ -11,10 +11,10 @@ const ideaId = "51c2e3a3-518d-441c-a276-c6644c733dd4";
 const now = Date.parse("2026-10-18T00:00:00.000Z");
 const selection = {
   kind: "discovered",
-  candidate: { reservationId, ideaId, modelId: "claude-opus-5-5",
-    expiresAt: "2026-10-18T01:00:00.000Z",
+  candidate: { reservationId, ideaId, provider: "anthropic",
+    modelId: "claude-opus-5-5", expiresAt: "2026-10-18T01:00:00.000Z",
     nextInvocationOrdinal: 0 },
-  price: { kind: "ready", priceVersionId: "price-v19-1",
+  price: { kind: "ready", priceVersionId: "price-v19-1", provider: "anthropic",
     modelId: "claude-opus-5-5", reasoningEffort: "high" },
 };
 
@@ -25,10 +25,34 @@ test("Max queue selection becomes a fresh content-free claim identity", () => {
   });
   assert.deepEqual(result, { kind: "ready", identity: {
     claimId, requestId, reservationId, ideaId,
-    invocationOrdinal: 0, priceVersionId: "price-v19-1",
+    invocationOrdinal: 0, priceVersionId: "price-v19-1", provider: "anthropic",
     modelId: "claude-opus-5-5", reasoningEffort: "high",
   } });
   assert.equal(Object.hasOwn(result.identity, "expiresAt"), false);
+});
+
+test("a Copilot or Cursor selection becomes a claim on its own channel", () => {
+  for (const [provider, modelId] of [["github-copilot", "gpt-5-mini"],
+    ["cursor", "auto"]]) {
+    const ids = [claimId, requestId];
+    const result = createAmuxV19MaxClaimIdentityFromQueue({ ...selection,
+      candidate: { ...selection.candidate, provider, modelId },
+      price: { ...selection.price, provider, modelId } },
+    { now, newId: () => ids.shift() });
+    assert.equal(result.kind, "ready", provider);
+    assert.equal(result.identity.provider, provider);
+    assert.equal(result.identity.modelId, modelId);
+  }
+  // The closed Codex channel and a channel mismatch never become a claim.
+  for (const change of [
+    { candidate: { ...selection.candidate, provider: "openai", modelId: "gpt-6-luna" },
+      price: { ...selection.price, provider: "openai", modelId: "gpt-6-luna" } },
+    { price: { ...selection.price, provider: "cursor" } },
+  ]) {
+    const ids = [claimId, requestId];
+    assert.deepEqual(createAmuxV19MaxClaimIdentityFromQueue({ ...selection,
+      ...change }, { now, newId: () => ids.shift() }), { kind: "refused" });
+  }
 });
 
 test("Max claim identity rejects stale or mismatched queue selections", () => {

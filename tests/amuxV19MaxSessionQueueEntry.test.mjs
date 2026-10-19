@@ -14,12 +14,12 @@ const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
 const candidate = (ordinal) => ({
   reservationId: `ec61a12d-d02a-478f-a499-${String(ordinal).padStart(12, "0")}`,
   ideaId: `ea86a25b-919f-4714-a3d8-${String(ordinal).padStart(12, "0")}`,
-  modelId: "claude-opus-5-5",
+  provider: "anthropic", modelId: "claude-opus-5-5",
   expiresAt: "2026-10-19T00:00:00.000Z",
   nextInvocationOrdinal: 0,
 });
 const price = { kind: "ready", priceVersionId: "approved-price",
-  modelId: "claude-opus-5-5", reasoningEffort: "high" };
+  provider: "anthropic", modelId: "claude-opus-5-5", reasoningEffort: "high" };
 
 async function withState(t, run) {
   const stateDirectory = await mkdtemp(join(tmpdir(), "amux-max-queue-"));
@@ -94,6 +94,34 @@ test("Max queue entry preserves a read-only pagination hint across ticks", async
           ? Response.json(price) : fetchImpl(url, options),
     }), { kind: "discovered", candidate: candidate(1), price });
     assert.equal(await state.read(), null);
+  }));
+
+test("subscription discovery binds each candidate to its own channel's price", async (t) =>
+  withState(t, async (stateDirectory) => {
+    const cursorCandidate = { ...candidate(3), provider: "cursor", modelId: "auto" };
+    const cursorPrice = { ...price, provider: "cursor", modelId: "auto" };
+    const priced = [];
+    const result = await runAmuxV19MaxSessionQueueEntryOnce({ origin,
+      stateDirectory, fetchImpl: async (url) => {
+        const target = new URL(url);
+        if (target.pathname.endsWith("/analysis-queue")) {
+          return Response.json({ candidates: [
+            // Codex stays closed: no price read, no claim.
+            { ...candidate(1), provider: "openai", modelId: "gpt-6-luna" },
+            // A price for another channel never binds this reservation.
+            { ...candidate(2), provider: "github-copilot", modelId: "gpt-5-mini" },
+            cursorCandidate], hasMore: false, nextCursor: null });
+        }
+        const reservationId = target.searchParams.get("reservationId");
+        priced.push(reservationId);
+        return Response.json(reservationId === candidate(2).reservationId
+          ? { ...price, provider: "cursor", modelId: "gpt-5-mini" } : cursorPrice);
+      },
+    });
+    assert.deepEqual(result, { kind: "discovered", candidate: cursorCandidate,
+      price: cursorPrice });
+    assert.deepEqual(priced, [candidate(2).reservationId,
+      cursorCandidate.reservationId]);
   }));
 
 test("Max queue entry refuses missing launcher secret before network", async (t) =>
