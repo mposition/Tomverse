@@ -79,7 +79,7 @@ Report implemented and tested behavior separately from documentation, review, me
 
 # 독립 검토와 모델 역할
 
-- 독립 검토는 위 Frontier 절이 정한 경계(새 보안·금전·파괴적·자율 권한)를 켤 때 한 번 받습니다.
+- 독립 검토는 위 Frontier 절대로 끝난 diff마다 한 번 받고, 그 검토가 덮은 경계가 바뀌지 않는 동안 다시 받지 않습니다.
   검토 서버를 씁니다: commit 후 `node "$HOME/bin/review.mjs" submit --author <자기 이름> --scope "<요약>"`,
   `wait <jobId>`를 종료 코드가 3이 아닐 때까지 반복합니다. 0 accept, 1 reject(고치고 새로 submit),
   2 unknown(다시 보내지 않고 사람에게 알림). 자세한 동작은 `tools/review-orchestrator/README.md`.
