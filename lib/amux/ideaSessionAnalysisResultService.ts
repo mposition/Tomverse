@@ -8,7 +8,8 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION,
   AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET,
   auditRowActorKind } from "@/lib/adminAuditSystemActors";
-import { sealAmuxContent, type AmuxContentKeys } from "./ideaCrypto.ts";
+import { amuxContentKeyCoordinate, sealAmuxContent,
+  type AmuxContentKeys } from "./ideaCrypto.ts";
 import { amuxContentUnitKeyId } from "./ideaKeyStore.ts";
 import { readAmuxMaxTrackedCheckoutEvidence,
   requireActiveMaxCheckoutClaim,
@@ -19,6 +20,9 @@ import { readAmuxMaxManifestIntentBinding,
   "./ideaTrackedCheckoutReadManifestStore.ts";
 import { commitAmuxSessionBudgetOutcome } from
   "./ideaSessionAnalysisBudgetSettlementService.ts";
+import { commitAmuxSessionAnalysisPlanInTx,
+  type AmuxSessionPlanRefusal } from
+  "./ideaSessionAnalysisPlanService.ts";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -29,8 +33,15 @@ export type AmuxMaxSessionResultIdentity = AmuxMaxCheckoutClaim & {
 };
 type ResultInput = AmuxMaxSessionResultIdentity & {
   rawModelOutput: string; inputTokens: number; outputTokens: number;
-  keys: AmuxContentKeys;
+  keys: AmuxContentKeys; unitIds?: readonly string[];
 };
+
+/** A key ring must carry the claim-scoped result key; a bare key is that key. */
+function resultKeyId(input: ResultInput): string | undefined {
+  const masters = input.keys.contentMasters;
+  return masters ? masters.get(amuxContentKeyCoordinate("analysis_result",
+    input.claimId))?.masterKeyId : input.keys.masterKeyId;
+}
 
 export class AmuxMaxSessionResultError extends Error {
   constructor(readonly code: "invalid_result" | "not_ready" |
@@ -127,7 +138,10 @@ export async function preflightAmuxMaxSessionResult(tx: Tx,
  * commit atomically. A failed settlement rolls the result back. */
 export async function commitAmuxMaxSessionResult(tx: Tx,
   input: ResultInput): Promise<{ claimId: string; resultAuditId: string;
-    settlementAuditId: string; digest: string; digestKeyId: string }> {
+    settlementAuditId: string; digest: string; digestKeyId: string;
+    plan: { state: "plan_ready" | "plan_continues"; planId: string;
+      unitCount: number } |
+      { state: "plan_refused"; reason: AmuxSessionPlanRefusal } }> {
   const bytes = typeof input?.rawModelOutput === "string"
     ? Buffer.from(input.rawModelOutput, "utf8") : null;
   if (!validIdentity(input) || !bytes || bytes.length < 1 ||
@@ -136,7 +150,7 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
         Number.isSafeInteger(value) && value >= 0 &&
         value <= 2_147_483_647) ||
       input.inputTokens + input.outputTokens <= 0 ||
-      input.keys.masterKeyId !== amuxContentUnitKeyId({
+      resultKeyId(input) !== amuxContentUnitKeyId({
         ideaId: input.ideaId, purpose: "analysis_result",
         subjectId: input.claimId })) {
     bytes?.fill(0);
@@ -187,9 +201,19 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
         throw new AmuxMaxSessionResultError("integrity_unavailable");
       }
     }
+    const claim = await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+      where: { id: input.claimId }, select: { modelId: true } });
+    if (!claim) throw new AmuxMaxSessionResultError("integrity_unavailable");
+    const planned = await commitAmuxSessionAnalysisPlanInTx(tx, {
+      ideaId: input.ideaId, claimId: input.claimId, resultAuditId,
+      modelId: claim.modelId, rawModelOutput: input.rawModelOutput,
+      keys: input.keys, unitIds: input.unitIds });
     return { claimId: input.claimId, resultAuditId,
       settlementAuditId: settlement.auditId,
-      digest: sealed.digest, digestKeyId: sealed.digestKeyId };
+      digest: sealed.digest, digestKeyId: sealed.digestKeyId,
+      plan: planned.state === "plan_refused" ? planned
+        : { state: planned.state, planId: planned.planId,
+          unitCount: planned.unitCount } };
   } finally { bytes.fill(0); }
 }
 

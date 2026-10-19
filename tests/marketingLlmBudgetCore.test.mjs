@@ -23,7 +23,10 @@ import {
   marketingLlmReservation,
   marketingLlmReservePayloadDigest,
   marketingLlmSettleOutcome,
+  MARKETING_LLM_SETTINGS_UNSET,
+  marketingLlmSettingsValue,
   parseMarketingLlmMonthlyCap,
+  parseMarketingLlmSettings,
   resolveMarketingLlmPin,
 } from "../lib/marketingLlmBudgetCore.ts";
 
@@ -296,5 +299,32 @@ test("the web-search profile's adapter digest names its search cap; the text pro
     marketingLlmAdapterConfigDigest(
       marketingLlmConfigSnapshot({ pin: { ...searchPin, maxWebSearchCalls: 4 }, adapterVersion: "1.0.0", adapterProfile: "web-search-v1" }),
     ),
+  );
+});
+
+test("the operator's settings document is read strictly, and anything else is unreadable", () => {
+  assert.deepEqual(parseMarketingLlmSettings(undefined), MARKETING_LLM_SETTINGS_UNSET);
+  assert.deepEqual(parseMarketingLlmSettings(null), MARKETING_LLM_SETTINGS_UNSET);
+  const set = { model: "fixture-model-2026-10-01", monthlyUsdCap: "12.5" };
+  assert.deepEqual(parseMarketingLlmSettings(marketingLlmSettingsValue(set)), set);
+  assert.deepEqual(parseMarketingLlmSettings('{"monthlyUsdCap":null,"model":null}'), MARKETING_LLM_SETTINGS_UNSET);
+  for (const value of [
+    "{",
+    "[]",
+    '"x"',
+    '{"model":null}',
+    '{"model":null,"monthlyUsdCap":null,"extra":1}',
+    '{"model":"has space","monthlyUsdCap":null}',
+    '{"model":7,"monthlyUsdCap":null}',
+    '{"model":null,"monthlyUsdCap":"101"}',
+    '{"model":null,"monthlyUsdCap":"0"}',
+    '{"model":null,"monthlyUsdCap":5}',
+  ]) {
+    assert.equal(parseMarketingLlmSettings(value), null, value);
+  }
+  // One spelling per settings, so equal settings compare equal as stored text.
+  assert.equal(
+    marketingLlmSettingsValue({ monthlyUsdCap: "1", model: "m" }),
+    marketingLlmSettingsValue({ model: "m", monthlyUsdCap: "1" }),
   );
 });

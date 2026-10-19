@@ -20,6 +20,19 @@ test("each idea is at exactly one of the six stages, and a human step still open
   assert.deepEqual(stage({}), ["execution_approval", "execution_approval"], "saved, nothing approved yet");
   assert.deepEqual(stage({ submissionOrigin: "session" }), ["analysis", null],
     "v19 queued session intake does not require an execution approval");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "awaiting_owner" }),
+    ["analysis", "session_review"], "a session answer that made no plan waits for the operator");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "awaiting_owner", proposedUnits: 2,
+    chunks: [chunk()] }), ["plan_approval", "plan_approval"],
+    "a session plan that registration did not take waits for plan approval");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "analyzing", chunks: [
+    chunk({ coverageStatus: "more" }),
+    chunk({ chunkIndex: 1, state: "pending", coverageStatus: null, previewState: null, holdStatus: null })] }),
+  ["analysis", null], "a session continuation page is claimed by the queue, not approved");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "awaiting_owner", proposedUnits: 2, chunks: [
+    chunk({ coverageStatus: "more" }),
+    chunk({ chunkIndex: 1, state: "pending", coverageStatus: null, previewState: null, holdStatus: null })] }),
+  ["analysis", "session_review"], "a refused later page waits for the operator, not for plan approval");
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "prepared", holdStatus: null })] }),
     ["execution_approval", "execution_approval"]);
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "expired", holdStatus: "released" })] }),

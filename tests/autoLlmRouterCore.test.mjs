@@ -214,3 +214,11 @@ test("a conversation with attachments anywhere is never rewritten", async () => 
   const emptyList = [{ role: "user", content: "fix it", attachments: [] }];
   assert.equal(withRouterRewrite(emptyList, "Fix the parser.")[0].content, "Fix the parser.");
 });
+
+test("the router asks an OpenAI model for low reasoning effort and leaves others alone", async () => {
+  const { autoLlmRouterProviderOptions, AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS, AUTO_LLM_ROUTER_TIMEOUT_MS } =
+    await import("../lib/autoLlmRouterCore.ts");
+  assert.deepEqual(autoLlmRouterProviderOptions("openai"), { openai: { strictJsonSchema: true, reasoningEffort: "low" } });
+  assert.deepEqual(autoLlmRouterProviderOptions("anthropic"), { openai: { strictJsonSchema: true } });
+  assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
+});

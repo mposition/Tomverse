@@ -4,7 +4,8 @@
  * the semantic work; this module only builds the prompt, calls once and
  * validates the answer.
  *
- * Off unless SUPPORT_TRIAGE_LLM_MODEL_ID names an enabled runtime model; then
+ * Off unless the model chosen in the Admin console (or, with none saved,
+ * SUPPORT_TRIAGE_LLM_MODEL_ID) is an enabled runtime model; otherwise
  * the keyword lane is used and nothing is spent. Spend is bounded by what
  * already bounds the worker: at most 50 reports per pass and 52 passes per UTC
  * day, one call each, `maxRetries: 0`, `maxOutputTokens` below.
@@ -20,6 +21,7 @@ import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { TRIAGE_LANES, type TriageLane } from "@/lib/supportTriageCore";
+import { readSupportTriageLlmModelSetting } from "@/lib/supportTriageLlmSetting";
 
 export const SUPPORT_TRIAGE_LLM_MODEL_ENV = "SUPPORT_TRIAGE_LLM_MODEL_ID";
 export const SUPPORT_TRIAGE_LLM_MAX_OUTPUT_TOKENS = 1_200;
@@ -103,7 +105,8 @@ export type TriageLlm = (input: TriageLlmInput) => Promise<TriageLlmAnswer | nul
 export const supportTriageLlmFromEnv = async (
   env: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<TriageLlm | null> => {
-  const modelId = env[SUPPORT_TRIAGE_LLM_MODEL_ENV]?.trim();
+  // The Admin console's choice first; the environment variable only when none is saved.
+  const modelId = (await readSupportTriageLlmModelSetting()) ?? env[SUPPORT_TRIAGE_LLM_MODEL_ENV]?.trim();
   if (!modelId) return null;
   const model = await getEnabledRuntimeModel(modelId);
   if (!model) {

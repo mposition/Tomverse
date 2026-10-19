@@ -122,3 +122,18 @@ test("both Admin locales state what a stop does before it is sent", () => {
   assert.match(adminAmuxIdeaProgressMessages.en.sessionStop.confirm, /never sent again/);
   assert.match(adminAmuxIdeaProgressMessages.ko.sessionStop.confirm, /다시 보내지 않고/);
 });
+
+test("a session answer that made no plan says so and why nothing was registered", () => {
+  const parked = { ...row([]), submissionOrigin: "session" as const,
+    ...amuxIdeaProgress({ state: "awaiting_owner", submissionOrigin: "session",
+      cancelled: false, chunks: [], proposedUnits: 0, cards: [] }) };
+  assert.equal(parked.waitingFor, "session_review");
+  const markup = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: parked }));
+  assert.match(markup, /data-testid="amux-session-review"/);
+  assert.doesNotMatch(renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session" } })), /amux-session-review/);
+  for (const locale of [adminAmuxIdeaProgressMessages.en, adminAmuxIdeaProgressMessages.ko]) {
+    assert.ok(locale.sessionReview && locale.sessionReviewHint && locale.sessionReviewDetail);
+  }
+});

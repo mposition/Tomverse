@@ -27,6 +27,7 @@ import {
 } from "@/lib/marketingDraftIntakeStore";
 import { createMarketingChannel, runMarketingTransaction } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
+import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
 
 const SECRET = "g".repeat(48);
@@ -67,7 +68,7 @@ const PIN: MarketingLlmPricePin = {
   expiresAt: new Date(pinVerifiedAt + 90 * day).toISOString(),
   source: "https://example.invalid/pricing",
 };
-const LEDGER: MarketingLlmBudgetEnvironment = { killSwitchOn: false, monthlyCapRaw: "1", pins: [PIN] };
+const LEDGER: MarketingLlmBudgetEnvironment = { killSwitchOn: false, pins: [PIN] };
 const callKey = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 /** A ledger call for run `run` and `purpose`, taken as far as `until`. */
@@ -125,10 +126,12 @@ async function ledgerCall(
 
 beforeEach(async () => {
   await reset();
+  await setMarketingLlmSettings(prisma, PIN.model, "1");
   await ledgerCall(1);
 });
 after(async () => {
   await reset();
+  await clearMarketingLlmSettings(prisma);
   await prisma.$disconnect();
 });
 
@@ -234,8 +237,9 @@ const intakeAudits = async () => {
 test("with no alert recipient configured, every draft is refused before anything is written", async () => {
   const row = await approvedChannel();
   await draftsOn();
-  // The build's readers: the cap is unreadable here, and the price alert has
-  // no recipient, so both closed inputs are named.
+  // The build's readers: no cap is set in the Admin Console, and the price
+  // alert has no recipient, so both closed inputs are named.
+  await clearMarketingLlmSettings(prisma);
   const saved = { ops: process.env.OPS_ALERT_EMAIL, admin: process.env.ADMIN_ALERT_EMAIL };
   delete process.env.OPS_ALERT_EMAIL;
   delete process.env.ADMIN_ALERT_EMAIL;

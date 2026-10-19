@@ -23,6 +23,7 @@ import {
 } from "@/lib/marketingCompetitorStore";
 import { generatorProjection, type MarketingClaimProjection } from "@/lib/marketingClaims";
 import { readMarketingAssetRegistry } from "@/lib/marketingFactResolution";
+import { MARKETING_LLM_SETTINGS_KEY, parseMarketingLlmSettings } from "@/lib/marketingLlmBudgetCore";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
@@ -57,6 +58,12 @@ export type MarketingGeneratorContext = {
   readonly brief: MarketingGeneratorReport | null;
   readonly marketIntel: MarketingGeneratorReport | null;
   readonly competitors: MarketingGeneratorCompetitors;
+  /**
+   * The model the operator selected in the Admin Console, or null when none is
+   * (or the setting cannot be read). The worker uses that model's pin; the
+   * ledger refuses any other.
+   */
+  readonly llm: { readonly model: string | null };
 };
 
 /**
@@ -118,7 +125,10 @@ export type MarketingGeneratorReport = {
   readonly payload: unknown;
 };
 
-type ContextReader = Pick<MarketingTransaction, "marketingChannel" | "marketingReport" | "marketingCompetitor">;
+type ContextReader = Pick<
+  MarketingTransaction,
+  "marketingChannel" | "marketingReport" | "marketingCompetitor" | "appSetting"
+>;
 
 /**
  * Market facts without the page each came from. The model writes no URL
@@ -179,11 +189,12 @@ export async function readMarketingGeneratorContext(
       allowedLocales: true,
     },
   });
-  const [brief, marketIntel, tracked, knownIds] = await Promise.all([
+  const [brief, marketIntel, tracked, knownIds, llmSetting] = await Promise.all([
     latestReport(db, "brief"),
     latestReport(db, "market_intel"),
     readMarketingCompetitorsForGenerator(db),
     readKnownMarketingCompetitorIds(db),
+    db.appSetting.findUnique({ where: { key: MARKETING_LLM_SETTINGS_KEY }, select: { value: true } }),
   ]);
   return {
     channels: channels.map((row) => ({
@@ -201,5 +212,6 @@ export async function readMarketingGeneratorContext(
     brief,
     marketIntel,
     competitors: { tracked, knownIds },
+    llm: { model: parseMarketingLlmSettings(llmSetting?.value)?.model ?? null },
   };
 }

@@ -16,7 +16,7 @@ import {
 const allowedOrigins = [SCOUT_PAGE_ORIGIN];
 
 test("the page table is the policy's twenty pages, in order, with unique ids", () => {
-  // docs/policy/product-research-agent.md §12. A change here is a policy change.
+  // docs/policy/product-research-agent.md §12. Change it together with the policy's table.
   assert.deepEqual(
     SCOUT_PAGES.map(({ id, path, lang }) => `${id} ${path} ${lang}`),
     [

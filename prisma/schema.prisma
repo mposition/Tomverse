@@ -9691,6 +9691,51 @@ model ProductResearchObservation {
   @@index([submittedAt])
 }
 
+/// One improvement suggestion from the product-research scout (owner direction
+/// 2026-10-19, LLM-first): the model looked at a page, a generated file or the
+/// catalogue and named something worth changing. The operator dismisses it or
+/// sends it to AMUX as an idea. No user is linked to a row.
+model ProductResearchSuggestion {
+  id              String    @id @default(cuid())
+  createdAt       DateTime  @default(now())
+  /// page | file | catalogue (SCOUT_SUBJECT_KINDS)
+  kind            String
+  /// The page id (home.en), probe id (pdf.document) or catalogue.
+  subject         String
+  title           String
+  /// SUGGESTION_AREAS
+  area            String
+  /// SUGGESTION_SEVERITIES
+  severity        String
+  evidence        String
+  suggestion      String
+  /// SUGGESTION_STATUSES
+  status          String    @default("open")
+  statusChangedAt DateTime?
+  /// The AMUX idea made from this suggestion, once sent.
+  amuxIdeaId      String?
+  modelId         String?
+
+  @@index([status, createdAt])
+  @@index([subject, createdAt])
+}
+
+/// One Scout model call: written before the call, settled after it. The
+/// daily cap set in Admin counts these rows. Token counts only, no content.
+model ProductResearchScoutLlmCall {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  subject      String
+  modelId      String
+  /// SCOUT_LLM_CALL_OUTCOMES
+  outcome      String   @default("started")
+  inputTokens  Int?
+  outputTokens Int?
+  kept         Int?
+
+  @@index([createdAt])
+}
+
 /// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
 /// only by the Admin genesis action; never updated or deleted. The migration's
 /// trigger enforces the chain: one first genesis (shadow), every later one
