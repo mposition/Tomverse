@@ -217,16 +217,8 @@ export function AmuxDecisionMakerJudgmentView({
       data-phase={state.phase}
       aria-label={m.title}
     >
-      <p className="text-xs leading-5 text-zinc-400" data-testid="amux-dm-judgment-not-approval">
-        {m.notApproval}
-      </p>
-      {irreversible ? (
-        <p className="text-xs font-semibold text-red-300" data-testid="amux-dm-judgment-irreversible">
-          {m.irreversible}
-        </p>
-      ) : null}
-
-      <details className="group rounded-lg border border-zinc-800" open={draft.accuracy !== "not_judged" || undefined}>
+      <div className="flex flex-wrap items-start gap-2">
+      <details className="group min-w-[14rem] flex-1 rounded-lg border border-zinc-800" open={draft.accuracy !== "not_judged" || undefined}>
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm font-medium text-zinc-200">
           <ChevronRight className="h-4 w-4 text-zinc-500 transition group-open:rotate-90" aria-hidden />
           <span className="flex-1">{m.accuracyLegend}</span>
@@ -273,7 +265,7 @@ export function AmuxDecisionMakerJudgmentView({
         </fieldset>
       </details>
 
-      <details className="group rounded-lg border border-zinc-800" open={draft.operatorAnswer.length > 0 || undefined}>
+      <details className="group min-w-[14rem] flex-1 rounded-lg border border-zinc-800" open={draft.operatorAnswer.length > 0 || undefined}>
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm font-medium text-zinc-200">
           <ChevronRight className="h-4 w-4 text-zinc-500 transition group-open:rotate-90" aria-hidden />
           {m.answerLabel}
@@ -290,6 +282,8 @@ export function AmuxDecisionMakerJudgmentView({
           <span className="text-xs text-zinc-400">{m.answerBytes(utf8Bytes(draft.operatorAnswer))}</span>
         </label>
       </details>
+
+      </div>
 
       <div className="flex flex-wrap gap-2">
         {(["confirm", "edit_confirm", "reject"] as const).map((kind) => {
@@ -321,6 +315,15 @@ export function AmuxDecisionMakerJudgmentView({
           </p>
         ) : null;
       })}
+
+      <p className="text-xs leading-5 text-zinc-500" data-testid="amux-dm-judgment-not-approval">
+        {m.notApproval}
+      </p>
+      {irreversible ? (
+        <p className="text-xs font-semibold text-red-300" data-testid="amux-dm-judgment-irreversible">
+          {m.irreversible}
+        </p>
+      ) : null}
 
       {state.phase === "sending" ? (
         <p role="status" className="text-sm text-zinc-300" data-testid="amux-dm-judgment-sending">

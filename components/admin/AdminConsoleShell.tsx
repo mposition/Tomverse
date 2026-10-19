@@ -497,7 +497,7 @@ function AdminConsoleChrome({
           </div>
         </main>
 
-        <footer className="border-t border-zinc-800 bg-[#08090c] px-4 py-3 text-xs text-zinc-400 sm:px-6">
+        <footer className="border-t border-zinc-800 bg-zinc-950 px-4 py-3 text-xs text-zinc-400 sm:px-6">
           <div className="mx-auto flex max-w-[104rem] flex-wrap items-center gap-x-5 gap-y-2">
             <span className="font-black uppercase tracking-[0.14em] text-zinc-300">
               {environment}

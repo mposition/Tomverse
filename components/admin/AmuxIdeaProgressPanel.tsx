@@ -24,8 +24,8 @@ export const amuxIdeaHref = (requestId: string) =>
 export type AmuxIdeaProgressRows = AmuxIdeaProgressRow[] | null | "reauthenticate";
 
 // The console is written in dark classes only; its Light theme remaps the
-// palette (docs/ui-contracts/admin-console-ia.md, "The console theme"). A
-// `dark:` variant would follow the product theme instead.
+// palette (docs/ui-contracts/admin-console-ia.md, "The console theme"). A dark
+// variant prefix would follow the product theme instead.
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300";
 const BUTTON_PRIMARY = `inline-flex min-h-11 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 ${FOCUS}`;
 const BUTTON_SECONDARY = `inline-flex min-h-11 items-center rounded-lg border border-zinc-600 px-4 text-sm font-medium text-zinc-100 hover:bg-zinc-800 ${FOCUS}`;
