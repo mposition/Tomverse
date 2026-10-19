@@ -6,8 +6,10 @@ import {
   AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS,
   AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
   AUTO_LLM_ROUTER_MAX_REASON_CHARS,
+  AUTO_LLM_ROUTER_MAX_TOPIC_CHARS,
   autoLlmRouterCandidates,
   autoLlmRouterOutputSchema,
+  autoLlmRouterSession,
   autoLlmRouterUserMessage,
   parseAutoLlmRouterOutput,
   previousAnswerExcerpt,
@@ -45,21 +47,29 @@ test("candidates carry what the choice needs, in the eligible order", () => {
 test("the schema asks for a reason first, then an id from the candidate set", () => {
   const schema = autoLlmRouterOutputSchema(candidates);
   assert.deepEqual(schema.properties.modelId.enum, ids);
-  assert.deepEqual(Object.keys(schema.properties), ["reason", "modelId"]);
-  assert.deepEqual(schema.required, ["reason", "modelId"]);
+  assert.deepEqual(Object.keys(schema.properties), ["reason", "topic", "modelId"]);
+  assert.deepEqual(schema.required, ["reason", "topic", "modelId"]);
   assert.equal(schema.additionalProperties, false);
 });
 
 test("an answer outside the set, or of the wrong shape, is no pick", () => {
   assert.deepEqual(
-    parseAutoLlmRouterOutput({ reason: " Short coding fix. ", modelId: "deepseek-v4-flash" }, candidates),
-    { modelId: "deepseek-v4-flash", reason: "Short coding fix." }
+    parseAutoLlmRouterOutput(
+      { reason: " Short coding fix. ", topic: " Python debugging ", modelId: "deepseek-v4-flash" },
+      candidates
+    ),
+    { modelId: "deepseek-v4-flash", reason: "Short coding fix.", topic: "Python debugging" }
   );
-  // A missing or empty reason does not void the pick.
+  // A missing or empty reason or topic does not void the pick.
   assert.deepEqual(
     parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash", reason: "  " }, candidates),
-    { modelId: "deepseek-v4-flash", reason: null }
+    { modelId: "deepseek-v4-flash", reason: null, topic: null }
   );
+  const longTopic = parseAutoLlmRouterOutput(
+    { topic: "t".repeat(AUTO_LLM_ROUTER_MAX_TOPIC_CHARS + 10), modelId: "gpt-5-6-luna" },
+    candidates
+  );
+  assert.equal(longTopic.topic.length, AUTO_LLM_ROUTER_MAX_TOPIC_CHARS);
   const long = parseAutoLlmRouterOutput(
     { reason: "x".repeat(AUTO_LLM_ROUTER_MAX_REASON_CHARS + 10), modelId: "gpt-5-6-luna" },
     candidates
@@ -115,6 +125,31 @@ test("the previous answer is the assistant reply the latest prompt follows", () 
     { role: "user", content: "next" },
   ]);
   assert.equal(long.length, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS);
+});
+
+test("session memory is the latest topic and recent picks of this conversation", () => {
+  assert.equal(autoLlmRouterSession([]), null);
+  // Newest first, as the reader orders them.
+  const session = autoLlmRouterSession([
+    { sessionTopic: null, pickedModelId: null, taskKind: "general" },
+    { sessionTopic: "Python debugging", pickedModelId: "deepseek-v4-flash", taskKind: "coding" },
+    { sessionTopic: "Old topic", pickedModelId: "gpt-5-6-luna", taskKind: "general" },
+    { sessionTopic: "Too old", pickedModelId: "claude-opus-4-8", taskKind: "writing" },
+  ]);
+  assert.deepEqual(session, {
+    topic: "Python debugging",
+    recentPicks: [
+      { modelId: "deepseek-v4-flash", taskKind: "coding" },
+      { modelId: "gpt-5-6-luna", taskKind: "general" },
+    ],
+  });
+  // Rows with neither a topic nor a pick are no memory at all.
+  assert.equal(
+    autoLlmRouterSession([{ sessionTopic: null, pickedModelId: null, taskKind: "general" }]),
+    null
+  );
+  const message = JSON.parse(autoLlmRouterUserMessage("다음 함수도 봐줘", null, candidates, session));
+  assert.deepEqual(message.session, session);
 });
 
 test("the router model is off unless configured with an enabled catalogue id", () => {

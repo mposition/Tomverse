@@ -9,16 +9,41 @@ import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 import {
     AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
+    AUTO_LLM_ROUTER_SESSION_PICKS,
     AUTO_LLM_ROUTER_SYSTEM,
     AUTO_LLM_ROUTER_TIMEOUT_MS,
     AUTO_LLM_ROUTER_VERSION,
     autoLlmRouterCandidates,
     autoLlmRouterOutputSchema,
+    autoLlmRouterSession,
     autoLlmRouterUserMessage,
     parseAutoLlmRouterOutput,
     resolveAutoLlmRouterModel,
     type AutoLlmRouterPick,
+    type AutoLlmRouterSession,
 } from "@/lib/autoLlmRouterCore";
+
+/**
+ * The router's memory of this conversation: its own latest decisions here.
+ * Null when there are none or they cannot be read -- memory is an aid, and a
+ * failed read must not cost the turn its pick.
+ */
+async function readRouterSession(
+    conversationId: string | null
+): Promise<AutoLlmRouterSession | null> {
+    if (!conversationId) return null;
+    try {
+        const rows = await prisma.autoRouterDecision.findMany({
+            where: { conversationId },
+            orderBy: { createdAt: "desc" },
+            take: AUTO_LLM_ROUTER_SESSION_PICKS,
+            select: { sessionTopic: true, pickedModelId: true, taskKind: true },
+        });
+        return autoLlmRouterSession(rows);
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Ask a small model which eligible candidate should answer this prompt.
@@ -58,6 +83,7 @@ export async function pickAutoModelWithLlm(input: {
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
+    const session = await readRouterSession(input.conversationId);
     const startedAt = Date.now();
     let outcome: "picked" | "invalid" | "error" = "error";
     let pick: AutoLlmRouterPick | null = null;
@@ -69,7 +95,8 @@ export async function pickAutoModelWithLlm(input: {
             prompt: autoLlmRouterUserMessage(
                 input.prompt,
                 input.previousAnswer,
-                candidates
+                candidates,
+                session
             ),
             maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
             maxRetries: 0,
@@ -99,6 +126,7 @@ export async function pickAutoModelWithLlm(input: {
             ruleModelId: input.ruleModelId,
             pickedModelId: pick?.modelId ?? null,
             hasContext: input.previousAnswer !== null,
+            hasSession: session !== null,
             outcome,
             latencyMs,
         })
@@ -114,12 +142,14 @@ export async function pickAutoModelWithLlm(input: {
                     conversationId: input.conversationId,
                     routerInput: input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS),
                     routerContext: input.previousAnswer,
+                    routerSession: session ?? undefined,
                     candidates,
                     taskKind: input.taskKind,
                     ruleModelId: input.ruleModelId,
                     routerModelId: routerModel.id,
                     pickedModelId: pick?.modelId ?? null,
                     reason: pick?.reason ?? null,
+                    sessionTopic: pick?.topic ?? null,
                     outcome,
                     latencyMs,
                     inputTokens: usage?.inputTokens ?? null,

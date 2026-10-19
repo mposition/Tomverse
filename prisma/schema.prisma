@@ -4547,6 +4547,8 @@ model AutoRouterDecision {
   routerInput    String
   /// The start of the previous answer, as sent; null on a first turn.
   routerContext  String?
+  /// The router's session memory as sent (topic, recent picks); null when none.
+  routerSession  Json?
   /// The candidates exactly as sent: id, name, bestFor, tier, credits.
   candidates     Json
   /// Task kind from the deterministic profiler, as a feature beside the text.
@@ -4559,6 +4561,8 @@ model AutoRouterDecision {
   pickedModelId  String?
   /// The call's one-sentence reason for its pick, cut to 300 characters.
   reason         String?
+  /// The conversation topic the call wrote, read back by the next turn.
+  sessionTopic   String?
   /// picked | invalid | error
   outcome        String
   latencyMs      Int
