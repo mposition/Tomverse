@@ -123,6 +123,15 @@ export type MarketingLlmPricePin = {
  */
 export const MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL = 10_000;
 
+/**
+ * Searches OpenAI may bill past the request's `max_tool_calls`: one, as the
+ * chat path records in lib/webSearchCapability.ts
+ * (`OPENAI_SEARCH_OVERSHOOT_ALLOWANCE`, a five-search ceiling billed six). The
+ * request still carries the pin's count; the reservation adds this. A test
+ * holds the two values together.
+ */
+export const MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE = 1;
+
 /** A pin whose project is the API key's own: no `openai-project` header is sent. */
 export const MARKETING_LLM_KEY_SCOPED_PROJECT = "key-scoped";
 
@@ -331,10 +340,12 @@ export type MarketingLlmReservation = {
 /**
  * The most one request can cost: the whole context window at the worst input
  * price plus the profile's output cap at the worst output price, and for a
- * web-search call every search the request allows at the search price,
- * rounded up. A web-search call is billed input once per model pass -- the
- * first, and one after each search, each of which may read up to the whole
- * context window -- so its input is the window times (searches + 1).
+ * web-search call every search it may be billed for at the search price,
+ * rounded up. That is the request's `max_tool_calls` plus OpenAI's observed
+ * overshoot (`MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE`). A web-search
+ * call is billed input once per model pass -- the first, and one after each
+ * search, each of which may read up to the whole context window -- so its
+ * input is the window times (billable searches + 1).
  * `max_output_tokens` bounds the whole response, reasoning included, so the
  * output cap is not multiplied. BigInt so no product of two large integers
  * loses a digit before the ceiling.
@@ -343,14 +354,18 @@ export const marketingLlmReservation = (
   pin: MarketingLlmPricePin,
   profile: MarketingLlmAdapterProfile = MARKETING_LLM_ADAPTER_PROFILE,
 ): MarketingLlmReservation => {
-  const passes = profile === MARKETING_LLM_WEB_SEARCH_PROFILE ? (pin.maxWebSearchCalls ?? 0) + 1 : 1;
+  const billableSearches =
+    profile === MARKETING_LLM_WEB_SEARCH_PROFILE && pin.maxWebSearchCalls !== undefined
+      ? pin.maxWebSearchCalls + MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE
+      : 0;
+  const passes = billableSearches + 1;
   const inputTokens = pin.contextWindowTokens * passes;
   const input = BigInt(inputTokens) * BigInt(pin.worstInputMicroUsdPerMillion);
   const output = BigInt(pin.maxOutputTokens) * BigInt(pin.worstOutputMicroUsdPerMillion);
   const million = BigInt(1_000_000);
   const searches =
     profile === MARKETING_LLM_WEB_SEARCH_PROFILE
-      ? BigInt(pin.maxWebSearchCalls ?? 0) * BigInt(pin.webSearchMicroUsdPerCall ?? 0) * million
+      ? BigInt(billableSearches) * BigInt(pin.webSearchMicroUsdPerCall ?? 0) * million
       : BigInt(0);
   const total = input + output + searches;
   const ceiling = (total + million - BigInt(1)) / million;

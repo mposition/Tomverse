@@ -259,12 +259,13 @@ test("the month key is the UTC year and month", () => {
 test("a web-search reservation reads the window once per model pass and adds every search, and a text reservation is unchanged", () => {
   const searchPin = pin({ webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 });
   assert.equal(marketingLlmReservation(searchPin).reservedMicroUsd, 115_508);
-  // Four passes (the first and one after each of three searches) of 128,000 x 0.8,
-  // the output cap once, and three searches: 409,600 + 13,107.2 + 30,000.
+  // Three searches requested, four billable (OpenAI's observed overshoot):
+  // five passes of 128,000 x 0.8, the output cap once, and four searches --
+  // 512,000 + 13,107.2 + 40,000.
   assert.deepEqual(marketingLlmReservation(searchPin, "web-search-v1"), {
-    reservedInputTokens: 512_000,
+    reservedInputTokens: 640_000,
     reservedOutputTokens: 4_096,
-    reservedMicroUsd: 452_708,
+    reservedMicroUsd: 565_108,
   });
   // A pin without search fields prices no search, and is not allowed the profile.
   assert.equal(marketingLlmReservation(pin(), "web-search-v1").reservedMicroUsd, 115_508);

@@ -148,11 +148,12 @@ test("a web-search reservation adds every search the pin allows, and a pin witho
   );
   assert.equal(web.status, "ok");
   if (web.status !== "ok") return;
-  // Four passes over the window, the output cap once and three searches.
-  assert.equal(web.value.reservedMicroUsd, 452_708);
+  // Five passes over the window (three searches plus OpenAI's overshoot), the
+  // output cap once and four billable searches.
+  assert.equal(web.value.reservedMicroUsd, 565_108);
   const stored = await row(web.value.callId);
   assert.equal((stored.configSnapshot as Record<string, unknown>).adapterProfile, "web-search-v1");
-  assert.equal(stored.reservedInputTokens, 4 * 128_000);
+  assert.equal(stored.reservedInputTokens, 5 * 128_000);
   // Dispatch binds to the web-search config, search cap included.
   const webAdapter = marketingLlmAdapterConfigDigest(
     marketingLlmConfigSnapshot({ pin: webPin, adapterVersion: MARKETING_LLM_ADAPTER_VERSION, adapterProfile: "web-search-v1" }),

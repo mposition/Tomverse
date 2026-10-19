@@ -5,13 +5,16 @@ import {
   MARKETING_LLM_MAX_OUTPUT_TOKENS,
   MARKETING_LLM_WEB_SEARCH_CALLS,
   MARKETING_LLM_WEB_SEARCH_PROFILE,
+  MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
   MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL,
   marketingLlmPinAllows,
   marketingLlmPinProblems,
+  marketingLlmReservation,
 } from "@/lib/marketingLlmBudgetCore";
 import { marketingLlmCatalogPins, marketingLlmModelOptions } from "@/lib/marketingLlmModelCatalog";
 import { MODEL_PRICING } from "@/lib/modelPricing";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { OPENAI_SEARCH_OVERSHOOT_ALLOWANCE } from "@/lib/webSearchCapability";
 
 const options = marketingLlmModelOptions();
 
@@ -51,4 +54,13 @@ test("only a pin the ledger accepts is selectable, and every other option says w
   // As built: 5.4 mini fits the ledger's row limits; a 1.05M window does not.
   assert.equal(options.find((option) => option.model === "gpt-5.4-mini")?.unavailable, null);
   assert.match(options.find((option) => option.model === "gpt-6-luna")?.unavailable ?? "", /context_window_over_row_limit/);
+});
+
+test("the reservation's search overshoot is the chat path's recorded one", () => {
+  assert.equal(MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE, OPENAI_SEARCH_OVERSHOOT_ALLOWANCE);
+  // A web-search reservation holds one search and one model pass more than
+  // the request asks for.
+  const { pin } = options.find((option) => option.model === "gpt-5.4-mini");
+  const billable = MARKETING_LLM_WEB_SEARCH_CALLS + OPENAI_SEARCH_OVERSHOOT_ALLOWANCE;
+  assert.equal(marketingLlmReservation(pin, MARKETING_LLM_WEB_SEARCH_PROFILE).reservedInputTokens, pin.contextWindowTokens * (billable + 1));
 });
