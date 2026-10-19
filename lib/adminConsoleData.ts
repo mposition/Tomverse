@@ -137,6 +137,17 @@ export async function loadFeedbackRows(options?: {
   const completionByFeedback = new Map(
     completionEvents.map((event) => [event.feedbackId, event])
   );
+  // The support-triage proposal for each report: the newest ready or decided
+  // one. Present only once the worker has run on the report.
+  const triageRows = rows.length
+    ? await prisma.supportTriageSuggestion.findMany({
+        where: { feedbackId: { in: rows.map((row) => row.id) }, state: { in: ["ready", "accepted"] } },
+        orderBy: { createdAt: "asc" },
+        select: { feedbackId: true, lane: true, laneSource: true, duplicateOfFeedbackIds: true, replyDraft: true },
+      })
+    : [];
+  const triageByFeedback = new Map<string, (typeof triageRows)[number]>();
+  for (const row of triageRows) triageByFeedback.set(row.feedbackId, row);
   // Newest per report wins: a resend is what happened last.
   const replyDeliveryByFeedback = new Map<string, (typeof replyDeliveries)[number]>();
   for (const row of replyDeliveries) replyDeliveryByFeedback.set(row.referenceId, row);
@@ -179,6 +190,17 @@ export async function loadFeedbackRows(options?: {
           occurredAt: feedback.traceEvidence.occurredAt.toISOString(),
         }
       : null,
+    triage: (() => {
+      const row = triageByFeedback.get(feedback.id);
+      return row && row.lane
+        ? {
+            lane: row.lane,
+            laneSource: row.laneSource,
+            duplicateOf: row.duplicateOfFeedbackIds,
+            replyDraft: row.replyDraft,
+          }
+        : null;
+    })(),
     completionSnapshot: (() => {
       const event = completionByFeedback.get(feedback.id);
       return event
