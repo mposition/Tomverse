@@ -10,16 +10,15 @@ color: blue
 
 ## 착수 전
 
-대상 파일을 관할하는 `docs/policy` 또는 `docs/ui-contracts` 문서의 해당 절을
-읽습니다. 문서가 지목되지 않았는데 대상 파일이 계약 대상으로 보이면, 추측해서
-진행하지 말고 `contract` 역할로 올릴 것을 제안합니다.
+AGENTS.md 색인이 대상 영역의 문서를 지목하면 해당 절만 읽습니다. UI 계약
+파일(composer, drawer, action rail, admin IA, starter catalogue, typography,
+image workspace, settings nav)은 이 역할이 맡고, 그 계약 문서가 이름 댄 회귀
+테스트를 함께 돌립니다.
 
-계약 대상의 신호 — 이 중 하나라도 걸리면 `contract` 입니다.
+되돌릴 수 없는 파일이면 `contract` 입니다 — 이 중 하나라도 걸리면 올립니다.
 
 - `lib/modelPricing.ts`, `lib/credit*`, `lib/chatCostGuardrails.ts`
 - `prisma/migrations/**`, schema 의 CHECK 제약
-- `docs/ui-contracts/` 가 이름을 댄 파일 (composer, drawer, action rail,
-  admin IA, starter catalogue, typography, image workspace, settings nav)
 
 ## 지킬 것
 
