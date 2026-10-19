@@ -1058,6 +1058,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
   // cost Tomverse, which idempotency key deduplicated it, or which digest
   // reconciles it. That is exactly why the state exists.
   {
+    domain: "autoRouterDecision",
+    publicName: "auto_model_choices",
+    prismaModel: "AutoRouterDecision",
+    state: "included_filtered",
+    withheldReason:
+      "The user's message as Auto read it and the model chosen to answer it. The candidate list, the rule's choice, the router model, token counts and timings are Tomverse's routing internals.",
+  },
+  {
     domain: "comparisonReview",
     publicName: "comparison_reviews",
     prismaModel: "ComparisonReview",

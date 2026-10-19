@@ -54,7 +54,9 @@ import {
     isRouterShadowEnabled,
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
-import { selectAutoModel } from "@/lib/autoModelSelection";
+import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
+import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
+import { previousAnswerExcerpt } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -1979,7 +1981,7 @@ async function handleChatPost(
                 "router_refused_before_dispatch"
             );
         }
-        const autoSelection = selectAutoModel({
+        const deterministicAutoSelection = selectAutoModel({
             explorationEnabled: await isAutoExplorationEnabled(),
             conversationId: conversationId ?? null,
             requestedModelId,
@@ -2021,6 +2023,28 @@ async function handleChatPost(
             requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
                 .maxOutputTokens,
         });
+        // Per prompt: a small model reads this message and reorders the
+        // Router's eligible set. Off unless Admin › Routing names a router
+        // model; any failure keeps the deterministic choice.
+        const autoSelection = applyLlmModelPick(
+            deterministicAutoSelection,
+            deterministicAutoSelection.routed
+                ? await pickAutoModelWithLlm({
+                      prompt: profileTextFor(autoRoutingMessages),
+                      previousAnswer: previousAnswerExcerpt(autoRoutingMessages),
+                      eligibleModelIds:
+                          deterministicAutoSelection.record.eligibleModelIds,
+                      models: routerCandidateInputs.models,
+                      creditsByModelId:
+                          deterministicAutoSelection.candidateCreditsByModelId,
+                      ruleModelId: deterministicAutoSelection.modelId,
+                      taskKind: deterministicAutoSelection.record.taskKind,
+                      userId: session?.user?.id ?? null,
+                      conversationId: conversationId ?? null,
+                      traceId,
+                  })
+                : null
+        );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;
         const autoRecord = guestAutoSelection?.routed
