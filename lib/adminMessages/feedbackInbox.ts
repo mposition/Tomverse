@@ -106,6 +106,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     triageDuplicates: "Possible duplicates",
     triageDraft: "Reply draft (not sent)",
     triageCopyDraft: "Copy draft",
+    triageUseDraft: "Reply with this draft",
     triageLanes: {
       bug_verified: "Bug, verified error",
       bug_unverified: "Bug, unverified",
@@ -279,6 +280,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     triageDuplicates: "중복으로 보이는 신고",
     triageDraft: "답변 초안 (발송 안 됨)",
     triageCopyDraft: "초안 복사",
+    triageUseDraft: "이 초안으로 답변",
     triageLanes: {
       bug_verified: "버그, 검증된 오류",
       bug_unverified: "버그, 미검증",
