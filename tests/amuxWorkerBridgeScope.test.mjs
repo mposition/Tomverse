@@ -24,9 +24,9 @@ const registration = (workerName, roleCeiling, desiredState = "active") => ({
 });
 const capability = (routingTags, v22 = null) => ({ capability: { model: null, routingTags, toolCapabilities: [], v22 } });
 
-test("S1 ships with the bridge scope latched off", () => {
-  assert.equal(AMUX_WORKER_BRIDGE_SCOPE_LATCH, false);
-  assert.equal(amuxWorkerBridgeScopeOpen(), false);
+test("S3 turns the bridge scope on", () => {
+  assert.equal(AMUX_WORKER_BRIDGE_SCOPE_LATCH, true);
+  assert.equal(amuxWorkerBridgeScopeOpen(), true);
 });
 
 test("the scope is every derived worker but the code constants, v22 where a v22 profile is recorded", () => {
