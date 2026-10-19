@@ -42,6 +42,22 @@ export const SCOUT_LLM_CALL_OUTCOMES = ["started", "ok", "failed"] as const;
 /** Bounds for the daily model-call cap an owner sets in Admin. 0 means no calls. */
 export const SCOUT_DAILY_CALL_CAP_MAX = 500;
 
+/**
+ * What one send of the walker came to, read from the scout route's answer.
+ * A day's cap is not a failure: once the route says the cap is reached the
+ * walker stops capturing and counts the rest as capped.
+ */
+export type ScoutSendOutcome = "judged" | "modelOff" | "capped" | "refused" | "failed";
+
+export function scoutSendOutcome(answer: unknown): ScoutSendOutcome {
+  const value = (answer ?? {}) as { judged?: unknown; reason?: unknown; refused?: unknown };
+  if (value.judged === true) return "judged";
+  if (value.reason === "model_off") return "modelOff";
+  if (value.reason === "daily_cap_reached") return "capped";
+  if (typeof value.refused === "string") return "refused";
+  return "failed";
+}
+
 export const SCOUT_SUBJECT_KINDS = ["page", "file", "catalogue"] as const;
 export type ScoutSubjectKind = (typeof SCOUT_SUBJECT_KINDS)[number];
 

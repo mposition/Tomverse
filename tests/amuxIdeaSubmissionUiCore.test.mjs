@@ -51,7 +51,23 @@ test("only an exact successful submission response confirms the idea", () => {
   assert.deepEqual(classifyIdeaSubmissionPost({
     status: 201, body: { state: "submitted", requestId, ideaId: "idea-1",
       hasExternalSources: true, transferReady: false },
-  }, requestId), { kind: "submitted", ideaId: "idea-1", hasExternalSources: true });
+  }, requestId), { kind: "submitted", ideaId: "idea-1", hasExternalSources: true,
+    origin: "owner" });
+  // An Admin idea saved through v19 session intake says so (amux-intake v19 item 1).
+  assert.deepEqual(classifyIdeaSubmissionPost({
+    status: 201, body: { state: "submitted", requestId, ideaId: "idea-1",
+      origin: "session", hasExternalSources: true, transferReady: false },
+  }, requestId), { kind: "submitted", ideaId: "idea-1", hasExternalSources: true,
+    origin: "session" });
+  for (const [code, status] of [["references_required", 400], ["outside_scope", 409],
+    ["model_not_approved", 409], ["scope_unavailable", 409],
+    ["reference_snapshot_unavailable", 503]]) {
+    assert.deepEqual(classifyIdeaSubmissionPost({ status, body: { error: code } }, requestId),
+      { kind: "refused", code });
+  }
+  // An uncertain session write is read back, never refused as a retryable error.
+  assert.deepEqual(classifyIdeaSubmissionPost({ status: 503,
+    body: { error: "outcome_unknown" } }, requestId), { kind: "verify" });
   for (const reply of [
     { status: 201, body: { state: "submitted", requestId: "different", ideaId: "idea-1" } },
     { status: 201, body: { state: "submitted", requestId } },
@@ -84,7 +100,8 @@ test("absent, partial, malformed and failed read-back all remain unknown", () =>
   assert.deepEqual(classifyIdeaSubmissionReadBack({
     status: 200, body: { requestId, status: "committed", ideaId: "idea-1",
       hasExternalSources: false },
-  }, requestId), { kind: "submitted", ideaId: "idea-1", hasExternalSources: false });
+  }, requestId), { kind: "submitted", ideaId: "idea-1", hasExternalSources: false,
+    origin: "owner" });
   for (const reply of [
     { status: 200, body: { requestId, status: "absent" } },
     { status: 200, body: { requestId, status: "partial", ideaId: "idea-1" } },

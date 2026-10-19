@@ -159,6 +159,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     tabs: {
       registry: { label: "레지스트리", description: "가용성, 가격 override, API 구성" },
       discovery: { label: "발견", description: "공급자가 공개했지만 아직 결정되지 않은 모델" },
+      catalog: { label: "이미지·코딩 카탈로그", description: "이미지·코딩 모델의 켜기·보류, 가격 이력, LLM 초안, Code용 스냅샷" },
     },
   },
   routing: {

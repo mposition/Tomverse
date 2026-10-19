@@ -773,6 +773,9 @@ run(
     // one writer, compare-and-set on the row, only a pinned model, the cap
     // within its ceiling, and a refused save that writes nothing.
     "tests/integration/marketing-llm-settings.db.test.ts",
+    // The Marketing console overview: each of its four reads against the real
+    // tables, and an empty record reading as zeros rather than as unreadable.
+    "tests/integration/marketing-console-overview.db.test.ts",
     // The generator's budget route (S3c3a): signed, bounded, strict requests,
     // each action in its own transaction, and no model pinned as built.
     "tests/integration/marketing-llm-budget-route.db.test.ts",
@@ -1216,4 +1219,17 @@ run(
     "tests/integration/message-attachment-resend.db.test.ts",
   ],
   "Running restored question attachment persistence scenarios"
+);
+// The dynamic model catalogue: a refused enable writes nothing, accepted
+// writes carry their audit row, price revisions and snapshots are immutable.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/model-catalog.db.test.ts",
+  ],
+  "Running the dynamic model catalogue scenarios"
 );

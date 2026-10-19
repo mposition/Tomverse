@@ -12,6 +12,7 @@ import {
   scoutDays,
   parseScoutAnswer,
   scoutPromptText,
+  scoutSendOutcome,
   suggestionIdeaText,
 } from "../lib/productResearchScoutCore.ts";
 
@@ -143,4 +144,15 @@ test("the day table has one row per UTC day, newest first, days without calls in
   assert.deepEqual(days[1], { day: "2026-10-18", calls: 0, failed: 0, kept: 0, inputTokens: 0, outputTokens: 0 });
   assert.equal(days[2].calls, 1);
   assert.equal(days.reduce((sum, day) => sum + day.calls, 0), 3);
+});
+
+test("the walker counts a day's cap as capped, not as a failure", () => {
+  assert.equal(scoutSendOutcome({ judged: true, stored: 3 }), "judged");
+  assert.equal(scoutSendOutcome({ judged: true, stored: 0 }), "judged");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "model_off" }), "modelOff");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "daily_cap_reached" }), "capped");
+  assert.equal(scoutSendOutcome({ refused: "images" }), "refused");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "model_failed" }), "failed");
+  assert.equal(scoutSendOutcome({}), "failed");
+  assert.equal(scoutSendOutcome(null), "failed");
 });

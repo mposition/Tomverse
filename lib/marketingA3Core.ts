@@ -10,8 +10,8 @@
  *   (`runMarketingLlmCall` with `webSearch`), and the ledger reserved for
  *   every search it allows.
  * - `readMarketingA3Answer` keeps only facts that parse, cite a URL the
- *   provider actually cited, on one of the competitor's approved official
- *   hosts, and carry the competitor id and checked time the service set -- the
+ *   provider actually cited or its searches returned, on one of the
+ *   competitor's approved official hosts, and carry the competitor id and checked time the service set -- the
  *   model chooses neither.
  * - `marketingA3ReportBody` signs the facts as a `market_intel` report for the
  *   app's report route, which checks the hosts again against the registry.
@@ -62,6 +62,9 @@ export function marketingA3Messages(competitor: {
   ];
 }
 
+/** Why a proposed fact was not kept. */
+export type MarketingA3DropReason = "source_not_official_host" | "shape" | "source_not_retrieved" | "over_limit";
+
 /** A market fact as the report payload holds it. */
 export type MarketIntelFact = {
   competitorId: string;
@@ -92,7 +95,9 @@ export function marketingA3SourceUrl(url: string, hosts: readonly string[]): str
   if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) return null;
   const host = parsed.hostname.toLowerCase();
   if (!hosts.some((allowed) => allowed.toLowerCase() === host)) return null;
-  return `https://${host}${parsed.pathname}`;
+  // One spelling per page: `/pricing/` and `/pricing` are the same source.
+  const path = parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/u, "") : parsed.pathname;
+  return `https://${host}${path}`;
 }
 
 /**
@@ -110,15 +115,22 @@ export function readMarketingA3Answer(
     readonly citations: readonly string[];
     readonly checkedAt: string;
   },
-): { readonly facts: MarketIntelFact[]; readonly unrepresentable: number; readonly unreadable: boolean } {
+): {
+  readonly facts: MarketIntelFact[];
+  readonly unrepresentable: number;
+  readonly unreadable: boolean;
+  /** Why each proposed fact was not kept, by reason: counts only, no URL or value. */
+  readonly dropped: Partial<Record<MarketingA3DropReason, number>>;
+} {
+  const dropped: Partial<Record<MarketingA3DropReason, number>> = {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(content.trim().replace(/^```(?:json)?\s*|\s*```$/gu, ""));
   } catch {
-    return { facts: [], unrepresentable: 0, unreadable: true };
+    return { facts: [], unrepresentable: 0, unreadable: true, dropped };
   }
   if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { facts?: unknown }).facts)) {
-    return { facts: [], unrepresentable: 0, unreadable: true };
+    return { facts: [], unrepresentable: 0, unreadable: true, dropped };
   }
   const answer = parsed as { facts: unknown[]; unrepresentable?: unknown };
   const reported = answer.unrepresentable;
@@ -139,13 +151,25 @@ export function readMarketingA3Answer(
       sourceUrl: sourceUrl ?? "",
       checkedAt: input.checkedAt,
     });
-    if (!fact.success || !fact.data || sourceUrl === null || !cited.has(sourceUrl) || facts.length >= MARKETING_A3_MAX_FACTS_PER_CALL) {
+    const reason: MarketingA3DropReason | null =
+      sourceUrl === null
+        ? "source_not_official_host"
+        : !fact.success || !fact.data
+          ? "shape"
+          : !cited.has(sourceUrl)
+            ? "source_not_retrieved"
+            : facts.length >= MARKETING_A3_MAX_FACTS_PER_CALL
+              ? "over_limit"
+              : null;
+    if (reason !== null || !fact.data) {
+      const counted = reason ?? "shape";
+      dropped[counted] = (dropped[counted] ?? 0) + 1;
       unrepresentable += 1;
       continue;
     }
     facts.push(fact.data);
   }
-  return { facts, unrepresentable, unreadable: false };
+  return { facts, unrepresentable, unreadable: false, dropped };
 }
 
 /** The signed `market_intel` report for the app's report route. */
