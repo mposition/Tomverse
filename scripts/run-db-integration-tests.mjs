@@ -736,6 +736,10 @@ run(
     // they are under the ledger lock, so turning the model off or lowering the
     // cap stops every later call, and racing reservations stay within the cap.
     "tests/integration/product-research-scout-settings.db.test.ts",
+    // The operator's Admin settings for the generator's model and monthly cap:
+    // one writer, compare-and-set on the row, only a pinned model, the cap
+    // within its ceiling, and a refused save that writes nothing.
+    "tests/integration/marketing-llm-settings.db.test.ts",
     // The generator's budget route (S3c3a): signed, bounded, strict requests,
     // each action in its own transaction, and no model pinned as built.
     "tests/integration/marketing-llm-budget-route.db.test.ts",

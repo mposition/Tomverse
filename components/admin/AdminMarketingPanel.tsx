@@ -47,10 +47,19 @@ export type MarketingConsoleView = {
   switches: Record<string, SwitchState>;
   canWrite: boolean;
   configGeneration: number | null;
+  /** The generator's model and monthly LLM cap (lib/marketingConsoleRead.ts). */
+  llm: LlmView;
   /** Staging only; null everywhere else (lib/marketingConsoleRead.ts). */
   webhookStaging: WebhookStagingView | null;
   /** Rows were left out at the section's limit (lib/marketingConsoleRead.ts). */
   truncated?: boolean;
+};
+
+type LlmView = {
+  /** Null when the stored document cannot be read. */
+  settings: { model: string | null; monthlyUsdCap: string | null } | null;
+  version: string | null;
+  pinnedModels: Array<{ model: string; expiresAt: string; webSearch: boolean }>;
 };
 
 type WebhookStagingView = {
@@ -222,6 +231,14 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         switches={view.switches}
         canWrite={view.canWrite}
         configGeneration={view.configGeneration}
+        section={view.section}
+        onDone={() => void refresh()}
+        m={m}
+      />
+
+      <MarketingLlmSettings
+        llm={view.llm}
+        canWrite={view.canWrite}
         section={view.section}
         onDone={() => void refresh()}
         m={m}
@@ -453,6 +470,102 @@ function MarketingSwitchStrip({
         onDone={onDone}
         m={m}
       />
+    </div>
+  );
+}
+
+/**
+ * The generator's model and monthly LLM cap, set here instead of in Railway
+ * variables (operator decision 2026-10-19). Only pinned models are offered:
+ * the pin is price evidence and lives in code. The cost ledger reads these
+ * inside every reservation, so a change applies to the next call.
+ */
+function MarketingLlmSettings({
+  llm,
+  canWrite,
+  section,
+  onDone,
+  m,
+}: {
+  llm: LlmView;
+  canWrite: boolean;
+  section: string;
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  const settings = llm.settings;
+  const models = llm.pinnedModels;
+  const action: MarketingAction[] = !canWrite
+    ? []
+    : [
+        {
+          id: "llm-settings",
+          label: m.llmSave,
+          path: "/api/admin/marketing/llm-settings",
+          method: "PATCH",
+          unavailable: models.length === 0 ? m.llmNoPins : undefined,
+          confirm: m.llmConfirm,
+          fields: [
+            {
+              name: "model",
+              label: m.llmModel,
+              kind: "select",
+              options: [m.llmModelNone, ...models.map((pinned) => pinned.model)],
+              initial: settings?.model ?? m.llmModelNone,
+            },
+            {
+              name: "monthlyUsdCap",
+              label: m.llmCap,
+              kind: "text",
+              initial: settings?.monthlyUsdCap ?? "",
+              hint: m.llmCapHint,
+            },
+          ],
+          body: (values) => ({
+            model: !values.model || values.model === m.llmModelNone ? null : values.model,
+            monthlyUsdCap: values.monthlyUsdCap?.trim() ? values.monthlyUsdCap.trim() : null,
+            expectedVersion: llm.version,
+          }),
+        },
+      ];
+
+  return (
+    <div data-testid="marketing-llm-settings" className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-3">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{m.llmTitle}</p>
+      {settings === null ? (
+        <p className="mt-2 text-xs text-amber-300">{m.llmUnreadable}</p>
+      ) : (
+        <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-xs text-zinc-400">{m.llmModel}</dt>
+            <dd data-testid="marketing-llm-model" className="truncate font-mono text-xs font-bold text-zinc-200">
+              {settings.model ?? m.llmUnset}
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-2">
+            <dt className="text-xs text-zinc-400">{m.llmCap}</dt>
+            <dd data-testid="marketing-llm-cap" className="text-xs font-bold text-zinc-200">
+              {settings.monthlyUsdCap ?? m.llmUnset}
+            </dd>
+          </div>
+        </dl>
+      )}
+      {models.length > 0 ? (
+        <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-500">
+          {models.map((pinned) => (
+            <li key={pinned.model}>
+              <span className="font-mono">{pinned.model}</span>
+              {" · "}
+              {m.llmPinExpires.replace("{date}", pinned.expiresAt.slice(0, 10))}
+              {pinned.webSearch ? ` · ${m.llmWebSearch}` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {settings === null || settings.model === null || settings.monthlyUsdCap === null ? (
+        <p className="mt-2 text-[11px] text-zinc-500">{m.llmNothingSpends}</p>
+      ) : null}
+      <MarketingActionRail actions={action} section={section} onDone={onDone} m={m} />
     </div>
   );
 }

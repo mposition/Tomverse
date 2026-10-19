@@ -4,6 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
 import {
+  marketingLlmPinnedModels,
+  readMarketingLlmSettings,
+  type MarketingLlmPinnedModel,
+} from "@/lib/marketingLlmSettingsStore";
+import type { MarketingLlmSettings } from "@/lib/marketingLlmBudgetCore";
+import {
   MARKETING_WEBHOOK_SHADOW_KEY,
   marketingWebhookApplyScopeStatus,
 } from "@/lib/marketingAutomationAccess";
@@ -112,6 +118,17 @@ export type MarketingWebhookStagingView = {
   }>;
 };
 
+export type MarketingConsoleLlmView = {
+  settings: MarketingLlmSettings | null;
+  version: string | null;
+  pinnedModels: MarketingLlmPinnedModel[];
+};
+
+const readLlm = async (): Promise<MarketingConsoleLlmView> => {
+  const read = await readMarketingLlmSettings(prisma);
+  return { settings: read.settings, version: read.version, pinnedModels: marketingLlmPinnedModels() };
+};
+
 export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
@@ -141,6 +158,12 @@ export type MarketingConsolePayload = {
    * a new generation would save against a state nobody saw.
    */
   configGeneration: number | null;
+  /**
+   * The generator's model and monthly LLM cap (Admin Console, operator decision
+   * 2026-10-19). `settings` is null when the stored document is unreadable;
+   * `version` is what a change sends back; `pinnedModels` is what may be chosen.
+   */
+  llm: MarketingConsoleLlmView;
   /** Null outside staging; see `MarketingWebhookStagingView`. */
   webhookStaging: MarketingWebhookStagingView | null;
   /**
@@ -355,9 +378,10 @@ export async function readMarketingConsole(
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
   const availability = marketingSectionAvailability(section);
-  const [{ switches, configGeneration }, webhookStaging] = await Promise.all([
+  const [{ switches, configGeneration }, webhookStaging, llm] = await Promise.all([
     readSwitches(),
     readWebhookStaging(),
+    readLlm(),
   ]);
 
   if (!availability.available) {
@@ -369,6 +393,7 @@ export async function readMarketingConsole(
       rows: [],
       switches,
       configGeneration,
+      llm,
       webhookStaging,
       canWrite,
     };
@@ -405,6 +430,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      llm,
       webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
@@ -469,6 +495,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      llm,
       webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
@@ -535,6 +562,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      llm,
       webhookStaging,
       canWrite,
       rows: channels.map((channel) => ({
@@ -578,6 +606,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_COMPETITOR_READ_LIMIT,
       switches,
       configGeneration,
+      llm,
       webhookStaging,
       canWrite,
       truncated: competitors.length > MARKETING_COMPETITOR_READ_LIMIT,
@@ -608,6 +637,7 @@ export async function readMarketingConsole(
     pageSize: MARKETING_READ_PAGE_SIZE,
     switches,
     configGeneration,
+    llm,
     webhookStaging,
     canWrite,
     rows: reports.map((report) => ({
