@@ -88,9 +88,27 @@ const LANE_RULES = [
   // shadow runs, and AI Review telemetry and feedback. Moved out of `accounts`
   // on 2026-10-02. Below `routing` and `finance` on purpose: their AMUX and
   // Prompt Refiner suites keep the lanes they had.
+  // AMUX itself, the optimizer that files AMUX cards and the engineering agent
+  // that takes them. Split out of `agents` on 2026-10-19, when that lane held
+  // 68 suites on develop and ran ~15 minutes against 3-8 for most others;
+  // below `routing` so its AMUX suites keep that lane.
+  ["amux", /^(amux-|chat-unified-optimizer-|engineering-agent-)/],
+  // The two operations agents with the largest DB surfaces, split out of
+  // `agents` on 2026-10-19 for the same reason.
+  ["ops-triage", /^(ops-observer-|support-triage-)/],
+  // Back-office agents that came to rest in `accounts` (QA release, billing
+  // finance ops, digests, Auto router optimizer), moved on 2026-10-19.
+  [
+    "operations",
+    /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|chat-refiner-initial-auto-release)/,
+  ],
+  // The remaining agents and the review machinery around them: marketing,
+  // Prompt Refiner shadow runs, and AI Review telemetry and feedback. Below
+  // `routing` and `finance` on purpose: their Prompt Refiner suites keep the
+  // lanes they had.
   [
     "agents",
-    /^(amux-|engineering-agent-|ops-observer-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
+    /^(marketing-(automation|fact|templates|webhook|competitor|draft|generator|intel|llm|retention)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
   ],
 ];
 
