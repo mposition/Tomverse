@@ -260,7 +260,10 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "read",
   },
   // setup + admission lock + receipt count + resolution audit (4) + update +
-  // receipt recheck + halt lock + automatic-clear audit (4) + update + fence
+  // receipt recheck + halt lock + automatic-clear audit (4) + update + fence.
+  // The 2026-10-20 amendment's two other paths are shorter: setup + admission lock + halt
+  // lock + placeholder insert + audit (4) + fence, and setup + admission lock
+  // + receipt count + acknowledgement audit (4) + update + fence.
   orchestratorResolve: {
     operation: "orchestrator_resolve",
     prismaCallCeiling: 16,

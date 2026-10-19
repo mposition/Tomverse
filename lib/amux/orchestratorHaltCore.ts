@@ -153,13 +153,57 @@ export const AMUX_ORCHESTRATOR_HALT_KEY_PREFIX_LENGTH = 8;
 export const AMUX_ORCHESTRATOR_REQUEST_ID_HEADER = "x-amux-request-id";
 export const AMUX_ORCHESTRATOR_INSTANCE_ID_HEADER = "x-amux-instance-id";
 
-/** The halt and resolution audit actions of versions 20 and 33. */
+/** The halt and resolution audit actions of versions 20 and 33 and the 2026-10-20 amendment. */
 export const AMUX_ORCHESTRATOR_AUDIT_ACTIONS = {
   halted: "amux.orchestrator.halted",
   writeResolved: "amux.orchestrator.write_resolved",
   haltCleared: "amux.orchestrator.halt_cleared",
   haltAutoCleared: "amux.orchestrator.halt_auto_cleared",
+  placeholderAdmitted: "amux.orchestrator.write_placeholder_admitted",
+  writeAutoAcknowledged: "amux.orchestrator.write_auto_acknowledged",
 } as const;
+
+/**
+ * 2026-10-20 amendment: the admission the server writes for a halted request that never
+ * reached it. The request id is the primary key, so whichever of this row and
+ * the real request's admission commits first wins: a late real request is then
+ * refused `duplicate_request` before it can change anything, and this row is
+ * resolved `no_commit` by the same resolver as any other. The nil instance id
+ * marks the row as the server's, never an orchestrator process's.
+ */
+export const AMUX_ORCHESTRATOR_PLACEHOLDER_INSTANCE_ID =
+  "00000000-0000-0000-0000-000000000000";
+export const AMUX_ORCHESTRATOR_PLACEHOLDER_BUDGET_MS = 1_000;
+
+/** 2026-10-20 amendment: the write call whose unknown outcome a halt reason names. */
+export const amuxOrchestratorCallKindForHaltReason = (
+  reason: AmuxOrchestratorHaltReasonCode,
+): AmuxOrchestratorCallKind | null => {
+  switch (reason) {
+    case "claim_outcome_unknown":
+      return "claim";
+    case "recovery_outcome_unknown":
+      return "recover";
+    case "promotion_outcome_unknown":
+      return "auto_promotion_tick";
+    default:
+      return null;
+  }
+};
+
+/**
+ * 2026-10-20 amendment: write calls whose committed effects need no person. The
+ * recovery sweep only releases claims, executions and assignments that have
+ * already expired, and the next sweep reads the board as it is, so a sweep
+ * whose answer was lost is acknowledged by the server instead of waiting for
+ * a person. Claim and the promotion tick are not in this list.
+ */
+export const AMUX_ORCHESTRATOR_SELF_ACKNOWLEDGED_CALL_KINDS = [
+  "recover",
+] as const satisfies readonly AmuxOrchestratorCallKind[];
+
+export const amuxOrchestratorCallKindSelfAcknowledges = (callKind: string): boolean =>
+  (AMUX_ORCHESTRATOR_SELF_ACKNOWLEDGED_CALL_KINDS as readonly string[]).includes(callKind);
 
 /**
  * Section 5: the only metadata keys these audit entries carry. `systemActor`
