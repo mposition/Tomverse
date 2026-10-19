@@ -17,6 +17,7 @@ import {
     autoLlmRouterUserMessage,
     parseAutoLlmRouterOutput,
     resolveAutoLlmRouterModel,
+    type AutoLlmRouterPick,
 } from "@/lib/autoLlmRouterCore";
 
 /**
@@ -34,6 +35,8 @@ import {
  */
 export async function pickAutoModelWithLlm(input: {
     prompt: string;
+    /** Start of the answer the prompt replies to; see previousAnswerExcerpt. */
+    previousAnswer: string | null;
     eligibleModelIds: readonly string[];
     models: readonly AiModel[];
     creditsByModelId: Readonly<Record<string, number>>;
@@ -57,13 +60,17 @@ export async function pickAutoModelWithLlm(input: {
 
     const startedAt = Date.now();
     let outcome: "picked" | "invalid" | "error" = "error";
-    let picked: string | null = null;
+    let pick: AutoLlmRouterPick | null = null;
     let usage: { inputTokens?: number; outputTokens?: number } | undefined;
     try {
         const generated = await generateText({
             model: getActiveAiModel(routerModel),
             system: AUTO_LLM_ROUTER_SYSTEM,
-            prompt: autoLlmRouterUserMessage(input.prompt, candidates),
+            prompt: autoLlmRouterUserMessage(
+                input.prompt,
+                input.previousAnswer,
+                candidates
+            ),
             maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
             maxRetries: 0,
             abortSignal: AbortSignal.timeout(AUTO_LLM_ROUTER_TIMEOUT_MS),
@@ -76,8 +83,8 @@ export async function pickAutoModelWithLlm(input: {
             providerOptions: { openai: { strictJsonSchema: true } },
         });
         usage = generated.usage as typeof usage;
-        picked = parseAutoLlmRouterOutput(generated.output, candidates);
-        outcome = picked ? "picked" : "invalid";
+        pick = parseAutoLlmRouterOutput(generated.output, candidates);
+        outcome = pick ? "picked" : "invalid";
     } catch {
         outcome = "error";
     }
@@ -90,7 +97,8 @@ export async function pickAutoModelWithLlm(input: {
             routerModelId: routerModel.id,
             candidateCount: candidates.length,
             ruleModelId: input.ruleModelId,
-            pickedModelId: picked,
+            pickedModelId: pick?.modelId ?? null,
+            hasContext: input.previousAnswer !== null,
             outcome,
             latencyMs,
         })
@@ -105,11 +113,13 @@ export async function pickAutoModelWithLlm(input: {
                     userId: input.userId,
                     conversationId: input.conversationId,
                     routerInput: input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS),
+                    routerContext: input.previousAnswer,
                     candidates,
                     taskKind: input.taskKind,
                     ruleModelId: input.ruleModelId,
                     routerModelId: routerModel.id,
-                    pickedModelId: picked,
+                    pickedModelId: pick?.modelId ?? null,
+                    reason: pick?.reason ?? null,
                     outcome,
                     latencyMs,
                     inputTokens: usage?.inputTokens ?? null,
@@ -126,5 +136,5 @@ export async function pickAutoModelWithLlm(input: {
                 );
             });
     }
-    return picked;
+    return pick?.modelId ?? null;
 }

@@ -4545,6 +4545,8 @@ model AutoRouterDecision {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   /// The message text exactly as sent to the router model.
   routerInput    String
+  /// The start of the previous answer, as sent; null on a first turn.
+  routerContext  String?
   /// The candidates exactly as sent: id, name, bestFor, tier, credits.
   candidates     Json
   /// Task kind from the deterministic profiler, as a feature beside the text.
@@ -4555,6 +4557,8 @@ model AutoRouterDecision {
   routerModelId  String
   /// The call's answer. Null when it answered outside the set or failed.
   pickedModelId  String?
+  /// The call's one-sentence reason for its pick, cut to 300 characters.
+  reason         String?
   /// picked | invalid | error
   outcome        String
   latencyMs      Int

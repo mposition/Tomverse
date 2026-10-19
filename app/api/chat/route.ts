@@ -56,6 +56,7 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
+import { previousAnswerExcerpt } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -2030,6 +2031,7 @@ async function handleChatPost(
             deterministicAutoSelection.routed
                 ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
+                      previousAnswer: previousAnswerExcerpt(autoRoutingMessages),
                       eligibleModelIds:
                           deterministicAutoSelection.record.eligibleModelIds,
                       models: routerCandidateInputs.models,
