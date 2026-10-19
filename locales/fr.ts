@@ -306,6 +306,8 @@ export const fr = {
         copyCode: "Copier le code",
         responseCopied: "Copié",
         tryAnotherModelHint: "Vous pouvez aussi sélectionner un autre modèle et réessayer.",
+        concurrencyRetryWaiting: "Vous pourrez réessayer dès qu'une réponse en cours sera terminée.",
+        concurrencyRetryReady: "Vous pouvez réessayer maintenant.",
         guestQuotaLoginBenefitHint: "En vous connectant, vous obtenez une limite quotidienne bien plus élevée, et cette conversation est enregistrée sur votre compte.",
         send: "Envoyer",
         creditUnit: "crédits",

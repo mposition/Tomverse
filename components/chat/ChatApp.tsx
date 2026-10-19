@@ -2506,6 +2506,52 @@ function ChatAppComponent({
     if (prompt) onRestorePrompt(prompt);
   }, [initialConversationId, onRestorePrompt, transcriptScope]);
 
+  /**
+   * Sends a concurrency-refused question again, in place of the refused turn.
+   *
+   * The refusal came before any provider call or reservation, so the turn
+   * left nothing behind: the refused card is dropped and the question is sent
+   * again under the bubble already on screen (its id is reused, so it is not
+   * shown twice) and bound to the same saved question as before.
+   */
+  const handleRetryConcurrency = useCallback((assistantMessageId: string) => {
+    const key = runtimeKeyRef.current;
+    const lastPrompt = getChatAppRetryPrompt(key);
+    if (!lastPrompt || isGuestAutoRetryBlocked(isGuestMode, lastPrompt)) return;
+    const snapshot = getChatRuntimeSnapshot(key).messages;
+    const failedIndex = snapshot.findIndex((message) => message.id === assistantMessageId);
+    const question = snapshot[failedIndex - 1];
+    if (failedIndex !== snapshot.length - 1 || question?.role !== "user") return;
+    const preparationToken = beginSendPreparation(key);
+    if (!preparationToken) return;
+
+    void (async () => {
+      try {
+        const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
+        if (!settingsReady || isChatRuntimeStreaming(key)) return;
+        writeChatRuntimeMessages(key, (prev) =>
+          prev.filter((message) => message.id !== assistantMessageId)
+        );
+        await handleSendPrompt(
+          lastPrompt.text,
+          lastPrompt.targetChatId,
+          question.id,
+          lastPrompt.attachments,
+          null,
+          undefined,
+          undefined,
+          undefined,
+          "single",
+          lastPrompt.webSearchMode,
+          [],
+          lastPrompt.sourceUserMessageId
+        );
+      } finally {
+        endSendPreparation(key, preparationToken);
+      }
+    })();
+  }, [beginSendPreparation, endSendPreparation, handleSendPrompt, isGuestMode, onBeforeSend]);
+
   const handleRetryLast = useCallback(() => {
     const lastPrompt = getChatAppRetryPrompt(runtimeKeyRef.current);
     if (!lastPrompt || isGuestAutoRetryBlocked(isGuestMode, lastPrompt)) return;
@@ -2969,6 +3015,16 @@ function ChatAppComponent({
         }
         onRestoreQuestion={transcriptScope === "conversation" && onRestorePrompt
           ? handleRestoreQuestion : undefined}
+        // Both scopes: a concurrency refusal is the one failure Chat may
+        // resend, since nothing of the refused turn ever ran (see the handler).
+        // Without a held retry prompt (after a reload) Chat falls back to
+        // restoring the question instead.
+        onRetryConcurrency={
+          getChatAppRetryPrompt(runtimeKey) &&
+          !isGuestAutoRetryBlocked(isGuestMode, getChatAppRetryPrompt(runtimeKey))
+            ? handleRetryConcurrency
+            : undefined
+        }
         onRetryWithoutAttachments={transcriptScope === "model" ? handleRetryWithoutAttachments : undefined}
         onContinueWithoutUnavailableAttachments={
           transcriptScope === "model" ? handleContinueWithoutUnavailableAttachments : undefined
