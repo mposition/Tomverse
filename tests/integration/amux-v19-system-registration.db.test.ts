@@ -63,8 +63,8 @@ import { commitIdeaOnlyTransferPreview } from
   "@/lib/amux/ideaTransferPreviewService";
 import { commitIdeaTransferConfirmation } from
   "@/lib/amux/ideaTransferConfirmationService";
-import { commitAmuxSessionAnalysisPlanInTx,
-  prepareAmuxSessionAnalysisPlan } from
+import { amuxSessionPageKeyIdentities,
+  commitAmuxSessionAnalysisPlanInTx, readAmuxSessionPageContextInTx } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
 import { prisma } from "@/lib/prisma";
 
@@ -508,9 +508,9 @@ test("one completed session plan registers atomically under system evidence", as
   });
 });
 
-/** A session idea whose only analysis is one claim-bound CLI answer: no owner
- * preview, no confirmation, no v4 budget hold. */
-async function sessionPlannedIdea(rawPage: (previewId: string) => unknown) {
+/** A session idea analysing on its own: no owner preview, no confirmation,
+ * no v4 budget hold. Each page is one claim-bound CLI answer. */
+async function analysingSessionIdea() {
   const ideaId = randomUUID();
   const inspected = inspectAmuxIdeaSessionSubmission({ version: 1,
     requestId: ideaId, input: { version: 1,
@@ -527,25 +527,39 @@ async function sessionPlannedIdea(rawPage: (previewId: string) => unknown) {
       expectedAuthority: authority, ideaId, keys: rawKeys }));
   await prisma.amuxIdeaSubmission.update({ where: { id: ideaId },
     data: { state: "analyzing" } });
+  assert.ok(submitted.auditId);
+  return { ideaId, rawIdentity };
+}
+
+/** One page answer, keyed the way the result route keys it. */
+async function sessionPageAnswer(idea: Awaited<ReturnType<typeof analysingSessionIdea>>,
+  rawPage: (previewId: string) => { units: unknown[] }) {
   const claimId = randomUUID();
-  const unitIds = Array.from({ length: 4 }, () => randomUUID());
-  const keys = await createAmuxContentKeyRing([rawIdentity], [
-    { ideaId, purpose: "analysis_freeform" as const,
-      subjectId: amuxAnalysisFreeformSubjectId(ideaId, claimId) },
-    ...unitIds.map((subjectId) => ({ ideaId,
+  const page = rawPage(claimId);
+  const unitIds = page.units.map(() => randomUUID());
+  const keys = await createAmuxContentKeyRing([idea.rawIdentity,
+    ...await amuxSessionPageKeyIdentities(prisma, idea.ideaId)], [
+    { ideaId: idea.ideaId, purpose: "transfer_payload" as const,
+      subjectId: claimId },
+    { ideaId: idea.ideaId, purpose: "analysis_freeform" as const,
+      subjectId: amuxAnalysisFreeformSubjectId(idea.ideaId, claimId) },
+    ...unitIds.map((subjectId) => ({ ideaId: idea.ideaId,
       purpose: "analysis_draft" as const, subjectId }))]);
-  const rawModelOutput = JSON.stringify(rawPage(claimId));
   const planned = await prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const plan = prepareAmuxSessionAnalysisPlan({ ideaId, claimId,
-      rawModelOutput, keys, unitIds });
-    // The submission audit stands in for the claim-bound result audit here;
-    // the result commit itself is covered by the session submission suite.
-    return commitAmuxSessionAnalysisPlanInTx(tx, { ideaId, claimId,
-      resultAuditId: submitted.auditId, modelId: authority.scope.model.modelId,
-      plan, keys });
+    // Each result has its own audit; the result commit itself is covered by
+    // the session submission suite, so a per-page stand-in id is enough here.
+    return commitAmuxSessionAnalysisPlanInTx(tx, { ideaId: idea.ideaId,
+      claimId, resultAuditId: `synthetic-result-${claimId}`,
+      modelId: authority.scope.model.modelId,
+      rawModelOutput: JSON.stringify(page), keys, unitIds });
   }, { timeout: 30_000 });
-  return { ideaId, claimId, unitIds, planned };
+  return { claimId, unitIds, planned, keys };
+}
+
+async function sessionPlannedIdea(rawPage: (previewId: string) => { units: unknown[] }) {
+  const idea = await analysingSessionIdea();
+  return { ideaId: idea.ideaId, ...await sessionPageAnswer(idea, rawPage) };
 }
 
 const sessionPage = (units: unknown[], extra: Record<string, unknown> = {}) =>
@@ -602,7 +616,8 @@ test("a session CLI answer becomes a plan the system registration accepts", asyn
   assert.equal(chunk.state, "draft_ready");
   assert.equal(chunk.currentPreviewId, claimId);
   assert.equal(preview.state, "completed");
-  assert.equal(preview.payloadCiphertext, null);
+  // The page prompt is stored as the preview payload a next page reads.
+  assert.ok(preview.payloadCiphertext && preview.payloadPurgeAfter);
   const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(ideaId);
   assert.equal(result.state, "committed");
   const decisions = await prisma.amuxIdeaUnitDecision.findMany({
@@ -615,6 +630,73 @@ test("a session CLI answer becomes a plan the system registration accepts", asyn
   assert.equal(decisions.filter((entry) => entry.registeredWorkItemId).length, 1);
   assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: ideaId }, select: { state: true } })).state, "completed");
+});
+
+test("a session plan continues on its next page and registers once complete", async () => {
+  await approveSyntheticTaskCatalog();
+  const title = `Synthetic two-page session ${randomUUID()}`;
+  const signal = (metrics: Record<string, number>) => ({ metrics,
+    uncertainty: "low", rationale: "Synthetic deterministic evidence.",
+    evidenceRefIds: ["operator_idea"] });
+  const nodes = sessionPlanUnits(title).slice(0, 3);
+  const stories = Array.from({ length: 8 }, (_, index) => ({
+    kind: "card", localId: `c0:card-${index}`, cardType: "story",
+    storyKind: "general", title: `${title} story ${index}`,
+    problem: "The idea holds more than eight independent cards.",
+    scopeIn: ["Review this story"], scopeOut: ["Do not execute"],
+    completionCriteria: ["The owner can review the result"],
+    featureRef: "c0:node-2", parentStoryRef: null, dependencyRefs: [],
+    duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
+    executionBrief: null, sourceRefIds: ["operator_idea"],
+    portfolioSignal: signal({ impact: 2 }) }));
+  const idea = await analysingSessionIdea();
+  const first = await sessionPageAnswer(idea, (previewId) => ({ schemaVersion: 5,
+    previewId, chunkIndex: 0, outcome: "propose", coverageStatus: "more",
+    continuationKind: "output", ownerQuestion: null,
+    coveredScope: "Eight independently reviewable stories were proposed.",
+    remainingScope: "One implementation Task remains for the same feature.",
+    units: [...nodes, ...stories] }));
+  assert.equal(first.planned.state, "plan_continues");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: idea.ideaId }, select: { state: true } })).state, "analyzing",
+  "the queue claims the next page; nobody approves it");
+  assert.equal((await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId: idea.ideaId, chunkIndex: 1 } },
+    select: { state: true } })).state, "pending");
+  // The next page sees the earlier page's scope and references.
+  const keys = await createAmuxContentKeyRing([idea.rawIdentity,
+    ...await amuxSessionPageKeyIdentities(prisma, idea.ideaId)], []);
+  const context = await prisma.$transaction(async (tx) => {
+    const row = await tx.amuxIdeaSubmission.findUniqueOrThrow({
+      where: { id: idea.ideaId },
+      select: { actorUserId: true, currentSourcePlanRevisionId: true } });
+    return readAmuxSessionPageContextInTx(tx, { ideaId: idea.ideaId,
+      actorUserId: row.actorUserId, planId: row.currentSourcePlanRevisionId,
+      now: new Date(), keys });
+  });
+  assert.equal(context.chunkIndex, 1);
+  assert.equal(context.continuation?.remainingScope,
+    "One implementation Task remains for the same feature.");
+  assert.ok(context.permittedTargetRefs.some((ref) => ref.ref === "c0:card-7"));
+  assert.ok(context.permittedTargetRefs.some((ref) => ref.ref === "c0:node-2"));
+  const second = await sessionPageAnswer(idea, (previewId) => ({ schemaVersion: 5,
+    previewId, chunkIndex: 1, outcome: "propose", coverageStatus: "complete",
+    continuationKind: null, ownerQuestion: null,
+    coveredScope: "The remaining implementation Task was proposed.",
+    remainingScope: null,
+    units: [{ ...sessionPlanUnits(title)[3]!, localId: "c1:card-0" }] }));
+  assert.equal(second.planned.state, "plan_ready");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: idea.ideaId }, select: { state: true } })).state, "awaiting_owner");
+  const result = await commitAmuxV19CompletedIdeaSystemRegistrationForTest(idea.ideaId);
+  assert.equal(result.state, "committed");
+  const decisions = await prisma.amuxIdeaUnitDecision.findMany({
+    where: { ideaId: idea.ideaId }, select: { sourcePreviewId: true,
+      registeredWorkItemId: true } });
+  assert.equal(decisions.length, 12);
+  assert.deepEqual(new Set(decisions.map((entry) => entry.sourcePreviewId)),
+    new Set([first.claimId, second.claimId]));
+  assert.equal(decisions.filter((entry) => entry.registeredWorkItemId).length, 9);
 });
 
 test("a session answer that asks the owner leaves the queue without a plan", async () => {

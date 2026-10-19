@@ -84,6 +84,17 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     (latest.holdStatus !== null && ACTIVE_HOLD.has(latest.holdStatus)))) {
     return at("analysis");
   }
+  if (facts.submissionOrigin === "session") {
+    // v19 session pages need no approval: the queue claims the next page on
+    // its own while the idea is analysing (item 4).
+    if (facts.state === "analyzing") return at("analysis");
+    // An answer that could not become a page leaves the queue with no plan
+    // rows for that page; the operator decides what to do with the idea.
+    if (facts.state === "awaiting_owner" &&
+        (latest === null || latest.state === "pending")) {
+      return at("analysis", "session_review");
+    }
+  }
   if (latest?.coverageStatus === "needs_owner_input") return at("execution_approval", "owner_input");
   if (latest?.coverageStatus === "more") return at("execution_approval", "continuation");
   if (latest && latest.chunkIndex > 0 && NOT_YET_SENT.has(latest.state)) {
@@ -105,13 +116,6 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   // append-only reservation waits for automatic analysis, not a human step.
   if (facts.submissionOrigin === "session" && facts.state === "submitted") {
     return at("analysis");
-  }
-  // A v19 session answer that could not become a plan (invalid, an owner
-  // question or a continuation page) leaves the queue with no plan rows; the
-  // operator decides what to do with the idea.
-  if (facts.submissionOrigin === "session" && facts.state === "awaiting_owner" &&
-      facts.chunks.length === 0) {
-    return at("analysis", "session_review");
   }
   return at("execution_approval", "execution_approval");
 }

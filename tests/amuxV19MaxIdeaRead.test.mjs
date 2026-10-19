@@ -28,7 +28,7 @@ async function withEnv(fn) {
 
 test("Max launcher reads only its claim-bound plaintext without a v4 byte cap", async () =>
   withEnv(async () => {
-    const idea = "synthetic idea " + "x".repeat(100_000);
+    const prompt = "synthetic page prompt " + "x".repeat(100_000);
     let calls = 0;
     const result = await readAmuxV19MaxIdeaOnce({ origin, reservationId,
       ideaId, claimId, fetchImpl: async (url, options) => {
@@ -41,11 +41,11 @@ test("Max launcher reads only its claim-bound plaintext without a v4 byte cap", 
         assert.equal(options.headers["x-amux-agent-id"], "amux-intake-max");
         assert.deepEqual(JSON.parse(options.body), { reservationId, ideaId,
           claimId });
-        return Response.json({ idea });
+        return Response.json({ prompt });
       },
     });
     assert.equal(calls, 1);
-    assert.deepEqual(result, { kind: "ready", idea });
+    assert.deepEqual(result, { kind: "ready", prompt });
   }));
 
 test("wrong origin refuses before network and malformed response stays unavailable", async () =>
@@ -58,7 +58,7 @@ test("wrong origin refuses before network and malformed response stays unavailab
     assert.equal(calls, 0);
     assert.deepEqual(await readAmuxV19MaxIdeaOnce({ origin,
       reservationId, ideaId, claimId,
-      fetchImpl: async () => Response.json({ idea: "", extra: true }),
+      fetchImpl: async () => Response.json({ prompt: "", extra: true }),
     }), { kind: "unavailable" });
   }));
 
@@ -76,7 +76,7 @@ test("only an exact fresh Max claim may fetch the idea", async () =>
         "/api/internal/amux/v19/analysis-idea");
       assert.deepEqual(JSON.parse(options.body), { reservationId, ideaId,
         claimId });
-      return Response.json({ idea: "synthetic idea" });
+      return Response.json({ prompt: "synthetic page prompt" });
     };
     for (const invalid of [
       { ...selection, identity: undefined,
@@ -90,6 +90,6 @@ test("only an exact fresh Max claim may fetch the idea", async () =>
       selection: invalid, fetchImpl }), { kind: "refused" });
     assert.equal(calls, 0);
     assert.deepEqual(await readAmuxV19MaxClaimedIdeaOnce({ origin,
-      selection, fetchImpl }), { kind: "ready", idea: "synthetic idea" });
+      selection, fetchImpl }), { kind: "ready", prompt: "synthetic page prompt" });
     assert.equal(calls, 1);
   }));

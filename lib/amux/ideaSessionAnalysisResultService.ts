@@ -21,7 +21,7 @@ import { readAmuxMaxManifestIntentBinding,
 import { commitAmuxSessionBudgetOutcome } from
   "./ideaSessionAnalysisBudgetSettlementService.ts";
 import { commitAmuxSessionAnalysisPlanInTx,
-  prepareAmuxSessionAnalysisPlan, type AmuxSessionPlanRefusal } from
+  type AmuxSessionPlanRefusal } from
   "./ideaSessionAnalysisPlanService.ts";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -139,7 +139,8 @@ export async function preflightAmuxMaxSessionResult(tx: Tx,
 export async function commitAmuxMaxSessionResult(tx: Tx,
   input: ResultInput): Promise<{ claimId: string; resultAuditId: string;
     settlementAuditId: string; digest: string; digestKeyId: string;
-    plan: { state: "plan_ready"; planId: string; unitCount: number } |
+    plan: { state: "plan_ready" | "plan_continues"; planId: string;
+      unitCount: number } |
       { state: "plan_refused"; reason: AmuxSessionPlanRefusal } }> {
   const bytes = typeof input?.rawModelOutput === "string"
     ? Buffer.from(input.rawModelOutput, "utf8") : null;
@@ -157,9 +158,6 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
   }
   try {
     await preflightAmuxMaxSessionResult(tx, input);
-    const plan = prepareAmuxSessionAnalysisPlan({ ideaId: input.ideaId,
-      claimId: input.claimId, rawModelOutput: input.rawModelOutput,
-      keys: input.keys, unitIds: input.unitIds });
     const sealed = sealAmuxContent(bytes, "analysis_result",
       input.claimId, input.keys);
     const resultAuditId = await writeSystemAuditLog({ tx,
@@ -208,14 +206,14 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
     if (!claim) throw new AmuxMaxSessionResultError("integrity_unavailable");
     const planned = await commitAmuxSessionAnalysisPlanInTx(tx, {
       ideaId: input.ideaId, claimId: input.claimId, resultAuditId,
-      modelId: claim.modelId, plan, keys: input.keys });
+      modelId: claim.modelId, rawModelOutput: input.rawModelOutput,
+      keys: input.keys, unitIds: input.unitIds });
     return { claimId: input.claimId, resultAuditId,
       settlementAuditId: settlement.auditId,
       digest: sealed.digest, digestKeyId: sealed.digestKeyId,
-      plan: planned.state === "plan_ready"
-        ? { state: planned.state, planId: planned.planId,
-          unitCount: planned.unitCount }
-        : planned };
+      plan: planned.state === "plan_refused" ? planned
+        : { state: planned.state, planId: planned.planId,
+          unitCount: planned.unitCount } };
   } finally { bytes.fill(0); }
 }
 

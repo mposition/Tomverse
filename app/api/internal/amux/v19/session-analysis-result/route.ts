@@ -18,6 +18,8 @@ import { amuxAnalysisFreeformSubjectId } from
 import { createAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { reportAmuxSessionIdeaNeedsOperator } from
   "@/lib/amux/ideaSessionAnalysisAlert";
+import { amuxSessionPageKeyIdentities } from
+  "@/lib/amux/ideaSessionAnalysisPlanService";
 import { amuxV19SystemRegistrationEnabled } from
   "@/lib/amux/ideaSystemRegistrationCore";
 import { AmuxV19SystemRegistrationError,
@@ -86,11 +88,18 @@ export async function POST(request: Request): Promise<Response> {
     if (Array.isArray(units) && units.length <= 40) unitCount = units.length;
   } catch { /* A non-JSON answer is a refused plan, not a failed write. */ }
   const unitIds = Array.from({ length: unitCount }, () => randomUUID());
+  // A continuation page opens the previous page; when that page cannot be
+  // found the plan writer parks the idea, so a lookup failure is not fatal.
+  const previousPage = await amuxSessionPageKeyIdentities(prisma, body.ideaId)
+    .catch(() => []);
   let keys;
   try {
     keys = await createAmuxContentKeyRing(
-      [{ ideaId: body.ideaId, purpose: "idea_raw", subjectId: body.ideaId }],
+      [{ ideaId: body.ideaId, purpose: "idea_raw", subjectId: body.ideaId },
+        ...previousPage],
       [{ ideaId: body.ideaId, purpose: "analysis_result",
+        subjectId: body.claimId },
+      { ideaId: body.ideaId, purpose: "transfer_payload",
         subjectId: body.claimId },
       { ideaId: body.ideaId, purpose: "analysis_freeform",
         subjectId: amuxAnalysisFreeformSubjectId(body.ideaId, body.claimId) },
@@ -112,9 +121,12 @@ export async function POST(request: Request): Promise<Response> {
     }
     return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
   }
-  const registration = result.plan.state === "plan_ready"
-    ? await registerSessionPlan(body.ideaId) : { state: "not_planned" };
-  if (registration.state !== "committed") {
+  // The next page is claimed by the queue on its own; nothing to register yet.
+  const registration = result.plan.state === "plan_continues"
+    ? { state: "continues" } : result.plan.state === "plan_ready"
+      ? await registerSessionPlan(body.ideaId) : { state: "not_planned" };
+  if (registration.state !== "committed" &&
+      registration.state !== "continues") {
     await alertOperator(body.ideaId, result.plan.state === "plan_refused"
       ? result.plan.reason : registration.state);
   }

@@ -6,6 +6,8 @@ import { AMUX_V19_EXCLUDED_PATH_DIGEST_KEY_ID,
   "../lib/amux/ideaLocalMaxSessionCycle.mjs";
 import { amuxV19MaxSessionCycleStatus } from
   "../scripts/amux-v19-max-session-cycle.mjs";
+import { buildAmuxIdeaAnalysisPrompt } from
+  "../lib/amux/ideaAnalysisPromptCore.ts";
 
 const origin = "https://amux.example.test/";
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
@@ -18,6 +20,10 @@ const identity = Object.freeze({ claimId: "9942fb52-4b78-4af6-931a-9eec8f66d394"
 const claim = { kind: "claimed", recovered: false, retryWrite: false,
   claimId: identity.claimId, requestId: identity.requestId,
   reservationId: identity.reservationId };
+const pagePrompt = (previewId) => buildAmuxIdeaAnalysisPrompt({ previewId,
+  chunkIndex: 0, revisionChunkIndex: 0, continuation: null,
+  sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
+    text: "Add a session plan writer." }], permittedTargetRefs: [] }).prompt;
 const references = [{ referenceOrdinal: 0, commitSha: "a".repeat(40) },
   { referenceOrdinal: 1, commitSha: "b".repeat(40) }];
 
@@ -44,7 +50,7 @@ function steps(overrides = {}) {
       return { kind: "claimed", identity, claim, retryWrite: false }; },
     readIdea: async ({ selection }) => { calls.push("readIdea");
       assert.equal(selection.identity, identity);
-      return { kind: "ready", idea: "Add a session plan writer." }; },
+      return { kind: "ready", prompt: pagePrompt(identity.claimId) }; },
     analyse: async (input) => { calls.push("analyse");
       const prompt = input.prompt(references.length);
       assert.ok(Buffer.isBuffer(prompt));
@@ -119,10 +125,11 @@ test("nothing after a claim is retried and only a recorded result releases the h
     }
   }));
 
-test("an idea the v4 prompt cannot carry stops before the CLI", () =>
+test("a page prompt for another claim stops before the CLI", () =>
   withSwitches(async () => {
     const fake = steps({
-      readIdea: async () => ({ kind: "ready", idea: "x".repeat(20_000) }),
+      readIdea: async () => ({ kind: "ready",
+        prompt: pagePrompt("aaaaaaaa-4b78-4af6-931a-9eec8f66d394") }),
       analyse: async (input) => {
         const prompt = input.prompt(1);
         return prompt === null ? { kind: "outcome_unknown", cliStarted: false }
