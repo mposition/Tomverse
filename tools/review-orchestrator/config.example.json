@@ -15,9 +15,7 @@
     "lib/chatCostGuardrails.ts",
     "lib/models.ts",
     "lib/billingPriceCatalog.ts",
-    "lib/conversationProduct.ts",
-    "docs/policy/**",
-    "docs/ui-contracts/**"
+    "lib/conversationProduct.ts"
   ],
   "amuxUsageUrl": "https://127.0.0.1:8824/api/usage",
   "amuxCaFile": "/etc/review-orchestrator/amux-cert.pem",
