@@ -74,3 +74,21 @@ test("Admin budget step is shown only after transfer confirmation", async () => 
   assert.match(budget, /method: "DELETE"/);
   assert.match(budget, /pendingRevocationId/);
 });
+
+test("the v19 Max runner's subscription_cli price uses the same reviewed rates", async () => {
+  const row = { ...AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE, status: "approved", mode: "subscription_cli" };
+  assert.equal(amuxV4ApprovedCliCostProfileMatches(row, "subscription_cli"), true);
+  assert.equal(amuxV4ApprovedCliCostProfileMatches(row), false, "the v4 API path still refuses it");
+  assert.equal(amuxV4ApprovedCliCostProfileMatches({ ...row, mode: "api" }, "subscription_cli"), false);
+  assert.equal(amuxV4ApprovedCliCostProfileMatches(
+    { ...row, inputMicroUsdPerMillion: 7_999_999 }, "subscription_cli"), false);
+  const route = await readFile(new URL(
+    "../app/api/admin/amux/ideas/analysis-prices/route.ts", import.meta.url), "utf8");
+  assert.match(route, /mode: z\.enum\(\["api", "subscription_cli"\]\)\.optional\(\)/);
+  assert.match(route, /mode: body\.mode \?\? profile\.mode/);
+  assert.match(route, /"max-subscription": "subscription_cli"/);
+  assert.match(route, /amuxV4ApprovedCliCostProfileMatches\(latest, mode\)/);
+  const page = await readFile(new URL(
+    "../app/(site)/(application)/admin/amux-settings/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /<AmuxOperatingScopePanel[^>]*\/>\s*<AmuxMaxSubscriptionPricePanel \/>/);
+});
