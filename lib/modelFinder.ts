@@ -431,10 +431,15 @@ export const RESEARCH_PATTERN =
 export const getContextualModelSuggestion = ({
   text,
   attachments,
+  selectionMode = "manual",
 }: {
   text: string;
   attachments: Array<{ name?: string; mediaType?: string }>;
+  selectionMode?: "manual" | "auto";
 }): ContextualModelSuggestion | null => {
+  // Smart Auto picks the answering model per prompt. An "add this model"
+  // nudge there argues with the router and would turn Auto into a manual pick.
+  if (selectionMode === "auto") return null;
   const normalizedText = text.trim();
   const hasDocumentAttachment = attachments.some((attachment) => {
     const mediaType = attachment.mediaType || "";
