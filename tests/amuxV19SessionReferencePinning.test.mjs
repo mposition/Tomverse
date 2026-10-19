@@ -51,3 +51,12 @@ test("missing credential, fork heads and incomplete snapshots fail before intake
   assert.deepEqual(await pinAmuxSessionReferences({ ...input,
     repositories: [], pullRequests: [] }, undefined), []);
 });
+
+test("a large default-branch commit (its diff in the response) still pins", async () => {
+  const files = Array.from({ length: 75 }, (_, i) => ({ filename: `f${i}`, patch: "x".repeat(6_000) }));
+  const fetchImpl = async (url) => url.endsWith("/repos/mposition/Tomverse")
+    ? json({ full_name: "mposition/Tomverse", default_branch: "main" })
+    : json({ sha: sha("c"), files });
+  assert.deepEqual(await pinAmuxSessionReferences({ ...input, pullRequests: [] }, token, fetchImpl),
+    [sha("c")]);
+});
