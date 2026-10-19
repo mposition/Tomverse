@@ -44,7 +44,8 @@ const V22 = [
 /**
  * `systemctl` as the host answers it: `list-units` prints every fake unit but
  * the main one (which, being enabled, the script checks by name anyway), and
- * `is-active` answers from FAKE_STATES, `inactive` for a unit it does not know.
+ * `is-active` answers from FAKE_STATES, `inactive` for a unit it does not know,
+ * and `is-enabled` answers FAKE_MAIN_FILE_STATE (`enabled` unless a test says).
  * FAKE_STATES is space-separated, so a space inside an answer travels as `~`.
  */
 const SYSTEMCTL_STUB = [
@@ -54,6 +55,7 @@ const SYSTEMCTL_STUB = [
   '    for pair in $FAKE_STATES; do unit=${pair%%=*}; [ "$unit" = tomverse-bridge.service ] || printf "%s loaded active running fake\\n" "$unit"; done',
   "    return 0",
   "  fi",
+  '  if [ "$1" = is-enabled ]; then printf "%s\\n" "$FAKE_MAIN_FILE_STATE"; [ "$FAKE_MAIN_FILE_STATE" = enabled ]; return; fi',
   '  if [ "$1" = is-active ]; then',
   '    for pair in $FAKE_STATES; do if [ "${pair%%=*}" = "$2" ]; then answer=${pair#*=}; printf "%s\\n" "${answer//\\~/ }"; [ "$answer" = active ]; return; fi; done',
   '    printf "inactive\\n"; return 3',
@@ -69,6 +71,7 @@ const run = ({
   credential = true,
   curlStatus = 0,
   listFails = false,
+  mainFileState = "enabled",
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-watchdog-"));
   try {
@@ -93,6 +96,7 @@ const run = ({
           .join(" "),
         FAKE_CURL_STATUS: String(curlStatus),
         FAKE_LIST_FAIL: listFails ? "1" : "0",
+        FAKE_MAIN_FILE_STATE: mainFileState,
       },
     });
     const lines = (name) =>
@@ -251,6 +255,32 @@ test("a main unit that is not loaded at all is down", { skip: noBash }, () => {
   );
   const result = run({ states: withoutMain });
   assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+});
+
+// Stage S3 (orchestration policy version 55): the codex sessions move to
+// per-worker units and tomverse-bridge.service is disabled, then removed (S4).
+const perWorker = {
+  "tomverse-amux-bridge@codex-impl.service": "active",
+  "tomverse-amux-bridge@claude-review.service": "active",
+};
+
+test("a disabled or removed main unit is no longer watched by name", { skip: noBash }, () => {
+  for (const mainFileState of ["disabled", "not-found", "masked"]) {
+    const result = run({ states: perWorker, mainFileState });
+    assert.deepEqual(result.requests, [URL_VALUE], mainFileState);
+    assert.match(result.output, /2 unit\(s\), 0 down/, mainFileState);
+  }
+});
+
+test("a main unit whose file state is unreadable stays watched", { skip: noBash }, () => {
+  const result = run({ states: perWorker, mainFileState: "" });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+});
+
+test("no bridge unit loaded at all is down, never an empty success", { skip: noBash }, () => {
+  const result = run({ states: {}, mainFileState: "disabled" });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+  assert.match(result.output, /no bridge unit is loaded/);
 });
 
 test("a listed unit outside the bridge names is ignored", { skip: noBash }, () => {
