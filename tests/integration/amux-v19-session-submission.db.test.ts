@@ -2023,9 +2023,16 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   assert.ok(storedResult.ciphertext && storedResult.ciphertext.length > 0);
   assert.equal(storedResult.inputTokens, 1001);
   assert.equal(storedResult.outputTokens, 1);
-  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
-    where: { id: ideaId }, select: { state: true },
-  })).state, "analyzing");
+  // An answer that is not a schema-valid plan page still settles, but it
+  // leaves the queue for the operator instead of buying another invocation.
+  assert.deepEqual(savedResult.plan,
+    { state: "plan_refused", reason: "invalid_result" });
+  const parked = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId }, select: { state: true,
+      currentSourcePlanRevisionId: true, analysisCompletedAt: true } });
+  assert.equal(parked.state, "awaiting_owner");
+  assert.equal(parked.currentSourcePlanRevisionId, null);
+  assert.ok(parked.analysisCompletedAt);
   const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
     "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
@@ -2190,6 +2197,10 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       await tx.amuxIdeaSubmission.update({ where: { id: targetId }, data: {
         submittedAt: oldSubmission, analysisDeadlineAt: oldDeadline,
         rawPurgeAfter: oldDeadline,
+        // The settled result left this idea for the operator; its completion
+        // clock moves with the synthetic submission clock.
+        ...(targetId === ideaId ? { analysisCompletedAt:
+          new Date(oldDeadline.getTime() - 60_000) } : {}),
         rawCiphertext: null, rawKeyId: null, rawKeyVersion: null,
         sourceProvenanceCiphertext: null,
         sourceProvenanceKeyId: null, sourceProvenanceKeyVersion: null,

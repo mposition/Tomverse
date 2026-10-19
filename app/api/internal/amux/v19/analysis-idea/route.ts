@@ -10,7 +10,7 @@ import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
 import { AMUX_V19_MAX_LAUNCHER_SECRET_ENV,
   isAmuxV19MaxLauncherAuthorized } from
   "@/lib/amux/ideaSessionMaxLauncherAuth";
-import { readAmuxV19MaxIdea } from
+import { readAmuxV19MaxPagePrompt } from
   "@/lib/amux/ideaSessionMaxIdeaRead";
 import { AMUX_SESSION_INTAKE_ENV } from
   "@/lib/amux/ideaSessionSubmissionCore";
@@ -50,8 +50,8 @@ export async function POST(request: Request): Promise<Response> {
   try { body = await readLimitedJson(request, 1_024, bodySchema); }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   try {
-    const idea = await readAmuxV19MaxIdea(body);
-    return idea ? amuxJsonNoStore(idea) :
+    const page = await readAmuxV19MaxPagePrompt(body);
+    return page ? amuxJsonNoStore(page) :
       amuxJsonNoStore({ error: "not_ready" }, 409);
   } catch {
     return amuxJsonNoStore({ error: "unavailable" }, 503);

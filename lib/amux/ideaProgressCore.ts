@@ -29,7 +29,8 @@ export const AMUX_IDEA_PROGRESS_STAGES = [
 ] as const;
 export type AmuxIdeaProgressStage = typeof AMUX_IDEA_PROGRESS_STAGES[number] | "cancelled";
 /** What a person must do next, when anything. */
-export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_input" | "plan_approval";
+export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_input" | "plan_approval" |
+  "session_review";
 
 export type AmuxIdeaProgressFacts = {
   state: string;
@@ -82,6 +83,17 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     (latest.previewState !== null && ACTIVE_PREVIEW.has(latest.previewState)) ||
     (latest.holdStatus !== null && ACTIVE_HOLD.has(latest.holdStatus)))) {
     return at("analysis");
+  }
+  if (facts.submissionOrigin === "session") {
+    // v19 session pages need no approval: the queue claims the next page on
+    // its own while the idea is analysing (item 4).
+    if (facts.state === "analyzing") return at("analysis");
+    // An answer that could not become a page leaves the queue with no plan
+    // rows for that page; the operator decides what to do with the idea.
+    if (facts.state === "awaiting_owner" &&
+        (latest === null || latest.state === "pending")) {
+      return at("analysis", "session_review");
+    }
   }
   if (latest?.coverageStatus === "needs_owner_input") return at("execution_approval", "owner_input");
   if (latest?.coverageStatus === "more") return at("execution_approval", "continuation");

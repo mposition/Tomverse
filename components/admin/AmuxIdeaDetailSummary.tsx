@@ -62,6 +62,9 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         })}
       </ol>
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
+      {row.waitingFor === "session_review" ? (
+        <p className="text-amber-200" data-testid="amux-session-review">{m.sessionReviewDetail}</p>
+      ) : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?

@@ -103,10 +103,13 @@ test("Max output is posted only after both exact source receipts", async () => {
       return Response.json({ claimId: identity.claimId,
         resultAuditId: "clsyntheticresult123",
         settlementAuditId: "clsyntheticsettlement123",
-        digest, digestKeyId: "synthetic-digest" });
+        digest, digestKeyId: "synthetic-digest",
+        plan: { state: "plan_refused", reason: "invalid_result" },
+        registration: { state: "not_planned" } });
     }), observed);
   assert.deepEqual(result, { kind: "recorded", recovered: false,
-    retryWrite: false, digest, digestKeyId: "synthetic-digest" });
+    retryWrite: false, digest, digestKeyId: "synthetic-digest",
+    planState: "plan_refused", registrationState: "not_planned" });
   assert.deepEqual(calls, [
     "GET /api/internal/amux/v19/session-analysis-stop",
     "POST /api/internal/amux/v19/max-checkout-evidence",
@@ -198,7 +201,9 @@ test("a multi-reference Max answer follows both claim-bound receipt pairs", asyn
       return Response.json({ claimId: identity.claimId,
         resultAuditId: "clsyntheticresult123",
         settlementAuditId: "clsyntheticsettlement123",
-        digest: "c".repeat(64), digestKeyId: "synthetic-digest" });
+        digest: "c".repeat(64), digestKeyId: "synthetic-digest",
+        plan: { state: "plan_refused", reason: "invalid_result" },
+        registration: { state: "not_planned" } });
     }), references,
   }, multi);
   assert.equal(result.kind, "recorded");
@@ -263,7 +268,9 @@ test("an unread reference still receives an empty manifest receipt", async () =>
       return Response.json({ claimId: identity.claimId,
         resultAuditId: "clsyntheticresult123",
         settlementAuditId: "clsyntheticsettlement123",
-        digest: "c".repeat(64), digestKeyId: "synthetic-digest" });
+        digest: "c".repeat(64), digestKeyId: "synthetic-digest",
+        plan: { state: "plan_refused", reason: "invalid_result" },
+        registration: { state: "not_planned" } });
     }), references,
   }, { ...observed, references: references.map((reference) => ({
     ...reference, excludedCount: observed.excludedCount,
