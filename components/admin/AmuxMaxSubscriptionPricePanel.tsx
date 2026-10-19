@@ -104,8 +104,10 @@ export function AmuxMaxSubscriptionPricePanel() {
     try {
       const response = await adminFetch(`${endpoint}?${new URLSearchParams({ id: pendingId })}`, { cache: "no-store" });
       const body = response.ok ? await response.json() as { state?: unknown } : null;
+      // Not visible yet may still be a commit in flight: only a found row ends
+      // the unknown state. A reload drops the ID, and the version check then
+      // refuses a second approval on the same predecessor.
       if (body?.state === "found") { setPendingId(null); setNotice("saved"); await settle(response.status); }
-      else if (body?.state === "not_visible") { setPendingId(null); await settle(response.status); }
     } catch { /* Keep the same ID. */ }
     finally { setBusy(false); }
   };
@@ -139,13 +141,13 @@ export function AmuxMaxSubscriptionPricePanel() {
     {latest?.status !== "approved" ? <label className="flex items-center gap-2">
       <input type="checkbox" checked={confirmed} disabled={!view || busy || !!pendingId}
         onChange={(event) => setConfirmed(event.target.checked)} className="size-5" />{m.confirm}</label> : null}
-    {latest?.status === "approved" && !usable ? <label className="flex items-center gap-2">
+    {latest?.status === "approved" ? <label className="flex items-center gap-2">
       <input type="checkbox" checked={revokeConfirmed} disabled={busy}
         onChange={(event) => setRevokeConfirmed(event.target.checked)} className="size-5" />{m.revokeConfirm}</label> : null}
     <div className="flex flex-wrap gap-2">
       {latest?.status !== "approved" ? <button type="button" onClick={() => void approve()} disabled={!canApprove}
         className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">{m.approve}</button> : null}
-      {latest?.status === "approved" && !usable ? <button type="button" onClick={() => void revoke()}
+      {latest?.status === "approved" ? <button type="button" onClick={() => void revoke()}
         disabled={!canRevoke}
         className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">{m.revoke}</button> : null}
       <button type="button" disabled={busy} onClick={() => void refresh().catch(() => setReadFailed(true))}
