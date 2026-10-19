@@ -51,6 +51,8 @@ import {
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
+import { stalePricingVersions } from "@/lib/modelCatalogCore";
 import {
   generateImageWithProvider,
   ImageProviderError,
@@ -178,6 +180,13 @@ export type ImageGenerationRequestInput = {
    * group, not a separate path (policy v2 §11).
    */
   modelIds?: string[];
+  /**
+   * The pricingVersion the composer showed for each model. When the server
+   * now charges a different version the request is refused before anything
+   * is reserved, so a price never changes between the quote and the charge.
+   * Omitted (older clients) skips the check.
+   */
+  expectedPricingVersions?: Record<string, string>;
 };
 
 export type ImageGenerationTargetResult = {
@@ -310,6 +319,9 @@ export const requestImageGeneration = async (
     );
   }
 
+  // The catalogue an operator may have changed at runtime (lib/modelCatalog.ts).
+  await refreshImageModelCatalog();
+
   // Resolve the fan-out before anything is charged. Duplicates collapse: a
   // group holds one target per model by construction, and silently billing
   // the same model twice would be the worst possible reading of a duplicate.
@@ -356,6 +368,19 @@ export const requestImageGeneration = async (
     model: plan.model!,
     price: plan.price!,
   }));
+  const stale = stalePricingVersions(
+    input.expectedPricingVersions,
+    (modelId) => getImageModel(modelId)?.pricingVersion ?? null
+  );
+  if (stale.length > 0) {
+    throw new ChatAccessError(
+      409,
+      "IMAGE_PRICE_CHANGED",
+      "The price of a selected image model changed. Reload to see the current price.",
+      undefined,
+      { changedModels: stale }
+    );
+  }
   const totalCredits = resolvedTargets.reduce(
     (sum, target) => sum + target.price.credits,
     0
@@ -1147,6 +1172,8 @@ const parseSize = (size: string): { width: number; height: number } => {
 export const processImageGeneration = async (
   generationId: string
 ): Promise<void> => {
+  // A model added at runtime exists only in the resolved catalogue.
+  await refreshImageModelCatalog();
   const claimed = await prisma.imageGeneration.updateMany({
     where: { id: generationId, status: "pending" },
     data: { status: "processing", startedAt: new Date() },
@@ -1594,6 +1621,8 @@ export const retryImageGenerationTarget = async (
     }
     throw error;
   }
+
+  await refreshImageModelCatalog();
 
   // A retry is a fresh attempt against the provider on a fresh reservation, so
   // it is gated exactly like a first request rather than inheriting the

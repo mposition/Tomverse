@@ -353,6 +353,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Discovery",
         description: "Models a provider listed that nobody has decided about",
       },
+      {
+        id: "catalog",
+        label: "Image & coding catalog",
+        description: "Enable or hold image and coding models, price history, LLM drafts, the Code snapshot",
+      },
     ],
   },
   {

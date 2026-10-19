@@ -11530,3 +11530,58 @@ model AmuxWorkerCapabilityEvent {
   @@unique([workerName, revision])
   @@index([workerName, sequence])
 }
+
+/// Runtime overrides and additions for the image and coding model catalogues.
+/// A NULL column inherits the code profile (lib/imageModelRegistry.ts); a value
+/// is an operator override. Coding rows have no code profile, so `profile`
+/// carries the whole row. Prices live in ModelCatalogPriceRevision.
+model ModelCatalogEntry {
+  category       String
+  modelId        String
+  enabled        Boolean?
+  holdReason     String?
+  sortOrder      Int?
+  profile        Json?
+  draft          Json?
+  draftSource    String?
+  draftCreatedAt DateTime?
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@id([category, modelId])
+  @@index([category, enabled])
+}
+
+/// Append-only price history. The effective price of a model is its latest
+/// revision whose effectiveFrom has passed; nothing updates or deletes a row.
+model ModelCatalogPriceRevision {
+  id             String   @id @default(cuid())
+  category       String
+  modelId        String
+  pricingVersion String
+  prices         Json
+  verification   Json
+  effectiveFrom  DateTime
+  actorId        String?
+  actorEmail     String?
+  createdAt      DateTime @default(now())
+
+  @@unique([category, modelId, pricingVersion])
+  @@index([category, modelId, effectiveFrom])
+}
+
+/// Immutable published catalogue the Code client reads (managed mode).
+model ModelCatalogSnapshot {
+  version       Int      @id @default(autoincrement())
+  category      String
+  contentHash   String
+  payload       Json
+  coverageUntil DateTime
+  publishedById String?
+  publishedAt   DateTime @default(now())
+
+  @@index([category, contentHash])
+  @@index([category, version])
+}

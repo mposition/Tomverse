@@ -1217,3 +1217,16 @@ run(
   ],
   "Running restored question attachment persistence scenarios"
 );
+// The dynamic model catalogue: a refused enable writes nothing, accepted
+// writes carry their audit row, price revisions and snapshots are immutable.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/model-catalog.db.test.ts",
+  ],
+  "Running the dynamic model catalogue scenarios"
+);
