@@ -33,8 +33,9 @@ import {
 } from "../lib/autoLlmRouterGuidance.ts";
 
 // The rewrite rule exactly as it was appended before it was split into fixed
-// rules and improvable guidance (docs/ui-contracts/prompt-refiner-suggestion.md
-// §9). The default rewrite guidance must rebuild it byte for byte.
+// rules and improvable guidance
+// (docs/ui-contracts/prompt-refiner-suggestion.md §9).
+// The default rewrite guidance must rebuild it byte for byte.
 const ORIGINAL_REWRITE_RULE = [
   "In rewrite, restate the user's message as one self-contained request the chosen model can answer without the rest of the conversation.",
   "Resolve references such as \"the code above\" or \"that one\" from previousAnswer and session; keep the user's language, intent, tone, constraints and every concrete detail.",
