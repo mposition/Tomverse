@@ -145,6 +145,9 @@ jobs:
           - conversations
           - routing
           - finance
+          - amux
+          - ops-triage
+          - operations
           - agents
           - accounts
 
