@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 const FIRST_POLL_MS = 1_500;
 const POLL_MS = 5_000;
@@ -27,7 +28,9 @@ export function useChatConcurrencySlot(messageId: string | null): boolean {
       if (document.visibilityState !== "hidden") {
         try {
           const response = await fetch("/api/chat/concurrency", { cache: "no-store" });
-          const body: unknown = response.ok ? await response.json() : null;
+          let body: unknown = null;
+          if (response.ok) body = await response.json();
+          else await discardResponseBody(response);
           if (
             !cancelled &&
             body !== null &&
