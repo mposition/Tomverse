@@ -6,6 +6,8 @@ Owner approved Concept B on 2026-10-20: Figma file
 - Studio is the new default appearance. Classic retains the previous desktop
   and mobile shells. Appearance and light/dark are independent of Easy or
   Professional, and switching appearance preserves the controlled draft.
+  Classic mobile exposes mode, appearance and theme in the conversation drawer,
+  preserving the answer canvas instead of reserving another permanent row.
 - Desktop uses a navigation rail, persistent question/participant panel and
   adaptive result canvas. Focus and side-by-side keep the same live panels;
   changing the view must not resubmit a prompt. Mobile has Write/Results and

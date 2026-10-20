@@ -1913,8 +1913,6 @@ export function MobileChatShell({
       </>
       )}
 
-      {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding} />}
-
       {isDrawerOpen && (
         <div
           ref={drawerDialogRef}
@@ -1996,11 +1994,14 @@ export function MobileChatShell({
               attachmentCount={attachments.length}
               isMobileDrawer
               mobileProductSwitcher={currentProduct ? (
-                <ChatProductSwitcher
-                  currentProduct={currentProduct}
-                  disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
-                  onProductSwitch={onProductSwitch}
-                />
+                <>
+                  <ChatProductSwitcher
+                    currentProduct={currentProduct}
+                    disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
+                    onProductSwitch={onProductSwitch}
+                  />
+                  {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                </>
               ) : undefined}
             />
             <button

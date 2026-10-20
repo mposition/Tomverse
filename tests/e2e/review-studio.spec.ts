@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
-import { openOnScreenKeyboard } from "./support/ui-audit";
+import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
@@ -38,7 +38,7 @@ async function expectHeaderControlsFit(page: Page) {
 }
 
 for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const) {
-  test(`Studio ${width > 768 ? "PC" : "mobile"} ${theme}, Classic and Professional keep the draft`, async ({ page }) => {
+  test(`Studio ${width > 768 ? "PC" : "mobile"} ${theme}, Classic and Professional keep the draft`, { tag: "@ui-risk" }, async ({ page }) => {
     await prepare(page, width, theme);
     await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     await expect(page.getByTestId("auto-variable-credit-notice")).toHaveCount(0);
@@ -52,6 +52,14 @@ for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const)
     await input.fill("Preserve this draft across appearance and mode changes.");
     await page.getByTestId("review-appearance").selectOption("classic");
     await expect(page.getByTestId("chat-textarea")).toHaveValue("Preserve this draft across appearance and mode changes.");
+    if (width <= 768) {
+      await expect(page.getByTestId("review-command-bar")).toHaveCount(0);
+      await page.getByTestId("mobile-sidebar-open").click();
+      await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar")).toBeVisible();
+      await expectHeaderControlsFit(page);
+      await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+      await expect(page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
+    }
     await page.getByTestId("review-appearance").selectOption("studio");
     await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
     await expect(page.getByTestId("chat-textarea")).toHaveValue("Preserve this draft across appearance and mode changes.");
@@ -59,6 +67,28 @@ for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const)
     await expect(page.locator("#chat-input-popover")).toBeVisible();
   });
 }
+
+test("Classic phone drawer keeps Review controls reachable at short heights and 200% text", { tag: "@ui-risk" }, async ({ page }) => {
+  await prepare(page, 320, "dark");
+  await page.getByTestId("review-appearance").selectOption("classic");
+  await page.getByTestId("mobile-sidebar-open").click();
+  const drawer = page.getByTestId("mobile-sidebar-drawer");
+  for (const { height, fontSize } of [{ height: 700, fontSize: 16 }, { height: 480, fontSize: 32 }]) {
+    await page.setViewportSize({ width: 320, height });
+    await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, fontSize);
+    const controls = drawer.getByTestId("review-command-bar").locator("button, select");
+    for (const control of await controls.all()) {
+      await expectTappableInVisibleViewport(page, control, `Review drawer control at ${height}px`);
+      const box = await control.boundingBox();
+      expect(box!.height).toBeGreaterThanOrEqual(43.5);
+    }
+    await expectTappableInVisibleViewport(page, drawer.getByTestId("sidebar-feedback-button"), "Drawer feedback");
+    await expect.poll(() => drawer.getByTestId("chat-sidebar").evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  }
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
+  await expect(page.getByTestId("mobile-sidebar-open")).toBeFocused();
+});
 
 test("Easy routes once and dispatches each selected provider through the existing comparison send", async ({ page }) => {
   await installChatModelStub(page, Object.fromEntries([...THREE_MODELS, "gpt-6-luna"].map(id => [id, { kind: "success", chunks: [`Answer from ${id}.`] }])));
