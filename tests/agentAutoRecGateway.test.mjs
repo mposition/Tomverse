@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import { handleRequest, readGatewayConfig, splitRequest } from "../tools/auto-rec-agent/bin/autorec-gateway.mjs";
+import { checkPeer, handleRequest, peerPidFromInstance, readGatewayConfig, splitRequest } from "../tools/auto-rec-agent/bin/autorec-gateway.mjs";
 import { LIMITS } from "../tools/auto-rec-agent/lib/contract.mjs";
 import { PR_BODY_FOOTER, branchNameFor } from "../tools/auto-rec-agent/lib/core.mjs";
 
@@ -17,7 +17,10 @@ const ENV = {
   AUTOREC_GITHUB_TOKEN: "t".repeat(40),
   STATE_DIRECTORY: "/state",
   PATH: "/usr/bin",
+  // systemd Accept=yes instance name: connection 3, peer PID 4242, peer UID 1001.
+  AUTOREC_PEER: "3-4242-1001",
 };
+const PTRACE_SCOPE = "/proc/sys/kernel/yama/ptrace_scope";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/2900";
 const raw = (path, mode = "100644") => `:${mode} ${mode} ${"a".repeat(40)} ${"b".repeat(40)} M\0${path}\0`;
 
@@ -35,13 +38,14 @@ function jsonResponse(status, body) {
  * Fake git and fetch. `git` answers by the subcommand after `-C <mirror>`;
  * `github` is a list of answers consumed in order for api.github.com calls.
  */
-function fakeDeps({ gitAnswers = {}, github = [], app = [], files = {}, env = ENV } = {}) {
+function fakeDeps({ gitAnswers = {}, github = [], app = [], files = {}, env = ENV, mainPid = 4242 } = {}) {
   let clock = Date.parse("2026-10-20T00:00:00.000Z");
   const gitCalls = [];
   const fetchCalls = [];
-  const store = { ...files };
+  const store = { [PTRACE_SCOPE]: "1", ...files };
   const deps = {
     config: readGatewayConfig(env),
+    runnerMainPid: async () => mainPid,
     now: () => clock,
     sleep: async (ms) => {
       clock += ms;
@@ -322,4 +326,41 @@ test("requests are one JSON header line followed by the payload", () => {
 test("an unknown op is refused", async () => {
   const { deps } = fakeDeps();
   assert.deepEqual(await handleRequest(deps, { op: "merge" }, Buffer.alloc(0)), { status: "error", code: "op_invalid" });
+});
+
+test("only the runner's main process is answered", async () => {
+  for (const [options, code] of [
+    [{ mainPid: 5000 }, "peer_not_runner"],
+    [{ mainPid: null }, "peer_not_runner"],
+    [{ env: { ...ENV, AUTOREC_PEER: "3-12-unknown" } }, "peer_unknown"],
+    [{ env: { ...ENV, AUTOREC_PEER: undefined } }, "peer_unknown"],
+    [{ files: { [PTRACE_SCOPE]: "0\n" } }, "ptrace_scope_unsafe"],
+    [{ files: { [PTRACE_SCOPE]: undefined } }, "ptrace_scope_unsafe"],
+  ]) {
+    const { deps, fetchCalls, gitCalls } = fakeDeps({ ...options, app: [jsonResponse(204)] });
+    for (const op of ["claim", "result", "publish"]) {
+      assert.deepEqual(await handleRequest(deps, { ...publishHeader(), op }, BUNDLE), { status: "error", code }, `${op} ${code}`);
+    }
+    assert.equal(fetchCalls.length + gitCalls.length, 0);
+  }
+  const { deps } = fakeDeps();
+  assert.deepEqual(await checkPeer(deps), { ok: true });
+});
+
+test("the peer PID is read from every systemd instance-name format", () => {
+  assert.equal(peerPidFromInstance("3-4242-1001"), 4242);
+  assert.equal(peerPidFromInstance("3-77-4242-1001"), 4242);
+  assert.equal(peerPidFromInstance("3-77-4242_991-1001"), 4242);
+  for (const value of ["3-unknown", "3-77-unknown", "4242", "3-0-1001", "3-x-1001", "", null]) {
+    assert.equal(peerPidFromInstance(value), null, String(value));
+  }
+});
+
+test("the scope diff starts at the fork point, so develop's newer commits never count", async () => {
+  const { deps, gitCalls } = fakeDeps({ gitAnswers: { diff: { code: 0, stdout: raw("AGENTS.md"), stderr: "" } } });
+  await handleRequest(deps, publishHeader(), BUNDLE);
+  const mergeBase = gitCalls.find(({ args }) => args[2] === "merge-base");
+  assert.deepEqual(mergeBase.args.slice(3), ["refs/remotes/origin/develop", HEAD]);
+  const diff = gitCalls.find(({ args }) => args[2] === "diff");
+  assert.deepEqual(diff.args.slice(-2), [FORK, HEAD]);
 });

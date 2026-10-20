@@ -15,7 +15,14 @@
  *   {"op":"publish","id","branch","head","title","body"} + bundle
  *                                                   -> published | refused | failed | unknown
  *
- * Whatever the caller says, the gateway itself decides what may leave: the
+ * Only the runner itself may ask. The socket is autorec's alone, but so is
+ * every process the agent and its tests start, so the gateway answers only
+ * when the connecting PID (from the instance name systemd gives an Accept=yes
+ * AF_UNIX connection) is the MainPID of autorec-runner.service, and only when
+ * Yama keeps the runner's descendants from attaching to it (ptrace_scope >= 1).
+ * Agent-written code can neither claim, report nor publish.
+ *
+ * Whatever the runner says, the gateway itself decides what may leave: the
  * branch is the recommendation's own new `claude/to-develop/auto-rec-*` branch,
  * the change passes the same scope check as the runner's against a develop it
  * fetched itself, a push never overwrites a branch, and at most
@@ -40,6 +47,7 @@ import {
   REPO_OWNER,
   REPO_SLUG,
   REPO_URL,
+  RUNNER_UNIT,
   appRequestHeaders,
 } from "../lib/contract.mjs";
 import {
@@ -79,7 +87,33 @@ export function readGatewayConfig(env) {
     stateDir: env.STATE_DIRECTORY?.split(":")[0] || "/var/lib/autorec-gw",
     tmpDir: tmpdir(),
     path: env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    // The unit's instance name (`Environment=AUTOREC_PEER=%i`).
+    peer: env.AUTOREC_PEER ?? null,
   };
+}
+
+/**
+ * The peer PID in a systemd Accept=yes AF_UNIX instance name: `NR-PID-UID`,
+ * or `NR-COOKIE-PID-UID` / `NR-COOKIE-PID_PIDFDID-UID` in newer systemd.
+ * Without peer credentials the name ends in `unknown`, which is no PID.
+ */
+export function peerPidFromInstance(instance) {
+  if (typeof instance !== "string") return null;
+  const parts = instance.split("-");
+  if (parts.length < 3 || !/^\d+$/.test(parts[parts.length - 1])) return null;
+  const pid = parts[parts.length - 2].split("_")[0];
+  return /^[1-9]\d{0,9}$/.test(pid) ? Number(pid) : null;
+}
+
+/** Is the connecting process the runner's main process, on a host where its children cannot attach to it? */
+export async function checkPeer(deps) {
+  const scope = deps.fs.readText("/proc/sys/kernel/yama/ptrace_scope");
+  if (!/^[1-3]\s*$/.test(scope ?? "")) return { ok: false, code: "ptrace_scope_unsafe" };
+  const peer = peerPidFromInstance(deps.config.peer);
+  if (peer === null) return { ok: false, code: "peer_unknown" };
+  const main = await deps.runnerMainPid();
+  if (!Number.isInteger(main) || main <= 0 || main !== peer) return { ok: false, code: "peer_not_runner" };
+  return { ok: true };
 }
 
 /** One JSON header line, then the payload bytes. */
@@ -300,6 +334,8 @@ async function publish(deps, header, payload) {
     deps.fs.remove(bundle);
   }
 
+  // The fork point, not develop's tip: commits develop gained after the runner
+  // branched are ancestors of neither side's change, so they never enter this diff.
   const forkPoint = await run(["merge-base", "refs/remotes/origin/develop", head]);
   if (forkPoint.code !== 0) return refused("setup_failed", "no_merge_base");
   const diff = await run(["diff", "--raw", "-z", "--no-renames", "--no-abbrev", forkPoint.stdout.trim(), head]);
@@ -335,6 +371,8 @@ async function publish(deps, header, payload) {
 
 export async function handleRequest(deps, header, payload) {
   if (deps.config.missing.length > 0) return { status: "error", code: "gateway_config_missing", missing: deps.config.missing };
+  const peer = await checkPeer(deps);
+  if (!peer.ok) return { status: "error", code: peer.code };
   if (header.op === "claim") return claim(deps);
   if (header.op === "result") return result(deps, header);
   if (header.op === "publish") return publish(deps, header, payload);
@@ -355,10 +393,31 @@ function realGit(args, { env, timeoutMs }) {
   });
 }
 
+/** autorec-runner.service's MainPID, read from systemd (no privileges needed), or null. */
+function realRunnerMainPid(config) {
+  return new Promise((resolve) => {
+    const child = spawn("systemctl", ["show", "--property=MainPID", "--value", RUNNER_UNIT], {
+      env: { PATH: config.path, LANG: "C" },
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    });
+    let out = "";
+    child.stdout.on("data", (chunk) => {
+      out += chunk.toString("utf8");
+    });
+    child.on("error", () => resolve(null));
+    child.on("close", (code) => {
+      const pid = Number(out.trim());
+      resolve(code === 0 && Number.isInteger(pid) && pid > 0 ? pid : null);
+    });
+  });
+}
+
 export function realGatewayDeps(env) {
   const config = readGatewayConfig(env);
   return {
     config,
+    runnerMainPid: () => realRunnerMainPid(config),
     git: realGit,
     fetch: globalThis.fetch,
     now: () => Date.now(),

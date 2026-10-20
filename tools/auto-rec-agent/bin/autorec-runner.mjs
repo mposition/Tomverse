@@ -99,10 +99,12 @@ export function readRunnerConfig(env) {
     logDir: env.AUTOREC_LOG_DIR || DEFAULTS.logDir,
     claudeBin: env.AUTOREC_CLAUDE_BIN || DEFAULTS.claudeBin,
     reviewClient: env.AUTOREC_REVIEW_CLIENT || DEFAULTS.reviewClient,
-    reviewHost: env.REVIEW_ORCH_HOST || null,
+    reviewSsh: env.AUTOREC_REVIEW_SSH || DEFAULTS.reviewSsh,
+    reviewHost: env.REVIEW_ORCH_HOST || DEFAULTS.reviewHost,
+    gitBin: env.AUTOREC_GIT_BIN || DEFAULTS.gitBin,
     gatewaySocket: env.AUTOREC_GATEWAY_SOCKET || DEFAULTS.gatewaySocket,
     nodeBin: process.execPath,
-    npmBin: env.AUTOREC_NPM_BIN || "npm",
+    npmBin: env.AUTOREC_NPM_BIN || DEFAULTS.npmBin,
     // Optional: a `claude setup-token` token from /etc/autorec/claude.env.
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || null,
   };
@@ -122,7 +124,17 @@ function agentEnv(config) {
   };
 }
 
-const reviewEnv = (config) => ({ ...baseEnv(config), ...(config.reviewHost ? { REVIEW_ORCH_HOST: config.reviewHost } : {}) });
+/**
+ * The review client and its git and ssh come only from root-owned paths: the
+ * agent can write ~/.local/bin and ~/.ssh/config, and a fake `ssh` there could
+ * answer "accept" for the review server.
+ */
+const reviewEnv = (config) => ({
+  ...baseEnv(config),
+  PATH: DEFAULTS.trustedPath,
+  REVIEW_ORCH_SSH: config.reviewSsh,
+  REVIEW_ORCH_HOST: config.reviewHost,
+});
 
 const failed = (reason, detail = undefined) => ({ outcome: OUTCOME_FAILED, reason, ...(detail ? { detail } : {}) });
 
@@ -138,7 +150,7 @@ function parseJsonObject(text) {
 /** Make sure the mirror's node_modules matches develop's lockfile and Prisma schema. */
 async function ensureDependencies(deps, base) {
   const { config, exec, fs } = deps;
-  const blobs = await exec("git", ["-C", config.mirror, "rev-parse", `${base}:package-lock.json`, `${base}:prisma/schema.prisma`], {
+  const blobs = await exec(config.gitBin, ["-C", config.mirror, "rev-parse", `${base}:package-lock.json`, `${base}:prisma/schema.prisma`], {
     env: baseEnv(config),
     timeoutMs: 60_000,
   });
@@ -147,7 +159,7 @@ async function ensureDependencies(deps, base) {
   const stamp = join(config.mirror, ".git", "autorec-deps-key");
   if (fs.readText(stamp) === key && fs.exists(join(config.mirror, "node_modules"))) return true;
   deps.log("dependencies_install", { base });
-  const checkout = await exec("git", ["-C", config.mirror, "checkout", "--quiet", "--force", "--detach", base], {
+  const checkout = await exec(config.gitBin, ["-C", config.mirror, "checkout", "--quiet", "--force", "--detach", base], {
     env: baseEnv(config),
     timeoutMs: 5 * 60_000,
   });
@@ -178,7 +190,8 @@ async function review(deps, ctx, claim, head) {
   const deadline = deps.now() + LIMITS.reviewWaitMs;
   for (;;) {
     const waited = await client(["wait", jobId], 12 * 60_000);
-    const verdict = classifyReviewExit(waited.timedOut ? null : waited.code);
+    // A `wait` that outran its own timeout is still a pending review, not a verdict.
+    const verdict = waited.timedOut ? "pending" : classifyReviewExit(waited.code);
     if (verdict === "pending" && deps.now() < deadline) {
       // `wait` itself blocks for minutes; this only stops a fast-returning server from spinning.
       await deps.sleep(10_000);
@@ -195,7 +208,7 @@ async function review(deps, ctx, claim, head) {
 /** Everything between the claim and the publish. Returns the outcome to report. */
 async function work(deps, claim, ctx) {
   const { config, exec, fs } = deps;
-  const git = (cwd, args, timeoutMs = 120_000) => exec("git", ["-C", cwd, ...args], { env: baseEnv(config), timeoutMs });
+  const git = (cwd, args, timeoutMs = 120_000) => exec(config.gitBin, ["-C", cwd, ...args], { env: baseEnv(config), timeoutMs });
 
   ctx.stage = "setup";
   const branch = branchNameFor(claim.id);
@@ -321,7 +334,7 @@ async function work(deps, claim, ctx) {
 
 async function cleanup(deps, ctx) {
   const { config, exec } = deps;
-  const git = (args) => exec("git", ["-C", config.mirror, ...args], { env: baseEnv(config), timeoutMs: 120_000 });
+  const git = (args) => exec(config.gitBin, ["-C", config.mirror, ...args], { env: baseEnv(config), timeoutMs: 120_000 });
   try {
     if (ctx.worktree) await git(["worktree", "remove", "--force", ctx.worktree]);
     if (ctx.branch) await git(["branch", "-D", ctx.branch]);

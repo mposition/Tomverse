@@ -49,7 +49,22 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 
 `autorec`은 에이전트가 쓴 코드(테스트)를 실행합니다. 같은 uid의 프로세스는 서로의
 `/proc/<pid>/environ`을 읽을 수 있으므로, 비밀은 다른 uid인 gateway에만 둡니다(검토 서버의
-`review-status-sender`와 같은 분리). gateway는 runner가 무엇을 보내든 스스로 지킵니다.
+`review-status-sender`와 같은 분리).
+
+**gateway는 runner 본체에만 답합니다.** 소켓은 `autorec`만 열 수 있지만, 에이전트와 그 테스트가
+띄운 프로세스도 `autorec`입니다. 그래서 gateway는 연결한 PID(systemd가 `Accept=yes` 인스턴스
+이름에 넣어 주는 값)가 `autorec-runner.service`의 MainPID일 때만 claim·result·publish를 처리하고,
+그 밖에는 `peer_not_runner`로 거절합니다. 자식 프로세스가 runner에 ptrace로 붙지 못하도록
+`kernel.yama.ptrace_scope`가 1 이상이어야 하며(Ubuntu 기본값 1), 아니면 `ptrace_scope_unsafe`로
+아무것도 하지 않습니다. 그래서 에이전트가 쓴 코드는 권장안을 가로채거나, 결과를 위조하거나,
+검토 없이 publish할 수 없습니다.
+
+**runner가 믿는 도구는 `autorec`이 바꿀 수 없는 경로에 있습니다.** `git`은 `/usr/bin/git`, `npm`은
+`/usr/bin/npm`, 검토 클라이언트와 그 ssh는 설치 폴더의 root 소유 복사본(`deploy/review-ssh`)과 root
+소유 설정(`/etc/autorec-ssh/config`, host key 고정)입니다. `~/.local/bin`이나 `~/.ssh/config`에 가짜
+`ssh`를 두어 검토 서버 대신 "accept"를 답하게 할 수 없습니다.
+
+gateway는 runner가 무엇을 보내든 스스로 지킵니다.
 
 - 브랜치는 그 권장안 id에서 나온 `claude/to-develop/auto-rec-*` 하나뿐이고, push는 **새 브랜치
   생성만** 합니다(`--force-with-lease=<ref>:`). 기존 브랜치를 덮거나 지우지 않습니다.
@@ -61,11 +76,12 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
   `autorec`의 mirror에서 복사하지 않습니다.
 
 **남는 위험(알고 받아들이는 것).**
-- `autorec` 계정의 코드는 gateway 소켓에 직접 publish를 요청할 수 있으므로, 검토를 건너뛴 변경도
-  draft PR이 될 수 있습니다. 그래도 범위 검사·생성 전용 push·일일 상한은 통과해야 하고, draft라
-  사람이 ready로 바꾸기 전에는 CI도 돌지 않습니다.
-- Claude 구독 로그인은 `autorec` 계정에서 읽힙니다(검토 서버의 reviewer 계정과 같은 조건). 그
-  계정에는 다른 로그인, 다른 SSH key, 제품 DB·배포 자격증명을 두지 않습니다.
+- 에이전트가 쓴 코드는 실행 중인 runner를 종료시킬 수 있습니다(같은 uid의 signal). 그러면 그
+  권장안은 결과 없이 lease가 끝나 `needs_lookup`이 됩니다.
+- Claude 구독 로그인과 검토 서버용 SSH key(`~/.ssh/review_orch`)는 `autorec` 계정에서 읽힙니다(검토
+  서버의 reviewer 계정과 같은 조건). 그 key는 forced command라 검토 요청 말고는 할 수 없지만, 검토
+  할당량을 쓸 수는 있습니다. 그 계정에는 다른 로그인, 다른 SSH key, 제품 DB·배포 자격증명을 두지
+  않습니다.
 - 브랜치 push는 Auto PR to Develop workflow를 실행합니다. 그 workflow가 실행하는 저장소 파일
   (`scripts/**`, `.github/**`)은 범위 검사가 막습니다.
 
@@ -157,8 +173,10 @@ sudo sh -c 'umask 077; nano /etc/autorec/claude.env'   # CLAUDE_CODE_OAUTH_TOKEN
 
 `autorec`이 같은 서버의 검토 서버에 `tools/review-orchestrator/README.md`의 Windows PC와 같은
 방식(forced command SSH)으로 요청합니다. 클라이언트는 설치 폴더의 root 소유 복사본
-(`/usr/local/lib/autorec-agent/tools/review-orchestrator/client/review.mjs`)이고, 검토 대상은 그
-commit뿐입니다.
+(`/usr/local/lib/autorec-agent/tools/review-orchestrator/client/review.mjs`)이고, ssh 설정은 설치
+script가 만든 root 소유 `/etc/autorec-ssh/config`(호스트 `review-orch` → `review@127.0.0.1`)와
+`/etc/autorec-ssh/known_hosts`(이 서버 sshd의 ed25519 key)입니다. `~/.ssh/config`는 쓰지 않습니다.
+검토 대상은 그 commit뿐입니다.
 
 ```bash
 sudo -iu autorec sh -c 'install -d -m 700 ~/.ssh && ssh-keygen -t ed25519 -N "" -C autorec -f ~/.ssh/review_orch'
@@ -167,19 +185,18 @@ sudo cat /home/autorec/.ssh/review_orch.pub
 
 검토 서버 계정의 `~review/.ssh/authorized_keys`에 있는 기존 `command="..."` 줄을 복사해 새 줄로
 붙이고, 끝의 키만 위 공개 키로 바꿉니다(forced command와 `no-port-forwarding` 등 옵션은 그대로).
-그다음 `autorec`의 SSH 별칭을 만듭니다.
+확인:
 
 ```bash
-sudo -iu autorec sh -c 'cat >> ~/.ssh/config <<EOF
-Host review-orch
-  HostName 127.0.0.1
-  User review
-  IdentityFile ~/.ssh/review_orch
-  IdentitiesOnly yes
-EOF
-chmod 600 ~/.ssh/config'
-sudo -iu autorec ssh -o StrictHostKeyChecking=accept-new review-orch   # rpc_missing JSON이 나오면 정상
+sudo -u autorec /usr/local/lib/autorec-agent/tools/auto-rec-agent/deploy/review-ssh review-orch   # rpc_missing JSON이 나오면 정상
 ```
+
+`Host key verification failed`이면 `/etc/autorec-ssh/known_hosts`가 비어 있거나 sshd가 22번이 아닌
+것입니다. `sudo sh -c 'ssh-keyscan -t ed25519 127.0.0.1 > /etc/autorec-ssh/known_hosts'`로 다시
+만듭니다(포트가 다르면 `/etc/autorec-ssh/config`의 `Port`도 함께 고칩니다. 설치 script를 다시
+실행하면 config는 저장소 것으로 돌아갑니다).
+
+`sysctl kernel.yama.ptrace_scope`가 1 이상인지도 봅니다(설치 script가 0이면 경고합니다).
 
 ### 7. 한 번 수동 실행
 
@@ -230,6 +247,11 @@ systemctl list-timers autorec-runner.timer
 | `pr_failed` | publish | 브랜치는 push됐지만 PR을 찾지도 열지도 못함. 브랜치는 GitHub에 남습니다 |
 | `runner_error` | 어디서나(publish 전) | 예상하지 못한 오류 |
 
+**gateway가 요청을 받지 않는 경우**(`claim_failed`의 `code`로 보입니다. 권장안은 claim되지 않았습니다):
+`gateway_config_missing`(3단계 값 없음), `peer_not_runner`(요청한 프로세스가 runner 본체가 아님 —
+`systemctl start autorec-runner.service`로 실행했는지, gateway가 `systemctl show`를 부를 수 있는지),
+`peer_unknown`(systemd가 연결한 쪽의 PID를 주지 못함), `ptrace_scope_unsafe`(위 6단계).
+
 **보고하지 않는 경우**(종료 코드 1, 로그 `outcome_unknown` 또는 `result_no_answer`): publish 요청에
 답이 없거나 gateway가 `unknown`이라고 답한 경우, 결과 보고가 실패한 경우. 앱은 lease가 끝나면
 `needs_lookup`으로 둡니다. 운영자는 GitHub에서 `auto-rec-` 브랜치와 PR을, 서버에서 아래 로그를
@@ -259,6 +281,6 @@ systemctl list-timers autorec-runner.timer
 | `bin/autorec-gateway.mjs` | 비밀을 가진 gateway(`DynamicUser`) |
 | `lib/core.mjs` | 범위 검사, 관련 테스트 선택, 지시문, 결과 본문 등 순수 함수 |
 | `lib/contract.mjs` | 앱 API, 저장소, 브랜치, 경로, 상한 상수 |
-| `deploy/` | systemd unit 넷, env 견본, `install.sh` |
+| `deploy/` | systemd unit 넷, env 견본, 검토용 ssh wrapper와 설정, `install.sh` |
 
 테스트: `node --conditions=react-server --import tsx --test tests/agentAutoRec*.test.mjs`.

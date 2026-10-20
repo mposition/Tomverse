@@ -310,3 +310,32 @@ test("the socket client sends one header line and the payload, and reads one JSO
   }
   await assert.rejects(callGateway(path, { op: "claim" }, null, 2_000), /gateway_/);
 });
+
+test("the runner's own tools come from root-owned paths, never the autorec account's PATH", async () => {
+  const { deps, calls } = fakeRunner();
+  await runOnce(deps);
+  for (const { signature, command } of calls) {
+    if (signature.startsWith("git ")) assert.equal(command, "/usr/bin/git", signature);
+  }
+  const submit = calls.find(({ signature }) => /review\.mjs submit/.test(signature));
+  assert.equal(submit.command, process.execPath);
+  assert.equal(submit.args[0], "/usr/local/lib/autorec-agent/tools/review-orchestrator/client/review.mjs");
+  assert.equal(submit.options.env.PATH, "/usr/bin:/bin");
+  assert.equal(submit.options.env.REVIEW_ORCH_SSH, "/usr/local/lib/autorec-agent/tools/auto-rec-agent/deploy/review-ssh");
+  assert.equal(submit.options.env.REVIEW_ORCH_HOST, "review-orch");
+});
+
+test("a `wait` call that times out is still pending, not a verdict", async () => {
+  let waits = 0;
+  const { deps, gatewayCalls } = fakeRunner({
+    rules: [
+      [
+        /review\.mjs wait/,
+        () => (++waits === 1 ? { code: 137, stdout: "", stderr: "", timedOut: true } : ok(JSON.stringify({ status: "accept", head: HEAD }))),
+      ],
+    ],
+  });
+  assert.equal(await runOnce(deps), 0);
+  assert.equal(waits, 2);
+  assert.equal(resultOf(gatewayCalls).outcome, "pr_opened");
+});

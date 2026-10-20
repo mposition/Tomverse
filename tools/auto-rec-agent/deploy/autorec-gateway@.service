@@ -14,6 +14,9 @@ StateDirectoryMode=0700
 # service's environment. A missing file stops the unit from starting.
 EnvironmentFile=/etc/autorec/autorec.env
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# The instance name carries the connecting PID; the gateway answers only the
+# runner's MainPID, never a process the agent or its tests started.
+Environment=AUTOREC_PEER=%i
 # A root-owned copy installed by install.sh, never the autorec account's checkout.
 ExecStart=/usr/bin/node --experimental-strip-types --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-gateway.mjs
 StandardInput=socket

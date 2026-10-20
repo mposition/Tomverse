@@ -53,15 +53,26 @@ export const PR_URL_PATTERN = /^https:\/\/github\.com\/mposition\/Tomverse\/pull
 export const BRANCH_PREFIX = "claude/to-develop/auto-rec-";
 export const BRANCH_PATTERN = /^claude\/to-develop\/auto-rec-[a-z0-9]{1,24}-[0-9a-f]{8}$/;
 
-// Server layout (decided with the operator, 2026-10-20).
+// The only process the gateway answers is this unit's main process.
+export const RUNNER_UNIT = "autorec-runner.service";
+
+// Server layout (decided with the operator, 2026-10-20). Tools the runner
+// itself trusts are absolute paths outside the autorec account: that account
+// can write ~/.local/bin, ~/.ssh/config and anything else in its home.
 export const DEFAULTS = Object.freeze({
   home: "/home/autorec",
   mirror: "/home/autorec/mirror/Tomverse",
   workDir: "/home/autorec/work",
   logDir: "/home/autorec/logs",
   claudeBin: "/home/autorec/.local/bin/claude",
+  gitBin: "/usr/bin/git",
+  npmBin: "/usr/bin/npm",
   gatewaySocket: "/run/autorec-gateway.sock",
   reviewClient: "/usr/local/lib/autorec-agent/tools/review-orchestrator/client/review.mjs",
+  // A root-owned wrapper: /usr/bin/ssh with a root-owned config and pinned host key.
+  reviewSsh: "/usr/local/lib/autorec-agent/tools/auto-rec-agent/deploy/review-ssh",
+  reviewHost: "review-orch",
+  trustedPath: "/usr/bin:/bin",
 });
 
 // Limits. The run is one recommendation per hourly timer tick.
