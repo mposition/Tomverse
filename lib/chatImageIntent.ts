@@ -9,26 +9,50 @@ import {
     autoLlmRouterWorstCaseMicroUsd,
     resolveAutoLlmRouterModel,
 } from "@/lib/autoLlmRouterCore";
+import {
+    readAutoLlmRouterImageTriage,
+    readAutoLlmRouterModelId,
+} from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import {
     CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
     CHAT_IMAGE_INTENT_SYSTEM,
     CHAT_IMAGE_INTENT_TIMEOUT_MS,
-    chatImageIntentModelId,
     chatImageIntentOutputSchema,
     chatImageIntentPrompt,
+    chatImageIntentUserMessage,
+    chatImageModelCandidates,
     parseChatImageIntentOutput,
+    type ChatImageDecision,
 } from "@/lib/chatImageIntentCore";
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 
+const NOT_IMAGE: ChatImageDecision = { image: false };
+
 /**
- * Whether a chat message asks for a new image, decided by one small model call.
+ * The router model id when image triage is on (Admin Console › Routing: a
+ * router model and the image triage switch), otherwise null. Never throws.
+ */
+export async function chatImageTriageModelId(): Promise<string | null> {
+    const [on, modelId] = await Promise.all([
+        readAutoLlmRouterImageTriage(),
+        readAutoLlmRouterModelId(),
+    ]);
+    return on ? modelId : null;
+}
+
+/**
+ * Whether a chat message asks for a new image and, if so, which image model
+ * and preset it needs -- one call to the Auto router's model, which triages
+ * image requests the way it triages chat ones.
  *
- * False -- and the message goes to chat as before -- when the feature is off,
- * the configured model is unavailable or unpriced, the provider's operational
- * budget is spent, or the call fails, times out or answers malformed. Never
- * throws: routing must not be the reason a send fails.
+ * `{ image: false }` -- and the message goes to chat as before -- when image
+ * triage is off or no router model is set, it is unavailable or unpriced, no image model is
+ * enabled, the provider's operational budget is spent, or the call fails,
+ * times out or answers malformed. Never throws: routing must not be the
+ * reason a send fails.
  *
  * The call's worst case is held under the same provider day/month budget as
  * the Auto router before it leaves, and settled to the reported usage after.
@@ -37,21 +61,27 @@ import { resolveModelPricing } from "@/lib/modelPricing";
 export async function detectChatImageRequest(input: {
     text: string;
     traceId: string;
-}): Promise<boolean> {
-    const configured = chatImageIntentModelId();
-    const prompt = chatImageIntentPrompt(input.text);
-    if (!configured || !prompt) return false;
+}): Promise<ChatImageDecision> {
+    if (!chatImageIntentPrompt(input.text)) return NOT_IMAGE;
+    const configured = await chatImageTriageModelId();
+    if (!configured) return NOT_IMAGE;
 
-    let models;
+    let model;
+    let candidates;
     try {
-        models = (await getRuntimeModels()).filter(
-            (model) => model.enabled && !model.catalogDeleted
+        const [runtimeModels, imageModels] = await Promise.all([
+            getRuntimeModels(),
+            refreshImageModelCatalog(),
+        ]);
+        model = resolveAutoLlmRouterModel(
+            runtimeModels.filter((entry) => entry.enabled && !entry.catalogDeleted),
+            configured
         );
+        candidates = chatImageModelCandidates(imageModels);
     } catch {
-        return false;
+        return NOT_IMAGE;
     }
-    const model = resolveAutoLlmRouterModel(models, configured);
-    if (!model) return false;
+    if (!model || candidates.length === 0) return NOT_IMAGE;
 
     let prices: { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
     try {
@@ -61,8 +91,9 @@ export async function detectChatImageRequest(input: {
             outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         };
     } catch {
-        return false;
+        return NOT_IMAGE;
     }
+    const prompt = chatImageIntentUserMessage(input.text, candidates);
     const worstCase = autoLlmRouterWorstCaseMicroUsd({
         system: CHAT_IMAGE_INTENT_SYSTEM,
         prompt,
@@ -79,10 +110,11 @@ export async function detectChatImageRequest(input: {
                 reason: worstCase === null ? "unpriced" : "provider_budget",
             })
         );
-        return false;
+        return NOT_IMAGE;
     }
 
     const startedAt = Date.now();
+    let decision: ChatImageDecision = NOT_IMAGE;
     let outcome: "image" | "chat" | "error" = "error";
     try {
         const generated = await generateText({
@@ -93,12 +125,15 @@ export async function detectChatImageRequest(input: {
             maxRetries: 0,
             abortSignal: AbortSignal.timeout(CHAT_IMAGE_INTENT_TIMEOUT_MS),
             output: Output.object({
-                schema: jsonSchema(chatImageIntentOutputSchema() as unknown as JSONSchema7),
+                schema: jsonSchema(
+                    chatImageIntentOutputSchema(candidates) as unknown as JSONSchema7
+                ),
                 name: "chat_image_intent",
             }),
             providerOptions: autoLlmRouterProviderOptions(model.provider),
         });
-        outcome = parseChatImageIntentOutput(generated.output) ? "image" : "chat";
+        decision = parseChatImageIntentOutput(generated.output, candidates);
+        outcome = decision.image ? "image" : "chat";
         const usage = generated.usage as
             | { inputTokens?: number; outputTokens?: number }
             | undefined;
@@ -113,6 +148,7 @@ export async function detectChatImageRequest(input: {
     } catch {
         // A failed or timed-out call keeps its whole hold: it may still have
         // been billed.
+        decision = NOT_IMAGE;
         outcome = "error";
     }
     console.info(
@@ -121,8 +157,11 @@ export async function detectChatImageRequest(input: {
             traceId: input.traceId,
             modelId: model.id,
             outcome,
+            imageModelId: decision.image ? decision.modelId : null,
+            preset: decision.image ? decision.preset : null,
+            candidateCount: candidates.length,
             latencyMs: Date.now() - startedAt,
         })
     );
-    return outcome === "image";
+    return decision;
 }

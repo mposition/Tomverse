@@ -138,6 +138,8 @@ import {
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageIntent } from "@/lib/chatImageIntentClient";
+import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
   type ChatStarterEntry,
@@ -766,9 +768,11 @@ export function ChatPageClient({
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
   /**
-   * Whether a chat send first asks the image-intent model (POST
+   * Whether a chat send first asks the Auto router's model (POST
    * /api/chat/image-intent) and hands an image request to the image
-   * workspace. Resolved server-side; off unless the env names a model.
+   * workspace with the triaged model and preset. Resolved server-side; off
+   * unless Admin Console › Routing names a router model and turns image
+   * triage on.
    */
   chatImageIntentEnabled?: boolean;
   /**
@@ -981,9 +985,14 @@ export function ChatPageClient({
   const [imageHandoffAutoGenerate, setImageHandoffAutoGenerate] = useState(false);
   const [imageDraftAutoGenerate, setImageDraftAutoGenerate] = useState(false);
   // Set only when the user reached the draft by choosing a model in the
-  // catalogue's image tab; otherwise the workspace keeps its own default.
+  // catalogue's image tab, or the image-intent triage chose one; otherwise
+  // the workspace keeps its own default.
   const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
     string[] | undefined
+  >(undefined);
+  // The image-intent triage's preset, for the same landing only.
+  const [imageDraftSeedPreset, setImageDraftSeedPreset] = useState<
+    ImagePreset | undefined
   >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
@@ -4448,7 +4457,12 @@ export function ChatPageClient({
     const handleStartImageDraft = (
         draftText: string,
         modelId?: string,
-        options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
+        options?: {
+            fromImageRequest?: boolean;
+            chatDraftOnReturn?: string;
+            /** The image-intent triage's preset; the workspace default otherwise. */
+            preset?: ImagePreset;
+        }
     ) => {
         if (promptRefinerMode === "e2e_fixture") {
             // The no-cost Refiner fixture cannot hand an accepted synthetic
@@ -4476,6 +4490,7 @@ export function ChatPageClient({
         );
         setImageDraftSeedPrompt(draftText);
         setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setImageDraftSeedPreset(options?.preset);
         setImageWorkspaceKey(nextImageDraftKey());
         setIsImageDraftActive(true);
         currentChatIdRef.current = null;
@@ -4518,6 +4533,7 @@ export function ChatPageClient({
         setIsImageDraftActive(false);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setChatDraftBeforeImage(null);
         if (restore) {
             currentChatIdRef.current = restore.scopeId;
@@ -4535,6 +4551,7 @@ export function ChatPageClient({
         setIsImageDraftActive(true);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setImageWorkspaceKey(nextImageDraftKey());
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
@@ -4569,6 +4586,7 @@ export function ChatPageClient({
         // paid to generate -- next to an enabled submit button.
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = conversation.id;
         setCurrentChatId(conversation.id);
@@ -5690,9 +5708,9 @@ export function ChatPageClient({
       const intentTicket = conversationSelectionTicketRef.current;
       const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
       imageIntentCheckPendingRef.current = true;
-      let imageRequested = false;
+      let decision: ChatImageDecision = { image: false };
       try {
-        imageRequested = await askChatImageIntent(intentText);
+        decision = await askChatImageIntent(intentText);
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
@@ -5720,8 +5738,13 @@ export function ChatPageClient({
       ) {
         return;
       }
-      if (imageRequested) {
-        handleStartImageDraft(intentText, undefined, { fromImageRequest: true });
+      if (decision.image) {
+        // The triage's model and preset seed the workspace; a choice the
+        // catalogue cannot honour falls back to its defaults there.
+        handleStartImageDraft(intentText, decision.modelId ?? undefined, {
+          fromImageRequest: true,
+          preset: decision.preset ?? undefined,
+        });
         return;
       }
       // Re-entered through the ref so the ordinary send runs on current state.
@@ -9646,6 +9669,7 @@ export function ChatPageClient({
       onConversationCreated={handleImageConversationCreated}
       initialPrompt={imageDraftSeedPrompt}
       initialModelIds={imageDraftSeedModelIds}
+      initialPreset={imageDraftSeedPreset}
       onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
       maxModels={imageGroupMaxModelsProp}
