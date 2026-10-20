@@ -37,7 +37,7 @@ export function ReviewCommandBar({ review, locked = false, view, setView }: {
   return <header className="review-command-bar" data-testid="review-command-bar">
     <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong>Review</strong><span>/ {c.newTask}</span></div>
     <div className="review-mode" role="group" aria-label={c.mode}>
-      {(["easy", "professional"] as const).map(mode => <button key={mode} type="button" aria-pressed={review.mode === mode} disabled={locked || review.pending || review.ready === false} onClick={() => review.setMode(mode)}>{mode === "easy" ? "Easy" : "Professional"}</button>)}
+      {(["easy", "professional"] as const).map(mode => <button key={mode} type="button" aria-pressed={review.mode === mode} disabled={locked || review.pending || review.ready === false || (mode === "easy" && !review.easyAvailable)} title={mode === "easy" && !review.easyAvailable ? c.unavailable : undefined} onClick={() => review.setMode(mode)}>{mode === "easy" ? "Easy" : "Professional"}</button>)}
     </div>
     {setView && <div className="review-view-switch" role="group" aria-label={c.results}>
       <button type="button" aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button>

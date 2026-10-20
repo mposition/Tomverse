@@ -8,7 +8,6 @@ import {
   chatImageIntentPrompt,
   chatImageIntentUserMessage,
   chatImageModelCandidates,
-  imageCandidatesForChatModels,
   parseChatImageIntentOutput,
   readChatImageDecision,
 } from "../lib/chatImageIntentCore.ts";
@@ -26,7 +25,6 @@ const models = [
   {
     id: "strong",
     name: "Strong Image",
-    provider: "openai",
     latencyClass: "slow",
     disabledReason: null,
     prices: [
@@ -39,8 +37,6 @@ const models = [
   {
     id: "quick",
     name: "Quick Image",
-    provider: "fal",
-    modelOwner: "google",
     latencyClass: "fast",
     disabledReason: null,
     prices: [price("medium", "1024x1024", 30)],
@@ -48,7 +44,6 @@ const models = [
   {
     id: "held",
     name: "Held Image",
-    provider: "xai",
     latencyClass: "fast",
     disabledReason: "worst_case_cost_unbounded",
     prices: [price("medium", "1024x1024", 10)],
@@ -56,7 +51,6 @@ const models = [
   {
     id: "landscape-only",
     name: "Landscape Only",
-    provider: "xai",
     latencyClass: "balanced",
     disabledReason: null,
     prices: [price("medium", "1536x1024", 40)],
@@ -70,17 +64,10 @@ test("candidates are enabled models with square prices, by preset", () => {
     {
       id: "strong",
       name: "Strong Image",
-      owner: "openai",
       latency: "slow",
       credits: { draft: 15, standard: 70, final: 250 },
     },
-    {
-      id: "quick",
-      name: "Quick Image",
-      owner: "google",
-      latency: "fast",
-      credits: { standard: 30 },
-    },
+    { id: "quick", name: "Quick Image", latency: "fast", credits: { standard: 30 } },
   ]);
 });
 
@@ -122,22 +109,22 @@ test("the instructions triage by complexity and keep code graphics in chat", () 
 test("a valid image answer keeps the triaged model and preset", () => {
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "strong", preset: "final" }, candidates),
-    { image: true, modelIds: ["strong"], preset: "final" }
+    { image: true, modelId: "strong", preset: "final" }
   );
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "quick", preset: "standard" }, candidates),
-    { image: true, modelIds: ["quick"], preset: "standard" }
+    { image: true, modelId: "quick", preset: "standard" }
   );
 });
 
 test("an unlisted model or an unoffered preset is dropped, not trusted", () => {
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "held", preset: "standard" }, candidates),
-    { image: true, modelIds: [], preset: null }
+    { image: true, modelId: null, preset: null }
   );
   assert.deepEqual(
     parseChatImageIntentOutput({ image: true, modelId: "quick", preset: "final" }, candidates),
-    { image: true, modelIds: ["quick"], preset: null }
+    { image: true, modelId: "quick", preset: null }
   );
 });
 
@@ -164,96 +151,36 @@ const jsonResponse = (body, status = 200) =>
 
 test("the client posts the text and reads the decision", async () => {
   let seen;
-  const decision = await askChatImageIntent("draw a cat", {}, async (url, init) => {
+  const decision = await askChatImageIntent("draw a cat", async (url, init) => {
     seen = { url, init };
-    return jsonResponse({ image: true, modelIds: ["quick"], preset: "draft" });
+    return jsonResponse({ image: true, modelId: "quick", preset: "draft" });
   });
-  assert.deepEqual(decision, { image: true, modelIds: ["quick"], preset: "draft" });
+  assert.deepEqual(decision, { image: true, modelId: "quick", preset: "draft" });
   assert.equal(seen.url, "/api/chat/image-intent");
   assert.equal(seen.init.method, "POST");
   assert.deepEqual(JSON.parse(seen.init.body), { text: "draw a cat" });
   assert.ok(seen.init.signal instanceof AbortSignal);
   assert.deepEqual(
-    await askChatImageIntent("x", {}, async () => jsonResponse({ image: true, preset: "huge" })),
-    { image: true, modelIds: [], preset: null }
+    await askChatImageIntent("x", async () => jsonResponse({ image: true, preset: "huge" })),
+    { image: true, modelId: null, preset: null }
   );
-  let reviewBody;
-  await askChatImageIntent("x", { chatModelIds: ["gpt-6-luna", "grok-5"] }, async (_url, init) => {
-    reviewBody = JSON.parse(init.body);
-    return jsonResponse({ image: false });
-  });
-  assert.deepEqual(reviewBody, { text: "x", chatModelIds: ["gpt-6-luna", "grok-5"] });
 });
 
 test("the client falls back to chat on no, refusal, malformed body or failure", async () => {
   const chat = { image: false };
-  assert.deepEqual(await askChatImageIntent("x", {}, async () => jsonResponse(chat)), chat);
+  assert.deepEqual(await askChatImageIntent("x", async () => jsonResponse(chat)), chat);
   assert.deepEqual(
-    await askChatImageIntent("x", {}, async () => jsonResponse({ error: "nope" }, 429)),
+    await askChatImageIntent("x", async () => jsonResponse({ error: "nope" }, 429)),
     chat
   );
   assert.deepEqual(
-    await askChatImageIntent("x", {}, async () => new Response("not json", { status: 200 })),
+    await askChatImageIntent("x", async () => new Response("not json", { status: 200 })),
     chat
   );
   assert.deepEqual(
-    await askChatImageIntent("x", {}, async () => {
+    await askChatImageIntent("x", async () => {
       throw new TypeError("network");
     }),
     chat
   );
-});
-
-test("Review maps chat models to their makers' image models, in order, capped", () => {
-  const all = chatImageModelCandidates([
-    ...models,
-    {
-      id: "grok-img",
-      name: "Grok Img",
-      provider: "xai",
-      latencyClass: "balanced",
-      disabledReason: null,
-      prices: [price("medium", "1024x1024", 50)],
-    },
-  ]);
-  const chat = [
-    { provider: "anthropic" },
-    { provider: "xai" },
-    { provider: "openai" },
-    { provider: "openai" },
-    { provider: "google" },
-  ];
-  assert.deepEqual(
-    imageCandidatesForChatModels(chat, all, 4).map((entry) => entry.id),
-    ["grok-img", "strong", "quick"]
-  );
-  assert.deepEqual(
-    imageCandidatesForChatModels(chat, all, 2).map((entry) => entry.id),
-    ["grok-img", "strong"]
-  );
-  assert.deepEqual(imageCandidatesForChatModels([{ provider: "anthropic" }], all, 3), []);
-});
-
-test("Review keeps its models and a preset only when every model offers it", () => {
-  const fixed = candidates; // strong (draft/standard/final) + quick (standard only)
-  assert.deepEqual(
-    parseChatImageIntentOutput({ image: true, modelId: "strong", preset: "final" }, fixed, fixed),
-    { image: true, modelIds: ["strong", "quick"], preset: null }
-  );
-  assert.deepEqual(
-    parseChatImageIntentOutput({ image: true, modelId: "quick", preset: "standard" }, fixed, fixed),
-    { image: true, modelIds: ["strong", "quick"], preset: "standard" }
-  );
-  assert.deepEqual(
-    parseChatImageIntentOutput({ image: false, modelId: "quick", preset: "standard" }, fixed, fixed),
-    { image: false }
-  );
-});
-
-test("the Review message tells the model only the preset is its choice", () => {
-  assert.match(
-    chatImageIntentUserMessage("cat", candidates, { fixed: true }),
-    /already chose these image models/
-  );
-  assert.doesNotMatch(chatImageIntentUserMessage("cat", candidates), /already chose/);
 });

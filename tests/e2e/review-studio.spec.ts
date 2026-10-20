@@ -22,6 +22,17 @@ async function prepare(page: Page, width: number, theme: "light" | "dark" = "lig
   await expect(page.locator(".review-participant-list>button")).toHaveCount(providerCount, { timeout: 20000 });
 }
 
+async function expectHeaderControlsFit(page: Page) {
+  await expect.poll(() => page.locator(".review-command-bar button").evaluateAll(buttons => buttons.flatMap(button => {
+    const box = button.getBoundingClientRect();
+    if (!box.width || !box.height) return [];
+    const range = document.createRange(); range.selectNodeContents(button);
+    const text = range.getBoundingClientRect();
+    return box.left < -1 || box.right > innerWidth + 1 || text.left < box.left - 1 || text.right > box.right + 1
+      ? [button.textContent || button.getAttribute("aria-label")] : [];
+  }))).toEqual([]);
+}
+
 for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const) {
   test(`Studio ${width > 768 ? "PC" : "mobile"} ${theme}, Classic and Professional keep the draft`, async ({ page }) => {
     await prepare(page, width, theme);
@@ -30,6 +41,7 @@ for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const)
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await expect.poll(() => page.locator("img").evaluateAll(nodes => nodes.filter(node => node instanceof HTMLImageElement && node.getClientRects().length > 0 && (!node.complete || !node.naturalWidth)).map(node => node.getAttribute("src"))), { timeout: 20000 }).toEqual([]);
     await expect(page.locator("html")).toHaveClass(new RegExp(theme));
+    await expectHeaderControlsFit(page);
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ style: "nextjs-portal { display: none !important; }", path: `artifacts/review-studio-${width > 768 ? "pc" : "mobile"}-${theme}.png`, fullPage: true });
     const input = page.getByTestId("chat-textarea");
@@ -63,6 +75,8 @@ test("Easy routes once and dispatches each selected provider through the existin
   await expect(page.getByText("Answer from gpt-6-luna.", { exact: true })).toBeVisible();
   await expect(page.getByText(`Answer from ${THREE_MODELS[0]}.`, { exact: true })).toBeVisible();
   expect(routes).toBe(2);
+  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await expect.poll(() => page.getByTestId("desktop-model-panel").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-model-id")))).toEqual(THREE_MODELS);
 });
 
 test("unsupported image providers show a local notice and never start a text or substitute image call", async ({ page }) => {
@@ -101,6 +115,7 @@ test("a supported image provider still executes while unsupported peers keep the
 test("Studio at 320px preserves a full-width textarea and reachable controls at 200% text size", async ({ page }) => {
   await prepare(page, 320);
   await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
+  await expectHeaderControlsFit(page);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   const input = (await page.getByTestId("chat-textarea").boundingBox())!;
   const row = (await page.getByTestId("composer-textarea-row").boundingBox())!;

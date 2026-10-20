@@ -84,17 +84,14 @@ const reset = () => {
   reserved.length = 0;
 };
 
-const detect = async (
-  text = "간단한 고양이 아이콘 그려줘",
-  chatModelIds?: readonly string[]
-) => {
+const detect = async (text = "간단한 고양이 아이콘 그려줘") => {
   const { detectChatImageRequest } = await load();
-  return detectChatImageRequest({ text, traceId: "trace-1", chatModelIds });
+  return detectChatImageRequest({ text, traceId: "trace-1" });
 };
 
 test("the router model triages: model and preset come back", async () => {
   reset();
-  assert.deepEqual(await detect(), { image: true, modelIds: ["gpt-image-2"], preset: "draft" });
+  assert.deepEqual(await detect(), { image: true, modelId: "gpt-image-2", preset: "draft" });
   assert.equal(calls.length, 1);
   assert.equal(reserved.length, 1);
   assert.ok(reserved[0] > 0);
@@ -149,48 +146,5 @@ test("a failed call or a 'no' goes to chat", async () => {
 test("a model outside the catalogue is not passed on", async () => {
   reset();
   modelOutput = { image: true, modelId: "made-up-image-model", preset: "final" };
-  assert.deepEqual(await detect(), { image: true, modelIds: [], preset: null });
-});
-
-test("Review: the selected chat models' makers make the image; the call picks the preset", async () => {
-  reset();
-  process.env.IMAGE_GROUP_MAX_MODELS = "3";
-  modelOutput = { image: true, modelId: "gpt-image-2", preset: "standard" };
-  const decision = await detect("노을 진 바다 그려줘", [
-    "claude-sonnet-5",
-    "grok-4-5",
-    "gpt-6-luna",
-    "gemini-3-7-flash",
-  ]);
-  delete process.env.IMAGE_GROUP_MAX_MODELS;
-  assert.equal(decision.image, true);
-  assert.deepEqual(decision.image && decision.modelIds, [
-    "grok-imagine-image-quality-20260403",
-    "gpt-image-2",
-    "fal-ai/nano-banana-2",
-  ]);
-  assert.equal(decision.image && decision.preset, "standard");
-  assert.match(calls[0].prompt, /already chose these image models/);
-});
-
-test("Review: a preset one selected model lacks is dropped", async () => {
-  reset();
-  modelOutput = { image: true, modelId: "gpt-image-2", preset: "final" };
-  const decision = await detect("정교한 포스터 그려줘", ["gpt-6-luna", "grok-4-5"]);
-  assert.deepEqual(decision, {
-    image: true,
-    modelIds: ["gpt-image-2", "grok-imagine-image-quality-20260403"],
-    preset: null,
-  });
-});
-
-test("Review: no maker with an image model falls back to the triage's pick", async () => {
-  reset();
-  modelOutput = { image: true, modelId: "gpt-image-2", preset: "draft" };
-  assert.deepEqual(await detect("고양이 그려줘", ["claude-sonnet-5"]), {
-    image: true,
-    modelIds: ["gpt-image-2"],
-    preset: "draft",
-  });
-  assert.doesNotMatch(calls[0].prompt, /already chose/);
+  assert.deepEqual(await detect(), { image: true, modelId: null, preset: null });
 });

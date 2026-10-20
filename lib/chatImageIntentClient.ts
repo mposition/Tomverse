@@ -12,18 +12,13 @@ import {
  */
 export async function askChatImageIntent(
     text: string,
-    options: { chatModelIds?: readonly string[] } = {},
     fetchImpl: typeof fetch = fetch
 ): Promise<ChatImageDecision> {
     try {
         const response = await fetchImpl("/api/chat/image-intent", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(
-                options.chatModelIds?.length
-                    ? { text, chatModelIds: options.chatModelIds }
-                    : { text }
-            ),
+            body: JSON.stringify({ text }),
             signal: AbortSignal.timeout(CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS),
         });
         if (!response.ok) {

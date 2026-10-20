@@ -3978,7 +3978,7 @@ export function ChatInput({
           {review?.appearance === "studio" && <button type="button" className="review-research-shortcut" onClick={() => {
             if (isGuestMode) { onGuestSignInPrompt?.(); return; }
             onOpenDeepResearchSetup?.();
-          }} disabled={isDeepResearchPending || review.pending}>Deep Research</button>}
+          }} disabled={isDeepResearchPending || review.pending}>{t("chat.toolsDeepResearch")}</button>}
           {review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || review?.appearance === "studio") && (
             <button
               ref={modelMenuButtonRef}
@@ -4128,16 +4128,8 @@ export function ChatInput({
                   ? "bg-blue-600 hover:bg-blue-500"
                   : "bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-300"
               }`}
-              title={
-                isAutoMode
-                  ? t("chat.send")
-                  : t("chat.send")
-              }
-              aria-label={
-                isAutoMode
-                  ? t("chat.send")
-                  : t("chat.send")
-              }
+              title={t("chat.send")}
+              aria-label={t("chat.send")}
               aria-describedby={
                 sendDisabledReason ? "chat-send-disabled-reason" : undefined
               }

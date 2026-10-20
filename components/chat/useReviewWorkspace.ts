@@ -26,6 +26,7 @@ export type ReviewWorkspaceControls = {
 export function useReviewWorkspace(identityKey: string | null, easyAvailable: boolean, conversationId: string | null) {
   const appearance = useSyncExternalStore<ReviewAppearance>(subscribePreferences, readAppearance, () => "studio");
   const readMode = useCallback((): ReviewMode => {
+    if (!easyAvailable) return "professional";
     try {
       const saved = JSON.parse(localStorage.getItem(`tomverse:review:${identityKey}`) ?? "null");
       if (saved?.mode === "easy" || saved?.mode === "professional") return saved.mode;

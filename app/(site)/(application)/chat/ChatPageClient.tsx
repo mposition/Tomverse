@@ -1048,6 +1048,9 @@ export function ChatPageClient({
   const reviewWorkspaceRef = useRef(reviewWorkspace);
   useLayoutEffect(() => { reviewWorkspaceRef.current = reviewWorkspace; }, [reviewWorkspace]);
   const reviewRoutingPendingRef = useRef(false);
+  const reviewProfessionalSelectionRef = useRef<{
+    identityKey: string | null; ticket: number; models: string[]; disabled: string[];
+  } | null>(null);
   const reviewImageSeedRouteRef = useRef<{ text: string; modelIds: string[]; preset: ImagePreset } | null>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
@@ -5758,6 +5761,13 @@ export function ChatPageClient({
       }
       reviewWorkspace.setImageRequest(false);
       reviewWorkspace.setUnsupportedProviders([]);
+      const manualSelection = reviewProfessionalSelectionRef.current;
+      if (manualSelection?.identityKey !== owner || manualSelection.ticket !== ticket) {
+        reviewProfessionalSelectionRef.current = {
+          identityKey: owner, ticket, models: [...latestModelSettingsRef.current.models],
+          disabled: [...latestModelSettingsRef.current.disabled],
+        };
+      }
       // Commit both the panels and the submit closure before ordinary dispatch.
       flushSync(() => mutateModelSettings(currentChatIdRef.current, chosen, []));
       if (owner !== identityNamespaceKey(identityNamespaceRef.current) ||
@@ -5845,7 +5855,7 @@ export function ChatPageClient({
         // catalogue cannot honour falls back to its defaults there.
         handleStartImageDraft(intentText, undefined, {
           fromImageRequest: true,
-          modelIds: decision.modelIds,
+          modelIds: decision.modelId ? [decision.modelId] : undefined,
           preset: decision.preset ?? undefined,
         });
         return;
@@ -9951,6 +9961,23 @@ export function ChatPageClient({
   const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
     ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
     : selectedModels;
+  const handleReviewModeChange = (mode: "easy" | "professional") => {
+    const ticket = conversationSelectionTicketRef.current;
+    if (reviewWorkspace.mode === "professional" && mode === "easy") {
+      reviewProfessionalSelectionRef.current = {
+        identityKey, ticket, models: [...latestModelSettingsRef.current.models],
+        disabled: [...latestModelSettingsRef.current.disabled],
+      };
+    } else if (reviewWorkspace.mode === "easy" && mode === "professional") {
+      const manual = reviewProfessionalSelectionRef.current;
+      if (manual?.identityKey === identityKey && manual.ticket === ticket) {
+        const models = manual.models.filter(id => Boolean(getModel(id)));
+        if (models.length) mutateModelSettings(currentChatIdRef.current, models, manual.disabled);
+      }
+      reviewProfessionalSelectionRef.current = null;
+    }
+    reviewWorkspace.setMode(mode);
+  };
 
   return (
     // Every surface that decides whether a model searches reads this: the
@@ -9990,6 +10017,7 @@ export function ChatPageClient({
         <MobileChatShell
           review={mountedSurface === "workspace" ? {
             ...reviewWorkspace,
+            setMode: handleReviewModeChange,
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
@@ -10158,6 +10186,7 @@ export function ChatPageClient({
           }}
           review={mountedSurface === "workspace" ? {
             ...reviewWorkspace,
+            setMode: handleReviewModeChange,
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,

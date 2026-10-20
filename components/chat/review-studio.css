@@ -163,10 +163,10 @@
   [data-review-appearance="studio"] .review-workspace-section { min-height:100%; height:auto; overflow:visible; padding:8px 20px calc(100px + env(safe-area-inset-bottom)); }
   .review-command-bar { flex-wrap:wrap; gap:8px; padding:8px 12px; }
   [data-review-appearance="studio"] .review-command-bar { padding:8px 0 24px; min-height:116px; position:relative; }
-  .review-brand { width:auto; }.review-brand img { display:block; }.review-brand strong { font-size:1.438rem; }.review-brand>span { display:none; }
+  .review-brand { width:auto; flex:1 0 auto; }.review-brand img { display:block; }.review-brand strong { font-size:1.438rem; }.review-brand>span { display:none; }
   .review-command-bar .review-credit-button { min-width:32px; width:32px; padding:4px; }.review-credit-button>span { display:none; }.review-icon-button { min-width:32px; width:32px; }
   .review-command-bar select { width:65px; padding:8px 2px; font-size:0.6875rem; }
-  [data-review-appearance="studio"] .review-mode { order:5; flex:1; margin-top:8px; }.review-mode>button { flex:1; padding:8px 10px; }
+  [data-review-appearance="studio"] .review-mode { order:5; flex:1 0 calc(100% - 132px); margin-top:8px; }.review-mode>button { flex:1; padding:8px 10px; white-space:normal; }
   .review-view-switch { display:flex; order:6; margin-top:8px; background:var(--review-surface); }.review-view-switch button { padding:8px 13px; }
   .review-studio-body { display:block; overflow:visible; }
   .review-studio-task { display:flex; padding:0; border:0; background:transparent; overflow:visible; }
