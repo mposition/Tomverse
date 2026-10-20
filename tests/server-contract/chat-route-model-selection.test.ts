@@ -59,6 +59,7 @@ let refinerAdmissionRefused = false;
 let refinerAdmissionEvents: string[] = [];
 // Set when the request's answer id is already a Chat image answer.
 let imageAnswerStored = false;
+let imageAnswerOwner = SESSION_USER_ID;
 
 async function loadRouteWithSpies(): Promise<{
   POST: (req: Request) => Promise<Response>;
@@ -181,9 +182,13 @@ async function loadRouteWithSpies(): Promise<{
           }),
         },
         message: {
-          findFirst: async () =>
+          findUnique: async () =>
             imageAnswerStored
-              ? { role: "assistant", content: "[Image generated] a cat" }
+              ? {
+                  role: "assistant",
+                  content: "[Image generated] a cat",
+                  conversation: { userId: imageAnswerOwner },
+                }
               : null,
         },
         // The second test deliberately fails after the selection gate; the
@@ -382,5 +387,21 @@ test("an answer id a Chat image turn already used is refused before credit or pr
     assert.equal(spies.streamTextCalls, 0);
   } finally {
     imageAnswerStored = false;
+  }
+});
+
+test("another account's image answer id tells the caller nothing", async () => {
+  const { POST } = await loadRouteWithSpies();
+  imageAnswerStored = true;
+  imageAnswerOwner = "someone-else";
+  try {
+    const response = await POST(chatRequest(UNSELECTED_MODEL_ID));
+    // The ordinary refusal for this request, not the image-answer conflict.
+    assert.equal(response.status, 403);
+    const payload = (await response.json()) as { code?: string };
+    assert.equal(payload.code, "MODEL_NOT_SELECTED");
+  } finally {
+    imageAnswerStored = false;
+    imageAnswerOwner = SESSION_USER_ID;
   }
 });

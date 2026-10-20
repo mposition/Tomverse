@@ -2042,19 +2042,21 @@ async function handleChatPost(
         if (session?.user?.id && assistantMessageId) {
             const answered = await Promise.resolve()
                 .then(() =>
-                    // Scoped to the caller's conversations: the answer to
-                    // "is this id an image answer" is nobody else's to learn.
-                    prisma.message.findFirst({
-                        where: {
-                            id: assistantMessageId,
-                            conversation: { userId: session.user.id },
+                    prisma.message.findUnique({
+                        where: { id: assistantMessageId },
+                        select: {
+                            role: true,
+                            content: true,
+                            conversation: { select: { userId: true } },
                         },
-                        select: { role: true, content: true },
                     })
                 )
                 .catch(() => null);
+            // Only the caller's own answer counts: whether another account's
+            // id is an image answer is nobody else's to learn.
             if (
-                answered?.role === "assistant" &&
+                answered?.conversation.userId === session.user.id &&
+                answered.role === "assistant" &&
                 answered.content.startsWith(CHAT_IMAGE_TURN_CONTENT_PREFIX)
             ) {
                 return tracedJsonError(
