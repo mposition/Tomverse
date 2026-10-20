@@ -28,7 +28,9 @@ let mocksInstalled = false;
 // The conversation's recent messages, newest first, and the image prompt.
 let recentMessages: Array<{ id: string; role: string; content: string }> = [];
 let previousGenerationPrompt: string | null = null;
+let conversationPassword: string | null = null;
 const prismaMock = {
+  conversation: { findFirst: async () => ({ password: conversationPassword }) },
   message: { findMany: async () => recentMessages },
   imageGenerationGroup: {
     findFirst: async ({ where }: { where: { groupIdempotencyKey: string } }) =>
@@ -99,6 +101,7 @@ const reset = () => {
   reserved.length = 0;
   recentMessages = [];
   previousGenerationPrompt = null;
+  conversationPassword = null;
 };
 
 const detect = async (text = "간단한 고양이 아이콘 그려줘") => {
@@ -190,6 +193,7 @@ test("a follow-up sees the previous image and comes back with its rewrite", asyn
     traceId: "trace-2",
     userId: "user-1",
     conversationId: "conv-1",
+    request: new Request("http://127.0.0.1:3100/api/chat/image-intent"),
   });
   assert.deepEqual(decision, {
     image: true,
@@ -212,8 +216,29 @@ test("without a recent image answer, no rewrite is taken", async () => {
     traceId: "trace-3",
     userId: "user-1",
     conversationId: "conv-1",
+    request: new Request("http://127.0.0.1:3100/api/chat/image-intent"),
   });
   assert.equal(decision.image && decision.prompt, null);
   assert.doesNotMatch(calls[0].prompt, /Previous image/);
   assert.equal(calls[0].maxOutputTokens, 400);
+});
+
+test("a locked conversation's previous image is not read without its unlock grant", async () => {
+  reset();
+  recentMessages = [
+    { id: "a1", role: "assistant", content: "[Image generated] a secret design" },
+  ];
+  previousGenerationPrompt = "a secret design";
+  conversationPassword = "stored-hash";
+  modelOutput = { image: true, modelId: "gpt-image-2", preset: "draft", prompt: "a secret design, blue" };
+  const { detectChatImageRequest } = await load();
+  const decision = await detectChatImageRequest({
+    text: "더 파랗게 해줘",
+    traceId: "trace-lock",
+    userId: "user-1",
+    conversationId: "conv-1",
+    request: new Request("http://127.0.0.1:3100/api/chat/image-intent"),
+  });
+  assert.doesNotMatch(calls[0].prompt, /secret design/);
+  assert.equal(decision.image && decision.prompt, null);
 });

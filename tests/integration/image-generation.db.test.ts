@@ -921,9 +921,14 @@ test("a Chat image turn answers in the chat conversation and replays without cha
   assert.equal(messages.length, 2);
   // A follow-up ("make it bluer") finds the prompt that made this image,
   // and only in its owner's conversation.
-  assert.equal(await readPreviousImagePrompt(user.id, chat.id), "a small cat icon");
+  const request = new Request("http://127.0.0.1:3100/api/chat/image-intent");
+  assert.equal(await readPreviousImagePrompt(user.id, chat.id, request), "a small cat icon");
   const stranger = await createUser();
-  assert.equal(await readPreviousImagePrompt(stranger.id, chat.id), null);
+  assert.equal(await readPreviousImagePrompt(stranger.id, chat.id, request), null);
+  // A password-locked conversation is read only with its unlock grant.
+  await prisma.conversation.update({ where: { id: chat.id }, data: { password: "locked-hash" } });
+  assert.equal(await readPreviousImagePrompt(user.id, chat.id, request), null);
+  await prisma.conversation.update({ where: { id: chat.id }, data: { password: null } });
 
   const read = await attachChatImageTurns(user.id, chat.id, messages);
   assert.deepEqual(read[1], {
