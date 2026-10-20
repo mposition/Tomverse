@@ -89,7 +89,7 @@ test.beforeEach(() => {
 });
 
 test("signed-in blank Chat receives only the server-owned offered boolean", async () => {
-  const response = await GET();
+  const response = await GET(new Request("https://tomverse.test/api/products/chat/capabilities"));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), { autoSelection: { offered: true } });
@@ -132,7 +132,7 @@ test("availability uncertainty fails closed without leaking an internal reason",
   const originalError = console.error;
   console.error = () => {};
   try {
-    const response = await GET();
+    const response = await GET(new Request("https://tomverse.test/api/products/chat/capabilities"));
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     assert.deepEqual(await response.json(), { autoSelection: { offered: false } });
