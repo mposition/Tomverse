@@ -1,16 +1,7 @@
 "use client";
 
-import { useState } from "react";
-
-import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
-import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import {
-  adminNetworkFailure,
-  readAdminApiFailure,
-  type AdminApiFailure,
-} from "@/lib/adminApiOutcome";
-import { adminFetch } from "@/lib/adminFetch";
-import { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
+import type { AdminApiFailure } from "@/lib/adminApiOutcome";
+import type { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import {
   AMUX_WORKER_CAPABILITY_REFUSALS,
   AMUX_WORKER_ROUTING_TAG_REQUIREMENTS,
@@ -18,7 +9,6 @@ import {
   AMUX_WORKER_V22_ROLE_REQUIREMENTS,
   AMUX_WORKER_V22_ROLES,
   AMUX_WORKER_V22_TOOLS,
-  parseAmuxWorkerCapabilityAdminView,
   type AmuxWorkerCapability,
   type AmuxWorkerCapabilityAdminRow,
   type AmuxWorkerCapabilityAdminView,
@@ -26,13 +16,10 @@ import {
 import {
   amuxToggleListValue,
   amuxWorkerCapabilityFormChanges,
-  amuxWorkerCapabilityFormFromRow,
   amuxWorkerCapabilityFormRefusal,
   amuxWorkerCapabilityFromForm,
   type AmuxWorkerCapabilityForm,
 } from "@/lib/amux/workerCapabilityEditCore";
-
-const CAPABILITY_PATH = "/api/admin/amux/workers/capabilities";
 
 type Messages = (typeof adminAmuxWorkerCapabilityMessages)["en"];
 
@@ -41,8 +28,6 @@ export type AmuxWorkerCapabilityPending = { done: number; total: number } | "rea
 export type AmuxWorkerCapabilityNotice = "done" | "stopped" | "outcome_unknown" | "unread" | null;
 export type AmuxWorkerCapabilityRefusalNotice = { workerName: string; code: string } | null;
 
-const cellClass = "border-b px-2 py-2 align-top border-zinc-700";
-const headClass = `${cellClass} text-xs font-semibold text-zinc-400`;
 const buttonClass =
   "inline-flex min-h-11 items-center rounded-md border px-3 py-1 text-xs font-bold disabled:opacity-60 border-zinc-500";
 
@@ -220,131 +205,6 @@ export function AmuxWorkerCapabilityEditor({
   );
 }
 
-/**
- * The capability section of AMUX › Execution › Workers, without hooks, so a
- * test can call it and read the tree it returns. It shows each registered
- * worker's recorded capability; the owner edits one worker at a time. Stage
- * R2a's import from the catalog variables went with the variables at R2e.
- */
-export function AmuxWorkerCapabilityView({
-  m,
-  view,
-  isOwner,
-  pending,
-  notice,
-  refusal,
-  failure,
-  onReread,
-  editing = null,
-  onEditStart = () => {},
-  onEditChange = () => {},
-  onEditCancel = () => {},
-  onEditSave = () => {},
-}: {
-  m: Messages;
-  view: AmuxWorkerCapabilityAdminView | null;
-  isOwner: boolean;
-  pending: AmuxWorkerCapabilityPending;
-  notice: AmuxWorkerCapabilityNotice;
-  refusal: AmuxWorkerCapabilityRefusalNotice;
-  failure: AdminApiFailure | null;
-  onReread: () => void;
-  /** The form being edited, or null; the owner edits one worker at a time. */
-  editing?: AmuxWorkerCapabilityForm | null;
-  onEditStart?: (row: AmuxWorkerCapabilityAdminRow) => void;
-  onEditChange?: (form: AmuxWorkerCapabilityForm) => void;
-  onEditCancel?: () => void;
-  onEditSave?: (form: AmuxWorkerCapabilityForm) => void;
-}) {
-  const busy = pending !== null;
-  return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-worker-capability-panel">
-      <h2 className="text-lg font-semibold text-zinc-100">{m.title}</h2>
-      <p className="text-sm text-zinc-300">{m.description}</p>
-      {view === null ? (
-        <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-capability-unavailable">
-            {m.unavailable}
-          </p>
-          <button type="button" className={`${buttonClass} w-fit`} disabled={busy} onClick={onReread} data-testid="amux-worker-capability-reread">
-            {pending === "reading" ? m.reading : m.reread}
-          </button>
-        </div>
-      ) : (
-        <>
-          <p className="text-sm text-zinc-300" data-testid="amux-worker-capability-latch">
-            {view.writesLatch ? m.writesOn : m.writesOff}
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm text-zinc-100">
-              <thead>
-                <tr>
-                  <th scope="col" className={headClass}>{m.column.worker}</th>
-                  <th scope="col" className={headClass}>{m.column.ceiling}</th>
-                  <th scope="col" className={headClass}>{m.column.current}</th>
-                  {isOwner ? <th scope="col" className={headClass}><span className="sr-only">{m.edit}</span></th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {view.rows.map((row) => (
-                  <tr key={row.workerName} data-testid={`amux-worker-capability-row-${row.workerName}`}>
-                    <th scope="row" className={`${cellClass} font-mono text-xs`}>{row.workerName}</th>
-                    <td className={cellClass}>{row.roleCeiling}</td>
-                    <td className={cellClass}>{describe(m, row.current?.capability ?? null)}</td>
-                    {isOwner ? (
-                      <td className={cellClass}>
-                        <button
-                          type="button"
-                          className={buttonClass}
-                          aria-label={m.editLabel(row.workerName)}
-                          disabled={busy || !view.writesLatch || row.desiredState === "retired" || editing !== null}
-                          onClick={() => onEditStart(row)}
-                          data-testid={`amux-worker-capability-edit-${row.workerName}`}
-                        >
-                          {m.edit}
-                        </button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {isOwner && editing !== null ? (() => {
-            const row = view.rows.find((candidate) => candidate.workerName === editing.workerName);
-            return row ? (
-              <AmuxWorkerCapabilityEditor
-                m={m}
-                row={row}
-                form={editing}
-                busy={busy}
-                writesLatch={view.writesLatch}
-                onChange={onEditChange}
-                onCancel={onEditCancel}
-                onSave={onEditSave}
-              />
-            ) : null;
-          })() : null}
-        </>
-      )}
-      {notice === "done" ? <p role="status" className="text-sm" data-testid="amux-worker-capability-done">{m.importDone}</p> : null}
-      {notice === "stopped" ? <p role="status" className="text-sm" data-testid="amux-worker-capability-stopped">{m.importStopped}</p> : null}
-      {notice === "outcome_unknown" ? (
-        <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-capability-outcome-unknown">{m.importOutcomeUnknown}</p>
-      ) : null}
-      {notice === "unread" ? (
-        <p role="alert" className="text-sm text-amber-300" data-testid="amux-worker-capability-run-unread">{m.importUnread}</p>
-      ) : null}
-      {refusal ? (
-        <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-capability-refused">
-          {m.importRefused(refusal.workerName, refusal.code)}
-        </p>
-      ) : null}
-      {failure ? <AdminApiFailureNotice failure={failure} /> : null}
-    </section>
-  );
-}
-
 export type AmuxWorkerCapabilityUpdate = Partial<{
   pending: AmuxWorkerCapabilityPending;
   notice: AmuxWorkerCapabilityNotice;
@@ -482,77 +342,4 @@ export async function runAmuxWorkerCapabilityEdit(
     },
   );
   return notice === "done";
-}
-
-/**
- * The view with its requests. A capability write needs the owner role, R2a's
- * code latch and a recent step-up, all checked by the route; a stale step-up
- * is answered 428 and rendered with the way back (`AdminApiFailureNotice`,
- * docs/ui-contracts/admin-console-ia.md rule 7).
- */
-export function AmuxWorkerCapabilityPanel({ view, isOwner }: { view: AmuxWorkerCapabilityAdminView | null; isOwner: boolean }) {
-  const m = useAdminMessages(adminAmuxWorkerCapabilityMessages) as Messages;
-  const { locale } = useAdminLocale();
-  const [current, setCurrent] = useState<AmuxWorkerCapabilityAdminView | null>(view);
-  const [pending, setPending] = useState<AmuxWorkerCapabilityPending>(null);
-  const [notice, setNotice] = useState<AmuxWorkerCapabilityNotice>(null);
-  const [refusal, setRefusal] = useState<AmuxWorkerCapabilityRefusalNotice>(null);
-  const [failure, setFailure] = useState<AdminApiFailure | null>(null);
-  const [editing, setEditing] = useState<AmuxWorkerCapabilityForm | null>(null);
-
-  const apply = (changes: AmuxWorkerCapabilityUpdate) => {
-    if ("view" in changes) {
-      const next = changes.view ?? null;
-      setCurrent(next);
-      // A worker that left the list (retired elsewhere) cannot be edited, and
-      // its editor would no longer render a way out: let the edit go.
-      if (next !== null) {
-        setEditing((form) => (form !== null && next.rows.some((row) => row.workerName === form.workerName) ? form : null));
-      }
-    }
-    if ("notice" in changes) setNotice(changes.notice ?? null);
-    if ("refusal" in changes) setRefusal(changes.refusal ?? null);
-    if ("failure" in changes) setFailure(changes.failure ?? null);
-    if ("pending" in changes) setPending(changes.pending ?? null);
-  };
-
-  const io: AmuxWorkerCapabilityIo = {
-    post: (entry) =>
-      adminFetch(CAPABILITY_PATH, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(entry),
-      }),
-    read: async () => {
-      try {
-        const response = await adminFetch(CAPABILITY_PATH, { method: "GET" });
-        return response.ok ? parseAmuxWorkerCapabilityAdminView(await response.json().catch(() => null)) : null;
-      } catch {
-        return null;
-      }
-    },
-    failureOf: (response) => readAdminApiFailure(response, { fallback: m.changeFailed, locale }),
-    networkFailure: () => adminNetworkFailure(locale),
-  };
-
-  return (
-    <AmuxWorkerCapabilityView
-      m={m}
-      view={current}
-      isOwner={isOwner}
-      pending={pending}
-      notice={notice}
-      refusal={refusal}
-      failure={failure}
-      onReread={() => void runAmuxWorkerCapabilityReread(io, apply)}
-      editing={editing}
-      onEditStart={(row) => setEditing(amuxWorkerCapabilityFormFromRow(row))}
-      onEditChange={setEditing}
-      onEditCancel={() => setEditing(null)}
-      onEditSave={(form) =>
-        void runAmuxWorkerCapabilityEdit(form, io, apply).then((saved) => {
-          if (saved) setEditing(null);
-        })}
-    />
-  );
 }

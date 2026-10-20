@@ -279,6 +279,9 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
   }
 }
 
+/** The same read, for AMUX › Operations settings › Workers. It selects nothing more. */
+export const readAgentOfficeAmuxWorkers = readAmuxWorkers;
+
 /**
  * The independent review server: the latest status report it sent, the one
  * row it may write. The report has no field for a job, a branch or a finding.

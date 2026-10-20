@@ -16,8 +16,8 @@ test("legacy halt and Decision Maker bookmarks retain their exact operations-set
   await expect(page).toHaveURL("/admin/amux-settings?tab=safety&taskId=task-example");
   await expect(consoleHeading(page)).toHaveText("Operations settings");
   const tabs = page.getByRole("navigation", { name: "AMUX operations settings sections" });
-  // The owner also sees Analysis settings.
-  await expect(tabs.getByRole("link")).toHaveCount(4);
+  // The owner also sees Automatic admission and Analysis settings.
+  await expect(tabs.getByRole("link")).toHaveCount(5);
   // The router may retain a hidden previous page; assert the active controls.
   const status = page.getByTestId("amux-halt-status").filter({ visible: true });
   await expect(status).toHaveCount(1);
