@@ -13,15 +13,24 @@ import {
   AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY,
   readActiveRouterGuidance,
 } from "@/lib/autoLlmRouterGuidance";
+import { AUTO_LLM_ROUTER_MODEL_SETTING_KEY, updateAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
+import { autoLlmRouterModelAllowed } from "@/lib/autoLlmRouterCore";
+import { getRuntimeModels } from "@/lib/modelRegistry";
+import { PROVIDER_API_KEY_ENV_NAMES } from "@/lib/modelRegistryShared";
 import {
   AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
   AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY,
+  pricesOf,
   promoteAutoRouterOptimizerCycle,
   readAutoRouterOptimizerState,
   reserveOptimizerCycle,
   updateOptimizerAutomation,
+  updateOptimizerModel,
 } from "@/lib/autoRouterOptimizer";
-import { AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD } from "@/lib/autoRouterOptimizerCore";
+import {
+  AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
+  optimizerProcessExitCode,
+} from "@/lib/autoRouterOptimizerCore";
 import {
   AUTO_REWRITE_OPTIMIZER_AUTOMATION_SETTING_KEY,
   loadRewriteDecisions,
@@ -29,6 +38,7 @@ import {
   readAutoRewriteOptimizerState,
   readRewriteOptimizerAutomation,
   rollBackAutoRewriteGuidance,
+  runAutoRouterOptimizerCycleToCompletion,
   runScheduledOptimizerCycle,
   updateRewriteOptimizerAutomation,
 } from "@/lib/autoRewriteOptimizer";
@@ -54,6 +64,7 @@ const SETTING_KEYS = [
   AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
   AUTO_REWRITE_OPTIMIZER_AUTOMATION_SETTING_KEY,
   AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY,
+  AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
 ];
 const createdUsers: string[] = [];
 
@@ -242,6 +253,72 @@ test("the daily step picks its target from the switches and starts nothing witho
   await seedCycle({ target: "routing", status: "failed", startedBy: "system" });
   assert.equal((await runScheduledOptimizerCycle()).target, "rewrite");
   assert.equal(await prisma.autoRouterOptimizerCycle.count(), 1);
+});
+
+test("the own-process run follows the daily step's rule, and a refusal is nothing to wait for", async () => {
+  // The Auto Router Optimizer service's entry (scripts/run-auto-router-optimizer.mjs).
+  assert.deepEqual(await runAutoRouterOptimizerCycleToCompletion(), { started: false, reason: "daily_off" });
+  await updateRewriteOptimizerAutomation(actor, { daily: true, autoPromote: false });
+  const refused = await runAutoRouterOptimizerCycleToCompletion();
+  assert.deepEqual(refused, { started: false, reason: "optimizer_off", target: "rewrite" });
+  assert.equal(optimizerProcessExitCode(refused), 0);
+  await updateOptimizerAutomation(actor, { daily: true, autoPromote: false });
+  assert.deepEqual(await runAutoRouterOptimizerCycleToCompletion(), {
+    started: false,
+    reason: "optimizer_off",
+    target: "routing",
+  });
+  assert.equal(await prisma.autoRouterOptimizerCycle.count(), 0);
+});
+
+test("the own-process run returns only when its cycle is recorded, with how it ended", async () => {
+  // No provider is reached: every key is unset and fetch throws, so each call
+  // fails before it leaves. With no real decision and no synthetic message the
+  // cycle ends as too few cases -- recorded, at no cost.
+  const models = await getRuntimeModels();
+  const model = models.find(
+    (candidate) =>
+      candidate.enabled &&
+      (candidate.provider === "openai" || candidate.provider === "anthropic") &&
+      autoLlmRouterModelAllowed(candidate) &&
+      pricesOf(candidate)
+  );
+  assert.ok(model, "the catalogue has a priced OpenAI or Anthropic model");
+  await updateOptimizerModel(actor, model.id);
+  await updateAutoLlmRouterModelId(actor, model.id);
+  await updateOptimizerAutomation(actor, { daily: true, autoPromote: false });
+
+  const keys = Object.values(PROVIDER_API_KEY_ENV_NAMES).flat();
+  const saved = Object.fromEntries(keys.map((name) => [name, process.env[name]]));
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = (async () => {
+    fetched += 1;
+    throw new Error("no network in this test");
+  }) as typeof fetch;
+  for (const name of keys) delete process.env[name];
+  try {
+    const result = await runAutoRouterOptimizerCycleToCompletion();
+    assert.equal(result.started, true);
+    assert.ok(result.started);
+    assert.equal(result.target, "routing");
+    assert.deepEqual(result.outcome, { recorded: true, status: "failed", failure: "too_few_cases" });
+    assert.equal(optimizerProcessExitCode(result), 0);
+    // Returned after the row was closed, not while it was still running.
+    const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: result.cycleId } });
+    assert.equal(row.status, "failed");
+    assert.equal(row.failure, "too_few_cases");
+    assert.equal(row.startedBy, "system");
+    assert.equal(row.spentMicroUsd, 0);
+    assert.ok(row.finishedAt);
+    assert.equal(fetched, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
 
 test("each Admin section lists only its own cycles; rewrite synthetic cases are shown and real ones never", async () => {
