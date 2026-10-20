@@ -52,6 +52,7 @@ import {
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
     summarizeRouterDecisions,
+    unreliableAnswerModels,
     syntheticCaseViews,
     type OptimizerCallKind,
     type OptimizerDecision,
@@ -60,7 +61,7 @@ import {
 } from "@/lib/autoRouterOptimizerCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
-import { DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -92,9 +93,40 @@ const ROUTER_STATS_DAYS = 14;
 const ROUTER_STATS_MAX_ROWS = 2_000;
 
 
-/** Room for a model that writes anything before the one-word object. */
-const JUDGE_MAX_OUTPUT_TOKENS = 400;
+/**
+ * Room for a model that writes anything before the one-word object. On Test
+ * (2026-10-20, cycle cmvgc2vrb) eight judge calls to claude-opus-5 ended at
+ * 400 tokens with no object (finishReason length): the request carried no
+ * thinking setting, and the tokens went before the object. The judge and the
+ * synthesizer now ask for no reasoning (`reasoning: "none"`, which the
+ * Anthropic provider sends as thinking disabled, or its lowest effort on a
+ * model that refuses that) and the judge keeps this much room besides.
+ */
+const JUDGE_MAX_OUTPUT_TOKENS = 2_000;
 const JUDGE_TIMEOUT_MS = 30_000;
+
+/**
+ * The one judge call of every optimizer cycle, routing and rewrite alike, so
+ * their limits cannot drift apart again: no reasoning, room for the object,
+ * one structured verdict. The caller's system prompt ends with
+ * AUTO_ROUTER_JUDGE_OUTPUT_RULE.
+ */
+export const optimizerJudgeCall = (input: { model: AiModel; system: string; prompt: string; name: string }) =>
+    generateText({
+        model: getActiveAiModel(input.model),
+        system: input.system,
+        prompt: input.prompt,
+        maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
+        reasoning: "none",
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
+        output: Output.object({
+            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
+            name: input.name,
+        }),
+        providerOptions: { openai: { strictJsonSchema: true } },
+    });
+
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
 export const OPTIMIZER_LOCK = "auto-router-optimizer";
@@ -255,6 +287,40 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
  * pick shares from the last two weeks of decisions. Counts only; null when
  * the read fails, and the cycle goes on without it.
  */
+/**
+ * Every model id the catalogue knows -- registry rows deleted from the
+ * catalogue and the static catalogue included -- for the guidance naming
+ * check: a name the menu no longer offers is caught however it is shaped.
+ */
+export async function optimizerCatalogueIds(): Promise<string[]> {
+    const registered = await getRuntimeModels({ includeCatalogDeleted: true });
+    return [...new Set([...registered, ...AVAILABLE_MODELS].map((model) => model.id))];
+}
+
+/**
+ * Models whose answers all failed in the last finished cycle that recorded
+ * answers, never drawn as the next cycle's direct challenger. Empty when
+ * there is no such cycle or it cannot be read.
+ */
+export async function readUnreliableAnswerModels(): Promise<string[]> {
+    try {
+        // Searched in the database rather than among the last few rows: any
+        // number of cycles that record no answers (rewrite cycles, older
+        // routing ones) may have finished since.
+        const rows = await prisma.$queryRaw<Array<{ answerStats: unknown }>>`
+            SELECT "summary"->'answerStats' AS "answerStats"
+            FROM "AutoRouterOptimizerCycle"
+            WHERE "status" IN ('passed', 'failed', 'error')
+              AND jsonb_typeof("summary"->'answerStats') = 'object'
+            ORDER BY "createdAt" DESC
+            LIMIT 1
+        `;
+        return rows[0] ? unreliableAnswerModels(rows[0].answerStats) : [];
+    } catch {
+        return [];
+    }
+}
+
 async function readRouterStats(now: Date): Promise<RouterStats | null> {
     try {
         const rows = await prisma.autoRouterDecision.findMany({
@@ -596,21 +662,39 @@ async function runInBackground(input: {
         spentByProvider: new Map(),
     };
     try {
-        const [candidatesFor, routerStats] = await Promise.all([
+        const [candidatesFor, routerStats, catalogueIds, unreliableModels] = await Promise.all([
             autoCandidateMenu(input.models),
             readRouterStats(new Date()),
+            optimizerCatalogueIds(),
+            readUnreliableAnswerModels(),
         ]);
         const result = await runOptimizerCycle(
-            { decisions: input.decisions, incumbentGuidance: input.incumbentGuidance, routerStats },
+            {
+                decisions: input.decisions,
+                incumbentGuidance: input.incumbentGuidance,
+                routerStats,
+                catalogueIds,
+                unreliableModels,
+            },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
                 candidatesFor,
+                // A proposal naming a model off the menu or without evidence;
+                // model ids only, never guidance text.
+                guidanceRejected: (rejection) =>
+                    console.warn(JSON.stringify({
+                        event: "auto_router_optimizer_guidance_rejected",
+                        cycleId: input.cycleId,
+                        reason: rejection.reason,
+                        ids: rejection.ids,
+                    })),
                 synthesize: async (message) => {
                     const generated = await traced("synthesize", () => generateText({
                         model: getActiveAiModel(input.optimizerModel),
                         system: AUTO_ROUTER_SYNTHESIZER_SYSTEM,
                         prompt: message,
                         maxOutputTokens: SYNTHESIZER_MAX_OUTPUT_TOKENS,
+                        reasoning: "none",
                         maxRetries: 0,
                         abortSignal: AbortSignal.timeout(SYNTHESIZER_TIMEOUT_MS),
                         output: Output.object({
@@ -717,18 +801,11 @@ async function runInBackground(input: {
                     };
                 },
                 judge: async (message) => {
-                    const generated = await traced("judge", () => generateText({
-                        model: getActiveAiModel(input.optimizerModel),
+                    const generated = await traced("judge", () => optimizerJudgeCall({
+                        model: input.optimizerModel,
                         system: AUTO_ROUTER_JUDGE_SYSTEM,
                         prompt: message,
-                        maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
-                        maxRetries: 0,
-                        abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
-                        output: Output.object({
-                            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
-                            name: "router_judgement",
-                        }),
-                        providerOptions: { openai: { strictJsonSchema: true } },
+                        name: "router_judgement",
                     }));
                     return {
                         value: parseJudgeWinner(outputOf("judge", generated)),
@@ -757,6 +834,9 @@ async function runInBackground(input: {
                     report: result.report,
                     comparisons: result.comparisons,
                     gate: result.gate,
+                    judgeFailed: result.judgeFailed,
+                    answerStats: result.answerStats,
+                    unreliableModels,
                 },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
@@ -795,6 +875,8 @@ async function runInBackground(input: {
                 {}
             ),
             gate: result.gate,
+            judgeFailed: result.judgeFailed,
+            unreliableModels,
             reportItems: result.report
                 ? result.report.findings.length + result.report.recommendations.length
                 : 0,
