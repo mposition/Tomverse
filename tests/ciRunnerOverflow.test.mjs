@@ -18,15 +18,19 @@ const expression = (fallback) =>
 const HEAVY_JOBS = [
   ["credit-finance-db-integration.yml", "credit-finance-db", "ubuntu-latest"],
   ["credit-finance-db-integration.yml", "ops-observer-pg16", "ubuntu-latest"],
-  ["credit-finance-db-integration.yml", "credit-finance-db-postgres16", "ubuntu-latest"],
+  // Develop-only until the support-triage PostgreSQL 16 lane is released:
+  // checked wherever the job exists, and required nowhere.
+  ["credit-finance-db-integration.yml", "credit-finance-db-postgres16", "ubuntu-latest", { optional: true }],
   ["admin-console-e2e.yml", "admin-console-e2e-shard", "ubuntu-latest"],
 ];
 
 const workflow = (file) => parse(readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8"));
 
 test("each heavy job picks Ubicloud only behind the switch, and keeps its GitHub runner otherwise", () => {
-  for (const [file, job, fallback] of HEAVY_JOBS) {
-    assert.equal(workflow(file).jobs[job]["runs-on"], expression(fallback), `${file} ${job}`);
+  for (const [file, job, fallback, { optional = false } = {}] of HEAVY_JOBS) {
+    const body = workflow(file).jobs[job];
+    if (!body && optional) continue;
+    assert.equal(body?.["runs-on"], expression(fallback), `${file} ${job}`);
   }
 });
 
