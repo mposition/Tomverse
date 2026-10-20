@@ -43,7 +43,7 @@ test("every state produces a non-empty block", () => {
   }
 });
 
-test("the token range is 231 to 364", () => {
+test("the token range is 231 to 353", () => {
   const tokens = everyState().map((state) => estimateTextTokens(build(state)));
   assert.equal(Math.min(...tokens), 231);
   // The handoff paragraph is a prohibition that carries its own reason, and a
@@ -51,7 +51,7 @@ test("the token range is 231 to 364", () => {
   // maximum is core + handoff + the file paragraph. The edit-limitation and
   // imperative-SVG variants that used to raise it were removed 2026-10-20
   // with the rule-based intent classifier.
-  assert.equal(Math.max(...tokens), 364);
+  assert.equal(Math.max(...tokens), 353);
 });
 
 test("the minimum is the core alone and the maximum is handoff plus SVG", () => {
@@ -233,5 +233,5 @@ test("a Free account is given no route, and is not told about the plan either", 
   // Free accounts do have the file tool, so the SVG paragraph is present --
   // this combination is real, not hypothetical.
   assert.ok(text.includes("SVG"));
-  assert.equal(estimateTextTokens(text), 364);
+  assert.equal(estimateTextTokens(text), 353);
 });

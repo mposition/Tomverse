@@ -135,8 +135,8 @@ export const IMAGE_CAPABILITY_CORE = [
  * without inventing another path" is the whole answer.
  */
 const HANDOFF_EXISTS = [
-  "Image generation exists in this app, and the app itself offers it beside",
-  "this answer when it applies. Do not describe it, do not explain how to",
+  "Image generation exists in this app, outside this answer. Do not",
+  "describe it, do not explain how to",
   "reach it, and never present it as an option for the user to pick from a",
   "list -- you cannot navigate there, so a user who chooses it from your list",
   "has been sent nowhere.",
