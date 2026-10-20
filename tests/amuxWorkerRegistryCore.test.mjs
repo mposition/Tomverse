@@ -17,7 +17,7 @@ import {
   AMUX_WORKER_PROVIDER_CLASSES,
   AMUX_WORKER_PROVIDER_CLASS_TABLE,
   AMUX_WORKER_REGISTRY_AUDIT_ACTIONS,
-  AMUX_WORKER_REGISTRY_BOOTSTRAP_ACTIVE,
+  AMUX_WORKER_REGISTRY_REFUSALS,
   AMUX_WORKER_REGISTRY_V31_SEED,
   AMUX_WORKER_ROLE_CEILINGS,
   AMUX_WORKER_TRIAL_CARD_COUNT,
@@ -97,7 +97,7 @@ test("the seed is version 27's thirteen: the catalog's seven active, the six new
   );
   assert.deepEqual(
     AMUX_WORKER_REGISTRY_V31_SEED.filter((entry) => entry.desiredState === "active").map((entry) => entry.workerName).sort(),
-    [...AMUX_WORKER_REGISTRY_BOOTSTRAP_ACTIVE].sort(),
+    ["claude-chore", "claude-contract", "claude-impl", "claude-review", "codex-chore", "codex-contract", "codex-impl"],
   );
   for (const entry of AMUX_WORKER_REGISTRY_V31_SEED) {
     const providerClass = amuxWorkerProviderClassOf(entry.workerName);
@@ -140,13 +140,19 @@ test("a role ceiling never exceeds the class's", () => {
   assert.equal(amuxWorkerRegistryChangeRefusal(null, change("codex-x", "requested", "contract", 0)), null);
 });
 
-test("a new worker starts requested, or active only if it is one of the catalog's seven", () => {
+test("a new worker starts requested or active, whatever its name (operator decision 2026-10-20)", () => {
   assert.equal(amuxWorkerRegistryChangeRefusal(null, change("claude-new", "requested", "chore", 0)), null);
-  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("claude-new", "active", "chore", 0)), "activation_requires_trial");
-  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("cursor-impl", "active", "implementation", 0)), "activation_requires_trial");
+  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("claude-new", "active", "chore", 0)), null);
+  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("cursor-impl", "active", "implementation", 0)), null);
   assert.equal(amuxWorkerRegistryChangeRefusal(null, change("claude-impl", "active", "implementation", 0)), null);
+  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("codex-x", "active", "contract", 0)), null);
   assert.equal(amuxWorkerRegistryChangeRefusal(null, change("claude-new", "paused", "chore", 0)), "first_state_invalid");
   assert.equal(amuxWorkerRegistryChangeRefusal(null, change("claude-new", "retired", "chore", 0)), "first_state_invalid");
+  // An unverified class still never holds contract, active or not.
+  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("cursor-impl", "active", "contract", 0)), "role_above_class");
+  assert.equal(amuxWorkerRegistryChangeRefusal(null, change("copilot-x", "active", "contract", 0)), "role_above_class");
+  // The trial refusal is gone from the vocabulary the route and Admin answer with.
+  assert.equal(AMUX_WORKER_REGISTRY_REFUSALS.includes("activation_requires_trial"), false);
 });
 
 test("every change names the revision the person saw", () => {
@@ -157,7 +163,7 @@ test("every change names the revision the person saw", () => {
   assert.equal(amuxWorkerRegistryChangeRefusal(null, change("claude-new", "requested", "chore", 1)), "stale_revision");
 });
 
-test("the transition rule: stop and narrow freely, activate only through R5, retire for good", () => {
+test("the transition rule: stop and narrow freely, activate directly, retire for good", () => {
   const active = registration("claude-impl", "active", "implementation");
   const requested = registration("cursor-impl", "requested", "chore");
   const paused = registration("codex-impl", "paused", "implementation");
@@ -170,13 +176,17 @@ test("the transition rule: stop and narrow freely, activate only through R5, ret
       assert.equal(amuxWorkerRegistryChangeRefusal(from, change(from.workerName, to, from.roleCeiling, 1)), null, `${from.desiredState}->${to}`);
     }
   }
-  // Activation is section 5's, which R1 does not have.
+  // The owner activates a requested or paused worker directly, with no trial
+  // period (operator decision 2026-10-20), at its role or a narrower one.
   for (const from of [requested, paused]) {
-    assert.equal(
-      amuxWorkerRegistryChangeRefusal(from, change(from.workerName, "active", from.roleCeiling, 1)),
-      "activation_requires_trial",
-    );
+    assert.equal(amuxWorkerRegistryChangeRefusal(from, change(from.workerName, "active", from.roleCeiling, 1)), null);
+    assert.equal(amuxWorkerRegistryChangeRefusal(from, change(from.workerName, "active", "chore", 1)), null);
   }
+  // Activation does not widen a role: that still happens only while requested.
+  assert.equal(amuxWorkerRegistryChangeRefusal(requested, change("cursor-impl", "active", "implementation", 1)), "role_widening_requires_trial");
+  assert.equal(amuxWorkerRegistryChangeRefusal(paused, change("codex-impl", "active", "contract", 1)), "role_widening_requires_trial");
+  // A class's ceiling binds an activation too.
+  assert.equal(amuxWorkerRegistryChangeRefusal(requested, change("cursor-impl", "active", "contract", 1)), "role_above_class");
   // A paused worker may go back to trial.
   assert.equal(amuxWorkerRegistryChangeRefusal(paused, change("codex-impl", "requested", "implementation", 1)), null);
   // Retired is final, whatever the change.

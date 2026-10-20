@@ -65,7 +65,7 @@ owner-only (rule 14).
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio`, `import`, `reconciliation`, `metadata`, `recovery` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
 | AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
-| AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `safety`, `decision-maker`, `analysis` (owner only) |
+| AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `safety`, `decision-maker`, `analysis` (owner only) |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
@@ -226,7 +226,7 @@ is where `ops` reviews, and it carries the queue and assignment evidence that
 belongs to no single card (operator decision, 2026-10-14).
 **Operations settings** opens to every admin role, but its **Automatic
 admission** section is owner-only. It is the owner's first section; after
-role filtering, every other role opens on **Execution safety and recovery**.
+role filtering, every other role opens on **Workers**.
 A non-owner who names `?tab=automatic-admission` gets a 404 before the page
 reads the v22 control.
 Each page loads only its open section. On 2026-10-10 the operator retired the
@@ -317,6 +317,7 @@ loses its redirect route or points at a tab that does not exist, and
 | `/admin/amux-board-promotion` | `/admin/amux-promotion?tab=promotion` | As above |
 | `/admin/amux-board-auto-promotion` | `/admin/amux-promotion?tab=auto-promotion` | As above |
 | `/admin/amux-cards` | `/admin/amux-execution?tab=cards` | As above |
+| `/admin/amux-execution?tab=workers` | `/admin/amux-settings?tab=workers` | Workers moved to Operations settings (2026-10-20); the request's other query is kept, its stale `tab` is not |
 
 The AMUX redirects decide nothing about access. A role the destination refuses
 is redirected and then gets the destination's 404, as it got one from the old
@@ -652,3 +653,21 @@ the switches, the accuracy report and the request history, says where the
 requests to judge are, and the old `?tab=decision-maker&request=<id>` address
 redirects to the panel. A delivery that is unknown is shown but not resolved
 here: the console has no resolution control yet.
+
+### AMUX Workers in Operations settings (2026-10-20)
+
+Workers moved from Execution to **Operations settings**, as its second
+section (Automatic admission, Workers, Execution safety and recovery, Decision
+Maker, Analysis settings). The old `/admin/amux-execution?tab=workers` address
+redirects through `ADMIN_AMUX_EXECUTION_LEGACY_TABS`. Every admin role reads
+the list; the owner alone is offered a change, and only while the registry's
+code latch is on. The screen is one list joined from the registry, the
+recorded capabilities and the live bridge reading
+(`lib/amux/workerOverviewCore.ts`): what needs a look comes first, then what
+can take work, what waits to be turned on, what is paused, and (behind a
+filter) what is kept. A worker whose live state could not be read is never
+drawn as connected. Turn on, pause and turn back on are the registry's own
+change (`POST /api/admin/amux/workers`), sent once and read back; a refusal is
+shown in plain words and an unknown outcome sends nothing more. The drawer
+edits what a worker can do through the existing capability editor. Its copy
+names no policy version, build stage or internal refusal code.

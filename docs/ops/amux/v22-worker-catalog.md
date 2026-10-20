@@ -16,7 +16,7 @@ A worker's v22 one-shot profile is part of its recorded capability: model,
 Task roles and tools. Only the owner records a capability, one worker at a
 time, through `POST /api/admin/amux/workers/capabilities` (owner role, R2a's
 code latch, a recent step-up, and the human audit `amux.worker.capability` in
-the same transaction). AMUX › Execution › Workers shows what is recorded.
+the same transaction). AMUX › Operations settings › Workers shows what is recorded.
 
 Only the existing Anthropic one-shot path is supported: `design`, `implement`,
 `review` and `investigate`, on a Claude worker and a supported model.

@@ -15,13 +15,15 @@ import {
 import { prisma } from "@/lib/prisma";
 
 // Orchestration policy version 31, stage R1, against PostgreSQL through the
-// migration history (20261012100000_amux_worker_registry), in the agents lane
-// of the DB integration suite.
+// migration history (20261012100000_amux_worker_registry, its guard body
+// replaced by 20261020200000_amux_worker_registry_direct_activation), in the
+// agents lane of the DB integration suite.
 //
-// What the migration header says the database enforces: the name grammar and
+// What the migration headers say the database enforces: the name grammar and
 // class prefix, Cursor and Copilot below contract, the change rule (first
-// event requested or one of the catalog's seven active, nothing after retired,
-// no activation after the first event, a wider role only while requested), the
+// event requested or active, for any name; activation from requested or
+// paused with no trial period, the operator's 2026-10-20 decision; nothing
+// after retired; the class never changes; a wider role only while requested), the
 // per-worker revision, the person's audit row of the same transaction under
 // the right action (a system audit cannot be written for these actions at
 // all: writeSystemAuditLog refuses an action its actor does not own), the
@@ -188,24 +190,58 @@ test("the CHECKs refuse a name, class or role outside version 31", async () => {
 
 test("the guard holds the change rule the core holds", async () => {
   const userId = `owner-${randomUUID()}`;
-  // First event: requested, or active only for the catalog's seven.
-  await rejectsWith(register(userId, { workerName: "claude-new", roleCeiling: "chore", desiredState: "active", revision: 1 }), /AMUX_WORKER_REGISTRY_FIRST_STATE/);
+  // First event: requested or active, whatever the name; never paused or retired.
   await rejectsWith(register(userId, { workerName: "claude-new", roleCeiling: "chore", desiredState: "paused", revision: 1 }), /AMUX_WORKER_REGISTRY_FIRST_STATE/);
+  await rejectsWith(register(userId, { workerName: "claude-new", roleCeiling: "chore", desiredState: "retired", revision: 1 }), /AMUX_WORKER_REGISTRY_FIRST_STATE/);
   await rejectsWith(register(userId, { workerName: "claude-new", roleCeiling: "chore", desiredState: "requested", revision: 2 }), /AMUX_WORKER_REGISTRY_STALE_REVISION/);
   await register(userId, { workerName: "claude-new", roleCeiling: "chore", desiredState: "requested", revision: 1 });
   await register(userId, { workerName: "codex-impl", roleCeiling: "implementation", desiredState: "active", revision: 1 });
-  // No activation after the first event.
-  await rejectsWith(register(userId, { workerName: "claude-new", roleCeiling: "chore", desiredState: "active", revision: 2 }), /AMUX_WORKER_REGISTRY_ACTIVATION/);
-  // A wider role only while requested.
+  // A worker outside the catalog's seven may start active (no trial period).
+  await register(userId, { workerName: "cursor-new", roleCeiling: "implementation", desiredState: "active", revision: 1 });
+  // A wider role only while requested: an activation cannot widen it.
   await rejectsWith(register(userId, { workerName: "codex-impl", roleCeiling: "contract", desiredState: "active", revision: 2 }), /AMUX_WORKER_REGISTRY_ROLE_WIDENING/);
+  await rejectsWith(register(userId, { workerName: "claude-new", roleCeiling: "implementation", desiredState: "active", revision: 2 }), /AMUX_WORKER_REGISTRY_ROLE_WIDENING/);
   await register(userId, { workerName: "claude-new", roleCeiling: "contract", desiredState: "requested", revision: 2 });
+  // requested -> active.
+  await register(userId, { workerName: "claude-new", roleCeiling: "contract", desiredState: "active", revision: 3 });
   // The revision is the previous plus one.
   await rejectsWith(register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "paused", revision: 3 }), /AMUX_WORKER_REGISTRY_STALE_REVISION/);
   await register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "paused", revision: 2 });
-  await rejectsWith(register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "active", revision: 3 }), /AMUX_WORKER_REGISTRY_ACTIVATION/);
-  // Retired is final.
-  await register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "retired", revision: 3 });
-  await rejectsWith(register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "requested", revision: 4 }), /AMUX_WORKER_REGISTRY_RETIRED/);
+  // paused -> active: lifting a pause.
+  await register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "active", revision: 3 });
+  // The class never changes (the guard runs before the name/class CHECK).
+  await rejectsWith(
+    register(userId, { workerName: "codex-impl", providerClass: "claude", roleCeiling: "chore", desiredState: "paused", revision: 4 }),
+    /AMUX_WORKER_REGISTRY_CLASS_CHANGED/,
+  );
+  // Retired is final, an activation included.
+  await register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "retired", revision: 4 });
+  await rejectsWith(register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "requested", revision: 5 }), /AMUX_WORKER_REGISTRY_RETIRED/);
+  await rejectsWith(register(userId, { workerName: "codex-impl", roleCeiling: "chore", desiredState: "active", revision: 5 }), /AMUX_WORKER_REGISTRY_RETIRED/);
+  // Cursor and Copilot never hold contract, whether they start or become active.
+  await rejectsWith(register(userId, { workerName: "copilot-new", roleCeiling: "contract", desiredState: "active", revision: 1 }), /class_ceiling_check/);
+  await rejectsWith(register(userId, { workerName: "cursor-new", roleCeiling: "contract", desiredState: "requested", revision: 2 }), /class_ceiling_check/);
+});
+
+test("the store activates directly: requested and paused workers become active through the owner's change", async () => {
+  const session = owner();
+  await change(session, { workerName: "cursor-impl", roleCeiling: "implementation", desiredState: "requested", expectedRevision: 0 });
+  const activated = await change(session, { workerName: "cursor-impl", roleCeiling: "implementation", desiredState: "active", expectedRevision: 1 });
+  assert.equal(activated.action, "amux.worker.change");
+  assert.equal(activated.revision, 2);
+  await change(session, { workerName: "cursor-impl", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 2 });
+  const resumed = await change(session, { workerName: "cursor-impl", roleCeiling: "implementation", desiredState: "active", expectedRevision: 3 });
+  assert.equal(resumed.revision, 4);
+  const first = await change(session, { workerName: "copilot-new", roleCeiling: "chore", desiredState: "active", expectedRevision: 0 });
+  assert.equal(first.action, "amux.worker.register");
+  const view = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryRead, (tx) => readAmuxWorkerRegistryOrThrow(tx));
+  assert.deepEqual(
+    view.registrations?.map((row) => [row.workerName, row.desiredState, row.revision]),
+    [
+      ["copilot-new", "active", 1],
+      ["cursor-impl", "active", 4],
+    ],
+  );
 });
 
 test("every event needs the person's audit of its own transaction, under the right action", async () => {

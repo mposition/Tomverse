@@ -1,21 +1,11 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for AMUX › Execution › Workers, capabilities (orchestration policy
- * version 35, stage R2a). Worker names, tags, roles and models are
- * identifiers and render as stored.
+ * Copy for the capability editor in AMUX › Operations settings › Workers.
+ * Worker names, tags, roles and models are identifiers and render as stored.
  */
 export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
   en: {
-    title: "Worker capabilities",
-    description:
-      "Version 35 moves what each worker can do -- model, routing tags, tools and the v22 profile -- into the registry. Assignment reads the catalog derived from the registry and these capabilities; the catalog environment variables are no longer read or imported (stage R2e). The owner edits a capability here.",
-    writesOff: "Capability writes are off: R2a ships with its code latch off, and the operator's activation record turns it on.",
-    writesOn: "Capability writes are on. Only the owner may record a capability, after a recent sign-in.",
-    unavailable: "The capabilities could not be read. Nothing is shown rather than a guessed list.",
-    reread: "Read again",
-    reading: "Reading…",
-    column: { worker: "Worker", ceiling: "Ceiling", current: "Recorded" },
     none: "none",
     tags: "tags",
     tools: "tools",
@@ -28,8 +18,6 @@ export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
     importUnread: "The run ended, but the capabilities could not be read again. Read them again before recording anything else.",
     importRefused: (worker: string, code: string) => `${worker} was refused (${code}). Nothing was written for it.`,
     changeFailed: "The capability change failed.",
-    edit: "Edit",
-    editLabel: (worker: string) => `Edit the capability of ${worker}`,
     editTitle: (worker: string) => `Capability of ${worker}`,
     editHelp:
       "Records one change with its own audit entry. The ceiling rule is checked here before saving and again when the change is recorded.",
@@ -55,15 +43,6 @@ export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
     cancel: "Cancel",
   },
   ko: {
-    title: "Worker 능력",
-    description:
-      "버전 35는 worker가 할 수 있는 것(모델, 역할 태그, 도구, v22 프로필)을 등록부로 옮깁니다. 배정은 등록부와 이 능력에서 유도한 카탈로그를 읽습니다. 카탈로그 환경 변수는 더 이상 읽지도 가져오지도 않습니다(R2e 단계). owner는 여기서 능력을 편집합니다.",
-    writesOff: "능력 쓰기가 꺼져 있습니다. R2a는 코드 래치를 끈 채 출고되며, 운영자 활성화 기록이 켭니다.",
-    writesOn: "능력 쓰기가 켜져 있습니다. owner만 최근 로그인 뒤에 능력을 기록할 수 있습니다.",
-    unavailable: "능력을 읽지 못했습니다. 추측한 목록 대신 아무것도 보이지 않습니다.",
-    reread: "다시 읽기",
-    reading: "읽는 중…",
-    column: { worker: "Worker", ceiling: "상한", current: "기록됨" },
     none: "없음",
     tags: "태그",
     tools: "도구",
@@ -75,8 +54,6 @@ export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
     importUnread: "실행은 끝났지만 능력을 다시 읽지 못했습니다. 다른 것을 기록하기 전에 다시 읽으세요.",
     importRefused: (worker: string, code: string) => `${worker} 기록이 거부되었습니다(${code}). 그 worker에는 아무것도 쓰지 않았습니다.`,
     changeFailed: "능력 변경에 실패했습니다.",
-    edit: "편집",
-    editLabel: (worker: string) => `${worker}의 능력 편집`,
     editTitle: (worker: string) => `${worker}의 능력`,
     editHelp: "감사 기록을 가진 변경 하나로 기록합니다. 상한 규칙은 저장하기 전에 여기서 한 번, 기록할 때 다시 한 번 확인합니다.",
     field: {
