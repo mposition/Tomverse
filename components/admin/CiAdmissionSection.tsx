@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Poin
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { shouldIssueAdminPoll, type AdminPollTrigger } from "@/lib/adminPollTick";
 import { adminCiAdmissionMessages } from "@/lib/adminMessages/ciAdmission";
 import type { CiRunnerUsage } from "@/lib/ciRunnerUsage";
@@ -156,6 +157,7 @@ const clock = (iso: string) => {
 };
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
+const PAGE_PATH = "/admin/agent-digests";
 
 type Kind = "develop" | "main" | "hotfix";
 const kindOf = (entry: Pick<CiAdmissionQueueEntry, "base" | "head">): Kind =>
@@ -199,6 +201,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [drag, setDrag] = useState<Drag | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -296,6 +299,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const send = async (body: Record<string, unknown>, rollback?: View) => {
     setBusy(true);
     setNotice(null);
+    setReauthenticationRequired(false);
     const restore = () => rollback && setView(rollback);
     try {
       const response = await adminFetch("/api/admin/ci-admission", {
@@ -306,7 +310,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       const payload = (await response.json().catch(() => ({}))) as Partial<View> & { code?: unknown };
       if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
         restore();
-        setNotice(m.reauthenticationRequired);
+        setReauthenticationRequired(true);
         return;
       }
       if (response.status === 403) {
@@ -536,6 +540,14 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         )}
       </div>
 
+      {reauthenticationRequired ? (
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-300">
+          {m.reauthenticationRequired}
+          <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
+            {m.signInAgain}
+          </a>
+        </p>
+      ) : null}
       {notice ? (
         <p className="text-sm text-amber-300" role="status">
           {notice}

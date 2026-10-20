@@ -61,6 +61,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
     saveFailed: "The change was not saved; the previous order is back.",
     stale: "The line changed meanwhile; it has been reloaded.",
     reauthenticationRequired: "Changing the line needs a recent sign-in.",
+    signInAgain: "Sign in again",
     forbidden: "Changing the line needs ops:write.",
   },
   ko: {
@@ -122,6 +123,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
     saveFailed: "변경을 저장하지 못해 이전 순서로 되돌렸습니다.",
     stale: "그사이 대기열이 바뀌어 다시 불러왔습니다.",
     reauthenticationRequired: "대기열을 바꾸려면 최근 로그인이 필요합니다.",
+    signInAgain: "다시 로그인",
     forbidden: "대기열을 바꾸려면 ops:write 권한이 필요합니다.",
   },
 });
