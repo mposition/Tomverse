@@ -186,6 +186,36 @@ test("an answering model's spend is booked to its own provider, beside the optim
   assert.equal(row.spentMicroUsd, 3_300);
 });
 
+test("a finished cycle keeps its report, direct comparisons and gate basis in its summary, and Admin reads them", async () => {
+  const started = await reserve();
+  assert.ok("cycle" in started);
+  const report = {
+    findings: ["같은 크레딧에서는 rival 답이 더 정확했습니다."],
+    recommendations: [{ kind: "code", text: "deepseek-v4-pro 답이 비어 있습니다." }],
+  };
+  const comparisons = [
+    { kind: "easy", a: "strong", b: "rival", verdict: "b", judged: ["B", "A"] },
+    { kind: "chat", a: "strong", b: null, verdict: "no_alternative" },
+  ];
+  const gate = { failure: null, basis: "direct", towardWinner: 3, towardLoser: 0 };
+  // As runInBackground writes it: no migration, all of it in the summary JSON.
+  const data = {
+    status: "passed",
+    spentMicroUsd: 1_000,
+    finishedAt: new Date(),
+    summary: { evaluated: 12, decided: 3, failedCalls: 0, report, comparisons, gate },
+  };
+  const spentByProvider = new Map([[OPTIMIZER_PROVIDER, 700], [ANSWER_PROVIDER, 300]]);
+  assert.equal(await finishOptimizerCycle({ cycleId: started.cycle.id, data, spentByProvider }), true);
+  const view = (await readAutoRouterOptimizerState()).cycles.find((item) => item.id === started.cycle.id);
+  assert.ok(view);
+  const summary = view.summary as { report?: unknown; comparisons?: unknown; gate?: unknown };
+  assert.deepEqual(summary.report, report);
+  assert.deepEqual(summary.comparisons, comparisons);
+  assert.deepEqual(summary.gate, gate);
+  assert.equal(await bucket(ANSWER_PROVIDER, "provider-cost-day"), 300);
+});
+
 test("Admin state shows a cycle's synthetic cases and never a real decision's", async () => {
   const realDecisionId = `real-${randomUUID()}`;
   const cycle = await prisma.autoRouterOptimizerCycle.create({

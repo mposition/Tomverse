@@ -19,7 +19,16 @@ import {
   admitOptimizerAnswer,
   admitOptimizerCycle,
   admitSyntheticMessages,
+  admitOptimizerReport,
   autoRouterAnswerSystem,
+  autoRouterGeneratorSchema,
+  directChallenger,
+  optimizerAnswerOutputTokens,
+  optimizerGateDecision,
+  summarizeRouterDecisions,
+  AUTO_ROUTER_ANSWER_MAX_OUTPUT_TOKENS,
+  AUTO_ROUTER_REPORT_MAX_CHARS,
+  AUTO_ROUTER_REPORT_MAX_ITEMS,
   syntheticCaseViews,
   syntheticMessagesNeeded,
   callCostMicroUsd,
@@ -139,6 +148,8 @@ const decisions = Array.from({ length: 24 }, (_, index) => ({
   reason: "r",
 }));
 const NEW_GUIDANCE = "Send greetings and small talk to the light model.\nSend code to the strong model.";
+const REPORT = { findings: ["인사에는 가벼운 모델로 충분합니다."], recommendations: [{ kind: "guidance", text: "인사는 가벼운 모델로 보내세요." }] };
+const proposal = (guidance = NEW_GUIDANCE) => ({ ...REPORT, guidance });
 
 // What each model writes when it answers; the judge prefers the light one.
 const ANSWERS = { light: "짧고 정확한 답입니다.", strong: "길고 자세하지만 같은 내용의 답입니다." };
@@ -163,7 +174,7 @@ const fakeDeps = (overrides = {}) => {
       generate: async (message) => {
         calls.generate++;
         seen.generated.push(message);
-        return { value: NEW_GUIDANCE, costMicroUsd: 100, provider: "opt" };
+        return { value: proposal(), costMicroUsd: 100, provider: "opt" };
       },
       route: async (guidance, decision) => {
         calls.route++;
@@ -219,31 +230,38 @@ test("a cycle that finds cheaper equal picks passes, answering and judging only 
     result.spentMicroUsd
   );
   assert.equal(result.failedCalls, 0);
+  // The strong pick has no same-credit or higher model to answer against it.
+  assert.equal(result.comparisons.length, 12);
+  assert.ok(result.comparisons.every((item) => item.a === "strong" && item.b === null && item.verdict === "no_alternative"));
+  assert.deepEqual(result.report, REPORT);
+  assert.equal(result.gate.basis, "judged");
   // A real decision's case never carries its message.
   assert.ok(result.cases.every((item) => item.source === undefined && item.message === undefined));
 });
 
-test("a proposal equal to the current guidance stops before any routing", async () => {
+test("a proposal equal to the current guidance stops before the proposal is replayed, and keeps its report", async () => {
   const { calls, deps } = fakeDeps({
-    generate: async () => ({ value: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, costMicroUsd: 100, provider: "opt" }),
+    generate: async () => ({ value: proposal(AUTO_LLM_ROUTER_DEFAULT_GUIDANCE), costMicroUsd: 100, provider: "opt" }),
   });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.failure, "candidate_invalid");
-  assert.equal(calls.route, 0);
-  assert.equal(result.spentMicroUsd, 100);
+  // Only the current guidance's picks of the evaluation half were replayed.
+  assert.equal(calls.route, 12);
+  assert.equal(result.spentMicroUsd, 100 + 12 * 10);
+  assert.deepEqual(result.report, REPORT);
 });
 
 test("once actual spend reaches the budget no new call starts, and the cycle never passes", async () => {
-  // Generation alone spends the whole budget: not one routing call starts.
+  // The current picks' replay spends the whole budget: the generator never starts.
   const { calls, deps } = fakeDeps({ budgetMicroUsd: 100 });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.status, "failed");
   assert.equal(result.failure, "budget_exhausted");
-  assert.equal(calls.generate, 1);
-  assert.equal(calls.route, 0);
+  assert.equal(calls.route, 12);
+  assert.equal(calls.generate, 0);
   assert.equal(calls.answer, 0);
   assert.equal(calls.judge, 0);
-  assert.equal(result.spentMicroUsd, 100);
+  assert.equal(result.spentMicroUsd, 12 * 10);
 });
 
 test("calls already in flight when the budget is reached are counted in full", async () => {
@@ -284,14 +302,16 @@ test("a call that throws costs nothing, is counted as failed and reads as no ans
 
 test("a reported cost that is not a number counts as nothing and never disables the budget", async () => {
   const { calls, deps } = fakeDeps({
-    generate: async () => ({ value: NEW_GUIDANCE, costMicroUsd: Number.NaN, provider: "opt" }),
-    budgetMicroUsd: 50,
+    generate: async () => ({ value: proposal(), costMicroUsd: Number.NaN, provider: "opt" }),
+    budgetMicroUsd: 200,
   });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.spentByKind.generate, 0);
-  // The routing calls still stop at the budget: 50 at 10 a call.
+  // The generator ran (the proposal is replayed only after it), and the
+  // routing calls still stop at the budget: 200 at 10 a call.
+  assert.equal(result.candidateGuidance, NEW_GUIDANCE);
   assert.equal(result.failure, "budget_exhausted");
-  assert.ok(calls.route >= 5 && calls.route < 5 + AUTO_ROUTER_OPTIMIZER_CONCURRENCY);
+  assert.ok(calls.route >= 20 && calls.route < 20 + AUTO_ROUTER_OPTIMIZER_CONCURRENCY);
   assert.equal(result.spentMicroUsd, calls.route * 10);
 });
 
@@ -453,7 +473,9 @@ test("a case whose answer cannot be had is undecided and never judged", async ()
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, thrown.deps);
   assert.equal(result.summary.undecided, 6);
   assert.equal(result.summary.decided, 0);
-  assert.equal(result.failure, "too_few_decided");
+  // Too few judged cases, and no comparison names a winner: no evidence.
+  assert.equal(result.failure, "evidence_below");
+  assert.deepEqual(result.gate, { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 0 });
   assert.equal(thrown.calls.judge, 0);
   assert.equal(result.failedCalls, 6);
   // The answers that came back are still paid for, to their provider.
@@ -486,6 +508,287 @@ test("Admin sees synthetic cases in full and real ones not at all", () => {
   ]);
   assert.deepEqual(syntheticCaseViews(null), []);
   assert.deepEqual(syntheticCaseViews({ cases: [] }), []);
+});
+
+const candidate = (id, credits) => ({
+  id, name: id, provider: "p", bestFor: id, tier: "standard", reasoning: null,
+  contextWindowTokens: null, acceptsImages: false, credits,
+});
+
+test("the direct challenger has the pick's credits, in turn, else the next level up", () => {
+  const field = [candidate("a", 1), candidate("b", 3), candidate("c", 3), candidate("d", 3), candidate("e", 9), candidate("f", 9)];
+  // Same credits, taken in turn by position, never the pick itself.
+  assert.deepEqual([0, 1, 2, 3].map((position) => directChallenger(field, "b", position)), ["c", "d", "c", "d"]);
+  assert.equal(directChallenger(field, "c", 0), "b");
+  // None of the same credits: the next level up, in turn.
+  assert.equal(directChallenger(field, "a", 0), "b");
+  assert.equal(directChallenger(field, "a", 1), "c");
+  assert.equal(directChallenger(field, "e", 4), "f");
+  // The top of the field with nobody beside it, or a pick not in the field.
+  assert.equal(directChallenger([candidate("a", 1), candidate("e", 9)], "e", 0), null);
+  assert.equal(directChallenger(field, "missing", 0), null);
+  // Unknown credits pair only with unknown credits.
+  assert.equal(directChallenger([candidate("x", null), candidate("y", null), candidate("z", 2)], "x", 0), "y");
+  assert.equal(directChallenger([candidate("x", null), candidate("z", 2)], "x", 0), null);
+});
+
+// Three models: light (1 credit), strong and rival (5 credits each). The judge
+// ranks answers light > rival > strong, so rival beats strong head to head.
+const RANKED = { light: "가볍고 정확한 답", rival: "경쟁 모델의 좋은 답", strong: "비싸고 장황한 답" };
+const rank = (answer) => ({ [RANKED.light]: 3, [RANKED.rival]: 2, [RANKED.strong]: 1 })[answer] ?? 0;
+const trio = [candidate("light", 1), candidate("strong", 5), candidate("rival", 5)];
+const trioDecisions = decisions.map((decision) => ({ ...decision, candidates: trio, taskKind: "chat" }));
+const rankedDeps = (overrides = {}) =>
+  fakeDeps({
+    answer: async (modelId) => ({ value: RANKED[modelId], costMicroUsd: 30, provider: `${modelId}-co` }),
+    judge: async (message) => {
+      const { answerA, answerB } = JSON.parse(message);
+      const order = rank(answerA) - rank(answerB);
+      return { value: order > 0 ? "A" : order < 0 ? "B" : "equal", costMicroUsd: 20, provider: "opt" };
+    },
+    ...overrides,
+  });
+
+test("each evaluation message is answered by its current pick and a same-credit rival before any guidance is written", async () => {
+  const answered = [];
+  const judged = [];
+  const { calls, seen, deps } = rankedDeps();
+  const counting = {
+    ...deps,
+    answer: async (modelId, turn) => { answered.push(modelId); return deps.answer(modelId, turn); },
+    judge: async (message) => { judged.push(message); return deps.judge(message); },
+  };
+  const routerStats = summarizeRouterDecisions([], 5_000);
+  const result = await runOptimizerCycle(
+    { decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, routerStats },
+    counting
+  );
+  assert.equal(result.comparisons.length, 12);
+  for (const item of result.comparisons) {
+    assert.equal(item.kind, "chat");
+    assert.equal(item.a, "strong");
+    assert.equal(item.b, "rival");
+    assert.equal(item.verdict, "b");
+    assert.deepEqual(item.judged, ["B", "A"]);
+  }
+  // The generator read the evidence: verdicts, the models it names, the stats.
+  const message = JSON.parse(seen.generated[0]);
+  assert.equal(message.directComparisons.length, 12);
+  assert.deepEqual(message.directComparisons[0], { kind: "chat", a: "strong", b: "rival", verdict: "b" });
+  assert.deepEqual(message.models.map((item) => item.id).sort(), ["rival", "strong"]);
+  assert.deepEqual(message.routerStats, routerStats);
+  assert.equal(calls.generate, 1);
+  // strong answers once per message and is reused by the replay comparison;
+  // rival answers each message once; light only where the proposal moved.
+  assert.equal(answered.filter((id) => id === "strong").length, 12);
+  assert.equal(answered.filter((id) => id === "rival").length, 12);
+  assert.equal(answered.filter((id) => id === "light").length, 6);
+  assert.equal(judged.length, 12 * 2 + 6 * 2);
+  assert.equal(result.spentByKind.answer, 30 * 30);
+  assert.equal(result.spentByProvider.get("rival-co"), 12 * 30);
+  assert.equal(result.spentByProvider.get("strong-co"), 12 * 30);
+  assert.equal(result.spentByProvider.get("light-co"), 6 * 30);
+  assert.equal([...result.spentByProvider.values()].reduce((sum, value) => sum + value, 0), result.spentMicroUsd);
+});
+
+test("a proposal that picks the direct challenger reuses its answers and judgement", async () => {
+  const answered = [];
+  const judged = [];
+  const { deps } = rankedDeps({
+    route: async (guidance) => ({ value: guidance === NEW_GUIDANCE ? "rival" : "strong", costMicroUsd: 10, provider: "rtr" }),
+  });
+  const counting = {
+    ...deps,
+    answer: async (modelId, turn) => { answered.push(modelId); return deps.answer(modelId, turn); },
+    judge: async (message) => { judged.push(message); return deps.judge(message); },
+  };
+  const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, counting);
+  assert.equal(answered.length, 24);
+  assert.equal(judged.length, 24);
+  // Twelve judged replay cases, all won by the proposal: the judged gate.
+  assert.equal(result.summary.candidateWins, 12);
+  assert.equal(result.gate.basis, "judged");
+  assert.equal(result.status, "passed");
+});
+
+test("with too few judged cases the gate decides on the direct comparisons", async () => {
+  // The proposal moves three hard messages from strong to rival, nothing else.
+  const moved = new Set(["d1", "d5", "d9"]);
+  const toRival = rankedDeps({
+    route: async (guidance, decision) => ({
+      value: guidance === NEW_GUIDANCE && moved.has(decision.id) ? "rival" : "strong", costMicroUsd: 10, provider: "rtr",
+    }),
+  });
+  const passed = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, toRival.deps);
+  assert.equal(passed.summary.decided, 3);
+  assert.deepEqual(passed.gate, { failure: null, basis: "direct", towardWinner: 3, towardLoser: 0 });
+  assert.equal(passed.status, "passed");
+
+  // The same move when strong wins head to head is a move toward the loser.
+  const strongBetter = rankedDeps({
+    answer: async (modelId) => ({ value: { light: RANKED.light, rival: RANKED.strong, strong: RANKED.rival }[modelId], costMicroUsd: 30, provider: `${modelId}-co` }),
+    route: toRival.deps.route,
+  });
+  const failed = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, strongBetter.deps);
+  assert.deepEqual(failed.gate, { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 3 });
+  assert.equal(failed.status, "failed");
+});
+
+const gateSummary = (overrides) => ({
+  evaluated: 12, unchanged: 8, decided: 2, candidateWins: 2, incumbentWins: 0, ties: 2,
+  undecided: 0, unrouted: 0, incumbentCredits: 50, candidateCredits: 50, ...overrides,
+});
+const moveCase = (from, to, verdict = "tie") => ({ decisionId: `${from}-${to}`, incumbentPick: from, candidatePick: to, verdict });
+
+test("the gate decision: judged first, the direct evidence only for too few judged cases", () => {
+  const comparisons = [
+    { kind: "easy", a: "strong", b: "rival", verdict: "b" },
+    { kind: "easy", a: "strong", b: "rival", verdict: "b" },
+    { kind: "hard", a: "strong", b: "other", verdict: "a" },
+    { kind: "hard", a: "strong", b: "rival", verdict: "tie" },
+    { kind: "hard", a: "strong", b: null, verdict: "no_alternative" },
+  ];
+  // Enough judged cases: the judged gate alone, whatever the comparisons say.
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({ decided: 6, candidateWins: 6 }), cases: [], comparisons }),
+    { failure: null, basis: "judged", towardWinner: 0, towardLoser: 0 }
+  );
+  assert.equal(
+    optimizerGateDecision({ summary: gateSummary({ decided: 6, candidateWins: 3, incumbentWins: 3 }), cases: [], comparisons }).failure,
+    "win_share_below"
+  );
+  // Too many failed routes stops the gate before any evidence.
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({ unrouted: 5 }), cases: [moveCase("strong", "rival")], comparisons }),
+    { failure: "too_many_unrouted", basis: "judged", towardWinner: 0, towardLoser: 0 }
+  );
+  // Moved toward a model that won its comparisons: passes.
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival"), moveCase("strong", "rival")], comparisons }),
+    { failure: null, basis: "direct", towardWinner: 2, towardLoser: 0 }
+  );
+  // Toward a model that lost (other lost to strong), or more toward losers.
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "other")], comparisons }),
+    { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 1 }
+  );
+  assert.equal(
+    optimizerGateDecision({
+      summary: gateSummary({}),
+      cases: [moveCase("strong", "rival"), moveCase("strong", "other"), moveCase("strong", "other")],
+      comparisons,
+    }).failure,
+    "evidence_below"
+  );
+  // Equal counts, or moves with no evidence either way, do not pass.
+  assert.equal(
+    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival"), moveCase("strong", "other")], comparisons }).failure,
+    "evidence_below"
+  );
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "unseen")], comparisons }),
+    { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 0 }
+  );
+  // A judged replay case is evidence too, for itself and for other cases.
+  assert.deepEqual(
+    optimizerGateDecision({
+      summary: gateSummary({}),
+      cases: [moveCase("light", "mid", "candidate"), moveCase("light", "mid")],
+      comparisons: [],
+    }),
+    { failure: null, basis: "direct", towardWinner: 2, towardLoser: 0 }
+  );
+  // Within the evidence, still held to the credit cap.
+  assert.deepEqual(
+    optimizerGateDecision({
+      summary: gateSummary({ incumbentCredits: 50, candidateCredits: 60 }),
+      cases: [moveCase("strong", "rival")],
+      comparisons,
+    }),
+    { failure: "credits_above", basis: "direct", towardWinner: 1, towardLoser: 0 }
+  );
+  // Unchanged and unrouted cases never count.
+  assert.equal(
+    optimizerGateDecision({
+      summary: gateSummary({}),
+      cases: [{ ...moveCase("strong", "strong"), verdict: "unchanged" }, { ...moveCase("strong", null), verdict: "unrouted" }],
+      comparisons,
+    }).towardWinner,
+    0
+  );
+});
+
+test("the report is admitted bounded, of known kinds, and never repeating a user's message", () => {
+  const userMessage = "우리 회사 내부 매출 자료를 요약해 주세요 담당자는 김철수입니다";
+  const report = admitOptimizerReport({
+    findings: [
+      "인사와 번역은 가벼운 모델이 충분히 답했습니다.",
+      "   ",
+      42,
+      "x".repeat(AUTO_ROUTER_REPORT_MAX_CHARS + 1),
+      `사용자가 "${userMessage.slice(0, 20)}"라고 물었습니다.`,
+    ],
+    recommendations: [
+      { kind: "guidance", text: "짧은 사실 질문은 standard 모델로 보내세요." },
+      { kind: "code", text: "deepseek-v4-pro 답 생성이 길이 초과로 끝납니다." },
+      { kind: "policy", text: "알 수 없는 종류" },
+      { kind: "setting", text: "" },
+    ],
+  }, [userMessage]);
+  assert.deepEqual(report, {
+    findings: ["인사와 번역은 가벼운 모델이 충분히 답했습니다."],
+    recommendations: [
+      { kind: "guidance", text: "짧은 사실 질문은 standard 모델로 보내세요." },
+      { kind: "code", text: "deepseek-v4-pro 답 생성이 길이 초과로 끝납니다." },
+    ],
+  });
+  assert.equal(admitOptimizerReport(null, []), null);
+  assert.equal(admitOptimizerReport({ findings: [], recommendations: [] }, []), null);
+  const many = admitOptimizerReport({ findings: Array.from({ length: 20 }, (_, index) => `발견 ${index}`), recommendations: [] }, []);
+  assert.equal(many.findings.length, AUTO_ROUTER_REPORT_MAX_ITEMS);
+  // The schema asks for the report before the guidance.
+  assert.deepEqual(Object.keys(autoRouterGeneratorSchema().properties), ["findings", "recommendations", "guidance"]);
+});
+
+test("router statistics count outcomes, timeouts, fallbacks and pick shares only", () => {
+  const rows = [
+    { outcome: "picked", pickedModelId: "light", ruleModelId: "light", latencyMs: 900 },
+    { outcome: "picked", pickedModelId: "light", ruleModelId: "strong", latencyMs: 1_100 },
+    { outcome: "picked", pickedModelId: "strong", ruleModelId: "strong", latencyMs: 1_500 },
+    { outcome: "error", pickedModelId: null, ruleModelId: "strong", latencyMs: 5_004 },
+    { outcome: "error", pickedModelId: null, ruleModelId: "strong", latencyMs: 300 },
+    { outcome: "invalid", pickedModelId: null, ruleModelId: "light", latencyMs: 2_000 },
+  ];
+  assert.deepEqual(summarizeRouterDecisions(rows, 5_000), {
+    decisions: 6,
+    outcomes: { picked: 3, invalid: 1, error: 1, timeout: 1 },
+    fallbackShare: 0.5,
+    ruleAgreementShare: 0.667,
+    picks: [{ modelId: "light", count: 2, share: 0.667 }, { modelId: "strong", count: 1, share: 0.333 }],
+    latencyMs: { p50: 1_500, p90: 5_004 },
+  });
+  assert.deepEqual(summarizeRouterDecisions([], 5_000), {
+    decisions: 0,
+    outcomes: { picked: 0, invalid: 0, error: 0, timeout: 0 },
+    fallbackShare: 0,
+    ruleAgreementShare: 0,
+    picks: [],
+    latencyMs: { p50: null, p90: null },
+  });
+});
+
+test("a reasoning model answers with its reservation as room to think, within its own cap", async () => {
+  const pricing = (maxOutputTokens, reservationOutputTokens) => ({ maxOutputTokens, reservationOutputTokens });
+  assert.equal(optimizerAnswerOutputTokens({ reasoning: null }, pricing(128_000, 8_192)), AUTO_ROUTER_ANSWER_MAX_OUTPUT_TOKENS);
+  assert.equal(optimizerAnswerOutputTokens({}, pricing(128_000, 8_192)), AUTO_ROUTER_ANSWER_MAX_OUTPUT_TOKENS);
+  assert.equal(optimizerAnswerOutputTokens({ reasoning: "high" }, pricing(384_000, 8_192)), AUTO_ROUTER_ANSWER_MAX_OUTPUT_TOKENS + 8_192);
+  assert.equal(optimizerAnswerOutputTokens({ reasoning: "high" }, pricing(8_192, 6_144)), 8_192);
+  assert.equal(optimizerAnswerOutputTokens({ reasoning: null }, pricing(2_048, 1_024)), 2_048);
+  // The model that returned no text at 1 500 and at 4 000 on Test.
+  const { AVAILABLE_MODELS } = await import("../lib/models.ts");
+  const { resolveModelPricing } = await import("../lib/modelPricing.ts");
+  const deepseek = AVAILABLE_MODELS.find((model) => model.id === "deepseek-v4-pro");
+  assert.ok(optimizerAnswerOutputTokens(deepseek, resolveModelPricing(deepseek)) > 4_000);
 });
 
 test("a stored guidance record is read only when it is complete and valid", async () => {
