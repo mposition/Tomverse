@@ -56,6 +56,14 @@ export const RECOMMENDATION_FAILURE_REASONS = [
     "review_unknown",
     "timeout",
     "agent_error",
+    // What the runner on the Ubuntu host can tell besides (tools/auto-rec-agent/lib/contract.mjs).
+    "lease_expired",
+    "setup_failed",
+    "runner_error",
+    "rate_limited",
+    "push_rejected",
+    "push_failed",
+    "pr_failed",
 ] as const;
 export type RecommendationFailureReason = (typeof RECOMMENDATION_FAILURE_REASONS)[number];
 
