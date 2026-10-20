@@ -13,8 +13,8 @@ import {
  * workspace with that choice instead of to an answer explaining that chat
  * cannot draw.
  *
- * Made by the Auto router's model (Admin Console › Routing); off when none is
- * set. The call only routes: the image workspace still quotes the price and
+ * Made by the Auto router's model (Admin Console › Routing), behind its own
+ * image triage switch there; off unless both are set. The call only routes: the image workspace still quotes the price and
  * spends credits under its own consent rules (docs/policy/image-generation.md).
  */
 

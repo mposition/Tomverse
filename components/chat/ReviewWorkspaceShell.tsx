@@ -57,7 +57,7 @@ import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
-import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
+import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -181,10 +181,10 @@ export async function ReviewWorkspaceShell({
   let maxImageModels = imageGroupMaxModels();
 
   // Whether a chat send asks the Auto router's model to triage image requests
-  // first (lib/chatImageIntent.ts): on exactly when Admin Console › Routing
-  // names a router model. Never throws; an unreadable setting reads as off.
+  // first (lib/chatImageIntent.ts): on when Admin Console › Routing names a
+  // router model and turns image triage on. Never throws; unreadable is off.
   const chatImageIntentEnabled =
-    imageGenerationEnabled && (await readAutoLlmRouterModelId()) !== null;
+    imageGenerationEnabled && (await chatImageTriageModelId()) !== null;
 
   // Which application-managed search backends this process can reach, resolved
   // here for the same reason the image limit is: the client cannot answer it.

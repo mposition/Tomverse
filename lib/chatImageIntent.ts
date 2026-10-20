@@ -9,7 +9,10 @@ import {
     autoLlmRouterWorstCaseMicroUsd,
     resolveAutoLlmRouterModel,
 } from "@/lib/autoLlmRouterCore";
-import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
+import {
+    readAutoLlmRouterImageTriage,
+    readAutoLlmRouterModelId,
+} from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import {
     CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
@@ -29,12 +32,24 @@ import { resolveModelPricing } from "@/lib/modelPricing";
 const NOT_IMAGE: ChatImageDecision = { image: false };
 
 /**
+ * The router model id when image triage is on (Admin Console › Routing: a
+ * router model and the image triage switch), otherwise null. Never throws.
+ */
+export async function chatImageTriageModelId(): Promise<string | null> {
+    const [on, modelId] = await Promise.all([
+        readAutoLlmRouterImageTriage(),
+        readAutoLlmRouterModelId(),
+    ]);
+    return on ? modelId : null;
+}
+
+/**
  * Whether a chat message asks for a new image and, if so, which image model
  * and preset it needs -- one call to the Auto router's model, which triages
  * image requests the way it triages chat ones.
  *
- * `{ image: false }` -- and the message goes to chat as before -- when no
- * router model is set, it is unavailable or unpriced, no image model is
+ * `{ image: false }` -- and the message goes to chat as before -- when image
+ * triage is off or no router model is set, it is unavailable or unpriced, no image model is
  * enabled, the provider's operational budget is spent, or the call fails,
  * times out or answers malformed. Never throws: routing must not be the
  * reason a send fails.
@@ -48,7 +63,7 @@ export async function detectChatImageRequest(input: {
     traceId: string;
 }): Promise<ChatImageDecision> {
     if (!chatImageIntentPrompt(input.text)) return NOT_IMAGE;
-    const configured = await readAutoLlmRouterModelId();
+    const configured = await chatImageTriageModelId();
     if (!configured) return NOT_IMAGE;
 
     let model;

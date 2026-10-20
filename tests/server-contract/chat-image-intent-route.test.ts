@@ -22,6 +22,7 @@ let sessionOverride: unknown = null;
 let flagEnabled = true;
 let planTier: "Free" | "Pro" | "Max" = "Pro";
 let accessRefused = false;
+let triageModelId: string | null = "gpt-6-luna";
 let detectAnswer: unknown = { image: true, modelId: "gpt-image-2", preset: "final" };
 const detectCalls: Array<{ text: string }> = [];
 let mocksInstalled = false;
@@ -61,6 +62,7 @@ async function loadRoute() {
     });
     mock.module(mod("lib/chatImageIntent.ts"), {
       namedExports: {
+        chatImageTriageModelId: async () => triageModelId,
         detectChatImageRequest: async (input: { text: string }) => {
           detectCalls.push({ text: input.text });
           return detectAnswer;
@@ -80,6 +82,7 @@ const postRequest = (body: unknown) =>
 
 const reset = () => {
   sessionOverride = { user: { id: "user-image-intent-1" } };
+  triageModelId = "gpt-6-luna";
   flagEnabled = true;
   planTier = "Pro";
   accessRefused = false;
@@ -114,6 +117,7 @@ test("an eligible caller gets the triage decision", async () => {
 });
 
 for (const [name, arrange] of [
+  ["image triage is off in Admin › Routing", () => (triageModelId = null)],
   ["image generation is off", () => (flagEnabled = false)],
   ["the plan has no image generation", () => (planTier = "Free")],
   ["the account is restricted", () => (accessRefused = true)],

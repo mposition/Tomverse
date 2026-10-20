@@ -761,7 +761,8 @@ export function ChatPageClient({
    * Whether a chat send first asks the Auto router's model (POST
    * /api/chat/image-intent) and hands an image request to the image
    * workspace with the triaged model and preset. Resolved server-side; off
-   * unless Admin Console › Routing names a router model.
+   * unless Admin Console › Routing names a router model and turns image
+   * triage on.
    */
   chatImageIntentEnabled?: boolean;
   /**

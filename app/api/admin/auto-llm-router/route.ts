@@ -8,8 +8,10 @@ import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
+  readAutoLlmRouterImageTriage,
   readAutoLlmRouterModelId,
   readAutoLlmRouterRewrite,
+  updateAutoLlmRouterImageTriage,
   updateAutoLlmRouterModelId,
   updateAutoLlmRouterRewrite,
 } from "@/lib/autoLlmRouterSettings";
@@ -34,6 +36,7 @@ const updateSchema = z
   .object({
     modelId: z.string().trim().min(1).max(120).nullable(),
     rewrite: z.boolean().optional(),
+    imageTriage: z.boolean().optional(),
   })
   .strict();
 
@@ -52,12 +55,13 @@ export async function GET(req: Request) {
       minute: 30,
       day: 500,
     });
-    const [modelId, rewrite, options] = await Promise.all([
+    const [modelId, rewrite, imageTriage, options] = await Promise.all([
       readAutoLlmRouterModelId(),
       readAutoLlmRouterRewrite(),
+      readAutoLlmRouterImageTriage(),
       routerModelOptions(),
     ]);
-    return NextResponse.json({ modelId, rewrite, options });
+    return NextResponse.json({ modelId, rewrite, imageTriage, options });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
@@ -81,7 +85,7 @@ export async function PUT(req: Request) {
       day: 100,
     });
 
-    const { modelId, rewrite } = await readLimitedJson(req, 1024, updateSchema);
+    const { modelId, rewrite, imageTriage } = await readLimitedJson(req, 1024, updateSchema);
     const options = await routerModelOptions();
     if (modelId !== null && !options.some((option) => option.id === modelId)) {
       return NextResponse.json(
@@ -93,8 +97,16 @@ export async function PUT(req: Request) {
     if (rewrite !== undefined && rewrite !== (await readAutoLlmRouterRewrite())) {
       await updateAutoLlmRouterRewrite({ session, request: req }, rewrite);
     }
+    if (imageTriage !== undefined && imageTriage !== (await readAutoLlmRouterImageTriage())) {
+      await updateAutoLlmRouterImageTriage({ session, request: req }, imageTriage);
+    }
     await updateAutoLlmRouterModelId({ session, request: req }, modelId);
-    return NextResponse.json({ modelId, rewrite: await readAutoLlmRouterRewrite(), options });
+    return NextResponse.json({
+      modelId,
+      rewrite: await readAutoLlmRouterRewrite(),
+      imageTriage: await readAutoLlmRouterImageTriage(),
+      options,
+    });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;
