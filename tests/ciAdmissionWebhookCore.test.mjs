@@ -18,10 +18,10 @@ test("other pull request changes and workflow runs start a round without an arri
   for (const action of ["converted_to_draft", "closed", "synchronize", "edited"]) {
     assert.deepEqual(ciAdmissionArrival("pull_request", pr(action), REPO), { kind: "round", arrival: null }, action);
   }
-  for (const action of ["completed", "requested"]) {
+  for (const action of ["completed", "requested", "in_progress"]) {
     assert.deepEqual(ciAdmissionArrival("workflow_run", { action, repository: { full_name: REPO } }, REPO), { kind: "round", arrival: null });
   }
-  assert.deepEqual(ciAdmissionArrival("workflow_run", { action: "in_progress", repository: { full_name: REPO } }, REPO), { kind: "ignore", reason: "action" });
+  assert.deepEqual(ciAdmissionArrival("workflow_run", { action: "unknown", repository: { full_name: REPO } }, REPO), { kind: "ignore", reason: "action" });
 });
 
 test("anything else is ignored", () => {

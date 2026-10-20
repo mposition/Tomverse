@@ -11,9 +11,12 @@
  *   pull requests, or one into main and one into develop, run at once.
  * - No class jumps the line: a hotfix waits like any other until the operator
  *   moves it to the top, so it never competes with running pull requests.
- * - A pull request uses its slots while its CI runs (or just after it was
- *   released, before GitHub shows its runs); one whose CI finished and only
- *   waits to be merged holds none.
+ * - A pull request uses its slots while its CI runs. One admission released or
+ *   let through also reserves its slots until GitHub shows its runs (or the
+ *   grace period ends), so a burst of events cannot let several through
+ *   against the same free slot; once its runs are seen, they alone count, so
+ *   a CI that finishes fast frees its slots at once. One whose CI finished and
+ *   only waits to be merged holds none.
  * - Arrival is a pull request becoming ready for review (or opened or reopened
  *   ready). If anything waits in line, or its slots do not fit, it goes back
  *   to draft, its just-started runs are cancelled, and it joins the end of the
@@ -33,7 +36,7 @@ import { z } from "zod";
 export const CI_ADMISSION_STATE_SETTING_KEY = "ci_admission_state";
 export const CI_ADMISSION_DEFAULT_CAPACITY = 3;
 export const CI_ADMISSION_MAX_CAPACITY = 20;
-/** How long a released pull request counts as running before GitHub shows its runs. */
+/** How long a released or admitted pull request is reserved (and its own ready event recognised) before GitHub shows its runs. */
 export const CI_ADMISSION_RELEASE_GRACE_MS = 5 * 60 * 1000;
 const MAX_EVENTS = 50;
 const MAX_QUEUE = 100;
@@ -91,7 +94,19 @@ const stateSchema = z
     version: z.literal(1),
     capacity: z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY),
     queue: z.array(queueEntrySchema).max(MAX_QUEUE),
-    released: z.array(z.object({ number: z.number().int().positive(), atMs: z.number().int().nonnegative() }).strict()).max(MAX_QUEUE),
+    /** Pull requests this admission released or let through, within the grace period. */
+    released: z
+      .array(
+        z
+          .object({
+            number: z.number().int().positive(),
+            atMs: z.number().int().nonnegative(),
+            /** Its runs have been seen: from then on they, not the reservation, count. */
+            observed: z.boolean().default(false),
+          })
+          .strict(),
+      )
+      .max(MAX_QUEUE),
     events: z.array(eventSchema).max(MAX_EVENTS),
     /** The latest round: when, how many slots were in use after it, and by which pull requests. */
     lastRound: z
@@ -141,6 +156,11 @@ export type CiAdmissionEvaluation = {
   actions: CiAdmissionAction[];
   /** Slots in use after this evaluation's releases. */
   used: number;
+  /**
+   * When someone waits and a reservation is still unobserved: how long until it
+   * expires, so the caller can judge again then without waiting for an event.
+   */
+  nextCheckInMs: number | null;
 };
 
 /**
@@ -163,10 +183,12 @@ export function evaluateCiAdmission(input: {
   const event = (kind: CiAdmissionEvent["kind"], number: number, detail: string | null = null) =>
     events.push({ at, kind, number, shadow, detail });
 
-  const released = input.state.released.filter(
-    (entry) => nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS && open.get(entry.number)?.draft === false,
-  );
+  const released = input.state.released
+    .filter((entry) => nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS && open.get(entry.number)?.draft === false)
+    .map((entry) => ({ ...entry, observed: entry.observed || input.runningShas.has(open.get(entry.number)!.headSha) }));
+  // Ours: its own ready event is not an arrival. Reserved: counts until its runs are seen.
   const releasedNumbers = new Set(released.map((entry) => entry.number));
+  const reserved = () => new Set(released.filter((entry) => !entry.observed).map((entry) => entry.number));
 
   // The line keeps only open drafts admission still handles.
   const queue: CiAdmissionQueueEntry[] = [];
@@ -184,7 +206,7 @@ export function evaluateCiAdmission(input: {
     queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200) });
   }
 
-  const running = (pull: CiAdmissionPull) => !pull.draft && (input.runningShas.has(pull.headSha) || releasedNumbers.has(pull.number));
+  const running = (pull: CiAdmissionPull) => !pull.draft && (input.runningShas.has(pull.headSha) || reserved().has(pull.number));
   const usedBy = (exclude: number | null) =>
     input.openPulls.reduce((sum, pull) => {
       const units = ciAdmissionUnits(pull);
@@ -207,6 +229,7 @@ export function evaluateCiAdmission(input: {
     } else {
       const index = queue.findIndex((entry) => entry.number === arrival.number);
       if (index >= 0) queue.splice(index, 1);
+      released.push({ number: arrival.number, atMs: nowMs, observed: input.runningShas.has(arrival.headSha) });
       event("admitted", arrival.number, null);
     }
   }
@@ -235,7 +258,7 @@ export function evaluateCiAdmission(input: {
     if (used + units > capacity) break;
     queue.shift();
     actions.push({ kind: "release", pull: asDraft });
-    released.push({ number: pull.number, atMs: nowMs });
+    released.push({ number: pull.number, atMs: nowMs, observed: false });
     releasedNow.add(pull.number);
     used += units;
     event("released", pull.number, null);
@@ -258,6 +281,15 @@ export function evaluateCiAdmission(input: {
     },
     actions,
     used,
+    nextCheckInMs:
+      queue.length === 0
+        ? null
+        : released
+            .filter((entry) => !entry.observed)
+            .reduce<number | null>((soonest, entry) => {
+              const left = Math.max(1_000, entry.atMs + CI_ADMISSION_RELEASE_GRACE_MS - nowMs);
+              return soonest === null ? left : Math.min(soonest, left);
+            }, null),
   };
 }
 

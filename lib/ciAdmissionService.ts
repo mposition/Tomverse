@@ -55,10 +55,34 @@ const takeLock = (tx: Prisma.TransactionClient) => tx.$executeRaw`SELECT pg_advi
 
 const code = (error: unknown) => (error instanceof Error ? error.message : "unknown").slice(0, 80);
 
+// When someone waits behind a reservation that GitHub has not yet shown runs
+// for, judge again when it expires rather than wait for the next webhook. One
+// timer per process; a restart loses it, and the next event does the same job.
+let recheck: ReturnType<typeof setTimeout> | null = null;
+const scheduleRecheck = (inMs: number | null) => {
+  if (inMs === null) return;
+  if (recheck) clearTimeout(recheck);
+  recheck = setTimeout(() => {
+    recheck = null;
+    void runCiAdmissionRound(null).catch((error: unknown) => {
+      console.error("CI admission recheck failed:", code(error));
+    });
+  }, inMs + 1_000);
+  recheck.unref?.();
+};
+
 export type CiAdmissionRoundOutcome =
   | { outcome: "off" | "not_configured" }
   | { outcome: "read_failed"; failure: string }
-  | { outcome: "done"; mode: "shadow" | "on"; held: number[]; released: number[]; cancelled: number[]; failures: string[] };
+  | {
+      outcome: "done";
+      mode: "shadow" | "on";
+      held: number[];
+      released: number[];
+      cancelled: number[];
+      failures: string[];
+      nextCheckInMs: number | null;
+    };
 
 /**
  * One round. `arrival` is the pull request whose webhook event made it ready
@@ -75,7 +99,7 @@ export async function runCiAdmissionRound(
   if (!github) return { outcome: "not_configured" };
   const now = deps.now ?? Date.now;
 
-  return prisma.$transaction(
+  const outcome = await prisma.$transaction(
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
@@ -98,6 +122,7 @@ export async function runCiAdmissionRound(
           released: evaluation.actions.filter((a) => a.kind === "release").map((a) => a.pull.number),
           cancelled: evaluation.actions.filter((a) => a.kind === "cancel").map((a) => a.pull.number),
           failures: [],
+          nextCheckInMs: evaluation.nextCheckInMs,
         } as const;
       }
 
@@ -141,10 +166,12 @@ export async function runCiAdmissionRound(
       }
       next.events = [...next.events, ...extra].slice(-50);
       await writeState(tx, next);
-      return { outcome: "done", mode, held, released, cancelled, failures } as const;
+      return { outcome: "done", mode, held, released, cancelled, failures, nextCheckInMs: evaluation.nextCheckInMs } as const;
     },
     { timeout: ROUND_TIMEOUT_MS, maxWait: ROUND_TIMEOUT_MS },
   );
+  if (outcome.outcome === "done") scheduleRecheck(outcome.nextCheckInMs);
+  return outcome;
 }
 
 /* ------------------------------------------------------------------------- */

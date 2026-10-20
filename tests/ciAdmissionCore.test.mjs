@@ -177,3 +177,29 @@ test("the round records which pull requests use the slots, released ones include
   assert.equal(evaluation.state.lastRound.used, 4);
   assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [1, 8, 9]);
 });
+
+test("a burst of arrivals before any run is visible cannot share one free slot", () => {
+  const first = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(2, { draft: true })], arrival: 1 });
+  assert.deepEqual(kinds(first), []);
+  const second = run({ state: first.state, openPulls: [pull(1), pull(2)], arrival: 2, nowMs: T0 + 1_000 });
+  assert.deepEqual(kinds(second), ["hold:2"]);
+});
+
+test("once a released pull request's runs are seen, a fast finish frees its slot at once", () => {
+  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
+  assert.deepEqual(kinds(released), ["release:8"]);
+  assert.ok(released.nextCheckInMs > 0, "someone waits behind an unobserved reservation");
+  const seen = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), nowMs: T0 + 30_000 });
+  assert.deepEqual(kinds(seen), []);
+  assert.equal(seen.nextCheckInMs, null);
+  // Two minutes later its CI has finished: well inside the grace period, #9 goes.
+  const done = run({ state: seen.state, openPulls: [pull(8), pull(9, { draft: true })], nowMs: T0 + 120_000 });
+  assert.deepEqual(kinds(done), ["release:9"]);
+});
+
+test("its own ready event is not an arrival even when its runs are already visible", () => {
+  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
+  const echo = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), arrival: 8, nowMs: T0 + 3_000 });
+  assert.deepEqual(kinds(echo), []);
+  assert.deepEqual(echo.state.queue.map((e) => e.number), [9]);
+});

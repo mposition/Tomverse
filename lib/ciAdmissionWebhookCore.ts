@@ -5,8 +5,9 @@
  * Arrival is a pull request becoming ready for review, or opened or reopened
  * already ready. Every other pull_request change (draft, close, new commits,
  * base edits) and every completed workflow run can free or take a slot, so it
- * starts a round without an arrival; a requested workflow run starts one too,
- * so a re-run on a draft is cancelled as it starts.
+ * starts a round without an arrival; a requested or in-progress workflow run
+ * starts one too, so a run on a draft is cancelled as it starts (a GitHub
+ * re-run sends no `requested`, only `in_progress`).
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -43,7 +44,9 @@ export function ciAdmissionArrival(event: string, payload: unknown, repository: 
   const action = payload.action;
 
   if (event === "workflow_run") {
-    return action === "completed" || action === "requested" ? { kind: "round", arrival: null } : { kind: "ignore", reason: "action" };
+    return action === "completed" || action === "requested" || action === "in_progress"
+      ? { kind: "round", arrival: null }
+      : { kind: "ignore", reason: "action" };
   }
 
   if (typeof action !== "string" || !ROUND_PULL_REQUEST_ACTIONS.has(action)) return { kind: "ignore", reason: "action" };
