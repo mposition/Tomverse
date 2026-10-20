@@ -2030,9 +2030,10 @@ async function handleChatPost(
           (lib/chatImageTurn.ts). The decision is made here, beside the router
           call and at the same time, instead of in a call the composer makes
           before sending -- so the turn waits for the longer of the two, not
-          both in a row. Only a signed-in, routed, single-panel Chat turn with
-          no attachment, Refiner proposal or deep research is asked; everything
-          else is a chat turn as before.
+          both in a row. Every signed-in single-panel turn of a stored Auto Chat
+          conversation is asked -- routed or not, since the composer no longer
+          asks on Auto turns -- unless it carries an attachment, a Refiner
+          proposal or deep research; everything else is a chat turn as before.
         */
         // An answer id an image turn already used is never a text answer: a
         // re-sent request under it would pay a provider for an answer the
@@ -2041,8 +2042,13 @@ async function handleChatPost(
         if (session?.user?.id && assistantMessageId) {
             const answered = await Promise.resolve()
                 .then(() =>
-                    prisma.message.findUnique({
-                        where: { id: assistantMessageId },
+                    // Scoped to the caller's conversations: the answer to
+                    // "is this id an image answer" is nobody else's to learn.
+                    prisma.message.findFirst({
+                        where: {
+                            id: assistantMessageId,
+                            conversation: { userId: session.user.id },
+                        },
                         select: { role: true, content: true },
                     })
                 )
@@ -2060,7 +2066,7 @@ async function handleChatPost(
             }
         }
         const autoImageTurnEligible =
-            deterministicAutoSelection.routed &&
+            conversationRouting?.selectionMode === "auto" &&
             !guestAutoSelection?.routed &&
             Boolean(session?.user?.id && conversationId && assistantMessageId) &&
             conversationRouting?.productKey === "chat" &&
@@ -2075,6 +2081,7 @@ async function handleChatPost(
                   text: profileTextFor(autoRoutingMessages),
                   plan: accountPlan,
                   traceId,
+                  request: req,
               })
             : Promise.resolve({ image: false } as const);
         // Per prompt: a small model reads this message and reorders the

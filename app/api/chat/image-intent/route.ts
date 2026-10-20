@@ -73,6 +73,7 @@ export async function POST(req: Request) {
       traceId: randomUUID(),
       userId,
       conversationId: body.conversationId ?? null,
+      request: req,
     });
     return NextResponse.json(decision);
   } catch (error) {

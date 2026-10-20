@@ -181,7 +181,7 @@ async function loadRouteWithSpies(): Promise<{
           }),
         },
         message: {
-          findUnique: async () =>
+          findFirst: async () =>
             imageAnswerStored
               ? { role: "assistant", content: "[Image generated] a cat" }
               : null,

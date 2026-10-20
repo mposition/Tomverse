@@ -32,6 +32,7 @@ import { planAllowsFeature } from "@/lib/billingEntitlements";
 import type { BillingPlanConfig } from "@/lib/billingPlanDefaults";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
+import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { prisma } from "@/lib/prisma";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -73,13 +74,26 @@ const FOLLOW_UP_LOOKBACK_MESSAGES = 6;
  * The prompt that made the latest image in this conversation, when one of
  * its last few messages is an image answer -- what a follow-up such as "make
  * it bluer" changes. Null when there is none or it cannot be read; the call
- * then judges the message on its own. Scoped to the caller's conversation.
+ * then judges the message on its own. Scoped to the caller's conversation,
+ * and to a conversation this request may read: a password-locked one needs
+ * the same unlock grant the transcript does, or its prompts are never read.
  */
 export async function readPreviousImagePrompt(
     userId: string,
-    conversationId: string
+    conversationId: string,
+    request: Request
 ): Promise<string | null> {
     try {
+        const conversation = await prisma.conversation.findFirst({
+            where: { id: conversationId, userId },
+            select: { password: true },
+        });
+        if (
+            !conversation ||
+            !hasConversationUnlockGrant(request, userId, conversationId, conversation.password)
+        ) {
+            return null;
+        }
         const recent = await prisma.message.findMany({
             where: { conversationId, conversation: { userId } },
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -114,6 +128,8 @@ export async function detectChatImageRequest(input: {
     /** The Chat conversation the message is sent in, for follow-ups. */
     userId?: string;
     conversationId?: string | null;
+    /** The caller's request, whose unlock grant a locked conversation needs. */
+    request?: Request;
 }): Promise<ChatImageDecision> {
     if (!chatImageIntentPrompt(input.text)) return NOT_IMAGE;
     const configured = await chatImageTriageModelId();
@@ -147,8 +163,8 @@ export async function detectChatImageRequest(input: {
         return NOT_IMAGE;
     }
     const previous =
-        input.userId && input.conversationId
-            ? await readPreviousImagePrompt(input.userId, input.conversationId)
+        input.userId && input.conversationId && input.request
+            ? await readPreviousImagePrompt(input.userId, input.conversationId, input.request)
             : null;
     const prompt = chatImageIntentUserMessage(input.text, candidates, previous);
     // A follow-up writes a whole prompt, not just a decision.
@@ -247,18 +263,22 @@ export async function detectChatTurnImage(input: {
     text: string;
     plan: BillingPlanConfig | null;
     traceId: string;
+    /** The chat request, whose unlock grant a locked conversation needs. */
+    request: Request;
 }): Promise<ChatImageDecision> {
     try {
         if (!input.plan || !planAllowsFeature(input.plan, "imageGeneration")) return NOT_IMAGE;
         if (!(await isImageGenerationEnabledCached())) return NOT_IMAGE;
         await assertUserOperationalAccess(input.userId);
+        return await detectChatImageRequest({
+            text: input.text,
+            traceId: input.traceId,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            request: input.request,
+        });
     } catch {
+        // A routing aid must not fail the turn; the turn is then chat.
         return NOT_IMAGE;
     }
-    return detectChatImageRequest({
-        text: input.text,
-        traceId: input.traceId,
-        userId: input.userId,
-        conversationId: input.conversationId,
-    });
 }
