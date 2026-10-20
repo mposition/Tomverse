@@ -1,6 +1,9 @@
 // Shared guard for the conversation kind invariant: chat-shaped endpoints
 // (chat send, comparison, share, title generation, export) must refuse an
-// image conversation, and the image endpoints must refuse a chat one.
+// image conversation, and the image endpoints must refuse a chat one. The
+// one exception is server-side: a Tomverse Chat image turn
+// (lib/chatImageTurn.ts) attaches its image group to the chat conversation
+// through requestImageGeneration's `chatTurnHost`, which no request body sets.
 // UI non-exposure is not a security boundary -- every server endpoint checks.
 // Policy: docs/policy/image-generation.md section 1.
 //

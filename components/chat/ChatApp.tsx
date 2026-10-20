@@ -53,6 +53,8 @@ import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { readChatImageTurnRef } from "@/lib/chatImageTurnCore";
+import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import {
   answeringModelId,
   CHAT_WELCOME_MESSAGE_ID as WELCOME_MESSAGE_ID,
@@ -125,6 +127,8 @@ import {
 } from "@/lib/guestAutoRetry";
 
 const processedPromptKeys = new Set<string>();
+// One image-turn request plus two re-asks under the same answer id.
+const CHAT_IMAGE_TURN_ATTEMPTS = 3;
 const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
 const DURABLE_ATTEMPT_MAX_POLL_MS = 5 * 60 * 1_000;
 const DURABLE_ATTEMPT_MAX_BACKOFF_MS = 15_000;
@@ -269,6 +273,11 @@ type ChatAppProps = {
     contextLayout?: "single" | "comparison";
     /** Opaque reference to a server-held Refiner decision; carries no prompt. */
     promptRefinerDecision?: PromptRefinerProductChatDecision;
+    /**
+     * Answer this turn with an image instead of text (lib/chatImageTurn.ts):
+     * the image-intent triage's models and preset.
+     */
+    imageTurn?: ChatImageTurnRequest;
   } | null;
   /**
    * Asks the shell for a context the whole run can share, after this panel's
@@ -1461,7 +1470,9 @@ function ChatAppComponent({
     onDispatchStarted?: () => void,
     /** One server-held Refiner decision. Never reused by a recovery send. */
     promptRefinerDecision?: PromptRefinerProductChatDecision,
-    guestAutoCapability?: string
+    guestAutoCapability?: string,
+    /** Answer with an image instead of text; see the branch below. */
+    imageTurn?: ChatImageTurnRequest
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1561,7 +1572,10 @@ function ChatAppComponent({
 	  createdAt: new Date().toISOString(),
     };
 
-    let assistantMessageId = crypto.randomUUID();
+    // A retried image turn keeps its first answer id: it is the image
+    // group's idempotency key (lib/chatImageTurn.ts).
+    let assistantMessageId =
+      imageTurn?.assistantMessageId ?? crypto.randomUUID();
     const assistantMessage: Message = {
 		id: assistantMessageId,
 		role: "assistant",
@@ -1574,7 +1588,11 @@ function ChatAppComponent({
     writeChatRuntimeMessages(runKey, (prev) => [
       // A refresh that completed after the durable Message POST may already
       // include this user row. The accepted turn must appear once, in order.
-      ...prev.filter((message) => message.id !== userMsgId),
+      // A retried image turn reuses its answer id, so its failed bubble is
+      // replaced rather than duplicated.
+      ...prev.filter(
+        (message) => message.id !== userMsgId && message.id !== assistantMessageId
+      ),
       userMessage,
       assistantMessage,
     ]);
@@ -1715,6 +1733,103 @@ function ChatAppComponent({
     // Keep that uncertainty scoped to this exact logical turn; ordinary Guest
     // manual and pre-POST verification failures retain their existing retry.
     let guestAutoRequestStarted = false;
+
+    /*
+      An image turn: the saved question is answered by an image in this same
+      conversation (POST .../image-turn), not by /api/chat. The route reserves
+      and starts the image and writes the answer; the card on the answer polls
+      the group for the pictures. Account Chat only -- a Guest has no saved
+      question to answer.
+    */
+    if (imageTurn && !isGuestMode) {
+      const sentPrompt = getChatRuntimeLastPrompt(runKey);
+      if (sentPrompt) {
+        setChatRuntimeLastPrompt(runKey, {
+          ...sentPrompt,
+          imageTurn: {
+            modelIds: imageTurn.modelIds,
+            preset: imageTurn.preset,
+            assistantMessageId,
+          },
+        });
+      }
+      try {
+        onDispatchStarted?.();
+        /*
+          The request is idempotent on the answer id, so an outcome this
+          client could not read -- a dropped connection, a 5xx, a body that
+          did not parse -- is asked again under the same id rather than shown
+          as a failure: the image may already be reserved, and asking again
+          recovers that group instead of leaving the user to send the
+          question a second time (and pay a second time). A readable refusal
+          (4xx) is final.
+        */
+        const postImageTurn = async () => {
+          const res = await fetch(
+            `/api/conversations/${encodeURIComponent(targetChatId)}/image-turn`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sourceUserMessageId,
+                assistantMessageId,
+                modelId,
+                imageModelIds: imageTurn.modelIds,
+                preset: imageTurn.preset,
+              }),
+              signal: controller.signal,
+            }
+          );
+          const data: unknown = await res.json().catch(() => null);
+          return { res, data };
+        };
+        let outcome: { res: Response; data: unknown } | null = null;
+        for (let attempt = 0; attempt < CHAT_IMAGE_TURN_ATTEMPTS; attempt += 1) {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, attempt * 1_500));
+          }
+          if (controller.signal.aborted) break;
+          try {
+            outcome = await postImageTurn();
+            if (outcome.res.status < 500 && outcome.data !== null) break;
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            outcome = null;
+          }
+        }
+        if (!outcome) throw new Error("Chat image turn outcome unknown.");
+        const { res, data } = outcome;
+        const body = (data ?? {}) as { content?: unknown; imageTurn?: unknown; error?: unknown; code?: unknown };
+        const imageTurnRef = res.ok ? readChatImageTurnRef(body.imageTurn) : null;
+        if (!imageTurnRef) {
+          const errorCode =
+            typeof body.code === "string" ? body.code : "CHAT_IMAGE_TURN_FAILED";
+          setAssistantMessage(
+            assistantMessageId,
+            typeof body.error === "string" ? body.error : t("chat.responseError"),
+            "error",
+            { errorCode }
+          );
+          return;
+        }
+        const content = typeof body.content === "string" ? body.content : "";
+        setAssistantMessage(assistantMessageId, content, "normal", undefined, {
+          imageTurn: imageTurnRef,
+        });
+        onResponseComplete?.(analyticsPromptId, modelId, content);
+      } catch {
+        setAssistantMessage(
+          assistantMessageId,
+          controller.signal.aborted ? t("chat.responseCancelled") : t("chat.responseError"),
+          controller.signal.aborted ? "cancelled" : "error",
+          controller.signal.aborted ? undefined : { errorCode: "CHAT_IMAGE_TURN_FAILED" }
+        );
+      } finally {
+        liveness.stop();
+        endChatRuntimeRun(runKey, controller);
+      }
+      return;
+    }
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
@@ -2583,7 +2698,9 @@ function ChatAppComponent({
         await handleSendPrompt(
           lastPrompt.text,
           lastPrompt.targetChatId,
-          crypto.randomUUID(),
+          // An image retry answers the same saved question in place, so the
+          // question keeps its own id instead of showing a second copy.
+          lastPrompt.imageTurn ? lastPrompt.sourceUserMessageId : crypto.randomUUID(),
           lastPrompt.attachments,
           null,
           undefined,
@@ -2595,7 +2712,12 @@ function ChatAppComponent({
           // through the stored mode would quietly send it with search off.
           lastPrompt.webSearchMode,
           [],
-          lastPrompt.sourceUserMessageId
+          lastPrompt.sourceUserMessageId,
+          undefined,
+          undefined,
+          undefined,
+          // An image turn is retried as the same image request.
+          lastPrompt.imageTurn
         );
       } finally {
         endSendPreparation(preparationKey, preparationToken);
@@ -2839,7 +2961,8 @@ function ChatAppComponent({
             );
           },
           promptPayload.promptRefinerDecision,
-          promptPayload.guestAutoCapability
+          promptPayload.guestAutoCapability,
+          promptPayload.imageTurn
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

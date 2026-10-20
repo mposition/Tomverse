@@ -39,6 +39,7 @@ import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
@@ -1201,7 +1202,11 @@ export function ChatMessageList({
                       ))}
                     </div>
                   )}
-                  {msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
+                  {msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
+                    // An image turn's answer is the picture; its text is only
+                    // the record kept for later turns and exports.
+                    <ChatImageTurnCard groupId={msg.imageTurn.groupId} />
+                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
