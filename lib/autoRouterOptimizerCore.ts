@@ -25,6 +25,7 @@
  */
 
 import type { AutoLlmRouterCandidate, AutoLlmRouterSession } from "@/lib/autoLlmRouterCore";
+import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
@@ -331,6 +332,65 @@ export const autoLlmRouterVersionFor = (baseVersion: string, cycleId: string | n
  * it spent.
  */
 export const AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS = 60 * 60_000;
+
+/**
+ * The own-process switch (coordinator, 2026-10-20). `on` moves the daily
+ * cycle off the web container -- where a redeploy's SIGTERM cut the first dev
+ * cycle off after 23 seconds, unrecorded -- to the Auto Router Optimizer cron
+ * service (scripts/run-auto-router-optimizer.mjs), which waits for the cycle
+ * to finish. The maintenance route then skips its optimizer step, and the
+ * service does nothing while it is off. Off by default: nothing changes until
+ * an operator sets it on both.
+ */
+export const AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV = "AUTO_ROUTER_OPTIMIZER_OWN_PROCESS";
+
+export const optimizerOwnProcessOn = (env: Record<string, string | undefined> = process.env) =>
+    env[AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV]?.trim().toLowerCase() === "on";
+
+/**
+ * Why the own process may not start a cycle, or null when it may. Off is
+ * nothing to do (exit 0); the other two are a misconfigured service (exit 1).
+ * A cycle writes system audit entries (its start, an automatic promotion), and
+ * without the web service's signing key they would be stored unsigned -- out
+ * of the hash chain for good, since the table is append-only -- so a process
+ * without one starts nothing.
+ */
+export const optimizerProcessRefusal = (
+    env: Record<string, string | undefined>
+): "off" | "no_database" | "no_audit_key" | null => {
+    if (!optimizerOwnProcessOn(env)) return "off";
+    if (!env.DATABASE_URL?.trim()) return "no_database";
+    // The current signing key only: with none, the writer would sign with a
+    // retired one listed for verification.
+    const current = adminAuditIntegrityKeys({
+        ADMIN_AUDIT_INTEGRITY_KEY: env.ADMIN_AUDIT_INTEGRITY_KEY,
+        NEXTAUTH_SECRET: env.NEXTAUTH_SECRET,
+    });
+    if (current.length === 0) return "no_audit_key";
+    return null;
+};
+
+/**
+ * The own process's whole deadline. Past it the process exits without
+ * recording; the cycle row stays running and the next start closes it as
+ * interrupted. Kept below AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS, so a cycle
+ * is never closed as stale while its process can still record it, and above
+ * the longest cycle the call deadlines allow (about 33 minutes, worked out in
+ * tests/autoRouterOptimizerCore.test.mjs).
+ */
+export const AUTO_ROUTER_OPTIMIZER_PROCESS_DEADLINE_MS = 50 * 60_000;
+
+/** How a cycle that was started and waited for ended. */
+export type OptimizerRunOutcome = { recorded: boolean; status: string; failure: string | null };
+
+/**
+ * The own process's exit code: 0 when it ran a cycle that recorded its result
+ * or had nothing to do (the daily switch off, today's cycle already run, a
+ * refusal); 1 when a started cycle could not record its result.
+ */
+export const optimizerProcessExitCode = (
+    run: { started: false } | { started: true; outcome?: OptimizerRunOutcome }
+) => (run.started && (!run.outcome?.recorded || run.outcome.failure === "run_error") ? 1 : 0);
 
 export const optimizerCycleView = (
     cycle: { status: string; failure: string | null; createdAt: Date },
