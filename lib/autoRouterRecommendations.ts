@@ -9,6 +9,8 @@ import {
     withRecommendationStatus,
     type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
+import { readRecAgentEnabled } from "@/lib/autoRouterRecAgent";
+import { AUTO_ROUTER_REC_AGENT_SETTING_KEY } from "@/lib/autoRouterRecAgentCore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -75,5 +77,36 @@ export async function setRecommendationStatus(
             },
         });
         return { ok: true as const, changed: true };
+    });
+}
+
+/**
+ * The owner's switch for the coding agent on the Ubuntu runner (Admin ›
+ * Routing). Off removes the row, so the agent's claim answers 204. The change
+ * and its audit entry commit together.
+ */
+export async function updateRecAgentSwitch(actor: { session: Session; request: Request }, enabled: boolean) {
+    return prisma.$transaction(async (tx) => {
+        await takeAuditChainLock(tx);
+        const before = await readRecAgentEnabled(tx);
+        if (enabled) {
+            const value = JSON.stringify({ enabled: true });
+            await tx.appSetting.upsert({
+                where: { key: AUTO_ROUTER_REC_AGENT_SETTING_KEY },
+                create: { key: AUTO_ROUTER_REC_AGENT_SETTING_KEY, value },
+                update: { value },
+            });
+        } else {
+            await tx.appSetting.deleteMany({ where: { key: AUTO_ROUTER_REC_AGENT_SETTING_KEY } });
+        }
+        await writeAdminAuditLog({
+            ...actor,
+            tx,
+            action: "auto.llm_router_rec_agent.updated",
+            targetType: "AppSettings",
+            targetId: AUTO_ROUTER_REC_AGENT_SETTING_KEY,
+            summary: `Turned the Auto router coding agent ${enabled ? "on" : "off"}.`,
+            metadata: { before, after: enabled },
+        });
     });
 }

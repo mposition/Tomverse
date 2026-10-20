@@ -18,7 +18,8 @@ import {
 import { undoTunableByOperator, updateSettingAutoApply } from "@/lib/autoRouterTunables";
 import { activeExclusions } from "@/lib/autoRouterTunablesCore";
 import { readAutoRouterTunables, readSettingAutoApply } from "@/lib/autoRouterTunablesRead";
-import { setRecommendationStatus } from "@/lib/autoRouterRecommendations";
+import { readRecAgentEnabled } from "@/lib/autoRouterRecAgent";
+import { setRecommendationStatus, updateRecAgentSwitch } from "@/lib/autoRouterRecommendations";
 import { RECOMMENDATION_STATUSES } from "@/lib/autoRouterRecommendationsCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
@@ -38,6 +39,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set_setting_auto_apply"), enabled: z.boolean() }).strict(),
   z.object({ action: z.literal("undo_router_timeout") }).strict(),
   z.object({ action: z.literal("undo_model_exclusion"), modelId: z.string().trim().min(1).max(120) }).strict(),
+  z.object({ action: z.literal("set_rec_agent"), enabled: z.boolean() }).strict(),
   z
     .object({
       action: z.literal("set_recommendation"),
@@ -54,11 +56,12 @@ const modelOptions = async () =>
     .map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
 
 const stateResponse = async () => {
-  const [state, options, tunables, settingAutoApply] = await Promise.all([
+  const [state, options, tunables, settingAutoApply, recAgentEnabled] = await Promise.all([
     readAutoRouterOptimizerState(),
     modelOptions(),
     readAutoRouterTunables(),
     readSettingAutoApply(),
+    readRecAgentEnabled(),
   ]);
   return NextResponse.json({
     ...state,
@@ -68,6 +71,7 @@ const stateResponse = async () => {
       routerTimeoutMs: tunables.routerTimeoutMs,
       excluded: activeExclusions(tunables, Date.now()),
     },
+    recAgent: { enabled: recAgentEnabled },
   });
 };
 
@@ -135,6 +139,11 @@ export async function POST(req: Request) {
 
     if (body.action === "set_automation") {
       await updateOptimizerAutomation(actor, { daily: body.daily, autoPromote: body.autoPromote });
+      return await stateResponse();
+    }
+
+    if (body.action === "set_rec_agent") {
+      await updateRecAgentSwitch(actor, body.enabled);
       return await stateResponse();
     }
 

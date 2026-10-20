@@ -70,6 +70,10 @@ export const CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR =
 /** The Auto router guidance optimizer (lib/autoRouterOptimizer.ts) when the
  * owner has turned on its daily cycle or automatic promotion. */
 export const AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR = "auto-router-optimizer" as const;
+/** The coding agent on the Ubuntu runner (tools/auto-rec-agent) taking an open
+ * code recommendation and reporting the develop PR it opened, or why not.
+ * Owner approval 2026-10-20; merging its PR stays a person's. */
+export const AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR = "auto-router-rec-agent" as const;
 
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
@@ -257,6 +261,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
   CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR,
+  AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
@@ -433,6 +438,10 @@ export const systemAuditActionAllowed = (
   (actor !== AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.api_model_access_observed" &&
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
+  (actor !== AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR ||
+    ((action === "auto.llm_router_recommendation.claimed" ||
+      action === "auto.llm_router_recommendation.result_recorded") &&
+      targetType === "AutoRouterOptimizerCycle")) &&
   (actor !== AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR ||
     ((action === "auto.llm_router_optimizer.cycle_started" ||
       action === "auto.llm_router_guidance.promoted" ||

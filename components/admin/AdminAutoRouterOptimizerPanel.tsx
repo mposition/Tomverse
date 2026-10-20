@@ -77,6 +77,8 @@ type OptimizerState = {
   };
   /** The optimizer's own setting changes; absent from an older server. */
   settings?: TunableSettingsState;
+  /** The coding agent on the Ubuntu runner; absent from an older server. */
+  recAgent?: { enabled: boolean };
 };
 
 type Action =
@@ -86,7 +88,8 @@ type Action =
   | { action: "promote"; cycleId: string }
   | { action: "roll_back" }
   | TunableAction
-  | { action: "set_recommendation"; cycleId: string; index: number; status: RecommendationStatus };
+  | { action: "set_recommendation"; cycleId: string; index: number; status: RecommendationStatus }
+  | { action: "set_rec_agent"; enabled: boolean };
 
 const OFF = "";
 const ENDPOINT = "/api/admin/auto-llm-router/optimizer";
@@ -309,6 +312,26 @@ export function AdminAutoRouterOptimizerPanel() {
             <pre className="mt-2 whitespace-pre-wrap text-xs text-zinc-300">{state.active.guidance}</pre>
           </details>
         </div>
+      ) : null}
+
+      {state ? (
+        <label
+          className="mt-5 flex min-h-11 items-center gap-2 text-sm text-zinc-300"
+          data-testid="admin-auto-router-rec-agent"
+        >
+          <input
+            type="checkbox"
+            checked={state.recAgent?.enabled === true}
+            disabled={busy || !state.recAgent}
+            onChange={(event) => void send({ action: "set_rec_agent", enabled: event.target.checked })}
+            data-testid="admin-auto-router-rec-agent-toggle"
+            className="h-5 w-5"
+          />
+          <span>
+            <span className="font-bold">{m.recAgentLabel}</span>
+            <span className="block text-xs text-zinc-500">{m.recAgentNote}</span>
+          </span>
+        </label>
       ) : null}
 
       {state ? (
