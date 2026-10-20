@@ -177,6 +177,11 @@ test("read and readback budgets bound the retry schedule", async () => {
   assert.ok(read.waited <= AMUX_V19_APP_RETRY_BUDGET_MS);
   assert.ok(readback.waited <= AMUX_V19_APP_READBACK_BUDGET_MS);
   assert.ok(readback.calls > read.calls);
+  // The budget, not the six listed delays, ends a readback: it keeps the last
+  // delay until the 60 s budget is nearly spent (review r-20261020-074454-231544).
+  assert.ok(readback.calls > 7, `readback made ${readback.calls} calls`);
+  assert.ok(readback.waited > AMUX_V19_APP_READBACK_BUDGET_MS - 8_000,
+    `readback waited ${readback.waited} ms`);
   // A single stop poll never retries: the stop rule re-asks on its own clock.
   const poll = await run("poll");
   assert.equal(poll.calls, 1);
