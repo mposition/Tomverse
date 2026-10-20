@@ -47,7 +47,23 @@ test("a row offers only its read-back until the exact claim is read", () => {
   assert.ok(markup.includes(claimId));
   assert.ok(markup.includes(html(m.readBack)));
   assert.ok(!markup.includes(html(m.consume)));
+  assert.ok(!markup.includes(html(m.consumeShadow)));
   assert.ok(!markup.includes('type="checkbox"'));
+});
+
+test("a subscription row says its headroom returns instead of being counted as used", () => {
+  // Owner decision 2026-10-20: an unproven max_shadow closure settles at zero.
+  const source = readFileSync("components/admin/AmuxSessionBudgetResolutionPanel.tsx", "utf8");
+  assert.match(source, /const shadow = row\.budgetMode === "max_shadow";/);
+  assert.match(source, /shadow \? m\.consumeHintShadow : m\.consumeHint/);
+  assert.match(source, /shadow \? m\.consumeShadow : m\.consume/);
+  assert.match(source, /notice === "resolved" && shadow \? m\.resolvedShadow : m\[notice\]/);
+  const { en, ko } = adminAmuxSessionBudgetResolutionMessages;
+  assert.match(en.consumeHintShadow, /usage recorded as unknown/);
+  assert.match(en.consumeHintShadow, /instead of counting it as used/);
+  assert.match(ko.consumeHintShadow, /사용으로 세지 않고/);
+  assert.doesNotMatch(en.consumeHintShadow, /full reserved amount as used/);
+  for (const messages of [en, ko]) assert.match(messages.resolvedShadow, /halt/);
 });
 
 test("the panel offers no proof-of-no-start path and resolves only as not_proven", () => {

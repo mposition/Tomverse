@@ -88,3 +88,16 @@ test("uncertain or mismatched claim is never reported as safe to retry",
         retryWrite: false })), { kind: "outcome_unknown",
       receiptStatus: "partial", retryWrite: false });
   });
+
+test("a pre-write refusal keeps its kind and fixed reason word only", async () => {
+  assert.deepEqual(await claimAmuxV19MaxQueueSelectionOnce(selection, {},
+    async () => ({ kind: "budget_hold", reason: "monthly_shadow_reached",
+      retryWrite: false })), { kind: "budget_hold",
+    reason: "monthly_shadow_reached", retryWrite: false });
+  assert.deepEqual(await claimAmuxV19MaxQueueSelectionOnce(selection, {},
+    async () => ({ kind: "not_ready", retryWrite: false })),
+  { kind: "not_ready", retryWrite: false });
+  assert.deepEqual(await claimAmuxV19MaxQueueSelectionOnce(selection, {},
+    async () => ({ kind: "budget_hold", reason: "Bearer x-1",
+      retryWrite: false })), { kind: "budget_hold", retryWrite: false });
+});
