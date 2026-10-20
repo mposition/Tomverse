@@ -42,8 +42,10 @@ fail() { echo "install: $*" >&2; exit "${2:-1}"; }
 id "$ACCOUNT" >/dev/null 2>&1 || fail "account $ACCOUNT does not exist" 64
 command -v git >/dev/null || fail "git is not installed" 64
 [ -x /usr/bin/node ] || fail "/usr/bin/node not found (the units use that path)" 64
-/usr/bin/node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=14)?0:1)' \
-  || fail "Node 22.14 or later is required (type stripping, --disable-sigusr1)" 64
+# Ask node itself for the flags the units use, instead of comparing versions
+# (23.0-23.6 are newer than 22.14 and still lack --disable-sigusr1).
+/usr/bin/node --disable-sigusr1 --experimental-strip-types --no-warnings=ExperimentalWarning -e 0 2>/dev/null \
+  || fail "this node does not accept --disable-sigusr1 --experimental-strip-types (use 22.14+ or 23.7+)" 64
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

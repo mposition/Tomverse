@@ -121,7 +121,7 @@ Settings → Developer settings → Personal access tokens → **Fine-grained to
 
 ### 2. 설치
 
-Node 22.14 이상(`--disable-sigusr1`과 타입 제거)과 git이 필요합니다(`/usr/bin/node --version`).
+Node 22.14 이상 또는 23.7 이상(`--disable-sigusr1`과 타입 제거)과 git이 필요합니다(`/usr/bin/node --version`).
 설치 script는 공개 저장소를
 root 소유 임시 폴더에 받아 코드와 unit을 복사하고, 빈 env 파일을 만들 뿐 아무것도 켜지 않습니다.
 다시 실행해도 됩니다(업데이트도 같은 명령입니다).
