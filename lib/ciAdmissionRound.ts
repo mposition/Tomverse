@@ -89,8 +89,10 @@ export const serially = <T>(work: () => Promise<T>): Promise<T> => {
 // timer per process; a restart loses it, and the next event does the same job.
 let recheck: ReturnType<typeof setTimeout> | null = null;
 const scheduleRecheck = (inMs: number | null) => {
-  if (inMs === null) return;
+  // The latest round decides: none needed clears an earlier one.
   if (recheck) clearTimeout(recheck);
+  recheck = null;
+  if (inMs === null) return;
   recheck = setTimeout(() => {
     recheck = null;
     void runCiAdmissionRound(null).catch((error: unknown) => {

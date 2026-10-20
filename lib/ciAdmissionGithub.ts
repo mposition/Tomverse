@@ -21,6 +21,8 @@ const REPO = `${API}/repos/${CI_ADMISSION_REPOSITORY}`;
 const TIMEOUT_MS = 8_000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "waiting", "pending", "requested"]);
 const SHA = /^[0-9a-f]{40}$/;
+const RUNNER_USAGE_MAX_RUNS = 200;
+const RUNNER_USAGE_PARALLEL = 8;
 
 export type CiAdmissionGithubConfig = { appId: string; privateKey: string };
 
@@ -224,8 +226,18 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         }
       }
       const counts: CiRunnerUsageCounts = { githubRunning: 0, githubQueued: 0, ubicloudRunning: 0, ubicloudQueued: 0 };
-      for (const id of runIds) {
-        for (const item of list(record(await get(`${REPO}/actions/runs/${id}/jobs?filter=latest&per_page=100`)).jobs)) {
+      // Bounded, so a busy repository still answers within a few seconds: at
+      // most RUNNER_USAGE_MAX_RUNS runs, RUNNER_USAGE_PARALLEL job reads at a time.
+      const ids = [...runIds].slice(0, RUNNER_USAGE_MAX_RUNS);
+      const jobLists: unknown[][] = [];
+      for (let index = 0; index < ids.length; index += RUNNER_USAGE_PARALLEL) {
+        const batch = ids.slice(index, index + RUNNER_USAGE_PARALLEL);
+        jobLists.push(
+          ...(await Promise.all(batch.map(async (id) => list(record(await get(`${REPO}/actions/runs/${id}/jobs?filter=latest&per_page=100`)).jobs)))),
+        );
+      }
+      for (const jobs of jobLists) {
+        for (const item of jobs) {
           const job = record(item);
           const status = String(job.status);
           if (!ACTIVE_RUN_STATUSES.has(status)) continue;
