@@ -10,6 +10,7 @@ import {
   AUTO_ROUTER_GUIDANCE_MAX_CHARS,
   AUTO_ROUTER_OPTIMIZER_CONCURRENCY,
   AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
+  AUTO_ROUTER_OPTIMIZER_GATE,
   AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
   AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
   AUTO_ROUTER_OPTIMIZER_TARGET_SAMPLE,
@@ -668,10 +669,15 @@ test("the gate decision: judged first, then each changed case on its own compari
   assert.deepEqual(
     optimizerGateDecision({
       summary: gateSummary({}),
-      cases: [moveCase("strong", "rival", "candidate"), moveCase("strong", "x", "candidate"), moveCase("strong", "y", "incumbent")],
+      cases: [
+        moveCase("strong", "rival", "candidate"),
+        moveCase("strong", "x", "candidate"),
+        moveCase("strong", "z", "candidate"),
+        moveCase("strong", "y", "incumbent"),
+      ],
       comparisons,
     }),
-    { failure: null, basis: "direct", towardWinner: 2, towardLoser: 1 }
+    { failure: null, basis: "direct", towardWinner: 3, towardLoser: 1 }
   );
   // A tie both orders agreed on counts neither way, whatever other cases show.
   assert.deepEqual(
@@ -703,9 +709,10 @@ test("the gate decision: judged first, then each changed case on its own compari
     optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival", "undecided", "hard")], comparisons: lopsided }),
     { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 1 }
   );
+  const easyUndecided = Array.from({ length: 3 }, () => moveCase("strong", "rival", "undecided", "easy"));
   assert.deepEqual(
-    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival", "undecided", "easy")], comparisons: lopsided }),
-    { failure: null, basis: "direct", towardWinner: 1, towardLoser: 0 }
+    optimizerGateDecision({ summary: gateSummary({}), cases: easyUndecided, comparisons: lopsided }),
+    { failure: null, basis: "direct", towardWinner: 3, towardLoser: 0 }
   );
   // No same-kind evidence, or a tie because a judge never answered: neither way
   // from its own result, so the same kind's evidence decides (here none).
@@ -719,16 +726,16 @@ test("the gate decision: judged first, then each changed case on its own compari
       cases: [moveCase("strong", "rival", "tie", "easy", ["A", null])],
       comparisons: lopsided,
     }),
-    { failure: null, basis: "direct", towardWinner: 1, towardLoser: 0 }
+    { failure: "evidence_below", basis: "direct", towardWinner: 1, towardLoser: 0 }
   );
   // Within the evidence, still held to the credit cap.
   assert.deepEqual(
     optimizerGateDecision({
       summary: gateSummary({ incumbentCredits: 50, candidateCredits: 60 }),
-      cases: [moveCase("strong", "rival", "candidate")],
+      cases: Array.from({ length: 3 }, () => moveCase("strong", "rival", "candidate")),
       comparisons,
     }),
-    { failure: "credits_above", basis: "direct", towardWinner: 1, towardLoser: 0 }
+    { failure: "credits_above", basis: "direct", towardWinner: 3, towardLoser: 0 }
   );
   // Unchanged and unrouted cases never count.
   assert.equal(
@@ -739,6 +746,20 @@ test("the gate decision: judged first, then each changed case on its own compari
     }).towardWinner,
     0
   );
+});
+
+test("the direct basis needs at least three cases toward winners, and more than toward losers", () => {
+  assert.equal(AUTO_ROUTER_OPTIMIZER_GATE.minTowardWinner, 3);
+  const won = (count) => Array.from({ length: count }, (_, index) => moveCase("strong", `m${index}`, "candidate"));
+  const lost = (count) => Array.from({ length: count }, (_, index) => moveCase("strong", `n${index}`, "incumbent"));
+  const decide = (cases) => optimizerGateDecision({ summary: gateSummary({}), cases, comparisons: [] });
+  // Two toward winners and none toward losers: still too thin.
+  assert.deepEqual(decide(won(2)), { failure: "evidence_below", basis: "direct", towardWinner: 2, towardLoser: 0 });
+  // Three: passes.
+  assert.deepEqual(decide(won(3)), { failure: null, basis: "direct", towardWinner: 3, towardLoser: 0 });
+  // Three, but as many toward losers: does not.
+  assert.deepEqual(decide([...won(3), ...lost(3)]), { failure: "evidence_below", basis: "direct", towardWinner: 3, towardLoser: 3 });
+  assert.deepEqual(decide([...won(4), ...lost(3)]), { failure: null, basis: "direct", towardWinner: 4, towardLoser: 3 });
 });
 
 test("the report is admitted bounded, of known kinds, and never repeating a user's conversation", () => {

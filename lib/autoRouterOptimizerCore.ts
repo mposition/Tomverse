@@ -63,6 +63,12 @@ export const AUTO_ROUTER_OPTIMIZER_GATE = {
     minWinShare: 0.6,
     /** Credits the proposal's picks may cost, relative to the current ones. */
     maxCreditRatio: 1.1,
+    /**
+     * On the direct-comparison basis, changed cases that must move toward a
+     * winner before a proposal may pass (2026-10-20): one or two is too thin
+     * a basis for a promotion that may be automatic.
+     */
+    minTowardWinner: 3,
 } as const;
 
 /** How many calls of one kind may run at once. */
@@ -827,8 +833,8 @@ export type OptimizerGateCase = Pick<OptimizerCase, "incumbentPick" | "candidate
  *   missing) borrows the direct comparisons of the same kind of work between
  *   its old and new pick: more wins for the new pick is toward the winner,
  *   more losses toward the loser, none either way is neither.
- * It passes when more cases moved toward winners than toward losers, within
- * the credit cap.
+ * It passes when at least AUTO_ROUTER_OPTIMIZER_GATE.minTowardWinner cases
+ * moved toward winners, more than toward losers, within the credit cap.
  */
 export const optimizerGateDecision = (input: {
     summary: OptimizerSummary;
@@ -867,7 +873,7 @@ export const optimizerGateDecision = (input: {
         if (balance < 0) towardLoser += 1;
     }
     const failure =
-        towardWinner <= towardLoser
+        towardWinner < AUTO_ROUTER_OPTIMIZER_GATE.minTowardWinner || towardWinner <= towardLoser
             ? "evidence_below"
             : creditRatio(input.summary) > AUTO_ROUTER_OPTIMIZER_GATE.maxCreditRatio
               ? "credits_above"
