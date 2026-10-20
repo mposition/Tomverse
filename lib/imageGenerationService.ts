@@ -1776,6 +1776,11 @@ export const retryImageGenerationTarget = async (
       ...(failedReservation
         ? { expectedPricingVersions: { [target.modelId]: failedReservation.pricingVersion } }
         : {}),
+      // The retry stays in the conversation its group already lives in. A
+      // chat conversation holds a group only through a Chat image turn
+      // (lib/chatImageTurn.ts), so its retry keeps that host; for an image
+      // conversation this changes nothing.
+      chatTurnHost: true,
     },
     now
   );

@@ -45,6 +45,9 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
   const [readFailed, setReadFailed] = useState(false);
   const inFlightRef = useRef(false);
   const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
+  // Why a retry was refused, by target, so a refusal is not mistaken for the
+  // original failure showing again.
+  const [retryErrors, setRetryErrors] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -80,15 +83,27 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
   const retry = async (targetId: string) => {
     if (retryingTargetIds.includes(targetId)) return;
     setRetryingTargetIds((current) => [...current, targetId]);
+    setRetryErrors((current) =>
+      Object.fromEntries(Object.entries(current).filter(([id]) => id !== targetId))
+    );
     try {
       const response = await fetch(`/api/images/targets/${encodeURIComponent(targetId)}/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ retryIdempotencyKey: crypto.randomUUID() }),
       });
-      await discardResponseBody(response);
+      if (response.ok) {
+        await discardResponseBody(response);
+      } else {
+        const data: unknown = await response.json().catch(() => null);
+        const message = (data as { error?: unknown } | null)?.error;
+        setRetryErrors((current) => ({
+          ...current,
+          [targetId]: typeof message === "string" ? message : t("chat.imageTurnFailed"),
+        }));
+      }
     } catch {
-      // The next read shows whatever state the retry reached.
+      setRetryErrors((current) => ({ ...current, [targetId]: t("chat.imageTurnFailed") }));
     } finally {
       setRetryingTargetIds((current) => current.filter((id) => id !== targetId));
       void refresh();
@@ -155,6 +170,11 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
                 >
                   {t("chat.imageTurnRetry")}
                 </button>
+                {retryErrors[target.targetId] ? (
+                  <p role="status" className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    {retryErrors[target.targetId]}
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div
