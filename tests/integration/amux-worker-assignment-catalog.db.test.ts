@@ -10,7 +10,6 @@ import {
   readAmuxDerivedWorkerCatalog,
 } from "@/lib/amux/workerAssignmentCatalog";
 import { recordAmuxWorkerCapabilityByOwner } from "@/lib/amux/workerCapabilityStore";
-import { readAmuxWorkerSessionList } from "@/lib/amux/workerSessionList";
 import { readAmuxWorkerBridgeScope } from "@/lib/amux/workerBridgeScope";
 import { recordAmuxWorkerRegistryChangeByOwner } from "@/lib/amux/workerRegistryStore";
 import {
@@ -148,20 +147,6 @@ test("registration and heartbeat ask the derived catalog inside their own transa
   );
   assert.equal((await beat()).accepted, true);
   assert.equal((await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: "claude-impl" } })).dispatchReady, false);
-});
-
-test("the bridge session list is the derived catalog without the engineering runner, or off", async () => {
-  // Orchestration policy version 35, section 4 (R2d).
-  assert.deepEqual(await readAmuxWorkerSessionList(false), { listed: false, reason: "session_list_off" });
-  assert.deepEqual(await readAmuxWorkerSessionList(true), { listed: true, workers: [] });
-  const session = owner();
-  await register(session, "claude-impl", "implementation", "active");
-  await register(session, "codex-chore", "chore", "active");
-  await register(session, "cursor-impl", "implementation", "requested");
-  for (const [name, tag] of [["claude-impl", "implementation"], ["codex-chore", "chore"], ["cursor-impl", "implementation"]]) {
-    await record(session, name, { model: null, routingTags: [tag], toolCapabilities: [], v22: null });
-  }
-  assert.deepEqual(await readAmuxWorkerSessionList(true), { listed: true, workers: ["claude-impl", "codex-chore"] });
 });
 
 test("the bridge scope is the derived catalog without the engineering runner, with each worker's kind, or off", async () => {

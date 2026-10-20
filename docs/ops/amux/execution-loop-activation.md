@@ -40,7 +40,7 @@
 
 ## 3. claim을 한 장만 연다
 
-1. claim은 owner 없는 `todo` 가운데 우선순위가 가장 높은 카드부터 dispatch-ready worker에 간다. 한 번에 한 attempt만 보려면 bridge의 환경 파일에 `TOMVERSE_AMUX_WSL_SESSIONS`로 세션 하나만 적고 다시 시작한다. 그 세션만 runtime으로 등록되고, attempt가 진행 중인 동안 그 세션은 dispatch-ready가 아니므로 두 번째 claim이 생기지 않는다. 어느 카드가 먼저 갈지는 `/admin/amux-execution?tab=cards`의 우선순위와 orchestrator 로그의 `selected task`로 미리 본다.
+1. claim은 owner 없는 `todo` 가운데 우선순위가 가장 높은 카드부터 dispatch-ready worker에 간다. 한 번에 한 attempt만 보려면 worker별 bridge(`tomverse-amux-bridge@<worker>`) 하나만 실행하거나 Admin 등록부에서 나머지 worker를 일시 중지한다(정책 버전 55 S4부터 `TOMVERSE_AMUX_WSL_SESSIONS`는 읽지 않는다). 그 worker만 runtime으로 등록되고, attempt가 진행 중인 동안 그 세션은 dispatch-ready가 아니므로 두 번째 claim이 생기지 않는다. 어느 카드가 먼저 갈지는 `/admin/amux-execution?tab=cards`의 우선순위와 orchestrator 로그의 `selected task`로 미리 본다.
 2. production `AMUX Orchestrator`에 `TOMVERSE_AMUX_CLAIM=1`을 둔다. `TOMVERSE_AMUX_EXECUTE`는 두지 않는다. 둘을 함께 두면 orchestrator가 시작하지 않는다.
 3. orchestrator 로그에서 `Tomverse task claim result`와 `claimed = true`를 확인한다.
 4. `/admin/amux-execution?tab=cards`에서 그 카드의 owner와 `doing`, 실행 1을 확인한다.
@@ -58,7 +58,7 @@ worker가 PR을 열고 로컬 카드를 끝내면 bridge가 다음 tick에 정�
 
 ## 5. 나머지 카드
 
-한 장의 전 과정을 확인한 뒤에만 `TOMVERSE_AMUX_WSL_SESSIONS`를 넓히거나 지운다.
+한 장의 전 과정을 확인한 뒤에만 나머지 worker의 bridge를 시작하거나 일시 중지를 푼다.
 
 ## 되돌리기
 
