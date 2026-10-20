@@ -401,10 +401,12 @@ export async function runRewriteOptimizerCycle(
         AUTO_ROUTER_OPTIMIZER_CONCURRENCY
     );
     if (spend.exhausted()) return finish("budget_exhausted", null, []);
-    const trained = train.map((decision, index) => ({
-        decision,
-        rewrite: normalized(trainReplays[index]?.rewrite),
-    }));
+    // A replay that failed says nothing about the guidance; shown as null it
+    // would read as "kept as written", so it is left out.
+    const trained = train.flatMap((decision, index) => {
+        const replay = trainReplays[index];
+        return replay ? [{ decision, rewrite: normalized(replay.rewrite) }] : [];
+    });
 
     const proposal = await spend.call("generate", () =>
         deps.generate(autoRewriteGeneratorMessage(input.incumbentGuidance, trained))

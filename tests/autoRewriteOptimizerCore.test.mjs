@@ -386,3 +386,20 @@ test("an answer request carries the model's own generation settings, as a chat t
   assert.ok(luna.reasoning);
   assert.ok(optimizerAnswerOptions(luna, turn).providerOptions);
 });
+
+test("a training replay that failed is left out of what the generator reads", async () => {
+  let trainingCalls = 0;
+  const { seen, deps } = fakeDeps({
+    rewrite: async (guidance, decision) => {
+      // The first two training replays fail; every other call answers.
+      if (guidance !== NEW_GUIDANCE && trainingCalls < 2 && Number(decision.id.slice(1)) % 2 === 0) {
+        trainingCalls++;
+        return { value: null, costMicroUsd: 10, provider: "rtr" };
+      }
+      return { value: { modelId: "light", rewrite: rewriteFor(guidance, decision) }, costMicroUsd: 10, provider: "rtr" };
+    },
+  });
+  await run(deps);
+  const sent = JSON.parse(seen.generated[0]);
+  assert.equal(sent.cases.length, 10);
+});
