@@ -56,8 +56,11 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 이름에 넣어 주는 값)가 `autorec-runner.service`의 MainPID일 때만 claim·result·publish를 처리하고,
 그 밖에는 `peer_not_runner`로 거절합니다. 자식 프로세스가 runner에 ptrace로 붙지 못하도록
 `kernel.yama.ptrace_scope`가 1 이상이어야 하며(Ubuntu 기본값 1), 아니면 `ptrace_scope_unsafe`로
-아무것도 하지 않습니다. 그래서 에이전트가 쓴 코드는 권장안을 가로채거나, 결과를 위조하거나,
-검토 없이 publish할 수 없습니다.
+아무것도 하지 않습니다. 같은 uid의 코드가 SIGUSR1로 runner의 Node inspector를 열어 그 안에서 코드를
+실행하는 길도 막습니다: runner unit은 `node --disable-sigusr1`로 시작하고, runner는 그 플래그 없이
+시작되면 실행을 거부하며(`runner_refused`), gateway도 runner의 `/proc/<pid>/cmdline`에서 그 플래그를
+확인합니다(`peer_inspector_signal`). 그래서 에이전트가 쓴 코드는 권장안을 가로채거나, 결과를
+위조하거나, 검토 없이 publish할 수 없습니다.
 
 **runner가 믿는 도구는 `autorec`이 바꿀 수 없는 경로에 있습니다.** `git`은 `/usr/bin/git`, `npm`은
 `/usr/bin/npm`, 검토 클라이언트와 그 ssh는 설치 폴더의 root 소유 복사본(`deploy/review-ssh`)과 root
@@ -118,7 +121,8 @@ Settings → Developer settings → Personal access tokens → **Fine-grained to
 
 ### 2. 설치
 
-Node 22.6 이상과 git이 필요합니다(`/usr/bin/node --version`). 설치 script는 공개 저장소를
+Node 22.14 이상(`--disable-sigusr1`과 타입 제거)과 git이 필요합니다(`/usr/bin/node --version`).
+설치 script는 공개 저장소를
 root 소유 임시 폴더에 받아 코드와 unit을 복사하고, 빈 env 파일을 만들 뿐 아무것도 켜지 않습니다.
 다시 실행해도 됩니다(업데이트도 같은 명령입니다).
 
@@ -250,7 +254,9 @@ systemctl list-timers autorec-runner.timer
 **gateway가 요청을 받지 않는 경우**(`claim_failed`의 `code`로 보입니다. 권장안은 claim되지 않았습니다):
 `gateway_config_missing`(3단계 값 없음), `peer_not_runner`(요청한 프로세스가 runner 본체가 아님 —
 `systemctl start autorec-runner.service`로 실행했는지, gateway가 `systemctl show`를 부를 수 있는지),
-`peer_unknown`(systemd가 연결한 쪽의 PID를 주지 못함), `ptrace_scope_unsafe`(위 6단계).
+`peer_unknown`(systemd가 연결한 쪽의 PID를 주지 못함), `ptrace_scope_unsafe`(위 6단계),
+`peer_inspector_signal`(runner unit의 `ExecStart`에 `--disable-sigusr1`이 없음 — 설치 script를 다시
+실행해 unit을 바꿉니다).
 
 **보고하지 않는 경우**(종료 코드 1, 로그 `outcome_unknown` 또는 `result_no_answer`): publish 요청에
 답이 없거나 gateway가 `unknown`이라고 답한 경우, 결과 보고가 실패한 경우. 앱은 lease가 끝나면

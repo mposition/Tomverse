@@ -42,8 +42,8 @@ fail() { echo "install: $*" >&2; exit "${2:-1}"; }
 id "$ACCOUNT" >/dev/null 2>&1 || fail "account $ACCOUNT does not exist" 64
 command -v git >/dev/null || fail "git is not installed" 64
 [ -x /usr/bin/node ] || fail "/usr/bin/node not found (the units use that path)" 64
-/usr/bin/node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=6)?0:1)' \
-  || fail "Node 22.6 or later is required (type stripping)" 64
+/usr/bin/node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=14)?0:1)' \
+  || fail "Node 22.14 or later is required (type stripping, --disable-sigusr1)" 64
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

@@ -21,6 +21,11 @@ const ENV = {
   AUTOREC_PEER: "3-4242-1001",
 };
 const PTRACE_SCOPE = "/proc/sys/kernel/yama/ptrace_scope";
+const RUNNER_CMDLINE_PATH = "/proc/4242/cmdline";
+const RUNNER_SCRIPT = "/usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-runner.mjs";
+const NUL = String.fromCharCode(0);
+const cmdline = (...argv) => `${argv.join(NUL)}${NUL}`;
+const SEALED_CMDLINE = cmdline("/usr/bin/node", "--disable-sigusr1", "--experimental-strip-types", RUNNER_SCRIPT);
 const PR_URL = "https://github.com/mposition/Tomverse/pull/2900";
 const raw = (path, mode = "100644") => `:${mode} ${mode} ${"a".repeat(40)} ${"b".repeat(40)} M\0${path}\0`;
 
@@ -42,7 +47,7 @@ function fakeDeps({ gitAnswers = {}, github = [], app = [], files = {}, env = EN
   let clock = Date.parse("2026-10-20T00:00:00.000Z");
   const gitCalls = [];
   const fetchCalls = [];
-  const store = { [PTRACE_SCOPE]: "1", ...files };
+  const store = { [PTRACE_SCOPE]: "1", [RUNNER_CMDLINE_PATH]: SEALED_CMDLINE, ...files };
   const deps = {
     config: readGatewayConfig(env),
     runnerMainPid: async () => mainPid,
@@ -336,6 +341,10 @@ test("only the runner's main process is answered", async () => {
     [{ env: { ...ENV, AUTOREC_PEER: undefined } }, "peer_unknown"],
     [{ files: { [PTRACE_SCOPE]: "0\n" } }, "ptrace_scope_unsafe"],
     [{ files: { [PTRACE_SCOPE]: undefined } }, "ptrace_scope_unsafe"],
+    // A runner whose inspector a SIGUSR1 could open is not trusted.
+    [{ files: { [RUNNER_CMDLINE_PATH]: cmdline("/usr/bin/node", RUNNER_SCRIPT) } }, "peer_inspector_signal"],
+    [{ files: { [RUNNER_CMDLINE_PATH]: cmdline("/usr/bin/node", RUNNER_SCRIPT, "--disable-sigusr1") } }, "peer_inspector_signal"],
+    [{ files: { [RUNNER_CMDLINE_PATH]: undefined } }, "peer_inspector_signal"],
   ]) {
     const { deps, fetchCalls, gitCalls } = fakeDeps({ ...options, app: [jsonResponse(204)] });
     for (const op of ["claim", "result", "publish"]) {
@@ -363,4 +372,20 @@ test("the scope diff starts at the fork point, so develop's newer commits never 
   assert.deepEqual(mergeBase.args.slice(3), ["refs/remotes/origin/develop", HEAD]);
   const diff = gitCalls.find(({ args }) => args[2] === "diff");
   assert.deepEqual(diff.args.slice(-2), [FORK, HEAD]);
+});
+
+test("the installed units start the runner and the gateway with the SIGUSR1 inspector path closed", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { runnerArgvIsSealed } = await import("../tools/auto-rec-agent/bin/autorec-gateway.mjs");
+  const execStart = (unit) => {
+    const text = readFileSync(new URL(`../tools/auto-rec-agent/deploy/${unit}`, import.meta.url), "utf8");
+    const lines = text.split(/\r?\n/).filter((line) => line.startsWith("ExecStart="));
+    assert.equal(lines.length, 1, unit);
+    return lines[0].slice("ExecStart=".length).trim().split(/\s+/);
+  };
+  // The runner unit's own command line is what the gateway reads back from /proc.
+  assert.equal(runnerArgvIsSealed(execStart("autorec-runner.service")), true);
+  assert.ok(execStart("autorec-gateway@.service").includes("--disable-sigusr1"));
+  assert.equal(runnerArgvIsSealed(["/usr/bin/node", RUNNER_SCRIPT]), false);
+  assert.equal(runnerArgvIsSealed(["/usr/bin/node", "--disable-sigusr1", "/tmp/other.mjs"]), false);
 });

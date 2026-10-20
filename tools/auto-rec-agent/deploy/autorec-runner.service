@@ -18,8 +18,11 @@ Environment=HOME=/home/autorec
 Environment=PATH=/home/autorec/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=AUTOREC_CLAUDE_BIN=/home/autorec/.local/bin/claude
 WorkingDirectory=/home/autorec
-# Absolute node path from `which node`; Node 22.6 or later (type stripping).
-ExecStart=/usr/bin/node --experimental-strip-types --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-runner.mjs
+# Absolute node path from `which node`; Node 22.14 or later. --disable-sigusr1:
+# the agent's code runs as this uid and could otherwise SIGUSR1 this process
+# into opening the inspector and run code inside it -- the one process the
+# gateway answers. The runner refuses to start without it.
+ExecStart=/usr/bin/node --disable-sigusr1 --experimental-strip-types --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-runner.mjs
 # Agent 30 min, tests, review wait up to 60 min, publish: bounded well below this.
 TimeoutStartSec=3h
 # When the run ends, anything the agent or a test left running ends with it.

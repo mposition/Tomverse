@@ -595,7 +595,17 @@ const isEntry = (() => {
     return false;
   }
 })();
-if (isEntry) {
+/**
+ * The gateway answers this process alone, and the agent's code shares its
+ * uid: without --disable-sigusr1 a SIGUSR1 would open the Node inspector and
+ * let that code run inside this process.
+ */
+export const startupProblem = (execArgv) => (execArgv.includes("--disable-sigusr1") ? null : "inspector_signal_enabled");
+
+if (isEntry && startupProblem(process.execArgv)) {
+  process.stdout.write(`${JSON.stringify({ event: "runner_refused", code: startupProblem(process.execArgv) })}\n`);
+  process.exit(64);
+} else if (isEntry) {
   runOnce(realRunnerDeps(process.env)).then(
     (code) => process.exit(code),
     (error) => {

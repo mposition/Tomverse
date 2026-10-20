@@ -113,7 +113,19 @@ export async function checkPeer(deps) {
   if (peer === null) return { ok: false, code: "peer_unknown" };
   const main = await deps.runnerMainPid();
   if (!Number.isInteger(main) || main <= 0 || main !== peer) return { ok: false, code: "peer_not_runner" };
+  // Same-uid code could SIGUSR1 the runner into opening the Node inspector and
+  // run code inside it; only a runner started with that path closed is trusted.
+  if (!runnerArgvIsSealed((deps.fs.readText(`/proc/${peer}/cmdline`) ?? "").split("\0"))) {
+    return { ok: false, code: "peer_inspector_signal" };
+  }
   return { ok: true };
+}
+
+/** `--disable-sigusr1` is a node option: it must come before the runner script, not after it. */
+export function runnerArgvIsSealed(argv) {
+  const script = argv.findIndex((arg) => arg.endsWith("/autorec-runner.mjs"));
+  const flag = argv.indexOf("--disable-sigusr1");
+  return script > 0 && flag > 0 && flag < script;
 }
 
 /** One JSON header line, then the payload bytes. */

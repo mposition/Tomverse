@@ -339,3 +339,10 @@ test("a `wait` call that times out is still pending, not a verdict", async () =>
   assert.equal(waits, 2);
   assert.equal(resultOf(gatewayCalls).outcome, "pr_opened");
 });
+
+test("the runner refuses to start unless the SIGUSR1 inspector path is closed", async () => {
+  const { startupProblem } = await import("../tools/auto-rec-agent/bin/autorec-runner.mjs");
+  assert.equal(startupProblem(["--disable-sigusr1", "--experimental-strip-types"]), null);
+  assert.equal(startupProblem(["--experimental-strip-types"]), "inspector_signal_enabled");
+  assert.equal(startupProblem([]), "inspector_signal_enabled");
+});
