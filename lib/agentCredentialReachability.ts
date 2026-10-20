@@ -471,6 +471,20 @@ export const agentBranchesAllCovered = (pattern: string): boolean => {
 const HOSTED_RUNNER = /^(?:ubuntu|windows|macos)-[A-Za-z0-9.-]+$/;
 
 /**
+ * Owner decision 2026-10-20: the Ubicloud overflow runner counts as hosted.
+ * Each job gets a fresh, discarded VM that holds no credential the workflow
+ * does not pass it, as a GitHub-hosted runner does. Exactly this label, and
+ * exactly the CI_RUNNER_OVERFLOW expression that chooses between it and a
+ * hosted label (tests/ciRunnerOverflow.test.mjs) -- no other non-GitHub
+ * label and no other expression.
+ */
+const OVERFLOW_RUNNER_LABEL = "ubicloud-standard-4-ubuntu-2404";
+const OVERFLOW_RUNNER_EXPRESSION =
+  /^\$\{\{ vars\.CI_RUNNER_OVERFLOW == 'on' && github\.event\.pull_request\.head\.repo\.fork != true && 'ubicloud-standard-4-ubuntu-2404' \|\| '(?:ubuntu|windows|macos)-[A-Za-z0-9.-]+' \}\}$/;
+const hostedRunnerLabel = (label: unknown): boolean =>
+  typeof label === "string" && (HOSTED_RUNNER.test(label) || label === OVERFLOW_RUNNER_LABEL);
+
+/**
  * Where a job runs and in what: a self-hosted runner, a container or a service
  * with credentials, or any of these chosen by an expression, can carry
  * credentials the workflow file never names.
@@ -478,8 +492,9 @@ const HOSTED_RUNNER = /^(?:ubuntu|windows|macos)-[A-Za-z0-9.-]+$/;
 const executionEnvironmentCredentialed = (workflow: Obj, job: Obj): boolean => {
   const runsOn = job["runs-on"];
   const hosted =
-    (typeof runsOn === "string" && HOSTED_RUNNER.test(runsOn)) ||
-    (Array.isArray(runsOn) && runsOn.length > 0 && runsOn.every((label) => typeof label === "string" && HOSTED_RUNNER.test(label)));
+    hostedRunnerLabel(runsOn) ||
+    (typeof runsOn === "string" && OVERFLOW_RUNNER_EXPRESSION.test(runsOn)) ||
+    (Array.isArray(runsOn) && runsOn.length > 0 && runsOn.every(hostedRunnerLabel));
   if (!hosted) return true;
   for (const field of ["container", "services", "defaults"] as const) {
     const value = job[field];
