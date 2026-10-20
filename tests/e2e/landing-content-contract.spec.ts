@@ -562,6 +562,7 @@ test("primary copy and CTAs survive a 200% text scale at 320px", async ({ page }
     "landing-signup-cta",
     "landing-safety-cta",
   ]) {
+    await expect(page.getByTestId(testId)).toBeVisible();
     const box = await layoutBox(page.getByTestId(testId));
     expect(box.width).toBeGreaterThan(0);
     expect(box.width).toBeLessThanOrEqual(320);
