@@ -776,6 +776,12 @@ export const autoRouterGeneratorSchema = () => ({
 });
 
 /**
+ * The last line of every optimizer judge's instructions, routing and rewrite
+ * alike: on Test (2026-10-20) judge calls ran out of output before the object.
+ */
+export const AUTO_ROUTER_JUDGE_OUTPUT_RULE = "Return only the object, with nothing before or after it.";
+
+/**
  * The judge reads the two answers themselves. Judging the picks from tier,
  * description and credits alone called every pair of same-tier, same-credit
  * models equal (Test, 2026-10-19: 0 decided of 20).
@@ -786,7 +792,7 @@ export const AUTO_ROUTER_JUDGE_SYSTEM = [
     "First judge quality: is the answer correct, complete, and does it do what the message asked (its language, format and constraints)?",
     "Only when both are about equally good, prefer the answer with fewer credits: credits are what the user pays.",
     "Answer A, B, or equal when neither is clearly better.",
-    "Return only the object, with nothing before or after it.",
+    AUTO_ROUTER_JUDGE_OUTPUT_RULE,
 ].join("\n");
 
 export type OptimizerAnswer = { modelId: string; answer: string };

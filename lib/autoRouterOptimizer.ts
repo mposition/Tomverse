@@ -104,6 +104,29 @@ const ROUTER_STATS_MAX_ROWS = 2_000;
  */
 const JUDGE_MAX_OUTPUT_TOKENS = 2_000;
 const JUDGE_TIMEOUT_MS = 30_000;
+
+/**
+ * The one judge call of every optimizer cycle, routing and rewrite alike, so
+ * their limits cannot drift apart again: no reasoning, room for the object,
+ * one structured verdict. The caller's system prompt ends with
+ * AUTO_ROUTER_JUDGE_OUTPUT_RULE.
+ */
+export const optimizerJudgeCall = (input: { model: AiModel; system: string; prompt: string; name: string }) =>
+    generateText({
+        model: getActiveAiModel(input.model),
+        system: input.system,
+        prompt: input.prompt,
+        maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
+        reasoning: "none",
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
+        output: Output.object({
+            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
+            name: input.name,
+        }),
+        providerOptions: { openai: { strictJsonSchema: true } },
+    });
+
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
 export const OPTIMIZER_LOCK = "auto-router-optimizer";
@@ -778,19 +801,11 @@ async function runInBackground(input: {
                     };
                 },
                 judge: async (message) => {
-                    const generated = await traced("judge", () => generateText({
-                        model: getActiveAiModel(input.optimizerModel),
+                    const generated = await traced("judge", () => optimizerJudgeCall({
+                        model: input.optimizerModel,
                         system: AUTO_ROUTER_JUDGE_SYSTEM,
                         prompt: message,
-                        maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
-                        reasoning: "none",
-                        maxRetries: 0,
-                        abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
-                        output: Output.object({
-                            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
-                            name: "router_judgement",
-                        }),
-                        providerOptions: { openai: { strictJsonSchema: true } },
+                        name: "router_judgement",
                     }));
                     return {
                         value: parseJudgeWinner(outputOf("judge", generated)),
