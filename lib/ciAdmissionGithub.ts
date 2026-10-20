@@ -29,11 +29,33 @@ export type CiAdmissionGithubConfig = { appId: string; privateKey: string };
 /** The App id and key from the environment, or null when either is missing. */
 export function ciAdmissionGithubConfig(env: NodeJS.ProcessEnv = process.env): CiAdmissionGithubConfig | null {
   const appId = (env.CI_ADMISSION_GITHUB_APP_ID ?? "").trim();
-  const raw = env.CI_ADMISSION_GITHUB_APP_PRIVATE_KEY ?? "";
-  // A PEM pasted into a single-line variable arrives with literal "\n".
-  const privateKey = raw.includes("\n") ? raw : raw.replaceAll("\\n", "\n");
-  if (!/^[1-9][0-9]{0,11}$/.test(appId) || privateKey.trim() === "") return null;
+  const privateKey = normalizeCiAdmissionPrivateKey(env.CI_ADMISSION_GITHUB_APP_PRIVATE_KEY ?? "");
+  if (!/^[1-9][0-9]{0,11}$/.test(appId) || privateKey === "") return null;
   return { appId, privateKey };
+}
+
+const PEM = /-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/;
+
+/**
+ * The App's private key (the whole downloaded .pem, not the SHA256
+ * fingerprint GitHub lists) as a PEM Node can read, however the variable
+ * stored it: real newlines, literal "\n", newlines turned into spaces by a
+ * single-line field, CRLF, surrounding quotes, or the whole PEM
+ * base64-encoded. The body is re-wrapped at 64 characters between its own
+ * header and footer. "" when nothing PEM-shaped is found -- a fingerprint
+ * pasted by mistake then reads as "not configured" rather than a decoder
+ * error on every round.
+ */
+export function normalizeCiAdmissionPrivateKey(raw: string): string {
+  let text = raw.trim().replace(/^["']|["']$/g, "").replaceAll("\\n", "\n").trim();
+  if (!text.includes("-----BEGIN")) {
+    const decoded = Buffer.from(text.replace(/\s+/g, ""), "base64").toString("utf8");
+    if (decoded.includes("-----BEGIN")) text = decoded;
+  }
+  const match = PEM.exec(text);
+  if (!match) return "";
+  const lines = match[2].replace(/\s+/g, "").match(/.{1,64}/g) ?? [];
+  return [`-----BEGIN ${match[1]}-----`, ...lines, `-----END ${match[1]}-----`, ""].join("\n");
 }
 
 const appJwt = (config: CiAdmissionGithubConfig, nowMs: number) => {
