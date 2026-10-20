@@ -25,7 +25,7 @@ import {
 // worse is undone by the next cycle; an operator can undo any of them.
 // No email leaves: OPS_ALERT_EMAIL is unset here, so the notice only logs.
 
-process.env.ADMIN_AUDIT_INTEGRITY_KEY ||= "tunables-test-integrity-key-0123456789abcdef";
+process.env.ADMIN_AUDIT_INTEGRITY_KEY ||= "tunables-audit-test-key";
 delete process.env.OPS_ALERT_EMAIL;
 delete process.env.ADMIN_ALERT_EMAIL;
 
