@@ -326,6 +326,27 @@ jobs:
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
 
     steps:
+      # The shard's record says `pending` until the suite step below replaces
+      # it, and both uploads overwrite. So the record is always this shard's
+      # latest attempt: a re-run replaces an earlier attempt's result instead
+      # of colliding with it, and an attempt killed before its result lands
+      # leaves `pending`, which the verdict counts as a failure rather than
+      # reading a stale pass.
+      - name: Mark the shard's suite outcome pending
+        shell: bash
+        run: |
+          mkdir -p e2e-shard-result
+          printf 'pending\n' > "e2e-shard-result/shard-${{ matrix.shard }}.txt"
+
+      - name: Upload the pending shard outcome
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-audit-e2e-result-${{ github.run_id }}-shard-${{ matrix.shard }}
+          path: e2e-shard-result
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -429,9 +450,7 @@ jobs:
           retention-days: 30
 
       # `always()`, so a shard whose build or install failed records
-      # `skipped` rather than nothing. A shard that never reaches this step
-      # (cancelled, or killed at the job ceiling) records nothing, and the
-      # verdict job counts a missing record as a failure.
+      # `skipped`. A shard that never reaches this step keeps `pending`.
       - name: Record the shard's suite outcome
         if: always()
         shell: bash
@@ -448,6 +467,7 @@ jobs:
           name: security-audit-e2e-result-${{ github.run_id }}-shard-${{ matrix.shard }}
           path: e2e-shard-result
           if-no-files-found: error
+          overwrite: true
           retention-days: 30
 
       - name: Fail the shard when its suite failed

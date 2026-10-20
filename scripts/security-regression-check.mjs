@@ -3634,6 +3634,10 @@ const checks = [
         source.includes("id: e2e_suite") &&
         source.includes("if: steps.e2e_suite.outcome != 'success'") &&
         source.includes("security-audit-e2e-result-${{ github.run_id }}-shard-") &&
+        // A re-run must replace the shard's record, and an attempt that dies
+        // before its result must leave `pending`, never an earlier pass.
+        source.includes("printf 'pending\\n'") &&
+        (source.match(/\n {10}overwrite: true\n/g) ?? []).length === 2 &&
         source.includes("needs: [audit, e2e, e2e_verdict]") &&
         source.includes("SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
         source.includes("E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
