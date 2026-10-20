@@ -3613,6 +3613,38 @@ const checks = [
     },
   },
   {
+    // 2026-10-20: the scheduled audit fired at 00:09Z on release #2792's commit
+    // 33adbbbb, failed on mobile-safari E2E, and Railway SKIPPED that production
+    // deploy. Railway's Wait for CI reads the commit's check suite, so every job
+    // here fails as a red check run while the suite still concludes success.
+    // The failure must still be enforced and reported: the shards record their
+    // own outcome, a credential-free verdict job reads it, and the report sends
+    // and enforces that verdict rather than `needs.e2e.result`, which
+    // job-level continue-on-error can turn into `success`.
+    name: "The scheduled daily audit cannot skip a production deploy and still reports E2E failures",
+    file: ".github/workflows/daily-security-audit.yml",
+    test: (source) => {
+      const jobsAt = source.indexOf("\njobs:");
+      const jobs = jobsAt < 0 ? "" : source.slice(jobsAt);
+      const jobBodies = jobs.split(/\n  (?=[a-z_][a-z0-9_-]*:\n)/).slice(1);
+      const verdict = jobBodies.find((body) => body.startsWith("e2e_verdict:")) ?? "";
+      return (
+        jobBodies.length === 4 &&
+        jobBodies.every((body) => /\n    continue-on-error: true\n/.test(body)) &&
+        source.includes("id: e2e_suite") &&
+        source.includes("if: steps.e2e_suite.outcome != 'success'") &&
+        source.includes("security-audit-e2e-result-${{ github.run_id }}-shard-") &&
+        source.includes("needs: [audit, e2e, e2e_verdict]") &&
+        source.includes("SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
+        source.includes("E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
+        !/needs\.e2e\.result\s*}}\s*$/m.test(source.split("\n  report:")[1] ?? "x") &&
+        // The verdict job reads artifacts written after third-party install
+        // scripts ran, so it must hold no secret.
+        !verdict.includes("secrets.")
+      );
+    },
+  },
+  {
     // #232 replaced a manual recovery step with this workflow, and the release
     // checklist now says to verify rather than perform it. What makes that
     // safe is the `verify` job: without it, a back-merge that conflicted or was

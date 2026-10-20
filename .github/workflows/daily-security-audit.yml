@@ -17,6 +17,25 @@ permissions:
   actions: read
   contents: read
 
+# Every job below carries `continue-on-error: true` at the job level, so a
+# failure stays a red check run (and is reported by Slack/email) while the
+# commit's Actions check suite still concludes success.
+#
+# That is what Railway's "Wait for CI" reads, and it cannot be told which
+# workflows are the release verdict. A scheduled run checks out whatever
+# commit is at the tip of main when GitHub gets round to firing it -- hours
+# late, often -- and attaches its check runs to that commit. On 2026-10-20 it
+# fired at 00:09Z on release #2792's commit 33adbbbb, failed on mobile-safari
+# E2E, and Railway SKIPPED that production deploy. The audit judges the
+# repository, not a release, so it must not decide whether one ships. Same
+# mechanism as back-merge-main-to-develop.yml and the scheduled
+# secret-history-scan.yml.
+#
+# With job-level continue-on-error `needs.e2e.result` no longer distinguishes
+# a failed shard, so each shard records its own suite outcome and the
+# `e2e_verdict` job below turns those into the status the report sends and
+# the enforcing step checks.
+
 concurrency:
   group: daily-security-audit-${{ github.ref }}
   cancel-in-progress: false
@@ -30,6 +49,7 @@ jobs:
   audit:
     name: Static, dependency and unit checks
     runs-on: ubuntu-latest
+    continue-on-error: true
     # Was 180 when this job also ran the E2E suite. What is left is ~7 minutes
     # of checks plus a browser install whose own deadline is 45.
     timeout-minutes: 70
@@ -258,6 +278,7 @@ jobs:
     # report a failure about the wrong thing.
     if: needs.audit.outputs.production_check == 'success' && needs.audit.outputs.browser_install == 'success'
     runs-on: ubuntu-latest
+    continue-on-error: true
     # Measured on run #55 (2026-09-01), the first run of this shape. Test step
     # time, then whole job, against what `--list --shard=i/6` says each shard
     # holds:
@@ -381,10 +402,14 @@ jobs:
         run: scripts/ci/install-playwright.sh chromium webkit
 
       - name: Run full desktop and mobile E2E suite
+        id: e2e_suite
         # Below the job's ceiling, so a shard that overruns fails this step and
         # still uploads its report and traces, instead of the job being
         # cancelled out from under all three.
         timeout-minutes: 60
+        # The step's `outcome` is recorded below and the last step fails the
+        # job on it, so this only defers the failure past the evidence upload.
+        continue-on-error: true
         run: npm run test:e2e:run -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload E2E evidence
@@ -403,16 +428,97 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      # `always()`, so a shard whose build or install failed records
+      # `skipped` rather than nothing. A shard that never reaches this step
+      # (cancelled, or killed at the job ceiling) records nothing, and the
+      # verdict job counts a missing record as a failure.
+      - name: Record the shard's suite outcome
+        if: always()
+        shell: bash
+        env:
+          SUITE_OUTCOME: ${{ steps.e2e_suite.outcome }}
+        run: |
+          mkdir -p e2e-shard-result
+          printf '%s\n' "${SUITE_OUTCOME:-unknown}" > "e2e-shard-result/shard-${{ matrix.shard }}.txt"
+
+      - name: Upload the shard's suite outcome
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-audit-e2e-result-${{ github.run_id }}-shard-${{ matrix.shard }}
+          path: e2e-shard-result
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail the shard when its suite failed
+        if: steps.e2e_suite.outcome != 'success'
+        shell: bash
+        env:
+          SUITE_OUTCOME: ${{ steps.e2e_suite.outcome }}
+        run: |
+          echo "::error title=E2E shard failed::Shard ${{ matrix.shard }}/${{ matrix.shards }} finished with ${SUITE_OUTCOME:-unknown}."
+          exit 1
+
+  # The E2E status the report sends and the enforcing step checks. Its own job
+  # rather than a step of `report`: it reads artifacts the shards wrote after
+  # running third-party install scripts, and `report` holds the Slack and
+  # Resend credentials, so that job downloads nothing.
+  e2e_verdict:
+    name: Full E2E verdict
+    needs: [e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    outputs:
+      result: ${{ steps.verdict.outputs.result }}
+    steps:
+      - name: Download shard outcomes
+        if: needs.e2e.result != 'skipped'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: security-audit-e2e-result-${{ github.run_id }}-shard-*
+          path: e2e-shard-results
+          merge-multiple: true
+
+      - name: Decide the E2E result
+        id: verdict
+        shell: bash
+        env:
+          NEEDS_RESULT: ${{ needs.e2e.result }}
+          SHARDS: "6"
+        run: |
+          # Anything but `success` -- `skipped` (no build or browsers),
+          # `cancelled`, `failure` -- passes through as itself. `success` is
+          # then checked against the shard records, because job-level
+          # continue-on-error can report a failed matrix as `success`.
+          result="success"
+          if [ "$NEEDS_RESULT" != "success" ]; then
+            result="${NEEDS_RESULT:-unknown}"
+          else
+            for shard in $(seq 1 "$SHARDS"); do
+              file="e2e-shard-results/shard-${shard}.txt"
+              outcome="missing"
+              if [ -f "$file" ]; then outcome="$(head -n 1 "$file")"; fi
+              echo "Shard ${shard}/${SHARDS}: $(printf '%s' "$outcome" | tr -cd 'a-z')"
+              if [ "$outcome" != "success" ]; then result="failure"; fi
+            done
+          fi
+          echo "E2E result: ${result}"
+          echo "result=${result}" >> "$GITHUB_OUTPUT"
+
   report:
     # Keeps the name this workflow reported before it was sharded, so anything
     # watching for that result still finds it.
     name: Security audit and daily report
-    needs: [audit, e2e]
+    needs: [audit, e2e, e2e_verdict]
     # `always()` so the report is delivered and the verdict is enforced even
     # when a shard fails, is skipped, or is cancelled. Reaching this job is not
     # itself a pass; the last step decides.
     if: always()
     runs-on: ubuntu-latest
+    continue-on-error: true
     timeout-minutes: 20
 
     steps:
@@ -462,11 +568,13 @@ jobs:
           SECURITY_AUDIT_TYPECHECK_STATUS: ${{ needs.audit.outputs.typecheck }}
           SECURITY_AUDIT_PRODUCTION_STATUS: ${{ needs.audit.outputs.production_check }}
           SECURITY_AUDIT_BROWSER_INSTALL_STATUS: ${{ needs.audit.outputs.browser_install }}
-          # `needs.e2e.result` collapses the whole matrix: it is `success` only
-          # when every shard succeeded, and `skipped` when the build or the
-          # browsers never got there. The reporter renders each of those as
-          # itself rather than folding them into a pass.
-          SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e.result }}
+          # From e2e_verdict: `success` only when every shard recorded a
+          # passing suite, `skipped` when the build or the browsers never got
+          # there, and `failure` for a failed or missing shard. Empty if that
+          # job did not run, which the enforcing step reports as unknown. The
+          # reporter renders each of those as itself rather than folding them
+          # into a pass.
+          SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}
         # `--import tsx` because the sender is resolved through
         # lib/emailSendingIdentityCore.ts, which is TypeScript. Sharing that
         # function is the point: a second copy of the rules is what left this
@@ -499,7 +607,7 @@ jobs:
           # `skipped` and `cancelled` are failures here on purpose -- a shard
           # that never ran has verified nothing, and treating either as a pass
           # is how an aggregating gate goes green without gating.
-          E2E_STATUS: ${{ needs.e2e.result }}
+          E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}
           REPORT_STATUS: ${{ steps.report.outcome }}
         run: |
           failed=0
