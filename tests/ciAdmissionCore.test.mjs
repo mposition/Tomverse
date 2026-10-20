@@ -373,3 +373,14 @@ test("a release the last round recorded but GitHub still shows as a draft goes b
   assert.deepEqual(next.state.queue.map((e) => e.number), [8, 9]);
   assert.ok(next.state.events.some((e) => e.number === 8 && e.detail === "release_unconfirmed"));
 });
+
+test("every status a round's actions will write is recorded before they run", () => {
+  const evaluation = run({
+    state: state({ capacity: 1, queue: [queued(8)], statusRetry: [5] }),
+    openPulls: [pull(8, { draft: true }), pull(9, { draft: true, headSha: "7".repeat(40) })],
+    running: new Set([ciRunKey(9, "7".repeat(40))]),
+  });
+  assert.deepEqual(kinds(evaluation).sort(), ["cancel:9", "release:8"]);
+  // #8 (release) is owed a status; #9 (only a cancel) is not; #5 stays owed.
+  assert.deepEqual(evaluation.state.statusRetry.sort(), [5, 8]);
+});

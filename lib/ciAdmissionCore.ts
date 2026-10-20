@@ -127,9 +127,10 @@ const stateSchema = z
      */
     releasing: z.array(queueEntrySchema).max(MAX_QUEUE).default([]),
     /**
-     * Pull requests whose `CI admission` commit status could not be written.
-     * The service retries them every round: pending while in line, success
-     * otherwise -- a pending left behind would hold merge-train back.
+     * Pull requests whose `CI admission` commit status is yet to be written:
+     * recorded with the round's judgment, taken off once written. The service
+     * retries them every round -- pending while in line, success otherwise --
+     * since a pending left behind would hold merge-train back.
      */
     statusRetry: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
@@ -395,7 +396,15 @@ export function evaluateCiAdmission(input: {
       granted: [...grantedHead].map(([number, headSha]) => ({ number, headSha })).slice(0, MAX_QUEUE),
       pendingArrivals: [],
       releasing: actions.flatMap((action) => (action.kind === "release" ? [action.entry] : [])),
-      statusRetry: input.state.statusRetry,
+      // Every status this round's actions will write is recorded before they
+      // run; the service takes each off once written, so a stop in between
+      // leaves it for the next round to write.
+      statusRetry: [
+        ...new Set([
+          ...input.state.statusRetry,
+          ...actions.filter((action) => action.kind !== "cancel").map((action) => action.pull.number),
+        ]),
+      ].slice(-MAX_QUEUE),
       events: [...input.state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,

@@ -165,7 +165,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   }
 
   // 2. Judge and record, under the lock.
-  const evaluation = await prisma.$transaction(
+  const { evaluation, owedStatuses } = await prisma.$transaction(
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
@@ -176,7 +176,8 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
           ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound, pendingArrivals: [] }
           : judged.state,
       );
-      return judged;
+      // Statuses owed from earlier rounds; this round's own are written by its actions.
+      return { evaluation: judged, owedStatuses: state.statusRetry };
     },
     { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
   );
@@ -213,7 +214,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   // round's own actions below then write anything newer.
   const open = new Map(openPulls.map((pull) => [pull.number, pull]));
   const inLine = new Set(evaluation.state.queue.map((entry) => entry.number));
-  for (const number of evaluation.state.statusRetry) {
+  for (const number of owedStatuses) {
     const pull = open.get(number);
     if (!pull) {
       statusResolved.add(number);
@@ -254,7 +255,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   }
 
   // 4. Corrections, on top of the state as it is now.
-  const retryChanged = statusFailed.size > 0 || evaluation.state.statusRetry.length > 0;
+  const retryChanged = statusFailed.size > 0 || statusResolved.size > 0;
   if (extra.length > 0 || undoHold.size > 0 || putBack.length > 0 || rejudge.size > 0 || retryChanged) {
     await prisma.$transaction(
       async (tx) => {
