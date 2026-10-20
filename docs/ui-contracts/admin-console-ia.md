@@ -632,7 +632,8 @@ observation record. The sidebar entry and the Suggestions tab carry the open
 suggestion count (`productResearch`), an unknown count rendering nothing. The
 engineering agent keeps its four sections, and its old
 `?tab=product-research` address redirects to
-`/admin/product-research?tab=suggestions` with the rest of its query
+`/admin/product-research?tab=observations`, the record it showed in
+production, with the rest of its query
 (`ADMIN_ENGINEERING_AGENT_LEGACY_TABS`). No route was retired.
 
 ### Decision Maker requests are judged in Execution (2026-10-19)

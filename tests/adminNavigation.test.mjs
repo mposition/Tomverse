@@ -693,14 +693,15 @@ test("product research is its own workspace and the engineering agent's old tab 
   assert.equal(adminNavigationBadge("productResearch", EMPTY_ADMIN_NAVIGATION_COUNTS), null);
 
   // The tab moved, so the engineering agent no longer offers it, and the old
-  // link lands on the first section with the rest of its query.
+  // link lands on what it showed in production -- the observation record --
+  // with the rest of its query.
   assert.equal(adminNavItemTabs("engineering-agent").some((tab) => tab.id === "product-research"), false);
   assert.deepEqual(ADMIN_ENGINEERING_AGENT_LEGACY_TABS, {
-    "product-research": "/admin/product-research?tab=suggestions",
+    "product-research": "/admin/product-research?tab=observations",
   });
   assert.equal(
     adminRedirectTarget(ADMIN_ENGINEERING_AGENT_LEGACY_TABS["product-research"], { tab: "product-research", from: "office" }),
-    "/admin/product-research?tab=suggestions&from=office"
+    "/admin/product-research?tab=observations&from=office"
   );
   const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/engineering-agent/page.tsx"), "utf8");
   assert.ok(page.includes("ADMIN_ENGINEERING_AGENT_LEGACY_TABS[query.tab]"));

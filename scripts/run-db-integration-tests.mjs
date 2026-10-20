@@ -705,6 +705,10 @@ run(
     // cap under one month lock across two connections, and each action's
     // statement count pinned.
     "tests/integration/marketing-llm-budget-store.db.test.ts",
+    // The Scout's spending stop: a call reserved against the model and cap as
+    // they are under the ledger lock, so turning the model off or lowering the
+    // cap stops every later call, and racing reservations stay within the cap.
+    "tests/integration/product-research-scout-settings.db.test.ts",
     // The generator's budget route (S3c3a): signed, bounded, strict requests,
     // each action in its own transaction, and no model pinned as built.
     "tests/integration/marketing-llm-budget-route.db.test.ts",

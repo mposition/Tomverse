@@ -51,8 +51,10 @@ export async function POST(request: Request) {
     const settings = await readScoutSettings();
     const llm = await scoutLlmFor(settings.modelId);
     if (!llm) return productResearchJson({ judged: false, reason: "model_off" });
-    const callId = await startScoutCall({ subject: submission.subject, modelId: llm.modelId, dailyCallCap: settings.dailyCallCap });
-    if (callId === null) return productResearchJson({ judged: false, reason: "daily_cap_reached" });
+    // The cap and the model are checked again under the ledger's lock.
+    const reservation = await startScoutCall({ subject: submission.subject, modelId: llm.modelId });
+    if ("refused" in reservation) return productResearchJson({ judged: false, reason: reservation.refused });
+    const callId = reservation.id;
 
     const existing = await recentSuggestionTitles(submission.subject);
     const judgement = await llm.judge(submission, existing);

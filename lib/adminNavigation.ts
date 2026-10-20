@@ -1268,10 +1268,11 @@ export const adminRedirectTarget = (
 
 /**
  * Product research left the engineering agent's screen for its own workspace
- * (2026-10-19). The old tab link still opens it.
+ * (2026-10-19). The old tab link opens the section it showed in production,
+ * the observation record.
  */
 export const ADMIN_ENGINEERING_AGENT_LEGACY_TABS: Readonly<Record<string, string>> = {
-  "product-research": "/admin/product-research?tab=suggestions",
+  "product-research": "/admin/product-research?tab=observations",
 };
 
 /** The old section links remain bookmarks, never a second control surface. */
