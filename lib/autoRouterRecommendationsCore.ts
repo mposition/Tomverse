@@ -17,8 +17,53 @@
  * Pure, so the whole decision runs under test without a database.
  */
 
+/** What an operator may set in Admin. */
 export const RECOMMENDATION_STATUSES = ["open", "done", "dismissed"] as const;
 export type RecommendationStatus = (typeof RECOMMENDATION_STATUSES)[number];
+
+/**
+ * What only the coding agent's internal API sets (owner approval 2026-10-20:
+ * an agent on the Ubuntu runner may open develop PRs on its own; merging stays
+ * a person's). It takes an open code recommendation (claimed), then reports a
+ * PR or a failure. An operator can still set any of the three above over them.
+ */
+export const AGENT_RECOMMENDATION_STATUSES = ["claimed", "pr_opened", "failed"] as const;
+export type AgentRecommendationStatus = (typeof AGENT_RECOMMENDATION_STATUSES)[number];
+export type StoredRecommendationStatus = RecommendationStatus | AgentRecommendationStatus;
+
+/**
+ * As shown: a claim whose lease ran out with no result is needs_lookup. It is
+ * derived, never stored, and never turned back into open by itself -- the
+ * agent may have pushed and opened a PR it could not report, so a person
+ * looks before the recommendation is offered again.
+ */
+export type DisplayedRecommendationStatus = StoredRecommendationStatus | "needs_lookup";
+
+const STORED_RECOMMENDATION_STATUSES: readonly string[] = [
+    ...RECOMMENDATION_STATUSES,
+    ...AGENT_RECOMMENDATION_STATUSES,
+];
+
+/** How long the agent holds a claim before it shows as needs_lookup. */
+export const REC_AGENT_LEASE_MS = 2 * 60 * 60 * 1000;
+
+/** Why the agent did not open a PR; a closed list, so the report cannot carry prose. */
+export const RECOMMENDATION_FAILURE_REASONS = [
+    "out_of_scope",
+    "no_change",
+    "tests",
+    "review_reject",
+    "review_unknown",
+    "timeout",
+    "agent_error",
+] as const;
+export type RecommendationFailureReason = (typeof RECOMMENDATION_FAILURE_REASONS)[number];
+
+/** The one repository the agent may open a PR in. */
+const PR_URL = /^https:\/\/github\.com\/mposition\/Tomverse\/pull\/[1-9][0-9]{0,6}$/;
+
+export const admitRecommendationPrUrl = (value: unknown): string | null =>
+    typeof value === "string" && PR_URL.test(value) ? value : null;
 
 /** Guidance recommendations are applied by their own cycle; only these two wait for a person. */
 export const ACTIONABLE_RECOMMENDATION_KINDS = ["code", "setting"] as const;
@@ -27,19 +72,40 @@ export type ActionableRecommendationKind = (typeof ACTIONABLE_RECOMMENDATION_KIN
 export const isRecommendationStatus = (value: unknown): value is RecommendationStatus =>
     typeof value === "string" && (RECOMMENDATION_STATUSES as readonly string[]).includes(value);
 
+const isStoredRecommendationStatus = (value: unknown): value is StoredRecommendationStatus =>
+    typeof value === "string" && STORED_RECOMMENDATION_STATUSES.includes(value);
+
 const isActionableKind = (value: unknown): value is ActionableRecommendationKind =>
     typeof value === "string" && (ACTIONABLE_RECOMMENDATION_KINDS as readonly string[]).includes(value);
 
-export type RecommendationStatusEntry = { status: RecommendationStatus; at: string; by: string };
+export type RecommendationStatusEntry = {
+    status: StoredRecommendationStatus;
+    at: string;
+    by: string;
+    /** claimed only: when the claim shows as needs_lookup. */
+    leaseUntil?: string;
+    /**
+     * Issued with each claim and kept on its result: a result is stored only
+     * against the claim it names, so a late result of an earlier claim of the
+     * same recommendation never lands on a later one.
+     */
+    claimId?: string;
+    /** pr_opened only. */
+    prUrl?: string;
+    /** failed only. */
+    reason?: RecommendationFailureReason;
+};
 
 export type ActionableRecommendation = {
     /** Place in the report's recommendations; the key of its status entry. */
     index: number;
     kind: ActionableRecommendationKind;
     text: string;
-    status: RecommendationStatus;
+    status: DisplayedRecommendationStatus;
     at: string | null;
     by: string | null;
+    prUrl: string | null;
+    reason: string | null;
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -54,15 +120,38 @@ export const recommendationStatusEntries = (summary: unknown): Map<number, Recom
         const index = Number(key);
         const value = record(raw);
         if (!Number.isInteger(index) || index < 0 || !value) continue;
-        if (!isRecommendationStatus(value.status)) continue;
+        if (!isStoredRecommendationStatus(value.status)) continue;
         if (typeof value.at !== "string" || typeof value.by !== "string") continue;
-        entries.set(index, { status: value.status, at: value.at, by: value.by });
+        entries.set(index, {
+            status: value.status,
+            at: value.at,
+            by: value.by,
+            ...(typeof value.leaseUntil === "string" ? { leaseUntil: value.leaseUntil } : {}),
+            ...(typeof value.claimId === "string" ? { claimId: value.claimId } : {}),
+            ...(typeof value.prUrl === "string" ? { prUrl: value.prUrl } : {}),
+            ...((RECOMMENDATION_FAILURE_REASONS as readonly unknown[]).includes(value.reason)
+                ? { reason: value.reason as RecommendationFailureReason }
+                : {}),
+        });
     }
     return entries;
 };
 
+/** A stored entry as shown at `now`: an expired claim is needs_lookup. */
+export const displayedRecommendationStatus = (
+    entry: RecommendationStatusEntry | undefined,
+    now: number
+): DisplayedRecommendationStatus => {
+    if (!entry) return "open";
+    if (entry.status === "claimed") {
+        const until = entry.leaseUntil ? Date.parse(entry.leaseUntil) : Number.NaN;
+        if (!Number.isFinite(until) || until <= now) return "needs_lookup";
+    }
+    return entry.status;
+};
+
 /** The report's code and setting recommendations with their status; guidance ones are left out. */
-export const actionableRecommendations = (summary: unknown): ActionableRecommendation[] => {
+export const actionableRecommendations = (summary: unknown, now: number = Date.now()): ActionableRecommendation[] => {
     const recommendations = record(record(summary)?.report)?.recommendations;
     if (!Array.isArray(recommendations)) return [];
     const entries = recommendationStatusEntries(summary);
@@ -75,9 +164,11 @@ export const actionableRecommendations = (summary: unknown): ActionableRecommend
                 index,
                 kind: value.kind,
                 text: value.text,
-                status: entry?.status ?? "open",
+                status: displayedRecommendationStatus(entry, now),
                 at: entry?.at ?? null,
                 by: entry?.by ?? null,
+                prUrl: entry?.prUrl ?? null,
+                reason: entry?.reason ?? null,
             },
         ];
     });
@@ -106,20 +197,68 @@ export const withRecommendationStatus = (
 export type OpenRecommendation = ActionableRecommendation & { cycleId: string; createdAt: string };
 
 /**
- * The open recommendations across cycles, newest cycle first and in report
- * order within one. The caller says how many cycles it read: the list is only
- * as wide as that (docs/ui-contracts/admin-console-ia.md rule 6).
+ * The recommendations that still need a person or the agent -- everything not
+ * marked done or dismissed -- newest cycle first and in report order within
+ * one. The caller says how many cycles it read: the list is only as wide as
+ * that (docs/ui-contracts/admin-console-ia.md rule 6).
  */
 export const openRecommendations = (
-    cycles: readonly { id: string; createdAt: string; summary: unknown }[]
+    cycles: readonly { id: string; createdAt: string; summary: unknown }[],
+    now: number = Date.now()
 ): OpenRecommendation[] =>
     [...cycles]
         .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
         .flatMap((cycle) =>
-            actionableRecommendations(cycle.summary)
-                .filter((item) => item.status === "open")
+            actionableRecommendations(cycle.summary, now)
+                .filter((item) => item.status !== "done" && item.status !== "dismissed")
                 .map((item) => ({ ...item, cycleId: cycle.id, createdAt: cycle.createdAt }))
         );
+
+/**
+ * The next recommendation the coding agent may take: the oldest open `code`
+ * one across the cycles given (oldest cycle first, report order within one).
+ * Setting recommendations are not code; they are applied elsewhere or by a
+ * person.
+ */
+export const nextClaimableRecommendation = (
+    cycles: readonly { id: string; createdAt: string; summary: unknown }[],
+    now: number
+): (ActionableRecommendation & { cycleId: string; createdAt: string }) | null => {
+    for (const cycle of [...cycles].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
+        const item = actionableRecommendations(cycle.summary, now).find(
+            (candidate) => candidate.kind === "code" && candidate.status === "open"
+        );
+        if (item) return { ...item, cycleId: cycle.id, createdAt: cycle.createdAt };
+    }
+    return null;
+};
+
+export type RecommendationResultInput = { claimId: string } & (
+    | { outcome: "pr_opened"; prUrl: string }
+    | { outcome: "failed"; reason: RecommendationFailureReason }
+);
+
+/**
+ * Whether the agent's result may be stored over the current entry. Only the
+ * claim the result names takes it -- expired or not, since the result is what
+ * happened. The same result of the same claim again is a replay; anything else
+ * (another claim, the operator reopened or closed it meanwhile, or a different
+ * result) is refused and changes nothing.
+ */
+export const recommendationResultDecision = (
+    current: RecommendationStatusEntry | undefined,
+    input: RecommendationResultInput
+): "apply" | "replay" | "not_claimed" => {
+    if (!current?.claimId || current.claimId !== input.claimId) return "not_claimed";
+    if (current.status === "claimed") return "apply";
+    if (input.outcome === "pr_opened" && current.status === "pr_opened" && current.prUrl === input.prUrl) {
+        return "replay";
+    }
+    if (input.outcome === "failed" && current.status === "failed" && current.reason === input.reason) {
+        return "replay";
+    }
+    return "not_claimed";
+};
 
 /**
  * Copies text with the browser clipboard, or says it could not. A missing

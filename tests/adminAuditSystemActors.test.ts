@@ -127,6 +127,7 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-controller",
     "amux-v22-api-model-access",
     "auto-router-optimizer",
+    "auto-router-rec-agent",
     "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
@@ -427,6 +428,21 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.reserved", "MarketingReport"), false);
   // Other actors are unaffected by the generator's scope.
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
+});
+
+test("the Auto router coding agent may only claim a recommendation and record its result", () => {
+  assert.equal(isSystemAuditActor("auto-router-rec-agent"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.claimed", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.result_recorded", "AutoRouterOptimizerCycle"), true);
+  // An operator's status change and a promotion stay outside its scope.
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.status_changed", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.claimed", "AppSettings"), false);
 });
 
 test("the Auto router optimizer actor may only start a cycle and promote one", () => {

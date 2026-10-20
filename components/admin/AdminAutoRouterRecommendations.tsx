@@ -77,8 +77,20 @@ export function RecommendationControls({
         >
           {m.recommendationStatuses[item.status]}
           {item.at ? ` · ${new Date(item.at).toLocaleString()}` : ""}
+          {item.reason ? ` · ${(m.recommendationFailureReasons as Record<string, string>)[item.reason] ?? item.reason}` : ""}
         </span>
-        {item.status === "open" ? (
+        {item.prUrl ? (
+          <a
+            href={item.prUrl}
+            target="_blank"
+            rel="noreferrer"
+            data-testid="admin-auto-router-recommendation-pr"
+            className="text-xs font-bold text-blue-300 underline underline-offset-4"
+          >
+            {m.openPr}
+          </a>
+        ) : null}
+        {item.status !== "done" && item.status !== "dismissed" ? (
           <>
             <button
               type="button"
@@ -101,7 +113,11 @@ export function RecommendationControls({
               {m.dismiss}
             </button>
           </>
-        ) : (
+        ) : null}
+        {item.status === "done" ||
+        item.status === "dismissed" ||
+        item.status === "failed" ||
+        item.status === "needs_lookup" ? (
           <button
             type="button"
             onClick={() => onSetStatus(cycle.id, item.index, "open")}
@@ -112,7 +128,7 @@ export function RecommendationControls({
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
             {m.reopen}
           </button>
-        )}
+        ) : null}
         <button
           type="button"
           onClick={() => void copyInstruction()}
