@@ -1,0 +1,28 @@
+[Unit]
+Description=Tomverse auto-rec agent runner (one optimizer recommendation per run)
+Documentation=https://github.com/mposition/Tomverse/blob/develop/tools/auto-rec-agent/README.md
+After=network-online.target autorec-gateway.socket
+Wants=network-online.target
+Requires=autorec-gateway.socket
+
+[Service]
+Type=oneshot
+User=autorec
+Group=autorec
+# No app secret and no GitHub token here. This account runs the code the
+# agent writes (its tests), and a process of the same uid can read this
+# one's environment; those two stay with autorec-gateway@.service.
+# Optional: CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token` (README).
+EnvironmentFile=-/etc/autorec/claude.env
+Environment=HOME=/home/autorec
+Environment=PATH=/home/autorec/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=AUTOREC_CLAUDE_BIN=/home/autorec/.local/bin/claude
+WorkingDirectory=/home/autorec
+# Absolute node path from `which node`; Node 22.6 or later (type stripping).
+ExecStart=/usr/bin/node --experimental-strip-types --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-runner.mjs
+# Agent 30 min, tests, review wait up to 60 min, publish: bounded well below this.
+TimeoutStartSec=3h
+# When the run ends, anything the agent or a test left running ends with it.
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
