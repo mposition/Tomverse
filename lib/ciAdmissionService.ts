@@ -11,30 +11,54 @@ import {
   parseCiAdmissionMode,
   parseCiAdmissionState,
   reorderCiAdmissionQueue,
+  type CiAdmissionAction,
   type CiAdmissionEvent,
   type CiAdmissionMode,
+  type CiAdmissionPull,
+  type CiAdmissionQueueEntry,
   type CiAdmissionState,
 } from "@/lib/ciAdmissionCore";
 import { ciAdmissionGithubConfig, createCiAdmissionGithub, type CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
 import { prisma } from "@/lib/prisma";
 
 /**
- * CI admission's round and its Admin changes (lib/ciAdmissionCore.ts). One
- * round at a time: every round and every Admin change takes the same
- * transaction-scoped advisory lock first (then, for an Admin change, the audit
- * chain lock), so a webhook burst is judged in turn against the state the
- * previous round wrote.
+ * CI admission's round and its Admin changes (lib/ciAdmissionCore.ts).
  *
- * In `on` mode the round carries out its actions; a failed action is recorded
- * and its effect on the state undone (a hold that did not happen leaves the
- * pull request out of the line; a release that did not happen keeps it at the
- * top). Nothing is retried blind: the next round re-reads GitHub first. In
- * `shadow` mode the round records what it would have done and keeps the state
- * it read, so the line never drifts from GitHub.
+ * A round, in order, and one at a time in this process (the app runs one
+ * replica; a webhook burst is judged in turn):
+ *
+ *   1. read GitHub (open pull requests, running pull_request runs);
+ *   2. one short transaction under the admission lock: read the state, judge,
+ *      write the judged state;
+ *   3. outside any transaction, carry out the actions on GitHub;
+ *   4. if any failed, one more short transaction under the lock applies the
+ *      corrections on top of whatever the state is by then (an Admin reorder
+ *      may have landed meanwhile).
+ *
+ * GitHub writes never run inside a database transaction, so a rollback can
+ * never leave GitHub changed and the state unwritten. If the process dies
+ * between 2 and 3 the state is ahead of GitHub and the next round heals it: a
+ * pull request it meant to hold is still ready, so it leaves the line as
+ * "ready elsewhere". A release whose ready call fails goes back to the top of
+ * the line in step 4. Nothing is retried blind: the next round re-reads GitHub.
+ *
+ * Every hold also sets the `CI admission` commit status to pending ("waiting
+ * in line; do not mark ready or re-run"), so a coding session or CI monitor
+ * that reads the checks knows not to fight the line; release, admission and
+ * leaving the line set it to success.
+ *
+ * In `shadow` mode the round records what it would have done and keeps the
+ * state it read, so the line never drifts from GitHub.
  */
 
 const LOCK = "tomverse-ci-admission";
-const ROUND_TIMEOUT_MS = 60_000;
+const TX_TIMEOUT_MS = 15_000;
+
+const STATUS = {
+  waiting: "Waiting in the CI admission line; released automatically when a slot frees. Do not mark ready or re-run.",
+  granted: "CI admission: slot granted, CI may run.",
+  left: "No longer waiting in the CI admission line.",
+} as const;
 
 export const ciAdmissionMode = (env: NodeJS.ProcessEnv = process.env): CiAdmissionMode =>
   parseCiAdmissionMode(env.CI_ADMISSION_MODE) ?? "off";
@@ -54,6 +78,14 @@ const writeState = (tx: Prisma.TransactionClient, state: CiAdmissionState) =>
 const takeLock = (tx: Prisma.TransactionClient) => tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${LOCK}))`;
 
 const code = (error: unknown) => (error instanceof Error ? error.message : "unknown").slice(0, 80);
+
+// One round at a time in this process.
+let roundChain: Promise<unknown> = Promise.resolve();
+const serially = <T>(work: () => Promise<T>): Promise<T> => {
+  const next = roundChain.then(work, work);
+  roundChain = next.catch(() => undefined);
+  return next;
+};
 
 // When someone waits behind a reservation that GitHub has not yet shown runs
 // for, judge again when it expires rather than wait for the next webhook. One
@@ -84,14 +116,20 @@ export type CiAdmissionRoundOutcome =
       nextCheckInMs: number | null;
     };
 
+type RoundDeps = { mode?: CiAdmissionMode; github?: CiAdmissionGithub | null; now?: () => number };
+
+const numbersOf = (actions: CiAdmissionAction[], kind: CiAdmissionAction["kind"]) =>
+  actions.filter((a) => a.kind === kind).map((a) => a.pull.number);
+
 /**
  * One round. `arrival` is the pull request whose webhook event made it ready
  * for review, or null for any other trigger.
  */
-export async function runCiAdmissionRound(
-  arrival: number | null,
-  deps: { mode?: CiAdmissionMode; github?: CiAdmissionGithub | null; now?: () => number } = {},
-): Promise<CiAdmissionRoundOutcome> {
+export function runCiAdmissionRound(arrival: number | null, deps: RoundDeps = {}): Promise<CiAdmissionRoundOutcome> {
+  return serially(() => round(arrival, deps));
+}
+
+async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
   const mode = deps.mode ?? ciAdmissionMode();
   if (mode === "off") return { outcome: "off" };
   const config = ciAdmissionGithubConfig();
@@ -99,79 +137,113 @@ export async function runCiAdmissionRound(
   if (!github) return { outcome: "not_configured" };
   const now = deps.now ?? Date.now;
 
-  const outcome = await prisma.$transaction(
+  // 1. GitHub, outside any transaction.
+  let openPulls: CiAdmissionPull[];
+  let runningShas: Set<string>;
+  try {
+    openPulls = await github.openPulls();
+    runningShas = await github.runningShas();
+  } catch (error) {
+    return { outcome: "read_failed", failure: code(error) };
+  }
+
+  // 2. Judge and record, under the lock.
+  const evaluation = await prisma.$transaction(
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      let openPulls;
-      let runningShas;
-      try {
-        openPulls = await github.openPulls();
-        runningShas = await github.runningShas();
-      } catch (error) {
-        return { outcome: "read_failed", failure: code(error) } as const;
-      }
-      const evaluation = evaluateCiAdmission({ state, openPulls, runningShas, arrival, nowMs: now(), shadow: mode === "shadow" });
-
-      if (mode === "shadow") {
-        await writeState(tx, { ...state, events: evaluation.state.events, lastRound: evaluation.state.lastRound });
-        return {
-          outcome: "done",
-          mode,
-          held: evaluation.actions.filter((a) => a.kind === "hold").map((a) => a.pull.number),
-          released: evaluation.actions.filter((a) => a.kind === "release").map((a) => a.pull.number),
-          cancelled: evaluation.actions.filter((a) => a.kind === "cancel").map((a) => a.pull.number),
-          failures: [],
-          nextCheckInMs: evaluation.nextCheckInMs,
-        } as const;
-      }
-
-      const next = evaluation.state;
-      const failures: string[] = [];
-      const extra: CiAdmissionEvent[] = [];
-      const at = new Date(now()).toISOString();
-      const held: number[] = [];
-      const released: number[] = [];
-      const cancelled: number[] = [];
-      for (const action of evaluation.actions) {
-        const number = action.pull.number;
-        // A hold has two steps; once the draft conversion succeeded the pull
-        // request waits in line even if cancelling its runs then fails.
-        let drafted = false;
-        try {
-          if (action.kind === "hold") {
-            await github.convertToDraft(action.pull);
-            drafted = true;
-            held.push(number);
-            const cancelled = await github.cancelRuns(action.pull);
-            if (cancelled > 0) extra.push({ at, kind: "held", number, shadow: false, detail: `cancelled_runs:${cancelled}` });
-          } else if (action.kind === "cancel") {
-            await github.cancelRuns(action.pull);
-            cancelled.push(number);
-          } else {
-            await github.markReady(action.pull);
-            released.push(number);
-          }
-        } catch (error) {
-          failures.push(`${action.kind}:${number}:${code(error)}`);
-          extra.push({ at, kind: "failed", number, shadow: false, detail: `${action.kind}:${code(error)}`.slice(0, 120) });
-          if (action.kind === "hold") {
-            if (!drafted) next.queue = next.queue.filter((entry) => entry.number !== number);
-          } else if (action.kind === "release") {
-            next.released = next.released.filter((entry) => entry.number !== number);
-            const entry = state.queue.find((queued) => queued.number === number);
-            if (entry && !next.queue.some((queued) => queued.number === number)) next.queue.unshift(entry);
-          }
-        }
-      }
-      next.events = [...next.events, ...extra].slice(-50);
-      await writeState(tx, next);
-      return { outcome: "done", mode, held, released, cancelled, failures, nextCheckInMs: evaluation.nextCheckInMs } as const;
+      const judged = evaluateCiAdmission({ state, openPulls, runningShas, arrival, nowMs: now(), shadow: mode === "shadow" });
+      await writeState(
+        tx,
+        mode === "shadow" ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound } : judged.state,
+      );
+      return judged;
     },
-    { timeout: ROUND_TIMEOUT_MS, maxWait: ROUND_TIMEOUT_MS },
+    { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
   );
-  if (outcome.outcome === "done") scheduleRecheck(outcome.nextCheckInMs);
-  return outcome;
+  const summary = {
+    held: numbersOf(evaluation.actions, "hold"),
+    released: numbersOf(evaluation.actions, "release"),
+    cancelled: numbersOf(evaluation.actions, "cancel"),
+  };
+  if (mode === "shadow") {
+    return { outcome: "done", mode, ...summary, failures: [], nextCheckInMs: evaluation.nextCheckInMs };
+  }
+
+  // 3. Carry the actions out on GitHub.
+  const failures: string[] = [];
+  const at = new Date(now()).toISOString();
+  const extra: CiAdmissionEvent[] = [];
+  const undoHold = new Set<number>();
+  const putBack: CiAdmissionQueueEntry[] = [];
+  const status = async (pull: CiAdmissionPull, state: "pending" | "success", text: string) => {
+    try {
+      await github.setStatus(pull, state, text);
+    } catch (error) {
+      failures.push(`status:${pull.number}:${code(error)}`);
+    }
+  };
+  for (const action of evaluation.actions) {
+    const number = action.pull.number;
+    let drafted = false;
+    try {
+      if (action.kind === "hold") {
+        await github.convertToDraft(action.pull);
+        drafted = true;
+        await status(action.pull, "pending", STATUS.waiting);
+        const cancelled = await github.cancelRuns(action.pull);
+        if (cancelled > 0) extra.push({ at, kind: "held", number, shadow: false, detail: `cancelled_runs:${cancelled}` });
+      } else if (action.kind === "release") {
+        await github.markReady(action.pull);
+        await status(action.pull, "success", STATUS.granted);
+      } else if (action.kind === "cancel") {
+        await github.cancelRuns(action.pull);
+      } else if (action.kind === "admit") {
+        await status(action.pull, "success", STATUS.granted);
+      } else {
+        await status(action.pull, "success", STATUS.left);
+      }
+    } catch (error) {
+      failures.push(`${action.kind}:${number}:${code(error)}`);
+      extra.push({ at, kind: "failed", number, shadow: false, detail: `${action.kind}:${code(error)}`.slice(0, 120) });
+      if (action.kind === "hold" && !drafted) undoHold.add(number);
+      if (action.kind === "release") putBack.push(action.entry);
+    }
+  }
+
+  // 4. Corrections, on top of the state as it is now.
+  if (extra.length > 0 || undoHold.size > 0 || putBack.length > 0) {
+    await prisma.$transaction(
+      async (tx) => {
+        await takeLock(tx);
+        const current = await readState(tx);
+        const queue = current.queue.filter((entry) => !undoHold.has(entry.number));
+        for (const entry of [...putBack].reverse()) {
+          if (!queue.some((queued) => queued.number === entry.number)) queue.unshift(entry);
+        }
+        const failedReleases = new Set(putBack.map((entry) => entry.number));
+        await writeState(tx, {
+          ...current,
+          queue: queue.slice(0, 100),
+          released: current.released.filter((entry) => !failedReleases.has(entry.number)),
+          events: [...current.events, ...extra].slice(-50),
+        });
+      },
+      { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
+    );
+  }
+  scheduleRecheck(evaluation.nextCheckInMs);
+  return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
+}
+
+/** After the operator removes a pull request from the line: its "waiting" status is cleared. */
+export async function clearCiAdmissionStatus(number: number): Promise<void> {
+  if (ciAdmissionMode() !== "on") return;
+  const config = ciAdmissionGithubConfig();
+  if (!config) return;
+  const github = createCiAdmissionGithub(config);
+  const pull = await github.openPull(number);
+  if (pull) await github.setStatus(pull, "success", STATUS.left);
 }
 
 /* ------------------------------------------------------------------------- */

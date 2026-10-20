@@ -54,12 +54,12 @@ test("an unreadable stored state is an empty one", () => {
 test("an arrival runs while it fits: three develop, or main and develop", () => {
   const running = [pull(1), pull(2)];
   const arrives = run({ state: state(), openPulls: [...running, pull(3)], runningShas: new Set([sha(1), sha(2)]), arrival: 3 });
-  assert.deepEqual(kinds(arrives), []);
+  assert.deepEqual(kinds(arrives), ["admit:3"]);
   assert.equal(arrives.state.events.at(-1).kind, "admitted");
 
   const main = pull(4, { base: "main", head: "release/x" });
   const withMain = run({ state: state(), openPulls: [main, pull(5)], runningShas: new Set([main.headSha]), arrival: 5 });
-  assert.deepEqual(kinds(withMain), []);
+  assert.deepEqual(kinds(withMain), ["admit:5"]);
 });
 
 test("an arrival that does not fit is held at the end of the line", () => {
@@ -180,7 +180,7 @@ test("the round records which pull requests use the slots, released ones include
 
 test("a burst of arrivals before any run is visible cannot share one free slot", () => {
   const first = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(2, { draft: true })], arrival: 1 });
-  assert.deepEqual(kinds(first), []);
+  assert.deepEqual(kinds(first), ["admit:1"]);
   const second = run({ state: first.state, openPulls: [pull(1), pull(2)], arrival: 2, nowMs: T0 + 1_000 });
   assert.deepEqual(kinds(second), ["hold:2"]);
 });
@@ -202,4 +202,44 @@ test("its own ready event is not an arrival even when its runs are already visib
   const echo = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), arrival: 8, nowMs: T0 + 3_000 });
   assert.deepEqual(kinds(echo), []);
   assert.deepEqual(echo.state.queue.map((e) => e.number), [9]);
+});
+
+test("an arrival that would be held and released in the same round is simply let through", () => {
+  // #7 waits; #1 finished, so both #7 (2 slots) and the arriving #9 (1) fit.
+  const evaluation = run({
+    state: state({ queue: [queued(7, "main")] }),
+    openPulls: [pull(7, { base: "main", draft: true }), pull(9)],
+    arrival: 9,
+  });
+  assert.deepEqual(kinds(evaluation), ["release:7", "admit:9"]);
+  assert.deepEqual(evaluation.state.queue, []);
+  assert.deepEqual(evaluation.state.events.map((e) => `${e.kind}:${e.number}`), ["released:7", "admitted:9"]);
+  assert.deepEqual(evaluation.state.released.map((r) => r.number).sort(), [7, 9]);
+});
+
+test("a release carries its place in line so a failed ready can put it back", () => {
+  const evaluation = run({ state: state({ queue: [queued(8)] }), openPulls: [pull(8, { draft: true })] });
+  const release = evaluation.actions.find((a) => a.kind === "release");
+  assert.equal(release.entry.number, 8);
+  assert.equal(release.entry.queuedAt, "2026-10-20T01:00:00.000Z");
+});
+
+test("a pull request that leaves the line while open has its waiting status cleared", () => {
+  const evaluation = run({
+    state: state({ capacity: 1, queue: [queued(7), queued(8)] }),
+    openPulls: [pull(1), pull(7, { base: "claude/x", draft: true }), pull(8)],
+    runningShas: new Set([sha(1), sha(8)]),
+  });
+  assert.deepEqual(kinds(evaluation).sort(), ["clear:7", "clear:8"]);
+});
+
+test("a full line takes no more, so the stored state stays inside its schema", () => {
+  const full = Array.from({ length: 100 }, (_, i) => queued(1000 + i));
+  const unique = (n) => n.toString(16).padStart(40, "e");
+  const openPulls = [pull(1), ...full.map((e) => pull(e.number, { draft: true, headSha: unique(e.number) })), pull(5)];
+  const evaluation = run({ state: state({ capacity: 1, queue: full }), openPulls, runningShas: new Set([sha(1)]), arrival: 5 });
+  assert.deepEqual(kinds(evaluation), []);
+  assert.equal(evaluation.state.queue.length, 100);
+  assert.equal(evaluation.state.events.at(-1).detail, "queue_full");
+  assert.equal(parseCiAdmissionState(JSON.stringify(evaluation.state)).queue.length, 100);
 });

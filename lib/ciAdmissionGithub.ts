@@ -6,11 +6,13 @@ import type { CiAdmissionPull } from "@/lib/ciAdmissionCore";
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
- * repository with Pull requests and Actions write, Metadata read.
+ * repository with Pull requests, Actions and Commit statuses write, Metadata
+ * read.
  *
  * Writes, and nothing else: convert a pull request to draft, mark one ready
  * for review, cancel a pull_request workflow run of a held pull request or a
- * draft. No merge, push, label, comment or status. Every failure is a short
+ * draft, and one commit status (context `CI admission`) on a pull request's
+ * head telling sessions it waits in line. No merge, push, label or comment. Every failure is a short
  * code; no token, key or body is ever returned or logged. The webhook
  * signature check is in lib/ciAdmissionWebhookCore.ts.
  */
@@ -20,6 +22,7 @@ const API = "https://api.github.com";
 const REPO = `${API}/repos/${CI_ADMISSION_REPOSITORY}`;
 const TIMEOUT_MS = 8_000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "waiting", "pending", "requested"]);
+const SHA = /^[0-9a-f]{40}$/;
 
 export type CiAdmissionGithubConfig = { appId: string; privateKey: string };
 
@@ -52,6 +55,23 @@ const list = (value: unknown): unknown[] => {
   return value;
 };
 
+const toPull = (item: unknown): CiAdmissionPull | null => {
+  const pull = record(item);
+  const head = record(pull.head);
+  const headRepo = head.repo === null || head.repo === undefined ? null : record(head.repo);
+  if (typeof pull.number !== "number") return null;
+  return {
+    number: pull.number,
+    nodeId: String(pull.node_id ?? ""),
+    title: String(pull.title ?? ""),
+    base: String(record(pull.base).ref ?? ""),
+    head: String(head.ref ?? ""),
+    headSha: String(head.sha ?? ""),
+    draft: pull.draft === true,
+    fork: headRepo === null || headRepo.full_name !== CI_ADMISSION_REPOSITORY,
+  };
+};
+
 export type CiAdmissionGithub = {
   openPulls(): Promise<CiAdmissionPull[]>;
   /** Head SHAs with a pull_request workflow run queued or in progress, repository-wide. */
@@ -62,7 +82,13 @@ export type CiAdmissionGithub = {
   cancelRuns(pull: CiAdmissionPull): Promise<number>;
   /** Jobs holding or waiting for a runner right now, repository-wide, split by GitHub-hosted and Ubicloud. */
   runnerUsage(): Promise<CiRunnerUsageCounts>;
+  /** The `CI admission` commit status on the pull request's head. */
+  setStatus(pull: CiAdmissionPull, state: "pending" | "success", description: string): Promise<void>;
+  /** One open pull request, or null when it is closed or not found. */
+  openPull(number: number): Promise<CiAdmissionPull | null>;
 };
+
+export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
 
 export type CiRunnerUsageCounts = { githubRunning: number; githubQueued: number; ubicloudRunning: number; ubicloudQueued: number };
 
@@ -95,7 +121,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) throw new Error("github_shape");
       const created = await call("POST", `${API}/app/installations/${id}/access_tokens`, jwt, {
         repositories: [CI_ADMISSION_REPOSITORY.split("/")[1]],
-        permissions: { pull_requests: "write", actions: "write", metadata: "read" },
+        permissions: { pull_requests: "write", actions: "write", statuses: "write", metadata: "read" },
       });
       if (created.status !== 201) throw new Error(`github_token_${created.status}`);
       const value = record(created.json()).token;
@@ -125,25 +151,31 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
   };
 
   return {
+    async openPull(number) {
+      const answer = await call("GET", `${REPO}/pulls/${number}`, await installationToken());
+      if (answer.status === 404) return null;
+      if (answer.status !== 200) throw new Error(`github_${answer.status}`);
+      const body = record(answer.json());
+      return body.state === "open" ? toPull(body) : null;
+    },
+    async setStatus(pull, state, description) {
+      if (!SHA.test(pull.headSha)) throw new Error("head_sha_invalid");
+      const target = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/$/, "");
+      const answer = await call("POST", `${REPO}/statuses/${pull.headSha}`, await installationToken(), {
+        state,
+        context: CI_ADMISSION_STATUS_CONTEXT,
+        description: description.slice(0, 140),
+        ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/agent-digests` } : {}),
+      });
+      if (answer.status !== 201) throw new Error(`github_status_${answer.status}`);
+    },
     async openPulls() {
       const pulls: CiAdmissionPull[] = [];
       for (let page = 1; page <= 3; page += 1) {
         const batch = list(await get(`${REPO}/pulls?state=open&per_page=100&page=${page}`));
         for (const item of batch) {
-          const pull = record(item);
-          const head = record(pull.head);
-          const headRepo = head.repo === null || head.repo === undefined ? null : record(head.repo);
-          if (typeof pull.number !== "number") continue;
-          pulls.push({
-            number: pull.number,
-            nodeId: String(pull.node_id ?? ""),
-            title: String(pull.title ?? ""),
-            base: String(record(pull.base).ref ?? ""),
-            head: String(head.ref ?? ""),
-            headSha: String(head.sha ?? ""),
-            draft: pull.draft === true,
-            fork: headRepo === null || headRepo.full_name !== CI_ADMISSION_REPOSITORY,
-          });
+          const pull = toPull(item);
+          if (pull) pulls.push(pull);
         }
         if (batch.length < 100) break;
       }

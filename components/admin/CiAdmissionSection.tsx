@@ -23,9 +23,10 @@ const RUNNER_REFRESH_MS = 20_000;
  * seconds while the page is visible and at once when it becomes visible again.
  * The server shares one cached read among all viewers.
  */
-function RunnerUsagePanel({ initial }: { initial: CiRunnerUsage }) {
+function RunnerUsagePanel() {
   const m = useAdminMessages(adminCiAdmissionMessages);
-  const [usage, setUsage] = useState<CiRunnerUsage>(initial);
+  // Read after the page renders, so a slow GitHub read never holds the page.
+  const [usage, setUsage] = useState<CiRunnerUsage | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -39,12 +40,14 @@ function RunnerUsagePanel({ initial }: { initial: CiRunnerUsage }) {
         // The next tick tries again; the last reading stays on screen.
       }
     };
+    const first = setTimeout(() => void poll(), 0);
     const refresh = setInterval(() => void poll(), RUNNER_REFRESH_MS);
     const clockTick = setInterval(() => setNow(Date.now()), 5_000);
     const onVisible = () => void poll();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
+      clearTimeout(first);
       clearInterval(refresh);
       clearInterval(clockTick);
       document.removeEventListener("visibilitychange", onVisible);
@@ -52,6 +55,14 @@ function RunnerUsagePanel({ initial }: { initial: CiRunnerUsage }) {
   }, []);
 
   const box = "flex flex-col gap-2.5 rounded-xl border border-zinc-800 bg-zinc-950 p-4";
+  if (usage === null) {
+    return (
+      <div className={box} data-testid="ci-runner-usage" aria-busy>
+        <span className="text-[13px] font-medium text-zinc-300">{m.runnerTitle}</span>
+        <div className="h-2.5 animate-pulse rounded-sm bg-zinc-800" />
+      </div>
+    );
+  }
   if (usage.status === "not_configured") {
     return <p className={`${box} text-xs text-zinc-500`}>{m.runnerNotConfigured}</p>;
   }
@@ -171,7 +182,7 @@ const moved = (order: number[], number: number, to: number) => {
  * decisions. A reorder is shown at once and saved; a refused save restores
  * the previous order.
  */
-export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; runnerUsage: CiRunnerUsage }) {
+export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWrite: boolean }) {
   const m = useAdminMessages(adminCiAdmissionMessages);
   const [view, setView] = useState<View>(initial);
   const [failed, setFailed] = useState(false);
@@ -302,7 +313,7 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
 
   /* ---------- pointer ---------- */
   const onPointerDown = (event: PointerEvent<HTMLButtonElement>, number: number) => {
-    if (busy || event.button !== 0 || !listRef.current) return;
+    if (!canWrite || busy || event.button !== 0 || !listRef.current) return;
     event.preventDefault();
     const listTop = listRef.current.getBoundingClientRect().top;
     const midpoints = order.map((n) => {
@@ -327,7 +338,7 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
   const onHandleKey = (event: KeyboardEvent<HTMLButtonElement>, number: number) => {
     const pick = event.key === " " || event.key === "Enter";
     if (!drag) {
-      if (!pick || busy) return;
+      if (!pick || busy || !canWrite) return;
       event.preventDefault();
       const from = order.indexOf(number);
       setDrag({ number, from, over: from, by: "keyboard", midpoints: [], grabOffset: 0, pointerY: 0, rowHeight: 0 });
@@ -404,14 +415,14 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-bold text-zinc-100">{m.title}</h2>
         <span data-testid="ci-admission-mode">{modePill}</span>
-        <button type="button" className={`${button} ml-auto`} disabled={busy} onClick={() => void send({ action: "evaluate" })}>
+        <button type="button" className={`${button} ml-auto`} disabled={!canWrite || busy} onClick={() => void send({ action: "evaluate" })}>
           {m.evaluate}
         </button>
       </div>
       <p className="-mt-2 text-[13px] text-zinc-400">{m.note}</p>
       {!view.configured && view.mode !== "off" ? <p className="text-sm text-amber-300">{m.notConfigured}</p> : null}
 
-      <RunnerUsagePanel initial={runnerUsage} />
+      <RunnerUsagePanel />
 
       {/* Slots */}
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4" data-testid="ci-admission-slots">
@@ -425,7 +436,7 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
               type="button"
               className="h-8 w-8 text-zinc-400 hover:text-zinc-100 disabled:opacity-40"
               aria-label={m.decrease}
-              disabled={busy || state.capacity <= 1}
+              disabled={!canWrite || busy || state.capacity <= 1}
               onClick={() => void send({ action: "set_capacity", capacity: state.capacity - 1 })}
             >
               −
@@ -437,7 +448,7 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
               type="button"
               className="h-8 w-8 text-zinc-400 hover:text-zinc-100 disabled:opacity-40"
               aria-label={m.increase}
-              disabled={busy || state.capacity >= CI_ADMISSION_MAX_CAPACITY}
+              disabled={!canWrite || busy || state.capacity >= CI_ADMISSION_MAX_CAPACITY}
               onClick={() => void send({ action: "set_capacity", capacity: state.capacity + 1 })}
             >
               +
@@ -548,7 +559,7 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
                       className="flex h-8 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-zinc-500 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:cursor-grabbing"
                       aria-label={fill(m.handle, { number })}
                       aria-pressed={isDragged}
-                      disabled={busy && !isDragged}
+                      disabled={!canWrite || (busy && !isDragged)}
                       onPointerDown={(event) => onPointerDown(event, number)}
                       onKeyDown={(event) => onHandleKey(event, number)}
                       onBlur={() => {
@@ -573,7 +584,7 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
                       <button
                         type="button"
                         className={button}
-                        disabled={busy || drag !== null}
+                        disabled={!canWrite || busy || drag !== null}
                         onClick={() => void send({ action: "move_top", number })}
                       >
                         {m.moveTop}
@@ -582,7 +593,7 @@ export function CiAdmissionSection({ initial, runnerUsage }: { initial: View; ru
                     <button
                       type="button"
                       className="min-h-8 rounded-lg px-2 text-[13px] font-medium text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
-                      disabled={busy || drag !== null}
+                      disabled={!canWrite || busy || drag !== null}
                       onClick={() => void send({ action: "remove", number })}
                     >
                       {m.remove}

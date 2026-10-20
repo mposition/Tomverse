@@ -10,7 +10,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { CI_ADMISSION_MAX_CAPACITY } from "@/lib/ciAdmissionCore";
-import { changeCiAdmission, readCiAdmissionAdminView, runCiAdmissionRound } from "@/lib/ciAdmissionService";
+import { changeCiAdmission, clearCiAdmissionStatus, readCiAdmissionAdminView, runCiAdmissionRound } from "@/lib/ciAdmissionService";
 
 /**
  * Admin › Agent digests: the CI admission line (lib/ciAdmissionCore.ts).
@@ -61,6 +61,12 @@ export async function POST(req: Request) {
       const changed = await changeCiAdmission({ session, request: req }, body);
       if (changed === null) {
         return NextResponse.json({ error: "The line changed; reload and try again.", code: "stale" }, { status: 409 });
+      }
+      if (body.action === "remove") {
+        // It stays a draft; its "waiting in line" status no longer applies.
+        await clearCiAdmissionStatus(body.number).catch((error: unknown) => {
+          console.error("CI admission status not cleared:", error instanceof Error ? error.message.slice(0, 80) : "unknown");
+        });
       }
     }
     // A round after every change: a pull request moved to the top, or a larger

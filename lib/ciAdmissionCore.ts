@@ -148,8 +148,13 @@ export function parseCiAdmissionState(value: string | null | undefined): CiAdmis
 
 export type CiAdmissionAction =
   | { kind: "hold"; pull: CiAdmissionPull }
-  | { kind: "release"; pull: CiAdmissionPull }
-  | { kind: "cancel"; pull: CiAdmissionPull };
+  /** `entry` is its place in line, put back at the top if marking it ready fails. */
+  | { kind: "release"; pull: CiAdmissionPull; entry: CiAdmissionQueueEntry }
+  | { kind: "cancel"; pull: CiAdmissionPull }
+  /** Let straight through: nothing to change on GitHub but its status. */
+  | { kind: "admit"; pull: CiAdmissionPull }
+  /** It left the line while still open: its "waiting in line" status is cleared. */
+  | { kind: "clear"; pull: CiAdmissionPull };
 
 export type CiAdmissionEvaluation = {
   state: CiAdmissionState;
@@ -192,15 +197,18 @@ export function evaluateCiAdmission(input: {
 
   // The line keeps only open drafts admission still handles.
   const queue: CiAdmissionQueueEntry[] = [];
+  const leaving: CiAdmissionPull[] = [];
   for (const entry of input.state.queue) {
     const pull = open.get(entry.number);
     if (!pull || ciAdmissionUnits(pull) === null) {
       event("dropped", entry.number, pull ? "not_handled" : "closed");
+      if (pull) leaving.push(pull);
       continue;
     }
     if (!pull.draft && entry.number !== input.arrival) {
       // Made ready by someone else while waiting: it runs; it no longer waits.
       event("dropped", entry.number, "ready_elsewhere");
+      leaving.push(pull);
       continue;
     }
     queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200) });
@@ -213,14 +221,18 @@ export function evaluateCiAdmission(input: {
       return units !== null && pull.number !== exclude && running(pull) ? sum + units : sum;
     }, 0);
 
-  const actions: CiAdmissionAction[] = [];
+  const actions: CiAdmissionAction[] = leaving.map((pull) => ({ kind: "clear", pull }) as const);
   const capacity = input.state.capacity;
 
   const arrival = input.arrival === null ? undefined : open.get(input.arrival);
   if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !releasedNumbers.has(arrival.number)) {
     const units = ciAdmissionUnits(arrival)!;
     const waiting = queue.some((entry) => entry.number !== arrival.number);
-    if (waiting || usedBy(arrival.number) + units > capacity) {
+    const queued = queue.some((entry) => entry.number === arrival.number);
+    if ((waiting || usedBy(arrival.number) + units > capacity) && !queued && queue.length >= MAX_QUEUE) {
+      // A full line takes no more: the stored state must stay inside its schema.
+      event("failed", arrival.number, "queue_full");
+    } else if (waiting || usedBy(arrival.number) + units > capacity) {
       actions.push({ kind: "hold", pull: arrival });
       if (!queue.some((entry) => entry.number === arrival.number)) {
         queue.push({ number: arrival.number, title: arrival.title.slice(0, 200), base: arrival.base, head: arrival.head.slice(0, 200), queuedAt: at });
@@ -230,13 +242,14 @@ export function evaluateCiAdmission(input: {
       const index = queue.findIndex((entry) => entry.number === arrival.number);
       if (index >= 0) queue.splice(index, 1);
       released.push({ number: arrival.number, atMs: nowMs, observed: input.runningShas.has(arrival.headSha) });
+      actions.push({ kind: "admit", pull: arrival });
       event("admitted", arrival.number, null);
     }
   }
 
   // A draft running CI is a replayed event: stop it. (A pull request held in
   // this evaluation has its runs cancelled by the hold itself.)
-  const holding = new Set(actions.map((action) => action.pull.number));
+  const holding = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
   for (const pull of input.openPulls) {
     if (!pull.draft || ciAdmissionUnits(pull) === null || holding.has(pull.number)) continue;
     if (!input.runningShas.has(pull.headSha)) continue;
@@ -257,11 +270,26 @@ export function evaluateCiAdmission(input: {
     const asDraft = heldNow.has(pull.number) ? { ...pull, draft: true } : pull;
     if (used + units > capacity) break;
     queue.shift();
-    actions.push({ kind: "release", pull: asDraft });
+    actions.push({ kind: "release", pull: asDraft, entry: top });
     released.push({ number: pull.number, atMs: nowMs, observed: false });
     releasedNow.add(pull.number);
     used += units;
     event("released", pull.number, null);
+  }
+
+  // Held and released in the same evaluation: it never needed to wait. Let it
+  // through instead of drafting it, cancelling its runs and marking it ready.
+  for (const number of heldNow) {
+    if (!releasedNow.has(number)) continue;
+    actions.splice(actions.findIndex((a) => a.kind === "hold" && a.pull.number === number), 1);
+    actions.splice(actions.findIndex((a) => a.kind === "release" && a.pull.number === number), 1);
+    const reservation = released.find((entry) => entry.number === number);
+    if (reservation) reservation.observed = input.runningShas.has(open.get(number)!.headSha);
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      if (events[i].number === number && (events[i].kind === "held" || events[i].kind === "released")) events.splice(i, 1);
+    }
+    actions.push({ kind: "admit", pull: open.get(number)! });
+    event("admitted", number, null);
   }
 
   return {
