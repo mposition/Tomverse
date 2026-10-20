@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   EMPTY_TUNABLES,
   MODEL_EXCLUSION_TUNABLE,
+  TIMEOUT_CHANGE_COOLDOWN_AFTER_REVERT_MS,
   TUNABLE_CHANGES_PER_CYCLE,
   activeExclusions,
   admitTunableChanges,
@@ -95,11 +96,12 @@ test("a timeout is lowered only when nothing timed out and p90 sits well under t
 });
 
 test("a model is excluded only after its answers kept failing, and only while a same-credit choice remains", () => {
-  const failing = evidence({ answerStats: { mini: { answered: 3, failed: 2 }, luna: { answered: 5, failed: 1 } } });
+  // answered counts successes only: mini failed 2 of 4 tries, luna 2 of 6.
+  const failing = evidence({ answerStats: { mini: { answered: 2, failed: 2 }, luna: { answered: 4, failed: 2 } } });
   assert.deepEqual(admit([excludeChange("mini")], { evidence: failing }).admitted, [
     { setting: "excludeModel", modelId: "mini", hours: 24, reason: "답변 실패가 반복됩니다" },
   ]);
-  // One failure in five is not a failing model.
+  // Two failures in six tries is not a failing model.
   assert.equal(admit([excludeChange("luna")], { evidence: failing }).rejected[0].reason, "no_evidence");
   // Not a candidate, or hours out of range.
   assert.equal(admit([excludeChange("ghost")], { evidence: failing }).rejected[0].reason, "not_a_candidate");
@@ -121,6 +123,7 @@ test("no more than the cycle limit is applied, nor more exclusions than allowed 
 
   const full = {
     routerTimeoutMs: null,
+    timeoutRevertedAt: null,
     excluded: Array.from({ length: MODEL_EXCLUSION_TUNABLE.maxActive }, (_, index) => ({
       modelId: `x${index}`,
       until: new Date(NOW + 3_600_000).toISOString(),
@@ -171,6 +174,7 @@ test("applied settings round-trip through storage; expired exclusions end on the
 test("the live router drops excluded models, but never below two candidates", () => {
   const tunables = {
     routerTimeoutMs: null,
+    timeoutRevertedAt: null,
     excluded: [{ modelId: "mini", until: new Date(NOW + 60_000).toISOString(), setAt: "", cycleId: "c", reason: "r" }],
   };
   assert.deepEqual(withoutExcludedModels(candidates, tunables, NOW).map((item) => item.id), ["luna", "flash", "terra"]);
@@ -193,7 +197,9 @@ test("a tuned timeout is undone when timeouts and errors rose after it, and only
   assert.equal(tunableRevertDecision(tuned, routerOutcomeShares(stats({ decisions: 5, timeout: 5 }))), "wait");
   assert.equal(tunableRevertDecision(null, null), "keep");
   // Undoing goes back to the code's default, not to an earlier tuned value.
-  assert.equal(revertedTimeout({ routerTimeoutMs: tuned, excluded: [] }).routerTimeoutMs, null);
+  const undone = revertedTimeout({ routerTimeoutMs: tuned, excluded: [], timeoutRevertedAt: null }, NOW);
+  assert.equal(undone.routerTimeoutMs, null);
+  assert.equal(undone.timeoutRevertedAt, new Date(NOW).toISOString());
 });
 
 test("the analysis call is asked for setting changes in a strict, all-required shape", () => {
@@ -202,4 +208,23 @@ test("the analysis call is asked for setting changes in a strict, all-required s
   assert.deepEqual(schema.properties.settingChanges, tunableChangesSchema());
   assert.deepEqual(tunableChangesSchema().items.required, ["setting", "value", "modelId", "hours", "reason"]);
   assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /settingChanges/);
+});
+
+test("after a tuned timeout is undone, no timeout change is taken for a week, so the bad stretch never becomes the baseline", () => {
+  const busy = evidence({ routerStats: stats({ timeout: 8, error: 4 }) });
+  const reverted = { routerTimeoutMs: null, excluded: [], timeoutRevertedAt: new Date(NOW - 60_000).toISOString() };
+  assert.deepEqual(admit([timeoutChange(6_500)], { evidence: busy, current: reverted }).rejected, [
+    { setting: "routerTimeoutMs", reason: "recently_reverted" },
+  ]);
+  const later = { ...reverted, timeoutRevertedAt: new Date(NOW - TIMEOUT_CHANGE_COOLDOWN_AFTER_REVERT_MS - 1).toISOString() };
+  assert.equal(admit([timeoutChange(6_500)], { evidence: busy, current: later }).admitted.length, 1);
+  // The cooldown survives storage.
+  assert.equal(parseTunables(JSON.stringify(reverted)).timeoutRevertedAt, reverted.timeoutRevertedAt);
+});
+
+test("a model that answered four times and failed twice is not excluded: half of all tries must fail", () => {
+  const healthy = evidence({ answerStats: { mini: { answered: 4, failed: 2 } } });
+  assert.equal(admit([excludeChange("mini")], { evidence: healthy }).rejected[0].reason, "no_evidence");
+  const failing = evidence({ answerStats: { mini: { answered: 2, failed: 2 } } });
+  assert.equal(admit([excludeChange("mini")], { evidence: failing }).admitted.length, 1);
 });

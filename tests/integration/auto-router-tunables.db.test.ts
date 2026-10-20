@@ -84,7 +84,7 @@ test("with the owner's switch off nothing is applied, and the cycle says it was 
     evidence: { routerStats: busyRouter, answerStats: {}, candidates },
   });
   assert.deepEqual(applied, []);
-  assert.deepEqual(await readAutoRouterTunables(), { routerTimeoutMs: null, excluded: [] });
+  assert.deepEqual(await readAutoRouterTunables(), { routerTimeoutMs: null, excluded: [], timeoutRevertedAt: null });
   const summary = (await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: cycle.id } }))
     .summary as Record<string, unknown>;
   assert.equal((summary.settingChanges as { skipped: string }).skipped, "auto_apply_off");
@@ -153,10 +153,21 @@ test("a tuned timeout that made routing worse is undone by the next cycle, with 
         latencyMs: index < 12 ? 7_000 : 1_000,
       })),
     });
+    // The audit table is append-only: count what this test adds.
+    const revertsBefore = (await auditRows("auto.llm_router_tunable.reverted")).length;
     assert.equal(await revertTunedTimeoutIfWorse(), "reverted");
+    const afterRevert = await readAutoRouterTunables();
+    assert.equal(afterRevert.routerTimeoutMs, null);
+    assert.ok(afterRevert.timeoutRevertedAt, "the cooldown is on record");
+    // The same cycle cannot put the reverted timeout straight back.
+    const again = await applyCycleTunableChanges({
+      cycleId: cycle.id,
+      proposed: [raiseTimeout],
+      evidence: { routerStats: busyRouter, answerStats: {}, candidates },
+    });
+    assert.deepEqual(again, []);
     assert.equal((await readAutoRouterTunables()).routerTimeoutMs, null);
-    const audit = await auditRows("auto.llm_router_tunable.reverted");
-    assert.equal(audit.length, 1);
+    assert.equal((await auditRows("auto.llm_router_tunable.reverted")).length, revertsBefore + 1);
     // Nothing tuned now: a second check keeps.
     assert.equal(await revertTunedTimeoutIfWorse(), "kept");
   } finally {
@@ -172,7 +183,7 @@ test("an operator undoes an exclusion or the timeout, and undoing what is not se
   await applyCycleTunableChanges({
     cycleId: cycle.id,
     proposed: [raiseTimeout, excludeMini],
-    evidence: { routerStats: busyRouter, answerStats: { mini: { answered: 2, failed: 2 } }, candidates },
+    evidence: { routerStats: busyRouter, answerStats: { mini: { answered: 1, failed: 2 } }, candidates },
   });
   assert.deepEqual(await undoTunableByOperator(actor, { setting: "excludeModel", modelId: "mini" }), { ok: true });
   assert.deepEqual((await readAutoRouterTunables()).excluded, []);
@@ -180,10 +191,10 @@ test("an operator undoes an exclusion or the timeout, and undoing what is not se
     refused: "not_set",
   });
   assert.deepEqual(await undoTunableByOperator(actor, { setting: "routerTimeoutMs" }), { ok: true });
-  // With nothing left, the row itself is gone.
-  assert.equal(
-    await prisma.appSetting.count({ where: { key: AUTO_ROUTER_TUNABLES_SETTING_KEY } }),
-    0
-  );
+  // A person's undo also starts the cooldown, so the row keeps that record.
+  const left = await readAutoRouterTunables();
+  assert.equal(left.routerTimeoutMs, null);
+  assert.deepEqual(left.excluded, []);
+  assert.ok(left.timeoutRevertedAt);
   assert.equal((await auditRows("auto.llm_router_tunable.undone")).length >= 2, true);
 });

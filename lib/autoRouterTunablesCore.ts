@@ -32,6 +32,12 @@ const RAISE_WHEN_SHARE = 0.05;
 const LOWER_MARGIN_MS = 1_500;
 /** Exclude a model only after this many failed answers, and at least half of its tries. */
 const MIN_FAILED_ANSWERS = 2;
+/**
+ * After a tuned timeout is undone, no timeout change is taken for this long:
+ * the statistics right after include the bad stretch, and re-applying on them
+ * would make that stretch the new baseline.
+ */
+export const TIMEOUT_CHANGE_COOLDOWN_AFTER_REVERT_MS = 7 * 24 * 60 * 60 * 1000;
 /** A timeout change is undone when timeouts and errors rose by this share. */
 const REVERT_WHEN_WORSE_BY = 0.05;
 
@@ -49,9 +55,14 @@ export type TimeoutTunable = {
 
 export type ModelExclusion = { modelId: string; until: string; setAt: string; cycleId: string; reason: string };
 
-export type AutoRouterTunables = { routerTimeoutMs: TimeoutTunable | null; excluded: ModelExclusion[] };
+export type AutoRouterTunables = {
+    routerTimeoutMs: TimeoutTunable | null;
+    excluded: ModelExclusion[];
+    /** When a tuned timeout was last undone because routing got worse. */
+    timeoutRevertedAt: string | null;
+};
 
-export const EMPTY_TUNABLES: AutoRouterTunables = { routerTimeoutMs: null, excluded: [] };
+export const EMPTY_TUNABLES: AutoRouterTunables = { routerTimeoutMs: null, excluded: [], timeoutRevertedAt: null };
 
 const record = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -125,7 +136,11 @@ export const parseTunables = (raw: string | null | undefined): AutoRouterTunable
               ];
           })
         : [];
-    return { routerTimeoutMs, excluded };
+    const timeoutRevertedAt =
+        typeof value.timeoutRevertedAt === "string" && Number.isFinite(Date.parse(value.timeoutRevertedAt))
+            ? value.timeoutRevertedAt
+            : null;
+    return { routerTimeoutMs, excluded, timeoutRevertedAt };
 };
 
 /** The live router's deadline: the tuned value, or the code's when none is set. */
@@ -167,7 +182,8 @@ export type TunableRejection =
     | "not_a_candidate"
     | "no_same_credit_alternative"
     | "too_many_exclusions"
-    | "over_cycle_limit";
+    | "over_cycle_limit"
+    | "recently_reverted";
 
 export type AdmittedTunableChange =
     | { setting: "routerTimeoutMs"; value: number; reason: string }
@@ -246,6 +262,11 @@ export const admitTunableChanges = (input: {
                 refuse("unchanged");
                 continue;
             }
+            const revertedAt = input.current.timeoutRevertedAt ? Date.parse(input.current.timeoutRevertedAt) : null;
+            if (revertedAt !== null && input.now - revertedAt < TIMEOUT_CHANGE_COOLDOWN_AFTER_REVERT_MS) {
+                refuse("recently_reverted");
+                continue;
+            }
             if (!shares || shares.decisions < MIN_ROUTER_DECISIONS) {
                 refuse("no_evidence");
                 continue;
@@ -284,7 +305,8 @@ export const admitTunableChanges = (input: {
                 continue;
             }
             const stats = input.evidence.answerStats[modelId];
-            if (!stats || stats.failed < MIN_FAILED_ANSWERS || stats.failed * 2 < stats.answered) {
+            // answered counts successful answers only: the share is of all tries.
+            if (!stats || stats.failed < MIN_FAILED_ANSWERS || stats.failed * 2 < stats.answered + stats.failed) {
                 refuse("no_evidence");
                 continue;
             }
@@ -328,11 +350,12 @@ export const applyTunableChanges = (input: {
     const setAt = new Date(input.now).toISOString();
     let routerTimeoutMs = input.current.routerTimeoutMs;
     const excluded = activeExclusions(input.current, input.now);
+    const timeoutRevertedAt = input.current.timeoutRevertedAt;
     for (const change of input.changes) {
         if (change.setting === "routerTimeoutMs") {
             routerTimeoutMs = {
                 value: change.value,
-                previous: effectiveRouterTimeoutMs({ routerTimeoutMs, excluded }, input.codeTimeoutMs),
+                previous: effectiveRouterTimeoutMs({ routerTimeoutMs, excluded, timeoutRevertedAt }, input.codeTimeoutMs),
                 setAt,
                 cycleId: input.cycleId,
                 reason: change.reason,
@@ -348,7 +371,7 @@ export const applyTunableChanges = (input: {
             });
         }
     }
-    return { routerTimeoutMs, excluded };
+    return { routerTimeoutMs, excluded, timeoutRevertedAt };
 };
 
 /**
@@ -370,9 +393,10 @@ export const tunableRevertDecision = (
  * default, not to `previous`: an earlier tuned value was itself only a
  * proposal, and the default is the one value nobody tuned.
  */
-export const revertedTimeout = (current: AutoRouterTunables): AutoRouterTunables => ({
+export const revertedTimeout = (current: AutoRouterTunables, now: number): AutoRouterTunables => ({
     ...current,
     routerTimeoutMs: null,
+    timeoutRevertedAt: new Date(now).toISOString(),
 });
 
 /** The analysis model's instruction for proposing a change, appended to the generator's. */

@@ -36,7 +36,8 @@ import { prisma } from "@/lib/prisma";
  */
 
 const writeTunables = async (tx: Prisma.TransactionClient, value: AutoRouterTunables) => {
-    if (!value.routerTimeoutMs && value.excluded.length === 0) {
+    // Kept while a revert's cooldown is on record, or the cooldown would be lost.
+    if (!value.routerTimeoutMs && value.excluded.length === 0 && !value.timeoutRevertedAt) {
         await tx.appSetting.deleteMany({ where: { key: AUTO_ROUTER_TUNABLES_SETTING_KEY } });
         return;
     }
@@ -168,7 +169,7 @@ export async function revertTunedTimeoutIfWorse(): Promise<"kept" | "reverted" |
         const current = await readAutoRouterTunables(tx);
         // Changed meanwhile (an operator's undo, or another change): leave it.
         if (!current.routerTimeoutMs || current.routerTimeoutMs.setAt !== tuned.setAt) return false;
-        await writeTunables(tx, revertedTimeout(current));
+        await writeTunables(tx, revertedTimeout(current, Date.now()));
         await writeAutoRouterTunableSystemAudit(tx, {
             action: "auto.llm_router_tunable.reverted",
             targetId: AUTO_ROUTER_TUNABLES_SETTING_KEY,
@@ -237,7 +238,8 @@ export async function undoTunableByOperator(
         let next: AutoRouterTunables;
         if (target.setting === "routerTimeoutMs") {
             if (!current.routerTimeoutMs) return { refused: "not_set" as const };
-            next = revertedTimeout(current);
+            // A person's undo also starts the cooldown: they did not want it.
+            next = revertedTimeout(current, Date.now());
         } else {
             if (!current.excluded.some((item) => item.modelId === target.modelId)) {
                 return { refused: "not_set" as const };
