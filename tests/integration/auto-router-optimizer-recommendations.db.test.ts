@@ -197,15 +197,25 @@ test("the coding agent claims the open code recommendation once, then reports a 
     assert.equal((claimAudit[0].metadata as Record<string, unknown>).index, 1);
 
     const prUrl = "https://github.com/mposition/Tomverse/pull/9999";
+    const result = { claimId: claimed.claimId, outcome: "pr_opened" as const, prUrl };
+    // A result naming another claim is refused and changes nothing.
     assert.deepEqual(
-      await recordRecommendationResult({ cycleId: cycle.id, index: 1, result: { outcome: "pr_opened", prUrl } }),
-      { ok: true, changed: true }
+      await recordRecommendationResult({
+        cycleId: cycle.id,
+        index: 1,
+        result: { ...result, claimId: "00000000-0000-4000-8000-000000000000" },
+      }),
+      { refused: "not_claimed" }
     );
+    assert.deepEqual(await recordRecommendationResult({ cycleId: cycle.id, index: 1, result }), {
+      ok: true,
+      changed: true,
+    });
     // The same result again changes nothing and adds no audit entry.
-    assert.deepEqual(
-      await recordRecommendationResult({ cycleId: cycle.id, index: 1, result: { outcome: "pr_opened", prUrl } }),
-      { ok: true, changed: false }
-    );
+    assert.deepEqual(await recordRecommendationResult({ cycleId: cycle.id, index: 1, result }), {
+      ok: true,
+      changed: false,
+    });
     assert.equal(
       (await prisma.adminAuditLog.findMany({
         where: { targetId: cycle.id, action: "auto.llm_router_recommendation.result_recorded" },
@@ -224,12 +234,20 @@ test("a result for a recommendation an operator reopened is refused and changes 
   const { recordRecommendationResult } = await import("@/lib/autoRouterRecAgent");
   const cycle = await seed();
   assert.deepEqual(
-    await recordRecommendationResult({ cycleId: cycle.id, index: 1, result: { outcome: "failed", reason: "tests" } }),
+    await recordRecommendationResult({
+      cycleId: cycle.id,
+      index: 1,
+      result: { claimId: "00000000-0000-4000-8000-000000000000", outcome: "failed", reason: "tests" },
+    }),
     { refused: "not_claimed" }
   );
   // A setting recommendation is never the agent's.
   assert.deepEqual(
-    await recordRecommendationResult({ cycleId: cycle.id, index: 2, result: { outcome: "failed", reason: "tests" } }),
+    await recordRecommendationResult({
+      cycleId: cycle.id,
+      index: 2,
+      result: { claimId: "00000000-0000-4000-8000-000000000000", outcome: "failed", reason: "tests" },
+    }),
     { refused: "not_found" }
   );
   assert.equal((await summaryOf(cycle.id)).recommendationStatus, undefined);

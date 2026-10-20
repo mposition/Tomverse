@@ -14,8 +14,8 @@ import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
 const NO_STORE = { "Cache-Control": "no-store" };
 
 const bodySchema = z.discriminatedUnion("outcome", [
-  z.object({ id: z.string().max(80), outcome: z.literal("pr_opened"), prUrl: z.string().max(200) }).strict(),
-  z.object({ id: z.string().max(80), outcome: z.literal("failed"), reason: z.enum(RECOMMENDATION_FAILURE_REASONS) }).strict(),
+  z.object({ id: z.string().max(80), claimId: z.string().uuid(), outcome: z.literal("pr_opened"), prUrl: z.string().max(200) }).strict(),
+  z.object({ id: z.string().max(80), claimId: z.string().uuid(), outcome: z.literal("failed"), reason: z.enum(RECOMMENDATION_FAILURE_REASONS) }).strict(),
 ]);
 
 /**
@@ -35,9 +35,9 @@ export async function POST(request: Request) {
     if (body.outcome === "pr_opened") {
       const prUrl = admitRecommendationPrUrl(body.prUrl);
       if (!prUrl) return NextResponse.json({ error: "bad_pr_url" }, { status: 400, headers: NO_STORE });
-      result = { outcome: "pr_opened", prUrl };
+      result = { claimId: body.claimId, outcome: "pr_opened", prUrl };
     } else {
-      result = { outcome: "failed", reason: body.reason };
+      result = { claimId: body.claimId, outcome: "failed", reason: body.reason };
     }
     const outcome = await recordRecommendationResult({ ...id, result });
     if ("refused" in outcome) {

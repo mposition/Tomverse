@@ -90,7 +90,7 @@ export function RecommendationControls({
             {m.openPr}
           </a>
         ) : null}
-        {item.status === "open" ? (
+        {item.status !== "done" && item.status !== "dismissed" ? (
           <>
             <button
               type="button"
@@ -113,7 +113,11 @@ export function RecommendationControls({
               {m.dismiss}
             </button>
           </>
-        ) : (
+        ) : null}
+        {item.status === "done" ||
+        item.status === "dismissed" ||
+        item.status === "failed" ||
+        item.status === "needs_lookup" ? (
           <button
             type="button"
             onClick={() => onSetStatus(cycle.id, item.index, "open")}
@@ -124,7 +128,7 @@ export function RecommendationControls({
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
             {m.reopen}
           </button>
-        )}
+        ) : null}
         <button
           type="button"
           onClick={() => void copyInstruction()}

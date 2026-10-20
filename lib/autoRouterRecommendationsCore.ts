@@ -84,6 +84,12 @@ export type RecommendationStatusEntry = {
     by: string;
     /** claimed only: when the claim shows as needs_lookup. */
     leaseUntil?: string;
+    /**
+     * Issued with each claim and kept on its result: a result is stored only
+     * against the claim it names, so a late result of an earlier claim of the
+     * same recommendation never lands on a later one.
+     */
+    claimId?: string;
     /** pr_opened only. */
     prUrl?: string;
     /** failed only. */
@@ -121,6 +127,7 @@ export const recommendationStatusEntries = (summary: unknown): Map<number, Recom
             at: value.at,
             by: value.by,
             ...(typeof value.leaseUntil === "string" ? { leaseUntil: value.leaseUntil } : {}),
+            ...(typeof value.claimId === "string" ? { claimId: value.claimId } : {}),
             ...(typeof value.prUrl === "string" ? { prUrl: value.prUrl } : {}),
             ...((RECOMMENDATION_FAILURE_REASONS as readonly unknown[]).includes(value.reason)
                 ? { reason: value.reason as RecommendationFailureReason }
@@ -226,25 +233,28 @@ export const nextClaimableRecommendation = (
     return null;
 };
 
-export type RecommendationResultInput =
+export type RecommendationResultInput = { claimId: string } & (
     | { outcome: "pr_opened"; prUrl: string }
-    | { outcome: "failed"; reason: RecommendationFailureReason };
+    | { outcome: "failed"; reason: RecommendationFailureReason }
+);
 
 /**
- * Whether the agent's result may be stored over the current entry. Only a
- * claim takes a result -- expired or not, since the result is what happened.
- * The same result again is a replay; anything else (the operator reopened or
- * closed it meanwhile, or a different result) is refused and changes nothing.
+ * Whether the agent's result may be stored over the current entry. Only the
+ * claim the result names takes it -- expired or not, since the result is what
+ * happened. The same result of the same claim again is a replay; anything else
+ * (another claim, the operator reopened or closed it meanwhile, or a different
+ * result) is refused and changes nothing.
  */
 export const recommendationResultDecision = (
     current: RecommendationStatusEntry | undefined,
     input: RecommendationResultInput
 ): "apply" | "replay" | "not_claimed" => {
-    if (current?.status === "claimed") return "apply";
-    if (input.outcome === "pr_opened" && current?.status === "pr_opened" && current.prUrl === input.prUrl) {
+    if (!current?.claimId || current.claimId !== input.claimId) return "not_claimed";
+    if (current.status === "claimed") return "apply";
+    if (input.outcome === "pr_opened" && current.status === "pr_opened" && current.prUrl === input.prUrl) {
         return "replay";
     }
-    if (input.outcome === "failed" && current?.status === "failed" && current.reason === input.reason) {
+    if (input.outcome === "failed" && current.status === "failed" && current.reason === input.reason) {
         return "replay";
     }
     return "not_claimed";

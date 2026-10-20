@@ -116,20 +116,26 @@ test("the agent takes the oldest open code recommendation, never a setting, guid
   assert.equal(nextClaimableRecommendation([], NOW), null);
 });
 
-test("only a claim takes a result; the same result again is a replay; anything else is refused", () => {
-  const claimed = { status: "claimed", at: iso(NOW), by: "auto-router-rec-agent", leaseUntil: iso(NOW - 1) };
-  const pr = { outcome: "pr_opened", prUrl: "https://github.com/mposition/Tomverse/pull/9" };
-  const failed = { outcome: "failed", reason: "tests" };
+test("only the claim a result names takes it; the same result again is a replay; anything else is refused", () => {
+  const CLAIM = "11111111-1111-4111-8111-111111111111";
+  const claimed = { status: "claimed", at: iso(NOW), by: "auto-router-rec-agent", leaseUntil: iso(NOW - 1), claimId: CLAIM };
+  const pr = { claimId: CLAIM, outcome: "pr_opened", prUrl: "https://github.com/mposition/Tomverse/pull/9" };
+  const failed = { claimId: CLAIM, outcome: "failed", reason: "tests" };
+  // A late result of an earlier claim never lands on a later one.
+  const earlier = "22222222-2222-4222-8222-222222222222";
+  assert.equal(recommendationResultDecision(claimed, { ...pr, claimId: earlier }), "not_claimed");
+  assert.equal(recommendationResultDecision({ ...claimed, claimId: undefined }, pr), "not_claimed");
   // An expired claim still takes the result: it is what happened.
   assert.equal(recommendationResultDecision(claimed, pr), "apply");
   assert.equal(recommendationResultDecision(claimed, failed), "apply");
-  const opened = { status: "pr_opened", at: iso(NOW), by: "auto-router-rec-agent", prUrl: pr.prUrl };
+  const opened = { status: "pr_opened", at: iso(NOW), by: "auto-router-rec-agent", prUrl: pr.prUrl, claimId: CLAIM };
   assert.equal(recommendationResultDecision(opened, pr), "replay");
   assert.equal(recommendationResultDecision(opened, { ...pr, prUrl: `${pr.prUrl}0` }), "not_claimed");
   assert.equal(recommendationResultDecision(opened, failed), "not_claimed");
-  const fail = { status: "failed", at: iso(NOW), by: "auto-router-rec-agent", reason: "tests" };
+  assert.equal(recommendationResultDecision(opened, { ...pr, claimId: earlier }), "not_claimed");
+  const fail = { status: "failed", at: iso(NOW), by: "auto-router-rec-agent", reason: "tests", claimId: CLAIM };
   assert.equal(recommendationResultDecision(fail, failed), "replay");
-  assert.equal(recommendationResultDecision(fail, { outcome: "failed", reason: "timeout" }), "not_claimed");
+  assert.equal(recommendationResultDecision(fail, { claimId: CLAIM, outcome: "failed", reason: "timeout" }), "not_claimed");
   // An operator's reopen or close is never overwritten.
   assert.equal(recommendationResultDecision(undefined, pr), "not_claimed");
   assert.equal(recommendationResultDecision({ status: "open", at: iso(NOW), by: "u1" }, pr), "not_claimed");

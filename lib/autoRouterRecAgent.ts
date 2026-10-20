@@ -1,5 +1,6 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
@@ -59,6 +60,8 @@ export type ClaimedRecommendation = {
     findings: string[];
     instruction: string;
     leaseUntil: string;
+    /** What the result must name: a late result of an earlier claim never lands on this one. */
+    claimId: string;
 };
 
 export const recommendationId = (cycleId: string, index: number) => `${cycleId}:${index}`;
@@ -97,6 +100,7 @@ export async function claimNextRecommendation(input: {
         if (!cycle) return null;
 
         const leaseUntil = new Date(now.getTime() + REC_AGENT_LEASE_MS).toISOString();
+        const claimId = randomUUID();
         await tx.autoRouterOptimizerCycle.update({
             where: { id: next.cycleId },
             data: {
@@ -105,6 +109,7 @@ export async function claimNextRecommendation(input: {
                     at: now.toISOString(),
                     by: AGENT_BY,
                     leaseUntil,
+                    claimId,
                 }) as Prisma.InputJsonObject,
             },
         });
@@ -113,7 +118,7 @@ export async function claimNextRecommendation(input: {
             targetId: next.cycleId,
             summary: "The coding agent took an Auto router optimizer code recommendation.",
             // Its place identifies it in the cycle; its text stays out of the chain.
-            metadata: { index: next.index, leaseUntil },
+            metadata: { index: next.index, leaseUntil, claimId },
         });
         const findings = reportFindings(cycle.summary);
         return {
@@ -130,6 +135,7 @@ export async function claimNextRecommendation(input: {
                 link: `${input.origin}/admin/routing#optimizer-cycle-${next.cycleId}`,
             }),
             leaseUntil,
+            claimId,
         };
     });
 }
@@ -172,6 +178,7 @@ export async function recordRecommendationResult(input: {
                     status: input.result.outcome,
                     at: now.toISOString(),
                     by: AGENT_BY,
+                    claimId: input.result.claimId,
                     ...(input.result.outcome === "pr_opened"
                         ? { prUrl: input.result.prUrl }
                         : { reason: input.result.reason }),
@@ -187,6 +194,7 @@ export async function recordRecommendationResult(input: {
                     : "The coding agent did not open a PR for an Auto router optimizer recommendation.",
             metadata: {
                 index: input.index,
+                claimId: input.result.claimId,
                 outcome: input.result.outcome,
                 ...(input.result.outcome === "pr_opened"
                     ? { prUrl: input.result.prUrl }
