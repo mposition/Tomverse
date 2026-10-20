@@ -14,6 +14,8 @@
  */
 
 /** The app-side switch and the walker's submission secret for the scout route. */
+import { createHash } from "node:crypto";
+
 export const PRODUCT_RESEARCH_SCOUT_SWITCH_ENV = "PRODUCT_RESEARCH_SCOUT_ENABLED";
 export const PRODUCT_RESEARCH_SCOUT_SECRET_ENV = "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET";
 
@@ -217,6 +219,19 @@ export function parseScoutAnswer(value: unknown, existingTitles: readonly string
     kept.push({ title, area: raw.area as SuggestionArea, severity: raw.severity as SuggestionSeverity, evidence, suggestion });
   }
   return kept;
+}
+
+/**
+ * The AMUX idea request id for one suggestion: a UUID v4 derived from the
+ * suggestion id, so every send of the same suggestion -- a retry, a second
+ * tab, a second owner -- is the same request and AMUX takes it once.
+ */
+export function suggestionSendRequestId(suggestionId: string): string {
+  const bytes = createHash("sha256").update(`product-research-suggestion:${suggestionId}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** The AMUX idea text an operator sends from a suggestion: what, where, why, what to change. */
