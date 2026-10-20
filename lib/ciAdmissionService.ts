@@ -78,7 +78,9 @@ async function applyCiAdmissionChange(actor: AdminActor, change: CiAdmissionAdmi
             pendingArrivals: before.pendingArrivals.filter((number) => number !== change.number),
             // Its "waiting in line" status is cleared by the next round (the
             // route runs one at once), and retried until it is written.
-            statusRetry: [...new Set([...before.statusRetry, change.number])].slice(-100),
+            owedCommits: [
+              ...new Set([...before.owedCommits, ...before.queue.filter((e) => e.number === change.number && e.headSha).map((e) => e.headSha)]),
+            ],
           }
         : null;
       summary = `Removed #${change.number} from the CI admission line; it stays a draft.`;

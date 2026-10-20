@@ -238,7 +238,8 @@ test("a pull request that leaves the line while open has its waiting status clea
     openPulls: [pull(1), pull(7, { base: "claude/x", draft: true }), pull(8)],
     runningShas: new Set([sha(1), sha(8)]),
   });
-  assert.deepEqual(kinds(evaluation).sort(), ["status:7", "status:8"]);
+  assert.deepEqual(kinds(evaluation), []);
+  assert.deepEqual(evaluation.state.owedCommits.sort(), [sha(7), sha(8)].sort());
 });
 
 test("a full line takes no more, so the stored state stays inside its schema", () => {
@@ -376,13 +377,13 @@ test("a release the last round recorded but GitHub still shows as a draft goes b
 
 test("every status a round's actions will write is recorded before they run", () => {
   const evaluation = run({
-    state: state({ capacity: 2, queue: [queued(8)], statusRetry: [5] }),
+    state: state({ capacity: 2, queue: [queued(8)], owedCommits: ["5".repeat(40)] }),
     openPulls: [pull(8, { draft: true }), pull(9, { draft: true, headSha: "7".repeat(40) })],
     running: new Set([ciRunKey(9, "7".repeat(40))]),
   });
   assert.deepEqual(kinds(evaluation).sort(), ["cancel:9", "release:8"]);
-  // #8 (release) is owed a status; #9 (only a cancel) is not; #5 stays owed.
-  assert.deepEqual(evaluation.state.statusRetry.sort(), [5, 8]);
+  // The released pull request's commit is owed a status; a cancel alone owes none; the earlier one stays owed.
+  assert.deepEqual(evaluation.state.owedCommits.sort(), ["5".repeat(40), sha(8)].sort());
 });
 
 test("a hold the last round recorded but GitHub still shows ready is judged again, not dropped", () => {
@@ -463,8 +464,8 @@ test("a waiting pull request that closes has the shared commit's status decided 
     openPulls: [pull(3, { headSha: shared })],
     running: new Set([ciRunKey(3, shared)]),
   });
-  assert.deepEqual(kinds(evaluation), ["status:3"]);
-  assert.ok(evaluation.state.statusRetry.includes(3));
+  assert.deepEqual(kinds(evaluation), []);
+  assert.deepEqual(evaluation.state.owedCommits, [shared]);
 });
 
 test("new commits on a waiting draft move its waiting status and redo the old commit's", () => {
@@ -475,6 +476,7 @@ test("new commits on a waiting draft move its waiting status and redo the old co
     openPulls: [pull(8, { draft: true, headSha: newHead }), pull(3, { headSha: oldHead })],
     running: new Set([ciRunKey(3, oldHead)]),
   });
-  assert.deepEqual(kinds(evaluation).sort(), ["status:3", "status:8"]);
+  assert.deepEqual(kinds(evaluation), []);
+  assert.deepEqual(evaluation.state.owedCommits.sort(), [oldHead, newHead].sort());
   assert.equal(evaluation.state.queue[0].headSha, newHead);
 });

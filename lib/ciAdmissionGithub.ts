@@ -92,7 +92,7 @@ export type CiAdmissionGithub = {
   /** Jobs holding or waiting for a runner right now, repository-wide, split by GitHub-hosted and Ubicloud. */
   runnerUsage(): Promise<CiRunnerUsageCounts>;
   /** The `CI admission` commit status on the pull request's head. */
-  setStatus(pull: CiAdmissionPull, state: "pending" | "success", description: string): Promise<void>;
+  setStatus(sha: string, state: "pending" | "success", description: string): Promise<void>;
 };
 
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
@@ -153,10 +153,10 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     return record(body.data);
   };
   return {
-    async setStatus(pull, state, description) {
-      if (!SHA.test(pull.headSha)) throw new Error("head_sha_invalid");
+    async setStatus(sha, state, description) {
+      if (!SHA.test(sha)) throw new Error("head_sha_invalid");
       const target = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/$/, "");
-      const answer = await call("POST", `${REPO}/statuses/${pull.headSha}`, await installationToken(), {
+      const answer = await call("POST", `${REPO}/statuses/${sha}`, await installationToken(), {
         state,
         context: CI_ADMISSION_STATUS_CONTEXT,
         description: description.slice(0, 140),

@@ -161,7 +161,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   }
 
   // 2. Judge and record, under the lock.
-  const { evaluation, owedStatuses } = await prisma.$transaction(
+  const evaluation = await prisma.$transaction(
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
@@ -172,8 +172,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
           ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound, pendingArrivals: [] }
           : judged.state,
       );
-      // Statuses owed from earlier rounds; this round's own are written by its actions.
-      return { evaluation: judged, owedStatuses: state.statusRetry };
+      return judged;
     },
     { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
   );
@@ -186,46 +185,16 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     return { outcome: "done", mode, ...summary, failures: [], nextCheckInMs: evaluation.nextCheckInMs };
   }
 
-  // 3. Carry the actions out on GitHub.
+  // 3. Carry the actions out on GitHub. Holds and cancellations first: a
+  // release may count on the slots they free. If any fails (a pull request
+  // stays ready, or runs keep running), this round's releases wait -- back to
+  // the top -- and the next round decides, still counting unstopped runs.
   const failures: string[] = [];
   const at = new Date(now()).toISOString();
   const extra: CiAdmissionEvent[] = [];
   const undoHold = new Set<number>();
   const rejudge = new Set<number>();
   const putBack: CiAdmissionQueueEntry[] = [];
-  const statusFailed = new Set<number>();
-  const statusResolved = new Set<number>();
-  // The status lives on the commit, not the pull request: when two open pull
-  // requests share a head, it is pending while either waits in line.
-  const open = new Map(openPulls.map((pull) => [pull.number, pull]));
-  const inLine = new Set(evaluation.state.queue.map((entry) => entry.number));
-  const waitsOn = (sha: string) => openPulls.some((pull) => pull.headSha === sha && inLine.has(pull.number));
-  const status = async (pull: CiAdmissionPull) => {
-    const pending = waitsOn(pull.headSha);
-    try {
-      await github.setStatus(pull, pending ? "pending" : "success", pending ? STATUS.waiting : STATUS.granted);
-      statusResolved.add(pull.number);
-      statusFailed.delete(pull.number);
-    } catch (error) {
-      failures.push(`status:${pull.number}:${code(error)}`);
-      statusFailed.add(pull.number);
-    }
-  };
-  // Statuses an earlier round could not write, first: what each should say
-  // now follows from the line (pending in it, success out of it), and this
-  // round's own actions below then write anything newer.
-  for (const number of owedStatuses) {
-    const pull = open.get(number);
-    if (!pull) {
-      statusResolved.add(number);
-      continue;
-    }
-    await status(pull);
-  }
-  // Holds and cancellations first: a release may count on the slots they
-  // free. If any fails (a pull request stays ready, or runs keep running),
-  // this round's releases wait -- back to the top -- and the next round
-  // decides, still counting a draft's unstopped runs as occupied.
   let holdFailed = false;
   const first = (action: CiAdmissionAction) => action.kind === "hold" || action.kind === "cancel";
   const ordered = [...evaluation.actions.filter(first), ...evaluation.actions.filter((action) => !first(action))];
@@ -236,19 +205,15 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
       if (action.kind === "hold") {
         await github.convertToDraft(action.pull);
         drafted = true;
-        await status(action.pull);
         const cancelled = await github.cancelRuns(action.pull);
         if (cancelled > 0) extra.push({ at, kind: "held", number, shadow: false, detail: `cancelled_runs:${cancelled}` });
       } else if (action.kind === "release") {
         if (holdFailed) throw new Error("deferred_after_failed_hold");
         await github.markReady(action.pull);
-        await status(action.pull);
       } else if (action.kind === "cancel") {
         await github.cancelRuns(action.pull);
-      } else {
-        // admit or clear: success unless another pull request on this commit waits.
-        await status(action.pull);
       }
+      // admit: nothing on GitHub but its commit's status, written below.
     } catch (error) {
       failures.push(`${action.kind}:${number}:${code(error)}`);
       extra.push({ at, kind: "failed", number, shadow: false, detail: `${action.kind}:${code(error)}`.slice(0, 120) });
@@ -262,9 +227,28 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     }
   }
 
+  // The line as it ends this round, failures included.
+  const finalLine = new Set(evaluation.state.queue.map((entry) => entry.number));
+  for (const number of undoHold) finalLine.delete(number);
+  for (const entry of putBack) finalLine.add(entry.number);
+
+  // 3b. Statuses, last, from the final line. The status lives on the commit:
+  // pending while any open pull request on it waits, success otherwise. Every
+  // owed commit -- recorded with the judgment, before anything ran -- is
+  // written; a failure keeps it owed, whatever the pull requests do next.
+  const written = new Set<string>();
+  for (const sha of evaluation.state.owedCommits) {
+    const pending = openPulls.some((pull) => pull.headSha === sha && finalLine.has(pull.number));
+    try {
+      await github.setStatus(sha, pending ? "pending" : "success", pending ? STATUS.waiting : STATUS.granted);
+      written.add(sha);
+    } catch (error) {
+      failures.push(`status:${sha.slice(0, 7)}:${code(error)}`);
+    }
+  }
+
   // 4. Corrections, on top of the state as it is now.
-  const retryChanged = statusFailed.size > 0 || statusResolved.size > 0;
-  if (extra.length > 0 || undoHold.size > 0 || putBack.length > 0 || rejudge.size > 0 || retryChanged) {
+  if (extra.length > 0 || undoHold.size > 0 || putBack.length > 0 || rejudge.size > 0 || written.size > 0) {
     await prisma.$transaction(
       async (tx) => {
         await takeLock(tx);
@@ -277,7 +261,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
         await writeState(tx, {
           ...current,
           pendingArrivals: [...new Set([...current.pendingArrivals, ...rejudge])].slice(-100),
-          statusRetry: [...new Set([...current.statusRetry.filter((n) => !statusResolved.has(n)), ...statusFailed])].slice(-100),
+          owedCommits: current.owedCommits.filter((sha) => !written.has(sha)),
           queue: queue.slice(0, 100),
           released: current.released.filter((entry) => !failedReleases.has(entry.number)),
           events: [...current.events, ...extra].slice(-50),
@@ -286,11 +270,9 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
       { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
     );
   }
-  // A release that failed is back at the top: try again shortly, since the
-  // failed call itself promises no further webhook.
   // Any failed GitHub write -- a release, a hold, a status, a cancellation --
   // is picked up again by the next round, which judges from GitHub as it is
-  // then (a draft still running CI is cancelled again); make sure one comes.
+  // then; make sure one comes.
   scheduleRecheck(failures.length > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs);
   return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
 }

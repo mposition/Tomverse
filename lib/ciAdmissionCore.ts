@@ -131,12 +131,14 @@ const stateSchema = z
     /** The pull requests the last round held: one GitHub still shows ready is judged again. */
     holding: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
     /**
-     * Pull requests whose `CI admission` commit status is yet to be written:
-     * recorded with the round's judgment, taken off once written. The service
-     * retries them every round -- pending while in line, success otherwise --
-     * since a pending left behind would hold merge-train back.
+     * Commits whose `CI admission` status is owed. The status lives on the
+     * commit, so this is kept by commit, not pull request: recorded with the
+     * round's judgment, written by the service at the end of the round from
+     * the final line (pending while any open pull request on the commit
+     * waits, success otherwise), taken off once written. A pending left
+     * behind would hold merge-train back.
      */
-    statusRetry: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
+    owedCommits: z.array(z.string().regex(/^[0-9a-f]{40}$/)).max(MAX_QUEUE * 2).default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
     /** The latest round: when, how many slots were in use after it, and by which pull requests. */
     lastRound: z
@@ -165,7 +167,7 @@ export const emptyCiAdmissionState = (): CiAdmissionState => ({
   pendingArrivals: [],
   releasing: [],
   holding: [],
-  statusRetry: [],
+  owedCommits: [],
   events: [],
   lastRound: null,
 });
@@ -193,14 +195,9 @@ export type CiAdmissionAction =
   /** `entry` is its place in line, put back at the top if marking it ready fails. */
   | { kind: "release"; pull: CiAdmissionPull; entry: CiAdmissionQueueEntry }
   | { kind: "cancel"; pull: CiAdmissionPull }
-  /** Let straight through: nothing to change on GitHub but its status. */
-  | { kind: "admit"; pull: CiAdmissionPull }
-  /**
-   * Its commit's `CI admission` status is decided again (pending while any
-   * open pull request on that commit waits, success otherwise): it left the
-   * line, a pull request sharing its commit did, or its head moved.
-   */
-  | { kind: "status"; pull: CiAdmissionPull };
+  /** Let straight through: nothing to change on GitHub but its commit's status. */
+  | { kind: "admit"; pull: CiAdmissionPull };
+
 
 export type CiAdmissionEvaluation = {
   state: CiAdmissionState;
@@ -281,27 +278,29 @@ export function evaluateCiAdmission(input: {
 
   // The line keeps only open drafts admission still handles.
   const queue: CiAdmissionQueueEntry[] = [];
-  const leaving: CiAdmissionPull[] = [];
+  // Commits whose status this round changes: every one is owed a write.
+  const owed = new Set<string>();
   for (const entry of input.state.queue) {
     const pull = open.get(entry.number);
     if (!pull || ciAdmissionUnits(pull) === null) {
       event("dropped", entry.number, pull ? "not_handled" : "closed");
-      if (pull) leaving.push(pull);
-      // Closed: the commit's status may still say "waiting" for an open pull
-      // request that shares it; have it decided again for those.
-      else if (entry.headSha) leaving.push(...input.openPulls.filter((other) => other.headSha === entry.headSha));
+      // Its commit (and any open pull request still on it) no longer waits.
+      if (pull) owed.add(pull.headSha);
+      if (entry.headSha) owed.add(entry.headSha);
       continue;
     }
     if (!pull.draft && !arrivals.includes(entry.number)) {
       // Made ready by someone else while waiting: it runs; it no longer waits.
       event("dropped", entry.number, "ready_elsewhere");
-      leaving.push(pull);
+      owed.add(pull.headSha);
+      if (entry.headSha) owed.add(entry.headSha);
       continue;
     }
-    if (entry.headSha && entry.headSha !== pull.headSha) {
+    if (entry.headSha !== pull.headSha) {
       // New commits on a waiting draft: the new commit says "waiting", and the
-      // old one is decided again for any open pull request still on it.
-      leaving.push(pull, ...input.openPulls.filter((other) => other.number !== pull.number && other.headSha === entry.headSha));
+      // old one is decided again.
+      owed.add(pull.headSha);
+      if (entry.headSha) owed.add(entry.headSha);
     }
     queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200), headSha: pull.headSha });
   }
@@ -334,7 +333,7 @@ export function evaluateCiAdmission(input: {
       return units !== null && pull.number !== exclude && occupying(pull) ? sum + units : sum;
     }, 0);
 
-  const actions: CiAdmissionAction[] = leaving.map((pull) => ({ kind: "status", pull }) as const);
+  const actions: CiAdmissionAction[] = [];
   const capacity = input.state.capacity;
 
   for (const arrivalNumber of arrivals) {
@@ -447,15 +446,17 @@ export function evaluateCiAdmission(input: {
       pendingArrivals: [],
       releasing: actions.flatMap((action) => (action.kind === "release" ? [action.entry] : [])),
       holding: actions.flatMap((action) => (action.kind === "hold" ? [action.pull.number] : [])),
-      // Every status this round's actions will write is recorded before they
-      // run; the service takes each off once written, so a stop in between
-      // leaves it for the next round to write.
-      statusRetry: [
+      // Recorded before anything runs; the service takes each off once
+      // written, so a stop in between leaves it for the next round.
+      owedCommits: [
         ...new Set([
-          ...input.state.statusRetry,
-          ...actions.filter((action) => action.kind !== "cancel").map((action) => action.pull.number),
+          ...input.state.owedCommits,
+          ...owed,
+          ...actions.filter((action) => action.kind !== "cancel").map((action) => action.pull.headSha),
         ]),
-      ].slice(-MAX_QUEUE),
+      ]
+        .filter((sha) => /^[0-9a-f]{40}$/.test(sha))
+        .slice(-MAX_QUEUE * 2),
       events: [...input.state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,
