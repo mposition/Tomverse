@@ -114,7 +114,10 @@ const stateSchema = z
      * still hold their slots. Only these keep their slots across a new push;
      * a pull request merely seen running was never granted anything.
      */
-    granted: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
+    granted: z
+      .array(z.object({ number: z.number().int().positive(), headSha: z.string().max(40) }).strict())
+      .max(MAX_QUEUE)
+      .default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
     /** The latest round: when, how many slots were in use after it, and by which pull requests. */
     lastRound: z
@@ -209,9 +212,24 @@ export function evaluateCiAdmission(input: {
   // Its own release echoing back is recognised by number and head together: a
   // reservation for an older head never exempts new commits from judgment.
   const reservedHead = (pull: CiAdmissionPull) => released.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
-  // Granted earlier and still holding: a new push keeps its slots (its new
-  // runs replace the old ones), so a fix push never goes to the back of the line.
-  const granted = new Set(input.state.granted);
+  // Granted earlier and still holding, with the head it was granted for: a new
+  // push keeps its slots (its new runs replace the old ones), so a fix push
+  // never goes to the back of the line.
+  const grantedHead = new Map(input.state.granted.map((grant) => [grant.number, grant.headSha]));
+  const granted = {
+    has: (number: number) => grantedHead.has(number),
+    add: (pull: CiAdmissionPull) => grantedHead.set(pull.number, pull.headSha),
+  };
+  // A granted pull request whose head moved got new commits, whichever event
+  // brings the news first: reserve the new head now, so no round in between
+  // mistakes its slot for a free one.
+  for (const [number, headSha] of grantedHead) {
+    const pull = open.get(number);
+    if (!pull || pull.draft || pull.headSha === headSha) continue;
+    reserve(pull);
+    grantedHead.set(number, pull.headSha);
+    event("admitted", number, "continuing");
+  }
   const reserved = () => new Set(released.filter((entry) => !entry.observed).map((entry) => entry.number));
 
   // The line keeps only open drafts admission still handles.
@@ -249,6 +267,7 @@ export function evaluateCiAdmission(input: {
     // granted: same slots, reserved for this head until its runs show.
     const priorHead = released.find((entry) => entry.number === arrival.number)?.headSha;
     reserve(arrival);
+    granted.add(arrival);
     if (priorHead !== arrival.headSha) event("admitted", arrival.number, "continuing");
   } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !reservedHead(arrival)) {
     const units = ciAdmissionUnits(arrival)!;
@@ -267,7 +286,7 @@ export function evaluateCiAdmission(input: {
       const index = queue.findIndex((entry) => entry.number === arrival.number);
       if (index >= 0) queue.splice(index, 1);
       reserve(arrival);
-      granted.add(arrival.number);
+      granted.add(arrival);
       actions.push({ kind: "admit", pull: arrival });
       event("admitted", arrival.number, null);
     }
@@ -298,7 +317,7 @@ export function evaluateCiAdmission(input: {
     queue.shift();
     actions.push({ kind: "release", pull: asDraft, entry: top });
     released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: false });
-    granted.add(pull.number);
+    granted.add(pull);
     releasedNow.add(pull.number);
     used += units;
     event("released", pull.number, null);
@@ -320,11 +339,11 @@ export function evaluateCiAdmission(input: {
   }
 
   // A grant ends when its pull request no longer runs and holds no reservation.
-  for (const number of [...granted]) {
+  for (const number of [...grantedHead.keys()]) {
     // Released in this evaluation: still a draft in this snapshot, about to run.
     if (releasedNow.has(number)) continue;
     const pull = open.get(number);
-    if (!pull || pull.draft || !running(pull)) granted.delete(number);
+    if (!pull || pull.draft || !running(pull)) grantedHead.delete(number);
   }
 
   return {
@@ -333,7 +352,7 @@ export function evaluateCiAdmission(input: {
       capacity,
       queue,
       released,
-      granted: [...granted].slice(0, MAX_QUEUE),
+      granted: [...grantedHead].map(([number, headSha]) => ({ number, headSha })).slice(0, MAX_QUEUE),
       events: [...input.state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,

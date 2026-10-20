@@ -246,7 +246,7 @@ test("a full line takes no more, so the stored state stays inside its schema", (
 
 test("new commits on a granted pull request keep its slots, reserved for the new head", () => {
   const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
-  assert.deepEqual(admitted.state.granted, [1]);
+  assert.deepEqual(admitted.state.granted.map((g) => g.number), [1]);
   const seen = run({ state: admitted.state, openPulls: [pull(1)], runningShas: new Set([sha(1)]), nowMs: T0 + 60_000 });
   assert.equal(seen.state.released[0].observed, true);
   // A fix push while #2 waits: #1 keeps its slot, and its new head is reserved
@@ -266,23 +266,23 @@ test("new commits on a granted pull request keep its slots, reserved for the new
 test("a pull request seen running but never granted is judged like any arrival", () => {
   // #3's runs were seen (an event raced ahead of its ready event); it was never granted.
   const raced = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(3)], runningShas: new Set([sha(1), sha(3)]) });
-  assert.deepEqual(raced.state.granted, []);
+  assert.deepEqual(raced.state.granted.map((g) => g.number), []);
   const arrives = run({ state: raced.state, openPulls: [pull(1), pull(3)], runningShas: new Set([sha(1), sha(3)]), arrival: 3, nowMs: T0 + 1_000 });
   assert.deepEqual(kinds(arrives), ["hold:3"]);
 });
 
 test("a grant ends when its pull request no longer runs", () => {
   const admitted = run({ state: state(), openPulls: [pull(1)], runningShas: new Set([sha(1)]), arrival: 1 });
-  assert.deepEqual(admitted.state.granted, [1]);
+  assert.deepEqual(admitted.state.granted.map((g) => g.number), [1]);
   const finished = run({ state: admitted.state, openPulls: [pull(1)], nowMs: T0 + 60_000 });
-  assert.deepEqual(finished.state.granted, []);
+  assert.deepEqual(finished.state.granted.map((g) => g.number), []);
 });
 
 test("a pull request released from the line stays granted, so a later fix push keeps its slot", () => {
   const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
-  assert.deepEqual(released.state.granted, [8]);
+  assert.deepEqual(released.state.granted.map((g) => g.number), [8]);
   const running = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), nowMs: T0 + 20 * 60_000 });
-  assert.deepEqual(running.state.granted, [8]);
+  assert.deepEqual(running.state.granted.map((g) => g.number), [8]);
   const fix = run({ state: running.state, openPulls: [pull(8, { headSha: "d".repeat(40) }), pull(9, { draft: true })], arrival: 8, nowMs: T0 + 21 * 60_000 });
   assert.deepEqual(kinds(fix), []);
 });
@@ -292,7 +292,7 @@ test("an older head's reservation does not exempt new commits from judgment", ()
   const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
   const seen = run({ state: admitted.state, openPulls: [pull(1)], runningShas: new Set([sha(1)]), nowMs: T0 + 30_000 });
   const finished = run({ state: { ...seen.state, queue: [queued(2)] }, openPulls: [pull(1), pull(2, { draft: true })], nowMs: T0 + 60_000 });
-  assert.deepEqual(finished.state.granted, [2]);
+  assert.deepEqual(finished.state.granted.map((g) => g.number), [2]);
   // A new commit on #1 while #2 holds the only slot: #1 is held, not let through.
   const push = run({
     state: finished.state,
@@ -301,4 +301,26 @@ test("an older head's reservation does not exempt new commits from judgment", ()
     nowMs: T0 + 90_000,
   });
   assert.deepEqual(kinds(push), ["hold:1"]);
+});
+
+test("a fix push seen first by another round keeps its slot (the push event arrives later)", () => {
+  // #1 granted and running on its old head; #2 waits.
+  const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
+  const running = run({ state: { ...admitted.state, queue: [queued(2)] }, openPulls: [pull(1), pull(2, { draft: true })], runningShas: new Set([sha(1)]), nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(running), []);
+  // A workflow_run event is judged before #1's synchronize: GitHub already shows
+  // the new head, only the old head's run is listed.
+  const head = "b".repeat(40);
+  const between = run({
+    state: running.state,
+    openPulls: [pull(1, { headSha: head }), pull(2, { draft: true })],
+    runningShas: new Set([sha(1)]),
+    nowMs: T0 + 2 * 60_000,
+  });
+  assert.deepEqual(kinds(between), [], "#2 is not released into #1's slot");
+  assert.deepEqual(between.state.granted, [{ number: 1, headSha: head }]);
+  assert.deepEqual(between.state.released.map((r) => [r.number, r.headSha]), [[1, head]]);
+  // Then the synchronize arrives: still #1's slot, nothing held.
+  const sync = run({ state: between.state, openPulls: [pull(1, { headSha: head }), pull(2, { draft: true })], arrival: 1, nowMs: T0 + 2 * 60_000 + 5_000 });
+  assert.deepEqual(kinds(sync), []);
 });
