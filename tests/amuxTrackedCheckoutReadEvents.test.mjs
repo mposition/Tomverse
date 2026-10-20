@@ -462,3 +462,21 @@ test("detail mode names init refusals and refused Read paths by name only", () =
   assert.deepEqual(quiet.rejectDetail(), []);
   assert.equal(quiet.rejectReason(), "read_path_refused");
 });
+
+test("thinking_tokens progress events pass only in their measured content-free shape", () => {
+  const thinking = { type: "system", subtype: "thinking_tokens",
+    estimated_tokens: 1200, estimated_tokens_delta: 40,
+    session_id: "s", uuid: "u" };
+  const readCall = use("read_1", "Read", { file_path: file });
+  const withEvent = (extra) => analyze([analysisInit, extra, readCall,
+    reply("read_1"), extra, analysisResult]);
+  assert.equal(withEvent(thinking).kind, "verified_success");
+  const withoutUuid = { ...thinking };
+  delete withoutUuid.uuid;
+  for (const changed of [
+    { ...thinking, text: "a thought" },
+    { ...thinking, tools: ["Bash"] },
+    { ...thinking, estimated_tokens: "1200" },
+    withoutUuid,
+  ]) assert.deepEqual(withEvent(changed), { kind: "outcome_unknown" });
+});
