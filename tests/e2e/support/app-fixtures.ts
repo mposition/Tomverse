@@ -1082,7 +1082,8 @@ export async function mockAuthenticatedApi(
     attachmentReferences: JsonValue[];
   }>();
   // A blank Chat can be opened beside a saved Review fixture too.
-  await page.route("**/api/products/chat/drafts/**", async (route) => {
+  // Keep the default below page-specific draft mocks, regardless of setup order.
+  await page.context().route("**/api/products/chat/drafts/**", async (route) => {
     const scopeKey = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() ?? "");
     const current = drafts.get(scopeKey);
     const canonical = (draft: NonNullable<typeof current>) => ({
