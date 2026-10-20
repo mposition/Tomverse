@@ -1,13 +1,12 @@
 fn main() -> std::process::ExitCode {
     use tomverse_orchestrator::wsl_bridge::BridgeArgs;
 
-    // Orchestration policy version 55, section 2: no arguments is the bridge
-    // exactly as before; `--worker <name>` is one bridge for one worker.
-    // `--dm-relay` is the Decision Maker relay alone (its own unit). Anything
-    // else does not start.
+    // Orchestration policy version 55, section 2: `--worker <name>` is one
+    // bridge for one worker. `--dm-relay` is the Decision Maker relay alone
+    // (its own unit). Anything else, including no arguments, does not start.
     let Some(args) = tomverse_orchestrator::wsl_bridge::parse_bridge_args(std::env::args_os().skip(1))
     else {
-        eprintln!("amux wsl bridge arguments are invalid; expected none, --worker <name> or --dm-relay");
+        eprintln!("amux wsl bridge arguments are invalid; expected --worker <name> or --dm-relay");
         return std::process::ExitCode::from(1);
     };
     let env_value = std::env::var(tomverse_orchestrator::wsl_bridge::WSL_BRIDGE_ENV_NAME).ok();
@@ -30,7 +29,6 @@ fn main() -> std::process::ExitCode {
             {
                 Ok(runtime) => runtime.block_on(async {
                     match &args {
-                        BridgeArgs::Sessions => tomverse_orchestrator::wsl_bridge::run_from_env().await,
                         BridgeArgs::Worker(worker) => {
                             tomverse_orchestrator::wsl_bridge::run_worker_from_env(worker).await
                         }

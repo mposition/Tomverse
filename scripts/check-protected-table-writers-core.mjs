@@ -892,9 +892,9 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261020120000_amux_v19_shadow_unknown_headroom/migration.sql",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
-    tableMentions: 2,
+    tableMentions: 3,
     writeVerbs: 5,
-    reason: "The shadow-headroom migration replaces the claim CHECK to admit a zero owner_consumed settlement for max_shadow only and replaces the v21 mode guard body with the same signature and trigger (owner decision 2026-10-20). It inserts, updates and deletes no claim row.",
+    reason: "The shadow-headroom migration replaces the claim CHECK to admit a zero owner_consumed settlement for max_shadow only and replaces the v21 mode guard body with the same signature and trigger (owner decision 2026-10-20); the third mention is the closure audit's targetType check. It inserts, updates and deletes no claim row.",
   },
   {
     path: "prisma/migrations/20261020120000_amux_v19_shadow_unknown_headroom/migration.sql",

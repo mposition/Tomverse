@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import {
     AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
     AUTO_LLM_ROUTER_DEFAULT_REWRITE_GUIDANCE,
+    type AutoLlmRouterGuidanceKind,
 } from "@/lib/autoLlmRouterCore";
 import {
     parseActiveRouterGuidance,
@@ -28,7 +29,7 @@ export const AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY = "auto.llmRouterGuidance";
  */
 export const AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY = "auto.llmRouterRewriteGuidance";
 
-export type RouterGuidanceKind = "routing" | "rewrite";
+export type RouterGuidanceKind = AutoLlmRouterGuidanceKind;
 
 export const DEFAULT_ROUTER_GUIDANCE: ActiveRouterGuidance = {
     guidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,

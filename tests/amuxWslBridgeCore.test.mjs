@@ -235,7 +235,7 @@ test("the rust bridge opens a client only after the exact env gate", () => {
   assert.match(bridge, /wsl bridge does not start workers/);
   const gate = bridge.slice(bridge.indexOf("pub fn activation_gate"), bridge.indexOf("pub fn local_amux_url_allowed"));
   assert.equal(gate.includes("from_env"), false);
-  const runner = bridge.slice(bridge.indexOf("pub async fn run_from_env"));
+  const runner = bridge.slice(bridge.indexOf("pub async fn run_worker_from_env"));
   assert.match(runner, /TomverseApi::from_env/);
   assert.match(runner, /worker_heartbeat/);
   assert.match(runner, /plan_worker_heartbeat/);
@@ -243,6 +243,6 @@ test("the rust bridge opens a client only after the exact env gate", () => {
   assert.match(bridge, /\.no_proxy\(\)/);
   assert.equal(bridge.includes("env_value.map(str::trim)"), false);
   assert.match(binary, /ActivationGate::EnvOff/);
-  assert.match(binary, /run_from_env/);
+  assert.match(binary, /run_worker_from_env\(worker\)/);
   assert.equal(binary.includes("TomverseApi::from_env"), false);
 });
