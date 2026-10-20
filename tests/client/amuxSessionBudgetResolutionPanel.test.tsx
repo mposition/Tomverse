@@ -95,3 +95,11 @@ test("the evidence digest is the sha256 of a fixed confirmation text", async () 
   assert.equal(await sessionBudgetEvidenceDigest(text),
     createHash("sha256").update(text, "utf8").digest("hex"));
 });
+
+test("a failed list refresh keeps the rows, so an unknown resolution is never resent", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../../components/admin/AmuxSessionBudgetResolutionPanel.tsx",
+    import.meta.url), "utf8");
+  assert.doesNotMatch(source, /setList\(null\)/);
+  assert.match(source, /if \(parsed\) setList\(parsed\);/);
+});

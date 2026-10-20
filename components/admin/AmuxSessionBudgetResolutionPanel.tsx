@@ -88,10 +88,12 @@ export function AmuxSessionBudgetResolutionPanel() {
       onStatus(response.status);
       const body: unknown = await response.json().catch(() => null);
       const parsed = response.ok ? readSessionBudgetUnknownList(body) : null;
-      setList(parsed);
+      // A failed refresh keeps the rows on screen: a row whose resolution
+      // outcome is unknown must keep its read-back-only state, never remount.
+      if (parsed) setList(parsed);
       setFailure(parsed ? null : response.status === 409 &&
         record(body)?.error === "session_budget_resolution_read_disabled" ? "readDisabled" : "unavailable");
-    } catch { setList(null); setFailure("unavailable"); }
+    } catch { setFailure("unavailable"); }
   }, [onStatus]);
 
   useEffect(() => {
