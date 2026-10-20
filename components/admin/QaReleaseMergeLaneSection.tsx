@@ -8,6 +8,8 @@ import type { AgentDigestConsole, QaReleaseConsoleAttempt } from "@/lib/agentDig
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { aestStamp } from "@/lib/agentOffice/time";
+import { card } from "@/components/admin/qaReleaseTabParts";
 
 const PAGE_PATH = "/admin/agent-digests";
 const RELEASE_ROUTE = "/api/admin/agent-digests/qa-release/merge-lane/release";
@@ -25,40 +27,73 @@ type Choice = "none" | "not_merged" | "merged_on_develop" | "deployed" | "restor
  * stuck attempt by a fact they confirmed; the route checks the role and a
  * recent sign-in again, and a stale sign-in is answered with the way back.
  */
-export function QaReleaseMergeLaneSection({ lane, canWrite }: { lane: Lane; canWrite: boolean }) {
+export function QaReleaseMergeLaneSection({ lane, canWrite, id }: { lane: Lane; canWrite: boolean; id?: string }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
   const attempt = lane.openAttempt;
+  // The attempt the latch names, when a failed deploy has already closed it:
+  // it is what the latch alert sends a person here to read.
+  const latchAttempt = lane.latched && lane.latchAttempt && lane.latchAttempt.id !== attempt?.id ? lane.latchAttempt : null;
+  const line = (shown: QaReleaseConsoleAttempt) =>
+    fill(m.laneAttemptLine, { number: shown.pullRequestNumber, state: shown.state, at: aestStamp(shown.issuedAt) });
   return (
-    <div className="flex flex-col gap-2" data-testid="qa-release-merge-lane">
-      <h2 className="text-base font-semibold text-zinc-100">{m.laneTitle}</h2>
-      <p className={lane.latched ? "text-sm text-amber-300" : "text-sm text-zinc-400"}>
-        {lane.latched ? m.laneLatched : m.laneFree}
-      </p>
+    <section
+      className={`${card} flex min-w-0 flex-col gap-3 ${lane.latched ? "border-amber-300/40" : ""}`}
+      id={id}
+      data-testid="qa-release-merge-lane"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-base font-semibold text-zinc-100">{m.laneTitle}</h2>
+        <span
+          className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+            lane.latched ? "bg-amber-300/15 text-amber-300" : "bg-emerald-400/15 text-emerald-400"
+          }`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${lane.latched ? "bg-amber-300" : "bg-emerald-400"}`} aria-hidden="true" />
+          {lane.latched ? m.lanePillLatched : m.lanePillFree}
+        </span>
+      </div>
+      <p className={lane.latched ? "text-sm text-amber-300" : "text-sm text-zinc-400"}>{lane.latched ? m.laneLatched : m.laneFreeNote}</p>
       {lane.latched && lane.latch ? (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className="text-zinc-400">{m.latchReason}</dt>
-          <dd className="font-mono text-xs" data-testid="qa-release-merge-lane-reason">{lane.latch.reason ?? m.none}</dd>
+          <dd className="break-all font-mono text-xs text-zinc-100" data-testid="qa-release-merge-lane-reason">
+            {lane.latch.reason ?? m.none}
+          </dd>
           <dt className="text-zinc-400">{m.latchAt}</dt>
-          <dd>{lane.latch.createdAt}</dd>
+          <dd className="text-zinc-300">{aestStamp(lane.latch.createdAt)}</dd>
+          {latchAttempt ? (
+            <>
+              <dt className="text-zinc-400">{m.latchAttempt}</dt>
+              <dd className="font-mono text-xs text-zinc-300">{line(latchAttempt)}</dd>
+            </>
+          ) : null}
         </dl>
       ) : null}
-      {/* The attempt the latch names: a failed deploy has already closed it,
-          and it is what the latch alert sends a person here to read. */}
-      {lane.latched && lane.latchAttempt && lane.latchAttempt.id !== attempt?.id ? (
-        <>
-          <h3 className="text-sm font-medium text-zinc-100">{m.latchAttempt}</h3>
-          <AttemptDetails attempt={lane.latchAttempt} testId="qa-release-merge-lane-latch-attempt" />
-        </>
+      <p className="text-sm text-zinc-400">
+        {m.openAttempt}: {attempt ? <span className="font-mono text-xs text-zinc-300">{line(attempt)}</span> : m.noOpenAttempt}
+      </p>
+      {attempt || latchAttempt ? (
+        <details>
+          <summary className="cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">{m.laneDetails}</summary>
+          <div className="mt-2 flex flex-col gap-3">
+            {latchAttempt ? (
+              <>
+                <h3 className="text-sm font-medium text-zinc-100">{m.latchAttempt}</h3>
+                <AttemptDetails attempt={latchAttempt} testId="qa-release-merge-lane-latch-attempt" />
+              </>
+            ) : null}
+            {attempt ? (
+              <>
+                <h3 className="text-sm font-medium text-zinc-100">{m.openAttempt}</h3>
+                <AttemptDetails attempt={attempt} testId="qa-release-merge-lane-attempt" />
+              </>
+            ) : null}
+          </div>
+        </details>
       ) : null}
-      <h3 className="text-sm font-medium text-zinc-100">{m.openAttempt}</h3>
-      {attempt ? (
-        <AttemptDetails attempt={attempt} testId="qa-release-merge-lane-attempt" />
-      ) : (
-        <p className="text-sm text-zinc-400">{m.noOpenAttempt}</p>
-      )}
       {/* Keyed by the latch event: after a release and refresh the form starts again. */}
       {canWrite && lane.latched ? <ReleaseForm key={lane.latch?.sequence ?? 0} lane={lane} /> : null}
-    </div>
+    </section>
   );
 }
 
@@ -80,14 +115,14 @@ function AttemptDetails({ attempt, testId }: { attempt: QaReleaseConsoleAttempt;
       <dt className="text-zinc-400">{m.mergeCommit}</dt>
       <dd className="break-all font-mono text-xs">{attempt.mergeCommitSha ?? m.none}</dd>
       <dt className="text-zinc-400">{m.issuedAt}</dt>
-      <dd>{attempt.issuedAt}</dd>
+      <dd>{aestStamp(attempt.issuedAt)}</dd>
       <dt className="text-zinc-400">{m.deployObserved}</dt>
       <dd>
         {attempt.deployObservation === null ? (
           m.deployNotObserved
         ) : (
           <>
-            <span>{attempt.deployObservedAt}</span>
+            <span>{attempt.deployObservedAt ? aestStamp(attempt.deployObservedAt) : m.none}</span>
             <ul className="mt-1 flex flex-col gap-0.5">
               {attempt.deployObservation.map((entry, index) => (
                 <li key={`${entry.service}-${index}`} className="break-all font-mono text-xs">
@@ -170,7 +205,7 @@ function ReleaseForm({ lane }: { lane: Lane }) {
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border p-3 border-zinc-800"
+      className="flex flex-col gap-3 rounded-xl border p-3 border-zinc-800"
       data-testid="qa-release-merge-lane-release-form"
       onSubmit={(event) => {
         event.preventDefault();
