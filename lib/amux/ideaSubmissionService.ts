@@ -123,28 +123,22 @@ export async function commitIdeaSubmission(
   return { ideaId: input.ideaId, requestId: input.inspected.requestId, auditId };
 }
 
-/** Read-back is metadata-only and owner-scoped. Absence after an ambiguous
- * commit is not permission to blindly retry the submission. */
-export async function readIdeaSubmissionRequest(
-  session: Session,
-  requestId: string,
-): Promise<
+type IdeaSubmissionReadBack =
   | { requestId: string; status: "absent" }
   | { requestId: string; status: "partial"; ideaId: string }
-  | { requestId: string; status: "committed"; ideaId: string; hasExternalSources: boolean }
-> {
-  const actorUserId = actorId(session);
-  const row = await prisma.amuxIdeaSubmission.findUnique({
-    where: { requestId },
-    select: { id: true, actorUserId: true },
-  });
-  if (!row || row.actorUserId !== actorUserId) return { requestId, status: "absent" };
+  | { requestId: string; status: "committed"; ideaId: string; hasExternalSources: boolean };
+
+/** Whether a stored submission's audit row landed with the metadata it promised. */
+async function submissionReadBack(
+  row: { id: string; actorUserId: string },
+  requestId: string,
+): Promise<IdeaSubmissionReadBack> {
   const audit = await prisma.adminAuditLog.findFirst({
     where: {
       action: AUDIT_ACTION,
       targetType: TARGET_TYPE,
       targetId: row.id,
-      actorUserId,
+      actorUserId: row.actorUserId,
     },
     select: { id: true, entryHash: true, metadata: true },
   });
@@ -162,6 +156,41 @@ export async function readIdeaSubmissionRequest(
   }
   return { requestId, status: "committed", ideaId: row.id,
     hasExternalSources: (repositoryCount as number) + (pullRequestCount as number) > 0 };
+}
+
+/** Read-back is metadata-only and owner-scoped. Absence after an ambiguous
+ * commit is not permission to blindly retry the submission. */
+export async function readIdeaSubmissionRequest(
+  session: Session,
+  requestId: string,
+): Promise<IdeaSubmissionReadBack> {
+  const actorUserId = actorId(session);
+  const row = await prisma.amuxIdeaSubmission.findUnique({
+    where: { requestId },
+    select: { id: true, actorUserId: true },
+  });
+  if (!row || row.actorUserId !== actorUserId) return { requestId, status: "absent" };
+  return submissionReadBack(row, requestId);
+}
+
+/**
+ * Read-back for a request id the caller derived from its own record, such as
+ * the Scout's per-suggestion send (suggestionSendRequestId): finding the id is
+ * finding that record's send, so any owner may finish a send another owner
+ * started. Metadata only; the owner-scoped read above is unchanged for
+ * request ids a browser chose.
+ */
+export async function readIdeaSubmissionByDerivedRequestId(
+  session: Session,
+  requestId: string,
+): Promise<IdeaSubmissionReadBack> {
+  actorId(session);
+  const row = await prisma.amuxIdeaSubmission.findUnique({
+    where: { requestId },
+    select: { id: true, actorUserId: true },
+  });
+  if (!row) return { requestId, status: "absent" };
+  return submissionReadBack(row, requestId);
 }
 
 /** New v4 submission path. The hard code latch ships false. */
