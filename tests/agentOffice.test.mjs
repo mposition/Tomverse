@@ -42,6 +42,8 @@ import {
   reviewQuotaView,
   reviewRoomView,
   researchTone,
+  routingLiveDept,
+  routingTone,
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "../lib/agentOfficeAmuxState.ts";
 import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
@@ -60,6 +62,7 @@ import {
   reviewStatusSnapshotSchema,
 } from "../lib/reviewOrchestratorStatusCore.ts";
 import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
+import { agentOfficeRoutingState } from "../lib/agentOfficeRoutingState.ts";
 import {
   AMUX_ROOM,
   DECISION_ROOM,
@@ -68,6 +71,8 @@ import {
   ENTRANCE_MAT,
   PROPS,
   ROOMS,
+  COLS,
+  ROWS,
 } from "../lib/agentOffice/world.ts";
 
 /** The live read module's code (comments stripped), cut from one read function to the next. */
@@ -81,11 +86,11 @@ const readFunction = (name) => {
   return source.slice(start, next < 0 ? undefined : next);
 };
 
-test("the office holds the eight agent teams and the digest desk", () => {
-  assert.equal(AGENT_OFFICE_TEAM_IDS.length, 8);
+test("the office holds the nine agent teams and the digest desk", () => {
+  assert.equal(AGENT_OFFICE_TEAM_IDS.length, 9);
   assert.deepEqual(
     [...AGENT_OFFICE_TEAM_IDS].sort(),
-    ["engineering", "finance", "marketing", "qa", "research", "sre", "support", "trust"]
+    ["engineering", "finance", "marketing", "qa", "research", "routing", "sre", "support", "trust"]
   );
   assert.equal(DEPT_ROOMS.length, AGENT_OFFICE_DEPT_IDS.length);
   assert.ok(AGENT_OFFICE_DEPT_IDS.includes("digest"));
@@ -1066,6 +1071,178 @@ test("the office reads the billing and finance agent's state, never its digest",
   assert.match(finance, /resolveDeploymentEnvironment\(\)/);
   assert.doesNotMatch(finance, /process\.env/);
   assert.match(finance, /read: "billing_finance_ops"/);
+});
+
+// ── Chat routing improvement ───────────────────────────────────────────────
+
+test("the routing team has the top row's fourth column, clear of every other room", () => {
+  const routing = ROOMS.find((room) => room.id === "routing");
+  assert.ok(routing);
+  assert.equal(routing.kind, "dept");
+  assert.equal(routing.short, "chat.routing");
+  assert.equal(routing.icon, "🧭");
+  assert.equal(routing.x, 56);
+  assert.equal(routing.y, 2);
+  assert.equal(routing.desks.length, 3);
+  assert.ok(DEPT_ROOMS.includes(routing));
+  assert.equal(ROOMS.filter((room) => room.id === "routing").length, 1);
+  // No two rooms share floor, and every room sits inside the map.
+  for (const [i, a] of ROOMS.entries()) {
+    assert.ok(a.x >= 0 && a.y >= 0 && a.x + a.w <= COLS && a.y + a.h <= ROWS, `${a.id} leaves the map`);
+    for (const b of ROOMS.slice(i + 1)) {
+      const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+      assert.ok(apart, `${a.id} overlaps ${b.id}`);
+    }
+  }
+  // The team record is the routing screen, and the console has it.
+  const dept = AGENT_OFFICE_DEPTS.find((entry) => entry.id === "routing");
+  assert.equal(dept.recordHref, "/admin/routing");
+  assert.equal(dept.icon, "🧭");
+  assert.equal(AGENT_OFFICE_BLOCKED_DEPTS.has("routing"), false);
+  const crew = AGENT_OFFICE_STAFF.filter((staff) => staff.dept === "routing").map((staff) => staff.id);
+  assert.deepEqual(crew, ["routing-lead", "routing-m1", "routing-m2"]);
+  // The console finds the team by its words in both languages.
+  const en = new AgentOffice(adminAgentOfficeMessages.en);
+  en.command("What is the router doing?");
+  assert.match(en.chat.at(-1).name, /Seungmin Ryu/);
+  const ko = new AgentOffice(adminAgentOfficeMessages.ko);
+  ko.command("라우팅팀 지금 뭐해?");
+  assert.match(ko.chat.at(-1).name, /류승민/);
+});
+
+const routingAt = (iso) => new Date(iso);
+const routingNow = routingAt("2026-10-20T04:00:00Z");
+const routingInput = (overrides = {}) => ({
+  last: {
+    target: "routing",
+    status: "passed",
+    failure: null,
+    createdAt: routingAt("2026-10-20T04:00:00Z"),
+    finishedAt: routingAt("2026-10-20T04:05:00Z"),
+  },
+  monthCycles: [
+    { createdAt: routingAt("2026-10-02T04:00:00Z"), spentMicroUsd: 10_000_000 },
+    { createdAt: routingAt("2026-10-19T23:59:59Z"), spentMicroUsd: 2_000_000 },
+    { createdAt: routingAt("2026-10-20T00:00:00Z"), spentMicroUsd: 1_200_000 },
+    { createdAt: routingAt("2026-10-20T04:00:00Z"), spentMicroUsd: 2_000_000 },
+  ],
+  lastPromotedAt: routingAt("2026-10-18T23:00:00Z"),
+  now: routingNow,
+  ...overrides,
+});
+const routingLast = (overrides) => ({ ...routingInput().last, ...overrides });
+
+test("the routing state sums the spend the way the optimizer does and keeps only status", () => {
+  assert.deepEqual(agentOfficeRoutingState(routingInput()), {
+    kind: "observed",
+    last: {
+      target: "routing",
+      status: "passed",
+      failure: null,
+      createdAt: "2026-10-20T04:00:00.000Z",
+      finishedAt: "2026-10-20T04:05:00.000Z",
+    },
+    // This UTC day starts at 00:00Z: the 23:59:59 cycle is yesterday's.
+    spentTodayMicroUsd: 3_200_000,
+    spentMonthMicroUsd: 15_200_000,
+    dayCapMicroUsd: 25_000_000,
+    monthCapMicroUsd: 150_000_000,
+    lastPromotedAt: "2026-10-18T23:00:00.000Z",
+  });
+  const none = agentOfficeRoutingState(routingInput({ last: null, monthCycles: [], lastPromotedAt: null }));
+  assert.equal(none.last, null);
+  assert.equal(none.spentMonthMicroUsd, 0);
+  assert.equal(none.lastPromotedAt, null);
+  // A status the room cannot name is unread, not a guess.
+  assert.deepEqual(agentOfficeRoutingState(routingInput({ last: routingLast({ status: "weird" }) })), { kind: "unread" });
+  assert.deepEqual(agentOfficeRoutingState(routingInput({ last: routingLast({ target: "other" }) })), { kind: "unread" });
+});
+
+test("the routing room's colour and lines follow the latest optimizer cycle and its caps", () => {
+  const en = adminAgentOfficeMessages.en.real.routing;
+  const ko = adminAgentOfficeMessages.ko.real.routing;
+  const room = (overrides, copy = en) => routingLiveDept(agentOfficeRoutingState(routingInput(overrides)), copy);
+  const tone = (overrides) => routingTone(agentOfficeRoutingState(routingInput(overrides)));
+
+  // Unread is not a status.
+  const unread = routingLiveDept({ kind: "unread" }, en);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "Unread");
+  assert.equal(unread.line, en.unread);
+  assert.equal(routingTone({ kind: "unread" }), "attention");
+
+  // No cycle on record waits.
+  const empty = room({ last: null, monthCycles: [], lastPromotedAt: null });
+  assert.equal(empty.status, "waiting");
+  assert.equal(empty.badge, "No cycle yet");
+  assert.equal(empty.line, en.none);
+  assert.equal(empty.detail, "$0.00 / $25.00 today · $0.00 / $150.00 this month · no promotion yet");
+
+  // Passed is done; the finish time is the one drawn, in Brisbane time.
+  const passed = room({});
+  assert.equal(passed.status, "done");
+  assert.equal(passed.badge, "Passed");
+  assert.equal(passed.line, "Latest routing cycle passed · 10-20 14:05 AEST");
+  assert.equal(passed.detail, "$3.20 / $25.00 today · $15.20 / $150.00 this month · last promotion 10-19 09:00 AEST");
+  assert.equal(room({ last: routingLast({ target: "rewrite" }) }).line, "Latest rewrite cycle passed · 10-20 14:05 AEST");
+
+  // Running is working, drawn from its start.
+  const running = room({ last: routingLast({ status: "running", finishedAt: null }) });
+  assert.equal(running.status, "working");
+  assert.equal(running.badge, "Running");
+  assert.equal(running.line, "Latest routing cycle running since 10-20 14:00 AEST");
+
+  // A failed or errored cycle needs a look and names its code.
+  const failed = room({ last: routingLast({ status: "failed", failure: "gate_regression" }) });
+  assert.equal(failed.status, "attention");
+  assert.equal(failed.badge, "Failed");
+  assert.equal(failed.line, "Latest routing cycle failed · 10-20 14:05 AEST · gate_regression");
+  const errored = room({ last: routingLast({ status: "error", failure: null }) });
+  assert.equal(errored.status, "attention");
+  assert.equal(errored.line, "Latest routing cycle errored · 10-20 14:05 AEST · unknown");
+
+  // A cap reached needs a look even after a pass, and the badge says so.
+  const dayCap = room({ monthCycles: [{ createdAt: routingAt("2026-10-20T01:00:00Z"), spentMicroUsd: 25_000_000 }] });
+  assert.equal(dayCap.status, "attention");
+  assert.equal(dayCap.badge, "Cap reached");
+  assert.match(dayCap.detail, /^daily spend cap reached · \$25\.00 \/ \$25\.00 today/);
+  assert.equal(
+    tone({ monthCycles: [{ createdAt: routingAt("2026-10-05T01:00:00Z"), spentMicroUsd: 150_000_000 }] }),
+    "attention"
+  );
+  const monthCap = room({ monthCycles: [{ createdAt: routingAt("2026-10-05T01:00:00Z"), spentMicroUsd: 150_000_000 }] });
+  assert.match(monthCap.detail, /^monthly spend cap reached/);
+  // Below the caps the passed cycle stays done; a running one stays working.
+  assert.equal(tone({}), "done");
+  assert.equal(tone({ last: routingLast({ status: "running", finishedAt: null }) }), "working");
+
+  // The Korean copy says the same things.
+  const koPassed = room({}, ko);
+  assert.equal(koPassed.badge, "합격");
+  assert.equal(koPassed.line, "직전 라우팅 cycle 합격 · 10-20 14:05 AEST");
+  assert.match(koPassed.detail, /^오늘 \$3\.20 \/ \$25\.00 · 이번 달 \$15\.20 \/ \$150\.00 · 마지막 승격 /);
+
+  // Both languages carry every badge.
+  for (const locale of ["en", "ko"]) {
+    const words = adminAgentOfficeMessages[locale].real.routing;
+    for (const key of ["running", "passed", "failed", "error", "none", "unread", "cap"]) {
+      assert.ok(words.badges[key], `${locale}: ${key}`);
+    }
+  }
+});
+
+test("the office reads the optimizer's cycle status and spend, never its guidance, cases or summary", () => {
+  const routing = readFunction("readRouting");
+  assert.match(routing, /prisma\.autoRouterOptimizerCycle\.findFirst\(\{\s*orderBy: \{ createdAt: "desc" \}/);
+  assert.match(routing, /select: \{ target: true, status: true, failure: true, createdAt: true, finishedAt: true \}/);
+  assert.match(routing, /select: \{ createdAt: true, spentMicroUsd: true \}/);
+  assert.match(routing, /promotedAt: \{ not: null \}/);
+  assert.doesNotMatch(routing, /guidance|candidateGuidance|incumbentGuidance|cases|summary|Guidance/);
+  assert.doesNotMatch(routing, /\.(create|update|upsert|delete)/);
+  assert.match(routing, /event: "admin_agent_office_read_failed", read: "auto_router_optimizer"/);
+  assert.match(routing, /return \{ kind: "unread" \}/);
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /routing: routingLiveDept\(live\.routing, m\.real\.routing\)/);
 });
 
 // ── The real view is the default; the demo plays on request ───────────────
@@ -2128,7 +2305,7 @@ test("a room's name opens what its team does, written from its code and policy",
   // tree. A team not built here (no record screen) may name a policy that has
   // not reached this branch yet: main lags develop by design.
   for (const dept of AGENT_OFFICE_DEPTS) {
-    if (dept.policy) assert.match(dept.policy, /^docs\/policy\/[a-z0-9-]+\.md$/, dept.id);
+    if (dept.policy) assert.match(dept.policy, /^docs\/(policy|ui-contracts)\/[a-z0-9-]+\.md$/, dept.id);
     if (dept.policy && dept.recordHref) assert.ok(existsSync(dept.policy), dept.policy);
   }
   for (const path of Object.values(AGENT_OFFICE_ROOM_POLICIES)) assert.ok(existsSync(path), path);
