@@ -4,8 +4,11 @@ import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
 import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { CiAdmissionSection } from "@/components/admin/CiAdmissionSection";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
+import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
+import { readCiRunnerUsage } from "@/lib/ciRunnerUsage";
 import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
 import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
 import { hasAdminPermission } from "@/lib/adminAuth";
@@ -44,6 +47,7 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
       ) : (
         <>
           <AdminAgentDigestsPanel key={tab.id} initial={await readAgentDigestConsole(canWrite)} />
+          <CiAdmissionSection initial={await readCiAdmissionAdminView()} runnerUsage={await readCiRunnerUsage()} />
           <QaReleaseMainCandidatesSection data={await readQaReleaseMainCandidates()} />
         </>
       )}
