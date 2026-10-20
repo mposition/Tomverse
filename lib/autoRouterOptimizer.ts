@@ -881,10 +881,11 @@ async function runInBackground(input: {
                   evidence: {
                       routerStats,
                       answerStats: result.answerStats,
-                      candidates: candidatesFor("hello").map((candidate) => ({
-                          id: candidate.id,
-                          credits: candidate.credits,
-                      })),
+                      // A candidate with no known price cannot stand in for
+                      // another at the same credits, so it is left out.
+                      candidates: candidatesFor("hello").flatMap((candidate) =>
+                          candidate.credits === null ? [] : [{ id: candidate.id, credits: candidate.credits }]
+                      ),
                   },
               }).catch((error) => {
                   console.error(JSON.stringify({
