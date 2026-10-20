@@ -638,9 +638,11 @@ const gateSummary = (overrides) => ({
   evaluated: 12, unchanged: 8, decided: 2, candidateWins: 2, incumbentWins: 0, ties: 2,
   undecided: 0, unrouted: 0, incumbentCredits: 50, candidateCredits: 50, ...overrides,
 });
-const moveCase = (from, to, verdict = "tie") => ({ decisionId: `${from}-${to}`, incumbentPick: from, candidatePick: to, verdict });
+const moveCase = (from, to, verdict = "undecided", kind = "hard", judged) => ({
+  decisionId: `${from}-${to}`, incumbentPick: from, candidatePick: to, verdict, kind, ...(judged ? { judged } : {}),
+});
 
-test("the gate decision: judged first, the direct evidence only for too few judged cases", () => {
+test("the gate decision: judged first, then each changed case on its own comparison, else same-kind evidence", () => {
   const comparisons = [
     { kind: "easy", a: "strong", b: "rival", verdict: "b" },
     { kind: "easy", a: "strong", b: "rival", verdict: "b" },
@@ -659,50 +661,71 @@ test("the gate decision: judged first, the direct evidence only for too few judg
   );
   // Too many failed routes stops the gate before any evidence.
   assert.deepEqual(
-    optimizerGateDecision({ summary: gateSummary({ unrouted: 5 }), cases: [moveCase("strong", "rival")], comparisons }),
+    optimizerGateDecision({ summary: gateSummary({ unrouted: 5 }), cases: [moveCase("strong", "rival", "candidate")], comparisons }),
     { failure: "too_many_unrouted", basis: "judged", towardWinner: 0, towardLoser: 0 }
   );
-  // Moved toward a model that won its comparisons: passes.
+  // A case's own comparison decides it: won, lost.
   assert.deepEqual(
-    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival"), moveCase("strong", "rival")], comparisons }),
-    { failure: null, basis: "direct", towardWinner: 2, towardLoser: 0 }
-  );
-  // Toward a model that lost (other lost to strong), or more toward losers.
-  assert.deepEqual(
-    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "other")], comparisons }),
-    { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 1 }
-  );
-  assert.equal(
     optimizerGateDecision({
       summary: gateSummary({}),
-      cases: [moveCase("strong", "rival"), moveCase("strong", "other"), moveCase("strong", "other")],
+      cases: [moveCase("strong", "rival", "candidate"), moveCase("strong", "x", "candidate"), moveCase("strong", "y", "incumbent")],
       comparisons,
-    }).failure,
-    "evidence_below"
+    }),
+    { failure: null, basis: "direct", towardWinner: 2, towardLoser: 1 }
   );
-  // Equal counts, or moves with no evidence either way, do not pass.
-  assert.equal(
-    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival"), moveCase("strong", "other")], comparisons }).failure,
-    "evidence_below"
-  );
+  // A tie both orders agreed on counts neither way, whatever other cases show.
   assert.deepEqual(
-    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "unseen")], comparisons }),
+    optimizerGateDecision({
+      summary: gateSummary({}),
+      cases: [moveCase("strong", "rival", "tie", "easy", ["equal", "equal"])],
+      comparisons,
+    }),
     { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 0 }
   );
-  // A judged replay case is evidence too, for itself and for other cases.
+  // Wins in one kind of work never overturn a case's own loss in another:
+  // rival won ten easy comparisons and lost two hard ones; the proposal moved
+  // two hard cases to rival and lost both on their own answers.
+  const lopsided = [
+    ...Array.from({ length: 10 }, () => ({ kind: "easy", a: "strong", b: "rival", verdict: "b" })),
+    { kind: "hard", a: "strong", b: "rival", verdict: "a" },
+    { kind: "hard", a: "strong", b: "rival", verdict: "a" },
+  ];
+  assert.deepEqual(
+    optimizerGateDecision({
+      summary: gateSummary({ decided: 2, candidateWins: 0, incumbentWins: 2 }),
+      cases: [moveCase("strong", "rival", "incumbent"), moveCase("strong", "rival", "incumbent")],
+      comparisons: lopsided,
+    }),
+    { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 2 }
+  );
+  // A case with no comparison of its own borrows the same kind's evidence only.
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival", "undecided", "hard")], comparisons: lopsided }),
+    { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 1 }
+  );
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival", "undecided", "easy")], comparisons: lopsided }),
+    { failure: null, basis: "direct", towardWinner: 1, towardLoser: 0 }
+  );
+  // No same-kind evidence, or a tie because a judge never answered: neither way
+  // from its own result, so the same kind's evidence decides (here none).
+  assert.deepEqual(
+    optimizerGateDecision({ summary: gateSummary({}), cases: [moveCase("strong", "rival", "undecided", "chat")], comparisons: lopsided }),
+    { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 0 }
+  );
   assert.deepEqual(
     optimizerGateDecision({
       summary: gateSummary({}),
-      cases: [moveCase("light", "mid", "candidate"), moveCase("light", "mid")],
-      comparisons: [],
+      cases: [moveCase("strong", "rival", "tie", "easy", ["A", null])],
+      comparisons: lopsided,
     }),
-    { failure: null, basis: "direct", towardWinner: 2, towardLoser: 0 }
+    { failure: null, basis: "direct", towardWinner: 1, towardLoser: 0 }
   );
   // Within the evidence, still held to the credit cap.
   assert.deepEqual(
     optimizerGateDecision({
       summary: gateSummary({ incumbentCredits: 50, candidateCredits: 60 }),
-      cases: [moveCase("strong", "rival")],
+      cases: [moveCase("strong", "rival", "candidate")],
       comparisons,
     }),
     { failure: "credits_above", basis: "direct", towardWinner: 1, towardLoser: 0 }
@@ -711,22 +734,30 @@ test("the gate decision: judged first, the direct evidence only for too few judg
   assert.equal(
     optimizerGateDecision({
       summary: gateSummary({}),
-      cases: [{ ...moveCase("strong", "strong"), verdict: "unchanged" }, { ...moveCase("strong", null), verdict: "unrouted" }],
-      comparisons,
+      cases: [moveCase("strong", "strong", "unchanged", "easy"), moveCase("strong", null, "unrouted", "easy")],
+      comparisons: lopsided,
     }).towardWinner,
     0
   );
 });
 
-test("the report is admitted bounded, of known kinds, and never repeating a user's message", () => {
+test("the report is admitted bounded, of known kinds, and never repeating a user's conversation", () => {
   const userMessage = "우리 회사 내부 매출 자료를 요약해 주세요 담당자는 김철수입니다";
+  const previousAnswer = "지난 분기 매출은 12억 3천만 원이었고 거래처는 한빛상사였습니다";
   const report = admitOptimizerReport({
     findings: [
       "인사와 번역은 가벼운 모델이 충분히 답했습니다.",
       "   ",
       42,
       "x".repeat(AUTO_ROUTER_REPORT_MAX_CHARS + 1),
-      `사용자가 "${userMessage.slice(0, 20)}"라고 물었습니다.`,
+      `사용자가 "${userMessage.slice(0, 12)}"라고 물었습니다.`,
+      // The previous answer the generator read is checked too.
+      `이전 답에는 ${previousAnswer.slice(8, 20)} 같은 내용이 있었습니다.`,
+      // A short real message is matched whole.
+      "후속 질문 '코드 고쳐줘' 유형은 강한 모델이 필요합니다.",
+      "문의는 someone@example.com 으로 왔습니다.",
+      "010-1234-5678 번호가 보였습니다.",
+      "https://internal.example 링크를 요약해 달라는 요청",
     ],
     recommendations: [
       { kind: "guidance", text: "짧은 사실 질문은 standard 모델로 보내세요." },
@@ -734,7 +765,7 @@ test("the report is admitted bounded, of known kinds, and never repeating a user
       { kind: "policy", text: "알 수 없는 종류" },
       { kind: "setting", text: "" },
     ],
-  }, [userMessage]);
+  }, [userMessage, previousAnswer, "코드 고쳐줘", "안녕"]);
   assert.deepEqual(report, {
     findings: ["인사와 번역은 가벼운 모델이 충분히 답했습니다."],
     recommendations: [

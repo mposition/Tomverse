@@ -466,26 +466,42 @@ export const summarizeRouterDecisions = (
 
 export const AUTO_ROUTER_REPORT_MAX_ITEMS = 8;
 export const AUTO_ROUTER_REPORT_MAX_CHARS = 500;
-/** A report entry sharing this many characters with a real message is dropped. */
-const REPORT_QUOTE_WINDOW = 16;
+/** A report entry sharing this many characters with real conversation text is dropped. */
+const REPORT_QUOTE_WINDOW = 10;
+/** Real text shorter than the window is matched whole, from this length. */
+const REPORT_QUOTE_MIN_CHARS = 4;
+/** Contact details and links never reach Admin through a report. */
+const REPORT_CONTACT_PATTERN =
+    /[^\s@]+@[^\s@]+\.[a-z]{2,}|\b01\d[-.\s]?\d{3,4}[-.\s]?\d{4}\b|\+\d{1,3}[-.\s]?\d{2,4}[-.\s]?\d{3,4}[-.\s]?\d{3,4}|https?:\/\/|www\./i;
 
 /**
  * The report Admin may show: bounded, plain entries of known kinds. The cheap
- * check where model output reaches Admin: an entry that repeats a run of a
- * real user's message is dropped, since Admin never shows what a user wrote.
+ * check where model output reaches Admin, since Admin never shows what a
+ * user's conversation said: an entry is dropped when it repeats any run of
+ * the real conversation text the generator read (each message and the
+ * previous answer it followed), contains a short such text whole, or
+ * contains an email address, phone number or link. A paraphrase cannot be
+ * caught this way; the generator is told never to quote or paraphrase.
  */
-export const admitOptimizerReport = (raw: unknown, realMessages: readonly string[]): OptimizerReport | null => {
+export const admitOptimizerReport = (raw: unknown, realTexts: readonly string[]): OptimizerReport | null => {
     const value = (raw ?? {}) as { findings?: unknown; recommendations?: unknown };
-    const flatten = (text: string) => text.replace(/\s+/g, " ");
+    const flatten = (text: string) => text.replace(/\s+/g, " ").trim();
     const windows = new Set<string>();
-    for (const message of realMessages) {
-        const text = flatten(message);
+    const shortTexts: string[] = [];
+    for (const real of realTexts) {
+        const text = flatten(real);
+        if (text.length < REPORT_QUOTE_WINDOW) {
+            if (text.length >= REPORT_QUOTE_MIN_CHARS) shortTexts.push(text);
+            continue;
+        }
         for (let index = 0; index + REPORT_QUOTE_WINDOW <= text.length; index += 1) {
             windows.add(text.slice(index, index + REPORT_QUOTE_WINDOW));
         }
     }
     const quotes = (text: string) => {
         const flat = flatten(text);
+        if (REPORT_CONTACT_PATTERN.test(flat)) return true;
+        if (shortTexts.some((short) => flat.includes(short))) return true;
         for (let index = 0; index + REPORT_QUOTE_WINDOW <= flat.length; index += 1) {
             if (windows.has(flat.slice(index, index + REPORT_QUOTE_WINDOW))) return true;
         }
@@ -792,20 +808,31 @@ export const optimizerGateFailure = (summary: OptimizerSummary): OptimizerFailur
     return null;
 };
 
+/** A replay case as the gate reads it, with the kind of work it is. */
+export type OptimizerGateCase = Pick<OptimizerCase, "incumbentPick" | "candidatePick" | "verdict" | "judged"> & {
+    /** The synthetic kind or the real decision's task kind. */
+    kind: string | null;
+};
+
 /**
  * The whole gate (owner goal, 2026-10-20: a cycle that decides without a
  * person). The judged gate above comes first. Only when it has too few
  * decided cases -- the router already picks well, so the two guidances
  * rarely differ -- is the proposal judged on the cycle's answer comparisons
- * instead: every comparison (direct, and judged replay cases) is a win of
- * one model over another, and each case the proposal changed counts toward
- * the winner when its new pick beat the old one more often than it lost to
- * it, toward the loser when the reverse. It passes when it moved more cases
- * toward winners than toward losers and stays within the credit cap.
+ * instead, case by case for each case it changed:
+ * - the case's own comparison decides when it has one: a win toward the
+ *   winner, a loss toward the loser, and a tie both orders agreed on counts
+ *   neither way -- no other case can overturn what this one showed;
+ * - only a case with no comparison of its own (an answer or a judgement
+ *   missing) borrows the direct comparisons of the same kind of work between
+ *   its old and new pick: more wins for the new pick is toward the winner,
+ *   more losses toward the loser, none either way is neither.
+ * It passes when more cases moved toward winners than toward losers, within
+ * the credit cap.
  */
 export const optimizerGateDecision = (input: {
     summary: OptimizerSummary;
-    cases: readonly OptimizerCase[];
+    cases: readonly OptimizerGateCase[];
     comparisons: readonly OptimizerComparison[];
 }): OptimizerGateDecision => {
     const judged = optimizerGateFailure(input.summary);
@@ -813,20 +840,11 @@ export const optimizerGateDecision = (input: {
         return { failure: judged, basis: "judged", towardWinner: 0, towardLoser: 0 };
     }
     const wins = new Map<string, number>();
-    const win = (winner: string, loser: string) => {
-        const key = JSON.stringify([winner, loser]);
-        wins.set(key, (wins.get(key) ?? 0) + 1);
-    };
-    const winsOf = (winner: string, loser: string) => wins.get(JSON.stringify([winner, loser])) ?? 0;
+    const keyOf = (kind: string | null, winner: string, loser: string) => JSON.stringify([kind, winner, loser]);
     for (const item of input.comparisons) {
-        if (!item.a || !item.b) continue;
-        if (item.verdict === "a") win(item.a, item.b);
-        if (item.verdict === "b") win(item.b, item.a);
-    }
-    for (const item of input.cases) {
-        if (!item.incumbentPick || !item.candidatePick) continue;
-        if (item.verdict === "incumbent") win(item.incumbentPick, item.candidatePick);
-        if (item.verdict === "candidate") win(item.candidatePick, item.incumbentPick);
+        if (!item.a || !item.b || (item.verdict !== "a" && item.verdict !== "b")) continue;
+        const key = item.verdict === "a" ? keyOf(item.kind, item.a, item.b) : keyOf(item.kind, item.b, item.a);
+        wins.set(key, (wins.get(key) ?? 0) + 1);
     }
     let towardWinner = 0;
     let towardLoser = 0;
@@ -834,7 +852,17 @@ export const optimizerGateDecision = (input: {
         const from = item.incumbentPick;
         const to = item.candidatePick;
         if (!from || !to || from === to) continue;
-        const balance = winsOf(to, from) - winsOf(from, to);
+        if (item.verdict === "candidate") {
+            towardWinner += 1;
+            continue;
+        }
+        if (item.verdict === "incumbent") {
+            towardLoser += 1;
+            continue;
+        }
+        const ownTie = item.verdict === "tie" && item.judged?.[0] != null && item.judged[1] != null;
+        if (ownTie) continue;
+        const balance = (wins.get(keyOf(item.kind, to, from)) ?? 0) - (wins.get(keyOf(item.kind, from, to)) ?? 0);
         if (balance > 0) towardWinner += 1;
         if (balance < 0) towardLoser += 1;
     }
@@ -913,6 +941,9 @@ const pool = async <T>(tasks: readonly (() => Promise<T>)[], limit: number) => {
     await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
     return results;
 };
+
+/** The kind of work a message is: its synthetic kind or its real task kind. */
+const kindOf = (decision: OptimizerDecision) => decision.synthetic?.kind ?? decision.taskKind ?? null;
 
 const ALL_KINDS = ["synthesize", "generate", "route", "answer", "judge"] as const;
 const zeroByKind = (): Record<OptimizerCallKind, number> =>
@@ -1082,7 +1113,7 @@ export async function runOptimizerCycle(
     // same credits, both answering, judged in both orders.
     comparisons = await pool(
         evaluate.map((decision, index) => async (): Promise<OptimizerComparison> => {
-            const kind = decision.synthetic?.kind ?? decision.taskKind ?? null;
+            const kind = kindOf(decision);
             const a = incumbentPicks[index] ?? null;
             if (!a) return { kind, a: null, b: null, verdict: "unrouted" };
             const b = directChallenger(decision.candidates, a, index);
@@ -1126,7 +1157,12 @@ export async function runOptimizerCycle(
         )
     );
     if (exhausted) return finish("budget_exhausted", null, []);
-    report = admitOptimizerReport(output, real.map((decision) => decision.routerInput));
+    // Checked against all real conversation text the generator could have
+    // read: each message and the previous answer it followed.
+    report = admitOptimizerReport(
+        output,
+        real.flatMap((decision) => [decision.routerInput, decision.routerContext ?? ""])
+    );
     const candidateGuidance = admitGuidance((output as { guidance?: unknown } | null)?.guidance);
     if (!candidateGuidance || candidateGuidance === input.incumbentGuidance.trim()) {
         return finish("candidate_invalid", null, []);
@@ -1172,7 +1208,8 @@ export async function runOptimizerCycle(
     if (exhausted) return finish("budget_exhausted", candidateGuidance, cases);
     const gate = optimizerGateDecision({
         summary: summarizeOptimizerCases(cases, byId),
-        cases,
+        // Cases and comparisons both follow `evaluate`, so a case's kind is its message's.
+        cases: cases.map((item, index) => ({ ...item, kind: kindOf(evaluate[index]) })),
         comparisons,
     });
     return finish(gate.failure, candidateGuidance, cases, gate);
