@@ -896,7 +896,9 @@ test("a Chat image turn answers in the chat conversation and replays without cha
   const first = await startChatImageTurn(turnInput);
   const replay = await startChatImageTurn(turnInput);
   assert.equal(replay.groupId, first.groupId);
-  assert.deepEqual(replay.pendingGenerationIds, []);
+  // Nothing ran the first request's work here, so the replay is what starts
+  // it -- the same generation, still one reservation.
+  assert.deepEqual(replay.pendingGenerationIds, first.pendingGenerationIds);
   assert.equal(await prisma.imageCreditReservation.count(), 1);
   assert.equal(await prisma.conversation.count(), 1);
 

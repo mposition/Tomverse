@@ -23,4 +23,10 @@ export const readChatImageTurnRef = (value: unknown): ChatImageTurnRef | null =>
 export type ChatImageTurnRequest = {
     modelIds: string[];
     preset: "draft" | "standard" | "final" | null;
+    /**
+     * Set on a retry only: the answer id the first try used, which is also
+     * the image group's idempotency key, so the retry recovers that group
+     * instead of reserving a second one.
+     */
+    assistantMessageId?: string;
 };

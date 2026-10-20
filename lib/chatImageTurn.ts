@@ -39,7 +39,13 @@ export type ChatImageTurnInput = {
 export type ChatImageTurnResult = {
     groupId: string;
     content: string;
-    /** Generations still to run; the route drives them after responding. */
+    /**
+     * Generations still waiting to start; the route drives them after
+     * responding. A replay included: if the first request's executor never
+     * ran (its answer write failed, or the response was lost before after()),
+     * the retry is what starts them. The claim in processImageGeneration lets
+     * only one runner take each.
+     */
     pendingGenerationIds: string[];
 };
 
@@ -145,10 +151,8 @@ export async function startChatImageTurn(
     return {
         groupId: result.groupId,
         content,
-        pendingGenerationIds: result.reused
-            ? []
-            : result.targets
-                  .filter((target) => target.status === "pending")
-                  .map((target) => target.generationId),
+        pendingGenerationIds: result.targets
+            .filter((target) => target.status === "pending")
+            .map((target) => target.generationId),
     };
 }

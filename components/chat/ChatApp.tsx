@@ -1560,7 +1560,10 @@ function ChatAppComponent({
 	  createdAt: new Date().toISOString(),
     };
 
-    let assistantMessageId = crypto.randomUUID();
+    // A retried image turn keeps its first answer id: it is the image
+    // group's idempotency key (lib/chatImageTurn.ts).
+    let assistantMessageId =
+      imageTurn?.assistantMessageId ?? crypto.randomUUID();
     const assistantMessage: Message = {
 		id: assistantMessageId,
 		role: "assistant",
@@ -1573,7 +1576,11 @@ function ChatAppComponent({
     writeChatRuntimeMessages(runKey, (prev) => [
       // A refresh that completed after the durable Message POST may already
       // include this user row. The accepted turn must appear once, in order.
-      ...prev.filter((message) => message.id !== userMsgId),
+      // A retried image turn reuses its answer id, so its failed bubble is
+      // replaced rather than duplicated.
+      ...prev.filter(
+        (message) => message.id !== userMsgId && message.id !== assistantMessageId
+      ),
       userMessage,
       assistantMessage,
     ]);
@@ -1723,6 +1730,17 @@ function ChatAppComponent({
       question to answer.
     */
     if (imageTurn && !isGuestMode) {
+      const sentPrompt = getChatRuntimeLastPrompt(runKey);
+      if (sentPrompt) {
+        setChatRuntimeLastPrompt(runKey, {
+          ...sentPrompt,
+          imageTurn: {
+            modelIds: imageTurn.modelIds,
+            preset: imageTurn.preset,
+            assistantMessageId,
+          },
+        });
+      }
       try {
         onDispatchStarted?.();
         const res = await fetch(
@@ -2651,7 +2669,12 @@ function ChatAppComponent({
           // through the stored mode would quietly send it with search off.
           lastPrompt.webSearchMode,
           [],
-          lastPrompt.sourceUserMessageId
+          lastPrompt.sourceUserMessageId,
+          undefined,
+          undefined,
+          undefined,
+          // An image turn is retried as the same image request.
+          lastPrompt.imageTurn
         );
       } finally {
         endSendPreparation(preparationKey, preparationToken);

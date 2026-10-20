@@ -24,6 +24,8 @@ let groups: Array<{ id: string; groupIdempotencyKey: string }> = [];
 const requests: Array<Record<string, unknown>> = [];
 const created: Array<Record<string, unknown>> = [];
 let groupQueries = 0;
+let reused = false;
+let replayStatus = "pending";
 let mocksInstalled = false;
 
 const prismaMock = {
@@ -64,9 +66,9 @@ async function load() {
             conversationId: input.conversationId,
             status: "pending",
             reservedCredits: 15,
-            reused: false,
+            reused,
             targets: [
-              { targetId: "t1", modelId: "gpt-image-2", provider: "openai", generationId: "gen-1", status: "pending", reservedCredits: 15 },
+              { targetId: "t1", modelId: "gpt-image-2", provider: "openai", generationId: "gen-1", status: reused ? replayStatus : "pending", reservedCredits: 15 },
             ],
           };
         },
@@ -88,6 +90,8 @@ const reset = () => {
   requests.length = 0;
   created.length = 0;
   groupQueries = 0;
+  reused = false;
+  replayStatus = "pending";
 };
 
 const input = {
@@ -216,4 +220,17 @@ test("the transcript read attaches groups only to image answers", async () => {
     imageTurn: { groupId: "group-9" },
   });
   assert.equal("imageTurn" in withImage[1], false);
+});
+
+test("a replay starts work that never ran, and leaves started work alone", async () => {
+  const { turn } = await load();
+  reset();
+  reused = true;
+  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] cat" };
+  assert.deepEqual((await turn.startChatImageTurn(input)).pendingGenerationIds, ["gen-1"]);
+  reset();
+  reused = true;
+  replayStatus = "processing";
+  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] cat" };
+  assert.deepEqual((await turn.startChatImageTurn(input)).pendingGenerationIds, []);
 });
