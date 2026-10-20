@@ -1,4 +1,5 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
+import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatAbortCause } from "@/lib/chatStreamLiveness";
 import type { WebSearchToggleMode } from "@/lib/appDefaults";
 
@@ -132,6 +133,12 @@ export type ChatRuntimeLastPrompt = {
    * before.
    */
   webSearchMode?: WebSearchToggleMode;
+  /**
+   * Set when this send was an image turn (lib/chatImageTurn.ts), with the
+   * answer id it used: retrying repeats the same image request under the
+   * same idempotency key, never a text request to /api/chat.
+   */
+  imageTurn?: ChatImageTurnRequest & { assistantMessageId: string };
 };
 
 const EMPTY_MESSAGES = Object.freeze([]) as unknown as Message[];

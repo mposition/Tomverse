@@ -35,6 +35,7 @@ import {
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import {
   CONVERSATION_KIND_NOT_SUPPORTED,
+  isChatConversationKind,
   isImageConversationKind,
 } from "@/lib/conversationKindGuard";
 import { lockCreditAccount } from "@/lib/creditDebt";
@@ -178,6 +179,14 @@ export type ImageGenerationRequestInput = {
    * group, not a separate path (policy v2 §11).
    */
   modelIds?: string[];
+  /**
+   * Server-only: the image answers a turn inside this chat conversation
+   * (Tomverse Chat, lib/chatImageTurn.ts), so `conversationId` may name a
+   * chat conversation as well as an image one. Never read from a request
+   * body -- POST /api/images/generations does not pass it, and keeps
+   * refusing a chat conversation.
+   */
+  chatTurnHost?: boolean;
 };
 
 export type ImageGenerationTargetResult = {
@@ -523,7 +532,10 @@ export const requestImageGeneration = async (
             "Conversation not found."
           );
         }
-        if (!isImageConversationKind(conversation.kind)) {
+        if (
+          !isImageConversationKind(conversation.kind) &&
+          !(input.chatTurnHost === true && isChatConversationKind(conversation.kind))
+        ) {
           throw new ChatAccessError(
             409,
             CONVERSATION_KIND_NOT_SUPPORTED,
@@ -1570,6 +1582,13 @@ export type ImageRetryInput = {
   userId: string;
   targetId: string;
   retryIdempotencyKey: string;
+  /**
+   * Whether a group living in a Tomverse Chat conversation may be retried:
+   * the caller's answer to the Chat image switch (Admin › Routing), which a
+   * Chat image's paid retry needs as much as its first attempt did. Omitted
+   * is no, and such a retry is refused like any chat conversation.
+   */
+  chatTurnHostAllowed?: boolean;
 };
 
 /**
@@ -1690,6 +1709,12 @@ export const retryImageGenerationTarget = async (
       conversationId: target.group.conversationId,
       idempotencyKey: `retry-${input.retryIdempotencyKey}`.slice(0, 64),
       modelIds: [target.modelId],
+      // The retry stays in the conversation its group already lives in. A
+      // chat conversation holds a group only through a Chat image turn
+      // (lib/chatImageTurn.ts), so its retry keeps that host -- while the
+      // Chat image switch is on. For an image conversation this changes
+      // nothing.
+      chatTurnHost: input.chatTurnHostAllowed === true,
     },
     now
   );
