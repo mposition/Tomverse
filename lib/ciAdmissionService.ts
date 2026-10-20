@@ -196,13 +196,31 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   const undoHold = new Set<number>();
   const rejudge = new Set<number>();
   const putBack: CiAdmissionQueueEntry[] = [];
+  const statusFailed = new Set<number>();
+  const statusResolved = new Set<number>();
   const status = async (pull: CiAdmissionPull, state: "pending" | "success", text: string) => {
     try {
       await github.setStatus(pull, state, text);
+      statusResolved.add(pull.number);
+      statusFailed.delete(pull.number);
     } catch (error) {
       failures.push(`status:${pull.number}:${code(error)}`);
+      statusFailed.add(pull.number);
     }
   };
+  // Statuses an earlier round could not write, first: what each should say
+  // now follows from the line (pending in it, success out of it), and this
+  // round's own actions below then write anything newer.
+  const open = new Map(openPulls.map((pull) => [pull.number, pull]));
+  const inLine = new Set(evaluation.state.queue.map((entry) => entry.number));
+  for (const number of evaluation.state.statusRetry) {
+    const pull = open.get(number);
+    if (!pull) {
+      statusResolved.add(number);
+      continue;
+    }
+    await status(pull, inLine.has(number) ? "pending" : "success", inLine.has(number) ? STATUS.waiting : STATUS.left);
+  }
   for (const action of evaluation.actions) {
     const number = action.pull.number;
     let drafted = false;
@@ -236,7 +254,8 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   }
 
   // 4. Corrections, on top of the state as it is now.
-  if (extra.length > 0 || undoHold.size > 0 || putBack.length > 0) {
+  const retryChanged = statusFailed.size > 0 || evaluation.state.statusRetry.length > 0;
+  if (extra.length > 0 || undoHold.size > 0 || putBack.length > 0 || rejudge.size > 0 || retryChanged) {
     await prisma.$transaction(
       async (tx) => {
         await takeLock(tx);
@@ -249,6 +268,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
         await writeState(tx, {
           ...current,
           pendingArrivals: [...new Set([...current.pendingArrivals, ...rejudge])].slice(-100),
+          statusRetry: [...new Set([...current.statusRetry.filter((n) => !statusResolved.has(n)), ...statusFailed])].slice(-100),
           queue: queue.slice(0, 100),
           released: current.released.filter((entry) => !failedReleases.has(entry.number)),
           events: [...current.events, ...extra].slice(-50),
@@ -259,7 +279,9 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   }
   // A release that failed is back at the top: try again shortly, since the
   // failed call itself promises no further webhook.
-  scheduleRecheck(putBack.length > 0 || rejudge.size > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs);
+  scheduleRecheck(
+    putBack.length > 0 || rejudge.size > 0 || statusFailed.size > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs,
+  );
   return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
 }
 
@@ -297,6 +319,12 @@ export type CiAdmissionAdminChange =
 
 /** Applies an operator's change under the admission lock and audits it; null when it no longer applies. */
 export async function changeCiAdmission(actor: AdminActor, change: CiAdmissionAdminChange): Promise<CiAdmissionState | null> {
+  // In turn with the rounds: never between a round's judgment and its
+  // corrections, so a correction cannot undo an operator's change.
+  return serially(() => applyCiAdmissionChange(actor, change));
+}
+
+async function applyCiAdmissionChange(actor: AdminActor, change: CiAdmissionAdminChange): Promise<CiAdmissionState | null> {
   return prisma.$transaction(async (tx) => {
     await takeLock(tx);
     await takeAuditChainLock(tx);

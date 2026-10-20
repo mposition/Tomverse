@@ -126,6 +126,12 @@ const stateSchema = z
      * stopped before making it), it goes back to the top of the line.
      */
     releasing: z.array(queueEntrySchema).max(MAX_QUEUE).default([]),
+    /**
+     * Pull requests whose `CI admission` commit status could not be written.
+     * The service retries them every round: pending while in line, success
+     * otherwise -- a pending left behind would hold merge-train back.
+     */
+    statusRetry: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
     /** The latest round: when, how many slots were in use after it, and by which pull requests. */
     lastRound: z
@@ -153,6 +159,7 @@ export const emptyCiAdmissionState = (): CiAdmissionState => ({
   granted: [],
   pendingArrivals: [],
   releasing: [],
+  statusRetry: [],
   events: [],
   lastRound: null,
 });
@@ -388,6 +395,7 @@ export function evaluateCiAdmission(input: {
       granted: [...grantedHead].map(([number, headSha]) => ({ number, headSha })).slice(0, MAX_QUEUE),
       pendingArrivals: [],
       releasing: actions.flatMap((action) => (action.kind === "release" ? [action.entry] : [])),
+      statusRetry: input.state.statusRetry,
       events: [...input.state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,
