@@ -207,6 +207,19 @@ emitted only where used and inherit the locale family automatically.
 
 ## Size and weight policy
 
+### Chat and Review wordmark
+
+The workspace sidebars, mobile new-conversation header and loading shell share
+`components/chat/TomverseWordmark.tsx`: lowercase `tomverse.` at 24px, weight
+650, letter-spacing -1px and line-height 1.6, with a 1px gap before the period.
+The wordmark inherits the existing locale UI family; it does not load a brand
+font or change body typography. An open conversation keeps its existing mobile
+header title. These values match the mobile app's owner-approved wordmark.
+At extreme zoom, the new-conversation wordmark yields space to the header's
+navigation controls; the accessible page heading remains available.
+
+### General text
+
 - Customer text is never below 11px, and 11px is limited to supplementary
   information that is never the only carrier of a fact.
 - Body copy and primary controls start at 14px.

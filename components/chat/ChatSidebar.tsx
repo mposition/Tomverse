@@ -9,6 +9,7 @@ import {
 } from "@/lib/conversationListGrouping";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
+import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
 import {
     forgetMissingPins,
@@ -1340,12 +1341,12 @@ export function ChatSidebar({
                   carries its own <h1> instead.
                 */}
                 {isMobileDrawer ? (
-                    <p className="text-sm font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
-                        Tomverse
+                    <p className="text-zinc-800 dark:text-zinc-100">
+                        <TomverseWordmark />
                     </p>
                 ) : (
-                    <h1 className="text-base font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
-                        Tomverse
+                    <h1 className="text-zinc-800 dark:text-zinc-100">
+                        <TomverseWordmark />
                     </h1>
                 )}
                 <BuildStagingBadge />
