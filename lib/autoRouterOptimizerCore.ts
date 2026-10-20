@@ -209,7 +209,44 @@ export type OptimizerCycleResult = {
     /** Calls that threw; their cost is unknown and counted as nothing. */
     failedCalls: number;
     failedByKind: Record<OptimizerCallKind, number>;
+    /** Judge calls that returned no verdict (failed or unparsed), counted apart from ties. */
+    judgeFailed: number;
+    /** Per answering model: answers it gave, and answers that failed or came back empty. */
+    answerStats: Record<string, OptimizerAnswerStats>;
 };
+
+export type OptimizerAnswerStats = { answered: number; failed: number };
+
+/**
+ * A model whose answers all failed in the last cycle -- at least this many,
+ * none answered -- is not drawn as a direct challenger in the next one: on
+ * Test (2026-10-20) deepseek-v4-pro timed out five times in one cycle, each a
+ * case undecided and a call that may still have been billed. It still
+ * answers when the router picks it, and it is drawn again once a cycle
+ * passes without it failing that way.
+ */
+export const AUTO_ROUTER_UNRELIABLE_MIN_FAILURES = 2;
+
+export const unreliableAnswerModels = (stats: unknown): string[] =>
+    stats && typeof stats === "object"
+        ? Object.entries(stats as Record<string, Partial<OptimizerAnswerStats>>)
+              .filter(([, value]) =>
+                  (value?.answered ?? 0) === 0 &&
+                  typeof value?.failed === "number" &&
+                  value.failed >= AUTO_ROUTER_UNRELIABLE_MIN_FAILURES)
+              .map(([modelId]) => modelId)
+              .sort()
+        : [];
+
+/**
+ * A verdict from both judge orders. A judge that returned nothing is not a
+ * tie: the comparison is undecided, so a judge failure never reads as
+ * evidence that two models are equal.
+ */
+export const judgedVerdict = (
+    judged: readonly [JudgeWinner | null, JudgeWinner | null]
+): "candidate" | "incumbent" | "tie" | "undecided" =>
+    judged[0] === null || judged[1] === null ? "undecided" : combineJudgeOrders(judged[0], judged[1]);
 
 export type OptimizerCallKind = "synthesize" | "generate" | "route" | "answer" | "judge";
 
@@ -742,6 +779,7 @@ export const AUTO_ROUTER_JUDGE_SYSTEM = [
     "First judge quality: is the answer correct, complete, and does it do what the message asked (its language, format and constraints)?",
     "Only when both are about equally good, prefer the answer with fewer credits: credits are what the user pays.",
     "Answer A, B, or equal when neither is clearly better.",
+    "Return only the object, with nothing before or after it.",
 ].join("\n");
 
 export type OptimizerAnswer = { modelId: string; answer: string };
@@ -1061,6 +1099,8 @@ export async function runOptimizerCycle(
         routerStats?: RouterStats | null;
         /** Every catalogue model id, retired ones included, for the naming check. */
         catalogueIds?: readonly string[];
+        /** Models never drawn as the direct challenger (unreliableAnswerModels of the last cycle). */
+        unreliableModels?: readonly string[];
     },
     deps: OptimizerCycleDeps
 ): Promise<OptimizerCycleResult> {
@@ -1076,6 +1116,9 @@ export async function runOptimizerCycle(
     const spentByKind = zeroByKind();
     const failedByKind = zeroByKind();
     const spentByProvider = new Map<string, number>();
+    // Declared before any early finish reads them.
+    const answerStats = new Map<string, OptimizerAnswerStats>();
+    let judgeFailed = 0;
     const call = async <T>(
         kind: OptimizerCallKind,
         run: () => Promise<OptimizerCallResult<T>>
@@ -1126,6 +1169,8 @@ export async function runOptimizerCycle(
         spentByProvider: new Map(spentByProvider),
         failedCalls,
         failedByKind: { ...failedByKind },
+        judgeFailed,
+        answerStats: Object.fromEntries(answerStats),
     });
 
     // Too few real decisions: one call writes the rest. Each synthetic message
@@ -1169,12 +1214,29 @@ export async function runOptimizerCycle(
     // the direct comparison and the replay comparison below ask for the same
     // ones whenever the proposal picks the direct challenger, and pay once.
     const answers = new Map<string, Promise<string | null>>();
+    const noteAnswer = (modelId: string, answered: boolean) => {
+        const stats = answerStats.get(modelId) ?? { answered: 0, failed: 0 };
+        if (answered) stats.answered += 1;
+        else stats.failed += 1;
+        answerStats.set(modelId, stats);
+    };
     const answerOf = (decision: OptimizerDecision, modelId: string) => {
         const key = JSON.stringify([decision.id, modelId]);
         let answer = answers.get(key);
         if (!answer) {
             const turn = { message: decision.routerInput, previousAnswer: decision.routerContext };
-            answer = call("answer", () => deps.answer(modelId, turn)).then(admitOptimizerAnswer);
+            // Counted only when the call was made: a budget refusal says
+            // nothing about the model.
+            answer = call("answer", async () => {
+                try {
+                    const result = await deps.answer(modelId, turn);
+                    noteAnswer(modelId, admitOptimizerAnswer(result.value) !== null);
+                    return result;
+                } catch (error) {
+                    noteAnswer(modelId, false);
+                    throw error;
+                }
+            }).then(admitOptimizerAnswer);
             answers.set(key, answer);
         }
         return answer;
@@ -1188,7 +1250,11 @@ export async function runOptimizerCycle(
             judged = Promise.all([
                 call("judge", () => deps.judge(autoRouterJudgeMessage(decision, first, second))),
                 call("judge", () => deps.judge(autoRouterJudgeMessage(decision, second, first))),
-            ]);
+            ]).then((orders) => {
+                // Counted once per judgement, however often it is reused.
+                judgeFailed += orders.filter((order) => order === null).length;
+                return orders;
+            });
             judgements.set(key, judged);
         }
         return judged;
@@ -1216,23 +1282,29 @@ export async function runOptimizerCycle(
     const trained = train.map((decision, index) => ({ ...decision, pickedModelId: trainPicks[index] ?? null }));
 
     // Direct comparison: the current pick against another candidate of the
-    // same credits, both answering, judged in both orders.
+    // same credits, both answering, judged in both orders. A model whose
+    // answers all failed last cycle is not drawn as the challenger.
+    const unreliable = new Set(input.unreliableModels ?? []);
     comparisons = await pool(
         evaluate.map((decision, index) => async (): Promise<OptimizerComparison> => {
             const kind = kindOf(decision);
             const a = incumbentPicks[index] ?? null;
             if (!a) return { kind, a: null, b: null, verdict: "unrouted" };
-            const b = directChallenger(decision.candidates, a, index);
+            const b = directChallenger(
+                decision.candidates.filter((candidate) => candidate.id === a || !unreliable.has(candidate.id)),
+                a,
+                index
+            );
             if (!b) return { kind, a, b: null, verdict: "no_alternative" };
             const [answerA, answerB] = await Promise.all([answerOf(decision, a), answerOf(decision, b)]);
             if (!answerA || !answerB) return { kind, a, b, verdict: "undecided" };
             const judged = await judgeOf(decision, { modelId: a, answer: answerA }, { modelId: b, answer: answerB });
-            const combined = combineJudgeOrders(judged[0], judged[1]);
+            const verdict = judgedVerdict(judged);
             return {
                 kind,
                 a,
                 b,
-                verdict: combined === "incumbent" ? "a" : combined === "candidate" ? "b" : "tie",
+                verdict: verdict === "incumbent" ? "a" : verdict === "candidate" ? "b" : verdict,
                 judged,
             };
         }),
@@ -1324,7 +1396,7 @@ export async function runOptimizerCycle(
                 { modelId: incumbentPick, answer: a },
                 { modelId: candidatePick, answer: b }
             );
-            return { ...base, verdict: combineJudgeOrders(judged[0], judged[1]), judged };
+            return { ...base, verdict: judgedVerdict(judged), judged };
         }),
         AUTO_ROUTER_OPTIMIZER_CONCURRENCY
     );

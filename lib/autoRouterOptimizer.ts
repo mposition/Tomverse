@@ -52,6 +52,7 @@ import {
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
     summarizeRouterDecisions,
+    unreliableAnswerModels,
     syntheticCaseViews,
     type OptimizerCallKind,
     type OptimizerDecision,
@@ -92,8 +93,16 @@ const ROUTER_STATS_DAYS = 14;
 const ROUTER_STATS_MAX_ROWS = 2_000;
 
 
-/** Room for a model that writes anything before the one-word object. */
-const JUDGE_MAX_OUTPUT_TOKENS = 400;
+/**
+ * Room for a model that writes anything before the one-word object. On Test
+ * (2026-10-20, cycle cmvgc2vrb) eight judge calls to claude-opus-5 ended at
+ * 400 tokens with no object (finishReason length): the request carried no
+ * thinking setting, and the tokens went before the object. The judge and the
+ * synthesizer now ask for no reasoning (`reasoning: "none"`, which the
+ * Anthropic provider sends as thinking disabled, or its lowest effort on a
+ * model that refuses that) and the judge keeps this much room besides.
+ */
+const JUDGE_MAX_OUTPUT_TOKENS = 2_000;
 const JUDGE_TIMEOUT_MS = 30_000;
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
@@ -263,6 +272,29 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
 export async function optimizerCatalogueIds(): Promise<string[]> {
     const registered = await getRuntimeModels({ includeCatalogDeleted: true });
     return [...new Set([...registered, ...AVAILABLE_MODELS].map((model) => model.id))];
+}
+
+/**
+ * Models whose answers all failed in the last finished cycle that recorded
+ * answers, never drawn as the next cycle's direct challenger. Empty when
+ * there is no such cycle or it cannot be read.
+ */
+export async function readUnreliableAnswerModels(): Promise<string[]> {
+    try {
+        const rows = await prisma.autoRouterOptimizerCycle.findMany({
+            where: { status: { in: ["passed", "failed", "error"] } },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: { summary: true },
+        });
+        const recorded = rows.find((row) => {
+            const summary = row.summary as { answerStats?: unknown } | null;
+            return summary?.answerStats != null && typeof summary.answerStats === "object";
+        });
+        return recorded ? unreliableAnswerModels((recorded.summary as { answerStats: unknown }).answerStats) : [];
+    } catch {
+        return [];
+    }
 }
 
 async function readRouterStats(now: Date): Promise<RouterStats | null> {
@@ -606,10 +638,11 @@ async function runInBackground(input: {
         spentByProvider: new Map(),
     };
     try {
-        const [candidatesFor, routerStats, catalogueIds] = await Promise.all([
+        const [candidatesFor, routerStats, catalogueIds, unreliableModels] = await Promise.all([
             autoCandidateMenu(input.models),
             readRouterStats(new Date()),
             optimizerCatalogueIds(),
+            readUnreliableAnswerModels(),
         ]);
         const result = await runOptimizerCycle(
             {
@@ -617,6 +650,7 @@ async function runInBackground(input: {
                 incumbentGuidance: input.incumbentGuidance,
                 routerStats,
                 catalogueIds,
+                unreliableModels,
             },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
@@ -636,6 +670,7 @@ async function runInBackground(input: {
                         system: AUTO_ROUTER_SYNTHESIZER_SYSTEM,
                         prompt: message,
                         maxOutputTokens: SYNTHESIZER_MAX_OUTPUT_TOKENS,
+                        reasoning: "none",
                         maxRetries: 0,
                         abortSignal: AbortSignal.timeout(SYNTHESIZER_TIMEOUT_MS),
                         output: Output.object({
@@ -747,6 +782,7 @@ async function runInBackground(input: {
                         system: AUTO_ROUTER_JUDGE_SYSTEM,
                         prompt: message,
                         maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
+                        reasoning: "none",
                         maxRetries: 0,
                         abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
                         output: Output.object({
@@ -782,6 +818,9 @@ async function runInBackground(input: {
                     report: result.report,
                     comparisons: result.comparisons,
                     gate: result.gate,
+                    judgeFailed: result.judgeFailed,
+                    answerStats: result.answerStats,
+                    unreliableModels,
                 },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
@@ -820,6 +859,8 @@ async function runInBackground(input: {
                 {}
             ),
             gate: result.gate,
+            judgeFailed: result.judgeFailed,
+            unreliableModels,
             reportItems: result.report
                 ? result.report.findings.length + result.report.recommendations.length
                 : 0,

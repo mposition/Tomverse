@@ -549,3 +549,46 @@ test("the naming check knows every catalogue id, models deleted from the catalog
     await prisma.modelRegistryEntry.deleteMany({ where: { id: deletedId } });
   }
 });
+
+test("the next challenger leaves out models whose answers all failed in the last cycle that recorded answers", async () => {
+  const { readUnreliableAnswerModels } = await import("@/lib/autoRouterOptimizer");
+  assert.deepEqual(await readUnreliableAnswerModels(), []);
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+  const stats = (answerStats: Record<string, { answered: number; failed: number }>) => ({ evaluated: 20, answerStats });
+  // The last finished cycle that recorded answers decides.
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "failed", createdAt: at(30),
+      summary: stats({ "deepseek-v4-pro": { answered: 0, failed: 5 }, "gpt-6-luna": { answered: 4, failed: 1 } }),
+    },
+  });
+  // Newer, but a cycle that recorded no answers, and one still running: neither counts.
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "failed", createdAt: at(20), summary: { evaluated: 12 },
+    },
+  });
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "running", createdAt: at(1),
+      summary: stats({ "gpt-6-luna": { answered: 0, failed: 9 } }),
+    },
+  });
+  assert.deepEqual(await readUnreliableAnswerModels(), ["deepseek-v4-pro"]);
+  // A newer finished cycle in which the model answered clears it.
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "passed", createdAt: at(10),
+      summary: stats({ "deepseek-v4-pro": { answered: 2, failed: 3 } }),
+    },
+  });
+  assert.deepEqual(await readUnreliableAnswerModels(), []);
+});

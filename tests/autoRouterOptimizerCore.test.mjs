@@ -949,8 +949,12 @@ test("each judged case keeps both orders' verdicts, so an unanswered judge is no
   for (const item of judged) {
     assert.equal(item.judged.length, 2);
     assert.ok(item.judged.includes(null));
-    assert.equal(item.verdict, "tie");
+    // A judge with no verdict leaves the case undecided, never a tie.
+    assert.equal(item.verdict, "undecided");
   }
+  assert.equal(result.summary.ties, 0);
+  assert.equal(result.summary.undecided, 6);
+  assert.equal(result.judgeFailed, 6);
   assert.ok(result.cases.filter((item) => item.verdict === "unchanged").every((item) => item.judged === undefined));
 });
 
@@ -1058,7 +1062,7 @@ test("a name outside the candidates is caught however it is shaped, and prose is
 });
 
 test("a comparison whose judge never answered is no evidence for naming a model", async () => {
-  // Every judgement fails to parse: each direct comparison reads as a tie, with no verdicts.
+  // Every judgement fails to parse: each direct comparison is undecided, with no verdicts.
   const rejected = [];
   const { deps } = rankedDeps({
     judge: async () => ({ value: null, costMicroUsd: 20, provider: "opt" }),
@@ -1066,7 +1070,8 @@ test("a comparison whose judge never answered is no evidence for naming a model"
     guidanceRejected: (rejection) => rejected.push(rejection),
   });
   const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
-  assert.ok(result.comparisons.every((item) => item.verdict === "tie" && item.judged[0] === null && item.judged[1] === null));
+  assert.ok(result.comparisons.every((item) => item.verdict === "undecided" && item.judged[0] === null && item.judged[1] === null));
+  assert.equal(result.judgeFailed, 12 * 2);
   assert.equal(result.failure, "candidate_invalid");
   assert.deepEqual(rejected, [{ reason: "unproven_model", ids: ["rival", "strong"] }]);
 
@@ -1080,4 +1085,88 @@ test("a comparison whose judge never answered is no evidence for naming a model"
   const ok = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, tied.deps);
   assert.notEqual(ok.failure, "candidate_invalid");
   assert.deepEqual(answered, []);
+});
+
+test("a judge that returns nothing is counted as a failure and leaves the comparison undecided, apart from ties", async () => {
+  const { judgedVerdict } = await import("../lib/autoRouterOptimizerCore.ts");
+  assert.equal(judgedVerdict(["B", "A"]), "candidate");
+  assert.equal(judgedVerdict(["A", "B"]), "incumbent");
+  assert.equal(judgedVerdict(["equal", "equal"]), "tie");
+  assert.equal(judgedVerdict(["A", "A"]), "tie");
+  assert.equal(judgedVerdict([null, "A"]), "undecided");
+  assert.equal(judgedVerdict(["B", null]), "undecided");
+  // One order fails for every direct comparison: no tie is recorded, each
+  // comparison is undecided, and every failed call is counted once.
+  let n = 0;
+  const { deps } = rankedDeps({
+    judge: async (message) => {
+      n++;
+      const { answerA, answerB } = JSON.parse(message);
+      if (n % 2 === 1) return { value: null, costMicroUsd: 20, provider: "opt" };
+      const order = rank(answerA) - rank(answerB);
+      return { value: order > 0 ? "A" : order < 0 ? "B" : "equal", costMicroUsd: 20, provider: "opt" };
+    },
+  });
+  const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.ok(result.comparisons.every((item) => item.verdict !== "tie"));
+  const undecided = result.comparisons.filter((item) => item.verdict === "undecided");
+  assert.ok(undecided.length > 0);
+  assert.ok(undecided.every((item) => item.judged.includes(null)));
+  assert.equal(result.judgeFailed, n - Math.floor(n / 2));
+  // The judge is told to return the object alone.
+  assert.match(AUTO_ROUTER_JUDGE_SYSTEM, /Return only the object/);
+});
+
+test("answers are counted per model, and a model whose answers all failed is not drawn as the next challenger", async () => {
+  const { unreliableAnswerModels, AUTO_ROUTER_UNRELIABLE_MIN_FAILURES } = await import("../lib/autoRouterOptimizerCore.ts");
+  assert.equal(AUTO_ROUTER_UNRELIABLE_MIN_FAILURES, 2);
+  assert.deepEqual(
+    unreliableAnswerModels({
+      "deepseek-v4-pro": { answered: 0, failed: 5 },
+      "gpt-6-luna": { answered: 3, failed: 1 },
+      "once-failed": { answered: 0, failed: 1 },
+      "mixed": { answered: 1, failed: 4 },
+      "bad": "x",
+    }),
+    ["deepseek-v4-pro"]
+  );
+  assert.deepEqual(unreliableAnswerModels(null), []);
+  assert.deepEqual(unreliableAnswerModels("nope"), []);
+
+  // rival times out on every answer: counted as failed, strong as answered.
+  const timedOut = rankedDeps({
+    answer: async (modelId) => {
+      if (modelId === "rival") throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
+      return { value: RANKED[modelId], costMicroUsd: 30, provider: `${modelId}-co` };
+    },
+  });
+  const first = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, timedOut.deps);
+  assert.deepEqual(first.answerStats.rival, { answered: 0, failed: 12 });
+  assert.equal(first.answerStats.strong.failed, 0);
+  assert.ok(first.answerStats.strong.answered >= 12);
+  assert.deepEqual(unreliableAnswerModels(first.answerStats), ["rival"]);
+
+  // The next cycle does not draw rival: strong has no other same-credit or
+  // higher candidate, so there is nothing to compare and rival never answers.
+  const asked = [];
+  const next = rankedDeps({
+    answer: async (modelId) => {
+      asked.push(modelId);
+      return { value: RANKED[modelId], costMicroUsd: 30, provider: `${modelId}-co` };
+    },
+  });
+  const second = await runOptimizerCycle(
+    { decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, unreliableModels: ["rival"] },
+    next.deps
+  );
+  assert.ok(second.comparisons.every((item) => item.verdict === "no_alternative" && item.b === null));
+  assert.ok(!asked.includes("rival"));
+
+  // The router's own pick still answers, even when it failed last time.
+  const pickStays = rankedDeps();
+  const third = await runOptimizerCycle(
+    { decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, unreliableModels: ["strong"] },
+    pickStays.deps
+  );
+  assert.ok(third.comparisons.every((item) => item.a === "strong" && item.b === "rival"));
 });
