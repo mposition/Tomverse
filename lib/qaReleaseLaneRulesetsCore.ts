@@ -106,7 +106,9 @@ export function qaReleaseLaneRulesets(input: {
   let suffix = "";
   if (scope.kind === "real") {
     updateInclude = ["~ALL"];
-    updateExclude = [ref("develop")];
+    // The release train pushes its own branches (policy section 8 item 12);
+    // owner-approved exception 2026-10-20.
+    updateExclude = [ref("develop"), "refs/heads/release/train-*"];
     developInclude = [ref("develop")];
   } else {
     const names = [...scope.updateBranches, scope.developBranch];
