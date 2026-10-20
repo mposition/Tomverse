@@ -45,6 +45,7 @@ import {
     rolledBackRouterGuidance,
     guidanceRejection,
     type OptimizerCallKind,
+    type OptimizerRunOutcome,
 } from "@/lib/autoRouterOptimizerCore";
 import {
     AUTO_REWRITE_GENERATOR_SYSTEM,
@@ -162,12 +163,15 @@ export async function loadRewriteDecisions(): Promise<RewriteOptimizerDecision[]
 }
 
 /**
- * Starts one rewrite cycle and returns at once; the calls run in the
- * background and the row is updated when they finish. Refusals cost nothing.
+ * Starts one rewrite cycle. By default it returns at once and the calls run
+ * in the background (Admin's button); with `waitForCompletion` it returns when
+ * the cycle has finished and been recorded, with the outcome (the own-process
+ * optimizer service). Refusals cost nothing.
  */
-export async function startAutoRewriteOptimizerCycle(actor: OptimizerActor): Promise<
-    { cycleId: string } | { refused: OptimizerStartRefusal }
-> {
+export async function startAutoRewriteOptimizerCycle(
+    actor: OptimizerActor,
+    options: { waitForCompletion?: boolean } = {}
+): Promise<{ cycleId: string; outcome?: OptimizerRunOutcome } | { refused: OptimizerStartRefusal }> {
     const models = await getRuntimeModels();
     const optimizerModel = resolveAutoLlmRouterModel(models, (await readOptimizerModelId()) ?? undefined);
     if (!optimizerModel) return { refused: "optimizer_off" };
@@ -194,7 +198,7 @@ export async function startAutoRewriteOptimizerCycle(actor: OptimizerActor): Pro
     });
     if ("refused" in started) return started;
 
-    void runInBackground({
+    const run = runInBackground({
         cycleId: started.cycle.id,
         budgetMicroUsd: started.cycle.budgetMicroUsd,
         decisions,
@@ -206,9 +210,14 @@ export async function startAutoRewriteOptimizerCycle(actor: OptimizerActor): Pro
         optimizerPrices,
         routerPrices,
     });
-    return { cycleId: started.cycle.id };
+    if (!options.waitForCompletion) {
+        void run;
+        return { cycleId: started.cycle.id };
+    }
+    return { cycleId: started.cycle.id, outcome: await run };
 }
 
+/** Runs a reserved rewrite cycle and records it; never throws (as the routing one). */
 async function runInBackground(input: {
     cycleId: string;
     budgetMicroUsd: number;
@@ -220,7 +229,7 @@ async function runInBackground(input: {
     routerModel: AiModel;
     optimizerPrices: Prices;
     routerPrices: Prices;
-}) {
+}): Promise<OptimizerRunOutcome> {
     // As in the routing cycle: a failed call is logged by shape and rethrown
     // (it then costs nothing in the cycle's count); content never reaches a log.
     const traced = async <T>(kind: OptimizerCallKind, run: () => Promise<T>) => {
@@ -430,6 +439,7 @@ async function runInBackground(input: {
             decided: result.summary.decided,
             undecided: result.summary.undecided,
         }));
+        return { recorded, status: result.status, failure: result.failure };
     } catch (error) {
         // As in the routing cycle: the spend known by then is booked through
         // the same compare-and-set as a normal finish, at most once.
@@ -445,6 +455,7 @@ async function runInBackground(input: {
             data: { status: "error", failure: "run_error", spentMicroUsd: known.spentMicroUsd, finishedAt: new Date() },
             spentByProvider: known.spentByProvider,
         }).catch(() => undefined);
+        return { recorded: false, status: "error", failure: "run_error" };
     }
 }
 
@@ -593,11 +604,11 @@ export async function readAutoRewriteOptimizerState() {
  * cycle a day (the system's daily count is shared), routing as before when
  * only its switch is on, rewrite when only the rewrite switch is on, and the
  * two in turn when both are. Off, or any refusal, starts nothing and costs
- * nothing.
+ * nothing. `waitForCompletion` runs the cycle to its end before returning.
  */
-export async function runScheduledOptimizerCycle(): Promise<
+export async function runScheduledOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
     | { started: false; reason: "daily_off" | OptimizerStartRefusal; target?: "routing" | "rewrite" }
-    | { started: true; cycleId: string; target: "routing" | "rewrite" }
+    | { started: true; cycleId: string; target: "routing" | "rewrite"; outcome?: OptimizerRunOutcome }
 > {
     const [routing, rewrite] = await Promise.all([readOptimizerAutomation(), readRewriteOptimizerAutomation()]);
     const last =
@@ -614,9 +625,18 @@ export async function runScheduledOptimizerCycle(): Promise<
         lastSystemTarget: last?.target === "rewrite" ? "rewrite" : last?.target === "routing" ? "routing" : null,
     });
     if (!target) return { started: false, reason: "daily_off" };
-    if (target === "routing") return { ...(await runScheduledAutoRouterOptimizerCycle()), target };
-    const result = await startAutoRewriteOptimizerCycle("system");
+    if (target === "routing") return { ...(await runScheduledAutoRouterOptimizerCycle(options)), target };
+    const result = await startAutoRewriteOptimizerCycle("system", options);
     return "refused" in result
         ? { started: false, reason: result.refused, target }
-        : { started: true, cycleId: result.cycleId, target };
+        : { started: true, cycleId: result.cycleId, target, ...(result.outcome ? { outcome: result.outcome } : {}) };
 }
+
+/**
+ * The own-process optimizer service's run (scripts/run-auto-router-optimizer.mjs):
+ * the same daily rule and the same reserve, run and finish as the maintenance
+ * route's step, but waited for, so a web redeploy cannot cut the cycle off and
+ * leave its spend unrecorded.
+ */
+export const runAutoRouterOptimizerCycleToCompletion = () =>
+    runScheduledOptimizerCycle({ waitForCompletion: true });

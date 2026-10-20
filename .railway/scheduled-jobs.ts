@@ -62,6 +62,32 @@ export const isRailwayEnvironment = (
   typeof value === "string" &&
   Object.prototype.hasOwnProperty.call(RAILWAY_ENVIRONMENT_BRANCHES, value);
 
+/**
+ * The Auto Router Optimizer service runs the cycle in its own process, so it
+ * holds what the cycle reads directly: the database, the provider keys of the
+ * models that answer, judge and route (the catalogue's providers), the Auto
+ * cohort's plans (the candidate menu) and its own switch. Names only; the
+ * operator sets the values in the dashboard after the first apply
+ * (docs/ops/railway-iac-scheduled-jobs.md 7절).
+ */
+const AUTO_ROUTER_OPTIMIZER_VARIABLES = [
+  "ANTHROPIC_API_KEY",
+  "AUTO_ROUTER_ELIGIBLE_PLANS",
+  "AUTO_ROUTER_OPTIMIZER_OWN_PROCESS",
+  "DASHSCOPE_API_KEY",
+  "DATABASE_URL",
+  "DEEPSEEK_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GROQ_API_KEY",
+  "MINIMAX_API_KEY",
+  "MISTRAL_API_KEY",
+  "MOONSHOT_API_KEY",
+  "OPENAI_API_KEY",
+  "PERPLEXITY_API_KEY",
+  "XAI_API_KEY",
+  "ZHIPU_API_KEY",
+] as const;
+
 export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
   {
     key: "creditReconciliation",
@@ -127,6 +153,21 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
         "PROVIDER_USAGE_SYNC_URL",
       ],
       // Not on dev (operator decision, 2026-10-07).
+    },
+  },
+  {
+    // The Auto router optimizer's daily cycle, waited for in its own process
+    // so a web redeploy cannot cut it off (coordinator, 2026-10-20). Does
+    // nothing until AUTO_ROUTER_OPTIMIZER_OWN_PROCESS is on; 30 minutes after
+    // Maintenance Cron, whose optimizer step then stands aside.
+    key: "autoRouterOptimizer",
+    service: "Auto Router Optimizer",
+    startCommand: "npm run maintenance:auto-router-optimizer",
+    cronSchedule: "30 3 * * *",
+    variables: {
+      production: AUTO_ROUTER_OPTIMIZER_VARIABLES,
+      staging: AUTO_ROUTER_OPTIMIZER_VARIABLES,
+      dev: AUTO_ROUTER_OPTIMIZER_VARIABLES,
     },
   },
 ];

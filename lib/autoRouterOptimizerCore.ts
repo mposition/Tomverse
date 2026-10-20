@@ -332,6 +332,42 @@ export const autoLlmRouterVersionFor = (baseVersion: string, cycleId: string | n
  */
 export const AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS = 60 * 60_000;
 
+/**
+ * The own-process switch (coordinator, 2026-10-20). `on` moves the daily
+ * cycle off the web container -- where a redeploy's SIGTERM cut the first dev
+ * cycle off after 23 seconds, unrecorded -- to the Auto Router Optimizer cron
+ * service (scripts/run-auto-router-optimizer.mjs), which waits for the cycle
+ * to finish. The maintenance route then skips its optimizer step, and the
+ * service does nothing while it is off. Off by default: nothing changes until
+ * an operator sets it on both.
+ */
+export const AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV = "AUTO_ROUTER_OPTIMIZER_OWN_PROCESS";
+
+export const optimizerOwnProcessOn = (env: Record<string, string | undefined> = process.env) =>
+    env[AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV]?.trim().toLowerCase() === "on";
+
+/**
+ * The own process's whole deadline. Past it the process exits without
+ * recording; the cycle row stays running and the next start closes it as
+ * interrupted. Kept below AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS, so a cycle
+ * is never closed as stale while its process can still record it, and above
+ * the longest cycle the call deadlines allow (about 33 minutes, worked out in
+ * tests/autoRouterOptimizerCore.test.mjs).
+ */
+export const AUTO_ROUTER_OPTIMIZER_PROCESS_DEADLINE_MS = 50 * 60_000;
+
+/** How a cycle that was started and waited for ended. */
+export type OptimizerRunOutcome = { recorded: boolean; status: string; failure: string | null };
+
+/**
+ * The own process's exit code: 0 when it ran a cycle that recorded its result
+ * or had nothing to do (the daily switch off, today's cycle already run, a
+ * refusal); 1 when a started cycle could not record its result.
+ */
+export const optimizerProcessExitCode = (
+    run: { started: false } | { started: true; outcome?: OptimizerRunOutcome }
+) => (run.started && (!run.outcome?.recorded || run.outcome.failure === "run_error") ? 1 : 0);
+
 export const optimizerCycleView = (
     cycle: { status: string; failure: string | null; createdAt: Date },
     now: Date

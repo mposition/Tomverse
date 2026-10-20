@@ -1180,3 +1180,53 @@ test("answers are counted per model, and a model whose answers all failed is not
   );
   assert.ok(third.comparisons.every((item) => item.a === "strong" && item.b === "rival"));
 });
+
+test("the own-process switch is on only when set to on", async () => {
+  const { optimizerOwnProcessOn, AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV } = await import("../lib/autoRouterOptimizerCore.ts");
+  assert.equal(AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV, "AUTO_ROUTER_OPTIMIZER_OWN_PROCESS");
+  assert.equal(optimizerOwnProcessOn({}), false);
+  for (const value of ["", "off", "true", "1", "yes", "onn"]) {
+    assert.equal(optimizerOwnProcessOn({ AUTO_ROUTER_OPTIMIZER_OWN_PROCESS: value }), false, value);
+  }
+  for (const value of ["on", "ON", " on "]) {
+    assert.equal(optimizerOwnProcessOn({ AUTO_ROUTER_OPTIMIZER_OWN_PROCESS: value }), true, value);
+  }
+});
+
+test("the own process gives up before the stale close and after the longest cycle", async () => {
+  const {
+    AUTO_ROUTER_OPTIMIZER_PROCESS_DEADLINE_MS,
+    AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS,
+    AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
+    AUTO_ROUTER_OPTIMIZER_CONCURRENCY,
+    AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS,
+  } = await import("../lib/autoRouterOptimizerCore.ts");
+  const { AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS } = await import("../lib/autoLlmRouterCore.ts");
+  // A cycle is never closed as stale while its own process can still record it.
+  assert.ok(AUTO_ROUTER_OPTIMIZER_PROCESS_DEADLINE_MS < AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS);
+  // The longest routing cycle every call deadline allows: synthesis and
+  // generation (150 s each, lib/autoRouterOptimizer.ts), then for the
+  // evaluation half (every other sampled message) in rounds of the
+  // concurrency: the current replays, the direct comparison (two answers side
+  // by side, then both judge orders side by side, 30 s), the candidate
+  // replays, and the replay comparison. The rewrite cycle is shorter.
+  const rounds = Math.ceil(AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX / 2 / AUTO_ROUTER_OPTIMIZER_CONCURRENCY);
+  const comparisonRound = AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS + 30_000;
+  const longest =
+    150_000 * 2 + rounds * (2 * AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS + 2 * comparisonRound);
+  assert.ok(longest < AUTO_ROUTER_OPTIMIZER_PROCESS_DEADLINE_MS, `${longest} ms`);
+});
+
+test("the own process exits 1 only when a started cycle did not record", async () => {
+  const { optimizerProcessExitCode } = await import("../lib/autoRouterOptimizerCore.ts");
+  assert.equal(optimizerProcessExitCode({ started: false }), 0);
+  assert.equal(optimizerProcessExitCode({ started: true, outcome: { recorded: true, status: "passed", failure: null } }), 0);
+  assert.equal(
+    optimizerProcessExitCode({ started: true, outcome: { recorded: true, status: "failed", failure: "candidate_invalid" } }),
+    0
+  );
+  assert.equal(optimizerProcessExitCode({ started: true, outcome: { recorded: false, status: "passed", failure: null } }), 1);
+  assert.equal(optimizerProcessExitCode({ started: true, outcome: { recorded: false, status: "error", failure: "run_error" } }), 1);
+  // Started but not waited for: nothing says it recorded.
+  assert.equal(optimizerProcessExitCode({ started: true }), 1);
+});

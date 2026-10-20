@@ -155,3 +155,57 @@ npm run railway:iac:plan
 |---|---|---|---|---|---|
 | staging | 2026-09-17 plan: 0 add / 5 change / 0 destroy | 2026-09-17, 이후 plan `already up to date` | 2026-09-16 22:14–22:18Z 재배포 | 새 배포 5개 모두 `configFile` 없음, start·cron·restart가 직전 배포와 동일(배포 메타데이터, Claude 읽기 전용) | 운영자 |
 | production | 2026-09-17 plan: 0 add / 5 change / 0 destroy (main `aac84aab`) | 2026-09-17, 이후 plan `already up to date` | 2026-09-16 23:50Z 재배포 | 새 배포 5개 모두 `configFile` 없음, start·cron·restart가 직전 배포와 동일, branch `main` `aac84aab`(배포 메타데이터, Claude 읽기 전용) | 운영자 |
+
+## 7. Auto Router Optimizer (2026-10-20 추가)
+
+Auto router optimizer의 하루 한 번 cycle을 웹 컨테이너 밖, 자기 프로세스에서 끝까지 기다리며 돌리는
+cron 서비스입니다. 웹 서비스 재배포(SIGTERM)가 cycle을 끊어 지출이 기록되지 않던 문제를 막습니다.
+
+- 서비스: `Auto Router Optimizer`, 시작 명령 `npm run maintenance:auto-router-optimizer`, cron `30 3 * * *`
+  (Maintenance Cron 30분 뒤), restart `NEVER`. 환경: dev·staging·production.
+- 스위치: 환경변수 `AUTO_ROUTER_OPTIMIZER_OWN_PROCESS=on`. **기본은 꺼짐**입니다.
+  - 꺼짐: 이 서비스는 로그 한 줄만 남기고 끝납니다(종료 코드 0). Maintenance Cron이 지금처럼 cycle을 시작합니다.
+  - 켜짐: Maintenance Cron의 optimizer 단계는 로그 한 줄(`auto_router_optimizer_daily_skipped`)만 남기고 건너뛰고,
+    이 서비스가 cycle을 끝까지 기다립니다. 어느 cycle을 돌릴지(routing·rewrite 교대, 하루 한 번, 상한)는 앱과 같은
+    코드가 정합니다.
+- 종료 코드: 0은 cycle을 돌려 기록했거나 할 일이 없음(스위치 꺼짐, daily 꺼짐, 오늘 이미 돎, 거절). 1은 시작한 cycle이
+  결과를 기록하지 못함, 실행 오류, 또는 50분 deadline 초과.
+- deadline과 stale 판정: 프로세스는 50분이 지나면 기록하지 않고 종료합니다. cycle 행은 `running`으로 남고, 다음 시작이
+  60분 stale 판정으로 `interrupted`로 닫습니다. deadline(50분)이 stale(60분)보다 짧으므로, 프로세스가 아직 기록할 수
+  있는 cycle이 stale로 닫히는 일은 없습니다. 모든 호출이 제한 시간까지 걸리는 가장 긴 routing cycle은 약 33분입니다
+  (`tests/autoRouterOptimizerCore.test.mjs`에서 계산).
+
+### 7.1 변수 (이름만, 값은 대시보드에서)
+
+`.railway/scheduled-jobs.ts`의 `AUTO_ROUTER_OPTIMIZER_VARIABLES`와 같아야 합니다. 목록 밖 이름은 다음 apply가 지웁니다.
+
+| 이름 | 용도 |
+|---|---|
+| `DATABASE_URL` | 그 환경의 앱 DB(웹 서비스와 같은 값. Railway reference variable로 연결 가능) |
+| `AUTO_ROUTER_OPTIMIZER_OWN_PROCESS` | 위 스위치. `on`일 때만 동작 |
+| `AUTO_ROUTER_ELIGIBLE_PLANS` | Auto 후보 메뉴의 plan(웹 서비스와 같은 값) |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `MOONSHOT_API_KEY`, `MINIMAX_API_KEY`, `DASHSCOPE_API_KEY`, `ZHIPU_API_KEY`, `PERPLEXITY_API_KEY` | optimizer·router·답하는 모델의 공급자 key(웹 서비스와 같은 값) |
+
+웹 서비스에 없는 공급자 key는 비워 두지 말고 이름을 표에서 빼는 PR을 먼저 만듭니다. key가 없는 공급자의 모델은
+답이 실패로 기록되고, 다음 cycle에서 비교 상대로 뽑히지 않습니다.
+
+### 7.2 켜는 순서 (운영자, 환경마다 dev → staging → production)
+
+**실행 위치:** 로컬 PC의 PowerShell, Tomverse clone 폴더 안. dev는 `develop`, staging은 `test`, production은 `main`
+checkout. staging은 `test`가 이 변경을 담은 뒤에만 apply합니다(그 전에는 시작 명령의 script가 없습니다).
+Railway CLI 로그인이 필요하고, 비밀값을 대화나 파일에 붙일 일은 없습니다.
+
+1. 읽기: `npm run railway:iac:install` → `npm run railway:iac:use-dev` → `npm run railway:iac:plan`.
+   plan은 `Auto Router Optimizer` **추가 1건만** 보여야 합니다. `destroy`나 다른 서비스의 `Delete variable`이 있으면 멈춥니다.
+2. 쓰기: `npm run railway:iac:apply`. 서비스가 생깁니다. 변수가 아직 없으므로 첫 cron은 스위치 꺼짐으로 아무것도 하지 않습니다.
+3. 대시보드 → 그 환경 → `Auto Router Optimizer` → Variables에 7.1의 이름을 넣습니다. `AUTO_ROUTER_OPTIMIZER_OWN_PROCESS`는
+   이때 아직 넣지 않거나 `off`로 둡니다. Deploy.
+4. 확인: `npm run railway:iac:plan`이 변경 없음이어야 합니다(변수 이름이 선언과 같다는 뜻).
+5. 켜기: **이 서비스에 먼저** `AUTO_ROUTER_OPTIMIZER_OWN_PROCESS=on`, 그다음 **웹 서비스(`Tomverse`)에도** `on`.
+   반대 순서면 그 사이 하루는 아무도 cycle을 시작하지 않습니다. 이 순서에서 겹치는 하루는 Maintenance Cron(03:00)이
+   먼저 시작하고, 이 서비스(03:30)는 같은 예약에서 `already_running`이나 `daily_done`으로 거절되어 종료 코드 0으로 끝납니다.
+6. 다음 03:30 UTC 이후 서비스 로그에서 `auto_router_optimizer_process_run`과 cycle 결과를, Admin › Routing에서 cycle을 확인합니다.
+
+**되돌리기:** 웹 서비스의 `AUTO_ROUTER_OPTIMIZER_OWN_PROCESS`를 지우거나 `off`로 바꾸면 Maintenance Cron이 다시 cycle을
+시작합니다. 이 서비스의 스위치도 `off`로 둡니다. 이 서비스만 켜져 있으면 둘 다 시작을 시도하지만, 하루 한 번 규칙이
+나중 것을 거절합니다.
