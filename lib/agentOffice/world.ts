@@ -13,7 +13,7 @@ import {
 
 export const TILE = 18;
 export const COLS = 74;
-export const ROWS = 59;
+export const ROWS = 63;
 export const WORLD_W = COLS * TILE;
 export const WORLD_H = ROWS * TILE;
 
@@ -143,7 +143,9 @@ export const DECISION_ROOM: Room = {
  * out of this room, because nothing in it is the demo's.
  */
 const AMUX_Y = 45;
-const AMUX_H = 11;
+// Two desk rows six tiles apart: a worker's bubble on the second row never
+// covers the name tag of the worker above it, and the room note sits below both.
+const AMUX_H = 15;
 const AMUX_W = COL_X[2] + ROOM_W - COL_X[0];
 
 export const AMUX_ROOM: Room = {
@@ -161,7 +163,7 @@ export const AMUX_ROOM: Room = {
   ],
   desks: Array.from({ length: 13 }, (_, i) => {
     const dx = 4 + (i % 7) * 7;
-    const dy = 3 + Math.floor(i / 7) * 4;
+    const dy = 3 + Math.floor(i / 7) * 6;
     return { deskX: COL_X[0] + dx - 1, deskY: AMUX_Y + dy, seat: { x: COL_X[0] + dx, y: AMUX_Y + dy + 1 } };
   }),
 };
@@ -245,7 +247,7 @@ for (const room of DEPT_ROOMS) {
 for (const desk of AMUX_ROOM.desks) {
   PROPS.push({ kind: "desk", x: desk.deskX, y: desk.deskY, w: 3, h: 1 });
 }
-PROPS.push({ kind: "shelf", x: AMUX_ROOM.x + 44, y: AMUX_ROOM.y + 7, w: 3, h: 1 });
+PROPS.push({ kind: "shelf", x: AMUX_ROOM.x + 44, y: AMUX_ROOM.y + 10, w: 3, h: 1 });
 PROPS.push({ kind: "plant", x: AMUX_ROOM.x + AMUX_ROOM.w - 2, y: AMUX_ROOM.y + 6, w: 1, h: 1 });
 PROPS.push({ kind: "plant", x: AMUX_ROOM.x + 1, y: AMUX_ROOM.y + AMUX_ROOM.h - 2, w: 1, h: 1 });
 for (const desk of REVIEW_ROOM.desks) {

@@ -266,6 +266,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // v21 claim mode guard body; no commit-deadline marker, classifier or
   // deferred trigger changes.
   "20261020090000_amux_v19_subscription_channels",
+  // Intake v19 subscription unknown closures return their headroom: a claim
+  // CHECK widening and the v21 claim mode guard body; no commit-deadline
+  // marker, classifier or deferred trigger changes.
+  "20261020120000_amux_v19_shadow_unknown_headroom",
   // Orchestration policy v31, operator decision 2026-10-20: the worker
   // registry guard's body without the trial-period activation rule. A
   // registry change keeps its ordinary mutation boundary; no deadline guard

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessSessionShadowBudget, settleSessionShadowUsage } from
-  "../lib/amux/ideaSessionShadowBudgetCore.ts";
+import { assessSessionShadowBudget, resolveSessionUnknownClaim,
+  settleSessionShadowUsage } from "../lib/amux/ideaSessionShadowBudgetCore.ts";
 
 const basis = (change = {}) => ({
   mode: "subscription_cli", provider: "anthropic",
@@ -45,6 +45,39 @@ test("subscription exception refuses API, unknown channels, unknown usage and un
     [{ pricingExpiresAt: "2026-10-18T00:00:00.000Z" }, "price_unverified"],
   ]) assert.deepEqual(assessSessionShadowBudget(basis(change)),
     { decision: "hold", reason });
+});
+
+test("an unproven subscription closure returns its headroom; a bounded one consumes it", () => {
+  // Owner decision 2026-10-20: a subscription run spends no money, so its
+  // occupied headroom is not counted as this month's usage.
+  assert.deepEqual(resolveSessionUnknownClaim({ budgetMode: "max_shadow",
+    verification: "not_proven", reservedMicroUsd: "35000000" }), {
+    decision: "resolve", status: "owner_consumed", settledMicroUsd: "0",
+    spentIncrementMicroUsd: "0", shadowUsage: "unknown" });
+  assert.deepEqual(resolveSessionUnknownClaim({ budgetMode: "bounded",
+    verification: "not_proven", reservedMicroUsd: "5000" }), {
+    decision: "resolve", status: "owner_consumed", settledMicroUsd: "5000",
+    spentIncrementMicroUsd: "5000", shadowUsage: null });
+  for (const budgetMode of ["bounded", "max_shadow"]) {
+    assert.deepEqual(resolveSessionUnknownClaim({ budgetMode,
+      verification: "proven_not_started", reservedMicroUsd: "5000" }), {
+      decision: "resolve", status: "released", settledMicroUsd: "0",
+      spentIncrementMicroUsd: "0", shadowUsage: null }, budgetMode);
+  }
+});
+
+test("an unknown closure refuses an unknown mode, verification or amount", () => {
+  const valid = { budgetMode: "max_shadow", verification: "not_proven",
+    reservedMicroUsd: "1" };
+  for (const raw of [null, [], "max_shadow",
+    { ...valid, budgetMode: "api" }, { ...valid, budgetMode: "Max_shadow" },
+    { ...valid, verification: "proven" }, { ...valid, reservedMicroUsd: "0" },
+    { ...valid, reservedMicroUsd: 1 }, { ...valid, reservedMicroUsd: "-1" },
+    { ...valid, reservedMicroUsd: "9223372036854775808" },
+    { ...valid, extra: true }, { budgetMode: "max_shadow", verification: "not_proven" }]) {
+    assert.deepEqual(resolveSessionUnknownClaim(raw), { decision: "refuse" },
+      JSON.stringify(raw));
+  }
 });
 
 test("observed CLI overrun is retained rather than clamped to reserved headroom", () => {

@@ -527,8 +527,6 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
     ["workers/register", ["workerRegister"], "worker_register"],
     // worker_heartbeat and v22_worker_heartbeat both delegate to this request.
     ["workers/heartbeat", ["workerHeartbeat"], "worker_heartbeat_with_capabilities"],
-    // Orchestration policy version 35, section 4: the bridge session list.
-    ["workers/session-list", ["workerSessionListRead"], "worker_session_list"],
     // Orchestration policy version 55, section 1: the scope a bridge started
     // with --worker reads.
     ["workers/bridge-scope", ["workerBridgeScopeRead"], "worker_bridge_scope"],
