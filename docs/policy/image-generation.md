@@ -864,16 +864,18 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   - **Auto 턴은 `/api/chat` 안에서 판정한다**(2026-10-21). Chat이 Auto(스마트 자동)이면
     composer는 판정 호출을 미리 하지 않는다. `/api/chat`이 router 호출과 **동시에**
     `detectChatTurnImage`를 실행하므로, 대기 시간은 두 호출의 합이 아니라 긴 쪽이다.
-    대상은 로그인했고 routed이며 단일 패널인 Chat 턴이고, 첨부·Refiner 제안·deep research가
-    없어야 한다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
+    대상은 저장된 대화가 Auto(`selectionMode = auto`)인 로그인 단일 패널 Chat 턴이다.
+    router가 routed했는지와 관계없이 판정하고(fallback 턴 포함), 보내는 메시지 자체에
+    첨부·Refiner 제안·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
     스위치). 이미지면 소유권·잠금·kind·context 검사를 모두 통과한 뒤, Refiner 소비·durable
     attempt·context bundle 사용·크레딧/lease/usage hold가 일어나기 **전에**
     `X-Chat-Response-Mode: image-turn`으로 끝난다. 그래서 반납할 것이 없다. 클라이언트는 같은
     답변 id로 이미지 턴을 만든다. 이미지 턴의 router 결정 행(`AutoRouterDecision`)은 쓰지 않는다.
     routing 학습 데이터, optimizer 표본, 세션 메모리에는 채팅 모델이 답한 턴만 남는다. 이미지
     답변으로 쓰인 답변 id로 `/api/chat`이 다시 들어오면 provider 호출 전에 409
-    `ASSISTANT_MESSAGE_CONFLICT`로 거절한다. manual 모드와 router가 routed하지 않은 턴은
-    composer 판정 경로를 그대로 쓴다.
+    `ASSISTANT_MESSAGE_CONFLICT`로 거절한다(호출자 자신의 답변일 때만). manual 모드 대화는
+    composer 판정 경로를 그대로 쓴다. 이미지 턴은 router 호출 비용과 판정 호출 비용을 함께
+    낸다. 두 호출은 병렬이라 대기 시간은 줄지만 호출 수는 그대로다.
   - 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을 hold한 뒤
     나가며, 실패·시간 초과·거절은 모두 일반 텍스트 전송으로 떨어진다. 첨부가
     있는 제출과 override 전송(Deep Research 확장 등)은 묻지 않는다. 판정을
