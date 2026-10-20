@@ -2657,7 +2657,9 @@ function ChatAppComponent({
         await handleSendPrompt(
           lastPrompt.text,
           lastPrompt.targetChatId,
-          crypto.randomUUID(),
+          // An image retry answers the same saved question in place, so the
+          // question keeps its own id instead of showing a second copy.
+          lastPrompt.imageTurn ? lastPrompt.sourceUserMessageId : crypto.randomUUID(),
           lastPrompt.attachments,
           null,
           undefined,

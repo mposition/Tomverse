@@ -68,12 +68,22 @@ export async function startChatImageTurn(
 
     const conversation = await prisma.conversation.findFirst({
         where: { id: input.conversationId, userId: input.userId },
-        select: { kind: true },
+        select: {
+            kind: true,
+            productKey: true,
+            continuationBridge: { select: { id: true } },
+        },
     });
     if (!conversation) {
         throw new ChatAccessError(404, "CONVERSATION_NOT_FOUND", "Conversation not found.");
     }
-    if (!isChatConversationKind(conversation.kind)) {
+    // Tomverse Chat only (policy §13 ⑥): Review and continued conversations
+    // are chat-kind too, and the exception does not extend to them.
+    if (
+        !isChatConversationKind(conversation.kind) ||
+        conversation.productKey !== "chat" ||
+        conversation.continuationBridge !== null
+    ) {
         throw new ChatAccessError(
             409,
             "CONVERSATION_KIND_NOT_SUPPORTED",

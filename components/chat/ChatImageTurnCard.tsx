@@ -48,6 +48,11 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
   // Why a retry was refused, by target, so a refusal is not mistaken for the
   // original failure showing again.
   const [retryErrors, setRetryErrors] = useState<Record<string, string>>({});
+  // After an accepted retry, keep polling until a read shows the new attempt:
+  // the read that would show it can itself fail, and the last state on screen
+  // is the failure the retry replaced.
+  const [awaitingRetry, setAwaitingRetry] = useState(false);
+  const retryBaselineRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -66,6 +71,7 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
       if (isGroupView(data)) {
         setGroup(data);
         setReadFailed(false);
+        if (data.generations.length > retryBaselineRef.current) setAwaitingRetry(false);
       }
     } catch {
       setReadFailed(true);
@@ -94,6 +100,8 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
       });
       if (response.ok) {
         await discardResponseBody(response);
+        retryBaselineRef.current = group?.generations.length ?? 0;
+        setAwaitingRetry(true);
       } else {
         const data: unknown = await response.json().catch(() => null);
         const message = (data as { error?: unknown } | null)?.error;
@@ -110,13 +118,6 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
     }
   };
 
-  const inProgress = !group || group.status === "in_progress";
-  useEffect(() => {
-    if (!inProgress) return;
-    const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [inProgress, refresh]);
-
   const current = (group?.targets ?? []).map((target) => ({
     target,
     generation:
@@ -124,6 +125,20 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
         (generation) => generation.generationId === target.currentGenerationId
       ) ?? null,
   }));
+  // Polled while anything on screen can still change: not read yet, a model
+  // without a finished attempt, or a retry not yet seen.
+  const inProgress =
+    !group ||
+    awaitingRetry ||
+    current.some(
+      ({ generation }) =>
+        !generation || (generation.status !== "succeeded" && generation.status !== "failed")
+    );
+  useEffect(() => {
+    if (!inProgress) return;
+    const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [inProgress, refresh]);
 
   if (!group) {
     return (

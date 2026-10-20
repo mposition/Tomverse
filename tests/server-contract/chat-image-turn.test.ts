@@ -17,7 +17,7 @@ process.env.DATABASE_URL ||=
 
 type Row = Record<string, unknown> | null;
 let triageOn = true;
-let conversation: Row = { kind: "chat" };
+let conversation: Row = { kind: "chat", productKey: "chat", continuationBridge: null };
 let source: Row = { content: "  간단한 고양이 아이콘 그려줘 " };
 let existing: Row = null;
 let groups: Array<{ id: string; groupIdempotencyKey: string }> = [];
@@ -83,7 +83,7 @@ async function load() {
 
 const reset = () => {
   triageOn = true;
-  conversation = { kind: "chat" };
+  conversation = { kind: "chat", productKey: "chat", continuationBridge: null };
   source = { content: "  간단한 고양이 아이콘 그려줘 " };
   existing = null;
   groups = [];
@@ -165,13 +165,19 @@ test("switched off, nothing is reserved", async () => {
   assert.equal(requests.length, 0);
 });
 
-test("someone else's conversation, an image conversation, or no question: nothing is reserved", async () => {
+test("someone else's, an image, a Review or a continued conversation, or no question: nothing is reserved", async () => {
   const { turn } = await load();
   reset();
   conversation = null;
   await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_NOT_FOUND");
   reset();
   conversation = { kind: "image" };
+  await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_KIND_NOT_SUPPORTED");
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_KIND_NOT_SUPPORTED");
+  reset();
+  conversation = { kind: "chat", productKey: "chat", continuationBridge: { id: "bridge" } };
   await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_KIND_NOT_SUPPORTED");
   reset();
   source = null;
