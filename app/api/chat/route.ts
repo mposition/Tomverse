@@ -57,6 +57,7 @@ import {
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { detectChatTurnImage } from "@/lib/chatImageIntent";
+import { latestUserTurnHasAttachments } from "@/lib/chatImageIntentCore";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
 import { previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
@@ -2075,7 +2076,8 @@ async function handleChatPost(
             !admissionToken &&
             !deepResearchDepth &&
             !promptRefinerDecision &&
-            !turnCarriesAttachments(autoRoutingMessages);
+            // This message's own attachments, not the conversation's.
+            !latestUserTurnHasAttachments(autoRoutingMessages);
         const autoImageDecisionPromise = autoImageTurnEligible
             ? detectChatTurnImage({
                   userId: session!.user!.id!,

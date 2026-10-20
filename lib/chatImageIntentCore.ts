@@ -245,3 +245,20 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
                 : null,
     };
 };
+
+/**
+ * Whether the message being sent -- the last user message -- carries an
+ * attachment. Only that turn decides image eligibility: a file shared earlier
+ * in the conversation does not make a later "draw a cat" anything but an
+ * image request.
+ */
+export const latestUserTurnHasAttachments = (
+    messages: readonly { role?: unknown; attachments?: unknown }[]
+): boolean => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== "user") continue;
+        return Array.isArray(message.attachments) && message.attachments.length > 0;
+    }
+    return false;
+};

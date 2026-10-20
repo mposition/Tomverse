@@ -9,6 +9,7 @@ import {
   chatImageIntentPrompt,
   chatImageIntentUserMessage,
   chatImageModelCandidates,
+  latestUserTurnHasAttachments,
   parseChatImageIntentOutput,
   readChatImageDecision,
 } from "../lib/chatImageIntentCore.ts";
@@ -232,4 +233,25 @@ test("the client sends the conversation so a follow-up can find its image", asyn
     return jsonResponse({ image: true, modelId: "quick", preset: "standard", prompt: "a blue cat" });
   });
   assert.deepEqual(body, { text: "더 파랗게", conversationId: "conv-1" });
+});
+
+test("only the message being sent decides attachment eligibility", () => {
+  const pdf = [{ id: "file-1" }];
+  assert.equal(
+    latestUserTurnHasAttachments([
+      { role: "user", content: "summarise this", attachments: pdf },
+      { role: "assistant", content: "summary" },
+      { role: "user", content: "고양이를 그려줘" },
+    ]),
+    false
+  );
+  assert.equal(
+    latestUserTurnHasAttachments([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+      { role: "user", content: "redraw this", attachments: pdf },
+    ]),
+    true
+  );
+  assert.equal(latestUserTurnHasAttachments([]), false);
 });
