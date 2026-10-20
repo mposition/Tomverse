@@ -121,6 +121,7 @@ Report implemented and tested behavior separately from documentation, review, me
 | Comparison action rail invariant | `docs/ui-contracts/comparison-action-rail.md` |
 | Typography and font system invariant | `docs/ui-contracts/typography.md` |
 | Image generation workspace invariant | `docs/ui-contracts/image-generation-workspace.md` |
+| Review Studio and Classic workspace | `docs/ui-contracts/review-studio.md` |
 | Settings navigation invariant | `docs/ui-contracts/settings-navigation.md` |
 | Admin Console information architecture invariant | `docs/ui-contracts/admin-console-ia.md` |
 | Auto model selection invariant | `docs/ui-contracts/auto-model-selection.md`, `docs/ui-contracts/chat-product-switcher.md`, `docs/policy/chat-refiner-initial-auto-release-v1.md` |
