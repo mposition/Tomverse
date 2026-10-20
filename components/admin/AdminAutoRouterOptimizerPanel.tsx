@@ -12,6 +12,15 @@ import { AutoRouterTunables, type TunableAction, type TunableSettingsState } fro
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
+import {
+  OpenRecommendationsInbox,
+  RecommendationControls,
+  optimizerCycleAnchor,
+} from "@/components/admin/AdminAutoRouterRecommendations";
+import {
+  actionableRecommendations,
+  type RecommendationStatus,
+} from "@/lib/autoRouterRecommendationsCore";
 
 type Summary = {
   evaluated: number;
@@ -76,7 +85,8 @@ type Action =
   | { action: "set_automation"; daily: boolean; autoPromote: boolean }
   | { action: "promote"; cycleId: string }
   | { action: "roll_back" }
-  | TunableAction;
+  | TunableAction
+  | { action: "set_recommendation"; cycleId: string; index: number; status: RecommendationStatus };
 
 const OFF = "";
 const ENDPOINT = "/api/admin/auto-llm-router/optimizer";
@@ -154,6 +164,9 @@ export function AdminAutoRouterOptimizerPanel() {
       setBusy(false);
     }
   };
+
+  const setRecommendation = (cycleId: string, index: number, status: RecommendationStatus) =>
+    void send({ action: "set_recommendation", cycleId, index, status });
 
   const reason = (code: string | null) =>
     code ? (m.reasons as Record<string, string>)[code] ?? code : null;
@@ -298,12 +311,17 @@ export function AdminAutoRouterOptimizerPanel() {
         </div>
       ) : null}
 
+      {state ? (
+        <OpenRecommendationsInbox cycles={state.cycles} busy={busy} onSetStatus={setRecommendation} />
+      ) : null}
+
       <h3 className="mt-5 text-sm font-bold text-zinc-200">{m.cyclesTitle}</h3>
       {state && state.cycles.length === 0 ? <p className="mt-2 text-sm text-zinc-500">{m.noCycles}</p> : null}
       <ul className="mt-2 space-y-3">
         {state?.cycles.map((cycle) => (
           <li
             key={cycle.id}
+            id={optimizerCycleAnchor(cycle.id)}
             data-testid="admin-auto-router-optimizer-cycle"
             className="rounded-2xl border border-zinc-800 p-4 text-sm text-zinc-300"
           >
@@ -354,15 +372,29 @@ export function AdminAutoRouterOptimizerPanel() {
                 {cycle.summary.report.recommendations.length > 0 ? (
                   <>
                     <p className="mt-2 text-xs font-bold text-zinc-300">{m.recommendationsTitle}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{m.recommendationHandled}</p>
                     <ul className="mt-1 space-y-1 text-xs text-zinc-300">
-                      {cycle.summary.report.recommendations.map((item, index) => (
-                        <li key={index} className="whitespace-pre-wrap">
-                          <span className="mr-1 rounded border border-zinc-600 px-1 text-[11px] text-zinc-400">
-                            {recommendationKind(item.kind)}
-                          </span>
-                          {item.text}
-                        </li>
-                      ))}
+                      {cycle.summary.report.recommendations.map((item, index) => {
+                        const actionable = actionableRecommendations(cycle.summary).find(
+                          (candidate) => candidate.index === index
+                        );
+                        return (
+                          <li key={index} className="whitespace-pre-wrap">
+                            <span className="mr-1 rounded border border-zinc-600 px-1 text-[11px] text-zinc-400">
+                              {recommendationKind(item.kind)}
+                            </span>
+                            {item.text}
+                            {actionable ? (
+                              <RecommendationControls
+                                cycle={cycle}
+                                item={actionable}
+                                busy={busy}
+                                onSetStatus={setRecommendation}
+                              />
+                            ) : null}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </>
                 ) : null}

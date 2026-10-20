@@ -1093,3 +1093,13 @@ f942c9e83457a075b9a7b921868a75103fd98eeb:tests/engineeringAgentPublisher.test.mj
 #
 # Scope: exactly this one finding in that one commit.
 529344aed43d8d5c762aa060e2feadd213dc9011:tests/integration/auto-router-tunables.db.test.ts:generic-api-key:28
+
+# Synthetic audit-chain test key, not a credential.
+#
+# Commit 1fbaeff introduced tests/integration/auto-router-optimizer-recommendations.db.test.ts
+# with a made-up ADMIN_AUDIT_INTEGRITY_KEY for its throwaway test database;
+# the follow-up commit 41a3d59 replaced it with a low-entropy literal the scan
+# does not flag, but the introducing commit is immutable history.
+#
+# Scope: exactly this one finding in that one commit.
+1fbaeff327c4f3e5208cedac18dbd20ee43e9f02:tests/integration/auto-router-optimizer-recommendations.db.test.ts:generic-api-key:16

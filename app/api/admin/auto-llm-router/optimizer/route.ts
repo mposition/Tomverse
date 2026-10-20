@@ -18,6 +18,8 @@ import {
 import { undoTunableByOperator, updateSettingAutoApply } from "@/lib/autoRouterTunables";
 import { activeExclusions } from "@/lib/autoRouterTunablesCore";
 import { readAutoRouterTunables, readSettingAutoApply } from "@/lib/autoRouterTunablesRead";
+import { setRecommendationStatus } from "@/lib/autoRouterRecommendations";
+import { RECOMMENDATION_STATUSES } from "@/lib/autoRouterRecommendationsCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 
@@ -36,6 +38,14 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set_setting_auto_apply"), enabled: z.boolean() }).strict(),
   z.object({ action: z.literal("undo_router_timeout") }).strict(),
   z.object({ action: z.literal("undo_model_exclusion"), modelId: z.string().trim().min(1).max(120) }).strict(),
+  z
+    .object({
+      action: z.literal("set_recommendation"),
+      cycleId: z.string().trim().min(1).max(64),
+      index: z.number().int().min(0).max(63),
+      status: z.enum(RECOMMENDATION_STATUSES),
+    })
+    .strict(),
 ]);
 
 const modelOptions = async () =>
@@ -125,6 +135,14 @@ export async function POST(req: Request) {
 
     if (body.action === "set_automation") {
       await updateOptimizerAutomation(actor, { daily: body.daily, autoPromote: body.autoPromote });
+      return await stateResponse();
+    }
+
+    if (body.action === "set_recommendation") {
+      const outcome = await setRecommendationStatus(actor, body);
+      if ("refused" in outcome) {
+        return NextResponse.json({ error: outcome.refused, code: outcome.refused }, { status: 409 });
+      }
       return await stateResponse();
     }
 

@@ -393,3 +393,72 @@ test("a content-free ui_invalidate event is accepted; one paid run names every f
   assert.ok(reason.also.includes("stream_trace_unverified"));
   assert.ok(reason.also.includes("usage_model_count") || reason.also.includes("usage_incomplete"));
 });
+
+test("detail mode names the refused system event and its keys, never its body", () => {
+  const secret = "sk-ant-oat01-SyntheticSecret_0123456789";
+  const rest = [use("read_1", "Read", { file_path: file }), reply("read_1"),
+    analysisResult];
+  const run = (event, detail) => {
+    const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
+      directory, files: ["src/a.ts"], modelId, ...(detail ? { detail } : {}) });
+    observer.observeChunk(Buffer.from([analysisInit, event, ...rest]
+      .map(JSON.stringify).join("\n")));
+    assert.deepEqual(observer.finish({ exitCode: 0, stdoutComplete: true }),
+      { kind: "outcome_unknown" });
+    return observer;
+  };
+  const event = { type: "system", subtype: "tengu.private_event-1",
+    message: `prompt text ${secret}`, session_id: "9a2f", payload: { token: secret } };
+  const off = run(event, false);
+  assert.deepEqual(off.rejectDetail(), []);
+  assert.equal(off.rejectReason().code, "system_event_other");
+  const on = run(event, true);
+  assert.equal(on.rejectReason().code, "system_event_other",
+    "detail mode does not change the verdict or its code");
+  assert.deepEqual(on.rejectDetail(), [{ code: "system_event_other",
+    keys: ["type", "subtype", "message", "session_id", "payload"],
+    subtype: "tengu.private_event-1" }]);
+  assert.equal(JSON.stringify(on.rejectDetail()).includes(secret), false);
+  assert.equal(JSON.stringify(on.rejectDetail()).includes("prompt text"), false);
+  // A subtype that is not a short token is reported as such, not echoed.
+  const odd = run({ type: "system", subtype: "a b/../etc" }, true);
+  assert.equal(odd.rejectDetail()[0].subtype, "<invalid>");
+  const long = run({ type: "system", subtype: "x".repeat(300) }, true);
+  assert.equal(long.rejectDetail()[0].subtype.length, 64);
+});
+
+test("detail mode names init refusals and refused Read paths by name only", () => {
+  const secret = "sk-ant-oat01-SyntheticSecret_0123456789";
+  const observer = createAmuxTrackedCheckoutAnalysisStreamObserver({
+    directory, files: ["src/a.ts"], modelId, detail: true });
+  observer.observeChunk(Buffer.from([{ ...analysisInit,
+    tools: ["Read", "Grep", "Bash"], apiKey: secret },
+  use("read_1", "Read", { file_path: `${directory}/.env` }),
+  use("bash_1", "Bash", { command: `echo ${secret}` }),
+  analysisResult].map(JSON.stringify).join("\n")));
+  observer.finish({ exitCode: 0, stdoutComplete: true });
+  const detail = observer.rejectDetail();
+  assert.deepEqual(detail[0], { code: "init_tools",
+    keys: ["type", "subtype", "tools", "permissionMode", "mcp_servers", "skills",
+      "plugins", "agents", "apiKey"],
+    names: ["tool:Read", "tool:Grep", "tool:Bash"] });
+  assert.equal(JSON.stringify(detail).includes(secret), false);
+  const paths = createAmuxTrackedCheckoutReadObserver({ directory,
+    files: ["src/a.ts"], detail: true });
+  observe(paths, use("read_1", "Read", { file_path: `${directory}/.env` }));
+  assert.deepEqual(paths.rejectDetail(), [{ code: "read_path_refused", path: ".env" }]);
+  const outside = createAmuxTrackedCheckoutReadObserver({ directory,
+    files: ["src/a.ts"], detail: true });
+  observe(outside, use("read_1", "Read", { file_path: "/home/runner/.claude/x" }));
+  assert.deepEqual(outside.rejectDetail(),
+    [{ code: "read_path_refused", path: "<outside>" }]);
+  const tool = createAmuxTrackedCheckoutReadObserver({ directory,
+    files: ["src/a.ts"], detail: true });
+  observe(tool, use("bash_1", "Bash", { command: `echo ${secret}` }));
+  assert.deepEqual(tool.rejectDetail(), [{ code: "tool_use_refused", name: "Bash" }]);
+  // Off by default: nothing is retained.
+  const quiet = make();
+  observe(quiet, use("read_1", "Read", { file_path: `${directory}/.env` }));
+  assert.deepEqual(quiet.rejectDetail(), []);
+  assert.equal(quiet.rejectReason(), "read_path_refused");
+});
