@@ -17,6 +17,8 @@ import { createQaReleaseRailwayPorts } from "../lib/qaReleaseMergeLaneRailway.ts
 import { runQaReleaseMergeLaneRound } from "../lib/qaReleaseMergeLaneServiceCore.ts";
 import { createQaReleaseTrainAppPorts, createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
 import { runQaReleaseTrainRound } from "../lib/qaReleaseTrainService.ts";
+import { createQaReleaseCiAdmissionGithubPorts } from "../lib/qaReleaseCiAdmissionPorts.ts";
+import { runQaReleaseCiAdmissionRound } from "../lib/qaReleaseCiAdmissionService.ts";
 
 // The app routes budget each call at 50 s (lib/qaReleaseMergeLaneRoutes.ts);
 // this side waits a little longer so it never aborts a call the route still
@@ -29,6 +31,10 @@ const READ_TIMEOUT_MS = 30_000;
 // minute silence rule (section 8 item 5) is safe only because no round lives
 // past this. A round stopped mid-call leaves its attempt to that rule.
 const HARD_TIMEOUT_MS = 10 * 60 * 1000;
+const STARTED_AT_MS = Date.now();
+// CI admission (section 8 item 13) polls until this point, well inside the
+// hard timeout, so its last poll never races the supervisor.
+const ADMISSION_DEADLINE_MS = STARTED_AT_MS + 8.5 * 60 * 1000;
 const supervisor = setTimeout(() => {
   console.log(JSON.stringify({ exitCode: 1, outcome: "hard_timeout" }));
   process.exit(1);
@@ -73,6 +79,22 @@ const train = await runQaReleaseTrainRound(
   Date.now(),
 ).finally(() => git.cleanup().catch(() => {}));
 
-clearTimeout(supervisor);
 console.log(JSON.stringify(train));
-process.exitCode = Math.max(result.exitCode, train.exitCode);
+
+// CI admission (policy section 8 item 13) runs last, on its own mode, for the
+// rest of this run: it polls once a minute and, in `on` mode, marks the head
+// of the `ci:queued` line ready for review when runners have room.
+const admission = await runQaReleaseCiAdmissionRound(
+  env,
+  {
+    github: createQaReleaseCiAdmissionGithubPorts({ http: readHttp, token }),
+    now: Date.now,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    log: (entry) => console.log(JSON.stringify(entry)),
+  },
+  ADMISSION_DEADLINE_MS,
+);
+
+clearTimeout(supervisor);
+console.log(JSON.stringify(admission));
+process.exitCode = Math.max(result.exitCode, train.exitCode, admission.exitCode);

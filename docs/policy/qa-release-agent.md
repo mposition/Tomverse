@@ -17,6 +17,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 7 | 2026-10-07 mposition | 버전 5·6의 재기록, 본문 변경 없음 — 버전 6 승인 기록(#2102)이 2026-10-06 22:18 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 병합할 UTC 날짜로 다시 기록함 |
 | 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
 | 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): 릴리스 열차(1절 5항, 8절 12항) — `main:next` 라벨, AEST 출발 시각, `release/train-*` push와 main PR 생성, 기본 꺼진 `QA_RELEASE_TRAIN_ENABLED` |
+| 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): CI 입장 관리(1절 6항, 8절 13항) — `ci:queued` draft 줄, 예비 12, 1분 회차, draft를 ready로 바꾸는 쓰기 하나, 기본 꺼진 `QA_RELEASE_CI_ADMISSION_MODE` |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
@@ -68,6 +69,7 @@ workflow·secret·branch protection·ruleset·GitHub App·Railway 변경도 그 
 3. **재실행 권고.** 최대 2건, 7일 만료. 실행은 사람이 합니다.
 4. **병합 레인.** 8절.
 5. **릴리스 열차.** 8절 12항. 정해진 출발 시각에 `main:next` 라벨이 붙은 develop PR을 모아 main PR 하나를 엽니다.
+6. **CI 입장 관리.** 8절 13항. `ci:queued` 라벨이 붙은 draft PR을 runner에 자리가 날 때 순서대로 ready로 바꿉니다.
 
 **LLM을 쓰지 않습니다.** 모든 판정은 결정적 코드입니다. 외부 텍스트(CI 로그, issue·PR 문장)는 판정의 입력일 뿐
 명령이 아니며, **digest에 들어가지 않습니다.** digest schema는 닫혀 있고 숫자·열거값·이슈 번호·SHA만 담습니다. CI 로그,
@@ -298,6 +300,26 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       행(`qa_release.train_admitted`, `qa_release.train_reported`)으로 남깁니다. 전용 테이블은 없습니다.
     - **ruleset**: 7항의 update ruleset은 App의 develop 밖 브랜치 생성을 막으므로, 켜기 전에 운영자가 `refs/heads/release/train-*`를
       그 ruleset의 제외 목록에 더합니다. 이것은 보안 경계 변경이라 운영자의 승인 대상입니다.
+
+13. **CI 입장 관리**(운영자 결정 2026-10-20). GitHub은 runner를 job 단위로 나눠 주므로, 먼저 시작한 PR의 다음 단계 job이
+    뒤에 들어온 PR들의 첫 job 뒤에 줄을 서고 모든 PR이 함께 늦게 끝납니다(2026-10-20 측정: develop push job이 20~30분
+    대기). 그래서 병합 레인 서비스가 열차 회차 뒤, 그 실행이 끝날 때까지(시작 뒤 8.5분) **1분마다** 입장 회차를 돕니다.
+    판정은 `lib/qaReleaseCiAdmissionCore.ts`, 순서는 `lib/qaReleaseCiAdmissionService.ts`입니다.
+    - **줄**은 `ci:queued` 라벨이 붙은 draft PR입니다(draft는 CI가 돌지 않습니다). 순서는 `hotfix/**` → 운영자의
+      `ci:priority` 라벨 → main release → develop이고, 같은 순위 안에서는 `ci:queued`를 붙인 시각입니다. base가 develop·main이
+      아닌 stacked PR은 줄에 서지 않습니다.
+    - **자리**는 동시 job 한도 40에서 develop·main push(배포)를 위한 예비 12를 뺀 28입니다. 실행 중·대기 중인 job과, 최근
+      10분 안에 들인 PR이 아직 보이지 않은 job 추정치(develop 30, main release·hotfix 45, 자리 28을 넘으면 28로 계산)를 뺀 만큼이
+      빈자리입니다. 맨 앞 PR이 들어가지 않으면 뒤의 작은 PR이 먼저 들어가되, 맨 앞이 20분을 기다렸으면 멈춥니다. 한 번에
+      최대 2개를 들입니다. push는 막지 않습니다.
+    - **모드** `QA_RELEASE_CI_ADMISSION_MODE`: 비어 있거나 `off`면 꺼짐(기본), `shadow`면 판정과 기록만, `on`이면 들인 draft를
+      ready로 바꿉니다(GraphQL `markPullRequestReadyForReview`). **GitHub 쓰기는 이것 하나**이고 label·comment·status는 쓰지
+      않습니다. 병합 레인의 kill switch가 비어 있지 않으면 멈춥니다. 본 앱에는 기록하지 않고, 회차마다 숫자와 코드만 담은 한
+      줄을 서비스 로그에 남깁니다. ready로 바꾼 것은 사람이 다시 draft로 돌릴 수 있습니다.
+    - **읽기**는 공개 저장소의 Actions run·job, 열린 PR과 그 label 이벤트입니다. 읽기가 실패한 회차는 아무것도 들이지 않고
+      끝납니다. ready 쓰기가 실패하면 기록하고, 다음 회차가 PR을 다시 읽어(이미 ready면 줄에서 빠짐) 판정합니다.
+    - **켜기**: `shadow`는 운영자가 변수를 정하면 됩니다. `on`은 에이전트가 PR 상태를 바꾸는 새 권한이라 운영자의 한 줄
+      승인 뒤에 켜고, 켠 뒤에는 개발 세션이 `gh pr ready` 대신 `ci:queued`를 붙입니다(AGENTS.md "브랜치와 PR").
 
 ## 9. 단계
 

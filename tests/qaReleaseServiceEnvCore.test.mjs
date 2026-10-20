@@ -166,3 +166,26 @@ test("the release train starts on its own flag, with the lane off, and stops on 
   assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_CONTROL_REVISION: "0" })), "refuse");
   assert.equal(decideQaReleaseTrainStart(train({ GITHUB_TOKEN: "x" })), "refuse");
 });
+
+test("CI admission starts on its own mode, with the lane off, and stops on the kill switch", async () => {
+  const { decideQaReleaseCiAdmissionStart } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  const admission = (overrides = {}) =>
+    laneEnv({ QA_RELEASE_MERGE_LANE_ENABLED: "false", QA_RELEASE_CI_ADMISSION_MODE: "shadow", ...overrides });
+  assert.deepEqual(decideQaReleaseCiAdmissionStart(admission()), { decision: "run", mode: "shadow" });
+  assert.deepEqual(decideQaReleaseCiAdmissionStart(admission({ QA_RELEASE_CI_ADMISSION_MODE: "on" })), { decision: "run", mode: "on" });
+  // Neither the lane's secret nor its Railway token is admission's.
+  const bare = admission({ QA_RELEASE_MERGE_LANE_SECRET: undefined, QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN: undefined });
+  assert.equal(decideQaReleaseCiAdmissionStart(bare).decision, "run");
+  for (const mode of [undefined, "", "off"]) {
+    assert.equal(decideQaReleaseCiAdmissionStart(admission({ QA_RELEASE_CI_ADMISSION_MODE: mode })).decision, "disabled", String(mode));
+  }
+  for (const mode of ["ON", "true", "1"]) {
+    assert.equal(decideQaReleaseCiAdmissionStart(admission({ QA_RELEASE_CI_ADMISSION_MODE: mode })).decision, "refuse", mode);
+  }
+  for (const value of [undefined, "1", " "]) {
+    assert.equal(decideQaReleaseCiAdmissionStart(admission({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: value })).decision, "disabled", String(value));
+  }
+  assert.equal(decideQaReleaseCiAdmissionStart(admission({ QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY: "" })).decision, "refuse");
+  assert.equal(decideQaReleaseCiAdmissionStart(admission({ QA_RELEASE_CONTROL_REVISION: "0" })).decision, "refuse");
+  assert.equal(decideQaReleaseCiAdmissionStart(admission({ GITHUB_TOKEN: "x" })).decision, "refuse");
+});

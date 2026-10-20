@@ -31,6 +31,8 @@ export const QA_RELEASE_SERVICE_VARIABLES = Object.freeze({
     // The release train (section 8 item 12) runs in the same service.
     "QA_RELEASE_TRAIN_ENABLED",
     "QA_RELEASE_TRAIN_SLOTS",
+    // CI admission (section 8 item 13) runs in the same service.
+    "QA_RELEASE_CI_ADMISSION_MODE",
   ]),
 } as const);
 
@@ -207,4 +209,25 @@ export function decideQaReleaseTrainStart(env: Readonly<Record<string, string | 
   if (required.some((name) => value(name) === "")) return "refuse";
   if (!/^[1-9][0-9]{0,8}$/.test(value("QA_RELEASE_CONTROL_REVISION"))) return "refuse";
   return "run";
+}
+
+/**
+ * CI admission's start decision (section 8 item 13): same name check and kill
+ * switch as the lane; its own mode, off unless declared `shadow` or `on`; it
+ * needs only the App and the revision, because it records nothing in the app.
+ */
+export function decideQaReleaseCiAdmissionStart(
+  env: Readonly<Record<string, string | undefined>>,
+): { decision: QaReleaseStartDecision; mode: "off" | "shadow" | "on" } {
+  const names = Object.keys(env).filter((name) => env[name] !== undefined);
+  if (!checkQaReleaseServiceEnv("mergeLane", names).ok) return { decision: "refuse", mode: "off" };
+  const value = (name: string) => (env[name] ?? "").trim();
+  if (env.QA_RELEASE_MERGE_LANE_KILL_SWITCH !== "") return { decision: "disabled", mode: "off" };
+  const mode = value("QA_RELEASE_CI_ADMISSION_MODE");
+  if (mode === "" || mode === "off") return { decision: "disabled", mode: "off" };
+  if (mode !== "shadow" && mode !== "on") return { decision: "refuse", mode: "off" };
+  const required = ["QA_RELEASE_MERGE_LANE_APP_ID", "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY", "QA_RELEASE_CONTROL_REVISION"];
+  if (required.some((name) => value(name) === "")) return { decision: "refuse", mode };
+  if (!/^[1-9][0-9]{0,8}$/.test(value("QA_RELEASE_CONTROL_REVISION"))) return { decision: "refuse", mode };
+  return { decision: "run", mode };
 }

@@ -68,7 +68,8 @@ Report implemented and tested behavior separately from documentation, review, me
   `release/train-*` main PR 하나를 엽니다(`docs/policy/qa-release-agent.md` 8절 12항). 급한 수정은 `hotfix/**`입니다.
 - workflow는 PR을 열기만 하고 병합하거나 auto-merge를 켜지 않습니다. 병합은 운영자의
   `npm run merge-train`이 합니다. 사람이 끈 스위치를 자동화가 다시 켜지 않습니다.
-- PR은 draft로 시작하고 끝나면 ready로 바꿉니다(draft는 CI가 돌지 않습니다). develop은 dev
+- PR은 draft로 시작하고 끝나면 ready로 바꿉니다(draft는 CI가 돌지 않습니다). CI 입장 관리가 `on`이 된 뒤에는
+  `gh pr ready` 대신 `ci:queued` 라벨을 붙이면 runner에 자리가 날 때 에이전트가 ready로 바꿉니다(`docs/policy/qa-release-agent.md` 8절 13항). develop은 dev
   환경에, Test는 `test` 브랜치에 배포됩니다(`docs/ops/dev-test-lanes.md`).
 
 # 독립 검토와 모델 역할
