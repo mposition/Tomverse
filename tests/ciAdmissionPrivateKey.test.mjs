@@ -11,7 +11,9 @@ const readable = (text) => createPrivateKey(normalizeCiAdmissionPrivateKey(text)
 
 test("every way a variable may store the key comes back readable", () => {
   assert.ok(readable(pem), "as downloaded");
-  assert.ok(readable(pem.replaceAll("\n", "\n")), "literal \n");
+  const escaped = pem.replaceAll("\n", "\\n");
+  assert.ok(!escaped.includes("\n"), "the escaped form has no real newline left");
+  assert.ok(readable(escaped), "literal \\n");
   assert.ok(readable(pem.replaceAll("\n", " ")), "newlines turned into spaces");
   assert.ok(readable(`"${pem}"`), "quoted");
   assert.ok(readable(Buffer.from(pem).toString("base64")), "base64 of the PEM");
