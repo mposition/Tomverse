@@ -4,7 +4,8 @@
  * run, from claim to a develop pull request a person merges.
  *
  *   claim (gateway) -> worktree from origin/develop -> Claude Code headless
- *   -> scope check -> related unit tests + lint -> independent review
+ *   -> one runner-made commit on develop -> scope check -> related unit tests
+ *   + lint -> independent review of exactly that commit
  *   -> publish (gateway: push + PR) -> result (gateway)
  *
  * It runs as the unprivileged `autorec` account and holds no secret: the
@@ -112,14 +113,18 @@ export function readRunnerConfig(env) {
 
 const baseEnv = (config) => ({ HOME: config.home, PATH: config.path, LANG: "C.UTF-8", USER: "autorec", LOGNAME: "autorec" });
 
+const commitEnv = (config) => ({
+  ...baseEnv(config),
+  GIT_AUTHOR_NAME: GIT_IDENTITY.name,
+  GIT_AUTHOR_EMAIL: GIT_IDENTITY.email,
+  GIT_COMMITTER_NAME: GIT_IDENTITY.name,
+  GIT_COMMITTER_EMAIL: GIT_IDENTITY.email,
+});
+
 function agentEnv(config) {
   return {
-    ...baseEnv(config),
+    ...commitEnv(config),
     TERM: "dumb",
-    GIT_AUTHOR_NAME: GIT_IDENTITY.name,
-    GIT_AUTHOR_EMAIL: GIT_IDENTITY.email,
-    GIT_COMMITTER_NAME: GIT_IDENTITY.name,
-    GIT_COMMITTER_EMAIL: GIT_IDENTITY.email,
     ...(config.claudeOauthToken ? { CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken } : {}),
   };
 }
@@ -174,12 +179,15 @@ async function ensureDependencies(deps, base) {
   return true;
 }
 
-async function review(deps, ctx, claim, head) {
+async function review(deps, ctx, claim, base, head) {
   const { config, exec } = deps;
   const client = (args, timeoutMs) =>
     exec(config.nodeBin, [config.reviewClient, ...args], { cwd: ctx.worktree, env: reviewEnv(config), timeoutMs });
   const scope = `auto-rec ${claim.id}: ${claim.recommendation.replace(/\s+/g, " ").slice(0, 300)}`;
-  const submitted = await client(["submit", "--author", "claude", "--scope", scope], 10 * 60_000);
+  // The base is the develop commit this run fetched itself. The client also
+  // looks at the worktree's own refs, which the agent's code can move, so the
+  // verdict counts only when the job reports this base and this head.
+  const submitted = await client(["submit", "--author", "claude", "--base", base, "--scope", scope], 10 * 60_000);
   const jobId = parseJsonObject(submitted.stdout)?.jobId;
   if (submitted.code !== 3 || typeof jobId !== "string" || !REVIEW_JOB_ID.test(jobId)) {
     deps.log("review_submit_failed", { code: submitted.code });
@@ -197,9 +205,12 @@ async function review(deps, ctx, claim, head) {
       await deps.sleep(10_000);
       continue;
     }
-    if (verdict === "accept" && parseJsonObject(waited.stdout)?.head !== head) {
-      deps.log("review_head_mismatch", { jobId });
-      return { verdict: "unknown", jobId };
+    if (verdict === "accept") {
+      const job = parseJsonObject(waited.stdout);
+      if (job?.head !== head || job?.base !== base || (job?.focus ?? null) !== null) {
+        deps.log("review_range_mismatch", { jobId });
+        return { verdict: "unknown", jobId };
+      }
     }
     return { verdict: verdict === "pending" ? "unknown" : verdict, jobId };
   }
@@ -256,9 +267,19 @@ async function work(deps, claim, ctx) {
   // Only committed work counts: drop anything the agent left uncommitted.
   await git(worktree, ["reset", "--quiet", "--hard", "HEAD"]);
   await git(worktree, ["clean", "-fdxq", "-e", "/node_modules"]);
-  const headResult = await git(worktree, ["rev-parse", "--verify", "HEAD^{commit}"]);
-  if (headResult.code !== 0) return failed("runner_error", "head");
-  const head = headResult.stdout.trim();
+  // A push publishes every commit it carries, so what leaves is one commit the
+  // runner makes from the agent's final tree, on the develop it fetched: no
+  // intermediate commit can carry something a later one removed.
+  const treeResult = await git(worktree, ["rev-parse", "--verify", "HEAD^{tree}"]);
+  if (treeResult.code !== 0) return failed("runner_error", "head");
+  const squashed = await exec(config.gitBin, ["-C", worktree, "commit-tree", treeResult.stdout.trim(), "-p", base, "-F", "-"], {
+    env: commitEnv(config),
+    input: `${buildPrTitle(claim)}\n`,
+    timeoutMs: 60_000,
+  });
+  const head = squashed.stdout.trim();
+  if (squashed.code !== 0 || !/^[0-9a-f]{40}$/.test(head)) return failed("runner_error", "squash");
+  if ((await git(worktree, ["reset", "--quiet", "--hard", head])).code !== 0) return failed("runner_error", "squash");
   const diff = await git(worktree, ["diff", "--raw", "-z", "--no-renames", "--no-abbrev", base, head]);
   if (diff.code !== 0) return failed("runner_error", "diff");
   const changes = parseRawDiff(diff.stdout);
@@ -296,7 +317,7 @@ async function work(deps, claim, ctx) {
   }
 
   ctx.stage = "review";
-  const verdict = await review(deps, ctx, claim, head);
+  const verdict = await review(deps, ctx, claim, base, head);
   if (verdict.verdict === "reject") return failed("review_reject");
   if (verdict.verdict !== "accept") return failed("review_unknown");
 
