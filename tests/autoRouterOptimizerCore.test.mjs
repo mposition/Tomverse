@@ -148,7 +148,8 @@ const decisions = Array.from({ length: 24 }, (_, index) => ({
   pickedModelId: "strong",
   reason: "r",
 }));
-const NEW_GUIDANCE = "Send greetings and small talk to the light model.\nSend code to the strong model.";
+// Names no candidate id: the lightest and strongest models, not `light` and `strong`.
+const NEW_GUIDANCE = "Send greetings and small talk to the lightest model.\nSend code to the strongest model.";
 const REPORT = { findings: ["인사에는 가벼운 모델로 충분합니다."], recommendations: [{ kind: "guidance", text: "인사는 가벼운 모델로 보내세요." }] };
 const proposal = (guidance = NEW_GUIDANCE) => ({ ...REPORT, guidance });
 
@@ -951,4 +952,83 @@ test("each judged case keeps both orders' verdicts, so an unanswered judge is no
     assert.equal(item.verdict, "tie");
   }
   assert.ok(result.cases.filter((item) => item.verdict === "unchanged").every((item) => item.judged === undefined));
+});
+
+test("guidance may name only candidates the direct comparisons judged", async () => {
+  const { guidanceNamingRejection } = await import("../lib/autoRouterOptimizerCore.ts");
+  const menu = ["gpt-5-4-mini", "gemini-2-5-flash", "gemini-flash-lite-latest", "minimax-m3", "gpt-6-luna", "claude-haiku-5-5", "perplexity/sonar"];
+  const judged = ["gpt-5-4-mini", "gemini-2-5-flash", "gemini-flash-lite-latest", "minimax-m3", "gpt-6-luna"];
+  // Named on evidence, including an id with no digit; prose is not a model.
+  assert.equal(
+    guidanceNamingRejection(
+      "Among 9-credit standard candidates, prefer gemini-2-5-flash or GPT-6-LUNA over gpt-5-4-mini for short factual questions.\n" +
+        "Spread easy and/or step-by-step work across low-credit models, e.g. gemini-flash-lite-latest.",
+      menu,
+      judged
+    ),
+    null
+  );
+  assert.equal(guidanceNamingRejection("Send greetings to light, low-credit models.", menu, judged), null);
+  // Not a candidate: refused, whether or not it was ever in the catalogue.
+  assert.deepEqual(
+    guidanceNamingRejection("Prefer gpt-9-ultra over gpt-5-4-mini for code.", menu, judged),
+    { reason: "unknown_model", ids: ["gpt-9-ultra"] }
+  );
+  // A candidate the comparisons never judged: refused as unproven.
+  assert.deepEqual(
+    guidanceNamingRejection("Prefer claude-haiku-5-5 over gpt-5-4-mini.\nUse perplexity/sonar for news.", menu, judged),
+    { reason: "unproven_model", ids: ["claude-haiku-5-5", "perplexity/sonar"] }
+  );
+  // An unknown id is reported before an unproven one.
+  assert.equal(guidanceNamingRejection("Prefer claude-haiku-5-5 or kimi-k9 for maths.", menu, judged).reason, "unknown_model");
+});
+
+test("a cycle refuses a proposal that names a model off the menu or without evidence", async () => {
+  // The direct comparisons judge strong against rival; light is never compared.
+  const run = async (guidance) => {
+    const rejected = [];
+    const { calls, deps } = rankedDeps({
+      generate: async () => ({ value: proposal(guidance), costMicroUsd: 100, provider: "opt" }),
+      guidanceRejected: (rejection) => rejected.push(rejection),
+    });
+    const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+    return { result, calls, rejected };
+  };
+  const evidenced = await run("Among 5-credit candidates, prefer rival over strong for greetings and small talk.");
+  assert.notEqual(evidenced.result.failure, "candidate_invalid");
+  assert.deepEqual(evidenced.rejected, []);
+
+  const unproven = await run("Send greetings and small talk to light, never to rival-2b or strong.");
+  assert.equal(unproven.result.failure, "candidate_invalid");
+  assert.deepEqual(unproven.rejected, [{ reason: "unknown_model", ids: ["rival-2b"] }]);
+  // Refused before the proposal is replayed: only the current picks were routed.
+  assert.equal(unproven.calls.route, 12);
+
+  // light is a candidate, but no comparison judged it: named without evidence.
+  const offEvidence = await run("Send greetings and small talk to light; keep code on strong.");
+  assert.equal(offEvidence.result.failure, "candidate_invalid");
+  assert.deepEqual(offEvidence.rejected, [{ reason: "unproven_model", ids: ["light"] }]);
+  assert.equal(offEvidence.calls.route, 12);
+});
+
+test("a candidate id counts as named only as a whole word", async () => {
+  const { guidanceNamingRejection } = await import("../lib/autoRouterOptimizerCore.ts");
+  const menu = ["light", "strong", "o3"];
+  // Words that contain an id are not the id.
+  assert.equal(guidanceNamingRejection("Use the lightest, light-weight or strongest models; lighter work first.", menu, []), null);
+  // The id alone, at the end of a sentence, or a short id with no separator.
+  assert.deepEqual(guidanceNamingRejection("Send small talk to light.", menu, []), { reason: "unproven_model", ids: ["light"] });
+  assert.deepEqual(guidanceNamingRejection("Proofs go to o3, code to strong", menu, ["strong"]), { reason: "unproven_model", ids: ["o3"] });
+  assert.equal(guidanceNamingRejection("Proofs go to o3, code to strong", menu, ["strong", "o3"]), null);
+});
+
+test("the live router can pick only a candidate, whatever the guidance names", () => {
+  const candidates = [candidate("gpt-6-luna", 9), candidate("gemini-2-5-flash", 9)];
+  const system = buildAutoLlmRouterSystem("Prefer retired-model-9 over gpt-6-luna for short questions.");
+  assert.match(system, /retired-model-9/);
+  return import("../lib/autoLlmRouterCore.ts").then(({ autoLlmRouterOutputSchema, parseAutoLlmRouterOutput }) => {
+    assert.deepEqual(autoLlmRouterOutputSchema(candidates).properties.modelId.enum, ["gpt-6-luna", "gemini-2-5-flash"]);
+    assert.equal(parseAutoLlmRouterOutput({ modelId: "retired-model-9", reason: "r", topic: "t" }, candidates), null);
+    assert.equal(parseAutoLlmRouterOutput({ modelId: "gemini-2-5-flash", reason: "r", topic: "t" }, candidates).modelId, "gemini-2-5-flash");
+  });
 });

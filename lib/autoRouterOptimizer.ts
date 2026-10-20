@@ -606,6 +606,15 @@ async function runInBackground(input: {
             {
                 budgetMicroUsd: input.budgetMicroUsd,
                 candidatesFor,
+                // A proposal naming a model off the menu or without evidence;
+                // model ids only, never guidance text.
+                guidanceRejected: (rejection) =>
+                    console.warn(JSON.stringify({
+                        event: "auto_router_optimizer_guidance_rejected",
+                        cycleId: input.cycleId,
+                        reason: rejection.reason,
+                        ids: rejection.ids,
+                    })),
                 synthesize: async (message) => {
                     const generated = await traced("synthesize", () => generateText({
                         model: getActiveAiModel(input.optimizerModel),
