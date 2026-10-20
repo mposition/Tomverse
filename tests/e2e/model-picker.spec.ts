@@ -322,25 +322,9 @@ test("favorited models lead the recommendations", { tag: "@ui-risk" }, async ({ 
   await expect(cards.nth(1)).toHaveAttribute("data-model-id", "mistral-medium-3-1");
 });
 
-test("long input explains its multiplier beside the send controls", { tag: "@ui-risk" }, async ({ page }) => {
+test("long input keeps the composer free of credit display", { tag: "@ui-risk" }, async ({ page }) => {
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
-  const estimate = page.getByTestId("request-credit-estimate");
-  await expect(estimate).toContainText("1.5×");
-  // Guests default to the 3-model brand trio with web search on: each
-  // model's 1 credit becomes 2 at 1.5x (6 in all), and each adds the 8-credit
-  // search reservation, which the input multiplier does not scale -- 30.
-  await expect(estimate).toContainText("30");
-
-  const estimateBox = await estimate.boundingBox();
-  const inputBox = await page.getByTestId("chat-input").boundingBox();
-  expect(estimateBox).not.toBeNull();
-  expect(inputBox).not.toBeNull();
-  expect(estimateBox!.x).toBeGreaterThanOrEqual(inputBox!.x);
-  expect(estimateBox!.x + estimateBox!.width).toBeLessThanOrEqual(
-    inputBox!.x + inputBox!.width
-  );
-  expect(estimateBox!.y + estimateBox!.height).toBeLessThanOrEqual(
-    inputBox!.y + inputBox!.height
-  );
+  await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
+
 });

@@ -13,6 +13,14 @@
 
 The message canvas may be optimized for additional vertical space, but the primary message-composition task must remain fully usable. The composer must always provide one complete, full-width input line before secondary controls are considered.
 
+## Studio appearance (2026-10-20)
+
+The approved Review Studio layout and credit presentation are specified in
+[Review Studio](review-studio.md). Classic retains the original layout. Both
+reuse the same input, execution, entitlement and cancellation controls; the
+Studio Write/Results view must never resubmit a request. The textarea retains
+its own complete full-width row.
+
 ## Scope
 
 | Area | File |
