@@ -324,7 +324,6 @@ export async function pickAutoModelWithLlm(input: {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             ...prices,
-            worstCaseMicroUsd: worstCase,
         });
         void settleRouterCost(routerModel.provider, actual - worstCase, reservedAt);
     }
