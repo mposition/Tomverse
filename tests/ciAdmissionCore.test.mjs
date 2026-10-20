@@ -238,7 +238,7 @@ test("a pull request that leaves the line while open has its waiting status clea
     openPulls: [pull(1), pull(7, { base: "claude/x", draft: true }), pull(8)],
     runningShas: new Set([sha(1), sha(8)]),
   });
-  assert.deepEqual(kinds(evaluation).sort(), ["clear:7", "clear:8"]);
+  assert.deepEqual(kinds(evaluation).sort(), ["status:7", "status:8"]);
 });
 
 test("a full line takes no more, so the stored state stays inside its schema", () => {
@@ -463,6 +463,18 @@ test("a waiting pull request that closes has the shared commit's status decided 
     openPulls: [pull(3, { headSha: shared })],
     running: new Set([ciRunKey(3, shared)]),
   });
-  assert.deepEqual(kinds(evaluation), ["clear:3"]);
+  assert.deepEqual(kinds(evaluation), ["status:3"]);
   assert.ok(evaluation.state.statusRetry.includes(3));
+});
+
+test("new commits on a waiting draft move its waiting status and redo the old commit's", () => {
+  const oldHead = "a".repeat(40);
+  const newHead = "b".repeat(40);
+  const evaluation = run({
+    state: state({ capacity: 1, queue: [{ ...queued(8), headSha: oldHead }] }),
+    openPulls: [pull(8, { draft: true, headSha: newHead }), pull(3, { headSha: oldHead })],
+    running: new Set([ciRunKey(3, oldHead)]),
+  });
+  assert.deepEqual(kinds(evaluation).sort(), ["status:3", "status:8"]);
+  assert.equal(evaluation.state.queue[0].headSha, newHead);
 });

@@ -195,8 +195,12 @@ export type CiAdmissionAction =
   | { kind: "cancel"; pull: CiAdmissionPull }
   /** Let straight through: nothing to change on GitHub but its status. */
   | { kind: "admit"; pull: CiAdmissionPull }
-  /** It left the line while still open: its "waiting in line" status is cleared. */
-  | { kind: "clear"; pull: CiAdmissionPull };
+  /**
+   * Its commit's `CI admission` status is decided again (pending while any
+   * open pull request on that commit waits, success otherwise): it left the
+   * line, a pull request sharing its commit did, or its head moved.
+   */
+  | { kind: "status"; pull: CiAdmissionPull };
 
 export type CiAdmissionEvaluation = {
   state: CiAdmissionState;
@@ -294,6 +298,11 @@ export function evaluateCiAdmission(input: {
       leaving.push(pull);
       continue;
     }
+    if (entry.headSha && entry.headSha !== pull.headSha) {
+      // New commits on a waiting draft: the new commit says "waiting", and the
+      // old one is decided again for any open pull request still on it.
+      leaving.push(pull, ...input.openPulls.filter((other) => other.number !== pull.number && other.headSha === entry.headSha));
+    }
     queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200), headSha: pull.headSha });
   }
   // A release the last round recorded but GitHub does not show: back to the top.
@@ -325,7 +334,7 @@ export function evaluateCiAdmission(input: {
       return units !== null && pull.number !== exclude && occupying(pull) ? sum + units : sum;
     }, 0);
 
-  const actions: CiAdmissionAction[] = leaving.map((pull) => ({ kind: "clear", pull }) as const);
+  const actions: CiAdmissionAction[] = leaving.map((pull) => ({ kind: "status", pull }) as const);
   const capacity = input.state.capacity;
 
   for (const arrivalNumber of arrivals) {
