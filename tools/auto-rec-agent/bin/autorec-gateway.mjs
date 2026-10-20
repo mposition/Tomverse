@@ -24,8 +24,8 @@
  *
  * Whatever the runner says, the gateway itself decides what may leave: the
  * branch is the recommendation's own new `claude/to-develop/auto-rec-*` branch,
- * the change passes the same scope check as the runner's against a develop it
- * fetched itself, a push never overwrites a branch, and at most
+ * the change is a single commit on the fork point with a develop it fetched
+ * itself and passes the same scope check as the runner's against it, a push never overwrites a branch, and at most
  * LIMITS.publishesPerDay publishes start in 24 hours. Outcomes it cannot see
  * are verified once (ls-remote, a PR listing) and otherwise answered as
  * `unknown`; nothing is retried.
@@ -350,7 +350,14 @@ async function publish(deps, header, payload) {
   // branched are ancestors of neither side's change, so they never enter this diff.
   const forkPoint = await run(["merge-base", "refs/remotes/origin/develop", head]);
   if (forkPoint.code !== 0) return refused("setup_failed", "no_merge_base");
-  const diff = await run(["diff", "--raw", "-z", "--no-renames", "--no-abbrev", forkPoint.stdout.trim(), head]);
+  const fork = forkPoint.stdout.trim();
+  // A push publishes every commit it carries, and only the final tree is
+  // checked here and was reviewed: the change must be one commit on the fork
+  // point, so nothing an earlier commit added and a later one removed leaves.
+  const parents = await run(["rev-list", "--parents", "-n", "1", head]);
+  const [, ...parentShas] = parents.code === 0 ? parents.stdout.trim().split(/\s+/) : [];
+  if (parentShas.length !== 1 || parentShas[0] !== fork) return refused("runner_error", "not_one_commit");
+  const diff = await run(["diff", "--raw", "-z", "--no-renames", "--no-abbrev", fork, head]);
   if (diff.code !== 0) return refused("setup_failed", "diff");
   let scope;
   try {
