@@ -8,6 +8,7 @@ import {
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AutoRouterTunables, type TunableAction, type TunableSettingsState } from "@/components/admin/AdminAutoRouterTunables";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
@@ -74,6 +75,8 @@ type OptimizerState = {
     dayCapMicroUsd: number;
     monthCapMicroUsd: number;
   };
+  /** The optimizer's own setting changes; absent from an older server. */
+  settings?: TunableSettingsState;
   /** The coding agent on the Ubuntu runner; absent from an older server. */
   recAgent?: { enabled: boolean };
 };
@@ -84,6 +87,7 @@ type Action =
   | { action: "set_automation"; daily: boolean; autoPromote: boolean }
   | { action: "promote"; cycleId: string }
   | { action: "roll_back" }
+  | TunableAction
   | { action: "set_recommendation"; cycleId: string; index: number; status: RecommendationStatus }
   | { action: "set_rec_agent"; enabled: boolean };
 
@@ -281,6 +285,8 @@ export function AdminAutoRouterOptimizerPanel() {
         </p>
       ) : null}
       {failure ? <AdminApiFailureNotice failure={failure} onRetry={() => void load()} /> : null}
+
+      <AutoRouterTunables settings={state?.settings} busy={busy} send={(action) => void send(action)} />
 
       {state ? (
         <div className="mt-5 rounded-2xl border border-zinc-800 p-4" data-testid="admin-auto-router-optimizer-active">

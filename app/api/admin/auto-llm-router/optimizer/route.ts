@@ -15,6 +15,9 @@ import {
   updateOptimizerAutomation,
   updateOptimizerModel,
 } from "@/lib/autoRouterOptimizer";
+import { undoTunableByOperator, updateSettingAutoApply } from "@/lib/autoRouterTunables";
+import { activeExclusions } from "@/lib/autoRouterTunablesCore";
+import { readAutoRouterTunables, readSettingAutoApply } from "@/lib/autoRouterTunablesRead";
 import { readRecAgentEnabled } from "@/lib/autoRouterRecAgent";
 import { setRecommendationStatus, updateRecAgentSwitch } from "@/lib/autoRouterRecommendations";
 import { RECOMMENDATION_STATUSES } from "@/lib/autoRouterRecommendationsCore";
@@ -33,6 +36,9 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set_automation"), daily: z.boolean(), autoPromote: z.boolean() }).strict(),
   z.object({ action: z.literal("promote"), cycleId: z.string().trim().min(1).max(64) }).strict(),
   z.object({ action: z.literal("roll_back") }).strict(),
+  z.object({ action: z.literal("set_setting_auto_apply"), enabled: z.boolean() }).strict(),
+  z.object({ action: z.literal("undo_router_timeout") }).strict(),
+  z.object({ action: z.literal("undo_model_exclusion"), modelId: z.string().trim().min(1).max(120) }).strict(),
   z.object({ action: z.literal("set_rec_agent"), enabled: z.boolean() }).strict(),
   z
     .object({
@@ -49,12 +55,25 @@ const modelOptions = async () =>
     .filter((model) => model.enabled && !model.catalogDeleted)
     .map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
 
-const stateResponse = async () =>
-  NextResponse.json({
-    ...(await readAutoRouterOptimizerState()),
-    options: await modelOptions(),
-    recAgent: { enabled: await readRecAgentEnabled() },
+const stateResponse = async () => {
+  const [state, options, tunables, settingAutoApply, recAgentEnabled] = await Promise.all([
+    readAutoRouterOptimizerState(),
+    modelOptions(),
+    readAutoRouterTunables(),
+    readSettingAutoApply(),
+    readRecAgentEnabled(),
+  ]);
+  return NextResponse.json({
+    ...state,
+    options,
+    settings: {
+      autoApply: settingAutoApply,
+      routerTimeoutMs: tunables.routerTimeoutMs,
+      excluded: activeExclusions(tunables, Date.now()),
+    },
+    recAgent: { enabled: recAgentEnabled },
   });
+};
 
 export async function GET(req: Request) {
   try {
@@ -97,6 +116,24 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "That model is not an enabled model." }, { status: 400 });
       }
       await updateOptimizerModel(actor, body.modelId);
+      return await stateResponse();
+    }
+
+    if (body.action === "set_setting_auto_apply") {
+      await updateSettingAutoApply(actor, body.enabled);
+      return await stateResponse();
+    }
+
+    if (body.action === "undo_router_timeout" || body.action === "undo_model_exclusion") {
+      const outcome = await undoTunableByOperator(
+        actor,
+        body.action === "undo_router_timeout"
+          ? { setting: "routerTimeoutMs" }
+          : { setting: "excludeModel", modelId: body.modelId }
+      );
+      if ("refused" in outcome) {
+        return NextResponse.json({ error: outcome.refused, code: outcome.refused }, { status: 409 });
+      }
       return await stateResponse();
     }
 

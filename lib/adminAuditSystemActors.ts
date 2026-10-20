@@ -446,7 +446,11 @@ export const systemAuditActionAllowed = (
     ((action === "auto.llm_router_optimizer.cycle_started" ||
       action === "auto.llm_router_guidance.promoted" ||
       action === "auto.llm_router_rewrite_guidance.promoted") &&
-      targetType === "AutoRouterOptimizerCycle")) &&
+      targetType === "AutoRouterOptimizerCycle") ||
+     // Its own setting changes (lib/autoRouterTunablesCore.ts), owner approval
+     // 2026-10-20, on the one settings row they live in.
+     ((action === "auto.llm_router_tunable.applied" || action === "auto.llm_router_tunable.reverted") &&
+      targetType === "AppSettings")) &&
   (actor !== CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR ||
     (action === "chat.unified_optimizer.run_admitted" &&
       targetType === "ChatUnifiedOptimizerRun") ||
