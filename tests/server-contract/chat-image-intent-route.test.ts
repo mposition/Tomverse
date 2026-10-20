@@ -23,8 +23,8 @@ let flagEnabled = true;
 let planTier: "Free" | "Pro" | "Max" = "Pro";
 let accessRefused = false;
 let triageModelId: string | null = "gpt-6-luna";
-let detectAnswer: unknown = { image: true, modelId: "gpt-image-2", preset: "final" };
-const detectCalls: Array<{ text: string }> = [];
+let detectAnswer: unknown = { image: true, modelIds: ["gpt-image-2"], preset: "final" };
+const detectCalls: Array<{ text: string; chatModelIds?: readonly string[] }> = [];
 let mocksInstalled = false;
 
 async function loadRoute() {
@@ -63,8 +63,15 @@ async function loadRoute() {
     mock.module(mod("lib/chatImageIntent.ts"), {
       namedExports: {
         chatImageTriageModelId: async () => triageModelId,
-        detectChatImageRequest: async (input: { text: string }) => {
-          detectCalls.push({ text: input.text });
+        detectChatImageRequest: async (input: {
+          text: string;
+          chatModelIds?: readonly string[];
+        }) => {
+          detectCalls.push(
+            input.chatModelIds
+              ? { text: input.text, chatModelIds: input.chatModelIds }
+              : { text: input.text }
+          );
           return detectAnswer;
         },
       },
@@ -86,7 +93,7 @@ const reset = () => {
   flagEnabled = true;
   planTier = "Pro";
   accessRefused = false;
-  detectAnswer = { image: true, modelId: "gpt-image-2", preset: "final" };
+  detectAnswer = { image: true, modelIds: ["gpt-image-2"], preset: "final" };
   detectCalls.length = 0;
 };
 
@@ -108,7 +115,7 @@ test("an eligible caller gets the triage decision", async () => {
   reset();
   assert.deepEqual(await answer(), {
     status: 200,
-    payload: { image: true, modelId: "gpt-image-2", preset: "final" },
+    payload: { image: true, modelIds: ["gpt-image-2"], preset: "final" },
   });
   assert.deepEqual(detectCalls, [{ text: "고양이 그림 그려줘" }]);
   reset();
@@ -137,4 +144,12 @@ test("blank text makes no call and an unknown field is refused", async () => {
   const { status } = await answer({ text: "draw", extra: 1 });
   assert.equal(status, 400);
   assert.equal(detectCalls.length, 0);
+});
+
+test("Review's selected chat models reach the triage", async () => {
+  reset();
+  await answer({ text: "바다 그려줘", chatModelIds: ["gpt-6-luna", "claude-sonnet-5"] });
+  assert.deepEqual(detectCalls, [
+    { text: "바다 그려줘", chatModelIds: ["gpt-6-luna", "claude-sonnet-5"] },
+  ]);
 });

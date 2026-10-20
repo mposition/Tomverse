@@ -4462,6 +4462,8 @@ export function ChatPageClient({
             chatDraftOnReturn?: string;
             /** The image-intent triage's preset; the workspace default otherwise. */
             preset?: ImagePreset;
+            /** The image-intent triage's models; wins over `modelId` when non-empty. */
+            modelIds?: readonly string[];
         }
     ) => {
         if (promptRefinerMode === "e2e_fixture") {
@@ -4489,7 +4491,13 @@ export function ChatPageClient({
             Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
         );
         setImageDraftSeedPrompt(draftText);
-        setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setImageDraftSeedModelIds(
+            options?.modelIds?.length
+                ? [...options.modelIds]
+                : modelId
+                  ? [modelId]
+                  : undefined
+        );
         setImageDraftSeedPreset(options?.preset);
         setImageWorkspaceKey(nextImageDraftKey());
         setIsImageDraftActive(true);
@@ -5690,6 +5698,10 @@ export function ChatPageClient({
       cancel, and the workspace generates on arrival only for an account that
       turned that on beside the price -- otherwise it waits on the price for
       one press. Any failure or "no" falls through to the ordinary send.
+
+      In Review the models already chosen for the comparison make the image:
+      each one's maker's image model, side by side, with only the preset left
+      to the triage. Chat lets the triage pick the model as well.
     */
     if (
       options === undefined &&
@@ -5697,7 +5709,7 @@ export function ChatPageClient({
       !isGuestMode &&
       imageGenerationEnabled &&
       planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
-      mountedSurface === "chat" &&
+      (mountedSurface === "chat" || mountedSurface === "workspace") &&
       !isImageDraftActiveRef.current &&
       attachments.length === 0 &&
       inputValue.trim().length > 0
@@ -5707,10 +5719,18 @@ export function ChatPageClient({
       const intentScope = composerDraftConversationId;
       const intentTicket = conversationSelectionTicketRef.current;
       const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
+      const reviewModelIds =
+        mountedSurface === "workspace"
+          ? latestModelSettingsRef.current.models.filter(
+              (modelId) => !latestModelSettingsRef.current.disabled.includes(modelId)
+            )
+          : undefined;
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
-        decision = await askChatImageIntent(intentText);
+        decision = await askChatImageIntent(intentText, {
+          chatModelIds: reviewModelIds,
+        });
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
@@ -5739,10 +5759,11 @@ export function ChatPageClient({
         return;
       }
       if (decision.image) {
-        // The triage's model and preset seed the workspace; a choice the
+        // The triage's models and preset seed the workspace; a choice the
         // catalogue cannot honour falls back to its defaults there.
-        handleStartImageDraft(intentText, decision.modelId ?? undefined, {
+        handleStartImageDraft(intentText, undefined, {
           fromImageRequest: true,
+          modelIds: decision.modelIds,
           preset: decision.preset ?? undefined,
         });
         return;
