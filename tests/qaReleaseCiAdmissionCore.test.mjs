@@ -54,20 +54,29 @@ test("the line holds labelled drafts only, by class and then by when the label w
     pr(9, { queuedAt: "not a date" }),
   ]);
   assert.deepEqual(line.map((e) => e.number), [7, 6, 5, 2, 1]);
-  assert.deepEqual(line.map((e) => e.estimate), [45, 30, 45, 30, 30]);
+  assert.deepEqual(line.map((e) => e.estimate), [38, 15, 38, 15, 15]);
 });
 
 test("admits the head of the line only when its estimate fits inside capacity minus the reserve", () => {
   const line = qaReleaseCiLine([pr(1), pr(2, { queuedAt: at(1) })]);
-  // 40 - 12 = 28 admissible: a 30-job pull request counts as 28, so it fits an
-  // idle repository alone, and a single running job keeps it waiting.
-  assert.deepEqual(decideQaReleaseCiAdmission({ line, activeJobs: [], recent: [], nowMs: T0 }).admit.map((e) => e.number), [1]);
-  assert.deepEqual(decideQaReleaseCiAdmission({ line, activeJobs: jobs(1), recent: [], nowMs: T0 }).admit, []);
+  // 40 - 12 = 28 admissible: one 15-job develop pull request fits an idle
+  // repository and leaves 13, too little for the second.
+  const idle = decideQaReleaseCiAdmission({ line, activeJobs: [], recent: [], nowMs: T0 });
+  assert.deepEqual(idle.admit.map((e) => e.number), [1]);
+  assert.equal(idle.free, 13);
+  assert.equal(idle.blocked.number, 2);
+  assert.deepEqual(decideQaReleaseCiAdmission({ line, activeJobs: jobs(14), recent: [], nowMs: T0 }).admit, []);
+  // With more room both fit in one poll.
   const roomy = { ...CONFIG, reserve: 0 };
   const decision = decideQaReleaseCiAdmission({ line, activeJobs: jobs(5), recent: [], nowMs: T0, config: roomy });
   assert.equal(decision.committed, 5);
-  assert.deepEqual(decision.admit.map((e) => e.number), [1]); // 35 free, then 5: the second does not fit
-  assert.equal(decision.blocked.number, 2);
+  assert.deepEqual(decision.admit.map((e) => e.number), [1, 2]);
+  assert.equal(decision.free, 5);
+  assert.equal(decision.blocked, null);
+  // A main release (38 jobs) counts as the whole 28 and waits for an empty room.
+  const release = qaReleaseCiLine([pr(3, { base: "main", head: "release/train-a" })]);
+  assert.deepEqual(decideQaReleaseCiAdmission({ line: release, activeJobs: [], recent: [], nowMs: T0 }).admit.map((e) => e.number), [3]);
+  assert.deepEqual(decideQaReleaseCiAdmission({ line: release, activeJobs: jobs(1), recent: [], nowMs: T0 }).admit, []);
 });
 
 test("running and queued jobs count against the room; nothing is admitted when full", () => {

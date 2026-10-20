@@ -40,8 +40,11 @@ export const QA_RELEASE_CI_ADMISSION_CONFIG = Object.freeze({
   maxPerPoll: 2,
   /** How long an admission counts against the room before its jobs are all visible. */
   settleMs: 10 * 60 * 1000,
-  /** Jobs one pull request is expected to start, by class. */
-  estimate: Object.freeze({ hotfix: 45, priority: 30, release: 45, develop: 30 }),
+  /**
+   * Jobs one pull request is expected to start, by class: measured on
+   * 2026-10-20 (develop pull requests 14-15 jobs, main release 37-38).
+   */
+  estimate: Object.freeze({ hotfix: 38, priority: 15, release: 38, develop: 15 }),
 });
 
 export type QaReleaseCiAdmissionConfig = typeof QA_RELEASE_CI_ADMISSION_CONFIG;
@@ -99,6 +102,7 @@ export type QaReleaseCiAdmission = { number: number; headSha: string; estimate: 
 export type QaReleaseCiDecision = {
   /** Jobs running or queued, plus the not-yet-visible share of recent admissions. */
   committed: number;
+  /** Room left after this poll's admissions. */
   free: number;
   admit: QaReleaseCiLineEntry[];
   /** The head of the line when it did not fit, and whether it has waited past the starvation limit. */
@@ -146,5 +150,5 @@ export function decideQaReleaseCiAdmission(input: {
       blocked = { number: entry.number, waitedMs, starving: waitedMs >= config.starvationMs };
     }
   }
-  return { committed, free: room - committed, admit, blocked, waiting };
+  return { committed, free, admit, blocked, waiting };
 }

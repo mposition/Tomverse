@@ -309,9 +309,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       `ci:priority` 라벨 → main release → develop이고, 같은 순위 안에서는 `ci:queued`를 붙인 시각입니다. base가 develop·main이
       아닌 stacked PR은 줄에 서지 않습니다.
     - **자리**는 동시 job 한도 40에서 develop·main push(배포)를 위한 예비 12를 뺀 28입니다. 실행 중·대기 중인 job과, 최근
-      10분 안에 들인 PR이 아직 보이지 않은 job 추정치(develop 30, main release·hotfix 45, 자리 28을 넘으면 28로 계산)를 뺀 만큼이
+      10분 안에 들인 PR이 아직 보이지 않은 job 추정치(2026-10-20 실측: develop 15, main release·hotfix 38; 자리 28을 넘으면 28로 계산해 빈 자리에서만 들어감)를 뺀 만큼이
       빈자리입니다. 맨 앞 PR이 들어가지 않으면 뒤의 작은 PR이 먼저 들어가되, 맨 앞이 20분을 기다렸으면 멈춥니다. 한 번에
-      최대 2개를 들입니다. push는 막지 않습니다.
+      최대 2개(둘이 함께 들어갈 자리가 있을 때)를 들입니다. push는 막지 않습니다.
     - **모드** `QA_RELEASE_CI_ADMISSION_MODE`: 비어 있거나 `off`면 꺼짐(기본), `shadow`면 판정과 기록만, `on`이면 들인 draft를
       ready로 바꿉니다(GraphQL `markPullRequestReadyForReview`). **GitHub 쓰기는 이것 하나**이고 label·comment·status는 쓰지
       않습니다. 병합 레인의 kill switch가 비어 있지 않으면 멈춥니다. 본 앱에는 기록하지 않고, 회차마다 숫자와 코드만 담은 한

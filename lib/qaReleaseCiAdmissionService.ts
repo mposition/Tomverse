@@ -9,9 +9,10 @@
  * requests, judges with lib/qaReleaseCiAdmissionCore.ts, and in `on` mode
  * marks the admitted drafts ready for review. That is the only GitHub write:
  * no label, comment or status. `shadow` mode judges and logs only. A failed
- * read ends the round without admitting; a failed write is reported and not
- * retried, and the next poll re-reads the pull request (a pull request that
- * did become ready is no longer a draft, so it drops out of the line).
+ * read ends the round without admitting. A failed write is reported and not
+ * repeated blind: the next poll re-reads the pull request first, and only one
+ * still in draft is judged (and possibly marked) again -- one that did become
+ * ready is no longer a draft, so it drops out of the line.
  */
 import {
   decideQaReleaseCiAdmission,
