@@ -14,8 +14,10 @@ import { inspectAmuxIdeaSubmission, submissionFailureKind } from "@/lib/amux/ide
 import {
   commitIdeaSubmission,
   IdeaSubmissionError,
+  readIdeaSubmissionByDerivedRequestId,
   readIdeaSubmissionRequest,
 } from "@/lib/amux/ideaSubmissionService";
+import { suggestionSendRequestId } from "@/lib/productResearchScoutCore";
 import { prisma } from "@/lib/prisma";
 
 const runnerTestUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -34,12 +36,19 @@ if (!url || !["postgres:", "postgresql:"].includes(url.protocol) ||
 
 const actorUserId = `synthetic-amux-owner-${randomUUID()}`;
 const actorEmail = "amux-v4-synthetic-owner@example.test";
-process.env.ADMIN_USER_IDS = actorUserId;
-process.env.ADMIN_EMAILS = actorEmail;
-process.env.ADMIN_OWNER_EMAILS = actorEmail;
+// A second owner, for the read-back a derived request id allows across owners.
+const secondOwnerId = `synthetic-amux-owner-b-${randomUUID()}`;
+const secondOwnerEmail = "amux-v4-synthetic-owner-b@example.test";
+process.env.ADMIN_USER_IDS = `${actorUserId},${secondOwnerId}`;
+process.env.ADMIN_EMAILS = `${actorEmail},${secondOwnerEmail}`;
+process.env.ADMIN_OWNER_EMAILS = `${actorEmail},${secondOwnerEmail}`;
 process.env.ADMIN_AUDIT_INTEGRITY_KEY = `synthetic-audit-${randomUUID()}`;
 const session = {
   user: { id: actorUserId, email: actorEmail, authenticatedAt: new Date().toISOString() },
+  expires: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+} as Session;
+const secondSession = {
+  user: { id: secondOwnerId, email: secondOwnerEmail, authenticatedAt: new Date().toISOString() },
   expires: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 } as Session;
 const request = new Request("https://tomverse.test/api/admin/amux/ideas/submissions", { method: "POST" });
@@ -128,6 +137,33 @@ test("read-back preserves whether the saved idea declared external sources", asy
   assert.deepEqual(await readIdeaSubmissionRequest(session, sourceRequestId),
     { requestId: sourceRequestId, status: "committed", ideaId: sourceIdeaId,
       hasExternalSources: true });
+});
+
+test("a Scout suggestion's derived request id is read back by any owner; a browser-chosen one stays owner-scoped", async () => {
+  // Owner A made the idea and stopped before closing the suggestion; owner B's
+  // send has to find it rather than be refused forever.
+  const derivedRequestId = suggestionSendRequestId(`synthetic-suggestion-${randomUUID()}`);
+  const derivedIdeaId = randomUUID();
+  const derivedInspection = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: derivedRequestId,
+    input: { version: 1, idea: "[Scout 제안] SYNTHETIC", repositories: [], pullRequests: [] },
+  }));
+  if (!derivedInspection.ok) throw new Error(derivedInspection.code);
+  await prisma.$transaction((tx) => commitIdeaSubmission(tx, {
+    session, request, inspected: derivedInspection, ideaId: derivedIdeaId, keys,
+  }));
+  assert.deepEqual(await readIdeaSubmissionRequest(secondSession, derivedRequestId),
+    { requestId: derivedRequestId, status: "absent" });
+  assert.deepEqual(await readIdeaSubmissionByDerivedRequestId(secondSession, derivedRequestId),
+    { requestId: derivedRequestId, status: "committed", ideaId: derivedIdeaId, hasExternalSources: false });
+  assert.deepEqual(await readIdeaSubmissionByDerivedRequestId(secondSession, randomUUID()).then((value) => value.status), "absent");
+  await assert.rejects(
+    prisma.$transaction((tx) => commitIdeaSubmission(tx, {
+      session: secondSession, request, inspected: derivedInspection, ideaId: randomUUID(), keys,
+    })),
+    (error: unknown) => error instanceof IdeaSubmissionError && error.code === "request_already_seen",
+  );
+  assert.equal(await prisma.amuxIdeaSubmission.count({ where: { requestId: derivedRequestId } }), 1);
 });
 
 test("submission row and canonical audit roll back together", async () => {

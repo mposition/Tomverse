@@ -12,7 +12,7 @@
 | 서비스 | project | 환경 | 진입점 | 일정 | 강제 종료 |
 |---|---|---|---|---|---|
 | Product Research Observation | Tomverse Agents | production·staging | `npm run agent:product-research-observation` | 매일 21:30 UTC | 15분 |
-| Product Research Probe | Tomverse Agents | production·staging | 같은 script `--probe` | 없음(손으로 실행) | 15분 |
+| Product Research Probe | Tomverse Agents | production·staging·dev | 같은 script `--probe` | 없음(손으로 실행) | 15분 |
 
 - 두 서비스는 **별도 Railway project**(`Tomverse Agents`)에 있습니다. reference
   변수는 자기 project 안에서만 해석되므로, DB 서비스와 공유 변수가 없는 project는
@@ -23,9 +23,7 @@
 - 기존 `Tomverse` project의 cron은 `.railway/railway.ts`가 named partial로
   소유합니다. **두 파일을 섞지 않습니다** — `railway:iac:*` script는 공유
   project를, `railway:agents:*`는 Agent project를 대상으로 합니다.
-- **probe는 환경마다 하나씩 있습니다**(이 트리에서는 production과 staging. `dev`는
-  그 lane을 가져오는 release와 함께 들어옵니다 — 여기서는 `RailwayEnvironment`가
-  두 환경뿐이라 세 번째 key는 계획할 수도 적용할 수도 없습니다). 그것이 재는 것은 *이미지*이고 환경마다
+- **probe는 환경마다 하나씩 있습니다.** 그것이 재는 것은 *이미지*이고 환경마다
   이미지를 따로 빌드하므로, 한 환경의 측정은 다른 환경에 대해 아무 말도 하지
   않습니다. production에 없던 동안 production 이미지는 아무도 잴 수 없는 유일한
   이미지였고, 그 답이 필요한 단계가 P2입니다(정책 §9의 첫 조건이 production
@@ -189,7 +187,7 @@ staging의 앱 스위치 → staging의 서비스 스위치 순서로 켭니다.
 
 ## 매일 보는 곳
 
-Admin Console → Operations → Engineering agent → **Product research** tab.
+Admin Console → Operations → **Product research** (`/admin/product-research`). 개선 제안, 실행과 비용, 이슈 관찰 기록 세 탭이고, 관측 기록은 세 번째 탭입니다. 예전 주소 `/admin/engineering-agent?tab=product-research`는 이 화면으로 redirect됩니다.
 
 **관측 섹션에는 버튼이 없습니다.** 이 Agent는 아무것도 제안하지 않으므로 승인할
 것도 거절할 것도 없습니다. 보이는 것은 예정 회차 목록(행이 없는 회차 포함), 가장
@@ -267,7 +265,14 @@ Admin Console → Operations → Engineering agent → **Product research** tab.
 | `issue_backlog_failed` | `report:issue-backlog` 자식 프로세스가 비정상 종료 | 배포 로그의 그 줄. 대개 `lib/modelPricing.ts` 해석이 실제 module과 어긋난 경우입니다 |
 | `schema_invalid` | report가 이 표가 모르는 모양을 냄 | report와 payload builder 중 한쪽만 바뀐 것입니다. 코드 변경입니다 |
 | `set_mismatch`·`count_mismatch` | 같은 이슈 번호가 둘, 또는 재계산한 수가 다름 | 코드 변경입니다 |
-| `timeout` | 자식 프로세스가 자기 deadline에 죽음 | clone 시간. S0에서 재어 둔 값과 비교합니다 |
+| `timeout` | 자식 프로세스가 자기 deadline에 죽었거나, 회차 전체가 준비 시한(14분)을 넘김 | 배포 로그가 어느 쪽인지 말합니다. 자식이면 clone 시간을 S0 측정값과 비교하고, 준비 시한이면 `preparation deadline reached`가 찍혀 있습니다 |
+
+**멈춘 회차는 멈춘 채로 두지 않습니다.** 자식 프로세스는 자기 deadline에
+`SIGTERM`을 받고, 5초 안에 나가지 않으면 `SIGKILL`을 받습니다. 그 kill은 프로세스
+**그룹**에 가므로 `git clone`이 띄운 `git-remote-https`도 함께 끝납니다. 15분 강제
+종료와 14분 준비 시한도 각각 살아 있는 자식을 먼저 끝낸 뒤 진행하며, 준비 시한은
+`timeout` 행을 제출합니다 — 멈춘 회차가 침묵으로 보이면 Railway cron이 이후 회차를
+건너뛰는 것과 구분되지 않기 때문입니다.
 
 **재시도하지 않습니다.** 같은 회차에 두 번째 답을 보내는 것이 한 회차가 서로 다른
 두 답을 갖는 경로이고, 서비스의 restart policy가 `NEVER`인 이유입니다. 실패한
@@ -288,3 +293,45 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
   이미 답이 있는 회차의 재제출은 409입니다.
 - **GitHub에 아무것도 쓰지 않습니다.** 이슈·label·comment·PR·check 전부. 토큰은
   읽기 전용이고, 쓰기 권한이 붙은 토큰을 넣으면 그 자체가 정책 위반입니다.
+
+## 개선 탐색 S0 probe (정책 §12)
+
+`npm run agent:product-research-scout-s0-probe -- fixture|pages|renderers`는 browser 규칙과 렌더러를 **로컬에서** 재는
+도구입니다(2026-10-13 측정의 근거). fixture는 로컬 서버 두 개로 금지된 요청이 실제로 도달하는지 세고, pages는 production
+공개 page 20개를 GET·HEAD로만 열며, renderers는 고정 명세 파일을 만들고 검사합니다. 출력에 page 원문·경로·비밀값이 없어
+그대로 붙여도 안전합니다. Railway 서비스는 따로 두지 않습니다 — Railway 컨테이너에서 Chromium sandbox가 뜨는지는 walker의
+첫 실행이 답합니다(뜨지 않으면 `product_research_scout_step_failed`의 `pages` 단계로 로그에 남습니다).
+
+## Scout walker (정책 §10, §13)
+
+`Product Research Scout`는 매일 18:00 UTC(04:00 AEST)에 도는 cron입니다. production 공개 page 20개, 생성 파일 4종,
+카탈로그를 모아 그 환경 앱의 `/api/internal/product-research/scout`로 하나씩 보내고, **앱이 모델을 부릅니다.** walker에는
+모델 키도 DB 자격증명도 없습니다. 이미지는 `docker/product-research-scout.Dockerfile`입니다.
+
+### 켜는 순서 (운영자)
+
+1. **앱 변수**(그 환경의 Tomverse 서비스): `PRODUCT_RESEARCH_SCOUT_ENABLED`(아무 값),
+   `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(32자 이상, 새로 만든 값). 꺼져 있으면 route는 404입니다.
+2. **walker 서비스**(Tomverse Agents의 그 환경: dev는 `develop`, production은 `main`에서 빌드): IaC apply로 만들지 대시보드에서 만들지는 운영자가 정합니다
+   (`docs/ops/dev-test-lanes.md`는 서비스 생성이 보이는 plan을 apply하지 말라고 적습니다). 대시보드라면 아래를 모두 맞춥니다.
+
+   | 설정 | 값 |
+   |---|---|
+   | 환경 | Tomverse Agents → **dev** 또는 **production** |
+   | 이름 | `Product Research Scout` |
+   | Source | GitHub `mposition/Tomverse`, branch `develop`(dev) 또는 `main`(production), Root directory 비움 |
+   | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout.Dockerfile`(앞에 `/` 없이) |
+   | Deploy → Start command | `npm run agent:product-research-scout` |
+   | Deploy → Cron schedule | `0 18 * * *` |
+   | Deploy → Restart policy | **Never** |
+   | Region | `asia-southeast1-eqsg3a`, replica 1 |
+   | Networking | 공개 domain을 만들지 않음 |
+   | Build → Watch paths | `docker/product-research-scout.Dockerfile`, `scripts/agents/product-research-scout.mjs`, `scripts/report-product-consistency-core.mjs`, `lib/productResearchScout*`, `lib/generatedArtifact*`, `package-lock.json` |
+   | Variables | `PRODUCT_RESEARCH_SCOUT_ENABLED`, `PRODUCT_RESEARCH_SCOUT_INGEST_URL`(그 환경 앱의 `https://…/api/internal/product-research/scout`), `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(1과 같은 값). 이 셋 말고는 없음 |
+
+3. **Admin에서 모델과 하루 상한**: Admin › 제품 리서치 › 실행과 비용의 "모델과 하루 상한"에서 이미지를 읽는
+   모델을 고르고 하루 호출 수를 정합니다(owner, 최근 로그인). 하루 약 25회면 한 번 실행을 다 판정합니다. 0이면 비용이 들지
+   않고, 모델이 없으면 walker는 돌아도 판정하지 않습니다.
+
+실행 결과는 walker 로그의 마지막 줄 `product_research_scout_run`(보낸 수, 저장한 제안 수, `model_off`·상한 도달·거절·실패
+수)과 Admin의 오늘 사용량에서 봅니다. 한 실행은 45분에 강제로 끝나고, 결과를 모르는 전송은 다시 보내지 않습니다.

@@ -612,6 +612,30 @@ The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ide
 
 From an idea to its plan approval the operator makes only the decisions policy requires (orchestration v49, intake v18 item 1): the **execution approval** and the **plan approval**, plus one button that builds the review screen. The new-idea card holds the text, the collapsed sources disclosure and one line naming the default model and its reasoning level (the approved-price model, else the first approved model; "high" when allowed, else its highest level) with a collapsed "Change the model"; its one button runs the existing input check, the model's eligibility check and the build-preview request (save, idea-only plan and exact preview) in that order, and a step that does not pass stops the chain with its own message. The separate steps (input check, save, source plan, eligibility, preview) stay reachable in a collapsed "Step by step (for recovery)" section and for a saved idea that stopped part-way. The execution approval screen shows the idea, the model, the exact payload (collapsed) and the cost ceiling with the single approve button; the legacy confirmation exists only when no approved price does and says what it does not do. After the approval the analysis result is read on a gentle bounded schedule (15 s, then 30 s, then 60 s, 48 reads at most, paused while the tab is hidden, ended by any refused or failed read; the manual button stays) and the plan approval opens by itself when the result arrives. While the plan approval, the execution approval or the build preview is in flight a blocking dialog (`role="dialog"`, `aria-modal`, focus trapped, background inert, Escape ignored) says what is being recorded, that it can take about 2 minutes and counts the seconds, then states the answer; an unknown outcome is read back and never posted again. The Ideas components use dark classes only, never `dark:` pairs (see "The console theme").
 
+### Product research is its own workspace (2026-10-19)
+
+The product-research agent left the engineering agent's screen for its own
+Operations entry, **Product research** (`/admin/product-research`), at the
+operator's request: the Scout's suggestions are decisions, and they were buried
+under a tab of a different agent between a settings form and a read-only
+observation table. Three sections, each loading only its own rows:
+**Suggestions** (the default) opens with four tiles that answer "what is
+waiting and is it working" (open count by severity, the newest run from the
+call ledger, the next scheduled run, today's calls against the cap), then the
+open suggestions grouped by the page or file they are about, groups holding a
+high-severity suggestion expanded and the rest folded, with severity and area
+filters, a newest-first view, and selection with a sticky bar that dismisses or
+sends the selected suggestions one request at a time and stops at the first
+refusal. **Runs and cost** holds the owner-only model and daily-cap form, today's
+use and the last seven UTC days. **Issue observations** is the unchanged
+observation record. The sidebar entry and the Suggestions tab carry the open
+suggestion count (`productResearch`), an unknown count rendering nothing. The
+engineering agent keeps its four sections, and its old
+`?tab=product-research` address redirects to
+`/admin/product-research?tab=observations`, the record it showed in
+production, with the rest of its query
+(`ADMIN_ENGINEERING_AGENT_LEGACY_TABS`). No route was retired.
+
 ### Decision Maker requests are judged in Execution (2026-10-19)
 
 A Decision Maker request that waits on a person -- an open proposal, or a

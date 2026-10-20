@@ -48,6 +48,11 @@ export type AdminNavigationCounts = {
    */
   pendingMarketingApprovals: number | null;
   /**
+   * Scout suggestions still open (docs/policy/product-research-agent.md §10):
+   * each waits for a person to dismiss it or send it to AMUX.
+   */
+  openProductResearchSuggestions: number | null;
+  /**
    * AMUX escalations waiting on a person: `open` and `acknowledged`, the same
    * statuses the Assignment section lists (AMUX_ESCALATION_AWAITING_STATUSES).
    *
@@ -101,6 +106,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   openModelLifecycle: null,
   overdueCampaignWaves: null,
   pendingMarketingApprovals: null,
+  openProductResearchSuggestions: null,
   openAmuxEscalations: null,
   openAmuxOrchestratorHalts: null,
   awaitingAmuxDecisionMaker: null,
@@ -169,6 +175,8 @@ export const adminNavigationBadge = (
       return counts.overdueCampaignWaves;
     case "marketing":
       return counts.pendingMarketingApprovals;
+    case "productResearch":
+      return counts.openProductResearchSuggestions;
     case "amuxEscalations":
       return counts.openAmuxEscalations;
     case "amuxOrchestratorHalts":

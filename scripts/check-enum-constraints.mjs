@@ -1403,6 +1403,36 @@ const REGISTRY = {
     reason:
       "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
   },
+  ProductResearchScoutLlmCall_outcome_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SCOUT_LLM_CALL_OUTCOMES",
+    reason: "A Scout model call is started before it runs and settled ok or failed after; started rows count toward the daily cap.",
+  },
+  ProductResearchSuggestion_kind_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SCOUT_SUBJECT_KINDS",
+    reason: "What the scout looked at: a public page, a generated file, or the model catalogue.",
+  },
+  ProductResearchSuggestion_area_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SUGGESTION_AREAS",
+    reason: "The area the model assigned. The answer is parsed against the same list, so an unknown area is dropped before it is stored.",
+  },
+  ProductResearchSuggestion_severity_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SUGGESTION_SEVERITIES",
+    reason: "low, medium or high, as the model judged it; the Admin list sorts on it.",
+  },
+  ProductResearchSuggestion_status_check: {
+    owner: "list",
+    module: "lib/productResearchScoutCore.ts",
+    list: "SUGGESTION_STATUSES",
+    reason: "open until the operator dismisses it or sends it to AMUX.",
+  },
   EngineeringAgentRun_status_check: {
     owner: "list",
     module: "lib/engineeringAgentCore.ts",
