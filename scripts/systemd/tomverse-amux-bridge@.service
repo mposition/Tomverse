@@ -59,6 +59,13 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 TemporaryFileSystem=/var/lib:ro
 UMask=0077
 
-# Intentionally no [Install] (version 31, section 4): an enabled instance would
-# start at boot without anyone checking its worker's halt latch. Instances are
-# started by the operator, and later by the reconciler.
+# Owner decision 2026-10-20: an instance the operator enables starts at boot,
+# as tomverse-bridge.service and tomverse-amux-v22-bridge@ did, rather than
+# waiting for a person after every reboot until version 31's reconciler
+# exists. Version 31 section 4 had kept [Install] out so nothing starts without
+# a check of the worker's halt latch; that latch is not written before stage
+# R4, and a started bridge still registers only what the app's bridge scope
+# lists. Enable an instance only after moving its worker under version 55,
+# section 3.1; disable it to move back.
+[Install]
+WantedBy=multi-user.target
