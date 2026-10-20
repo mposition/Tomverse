@@ -347,6 +347,15 @@ export const parseAutoLlmRouterOutput = (
  * made. Turning it on is an operator decision because each routed turn then
  * costs one more (small) provider request.
  */
+/**
+ * Whether a model may make the router call. Perplexity bills a search fee on
+ * every request on top of tokens (lib/modelPricing.ts), which the call's
+ * token-only cost bound below would understate; the router needs no search,
+ * so those models are not offered and a stored one reads as off.
+ */
+export const autoLlmRouterModelAllowed = (model: Pick<AiModel, "provider">) =>
+    model.provider !== "perplexity";
+
 export const resolveAutoLlmRouterModel = (
     models: readonly AiModel[],
     configuredModelId: string | undefined
@@ -354,5 +363,39 @@ export const resolveAutoLlmRouterModel = (
     const id = configuredModelId?.trim();
     if (!id) return null;
     const model = models.find((candidate) => candidate.id === id);
-    return model && model.enabled ? model : null;
+    return model && model.enabled && autoLlmRouterModelAllowed(model) ? model : null;
+};
+
+/**
+ * The most one router call can cost, in micro-USD: what is reserved against
+ * the provider's operational budget before the call leaves
+ * (docs/policy/credit-and-cost-limits.md), so a turn whose budget is spent
+ * makes no router call at all.
+ *
+ * A byte-level BPE token covers at least one UTF-8 byte, so the request's
+ * byte length bounds its input tokens; the output (reasoning included) is
+ * bounded by the call's maxOutputTokens. Null when either price is unknown:
+ * an unpriced call is not made.
+ */
+export const autoLlmRouterWorstCaseMicroUsd = (input: {
+    system: string;
+    prompt: string;
+    maxOutputTokens: number;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+}): number | null => {
+    const priced = (value: number) => Number.isFinite(value) && value > 0;
+    if (!priced(input.inputUsdPerMillionTokens) || !priced(input.outputUsdPerMillionTokens)) {
+        return null;
+    }
+    const encoder = new TextEncoder();
+    const inputTokens =
+        encoder.encode(input.system).length + encoder.encode(input.prompt).length;
+    return Math.max(
+        1,
+        Math.ceil(
+            inputTokens * input.inputUsdPerMillionTokens +
+                input.maxOutputTokens * input.outputUsdPerMillionTokens
+        )
+    );
 };
