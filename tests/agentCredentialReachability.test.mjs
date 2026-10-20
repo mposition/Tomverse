@@ -798,7 +798,13 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // The unexcluded baseline is now 20 credentialed jobs, 1 reason, 1 path rule,
 // 7 reached workflows, and still forbids all because of the remaining PAT job.
 // The intermediate cf63... value measured only the first correction.
-const POSTURE_DIGEST = "ed4f5e71fc85";
+// 2026-10-20 owner-approved PR CI auto-fix (.github/workflows/pr-ci-auto-fix.yml):
+// its propose (model key) and publish (GH_AUTOMATION_PAT) jobs run on a
+// workflow_run chained from PR Fast Gate, so the unexcluded baseline gains a
+// chained-event reason and two credentialed jobs. Both are owner-reviewed
+// exact-blob exclusions in lib/agentCredentialReviewedExclusions.ts, so the
+// excluded analysis still does not forbid everything.
+const POSTURE_DIGEST = "f17f6f634878";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();
