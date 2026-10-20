@@ -12,8 +12,9 @@ import { actionableRecommendations } from "@/lib/autoRouterRecommendationsCore";
 // entry in one transaction, and two operators marking different
 // recommendations of one cycle never lose each other's change.
 
-// With a key the audit writer chains each entry; without one the row has no hash.
-process.env.ADMIN_AUDIT_INTEGRITY_KEY ||= "recommendation-audit-test-key";
+// The audit writer signs with the environment's key, as every other suite in
+// this database does: a suite-only key would leave rows that a later
+// whole-chain check (verifyAdminAuditIntegrity) cannot verify.
 
 const session = {
   user: { id: `recommendation-${randomUUID()}`, email: "recommendation@example.test" },
