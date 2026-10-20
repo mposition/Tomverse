@@ -44,6 +44,7 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
   const [group, setGroup] = useState<GroupView | null>(null);
   const [readFailed, setReadFailed] = useState(false);
   const inFlightRef = useRef(false);
+  const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -73,6 +74,26 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
   useEffect(() => {
     queueMicrotask(() => void refresh());
   }, [refresh]);
+
+  // One failed model, run again on the user's press: a new attempt under the
+  // same target (POST /api/images/targets/[id]/retry), charged like the first.
+  const retry = async (targetId: string) => {
+    if (retryingTargetIds.includes(targetId)) return;
+    setRetryingTargetIds((current) => [...current, targetId]);
+    try {
+      const response = await fetch(`/api/images/targets/${encodeURIComponent(targetId)}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ retryIdempotencyKey: crypto.randomUUID() }),
+      });
+      await discardResponseBody(response);
+    } catch {
+      // The next read shows whatever state the retry reached.
+    } finally {
+      setRetryingTargetIds((current) => current.filter((id) => id !== targetId));
+      void refresh();
+    }
+  };
 
   const inProgress = !group || group.status === "in_progress";
   useEffect(() => {
@@ -120,12 +141,21 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
                 }}
               />
             ) : generation?.status === "failed" ? (
-              <p
+              <div
                 data-testid="chat-image-turn-failed"
                 className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
               >
-                {t("chat.imageTurnFailed")}
-              </p>
+                <p>{t("chat.imageTurnFailed")}</p>
+                <button
+                  type="button"
+                  data-testid="chat-image-turn-retry"
+                  disabled={retryingTargetIds.includes(target.targetId)}
+                  onClick={() => void retry(target.targetId)}
+                  className="mt-3 min-h-11 rounded-xl border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200"
+                >
+                  {t("chat.imageTurnRetry")}
+                </button>
+              </div>
             ) : (
               <div
                 data-testid="chat-image-turn-generating"

@@ -93,7 +93,14 @@ export async function startChatImageTurn(
         where: { id: input.assistantMessageId },
         select: { conversationId: true, role: true, content: true },
     });
-    if (existing && (existing.conversationId !== input.conversationId || existing.role !== "assistant")) {
+    // A replay is only of an image answer: reusing a text answer's id would
+    // reserve an image the transcript can never show.
+    if (
+        existing &&
+        (existing.conversationId !== input.conversationId ||
+            existing.role !== "assistant" ||
+            !existing.content.startsWith(CHAT_IMAGE_TURN_CONTENT_PREFIX))
+    ) {
         throw new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That answer id is taken.");
     }
 

@@ -284,6 +284,7 @@ export const en = {
         responseGenerating: "Generating a response.",
         imageTurnGenerating: "Creating the image…",
         imageTurnFailed: "The image could not be created. Please try again.",
+        imageTurnRetry: "Try again",
         responseComplete: "Response complete.",
         responseIncomplete: "The response stopped at the output length limit.",
         responseIncompleteNotice: "The response was cut off by the output length limit. You can ask a follow-up question to continue.",

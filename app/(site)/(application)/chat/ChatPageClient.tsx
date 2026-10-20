@@ -7134,7 +7134,12 @@ export function ChatPageClient({
         ...(promptRefinerDecisionForSend
           ? { promptRefinerDecision: promptRefinerDecisionForSend }
           : {}),
-        ...(options?.imageTurn ? { imageTurn: options.imageTurn } : {}),
+        // One answer per question: every panel named in modelIds consumes
+        // this payload, and each image turn reserves its own paid group, so
+        // a send made for more than one panel never carries one.
+        ...(options?.imageTurn && activeModelIds.length === 1
+          ? { imageTurn: options.imageTurn }
+          : {}),
       });
       if (skipAutoForThisTurn) setPromptRefinerSkipAutoScope(null);
       if (explicitPromptRefinerDecision) resetPromptRefinerState();

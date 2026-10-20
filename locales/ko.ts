@@ -287,6 +287,7 @@ export const ko = {
         responseGenerating: "응답을 생성하고 있습니다.",
         imageTurnGenerating: "이미지를 만들고 있습니다…",
         imageTurnFailed: "이미지를 만들지 못했습니다. 다시 시도해 주세요.",
+        imageTurnRetry: "다시 시도",
         responseComplete: "응답이 완료되었습니다.",
         responseIncomplete: "출력 길이 제한으로 답변이 중단되었습니다.",
         responseIncompleteNotice: "출력 길이 제한으로 답변이 중단되었습니다. 후속 질문으로 이어서 요청할 수 있습니다.",

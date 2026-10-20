@@ -187,6 +187,11 @@ test("a replay reuses the answer and its group key; a foreign answer id is refus
   existing = { conversationId: "other", role: "assistant", content: "x" };
   await rejects(() => turn.startChatImageTurn(input), "ASSISTANT_MESSAGE_CONFLICT");
   assert.equal(requests.length, 0);
+  reset();
+  // A text answer's id: replaying it would charge for an image no transcript shows.
+  existing = { conversationId: "conv-1", role: "assistant", content: "a text answer" };
+  await rejects(() => turn.startChatImageTurn(input), "ASSISTANT_MESSAGE_CONFLICT");
+  assert.equal(requests.length, 0);
 });
 
 test("the transcript read attaches groups only to image answers", async () => {

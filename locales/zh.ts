@@ -302,6 +302,7 @@ export const zh = {
         responseGenerating: "正在生成回复。",
         imageTurnGenerating: "正在生成图片…",
         imageTurnFailed: "图片生成失败，请重试。",
+        imageTurnRetry: "重试",
         responseComplete: "回复已完成。",
         responseIncomplete: "回复因输出长度上限而中断。",
         responseIncompleteNotice: "回复因输出长度上限而中断。你可以通过追问继续。",

@@ -293,6 +293,7 @@ export const de = {
         responseGenerating: "Antwort wird generiert.",
         imageTurnGenerating: "Bild wird erstellt…",
         imageTurnFailed: "Das Bild konnte nicht erstellt werden. Bitte versuchen Sie es erneut.",
+        imageTurnRetry: "Erneut versuchen",
         responseComplete: "Antwort abgeschlossen.",
         responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
         responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",

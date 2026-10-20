@@ -293,6 +293,7 @@ export const es = {
         responseGenerating: "Generando una respuesta.",
         imageTurnGenerating: "Creando la imagen…",
         imageTurnFailed: "No se pudo crear la imagen. Inténtalo de nuevo.",
+        imageTurnRetry: "Reintentar",
         responseComplete: "Respuesta completada.",
         responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
         responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",

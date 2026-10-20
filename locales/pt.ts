@@ -293,6 +293,7 @@ export const pt = {
         responseGenerating: "Gerando uma resposta.",
         imageTurnGenerating: "Criando a imagem…",
         imageTurnFailed: "Não foi possível criar a imagem. Tente novamente.",
+        imageTurnRetry: "Tentar novamente",
         responseComplete: "Resposta concluída.",
         responseIncomplete: "A resposta parou no limite de comprimento de saída.",
         responseIncompleteNotice: "A resposta foi interrompida pelo limite de comprimento de saída. Você pode continuar com uma pergunta de acompanhamento.",
