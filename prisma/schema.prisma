@@ -4608,6 +4608,10 @@ model AutoRouterOptimizerCycle {
   startedBy         String    @default("person")
   spentMicroUsd     Int       @default(0)
   promotedAt        DateTime?
+  /// routing | rewrite -- which guidance the cycle improves
+  /// (AUTO_LLM_ROUTER_GUIDANCE_KINDS, held by a CHECK). Both share one running
+  /// cycle at a time and the same day and month caps.
+  target            String    @default("routing")
 
   @@index([createdAt])
   @@index([status])

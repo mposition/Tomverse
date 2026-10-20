@@ -435,7 +435,8 @@ export const systemAuditActionAllowed = (
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
   (actor !== AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR ||
     ((action === "auto.llm_router_optimizer.cycle_started" ||
-      action === "auto.llm_router_guidance.promoted") &&
+      action === "auto.llm_router_guidance.promoted" ||
+      action === "auto.llm_router_rewrite_guidance.promoted") &&
       targetType === "AutoRouterOptimizerCycle")) &&
   (actor !== CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR ||
     (action === "chat.unified_optimizer.run_admitted" &&

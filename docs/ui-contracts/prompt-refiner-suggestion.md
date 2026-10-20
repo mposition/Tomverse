@@ -449,9 +449,21 @@ rollback할 수 있다. rewrite 필드 정의, 답·요구사항 추가·지시 
 사용자 메시지만, 표시, 원문 저장)는 guidance가 무엇이든 바뀌지 않는다. 승격된 문장으로 재작성한
 턴의 version은 `+rewrite+<cycleId>`로 끝난다.
 
+그 개선은 rewrite 회차(`lib/autoRewriteOptimizer.ts`, `AutoRouterOptimizerCycle.target = 'rewrite'`)가
+한다. 회차는 후속 질문(직전 답변이 있는 턴)으로 제안을 평가한다. 실제 턴은 live router가 재작성을
+요청했던 턴만 쓴다. 그 요청이 첨부 없음과 1,500자 이하를 이미 확인했기 때문이다. 부족하면 개선 모델이
+만든 두 턴짜리 합성 대화로 채운다. 같은 메시지를 현재 문장과 제안 문장으로 각각 재작성하고, 같은 답변
+모델이 두 재작성에 답하며, 판정 모델은 재작성문이 아니라 두 답을 사용자 원문과 직전 답변 기준으로
+순서를 바꿔 두 번 비교한다. 이 평가에서도 재작성은 live와 같은 router 호출과 `admitRouterRewrite()`를
+거친다. 승격은 통과한 회차에 대해 운영자가 누르거나, 기본 꺼진 rewrite 전용 자동 승격 스위치가 한다.
+두 경우 모두 같은 트랜잭션에서 감사 기록이 남고 한 단계씩 되돌릴 수 있다.
+
 검증: `tests/autoLlmRouterCore.test.mjs`가 꺼진 상태의 프롬프트 동일성, 켜진 상태의 규칙과
 schema, `admitRouterRewrite()`의 경계, `withRouterRewrite()`가 마지막 일반 텍스트 사용자
 메시지만 바꾸고 입력을 변경하지 않는 것을 고정한다. `tests/autoLlmRouterRewriteGuidance.test.mjs`는
 기본 rewrite guidance가 이전 프롬프트를 바이트 단위로 재현하는 것, 꺼진 상태에서 guidance가
 프롬프트에 닿지 않는 것, 상한을 무시하라는 guidance에서도 위 경계가 그대로인 것, 깨진 행의
-기본값 대체와 version 접미사를 고정한다.
+기본값 대체와 version 접미사를 고정한다. `tests/autoRewriteOptimizerCore.test.mjs`는 rewrite 회차가
+같은 답변 모델로 두 재작성에 답하고 판정이 재작성문 없이 원문 기준으로 이뤄지는 것을 고정한다.
+`tests/integration/auto-router-optimizer-rewrite.db.test.ts`는 승격이 rewrite guidance에만 쓰이고
+routing guidance에는 쓰이지 않는 것을 고정한다.

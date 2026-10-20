@@ -25,6 +25,9 @@
  */
 
 import type { AutoLlmRouterCandidate, AutoLlmRouterSession } from "@/lib/autoLlmRouterCore";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
+import { resolveModelPricing } from "@/lib/modelPricing";
+import type { AiModel } from "@/lib/models";
 
 /** At most this many recent decisions are sampled; half train, half evaluate. */
 export const AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX = 40;
@@ -782,6 +785,27 @@ export const optimizerAnswerOutputTokens = (
         pricing.maxOutputTokens,
         AUTO_ROUTER_ANSWER_MAX_OUTPUT_TOKENS + (model.reasoning ? pricing.reservationOutputTokens : 0)
     );
+
+export const AUTO_ROUTER_ANSWER_TIMEOUT_MS = 60_000;
+/** A reasoning model thinks before it answers; it gets longer to do both. */
+export const AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS = 120_000;
+
+/**
+ * An optimizer answer request -- routing cycle and rewrite cycle alike --
+ * minus the provider model and the abort signal the caller adds. The model
+ * answers with its own generation settings, as a chat turn would have it
+ * answer (reasoning effort, adaptive thinking, the sampling rules some models
+ * require): without them a reasoning model would be measured as a different
+ * model from the one users get. Never a tool, never a retry.
+ */
+export const optimizerAnswerOptions = (model: AiModel, turn: OptimizerAnswerTurn) => ({
+    system: autoRouterAnswerSystem(turn.previousAnswer),
+    prompt: turn.message,
+    maxOutputTokens: optimizerAnswerOutputTokens(model, resolveModelPricing(model)),
+    maxRetries: 0,
+    timeoutMs: model.reasoning ? AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS : AUTO_ROUTER_ANSWER_TIMEOUT_MS,
+    ...getModelGenerationSettings(model),
+});
 
 /** An answer the judge can read, or null: an empty answer is no answer. */
 export const admitOptimizerAnswer = (raw: unknown): string | null =>
