@@ -319,22 +319,22 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   "amux-execution": {
     label: "실행",
     description: "AMUX 카드와 실행 상태, AMUX가 작업을 배정한 이유",
-    aliases: ["실행", "카드", "워커", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고", "등록부", "워커 등록부"],
+    aliases: ["실행", "카드", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고"],
     tabs: {
       cards: { label: "카드", description: "Tomverse에 저장된 모든 AMUX 카드와 실행 상태" },
       assignment: { label: "배정", description: "AMUX가 작업을 배정한 이유와 사람을 기다리는 에스컬레이션" },
-      workers: { label: "Worker", description: "worker 등록부, worker별 원하는 상태와 실제 상태, 배정 카탈로그와의 일치" },
     },
   },
   "amux-settings": {
     label: "운영 설정",
-    description: "AMUX 자동 편입, 실행 안전, 복구 증거와 Decision Maker 제어",
-    aliases: ["운영 설정", "자동 편입", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치", "분석 설정", "비용 카탈로그"],
+    description: "AMUX 자동 편입, Worker, 실행 안전, 복구 증거와 Decision Maker 제어",
+    aliases: ["운영 설정", "워커", "등록부", "워커 등록부", "자동 편입", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치", "분석 설정", "비용 카탈로그"],
     tabs: {
       "automatic-admission": {
         label: "자동 편입",
         description: "준비된 Task를 담당 없는 Todo에 편입하는 owner 승인",
       },
+      workers: { label: "Worker", description: "AI worker를 등록하고, 할 수 있는 일을 정하고, 켜고 끕니다" },
       safety: { label: "실행 안전·복구", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
       "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
       analysis: { label: "분석 설정", description: "분석 월 예산, 승인된 분석 모델, Task 비용 카탈로그" },
