@@ -400,6 +400,9 @@ export function evaluateCiAdmission(input: {
     if (!pull || pull.draft || !running(pull)) grantedHead.delete(number);
   }
 
+  // The same final state the budget uses: held pull requests give up their slots.
+  const finalHeld = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
+
   return {
     state: {
       version: 1,
@@ -424,7 +427,11 @@ export function evaluateCiAdmission(input: {
         at,
         used,
         running: input.openPulls
-          .filter((pull) => ciAdmissionUnits(pull) !== null && (running(pull) || releasedNow.has(pull.number)))
+          .filter(
+            (pull) =>
+              ciAdmissionUnits(pull) !== null &&
+              ((running(pull) && !finalHeld.has(pull.number)) || releasedNow.has(pull.number)),
+          )
           .map((pull) => ({ number: pull.number, title: pull.title.slice(0, 200), base: pull.base })),
       },
     },

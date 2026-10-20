@@ -405,3 +405,10 @@ test("slots of a pull request held this round count as free for the release that
   });
   assert.deepEqual(kinds(evaluation), ["release:7", "admit:9"]);
 });
+
+test("the slots shown as running leave out a pull request held this round", () => {
+  const evaluation = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
+  assert.deepEqual(kinds(evaluation), ["hold:9", "release:7"]);
+  assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [7]);
+  assert.equal(evaluation.used, 1);
+});
