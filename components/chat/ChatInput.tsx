@@ -2537,6 +2537,7 @@ export function ChatInput({
     if (!shouldAutoFocus) return;
 
     const id = requestAnimationFrame(() => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       textareaRef.current?.focus();
     });
 

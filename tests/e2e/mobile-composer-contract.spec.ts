@@ -123,12 +123,14 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
   } = options;
 
   await prepareGuestPage(page, "en", options.appearance ?? "classic");
-  await mockAuthenticatedApi(page, {
+  const account = await mockAuthenticatedApi(page, {
+    language: lang,
     productKey,
     selectedModels: models,
     messages: emptyConversation ? [] : seededMessages(models),
     webSearchMode,
   });
+  account.theme = "light";
   await setDeterministicTheme(page, "light");
   await suppressTransientUi(page);
   await restoreActiveConversation(page);

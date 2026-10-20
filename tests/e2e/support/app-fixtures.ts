@@ -1,5 +1,6 @@
 import { expect, type Page, type Route, type TestInfo } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { isLanguage, type Language } from "../../../lib/language";
 
 export const qaPersistedMessageId = (conversationId: string, requestId: string) => {
   const bytes = createHash("sha256")
@@ -484,7 +485,7 @@ export type AuthenticatedQaState = {
     status: "current" | "superseded";
   } | null;
   theme: "dark" | "light" | "system";
-  language: QaLanguage;
+  language: Language;
   timeZone: string;
   timeZoneInitializedAt: string | null;
   timeZoneChangedAt: string | null;
@@ -602,7 +603,7 @@ export async function mockAuthenticatedApi(
      * /chat's welcome screen starts from DEFAULT_MODEL_ID instead.
      */
     selectedModels?: string[];
-    language?: QaLanguage;
+    language?: Language;
     showSidebarTour?: boolean;
     /**
      * Seeds the conversation with history. Panels report themselves empty
@@ -823,7 +824,7 @@ export async function mockAuthenticatedApi(
       if (body.theme === "dark" || body.theme === "light" || body.theme === "system") {
         state.theme = body.theme;
       }
-      if (body.language === "ko" || body.language === "en" || body.language === "zh") {
+      if (isLanguage(body.language)) {
         state.language = body.language;
       }
       if (typeof body.timeZone === "string") {
@@ -853,6 +854,14 @@ export async function mockAuthenticatedApi(
       );
     }
 
+    // Unless a test seeds an account preference, keep its requested page
+    // locale when the account hydrates. Later preference writes stay stateful.
+    if (state.userSettingsReads === 0 && options.language === undefined) {
+      const requestedLanguage = new URL(page.url()).searchParams.get("lang");
+      if (isLanguage(requestedLanguage)) {
+        state.language = requestedLanguage;
+      }
+    }
     state.userSettingsReads += 1;
     return route.fulfill(
       json({

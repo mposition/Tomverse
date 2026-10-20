@@ -1256,7 +1256,6 @@ export function MobileChatShell({
         not a second copy of it.
       */}
       <h1 className="sr-only">Tomverse</h1>
-      {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding} />}
       <header
         ref={headerRef}
         data-testid="mobile-chat-header"
@@ -1913,6 +1912,8 @@ export function MobileChatShell({
       </div>
       </>
       )}
+
+      {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding} />}
 
       {isDrawerOpen && (
         <div

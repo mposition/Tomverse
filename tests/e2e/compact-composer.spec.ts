@@ -85,7 +85,7 @@ test.describe("Approved compact Composer", () => {
       if (product === "review") {
         const originalSizes: Record<string, number> = {
           "icon-plus.svg": 21, "icon-chevron-down-14.svg": 14,
-          "icon-chevron-down-12.svg": 12, "icon-coins.svg": 15,
+          "icon-chevron-down-12.svg": 12,
           "icon-mic.svg": 21, "icon-arrow-up.svg": 21, "icon-globe.svg": 16,
         };
         const slots = await page.getByTestId("chat-input").locator('span[style*="/assets/composer-compact/"]').evaluateAll(nodes => nodes.map(node => {
@@ -93,7 +93,8 @@ test.describe("Approved compact Composer", () => {
           const box = node.getBoundingClientRect();
           return { mask: style.maskImage, width: box.width, height: box.height };
         }));
-        expect(slots.length).toBeGreaterThanOrEqual(4);
+        // The credit disclosure and its icon were removed from the composer.
+        expect(slots.length).toBeGreaterThanOrEqual(3);
         for (const slot of slots) {
           const filename = slot.mask.match(/icon-[a-z0-9-]+\.svg/)?.[0];
           expect(filename).toBeTruthy();

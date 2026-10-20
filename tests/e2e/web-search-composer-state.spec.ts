@@ -99,6 +99,7 @@ const seedGuestConversation = async (
 /** A Pro account whose open conversation holds `models`, search on. */
 const openProConversation = async (page: Page, models: string[]) => {
   await mockAuthenticatedApi(page, {
+    language: "en",
     selectedModels: models,
     webSearchMode: "always",
     messages: [
