@@ -376,7 +376,7 @@ test("a release the last round recorded but GitHub still shows as a draft goes b
 
 test("every status a round's actions will write is recorded before they run", () => {
   const evaluation = run({
-    state: state({ capacity: 1, queue: [queued(8)], statusRetry: [5] }),
+    state: state({ capacity: 2, queue: [queued(8)], statusRetry: [5] }),
     openPulls: [pull(8, { draft: true }), pull(9, { draft: true, headSha: "7".repeat(40) })],
     running: new Set([ciRunKey(9, "7".repeat(40))]),
   });
@@ -411,4 +411,19 @@ test("the slots shown as running leave out a pull request held this round", () =
   assert.deepEqual(kinds(evaluation), ["hold:9", "release:7"]);
   assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [7]);
   assert.equal(evaluation.used, 1);
+});
+
+test("a draft whose runs have not stopped keeps its slots, round after round, until they do", () => {
+  // Round 1: #9 arrives running while #7 waits (budget 1): hold #9, release #7.
+  const first = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
+  assert.deepEqual(kinds(first), ["hold:9", "release:7"]);
+  // #9 was drafted but cancelling its runs failed, so the release was deferred:
+  // #7 is back at the top (as the service's correction leaves it).
+  const deferred = { ...first.state, queue: [queued(7), ...first.state.queue.filter((e) => e.number !== 7)], released: [], granted: [], releasing: [] };
+  // Round 2: #9 is a draft whose runs still run. #7 must not be released beside them.
+  const second = run({ state: deferred, openPulls: [pull(7, { draft: true }), pull(9, { draft: true })], runningShas: new Set([sha(9)]), nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(second), ["cancel:9"]);
+  // Round 3: #9's runs stopped. Now #7 goes.
+  const third = run({ state: second.state, openPulls: [pull(7, { draft: true }), pull(9, { draft: true })], nowMs: T0 + 120_000 });
+  assert.deepEqual(kinds(third), ["release:7"]);
 });

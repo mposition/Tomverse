@@ -218,14 +218,13 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     }
     await status(pull, inLine.has(number) ? "pending" : "success", inLine.has(number) ? STATUS.waiting : STATUS.left);
   }
-  // Holds first: a release may count on the slots they free. If any hold
-  // fails (its pull request stays ready, or its runs keep running), this
-  // round's releases wait -- back to the top -- and the next round decides.
+  // Holds and cancellations first: a release may count on the slots they
+  // free. If any fails (a pull request stays ready, or runs keep running),
+  // this round's releases wait -- back to the top -- and the next round
+  // decides, still counting a draft's unstopped runs as occupied.
   let holdFailed = false;
-  const ordered = [
-    ...evaluation.actions.filter((action) => action.kind === "hold"),
-    ...evaluation.actions.filter((action) => action.kind !== "hold"),
-  ];
+  const first = (action: CiAdmissionAction) => action.kind === "hold" || action.kind === "cancel";
+  const ordered = [...evaluation.actions.filter(first), ...evaluation.actions.filter((action) => !first(action))];
   for (const action of ordered) {
     const number = action.pull.number;
     let drafted = false;
@@ -250,7 +249,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     } catch (error) {
       failures.push(`${action.kind}:${number}:${code(error)}`);
       extra.push({ at, kind: "failed", number, shadow: false, detail: `${action.kind}:${code(error)}`.slice(0, 120) });
-      if (action.kind === "hold") holdFailed = true;
+      if (action.kind === "hold" || action.kind === "cancel") holdFailed = true;
       if (action.kind === "hold" && !drafted) {
         // Still ready on GitHub: out of the line, and judged again next round.
         undoHold.add(number);

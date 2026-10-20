@@ -298,10 +298,15 @@ export function evaluateCiAdmission(input: {
   }
 
   const running = (pull: CiAdmissionPull) => !pull.draft && (input.running.has(ciRunKey(pull.number, pull.headSha)) || reserved().has(pull.number));
+  // A draft whose runs have not stopped yet (a re-run, or a hold whose
+  // cancellation has not taken) still occupies runners: its slots count until
+  // they are actually free, whatever the cancellation's outcome.
+  const runningNumbers = new Set([...input.running].map((key) => Number(key.split("@")[0])));
+  const occupying = (pull: CiAdmissionPull) => running(pull) || (pull.draft && runningNumbers.has(pull.number));
   const usedBy = (exclude: number | null) =>
     input.openPulls.reduce((sum, pull) => {
       const units = ciAdmissionUnits(pull);
-      return units !== null && pull.number !== exclude && running(pull) ? sum + units : sum;
+      return units !== null && pull.number !== exclude && occupying(pull) ? sum + units : sum;
     }, 0);
 
   const actions: CiAdmissionAction[] = leaving.map((pull) => ({ kind: "clear", pull }) as const);
@@ -344,7 +349,6 @@ export function evaluateCiAdmission(input: {
   // re-run of an older head's run counts too: stop it. (A pull request held in
   // this evaluation has its runs cancelled by the hold itself.)
   const holding = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
-  const runningNumbers = new Set([...input.running].map((key) => Number(key.split("@")[0])));
   for (const pull of input.openPulls) {
     if (!pull.draft || ciAdmissionUnits(pull) === null || holding.has(pull.number)) continue;
     if (!runningNumbers.has(pull.number)) continue;
@@ -358,7 +362,7 @@ export function evaluateCiAdmission(input: {
   const heldNow = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
   let used = input.openPulls.reduce((sum, pull) => {
     const units = ciAdmissionUnits(pull);
-    return units !== null && !heldNow.has(pull.number) && running(pull) ? sum + units : sum;
+    return units !== null && !heldNow.has(pull.number) && occupying(pull) ? sum + units : sum;
   }, 0);
   while (queue.length > 0) {
     const top = queue[0];
