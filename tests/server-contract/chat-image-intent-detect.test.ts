@@ -198,7 +198,7 @@ test("a follow-up sees the previous image and comes back with its rewrite", asyn
     prompt: "파란색의 간단한 고양이 아이콘",
   });
   // Room to write the whole new prompt, and the budget hold sized to it.
-  assert.equal(calls[0].maxOutputTokens, 2_000);
+  assert.equal(calls[0].maxOutputTokens, 2_500);
   assert.match(calls[0].prompt, /Previous image:\n간단한 고양이 아이콘 그려줘\n\nMessage:\n더 파랗게 해줘$/);
 });
 

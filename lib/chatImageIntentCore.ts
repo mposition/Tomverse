@@ -45,7 +45,7 @@ export const CHAT_IMAGE_INTENT_TIMEOUT_MS = 8_000;
  * and the time to write it. Used only when a previous image is shown; the
  * worst-case budget hold is taken at this ceiling then.
  */
-export const CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS = 2_000;
+export const CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS = 2_500;
 export const CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS = 12_000;
 
 /** The composer's wait: the longest server deadline plus the round trip. */
@@ -76,8 +76,13 @@ export type ChatImageDecision =
           prompt: string | null;
       };
 
-/** A follow-up rewrite longer than this is cut, never trusted whole. */
-export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 1_000;
+/**
+ * The longest follow-up rewrite accepted. The call is told this limit; a
+ * rewrite over it is refused, never cut -- the end of the prompt is where
+ * the change ("now in blue") usually is, and an image made from a prompt
+ * missing it would be charged for the wrong picture.
+ */
+export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 1_500;
 
 /** Enabled models with at least one square price, in catalogue order. */
 export const chatImageModelCandidates = (
@@ -124,7 +129,7 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
     "",
     CHAT_IMAGE_ROUTING_CRITERIA,
     "",
-    "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details or composition, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language. In every other case prompt is an empty string.",
+    "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details or composition, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
     "When image=false, fill modelId and preset with any listed value; they are ignored.",
 ].join("\n");
 
@@ -150,7 +155,9 @@ export const chatImageIntentUserMessage = (
         ...(previousImagePrompt
             ? [
                   "Previous image:",
-                  previousImagePrompt.slice(0, CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS),
+                  // Whole: a cut previous prompt would lose what the change
+                  // is applied to.
+                  previousImagePrompt,
                   "",
               ]
             : []),
@@ -192,9 +199,10 @@ export const parseChatImageIntentOutput = (
     };
     if (value.image !== true) return { image: false };
     const rewrite =
-        followUpAllowed && typeof value.prompt === "string"
-            ? value.prompt.trim().slice(0, CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS)
-            : "";
+        followUpAllowed && typeof value.prompt === "string" ? value.prompt.trim() : "";
+    // Over the limit is refused, not cut: see CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS.
+    // The message then goes to chat rather than paying for a mangled image.
+    if (rewrite.length > CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS) return { image: false };
     const prompt = rewrite || null;
     const candidate = candidates.find((entry) => entry.id === value.modelId);
     if (!candidate) return { image: true, modelId: null, preset: null, prompt };
@@ -217,6 +225,12 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
         prompt?: unknown;
     };
     if (value.image !== true) return { image: false };
+    if (
+        typeof value.prompt === "string" &&
+        value.prompt.trim().length > CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS
+    ) {
+        return { image: false };
+    }
     return {
         image: true,
         modelId: typeof value.modelId === "string" && value.modelId ? value.modelId : null,
@@ -227,7 +241,7 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
                 : null,
         prompt:
             typeof value.prompt === "string" && value.prompt.trim()
-                ? value.prompt.trim().slice(0, CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS)
+                ? value.prompt.trim()
                 : null,
     };
 };

@@ -200,10 +200,21 @@ test("a follow-up's rewritten prompt is kept only when a previous image was show
     parseChatImageIntentOutput({ ...output, prompt: "   " }, candidates, true).prompt,
     null
   );
+  // At the limit it is kept whole; over it, refused rather than cut -- the
+  // change is usually at the end, and a cut prompt would be charged for the
+  // wrong picture.
+  const atLimit = "x".repeat(CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS);
   assert.equal(
-    parseChatImageIntentOutput({ ...output, prompt: "x".repeat(5000) }, candidates, true).prompt
-      .length,
-    CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS
+    parseChatImageIntentOutput({ ...output, prompt: atLimit }, candidates, true).prompt,
+    atLimit
+  );
+  assert.deepEqual(
+    parseChatImageIntentOutput({ ...output, prompt: `${atLimit}, now in blue` }, candidates, true),
+    { image: false }
+  );
+  assert.deepEqual(
+    readChatImageDecision({ image: true, modelId: "strong", preset: "draft", prompt: `${atLimit}!` }),
+    { image: false }
   );
 });
 
