@@ -247,13 +247,19 @@ test("claimed dispatch resolves every reference before the default-closed host",
     try {
       delete process.env[switchName];
       assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce(input),
-        { kind: "refused", cliStarted: false });
+        { kind: "refused", cliStarted: false, beforeCli: true });
+      // Diagnostic mode adds only the fixed stage code.
+      calls.length = 0;
+      assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce({
+        ...input, diagnostic: true,
+      }), { kind: "refused", cliStarted: false, beforeCli: true,
+        failureStage: "analysis_refused" });
       assert.equal(calls.filter((path) =>
         path.endsWith("/checkout-reference")).length, 2);
       calls.length = 0;
       assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce({
         ...input, claim: { ...claim, recovered: true },
-      }), { kind: "refused", cliStarted: false });
+      }), { kind: "refused", cliStarted: false, beforeCli: true });
       assert.equal(calls.length, 0);
     } finally {
       if (old === undefined) delete process.env[switchName];

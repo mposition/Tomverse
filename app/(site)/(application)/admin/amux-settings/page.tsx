@@ -13,6 +13,7 @@ import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisM
 import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
 import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePanel";
 import { AmuxMaxSubscriptionPricePanel } from "@/components/admin/AmuxMaxSubscriptionPricePanel";
+import { AmuxSessionBudgetResolutionPanel } from "@/components/admin/AmuxSessionBudgetResolutionPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import {
   amuxSwitchedTabStatus,
@@ -97,6 +98,7 @@ export default async function AdminAmuxSettingsPage({
       <AmuxOperatingScopePanel operatorId={session.user.id} />
       <AmuxMaxSubscriptionPricePanel />
       <AmuxAnalysisMonthlyBudgetPanel available={budgetAvailable} operatorId={session.user.id} />
+      <AmuxSessionBudgetResolutionPanel />
       <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} />
       <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
         amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} /></div>;
