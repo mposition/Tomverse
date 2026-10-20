@@ -194,6 +194,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   const at = new Date(now()).toISOString();
   const extra: CiAdmissionEvent[] = [];
   const undoHold = new Set<number>();
+  const rejudge = new Set<number>();
   const putBack: CiAdmissionQueueEntry[] = [];
   const status = async (pull: CiAdmissionPull, state: "pending" | "success", text: string) => {
     try {
@@ -225,7 +226,11 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     } catch (error) {
       failures.push(`${action.kind}:${number}:${code(error)}`);
       extra.push({ at, kind: "failed", number, shadow: false, detail: `${action.kind}:${code(error)}`.slice(0, 120) });
-      if (action.kind === "hold" && !drafted) undoHold.add(number);
+      if (action.kind === "hold" && !drafted) {
+        // Still ready on GitHub: out of the line, and judged again next round.
+        undoHold.add(number);
+        rejudge.add(number);
+      }
       if (action.kind === "release") putBack.push(action.entry);
     }
   }
@@ -243,6 +248,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
         const failedReleases = new Set(putBack.map((entry) => entry.number));
         await writeState(tx, {
           ...current,
+          pendingArrivals: [...new Set([...current.pendingArrivals, ...rejudge])].slice(-100),
           queue: queue.slice(0, 100),
           released: current.released.filter((entry) => !failedReleases.has(entry.number)),
           events: [...current.events, ...extra].slice(-50),
@@ -253,7 +259,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   }
   // A release that failed is back at the top: try again shortly, since the
   // failed call itself promises no further webhook.
-  scheduleRecheck(putBack.length > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs);
+  scheduleRecheck(putBack.length > 0 || rejudge.size > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs);
   return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
 }
 

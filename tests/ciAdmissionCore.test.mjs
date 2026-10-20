@@ -364,3 +364,12 @@ test("an arrival left pending by a failed read is judged by the next round", () 
   assert.deepEqual(evaluation.state.queue.map((e) => e.number), [2, 3]);
   assert.deepEqual(evaluation.state.pendingArrivals, []);
 });
+
+test("a release the last round recorded but GitHub still shows as a draft goes back to the top", () => {
+  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
+  assert.deepEqual(released.state.releasing.map((e) => e.number), [8]);
+  // The process stopped before marking #8 ready: the next round finds it a draft.
+  const next = run({ state: released.state, openPulls: [pull(1), pull(8, { draft: true }), pull(9, { draft: true })], runningShas: new Set([sha(1)]), nowMs: T0 + 60_000 });
+  assert.deepEqual(next.state.queue.map((e) => e.number), [8, 9]);
+  assert.ok(next.state.events.some((e) => e.number === 8 && e.detail === "release_unconfirmed"));
+});

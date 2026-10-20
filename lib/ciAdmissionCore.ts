@@ -120,6 +120,12 @@ const stateSchema = z
       .default([]),
     /** Arrivals whose round could not read GitHub: judged first by the next round. */
     pendingArrivals: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
+    /**
+     * Places in line of the pull requests the last round released. If the
+     * next round still finds one a draft (its ready call failed, or the process
+     * stopped before making it), it goes back to the top of the line.
+     */
+    releasing: z.array(queueEntrySchema).max(MAX_QUEUE).default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
     /** The latest round: when, how many slots were in use after it, and by which pull requests. */
     lastRound: z
@@ -146,6 +152,7 @@ export const emptyCiAdmissionState = (): CiAdmissionState => ({
   released: [],
   granted: [],
   pendingArrivals: [],
+  releasing: [],
   events: [],
   lastRound: null,
 });
@@ -265,6 +272,13 @@ export function evaluateCiAdmission(input: {
     }
     queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200) });
   }
+  // A release the last round recorded but GitHub does not show: back to the top.
+  for (const entry of [...input.state.releasing].reverse()) {
+    const pull = open.get(entry.number);
+    if (!pull || !pull.draft || ciAdmissionUnits(pull) === null || queue.some((queued) => queued.number === entry.number)) continue;
+    queue.unshift(entry);
+    event("failed", entry.number, "release_unconfirmed");
+  }
 
   const running = (pull: CiAdmissionPull) => !pull.draft && (input.running.has(ciRunKey(pull.number, pull.headSha)) || reserved().has(pull.number));
   const usedBy = (exclude: number | null) =>
@@ -373,6 +387,7 @@ export function evaluateCiAdmission(input: {
       released,
       granted: [...grantedHead].map(([number, headSha]) => ({ number, headSha })).slice(0, MAX_QUEUE),
       pendingArrivals: [],
+      releasing: actions.flatMap((action) => (action.kind === "release" ? [action.entry] : [])),
       events: [...input.state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,

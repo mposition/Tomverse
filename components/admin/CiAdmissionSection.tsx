@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
+import { shouldIssueAdminPoll, type AdminPollTrigger } from "@/lib/adminPollTick";
 import { adminCiAdmissionMessages } from "@/lib/adminMessages/ciAdmission";
 import type { CiRunnerUsage } from "@/lib/ciRunnerUsage";
 import {
@@ -31,19 +33,27 @@ function RunnerUsagePanel() {
 
   useEffect(() => {
     let stopped = false;
-    const poll = async () => {
-      if (document.visibilityState !== "visible") return;
+    // One request at a time, none from a background tab's timer
+    // (docs/ui-contracts/admin-console-ia.md rule 11).
+    let inFlight = false;
+    const poll = async (trigger: AdminPollTrigger) => {
+      if (!shouldIssueAdminPoll({ inFlight, documentVisible: document.visibilityState === "visible", trigger })) return;
+      inFlight = true;
       try {
-        const response = await fetch("/api/admin/ci-admission/runners", { cache: "no-store" });
+        const response = await adminFetch("/api/admin/ci-admission/runners", { cache: "no-store" });
         if (response.ok && !stopped) setUsage((await response.json()) as CiRunnerUsage);
       } catch {
         // The next tick tries again; the last reading stays on screen.
+      } finally {
+        inFlight = false;
       }
     };
-    const first = setTimeout(() => void poll(), 0);
-    const refresh = setInterval(() => void poll(), RUNNER_REFRESH_MS);
+    const first = setTimeout(() => void poll("event"), 0);
+    const refresh = setInterval(() => void poll("interval"), RUNNER_REFRESH_MS);
     const clockTick = setInterval(() => setNow(Date.now()), 5_000);
-    const onVisible = () => void poll();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void poll("event");
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
@@ -202,7 +212,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch("/api/admin/ci-admission", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/ci-admission", { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
       setView((await response.json()) as View);
       setFailed(false);
@@ -252,7 +262,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
     setNotice(null);
     const restore = () => rollback && setView(rollback);
     try {
-      const response = await fetch("/api/admin/ci-admission", {
+      const response = await adminFetch("/api/admin/ci-admission", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
