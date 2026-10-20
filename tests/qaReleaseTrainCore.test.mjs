@@ -1,0 +1,85 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  orderQaReleaseTrainCandidates,
+  parseQaReleaseTrainSlots,
+  qaReleaseTrainBranch,
+  qaReleaseTrainDeparture,
+  qaReleaseTrainPullRequest,
+  qaReleaseTrainShouldDepart,
+} from "../lib/qaReleaseTrainCore.ts";
+
+const A = "a".repeat(40);
+const B = "b".repeat(40);
+const C = "c".repeat(40);
+
+test("departure hours: the default, a custom list, and anything else refused", () => {
+  assert.deepEqual(parseQaReleaseTrainSlots(undefined), [8, 11, 14, 17, 20]);
+  assert.deepEqual(parseQaReleaseTrainSlots(""), [8, 11, 14, 17, 20]);
+  assert.deepEqual(parseQaReleaseTrainSlots("20, 9"), [9, 20]);
+  for (const bad of ["8,8", "24", "8;11", "x", "8,"]) assert.equal(parseQaReleaseTrainSlots(bad), null, bad);
+});
+
+test("a departure is AEST, lasts an hour, and is named by its AEST date and hour", () => {
+  const hours = [8, 11, 14, 17, 20];
+  // 2026-10-20 11:05 AEST = 01:05 UTC.
+  assert.deepEqual(qaReleaseTrainDeparture(Date.parse("2026-10-20T01:05:00Z"), hours), {
+    slot: "20261020-1100",
+    departsAtMs: Date.parse("2026-10-20T01:00:00Z"),
+  });
+  // 10:59 AEST: the 08:00 departure's hour is over and 11:00 has not come.
+  assert.equal(qaReleaseTrainDeparture(Date.parse("2026-10-20T00:59:00Z"), hours), null);
+  // 11:59 AEST still belongs to 11:00; 12:00 does not.
+  assert.equal(qaReleaseTrainDeparture(Date.parse("2026-10-20T01:59:00Z"), hours)?.slot, "20261020-1100");
+  assert.equal(qaReleaseTrainDeparture(Date.parse("2026-10-20T02:00:00Z"), hours), null);
+  // 08:30 AEST is 22:30 UTC the day before: the slot is named by the AEST date.
+  assert.equal(qaReleaseTrainDeparture(Date.parse("2026-10-19T22:30:00Z"), hours)?.slot, "20261020-0800");
+  assert.equal(qaReleaseTrainBranch("20261020-0800"), "release/train-20261020-0800");
+  assert.throws(() => qaReleaseTrainBranch("2026-10-20"));
+});
+
+test("cargo rides in develop merge order, once, and malformed entries are dropped", () => {
+  const ordered = orderQaReleaseTrainCandidates([
+    { number: 3, title: "c", mergeCommitSha: C, mergedAt: "2026-10-20T02:00:00Z" },
+    { number: 1, title: "a", mergeCommitSha: A, mergedAt: "2026-10-20T01:00:00Z" },
+    { number: 1, title: "a again", mergeCommitSha: A, mergedAt: "2026-10-20T01:00:00Z" },
+    { number: 2, title: "bad sha", mergeCommitSha: "nope", mergedAt: "2026-10-20T01:30:00Z" },
+    { number: 4, title: "b", mergeCommitSha: B, mergedAt: "2026-10-20T01:30:00Z" },
+  ]);
+  assert.deepEqual(ordered.map((c) => c.number), [1, 4, 3]);
+});
+
+test("no departure, an open train, or no cargo means the round does not depart", () => {
+  const slot = { slot: "20261020-1100" };
+  assert.deepEqual(qaReleaseTrainShouldDepart({ departure: null, openTrainPullRequests: 0, candidates: 3 }), { depart: false, reason: "no_departure" });
+  assert.deepEqual(qaReleaseTrainShouldDepart({ departure: slot, openTrainPullRequests: 1, candidates: 3 }), { depart: false, reason: "train_open" });
+  assert.deepEqual(qaReleaseTrainShouldDepart({ departure: slot, openTrainPullRequests: 0, candidates: 0 }), { depart: false, reason: "no_cargo" });
+  assert.deepEqual(qaReleaseTrainShouldDepart({ departure: slot, openTrainPullRequests: 0, candidates: 1 }), { depart: true });
+});
+
+test("the main pull request names what rode, what was left out and why, and the 7.9.1 fields", () => {
+  const candidates = [
+    { number: 10, title: "feat: one", mergeCommitSha: A, mergedAt: "2026-10-20T01:00:00Z" },
+    { number: 11, title: "fix: two", mergeCommitSha: B, mergedAt: "2026-10-20T01:10:00Z" },
+    { number: 12, title: "feat: three", mergeCommitSha: C, mergedAt: "2026-10-20T01:20:00Z" },
+  ];
+  const { title, body } = qaReleaseTrainPullRequest({
+    slot: "20261020-1100",
+    candidates,
+    picks: [
+      { number: 10, outcome: "included" },
+      { number: 11, outcome: "conflict" },
+      { number: 12, outcome: "already_in_main" },
+    ],
+    rcSha: B,
+    rollbackSha: C,
+  });
+  assert.equal(title, "release: train 20261020-1100 (1 PR)");
+  assert.match(body, /## Included \(1\)\n\n- #10 feat: one/);
+  assert.match(body, /## Left out \(1\)\n\n- #11 fix: two — cherry-pick conflict on main/);
+  assert.match(body, /Already on main, skipped: #12\./);
+  assert.match(body, new RegExp(`RC SHA: +${B}`));
+  assert.match(body, new RegExp(`Rollback SHA: +${C}`));
+  for (const field of ["Verified on:", "Verified by / how:", "Back-merge run:"]) assert.ok(body.includes(field), field);
+});

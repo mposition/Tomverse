@@ -33,6 +33,8 @@ export type QaReleaseDigestServicePorts = {
   collectCi: (
     readToken: string,
   ) => Promise<(Pick<QaReleaseDigest, "ci" | "releaseLane"> & { unrecognizedJobs: number; truncated: boolean }) | null>;
+  /** Develop merge to dev timing (lib/qaReleaseLatencyCollectCore.ts); absent in callers that do not measure it. */
+  collectLatency?: (readToken: string) => Promise<QaReleaseDigest["latency"]>;
   postJson: (url: string, headers: Readonly<Record<string, string>>, body: string) => Promise<{ status: number }>;
   now: () => Date;
 };
@@ -129,6 +131,10 @@ export async function runQaReleaseDigestService(
   // a renamed job or a window past the page cap must not read as "no failures".
   else if (ci.unrecognizedJobs > 0 || ci.truncated) notChecked.push("ci_collection_incomplete");
 
+  // Timing is a separate read: its failure is "unavailable" inside the
+  // digest, never a failed run.
+  const latency = ports.collectLatency ? await ports.collectLatency(readToken).catch(() => ({ status: "unavailable" as const })) : undefined;
+
   let digest: QaReleaseDigest;
   try {
     digest = buildQaReleaseDigest({
@@ -142,6 +148,7 @@ export async function runQaReleaseDigestService(
       checks,
       ci: ci?.ci ?? [],
       releaseLane: ci?.releaseLane ?? [],
+      ...(latency ? { latency } : {}),
       notChecked,
     });
   } catch {

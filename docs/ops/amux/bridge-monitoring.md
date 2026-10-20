@@ -44,8 +44,8 @@ bridge는 하나가 아니다. `tomverse-bridge.service`가 codex 세션을 맡�
 
 - `tomverse-bridge.service`는 `disabled`·`not-found`·`masked`일 때 이름으로 보지 않는다. v55 S3에서 codex 세션을
   worker별 unit으로 옮기며 이 unit을 `disable`하고, S4에서 파일을 지운다. 그 밖의 답(읽지 못함 포함)이면 계속 본다.
-- 로드된 bridge unit이 **하나도 없으면** down이다. worker별 unit은 `[Install]`이 없어 재부팅 뒤 저절로 켜지지
-  않으므로, 그 상태를 빈 "전부 정상"으로 보내지 않는다.
+- 로드된 bridge unit이 **하나도 없으면** down이다. enable하지 않은 인스턴스는 재부팅 뒤 켜지지 않으므로, 그 상태를
+  빈 "전부 정상"으로 보내지 않는다.
 
 | 상태 | 보내는 것 | monitor |
 |---|---|---|

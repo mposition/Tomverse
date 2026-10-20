@@ -24,3 +24,16 @@ test("v19 unknown-cost resolution is owner-only, step-up, same-origin and dark",
   assert.doesNotMatch(route + service,
     /CreditAccount|CreditLot|ChatCost|Conversation/);
 });
+
+test("the owner list of unknown claims is bounded, read-only and content-free", async () => {
+  const service = await read("lib/amux/ideaSessionAnalysisBudgetResolutionService.ts");
+  const start = service.indexOf("export async function listAmuxSessionBudgetUnknownClaims");
+  const list = service.slice(start, service.indexOf("\n}\n", start));
+  assert.ok(start > 0);
+  assert.match(list, /getAdminRole\(input\.session\) !== "owner"/);
+  assert.match(list, /status: "outcome_unknown", closedAt: null/);
+  assert.match(list, /take: AMUX_V19_SESSION_BUDGET_UNKNOWN_LIST_LIMIT/);
+  assert.match(list, /select: \{ id: true, invocationOrdinal: true, budgetMode: true,\s+createdAt: true \}/);
+  assert.doesNotMatch(list, /\.(?:create|update|upsert|delete)\w*\(|\$executeRaw|\$queryRaw|writeAdminAuditLog/);
+  assert.doesNotMatch(list, /reservedMicroUsd|settledMicroUsd|requestId|reservationId|modelId|provider/);
+});

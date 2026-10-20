@@ -16,6 +16,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 6 | 2026-10-05 mposition | 버전 5의 재기록, 본문 변경 없음 — 버전 5 승인 기록(#2093)이 2026-10-04 23:53 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 새 버전으로 다시 기록함 |
 | 7 | 2026-10-07 mposition | 버전 5·6의 재기록, 본문 변경 없음 — 버전 6 승인 기록(#2102)이 2026-10-06 22:18 UTC에 병합되어 승인 판정 5번(`approvedAt`과 병합의 UTC 날짜)을 통과하지 못했으므로, 같은 내용을 병합할 UTC 날짜로 다시 기록함 |
 | 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
+| 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): 릴리스 열차(1절 5항, 8절 12항) — `main:next` 라벨, AEST 출발 시각, `release/train-*` push와 main PR 생성, 기본 꺼진 `QA_RELEASE_TRAIN_ENABLED` |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
@@ -66,6 +67,7 @@ workflow·secret·branch protection·ruleset·GitHub App·Railway 변경도 그 
    label이 아닙니다. 결정적 규칙이고 판정이 아닙니다. 근거가 없으면 `undetermined`이며 소유자 할 일을 만들지 않습니다.
 3. **재실행 권고.** 최대 2건, 7일 만료. 실행은 사람이 합니다.
 4. **병합 레인.** 8절.
+5. **릴리스 열차.** 8절 12항. 정해진 출발 시각에 `main:next` 라벨이 붙은 develop PR을 모아 main PR 하나를 엽니다.
 
 **LLM을 쓰지 않습니다.** 모든 판정은 결정적 코드입니다. 외부 텍스트(CI 로그, issue·PR 문장)는 판정의 입력일 뿐
 명령이 아니며, **digest에 들어가지 않습니다.** digest schema는 닫혀 있고 숫자·열거값·이슈 번호·SHA만 담습니다. CI 로그,
@@ -275,6 +277,27 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     로컬에서만 쓰고, 그 키를 Railway 서비스나 저장소 secret에 넣지 않습니다. main·develop ruleset이 모두 걸린 뒤(S-M1 진입
     조건) 실제 서비스용 키를 발급해 병합 레인 서비스에만 설정하고, 관측용 키는 폐기합니다. 어느 단계에서도 ruleset이 걸리기
     전에 App 키가 Railway에 있지 않습니다.
+
+12. **릴리스 열차**(운영자 결정 2026-10-20). main 선택 release(`.github/RELEASE_CHECKLIST.md` 7.9.1)를 기능마다 따로
+    열면 runner를 한꺼번에 차지합니다(2026-10-20 측정: 동시에 열린 main release PR 5개가 runner 시간의 54%). 그래서 병합 레인
+    서비스가 develop 회차 뒤에 **열차 회차**를 돕니다. 판정은 `lib/qaReleaseTrainCore.ts`, 순서는 `lib/qaReleaseTrainService.ts`입니다.
+    - **출발 시각**은 AEST 08·11·14·17·20시이고 `QA_RELEASE_TRAIN_SLOTS`(쉼표로 나눈 시) 하나로 바꿉니다. 출발 뒤 한 시간 안의
+      회차만 그 출발을 시작하며, 그 출발의 브랜치 `release/train-YYYYMMDD-HHMM`(AEST)이 GitHub에 있으면 다시 시작하지 않습니다.
+    - **실을 PR**은 develop에 병합됐고 `main:next` 라벨이 붙은 PR입니다. 라벨은 사람이나 개발 세션이 붙이고 에이전트는 읽기만
+      합니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 실을 PR이 없으면 열지 않습니다. 한 열차는 최대 30개를 싣고 나머지는
+      다음 열차를 탑니다.
+    - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
+      합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뛰고, 충돌하는 PR은 abort하고 뺍니다. 뺀 PR과
+      이유는 PR 본문과 Admin에 보이고 라벨은 그대로 둡니다. 충돌 해결은 하지 않습니다.
+    - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
+      7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
+      — 운영자가 `npm run merge-train`으로 합니다. label·comment·status는 쓰지 않습니다.
+    - **스위치**: `QA_RELEASE_TRAIN_ENABLED`가 정확히 `true`일 때만 돌고(기본 꺼짐), 병합 레인의 kill switch가 비어 있지 않으면
+      멈춥니다. develop 레인(`QA_RELEASE_MERGE_LANE_ENABLED`)과는 따로 켭니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
+      revision이 최신 운영자 제어 revision과 같고 레인이 latch되지 않았을 때만이며, 승인과 결과를 병합 레인 actor의 시스템 감사
+      행(`qa_release.train_admitted`, `qa_release.train_reported`)으로 남깁니다. 전용 테이블은 없습니다.
+    - **ruleset**: 7항의 update ruleset은 App의 develop 밖 브랜치 생성을 막으므로, 켜기 전에 운영자가 `refs/heads/release/train-*`를
+      그 ruleset의 제외 목록에 더합니다. 이것은 보안 경계 변경이라 운영자의 승인 대상입니다.
 
 ## 9. 단계
 

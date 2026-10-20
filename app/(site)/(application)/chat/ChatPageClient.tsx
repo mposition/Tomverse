@@ -137,6 +137,9 @@ import {
 } from "@/lib/imageModelRegistry";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
+import { askChatImageIntent } from "@/lib/chatImageIntentClient";
+import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
   type ChatStarterEntry,
@@ -667,6 +670,8 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  /** The image-intent call already answered "chat" for this exact draft. */
+  imageIntentChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
   /**
@@ -735,6 +740,7 @@ export function ChatPageClient({
   guestDefaultModelId,
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
+  chatImageIntentEnabled = false,
   voiceInputEnabled = false,
   promptRefinerMode = "off",
   promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: false },
@@ -761,6 +767,14 @@ export function ChatPageClient({
   guestBrandTrioModelIds?: readonly string[];
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  /**
+   * Whether a chat send first asks the Auto router's model (POST
+   * /api/chat/image-intent) and hands an image request to the image
+   * workspace with the triaged model and preset. Resolved server-side; off
+   * unless Admin Console › Routing names a router model and turns image
+   * triage on.
+   */
+  chatImageIntentEnabled?: boolean;
   /**
    * The voice input opt-in flag AND its kill switch AND the signed-in
    * requirement, already folded into one boolean on the server
@@ -971,9 +985,14 @@ export function ChatPageClient({
   const [imageHandoffAutoGenerate, setImageHandoffAutoGenerate] = useState(false);
   const [imageDraftAutoGenerate, setImageDraftAutoGenerate] = useState(false);
   // Set only when the user reached the draft by choosing a model in the
-  // catalogue's image tab; otherwise the workspace keeps its own default.
+  // catalogue's image tab, or the image-intent triage chose one; otherwise
+  // the workspace keeps its own default.
   const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
     string[] | undefined
+  >(undefined);
+  // The image-intent triage's preset, for the same landing only.
+  const [imageDraftSeedPreset, setImageDraftSeedPreset] = useState<
+    ImagePreset | undefined
   >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
@@ -2145,6 +2164,8 @@ export function ChatPageClient({
   const webSearchModeRef = useRef(webSearchMode);
   const pendingProfileIdRef = useRef(pendingProfileId);
   const isImageDraftActiveRef = useRef(isImageDraftActive);
+  // A second press while the image-intent call is out is the same send.
+  const imageIntentCheckPendingRef = useRef(false);
   // One serialized, coalescing PATCH queue per conversation. Never aborts an
   // in-flight write (an aborted fetch still commits server-side, which is
   // exactly the out-of-order overwrite this replaces) -- a newer change is
@@ -4436,7 +4457,12 @@ export function ChatPageClient({
     const handleStartImageDraft = (
         draftText: string,
         modelId?: string,
-        options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
+        options?: {
+            fromImageRequest?: boolean;
+            chatDraftOnReturn?: string;
+            /** The image-intent triage's preset; the workspace default otherwise. */
+            preset?: ImagePreset;
+        }
     ) => {
         if (promptRefinerMode === "e2e_fixture") {
             // The no-cost Refiner fixture cannot hand an accepted synthetic
@@ -4464,6 +4490,7 @@ export function ChatPageClient({
         );
         setImageDraftSeedPrompt(draftText);
         setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setImageDraftSeedPreset(options?.preset);
         setImageWorkspaceKey(nextImageDraftKey());
         setIsImageDraftActive(true);
         currentChatIdRef.current = null;
@@ -4506,6 +4533,7 @@ export function ChatPageClient({
         setIsImageDraftActive(false);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setChatDraftBeforeImage(null);
         if (restore) {
             currentChatIdRef.current = restore.scopeId;
@@ -4523,6 +4551,7 @@ export function ChatPageClient({
         setIsImageDraftActive(true);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setImageWorkspaceKey(nextImageDraftKey());
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
@@ -4557,6 +4586,7 @@ export function ChatPageClient({
         // paid to generate -- next to an enabled submit button.
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = conversation.id;
         setCurrentChatId(conversation.id);
@@ -5651,6 +5681,74 @@ export function ChatPageClient({
       }) === "awaiting_capability"
     ) {
       return;
+    }
+    /*
+      A composer send that asks for a picture goes to the image workspace
+      instead of to chat, decided by one small model call before anything is
+      saved (lib/chatImageIntent.ts). It is the image-intent chip's handoff,
+      taken on the user's behalf: no server row, the draft comes back on
+      cancel, and the workspace generates on arrival only for an account that
+      turned that on beside the price -- otherwise it waits on the price for
+      one press. Any failure or "no" falls through to the ordinary send.
+    */
+    if (
+      options === undefined &&
+      chatImageIntentEnabled &&
+      !isGuestMode &&
+      imageGenerationEnabled &&
+      planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
+      mountedSurface === "chat" &&
+      !isImageDraftActiveRef.current &&
+      attachments.length === 0 &&
+      inputValue.trim().length > 0
+    ) {
+      if (imageIntentCheckPendingRef.current) return;
+      const intentText = inputValue;
+      const intentScope = composerDraftConversationId;
+      const intentTicket = conversationSelectionTicketRef.current;
+      const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
+      imageIntentCheckPendingRef.current = true;
+      let decision: ChatImageDecision = { image: false };
+      try {
+        decision = await askChatImageIntent(intentText);
+      } finally {
+        imageIntentCheckPendingRef.current = false;
+      }
+      /*
+        The answer is about the text as it was pressed. A draft edited, given
+        an attachment, or left for another conversation during the wait is a
+        different request: neither handed off (it could start a paid
+        generation for words already withdrawn, and cancel would restore the
+        stale text over the edit) nor sent from this render's stale closure.
+        The next press decides it. The identity fence comes first: after an
+        account switch the same text in the new account's draft is not this
+        request either.
+      */
+      const liveDraft = readDraft(intentScope);
+      if (
+        !identityKey ||
+        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
+        intentIdentityEpoch !== submitIdentityFenceRef.current.epoch ||
+        !activeChatIdentityIs(identityKey, intentIdentityEpoch) ||
+        submitIdentityFenceRef.current.identityKey !== identityKey ||
+        intentTicket !== conversationSelectionTicketRef.current ||
+        isImageDraftActiveRef.current ||
+        liveDraft.text !== intentText ||
+        liveDraft.attachments.length > 0
+      ) {
+        return;
+      }
+      if (decision.image) {
+        // The triage's model and preset seed the workspace; a choice the
+        // catalogue cannot honour falls back to its defaults there.
+        handleStartImageDraft(intentText, decision.modelId ?? undefined, {
+          fromImageRequest: true,
+          preset: decision.preset ?? undefined,
+        });
+        return;
+      }
+      // Re-entered through the ref so the ordinary send runs on current state.
+      return handleGlobalSubmitRef.current({ imageIntentChecked: true });
     }
     const waitForCommittedAutoScope = async (
       expectedConversationId: string,
@@ -9571,6 +9669,7 @@ export function ChatPageClient({
       onConversationCreated={handleImageConversationCreated}
       initialPrompt={imageDraftSeedPrompt}
       initialModelIds={imageDraftSeedModelIds}
+      initialPreset={imageDraftSeedPreset}
       onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
       maxModels={imageGroupMaxModelsProp}

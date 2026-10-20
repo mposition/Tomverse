@@ -10,6 +10,7 @@ import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSy
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
     AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+    AUTO_LLM_ROUTER_TIMEOUT_MS,
     autoLlmRouterCandidates,
     resolveAutoLlmRouterModel,
     type AutoLlmRouterCandidate,
@@ -48,12 +49,16 @@ import {
     rolledBackRouterGuidance,
     runOptimizerCycle,
     guidanceRejection,
+    optimizerAnswerOutputTokens,
     optimizerCallFailureDetail,
+    summarizeRouterDecisions,
     syntheticCaseViews,
     type OptimizerCallKind,
     type OptimizerDecision,
+    type RouterStats,
     type SyntheticCaseView,
 } from "@/lib/autoRouterOptimizerCore";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
@@ -77,15 +82,22 @@ export const AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY = "auto.llmRouterOptimizerM
  * 3 000 characters of Korean can take more than 4 000 tokens. At 1 200 the
  * first Test cycle (2026-10-19, Claude Opus 4.8) threw before admission.
  */
-const GENERATOR_MAX_OUTPUT_TOKENS = 6_000;
-const GENERATOR_TIMEOUT_MS = 90_000;
+/** The guidance plus the report written before it, in Korean. */
+const GENERATOR_MAX_OUTPUT_TOKENS = 10_000;
+const GENERATOR_TIMEOUT_MS = 150_000;
 /** Room for up to 24 messages of a few hundred characters each. */
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 8_000;
 const SYNTHESIZER_TIMEOUT_MS = 150_000;
-/** An answer long enough to judge, not a full reply (owner, 2026-10-20). */
-const ANSWER_MAX_OUTPUT_TOKENS = 1_500;
 const ANSWER_TIMEOUT_MS = 60_000;
-const JUDGE_MAX_OUTPUT_TOKENS = 40;
+/** A reasoning model thinks before it answers; it gets longer to do both. */
+const REASONING_ANSWER_TIMEOUT_MS = 120_000;
+/** The router's recent decisions the generator's statistics are read from. */
+const ROUTER_STATS_DAYS = 14;
+const ROUTER_STATS_MAX_ROWS = 2_000;
+
+
+/** Room for a model that writes anything before the one-word object. */
+const JUDGE_MAX_OUTPUT_TOKENS = 400;
 const JUDGE_TIMEOUT_MS = 30_000;
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
@@ -223,6 +235,7 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
             candidates: true,
             pickedModelId: true,
             reason: true,
+            taskKind: true,
         },
     });
     return rows.flatMap((row) => {
@@ -230,6 +243,7 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
         if (candidates.length < 2) return [];
         return [{
             id: row.id,
+            taskKind: row.taskKind,
             routerInput: row.routerInput,
             routerContext: row.routerContext,
             routerSession: asSession(row.routerSession),
@@ -238,6 +252,25 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
             reason: row.reason,
         }];
     });
+}
+
+/**
+ * The router's recent behaviour for the generator: outcomes, fallbacks and
+ * pick shares from the last two weeks of decisions. Counts only; null when
+ * the read fails, and the cycle goes on without it.
+ */
+async function readRouterStats(now: Date): Promise<RouterStats | null> {
+    try {
+        const rows = await prisma.autoRouterDecision.findMany({
+            where: { createdAt: { gte: new Date(now.getTime() - ROUTER_STATS_DAYS * 24 * 60 * 60_000) } },
+            orderBy: { createdAt: "desc" },
+            take: ROUTER_STATS_MAX_ROWS,
+            select: { outcome: true, pickedModelId: true, ruleModelId: true, latencyMs: true },
+        });
+        return summarizeRouterDecisions(rows, AUTO_LLM_ROUTER_TIMEOUT_MS);
+    } catch {
+        return null;
+    }
 }
 
 /** What cycles since `from` have actually spent. */
@@ -524,6 +557,28 @@ async function runInBackground(input: {
             throw error;
         }
     };
+    // `generated.output` throws when the text does not parse as the schema --
+    // after the call was paid. Read here, outside `traced`, it used to make
+    // the call count as failed with no log and no cost; now the cost stays
+    // counted and the cause is logged (shape only, never the text).
+    const outputOf = (
+        kind: "synthesize" | "generate" | "judge",
+        generated: { readonly output: unknown; finishReason: string; usage?: { outputTokens?: number } }
+    ): unknown => {
+        try {
+            return generated.output;
+        } catch (error) {
+            console.warn(JSON.stringify({
+                event: "auto_router_optimizer_output_unparsed",
+                cycleId: input.cycleId,
+                kind,
+                finishReason: generated.finishReason,
+                outputTokens: generated.usage?.outputTokens ?? null,
+                ...optimizerCallFailureDetail(error),
+            }));
+            return null;
+        }
+    };
     const cost = (prices: Prices, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
         callCostMicroUsd({
             inputTokens: usage?.inputTokens,
@@ -542,9 +597,12 @@ async function runInBackground(input: {
         spentByProvider: new Map(),
     };
     try {
-        const candidatesFor = await autoCandidateMenu(input.models);
+        const [candidatesFor, routerStats] = await Promise.all([
+            autoCandidateMenu(input.models),
+            readRouterStats(new Date()),
+        ]);
         const result = await runOptimizerCycle(
-            { decisions: input.decisions, incumbentGuidance: input.incumbentGuidance },
+            { decisions: input.decisions, incumbentGuidance: input.incumbentGuidance, routerStats },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
                 candidatesFor,
@@ -562,7 +620,8 @@ async function runInBackground(input: {
                         }),
                         providerOptions: { openai: { strictJsonSchema: true } },
                     }));
-                    const messages = (generated.output as { messages?: unknown } | null)?.messages;
+                    const output = outputOf("synthesize", generated);
+                    const messages = (output as { messages?: unknown } | null)?.messages;
                     console.info(JSON.stringify({
                         event: "auto_router_optimizer_synthesized",
                         cycleId: input.cycleId,
@@ -570,7 +629,7 @@ async function runInBackground(input: {
                         messages: Array.isArray(messages) ? messages.length : null,
                     }));
                     return {
-                        value: generated.output,
+                        value: output,
                         costMicroUsd: cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
@@ -589,7 +648,9 @@ async function runInBackground(input: {
                         }),
                         providerOptions: { openai: { strictJsonSchema: true } },
                     }));
-                    const guidance = (generated.output as { guidance?: unknown } | null)?.guidance;
+                    // The report and the proposal together; the cycle admits each.
+                    const output = outputOf("generate", generated);
+                    const guidance = (output as { guidance?: unknown } | null)?.guidance;
                     const rejection = guidanceRejection(guidance);
                     if (rejection) {
                         console.warn(JSON.stringify({
@@ -600,7 +661,7 @@ async function runInBackground(input: {
                         }));
                     }
                     return {
-                        value: typeof guidance === "string" ? guidance : null,
+                        value: output,
                         costMicroUsd: cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
@@ -622,7 +683,9 @@ async function runInBackground(input: {
                     };
                 },
                 // The picked model answers as itself: its own provider, its
-                // own price, no tools. Paid to that provider, which may be
+                // own price, no tools, and the reasoning and provider options
+                // a chat turn gives it (getModelGenerationSettings, as the
+                // chat route calls it). Paid to that provider, which may be
                 // neither the optimizer's nor the router's.
                 answer: async (modelId, turn) => {
                     const model = answerModels.get(modelId);
@@ -635,9 +698,12 @@ async function runInBackground(input: {
                         model: getActiveAiModel(model),
                         system: autoRouterAnswerSystem(turn.previousAnswer),
                         prompt: turn.message,
-                        maxOutputTokens: ANSWER_MAX_OUTPUT_TOKENS,
+                        maxOutputTokens: optimizerAnswerOutputTokens(model, resolveModelPricing(model)),
                         maxRetries: 0,
-                        abortSignal: AbortSignal.timeout(ANSWER_TIMEOUT_MS),
+                        abortSignal: AbortSignal.timeout(
+                            model.reasoning ? REASONING_ANSWER_TIMEOUT_MS : ANSWER_TIMEOUT_MS
+                        ),
+                        ...getModelGenerationSettings(model),
                     }));
                     if (!generated.text.trim()) {
                         console.warn(JSON.stringify({
@@ -669,7 +735,7 @@ async function runInBackground(input: {
                         providerOptions: { openai: { strictJsonSchema: true } },
                     }));
                     return {
-                        value: parseJudgeWinner(generated.output),
+                        value: parseJudgeWinner(outputOf("judge", generated)),
                         costMicroUsd: cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
@@ -686,7 +752,16 @@ async function runInBackground(input: {
                 failure: result.failure,
                 candidateGuidance: result.candidateGuidance,
                 cases: result.cases,
-                summary: { ...result.summary, failedCalls: result.failedCalls },
+                // No migration: the report, the direct comparisons and the
+                // gate's basis ride in the summary JSON.
+                summary: {
+                    ...result.summary,
+                    failedCalls: result.failedCalls,
+                    failedByKind: result.failedByKind,
+                    report: result.report,
+                    comparisons: result.comparisons,
+                    gate: result.gate,
+                },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
             },
@@ -719,6 +794,14 @@ async function runInBackground(input: {
             syntheticCases: result.cases.filter((item) => item.source === "synthetic").length,
             decided: result.summary.decided,
             undecided: result.summary.undecided,
+            comparisons: result.comparisons.reduce<Record<string, number>>(
+                (counts, item) => ({ ...counts, [item.verdict]: (counts[item.verdict] ?? 0) + 1 }),
+                {}
+            ),
+            gate: result.gate,
+            reportItems: result.report
+                ? result.report.findings.length + result.report.recommendations.length
+                : 0,
         }));
     } catch (error) {
         // The cycle could not record its own result. Nothing was reserved, so

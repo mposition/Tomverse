@@ -18,9 +18,9 @@
 # tomverse-amux-bridge@<worker>; every loaded instance of it is checked too.
 # The older names stay for the transition. Stage S3 moves the codex sessions
 # to per-worker units and disables tomverse-bridge.service; from then on it is
-# no longer watched by name. A host with no bridge unit loaded at all -- after
-# a reboot, per-worker units are started by hand and none comes back on its
-# own -- is down, never an empty "all active".
+# no longer watched by name. A host with no bridge unit loaded at all -- for
+# example after a reboot with no per-worker instance enabled -- is down, never
+# an empty "all active".
 #
 # Sending nothing is a signal too: the monitor turns a silence longer than its
 # grace period into an alert, which is also what the host going down, losing

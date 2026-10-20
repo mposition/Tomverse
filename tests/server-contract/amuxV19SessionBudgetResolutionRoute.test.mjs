@@ -10,6 +10,8 @@ const claimId = "00000000-0000-4000-8000-000000000001";
 let session = null;
 let role = "owner";
 let readCount = 0;
+let listCount = 0;
+let listSession = null;
 let writeCount = 0;
 let readError = null;
 let writeError = null;
@@ -39,6 +41,13 @@ mock.module("@/lib/auth", { namedExports: { authOptions: {} } });
 mock.module("@/lib/amux/ideaSessionAnalysisBudgetResolutionService", {
   namedExports: {
     AmuxSessionBudgetResolutionError,
+    listAmuxSessionBudgetUnknownClaims: async (_tx, input) => {
+      listCount += 1;
+      listSession = input.session;
+      return { rows: [{ claimId, invocationOrdinal: 0,
+        budgetMode: "max_shadow", createdAt: "2026-10-20T00:00:00.000Z" }],
+      total: 1, limit: 20 };
+    },
     readAmuxSessionBudgetResolution: async () => {
       readCount += 1;
       if (readError) throw readError;
@@ -155,4 +164,34 @@ test("owner GET maps integrity failures without exposing claim content", async (
       assert.equal(JSON.stringify(await response.json()).includes("5000"), false);
     }
   } finally { readError = null; }
+});
+
+test("owner GET lists unresolved unknown claims only for the exact list query", async () => {
+  const route = await routePromise;
+  listCount = 0;
+  readCount = 0;
+  session = { user: { id: "owner-id" } };
+  role = "admin";
+  assert.equal((await route.GET(new Request(`${endpoint}?list=outcome_unknown`))).status, 403);
+  role = "owner";
+  delete process.env[readSwitch];
+  const disabled = await route.GET(new Request(`${endpoint}?list=outcome_unknown`));
+  assert.equal(disabled.status, 409);
+  assert.equal((await disabled.json()).error, "session_budget_resolution_read_disabled");
+  process.env[readSwitch] = "enabled";
+  for (const query of ["?list=in_flight", "?list=outcome_unknown&list=outcome_unknown",
+    `?list=outcome_unknown&claimId=${claimId}`]) {
+    assert.equal((await route.GET(new Request(endpoint + query))).status, 400, query);
+  }
+  assert.equal(listCount, 0);
+  const response = await route.GET(new Request(`${endpoint}?list=outcome_unknown`));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store, max-age=0");
+  assert.deepEqual(await response.json(), { state: "unknown_list",
+    rows: [{ claimId, invocationOrdinal: 0, budgetMode: "max_shadow",
+      createdAt: "2026-10-20T00:00:00.000Z" }], total: 1, limit: 20,
+    retryAutomatically: false });
+  assert.equal(listCount, 1);
+  assert.equal(listSession, session);
+  assert.equal(readCount, 0, "a list never reads one claim's ledger");
 });

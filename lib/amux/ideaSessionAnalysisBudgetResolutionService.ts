@@ -35,6 +35,35 @@ function resolutionReadbackDigest(value: {
   })).digest("hex");
 }
 
+/** The newest unresolved unknown claims an owner list shows at once. */
+export const AMUX_V19_SESSION_BUDGET_UNKNOWN_LIST_LIMIT = 20;
+
+/** Owner list of the claims still held as outcome_unknown: IDs, ordinals,
+ * budget mode and times only, newest first and bounded. It decides nothing;
+ * each row is resolved only through its exact read-back below. */
+export async function listAmuxSessionBudgetUnknownClaims(tx: Tx, input: {
+  session: Session;
+}): Promise<{ rows: Array<{ claimId: string; invocationOrdinal: number;
+  budgetMode: string; createdAt: string }>; total: number; limit: number }> {
+  if (!isAdminSession(input.session) ||
+      getAdminRole(input.session) !== "owner" || !input.session.user?.id) {
+    throw new AmuxSessionBudgetResolutionError("forbidden");
+  }
+  const where = { namespace: AMUX_V4_ANALYSIS_NAMESPACE,
+    status: "outcome_unknown", closedAt: null };
+  const rows = await tx.amuxIdeaSessionAnalysisBudgetClaim.findMany({
+    where, orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    take: AMUX_V19_SESSION_BUDGET_UNKNOWN_LIST_LIMIT,
+    select: { id: true, invocationOrdinal: true, budgetMode: true,
+      createdAt: true },
+  });
+  const total = await tx.amuxIdeaSessionAnalysisBudgetClaim.count({ where });
+  return { rows: rows.map((row) => ({ claimId: row.id,
+    invocationOrdinal: row.invocationOrdinal, budgetMode: row.budgetMode,
+    createdAt: row.createdAt.toISOString() })),
+  total, limit: AMUX_V19_SESSION_BUDGET_UNKNOWN_LIST_LIMIT };
+}
+
 /** Content-free owner read-back for an uncertain or terminal claim. It does
  * not decide whether local evidence proves the CLI never started. */
 export async function readAmuxSessionBudgetResolution(tx: Tx, input: {

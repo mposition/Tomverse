@@ -11,6 +11,7 @@ import { apiSecurityResponse, consumeApiRateLimit,
 import { authOptions } from "@/lib/auth";
 import { AmuxSessionBudgetResolutionError,
   commitAmuxSessionBudgetUnknownResolution,
+  listAmuxSessionBudgetUnknownClaims,
   readAmuxSessionBudgetResolution } from
   "@/lib/amux/ideaSessionAnalysisBudgetResolutionService";
 import { prisma } from "@/lib/prisma";
@@ -54,7 +55,9 @@ function failure(error: unknown): Response {
 }
 
 /** Owner-only content-free exact-claim readback. It remains available after
- * writes are switched off so an unknown POST can be reconciled. */
+ * writes are switched off so an unknown POST can be reconciled.
+ * `?list=outcome_unknown` instead lists the newest unresolved unknown claims
+ * (IDs, ordinals and times only) so the owner can pick one to read back. */
 export async function GET(request: Request): Promise<Response> {
   try {
     const session = await owner();
@@ -67,6 +70,17 @@ export async function GET(request: Request): Promise<Response> {
         { status: 409, headers: noStore });
     }
     const params = new URL(request.url).searchParams;
+    if ([...params.keys()].length === 1 && params.getAll("list").length === 1) {
+      if (params.get("list") !== "outcome_unknown") return NextResponse.json(
+        { error: "Invalid request." }, { status: 400, headers: noStore });
+      await consumeApiRateLimit(request, session.user!.id!,
+        "admin-amux-v19-session-budget-resolution-read", { minute: 15, day: 100 });
+      const list = await prisma.$transaction((tx) =>
+        listAmuxSessionBudgetUnknownClaims(tx, { session }),
+      { maxWait: 5_000, timeout: 15_000 });
+      return NextResponse.json({ state: "unknown_list", ...list,
+        retryAutomatically: false }, { headers: noStore });
+    }
     if ([...params.keys()].length !== 1 || params.getAll("claimId").length !== 1) {
       return NextResponse.json({ error: "Invalid request." },
         { status: 400, headers: noStore });

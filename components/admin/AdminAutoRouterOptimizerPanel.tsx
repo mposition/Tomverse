@@ -22,6 +22,13 @@ type Summary = {
   undecided?: number;
   incumbentCredits: number;
   candidateCredits: number;
+  /** Absent on a cycle recorded before the direct comparison and the report. */
+  report?: {
+    findings: string[];
+    recommendations: { kind: string; text: string }[];
+  } | null;
+  comparisons?: { kind: string | null; a: string | null; b: string | null; verdict: string }[];
+  gate?: { basis: "judged" | "direct"; towardWinner: number; towardLoser: number } | null;
 };
 
 type Cycle = {
@@ -146,6 +153,10 @@ export function AdminAutoRouterOptimizerPanel() {
     code ? (m.reasons as Record<string, string>)[code] ?? code : null;
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
   const verdict = (value: string) => (m.verdicts as Record<string, string>)[value] ?? value;
+  const comparisonVerdict = (value: string) =>
+    (m.comparisonVerdicts as Record<string, string>)[value] ?? value;
+  const recommendationKind = (value: string) =>
+    (m.recommendationKinds as Record<string, string>)[value] ?? value;
 
   return (
     <section
@@ -314,6 +325,54 @@ export function AdminAutoRouterOptimizerPanel() {
                 {cycle.summary.undecided !== undefined ? `${cycle.summary.undecided} ${m.undecided} · ` : ""}
                 {m.credits} {cycle.summary.incumbentCredits} → {cycle.summary.candidateCredits}
               </p>
+            ) : null}
+            {cycle.summary?.gate?.basis === "direct" ? (
+              <p className="mt-1 text-xs text-zinc-400" data-testid="admin-auto-router-optimizer-gate-direct">
+                {m.gateDirect}: {cycle.summary.gate.towardWinner} {m.towardWinner} · {cycle.summary.gate.towardLoser}{" "}
+                {m.towardLoser}
+              </p>
+            ) : null}
+            {cycle.summary?.report ? (
+              <div className="mt-2 rounded-xl border border-zinc-800 p-3" data-testid="admin-auto-router-optimizer-report">
+                <p className="text-xs font-bold text-zinc-300">{m.reportTitle}</p>
+                {cycle.summary.report.findings.length > 0 ? (
+                  <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-zinc-300">
+                    {cycle.summary.report.findings.map((finding, index) => (
+                      <li key={index} className="whitespace-pre-wrap">{finding}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {cycle.summary.report.recommendations.length > 0 ? (
+                  <>
+                    <p className="mt-2 text-xs font-bold text-zinc-300">{m.recommendationsTitle}</p>
+                    <ul className="mt-1 space-y-1 text-xs text-zinc-300">
+                      {cycle.summary.report.recommendations.map((item, index) => (
+                        <li key={index} className="whitespace-pre-wrap">
+                          <span className="mr-1 rounded border border-zinc-600 px-1 text-[11px] text-zinc-400">
+                            {recommendationKind(item.kind)}
+                          </span>
+                          {item.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            {cycle.summary?.comparisons && cycle.summary.comparisons.length > 0 ? (
+              <details className="mt-2" data-testid="admin-auto-router-optimizer-comparisons">
+                <summary className="cursor-pointer text-xs font-bold text-zinc-400">
+                  {m.comparisonsTitle} ({cycle.summary.comparisons.length})
+                </summary>
+                <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+                  {cycle.summary.comparisons.map((item, index) => (
+                    <li key={index}>
+                      {item.kind ? `${(m.kinds as Record<string, string>)[item.kind] ?? item.kind} · ` : ""}
+                      {item.a ?? "-"} vs {item.b ?? "-"} · {comparisonVerdict(item.verdict)}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             ) : null}
             {cycle.syntheticCases && cycle.syntheticCases.length > 0 ? (
               <details className="mt-2" data-testid="admin-auto-router-optimizer-synthetic">

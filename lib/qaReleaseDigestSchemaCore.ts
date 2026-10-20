@@ -158,6 +158,43 @@ const countsOf = <T extends readonly [string, ...string[]]>(keys: T) =>
     .object(Object.fromEntries(keys.map((key) => [key, count])) as { [K in T[number]]: typeof count })
     .strict();
 
+const latencyMinutes = z.number().min(0).max(100_000).nullable();
+
+/**
+ * Develop merge to dev timing (lib/qaReleaseLatencyCollectCore.ts). Optional,
+ * so digests stored before it existed still validate when read.
+ */
+const latencySchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("unavailable") }).strict(),
+  z
+    .object({
+      status: z.literal("ok"),
+      merges: z
+        .array(
+          z
+            .object({
+              pullRequest: z.number().int().min(0).max(1_000_000_000),
+              mergedAt: isoInstant,
+              firstCheckStartMin: latencyMinutes,
+              lastCheckStartMin: latencyMinutes,
+              lastCheckDoneMin: latencyMinutes,
+              devDeployedMin: latencyMinutes,
+            })
+            .strict(),
+        )
+        .max(15),
+      summary: z
+        .object({
+          medianDevDeployedMin: latencyMinutes,
+          maxDevDeployedMin: latencyMinutes,
+          medianLastCheckDoneMin: latencyMinutes,
+          maxLastCheckStartMin: latencyMinutes,
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+
 export const qaReleaseDigestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -237,6 +274,7 @@ export const qaReleaseDigestSchema = z
           .strict(),
       )
       .max(QA_RELEASE_DIGEST_ARRAY_LIMITS.releaseLane),
+    latency: latencySchema.optional(),
     notChecked: z
       .array(z.enum(QA_RELEASE_NOT_CHECKED_CODES))
       .max(QA_RELEASE_DIGEST_ARRAY_LIMITS.notChecked)
