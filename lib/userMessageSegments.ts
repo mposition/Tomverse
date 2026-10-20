@@ -1,4 +1,4 @@
-import { looksLikeStructuredText } from "@/lib/structuredPasteDetection";
+import { hasIndentedPythonBlock, looksLikeStructuredText } from "@/lib/structuredPasteDetection";
 
 /**
  * How a user's own message is shown, split into plain text and code.
@@ -59,7 +59,7 @@ const classifyUnfencedRun = (lines: string[]): UserMessageSegment[] => {
       segments.pop();
       beforePrevious.code += `\n${previous.text}\n${paragraph}`;
     } else {
-      segments.push({ kind: "code", code: paragraph, language: null, fenced: false });
+      segments.push({ kind: "code", code: paragraph, language: hasIndentedPythonBlock(paragraph) ? "python" : null, fenced: false });
     }
   }
   return segments;

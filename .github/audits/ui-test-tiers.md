@@ -111,6 +111,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `mobile-message-visibility.spec.ts` |
 | `review-studio.spec.ts` |
 | `chat-studio.spec.ts` |
+| `user-prompt-code.spec.ts` |
 | `model-finder.spec.ts` |
 | `model-picker.spec.ts` |
 | `plan-change-dialog.spec.ts` |
