@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
 
-import { ciRunKey, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
+import { ciRunKey, type CiAdmissionDeploy, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
@@ -8,8 +8,8 @@ import { ciRunKey, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
  * read.
  *
  * Writes, and nothing else: convert a pull request to draft, mark one ready
- * for review, cancel a pull_request workflow run of a held pull request or a
- * draft, and one commit status (context `CI admission`) on a pull request's
+ * for review, cancel a pull_request workflow run of a held pull request, a
+ * draft or one the operator stops in Admin, and one commit status (context `CI admission`) on a pull request's
  * head telling sessions it waits in line. No merge, push, label or comment. Every failure is a short
  * code; no token, key or body is ever returned or logged. The webhook
  * signature check is in lib/ciAdmissionWebhookCore.ts.
@@ -107,12 +107,23 @@ const toPull = (item: unknown): CiAdmissionPull | null => {
 
 export type CiAdmissionGithub = {
   openPulls(): Promise<CiAdmissionPull[]>;
-  /** `ciRunKey(number, head)` for every pull_request workflow run queued or in progress, repository-wide. */
-  runningPulls(): Promise<{ keys: Set<string>; bases: Map<number, string> }>;
+  /**
+   * `ciRunKey(number, head)` for every pull_request workflow run queued or in
+   * progress, repository-wide, and the push runs on develop and main (one
+   * entry per commit).
+   */
+  runningPulls(): Promise<{ keys: Set<string>; bases: Map<number, string>; deploys: CiAdmissionDeploy[] }>;
+  /** One pull request as GitHub shows it now, with whether it is open; null when there is none. */
+  pull(number: number): Promise<{ pull: CiAdmissionPull; open: boolean } | null>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
-  /** Cancels the pull request's own queued and running pull_request runs (never another pull request's on the same commit); returns how many. */
-  cancelRuns(pull: CiAdmissionPull): Promise<number>;
+  /**
+   * Cancels the pull request's own queued and running pull_request runs (never
+   * another pull request's on the same commit); returns how many. `force` is
+   * GitHub's force-cancel, which also stops jobs that run on cancellation:
+   * the operator's stop, not admission's own holds.
+   */
+  cancelRuns(pull: CiAdmissionPull, options?: { force?: boolean }): Promise<number>;
   /** Jobs holding or waiting for a runner right now, repository-wide, split by GitHub-hosted and Ubicloud. */
   runnerUsage(): Promise<CiRunnerUsageCounts>;
   /** The `CI admission` commit status on the pull request's head. */
@@ -205,21 +216,39 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       // The base of each pull request with a run, so a closed or merged one
       // whose runs still run is counted at its slots too.
       const bases = new Map<number, string>();
+      // Deploy CI: push runs on develop and main, one entry per commit.
+      const deploys = new Map<string, CiAdmissionDeploy>();
       for (const status of ACTIVE_RUN_STATUSES) {
         for (let page = 1; page <= 3; page += 1) {
-          const runs = list(record(await get(`${REPO}/actions/runs?status=${status}&event=pull_request&per_page=100&page=${page}`)).workflow_runs);
+          const runs = list(record(await get(`${REPO}/actions/runs?status=${status}&per_page=100&page=${page}`)).workflow_runs);
           for (const run of runs) {
             const data = record(run);
             if (typeof data.head_sha !== "string") continue;
-            for (const { number, base } of runPulls(data)) {
-              keys.add(ciRunKey(number, data.head_sha));
-              if (base) bases.set(number, base);
+            if (data.event === "pull_request") {
+              for (const { number, base } of runPulls(data)) {
+                keys.add(ciRunKey(number, data.head_sha));
+                if (base) bases.set(number, base);
+              }
+            } else if (data.event === "push" && (data.head_branch === "develop" || data.head_branch === "main")) {
+              const key = `${data.head_branch}@${data.head_sha}`;
+              if (!deploys.has(key)) {
+                const title = typeof data.display_title === "string" ? data.display_title : "";
+                deploys.set(key, { branch: data.head_branch, sha: data.head_sha.slice(0, 40), title: title.slice(0, 200) });
+              }
             }
           }
           if (runs.length < 100) break;
         }
       }
-      return { keys, bases };
+      return { keys, bases, deploys: [...deploys.values()] };
+    },
+    async pull(number) {
+      const answer = await call("GET", `${REPO}/pulls/${number}`, await installationToken());
+      if (answer.status === 404) return null;
+      if (answer.status !== 200) throw new Error(`github_${answer.status}`);
+      const body = answer.json();
+      const pull = toPull(body);
+      return pull ? { pull, open: record(body).state === "open" } : null;
     },
     async convertToDraft(pull) {
       const data = await graphql(
@@ -272,7 +301,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       }
       return counts;
     },
-    async cancelRuns(pull) {
+    async cancelRuns(pull, options = {}) {
       // Every queued or running pull_request run of this pull request, on any
       // head (a re-run of an older head's run included), and no other's -- the
       // same commit may be the head of another pull request too.
@@ -287,7 +316,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       let cancelled = 0;
       for (const run of runs) {
         if (typeof run.id !== "number") continue;
-        const answer = await call("POST", `${REPO}/actions/runs/${run.id}/cancel`, await installationToken());
+        const answer = await call("POST", `${REPO}/actions/runs/${run.id}/${options.force ? "force-cancel" : "cancel"}`, await installationToken());
         // 409: the run finished meanwhile; nothing left to cancel.
         if (answer.status === 202) cancelled += 1;
         else if (answer.status !== 409) throw new Error(`github_cancel_${answer.status}`);
