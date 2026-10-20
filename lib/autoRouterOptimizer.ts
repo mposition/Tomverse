@@ -40,7 +40,6 @@ import {
     AUTO_ROUTER_SYNTHESIZER_SYSTEM,
     optimizerCycleView,
     admitOptimizerCycle,
-    autoRouterAnswerSystem,
     autoRouterGeneratorSchema,
     autoRouterJudgeSchema,
     autoRouterSynthesizerSchema,
@@ -50,7 +49,7 @@ import {
     rolledBackRouterGuidance,
     runOptimizerCycle,
     guidanceRejection,
-    optimizerAnswerOutputTokens,
+    optimizerAnswerOptions,
     optimizerCallFailureDetail,
     summarizeRouterDecisions,
     syntheticCaseViews,
@@ -59,7 +58,6 @@ import {
     type RouterStats,
     type SyntheticCaseView,
 } from "@/lib/autoRouterOptimizerCore";
-import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
@@ -89,9 +87,6 @@ const GENERATOR_TIMEOUT_MS = 150_000;
 /** Room for up to 24 messages of a few hundred characters each. */
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 8_000;
 const SYNTHESIZER_TIMEOUT_MS = 150_000;
-const ANSWER_TIMEOUT_MS = 60_000;
-/** A reasoning model thinks before it answers; it gets longer to do both. */
-const REASONING_ANSWER_TIMEOUT_MS = 120_000;
 /** The router's recent decisions the generator's statistics are read from. */
 const ROUTER_STATS_DAYS = 14;
 const ROUTER_STATS_MAX_ROWS = 2_000;
@@ -689,7 +684,8 @@ async function runInBackground(input: {
                 // The picked model answers as itself: its own provider, its
                 // own price, no tools, and the reasoning and provider options
                 // a chat turn gives it (getModelGenerationSettings, as the
-                // chat route calls it). Paid to that provider, which may be
+                // chat route calls it, inside optimizerAnswerOptions). Paid to
+                // that provider, which may be
                 // neither the optimizer's nor the router's.
                 answer: async (modelId, turn) => {
                     const model = answerModels.get(modelId);
@@ -698,16 +694,12 @@ async function runInBackground(input: {
                     if (!model || !prices) {
                         return { value: null, costMicroUsd: 0, provider: model?.provider ?? "unknown" };
                     }
+                    // Shared with the rewrite cycle (lib/autoRewriteOptimizer.ts).
+                    const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
                     const generated = await traced("answer", () => generateText({
                         model: getActiveAiModel(model),
-                        system: autoRouterAnswerSystem(turn.previousAnswer),
-                        prompt: turn.message,
-                        maxOutputTokens: optimizerAnswerOutputTokens(model, resolveModelPricing(model)),
-                        maxRetries: 0,
-                        abortSignal: AbortSignal.timeout(
-                            model.reasoning ? REASONING_ANSWER_TIMEOUT_MS : ANSWER_TIMEOUT_MS
-                        ),
-                        ...getModelGenerationSettings(model),
+                        abortSignal: AbortSignal.timeout(timeoutMs),
+                        ...options,
                     }));
                     if (!generated.text.trim()) {
                         console.warn(JSON.stringify({

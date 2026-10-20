@@ -35,10 +35,9 @@ import {
 } from "@/lib/autoRouterOptimizer";
 import {
     AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
-    autoRouterAnswerSystem,
     autoRouterJudgeSchema,
     callCostMicroUsd,
-    optimizerAnswerOutputTokens,
+    optimizerAnswerOptions,
     optimizerCallFailureDetail,
     optimizerCycleView,
     parseJudgeWinner,
@@ -61,7 +60,6 @@ import {
     type RewriteSyntheticCaseView,
 } from "@/lib/autoRewriteOptimizerCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
-import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
@@ -90,9 +88,10 @@ const GENERATOR_MAX_OUTPUT_TOKENS = 6_000;
 const GENERATOR_TIMEOUT_MS = 90_000;
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 16_000;
 const SYNTHESIZER_TIMEOUT_MS = 180_000;
-const ANSWER_TIMEOUT_MS = 60_000;
 const JUDGE_MAX_OUTPUT_TOKENS = 400;
 const JUDGE_TIMEOUT_MS = 30_000;
+/** How many times the sample size of recent rewritten turns is read before filtering. */
+const SAMPLE_READ_FACTOR = 4;
 
 export async function readRewriteOptimizerAutomation(
     db: Pick<Prisma.TransactionClient, "appSetting"> = prisma
@@ -129,13 +128,15 @@ async function writeRewriteOptimizerAutomation(
  * Recent follow-up turns the live router was asked to rewrite. Asking is what
  * established that the turn had no attachment anywhere and a short enough
  * message (lib/autoLlmRouter.ts); the decision row records neither, so a turn
- * routed with rewriting off is not used. Exported for the database test.
+ * routed with rewriting off is not used. Read deeper than the sample, so a
+ * run of turns that do not qualify does not shrink it. Exported for the
+ * database test.
  */
 export async function loadRewriteDecisions(): Promise<RewriteOptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
         where: { outcome: "picked", version: { contains: "+rewrite" }, routerContext: { not: null } },
         orderBy: { createdAt: "desc" },
-        take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
+        take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX * SAMPLE_READ_FACTOR,
         select: {
             id: true,
             routerInput: true,
@@ -145,7 +146,7 @@ export async function loadRewriteDecisions(): Promise<RewriteOptimizerDecision[]
             pickedModelId: true,
         },
     });
-    return rows.flatMap((row) => {
+    const turns = rows.flatMap((row) => {
         const candidates = Array.isArray(row.candidates) ? row.candidates.filter(isCandidate) : [];
         const turn = { routerInput: row.routerInput, routerContext: row.routerContext, candidates };
         if (!isRewriteSampleTurn(turn) || !row.routerContext) return [];
@@ -158,6 +159,7 @@ export async function loadRewriteDecisions(): Promise<RewriteOptimizerDecision[]
             pickedModelId: row.pickedModelId,
         }];
     });
+    return turns.slice(0, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
 }
 
 /**
@@ -358,14 +360,13 @@ async function runInBackground(input: {
                     if (!model || !prices) {
                         return { value: null, costMicroUsd: 0, provider: model?.provider ?? "unknown" };
                     }
+                    // The routing cycle's answer request: the model's own generation
+                    // settings, as a chat turn gets them.
+                    const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
                     const generated = await traced("answer", () => generateText({
                         model: getActiveAiModel(model),
-                        system: autoRouterAnswerSystem(turn.previousAnswer),
-                        prompt: turn.message,
-                        // As the routing cycle: room for a reasoning model to answer.
-                        maxOutputTokens: optimizerAnswerOutputTokens(model, resolveModelPricing(model)),
-                        maxRetries: 0,
-                        abortSignal: AbortSignal.timeout(ANSWER_TIMEOUT_MS),
+                        abortSignal: AbortSignal.timeout(timeoutMs),
+                        ...options,
                     }));
                     return {
                         value: generated.text,

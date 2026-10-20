@@ -348,3 +348,41 @@ test("the daily run starts one cycle: routing as before, rewrite alone, or the t
   assert.equal(target(true, true, "routing"), "rewrite");
   assert.equal(target(true, true, "rewrite"), "routing");
 });
+
+test("an answer request carries the model's own generation settings, as a chat turn does", async () => {
+  const { AVAILABLE_MODELS } = await import("../lib/models.ts");
+  const { getModelGenerationSettings } = await import("../lib/modelGenerationCompatibility.ts");
+  const { resolveModelPricing } = await import("../lib/modelPricing.ts");
+  const {
+    AUTO_ROUTER_ANSWER_TIMEOUT_MS,
+    AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS,
+    autoRouterAnswerSystem,
+    optimizerAnswerOptions,
+    optimizerAnswerOutputTokens,
+  } = await import("../lib/autoRouterOptimizerCore.ts");
+  const turn = { message: "Fix function f3 from the previous answer.", previousAnswer: "def f3(): return 3" };
+  const ids = ["gpt-6-luna", "claude-opus-4-8", "gemini-3-7-flash"];
+  for (const id of ids) {
+    const model = AVAILABLE_MODELS.find((candidate) => candidate.id === id);
+    assert.ok(model, id);
+    const options = optimizerAnswerOptions(model, turn);
+    // Every generation setting a chat turn sends, with the same values.
+    const settings = getModelGenerationSettings(model);
+    for (const [key, value] of Object.entries(settings)) {
+      assert.deepEqual(options[key], value, `${id} ${key}`);
+    }
+    assert.equal(options.prompt, turn.message);
+    assert.equal(options.system, autoRouterAnswerSystem(turn.previousAnswer));
+    assert.equal(options.maxRetries, 0);
+    assert.equal(options.maxOutputTokens, optimizerAnswerOutputTokens(model, resolveModelPricing(model)));
+    assert.equal(
+      options.timeoutMs,
+      model.reasoning ? AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS : AUTO_ROUTER_ANSWER_TIMEOUT_MS
+    );
+    assert.equal("tools" in options, false);
+  }
+  // A reasoning model's request is not a plain one: its provider options travel.
+  const luna = AVAILABLE_MODELS.find((candidate) => candidate.id === "gpt-6-luna");
+  assert.ok(luna.reasoning);
+  assert.ok(optimizerAnswerOptions(luna, turn).providerOptions);
+});
