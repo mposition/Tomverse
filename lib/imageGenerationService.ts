@@ -1644,6 +1644,13 @@ export type ImageRetryInput = {
   userId: string;
   targetId: string;
   retryIdempotencyKey: string;
+  /**
+   * Whether a group living in a Tomverse Chat conversation may be retried:
+   * the caller's answer to the Chat image switch (Admin › Routing), which a
+   * Chat image's paid retry needs as much as its first attempt did. Omitted
+   * is no, and such a retry is refused like any chat conversation.
+   */
+  chatTurnHostAllowed?: boolean;
 };
 
 /**
@@ -1778,9 +1785,10 @@ export const retryImageGenerationTarget = async (
         : {}),
       // The retry stays in the conversation its group already lives in. A
       // chat conversation holds a group only through a Chat image turn
-      // (lib/chatImageTurn.ts), so its retry keeps that host; for an image
-      // conversation this changes nothing.
-      chatTurnHost: true,
+      // (lib/chatImageTurn.ts), so its retry keeps that host -- while the
+      // Chat image switch is on. For an image conversation this changes
+      // nothing.
+      chatTurnHost: input.chatTurnHostAllowed === true,
     },
     now
   );

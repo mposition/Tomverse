@@ -126,6 +126,8 @@ import {
 } from "@/lib/guestAutoRetry";
 
 const processedPromptKeys = new Set<string>();
+// One image-turn request plus two re-asks under the same answer id.
+const CHAT_IMAGE_TURN_ATTEMPTS = 3;
 const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
 const DURABLE_ATTEMPT_MAX_POLL_MS = 5 * 60 * 1_000;
 const DURABLE_ATTEMPT_MAX_BACKOFF_MS = 15_000;
@@ -1743,22 +1745,50 @@ function ChatAppComponent({
       }
       try {
         onDispatchStarted?.();
-        const res = await fetch(
-          `/api/conversations/${encodeURIComponent(targetChatId)}/image-turn`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sourceUserMessageId,
-              assistantMessageId,
-              modelId,
-              imageModelIds: imageTurn.modelIds,
-              preset: imageTurn.preset,
-            }),
-            signal: controller.signal,
+        /*
+          The request is idempotent on the answer id, so an outcome this
+          client could not read -- a dropped connection, a 5xx, a body that
+          did not parse -- is asked again under the same id rather than shown
+          as a failure: the image may already be reserved, and asking again
+          recovers that group instead of leaving the user to send the
+          question a second time (and pay a second time). A readable refusal
+          (4xx) is final.
+        */
+        const postImageTurn = async () => {
+          const res = await fetch(
+            `/api/conversations/${encodeURIComponent(targetChatId)}/image-turn`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sourceUserMessageId,
+                assistantMessageId,
+                modelId,
+                imageModelIds: imageTurn.modelIds,
+                preset: imageTurn.preset,
+              }),
+              signal: controller.signal,
+            }
+          );
+          const data: unknown = await res.json().catch(() => null);
+          return { res, data };
+        };
+        let outcome: { res: Response; data: unknown } | null = null;
+        for (let attempt = 0; attempt < CHAT_IMAGE_TURN_ATTEMPTS; attempt += 1) {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, attempt * 1_500));
           }
-        );
-        const data: unknown = await res.json().catch(() => null);
+          if (controller.signal.aborted) break;
+          try {
+            outcome = await postImageTurn();
+            if (outcome.res.status < 500 && outcome.data !== null) break;
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            outcome = null;
+          }
+        }
+        if (!outcome) throw new Error("Chat image turn outcome unknown.");
+        const { res, data } = outcome;
         const body = (data ?? {}) as { content?: unknown; imageTurn?: unknown; error?: unknown; code?: unknown };
         const imageTurnRef = res.ok ? readChatImageTurnRef(body.imageTurn) : null;
         if (!imageTurnRef) {

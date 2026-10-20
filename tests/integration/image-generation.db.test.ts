@@ -941,10 +941,23 @@ test("a failed image in a chat conversation can be retried there", async () => {
   });
   await prisma.chatRequestLease.deleteMany({});
 
+  // With the Chat image switch off, the paid retry is refused.
+  await assert.rejects(
+    retryImageGenerationTarget({
+      userId: user.id,
+      targetId: target.targetId,
+      retryIdempotencyKey: "chat-retry-off-abcdefgh",
+    }),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.code, "CONVERSATION_KIND_NOT_SUPPORTED");
+      return true;
+    }
+  );
   const retry = await retryImageGenerationTarget({
     userId: user.id,
     targetId: target.targetId,
     retryIdempotencyKey: "chat-retry-abcdefgh",
+    chatTurnHostAllowed: true,
   });
   assert.equal(retry.groupId, first.groupId);
   assert.equal(retry.conversationId, chat.id);
