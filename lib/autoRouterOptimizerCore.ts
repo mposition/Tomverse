@@ -579,23 +579,40 @@ export const admitGuidance = (raw: unknown): string | null => {
 };
 
 /**
- * Something in guidance text shaped like a model id: a letter, then parts
- * joined by "-", "." or "/". It counts as a named model when it has a digit
- * (every catalogue id but a few does) or is one of the cycle's candidate ids
- * (which catches those few, such as perplexity/sonar), so prose such as
- * "and/or" or "step-by-step" is not read as a model. A candidate id written
- * as a whole word counts too, whatever its shape.
+ * What in guidance text counts as naming a model:
+ * - an id-shaped token -- a letter, then parts joined by "-", "." or "/" --
+ *   with a digit (every catalogue id but a few has one), or equal to a known id;
+ * - any known id (this cycle's candidates and the whole catalogue, retired
+ *   models included) written as a whole word, whatever its shape, which
+ *   catches ids with no digit such as perplexity/sonar-pro;
+ * - a token with no separator made of letters then digits, when its letters
+ *   are a catalogue model family (gpt4, qwen3) or it is OpenAI's o-series
+ *   (o3, o4).
+ * Prose such as "and/or", "step-by-step", "9-credit", "p90" or "base64" is
+ * not a model.
  */
 const MODEL_ID_TOKEN = /[a-z][a-z0-9]*(?:[-./][a-z0-9]+)+/gi;
+const SHORT_MODEL_TOKEN = /(?<![a-z0-9\-./])([a-z]+)(\d+[a-z0-9]*)(?![a-z0-9\-/]|\.[a-z0-9])/gi;
 const ID_CHAR = /[a-z0-9\-./]/i;
 
 export type GuidanceNamingRejection = { reason: "unknown_model" | "unproven_model"; ids: string[] };
 
+/** Where a known id appears as a whole word, ending a sentence included. */
+const standsAlone = (text: string, id: string) => {
+    for (let at = text.indexOf(id); at >= 0; at = text.indexOf(id, at + 1)) {
+        const before = at > 0 ? text[at - 1] : "";
+        const after = text[at + id.length] ?? "";
+        const endsSentence = after === "." && !ID_CHAR.test(text[at + id.length + 1] ?? "");
+        if (!ID_CHAR.test(before) && (!ID_CHAR.test(after) || endsSentence)) return true;
+    }
+    return false;
+};
+
 /**
  * Why a proposal may not name the models it names, or null when it may
  * (coordinator, 2026-10-20). The cheap check where model output becomes the
- * live router's instructions: every model id the guidance names must be one
- * of this cycle's candidates (`unknown_model` otherwise), and one the direct
+ * live router's instructions: every model the guidance names must be one of
+ * this cycle's candidates (`unknown_model` otherwise), and one the direct
  * comparisons judged (`unproven_model` otherwise), so a model is named only
  * on evidence. The live router needs no check of its own: it can only answer
  * with a candidate id (its output schema's enum), so a name it does not offer
@@ -604,27 +621,26 @@ export type GuidanceNamingRejection = { reason: "unknown_model" | "unproven_mode
 export const guidanceNamingRejection = (
     guidance: string,
     candidateIds: Iterable<string>,
-    judgedIds: Iterable<string>
+    judgedIds: Iterable<string>,
+    /** Every catalogue id, retired ones included, so their names are caught too. */
+    catalogueIds: Iterable<string> = []
 ): GuidanceNamingRejection | null => {
     const candidates = new Set([...candidateIds].map((id) => id.toLowerCase()));
     const judged = new Set([...judgedIds].map((id) => id.toLowerCase()));
-    const named = new Set<string>();
-    for (const match of guidance.matchAll(MODEL_ID_TOKEN)) {
-        const token = match[0].toLowerCase();
-        if (/\d/.test(token) || candidates.has(token)) named.add(token);
-    }
-    // A candidate id standing alone, however it is shaped.
+    const known = new Set([...candidates, ...[...catalogueIds].map((id) => id.toLowerCase())]);
+    const families = new Set(
+        [...known].map((id) => /^[a-z]+/.exec(id)?.[0] ?? "").filter((family) => family.length >= 2)
+    );
     const lower = guidance.toLowerCase();
-    for (const id of candidates) {
-        for (let at = lower.indexOf(id); at >= 0; at = lower.indexOf(id, at + 1)) {
-            const before = at > 0 ? lower[at - 1] : "";
-            const after = lower[at + id.length] ?? "";
-            const endsSentence = after === "." && !ID_CHAR.test(lower[at + id.length + 1] ?? "");
-            if (!ID_CHAR.test(before) && (!ID_CHAR.test(after) || endsSentence)) {
-                named.add(id);
-                break;
-            }
-        }
+    const named = new Set<string>();
+    for (const match of lower.matchAll(MODEL_ID_TOKEN)) {
+        if (/\d/.test(match[0]) || known.has(match[0])) named.add(match[0]);
+    }
+    for (const match of lower.matchAll(SHORT_MODEL_TOKEN)) {
+        if (families.has(match[1]) || match[1] === "o") named.add(match[0]);
+    }
+    for (const id of known) {
+        if (standsAlone(lower, id)) named.add(id);
     }
     const unknown = [...named].filter((id) => !candidates.has(id)).sort();
     if (unknown.length > 0) return { reason: "unknown_model", ids: unknown };
@@ -1043,6 +1059,8 @@ export async function runOptimizerCycle(
         incumbentGuidance: string;
         /** The router's recent behaviour, read before the cycle; null when unread. */
         routerStats?: RouterStats | null;
+        /** Every catalogue model id, retired ones included, for the naming check. */
+        catalogueIds?: readonly string[];
     },
     deps: OptimizerCycleDeps
 ): Promise<OptimizerCycleResult> {
@@ -1256,15 +1274,20 @@ export async function runOptimizerCycle(
         return finish("candidate_invalid", null, []);
     }
     // A model may be named only if it is a candidate here and the direct
-    // comparisons judged it.
+    // comparisons judged it. A tie counts only when both orders answered: a
+    // judge that failed or did not parse also reads as a tie, and that is no
+    // evidence about either model.
     const naming = guidanceNamingRejection(
         candidateGuidance,
         [...trained, ...evaluate].flatMap((decision) => decision.candidates.map((candidate) => candidate.id)),
-        comparisons.flatMap((item) =>
-            item.a && item.b && (item.verdict === "a" || item.verdict === "b" || item.verdict === "tie")
+        comparisons.flatMap((item) => {
+            if (!item.a || !item.b) return [];
+            const bothJudged = item.judged?.[0] != null && item.judged[1] != null;
+            return item.verdict === "a" || item.verdict === "b" || (item.verdict === "tie" && bothJudged)
                 ? [item.a, item.b]
-                : []
-        )
+                : [];
+        }),
+        input.catalogueIds ?? []
     );
     if (naming) {
         deps.guidanceRejected?.(naming);

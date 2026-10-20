@@ -601,7 +601,12 @@ async function runInBackground(input: {
             readRouterStats(new Date()),
         ]);
         const result = await runOptimizerCycle(
-            { decisions: input.decisions, incumbentGuidance: input.incumbentGuidance, routerStats },
+            {
+                decisions: input.decisions,
+                incumbentGuidance: input.incumbentGuidance,
+                routerStats,
+                catalogueIds: input.models.map((model) => model.id),
+            },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
                 candidatesFor,
