@@ -664,6 +664,8 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  /** The image-intent call already answered "chat" for this exact draft. */
+  imageIntentChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
   /**
@@ -5660,13 +5662,14 @@ export function ChatPageClient({
       !isGuestMode &&
       imageGenerationEnabled &&
       planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
-      mountedSurface !== "review" &&
+      mountedSurface === "chat" &&
       !isImageDraftActiveRef.current &&
       attachments.length === 0 &&
       inputValue.trim().length > 0
     ) {
       if (imageIntentCheckPendingRef.current) return;
       const intentText = inputValue;
+      const intentScope = composerDraftConversationId;
       const intentTicket = conversationSelectionTicketRef.current;
       imageIntentCheckPendingRef.current = true;
       let imageRequested = false;
@@ -5675,14 +5678,29 @@ export function ChatPageClient({
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
+      /*
+        The answer is about the text as it was pressed. A draft edited, given
+        an attachment, or left for another conversation during the wait is a
+        different request: neither handed off (it could start a paid
+        generation for words already withdrawn, and cancel would restore the
+        stale text over the edit) nor sent from this render's stale closure.
+        The next press decides it.
+      */
+      const liveDraft = readDraft(intentScope);
       if (
-        imageRequested &&
-        intentTicket === conversationSelectionTicketRef.current &&
-        !isImageDraftActiveRef.current
+        intentTicket !== conversationSelectionTicketRef.current ||
+        isImageDraftActiveRef.current ||
+        liveDraft.text !== intentText ||
+        liveDraft.attachments.length > 0
       ) {
+        return;
+      }
+      if (imageRequested) {
         handleStartImageDraft(intentText, undefined, { fromImageRequest: true });
         return;
       }
+      // Re-entered through the ref so the ordinary send runs on current state.
+      return handleGlobalSubmitRef.current({ imageIntentChecked: true });
     }
     const waitForCommittedAutoScope = async (
       expectedConversationId: string,
