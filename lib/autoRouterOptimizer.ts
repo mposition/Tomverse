@@ -63,6 +63,10 @@ import {
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
+import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizerLock";
+import { applyCycleTunableChanges, revertTunedTimeoutIfWorse } from "@/lib/autoRouterTunables";
+import { effectiveRouterTimeoutMs } from "@/lib/autoRouterTunablesCore";
+import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -130,7 +134,7 @@ export const optimizerJudgeCall = (input: { model: AiModel; system: string; prom
 
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
-export const OPTIMIZER_LOCK = "auto-router-optimizer";
+export { OPTIMIZER_LOCK };
 
 export async function readOptimizerModelId(): Promise<string | null> {
     try {
@@ -333,7 +337,9 @@ async function readRouterStats(now: Date): Promise<RouterStats | null> {
             take: ROUTER_STATS_MAX_ROWS,
             select: { outcome: true, pickedModelId: true, ruleModelId: true, latencyMs: true },
         });
-        return summarizeRouterDecisions(rows, AUTO_LLM_ROUTER_TIMEOUT_MS);
+        // Timeouts are counted against the deadline in force, tuned or not.
+        const timeoutMs = effectiveRouterTimeoutMs(await readAutoRouterTunables(), AUTO_LLM_ROUTER_TIMEOUT_MS);
+        return summarizeRouterDecisions(rows, timeoutMs);
     } catch {
         return null;
     }
@@ -677,6 +683,12 @@ async function runInBackground(input: {
         spentMicroUsd: 0,
         spentByProvider: new Map(),
     };
+    // The settings this optimizer changed on its own, undone first when one
+    // made routing worse since (lib/autoRouterTunablesCore.ts).
+    await revertTunedTimeoutIfWorse().catch(() => "kept" as const);
+    // What the analysis call proposed for the settings, applied after the
+    // cycle is recorded and only when it passes its range and evidence.
+    let proposedSettingChanges: unknown[] = [];
     try {
         const [candidatesFor, routerStats, catalogueIds, unreliableModels] = await Promise.all([
             autoCandidateMenu(input.models),
@@ -749,6 +761,8 @@ async function runInBackground(input: {
                     }));
                     // The report and the proposal together; the cycle admits each.
                     const output = outputOf("generate", generated);
+                    const settingChanges = (output as { settingChanges?: unknown } | null)?.settingChanges;
+                    proposedSettingChanges = Array.isArray(settingChanges) ? settingChanges : [];
                     const guidance = (output as { guidance?: unknown } | null)?.guidance;
                     const rejection = guidanceRejection(guidance);
                     if (rejection) {
@@ -859,6 +873,28 @@ async function runInBackground(input: {
             },
             spentByProvider,
         });
+        // Setting changes only for a cycle it recorded; never fails the cycle.
+        const appliedSettings = recorded
+            ? await applyCycleTunableChanges({
+                  cycleId: input.cycleId,
+                  proposed: proposedSettingChanges,
+                  evidence: {
+                      routerStats,
+                      answerStats: result.answerStats,
+                      candidates: candidatesFor("hello").map((candidate) => ({
+                          id: candidate.id,
+                          credits: candidate.credits,
+                      })),
+                  },
+              }).catch((error) => {
+                  console.error(JSON.stringify({
+                      event: "auto_router_tunable_apply_failed",
+                      cycleId: input.cycleId,
+                      error: error instanceof Error ? error.name : "unknown",
+                  }));
+                  return [];
+              })
+            : [];
         // Automatic promotion only of a result this cycle itself recorded, and
         // only through the same compare-and-set a person's click uses.
         let promotion:
@@ -893,6 +929,8 @@ async function runInBackground(input: {
             gate: result.gate,
             judgeFailed: result.judgeFailed,
             unreliableModels,
+            settingsProposed: proposedSettingChanges.length,
+            settingsApplied: appliedSettings.length,
             reportItems: result.report
                 ? result.report.findings.length + result.report.recommendations.length
                 : 0,
