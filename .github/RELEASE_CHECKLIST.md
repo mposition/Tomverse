@@ -987,6 +987,19 @@ Back-merge run:     ____________________
 Done this way, a selective release is a release. It gets a record under
 `.github/audits/release-<date>__<sha>.md`, not a deviation record.
 
+**Release train (2026-10-20).** Selective releases are normally assembled by
+the QA-release agent rather than by hand: label a develop pull request
+`main:next` once dev has verified it, and do not open its release pull request
+yourself. At 08, 11, 14, 17 and 20 AEST the agent cherry-picks the labelled
+pull requests onto `origin/main` in develop merge order, leaves out any that
+conflict (named in the body, still labelled), and opens one
+`release/train-YYYYMMDD-HHMM` pull request with the block above pre-filled
+(RC SHA and Rollback SHA; Verified and Back-merge are yours). Every item
+above still applies to that pull request, and a person merges it with
+`npm run merge-train`. One train is open at a time
+(`docs/policy/qa-release-agent.md` section 8 item 12). A declared incident
+or advisory still takes `hotfix/**`.
+
 ### 7.9.2 The exception: `hotfix/**`
 
 Staging is skipped entirely here, so the bar is what makes it an exception
