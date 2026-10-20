@@ -739,6 +739,9 @@ run(
     // The Auto router optimizer's money and audit steps: one cycle at a time,
     // the run/day/month caps, promotion as a compare-and-set, one-step rollback.
     "tests/integration/auto-router-optimizer.db.test.ts",
+    // Its rewrite cycles: the shared lock and caps, the target CHECK, and
+    // promotion into the rewrite guidance only.
+    "tests/integration/auto-router-optimizer-rewrite.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
     // history constraints that refuse a decision without its record.

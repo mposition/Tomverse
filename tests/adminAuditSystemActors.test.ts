@@ -435,7 +435,11 @@ test("the Auto router optimizer actor may only start a cycle and promote one", (
     "auto.llm_router_optimizer.cycle_started", "AutoRouterOptimizerCycle"), true);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",
     "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_rewrite_guidance.promoted", "AutoRouterOptimizerCycle"), true);
   // Rollback stays a person's action, and no other target is in scope.
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_rewrite_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",
     "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",

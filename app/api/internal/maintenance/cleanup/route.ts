@@ -4,7 +4,7 @@ import { cleanupExpiredData } from "@/lib/maintenance";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
 import { runPromotionObserver } from "@/lib/feedbackAutoFixPromotion";
-import { runScheduledAutoRouterOptimizerCycle } from "@/lib/autoRouterOptimizer";
+import { runScheduledOptimizerCycle } from "@/lib/autoRewriteOptimizer";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -82,10 +82,10 @@ export async function POST(request: Request) {
         })
       );
     }
-    // The Auto router optimizer's daily cycle, when its owner turned it on
-    // (Admin › Routing). It starts the cycle and returns; a refusal or failure
-    // here never stops the cleanup below.
-    const optimizer = await runScheduledAutoRouterOptimizerCycle().catch((error) => {
+    // The Auto router optimizer's daily cycle -- routing or rewrite guidance,
+    // one a day -- when its owner turned it on (Admin › Routing). It starts the
+    // cycle and returns; a refusal or failure here never stops the cleanup below.
+    const optimizer = await runScheduledOptimizerCycle().catch((error) => {
       console.warn(
         JSON.stringify({
           event: "auto_router_optimizer_daily_failed",

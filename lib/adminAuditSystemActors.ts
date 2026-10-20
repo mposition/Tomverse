@@ -257,7 +257,8 @@ export const systemAuditActionAllowed = (
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
   (actor !== AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR ||
     ((action === "auto.llm_router_optimizer.cycle_started" ||
-      action === "auto.llm_router_guidance.promoted") &&
+      action === "auto.llm_router_guidance.promoted" ||
+      action === "auto.llm_router_rewrite_guidance.promoted") &&
       targetType === "AutoRouterOptimizerCycle")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||

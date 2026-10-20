@@ -6,6 +6,7 @@ import { AdminRoutingShadowPanel } from "@/components/admin/AdminRoutingShadowPa
 import { AdminAdaptiveStatisticsPanel } from "@/components/admin/AdminAdaptiveStatisticsPanel";
 import { AdminAutoLlmRouterPanel } from "@/components/admin/AdminAutoLlmRouterPanel";
 import { AdminAutoRouterOptimizerPanel } from "@/components/admin/AdminAutoRouterOptimizerPanel";
+import { AdminAutoRewriteOptimizerPanel } from "@/components/admin/AdminAutoRewriteOptimizerPanel";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getAdminRole } from "@/lib/adminAuth";
@@ -41,6 +42,7 @@ export default async function AdminRoutingPage() {
       </p>
       <AdminAutoLlmRouterPanel />
       <AdminAutoRouterOptimizerPanel />
+      <AdminAutoRewriteOptimizerPanel />
       {getAdminRole(session) === "owner" && <AdminAdaptiveStatisticsPanel />}
       <AdminRoutingShadowPanel />
     </div>

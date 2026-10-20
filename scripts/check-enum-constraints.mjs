@@ -64,6 +64,13 @@ const REGISTRY = {
     reason:
       "An administrator's per-model web search route: off or the application-managed backend. NULL follows the code. There is no value for a provider's native tool on purpose -- its cost ceiling is verified per model in lib/webSearchCapability.ts, not chosen in a form.",
   },
+  AutoRouterOptimizerCycle_target_check: {
+    owner: "list",
+    module: "lib/autoLlmRouterCore.ts",
+    list: "AUTO_LLM_ROUTER_GUIDANCE_KINDS",
+    reason:
+      "Which guidance an optimizer cycle improves: the router's routing guidance or its rewrite guidance. Promotion writes the cycle's proposal into the guidance its target names, so a third value the code did not know would have no guidance to promote into.",
+  },
   Conversation_selectionMode_check: {
     owner: "list",
     module: "lib/conversationSelectionMode.ts",
