@@ -353,3 +353,14 @@ test("a draft running a re-run of an older head is cancelled too", () => {
   });
   assert.deepEqual(kinds(evaluation), ["cancel:4"]);
 });
+
+test("an arrival left pending by a failed read is judged by the next round", () => {
+  const evaluation = run({
+    state: state({ capacity: 1, queue: [queued(2)], pendingArrivals: [3] }),
+    openPulls: [pull(1), pull(2, { draft: true }), pull(3)],
+    runningShas: new Set([sha(1)]),
+  });
+  assert.deepEqual(kinds(evaluation), ["hold:3"]);
+  assert.deepEqual(evaluation.state.queue.map((e) => e.number), [2, 3]);
+  assert.deepEqual(evaluation.state.pendingArrivals, []);
+});

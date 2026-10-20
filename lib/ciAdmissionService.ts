@@ -146,8 +146,20 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     openPulls = await github.openPulls();
     running = await github.runningPulls();
   } catch (error) {
-    // The event that brought this round may be the last one for a while: try
-    // again shortly rather than leave a free slot unused.
+    // Keep the arrival for the next round (it survives a restart), and try
+    // again shortly: the event that brought this round may be the last for a while.
+    if (arrival !== null) {
+      await prisma.$transaction(
+        async (tx) => {
+          await takeLock(tx);
+          const current = await readState(tx);
+          if (!current.pendingArrivals.includes(arrival)) {
+            await writeState(tx, { ...current, pendingArrivals: [...current.pendingArrivals, arrival].slice(-100) });
+          }
+        },
+        { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
+      );
+    }
     scheduleRecheck(RETRY_AFTER_FAILED_RELEASE_MS);
     return { outcome: "read_failed", failure: code(error) };
   }
@@ -160,7 +172,9 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
       const judged = evaluateCiAdmission({ state, openPulls, running, arrival, nowMs: now(), shadow: mode === "shadow" });
       await writeState(
         tx,
-        mode === "shadow" ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound } : judged.state,
+        mode === "shadow"
+          ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound, pendingArrivals: [] }
+          : judged.state,
       );
       return judged;
     },

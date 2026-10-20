@@ -118,6 +118,8 @@ const stateSchema = z
       .array(z.object({ number: z.number().int().positive(), headSha: z.string().max(40) }).strict())
       .max(MAX_QUEUE)
       .default([]),
+    /** Arrivals whose round could not read GitHub: judged first by the next round. */
+    pendingArrivals: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
     /** The latest round: when, how many slots were in use after it, and by which pull requests. */
     lastRound: z
@@ -143,6 +145,7 @@ export const emptyCiAdmissionState = (): CiAdmissionState => ({
   queue: [],
   released: [],
   granted: [],
+  pendingArrivals: [],
   events: [],
   lastRound: null,
 });
@@ -240,6 +243,10 @@ export function evaluateCiAdmission(input: {
   }
   const reserved = () => new Set(released.filter((entry) => !entry.observed).map((entry) => entry.number));
 
+  // Arrivals left over from a round whose GitHub read failed are judged first,
+  // then this round's own, each in turn.
+  const arrivals = [...new Set([...input.state.pendingArrivals, ...(input.arrival === null ? [] : [input.arrival])])];
+
   // The line keeps only open drafts admission still handles.
   const queue: CiAdmissionQueueEntry[] = [];
   const leaving: CiAdmissionPull[] = [];
@@ -250,7 +257,7 @@ export function evaluateCiAdmission(input: {
       if (pull) leaving.push(pull);
       continue;
     }
-    if (!pull.draft && entry.number !== input.arrival) {
+    if (!pull.draft && !arrivals.includes(entry.number)) {
       // Made ready by someone else while waiting: it runs; it no longer waits.
       event("dropped", entry.number, "ready_elsewhere");
       leaving.push(pull);
@@ -269,34 +276,36 @@ export function evaluateCiAdmission(input: {
   const actions: CiAdmissionAction[] = leaving.map((pull) => ({ kind: "clear", pull }) as const);
   const capacity = input.state.capacity;
 
-  const arrival = input.arrival === null ? undefined : open.get(input.arrival);
-  if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && granted.has(arrival.number)) {
-    // Its own release echoing back, or new commits on a pull request already
-    // granted: same slots, reserved for this head until its runs show.
-    const priorHead = released.find((entry) => entry.number === arrival.number)?.headSha;
-    reserve(arrival);
-    granted.add(arrival);
-    if (priorHead !== arrival.headSha) event("admitted", arrival.number, "continuing");
-  } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !reservedHead(arrival)) {
-    const units = ciAdmissionUnits(arrival)!;
-    const waiting = queue.some((entry) => entry.number !== arrival.number);
-    const queued = queue.some((entry) => entry.number === arrival.number);
-    if ((waiting || usedBy(arrival.number) + units > capacity) && !queued && queue.length >= MAX_QUEUE) {
-      // A full line takes no more: the stored state must stay inside its schema.
-      event("failed", arrival.number, "queue_full");
-    } else if (waiting || usedBy(arrival.number) + units > capacity) {
-      actions.push({ kind: "hold", pull: arrival });
-      if (!queue.some((entry) => entry.number === arrival.number)) {
-        queue.push({ number: arrival.number, title: arrival.title.slice(0, 200), base: arrival.base, head: arrival.head.slice(0, 200), queuedAt: at });
-      }
-      event("held", arrival.number, waiting ? "line_waiting" : "no_slot");
-    } else {
-      const index = queue.findIndex((entry) => entry.number === arrival.number);
-      if (index >= 0) queue.splice(index, 1);
+  for (const arrivalNumber of arrivals) {
+    const arrival = open.get(arrivalNumber);
+    if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && granted.has(arrival.number)) {
+      // Its own release echoing back, or new commits on a pull request already
+      // granted: same slots, reserved for this head until its runs show.
+      const priorHead = released.find((entry) => entry.number === arrival.number)?.headSha;
       reserve(arrival);
       granted.add(arrival);
-      actions.push({ kind: "admit", pull: arrival });
-      event("admitted", arrival.number, null);
+      if (priorHead !== arrival.headSha) event("admitted", arrival.number, "continuing");
+    } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !reservedHead(arrival)) {
+      const units = ciAdmissionUnits(arrival)!;
+      const waiting = queue.some((entry) => entry.number !== arrival.number);
+      const queued = queue.some((entry) => entry.number === arrival.number);
+      if ((waiting || usedBy(arrival.number) + units > capacity) && !queued && queue.length >= MAX_QUEUE) {
+        // A full line takes no more: the stored state must stay inside its schema.
+        event("failed", arrival.number, "queue_full");
+      } else if (waiting || usedBy(arrival.number) + units > capacity) {
+        actions.push({ kind: "hold", pull: arrival });
+        if (!queue.some((entry) => entry.number === arrival.number)) {
+          queue.push({ number: arrival.number, title: arrival.title.slice(0, 200), base: arrival.base, head: arrival.head.slice(0, 200), queuedAt: at });
+        }
+        event("held", arrival.number, waiting ? "line_waiting" : "no_slot");
+      } else {
+        const index = queue.findIndex((entry) => entry.number === arrival.number);
+        if (index >= 0) queue.splice(index, 1);
+        reserve(arrival);
+        granted.add(arrival);
+        actions.push({ kind: "admit", pull: arrival });
+        event("admitted", arrival.number, null);
+      }
     }
   }
 
@@ -363,6 +372,7 @@ export function evaluateCiAdmission(input: {
       queue,
       released,
       granted: [...grantedHead].map(([number, headSha]) => ({ number, headSha })).slice(0, MAX_QUEUE),
+      pendingArrivals: [],
       events: [...input.state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,
