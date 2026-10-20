@@ -75,6 +75,8 @@ const queueEntrySchema = z
     title: z.string().max(200),
     base: z.string().max(100),
     head: z.string().max(200),
+    /** The head commit when last seen: its status is shared with any pull request on the same commit. */
+    headSha: z.string().max(40).default(""),
     queuedAt: z.string().max(30),
   })
   .strict();
@@ -281,6 +283,9 @@ export function evaluateCiAdmission(input: {
     if (!pull || ciAdmissionUnits(pull) === null) {
       event("dropped", entry.number, pull ? "not_handled" : "closed");
       if (pull) leaving.push(pull);
+      // Closed: the commit's status may still say "waiting" for an open pull
+      // request that shares it; have it decided again for those.
+      else if (entry.headSha) leaving.push(...input.openPulls.filter((other) => other.headSha === entry.headSha));
       continue;
     }
     if (!pull.draft && !arrivals.includes(entry.number)) {
@@ -289,7 +294,7 @@ export function evaluateCiAdmission(input: {
       leaving.push(pull);
       continue;
     }
-    queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200) });
+    queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200), headSha: pull.headSha });
   }
   // A release the last round recorded but GitHub does not show: back to the top.
   for (const entry of [...input.state.releasing].reverse()) {
@@ -342,7 +347,14 @@ export function evaluateCiAdmission(input: {
       } else if (waiting || usedBy(arrival.number) + units > capacity) {
         actions.push({ kind: "hold", pull: arrival });
         if (!queue.some((entry) => entry.number === arrival.number)) {
-          queue.push({ number: arrival.number, title: arrival.title.slice(0, 200), base: arrival.base, head: arrival.head.slice(0, 200), queuedAt: at });
+          queue.push({
+            number: arrival.number,
+            title: arrival.title.slice(0, 200),
+            base: arrival.base,
+            head: arrival.head.slice(0, 200),
+            headSha: arrival.headSha,
+            queuedAt: at,
+          });
         }
         event("held", arrival.number, waiting ? "line_waiting" : "no_slot");
       } else {

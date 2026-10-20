@@ -455,3 +455,14 @@ test("a closed pull request whose runs still run occupies its slots until they s
   assert.equal(evaluation.used, 2);
   assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [30]);
 });
+
+test("a waiting pull request that closes has the shared commit's status decided again", () => {
+  const shared = "e".repeat(40);
+  const evaluation = run({
+    state: state({ queue: [{ ...queued(8), headSha: shared }] }),
+    openPulls: [pull(3, { headSha: shared })],
+    running: new Set([ciRunKey(3, shared)]),
+  });
+  assert.deepEqual(kinds(evaluation), ["clear:3"]);
+  assert.ok(evaluation.state.statusRetry.includes(3));
+});
