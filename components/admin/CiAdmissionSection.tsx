@@ -157,7 +157,7 @@ const clock = (iso: string) => {
 };
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
-const PAGE_PATH = "/admin/agent-digests";
+const PAGE_PATH = "/admin/agent-digests?tab=ci-admission";
 
 type Kind = "develop" | "main" | "hotfix";
 const kindOf = (entry: Pick<CiAdmissionQueueEntry, "base" | "head">): Kind =>

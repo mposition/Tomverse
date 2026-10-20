@@ -35,6 +35,8 @@ export type AgentDigestConsoleRow = {
     issuesAvailable: boolean;
     failedChecks: number;
     failedCiJobs: number;
+    /** The failed CI rows themselves, as the digest classed them. */
+    failedCi: { workflow: string; job: string; shard: number | null; conclusion: string; label: string; runId: string }[];
     notChecked: string[];
     /**
      * Develop merge to dev timing (lib/qaReleaseLatencyCollectCore.ts):
@@ -169,6 +171,11 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
         issuesAvailable: digest.issues.status === "ok",
         failedChecks: digest.checks.filter((check) => check.result === "fail").length,
         failedCiJobs: digest.ci.filter((job) => job.label !== null).length,
+        failedCi: digest.ci.flatMap((job) =>
+          job.label === null
+            ? []
+            : [{ workflow: job.workflow, job: job.job, shard: job.shard, conclusion: job.jobConclusion, label: job.label, runId: job.runId }],
+        ),
         notChecked: [...digest.notChecked],
         latency: !digest.latency
           ? { status: "absent" }
