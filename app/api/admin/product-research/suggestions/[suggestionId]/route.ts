@@ -16,9 +16,10 @@ import {
   inspectAmuxIdeaSubmission,
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
-import { IdeaSubmissionError, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import { IdeaSubmissionError, readIdeaSubmissionByDerivedRequestId, submitIdea } from "@/lib/amux/ideaSubmissionService";
 import { authOptions } from "@/lib/auth";
 import { suggestionIdeaText, suggestionSendRequestId } from "@/lib/productResearchScoutCore";
+import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
 import { closeSuggestion, readSuggestion } from "@/lib/productResearchScoutStore";
 
 // The operator's two actions on a Scout suggestion
@@ -32,7 +33,9 @@ import { closeSuggestion, readSuggestion } from "@/lib/productResearchScoutStore
 // the suggestion sent. The request id is derived from the suggestion id on the
 // server (suggestionSendRequestId), so a lost answer, a second tab or a second
 // owner all name the same request: AMUX takes it once and the rest read it
-// back. A request id in the body is ignored.
+// back, by any owner, which also finishes a send whose idea was made but whose
+// suggestion was never closed (lib/productResearchScoutSend.ts). A request id
+// in the body is ignored.
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: noStore });
@@ -95,33 +98,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
     }
     await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-suggestion-send", { minute: 5, day: 50 });
 
-    // An earlier send of this suggestion may already have made the idea.
-    const earlier = await readIdeaSubmissionRequest(session, requestId);
-    let ideaId: string;
-    if (earlier.status === "committed") {
-      ideaId = earlier.ideaId;
-    } else if (earlier.status === "partial") {
-      return json({ error: "idea_partial", ideaId: earlier.ideaId }, 409);
-    } else {
-      const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
-        version: 1,
-        requestId,
-        input: { version: 1, idea: suggestionIdeaText(suggestion), repositories: [], pullRequests: [] },
-      }));
-      if (!inspected.ok) return json({ error: inspected.code }, 400);
-      try {
-        ideaId = (await submitIdea({ session, request, inspected })).ideaId;
-      } catch (error) {
-        // A concurrent send of the same suggestion got there first: one idea,
-        // read back rather than made twice.
-        if (!(error instanceof IdeaSubmissionError) || error.code !== "request_already_seen") throw error;
-        const winner = await readIdeaSubmissionRequest(session, requestId);
-        if (winner.status !== "committed") return json({ error: "idea_in_progress" }, 409);
-        ideaId = winner.ideaId;
-      }
-    }
-    const closed = await closeSuggestion({ session, request, id: suggestionId, next: { status: "sent", amuxIdeaId: ideaId } });
-    return json({ status: closed ? "sent" : "unchanged", amuxIdeaId: ideaId });
+    const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+      version: 1,
+      requestId,
+      input: { version: 1, idea: suggestionIdeaText(suggestion), repositories: [], pullRequests: [] },
+    }));
+    if (!inspected.ok) return json({ error: inspected.code }, 400);
+    const result = await sendScoutSuggestion({
+      readBack: () => readIdeaSubmissionByDerivedRequestId(session, requestId),
+      submit: () => submitIdea({ session, request, inspected }),
+      isAlreadySeen: (error) => error instanceof IdeaSubmissionError && error.code === "request_already_seen",
+      close: (ideaId) => closeSuggestion({ session, request, id: suggestionId, next: { status: "sent", amuxIdeaId: ideaId } }),
+    });
+    if (result.kind === "partial") return json({ error: "idea_partial", ideaId: result.ideaId }, 409);
+    if (result.kind === "in_progress") return json({ error: "idea_in_progress" }, 409);
+    return json({ status: result.closed ? "sent" : "unchanged", amuxIdeaId: result.ideaId });
   } catch (error) {
     return failure(error);
   }
