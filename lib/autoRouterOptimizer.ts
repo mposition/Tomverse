@@ -25,6 +25,7 @@ import {
     DEFAULT_ROUTER_GUIDANCE,
     readActiveRouterGuidance,
     writeActiveRouterGuidance,
+    type RouterGuidanceKind,
 } from "@/lib/autoLlmRouterGuidance";
 import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 import {
@@ -94,7 +95,7 @@ const JUDGE_MAX_OUTPUT_TOKENS = 400;
 const JUDGE_TIMEOUT_MS = 30_000;
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
-const OPTIMIZER_LOCK = "auto-router-optimizer";
+export const OPTIMIZER_LOCK = "auto-router-optimizer";
 
 export async function readOptimizerModelId(): Promise<string | null> {
     try {
@@ -177,10 +178,10 @@ export async function runScheduledAutoRouterOptimizerCycle(): Promise<
         : { started: true, cycleId: result.cycleId };
 }
 
-type Prices = { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
+export type Prices = { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
 
 /** Null when the price cannot be resolved; a cycle then does not start. */
-const pricesOf = (model: AiModel): Prices | null => {
+export const pricesOf = (model: AiModel): Prices | null => {
     try {
         const pricing = resolveModelPricing(model);
         const prices = {
@@ -198,7 +199,7 @@ const pricesOf = (model: AiModel): Prices | null => {
     }
 };
 
-const isCandidate = (value: unknown): value is AutoLlmRouterCandidate => {
+export const isCandidate = (value: unknown): value is AutoLlmRouterCandidate => {
     const candidate = value as Partial<AutoLlmRouterCandidate> | null;
     return (
         typeof candidate?.id === "string" &&
@@ -208,7 +209,7 @@ const isCandidate = (value: unknown): value is AutoLlmRouterCandidate => {
     );
 };
 
-const asSession = (value: unknown): AutoLlmRouterSession | null => {
+export const asSession = (value: unknown): AutoLlmRouterSession | null => {
     const session = value as Partial<AutoLlmRouterSession> | null;
     return session && Array.isArray(session.recentPicks)
         ? { topic: typeof session.topic === "string" ? session.topic : null, recentPicks: session.recentPicks }
@@ -311,6 +312,8 @@ export async function reserveOptimizerCycle(input: {
     optimizerModelId: string;
     routerModelId: string;
     incumbentGuidance: string;
+    /** Which guidance the cycle improves; the lock and caps are shared by both. */
+    target?: RouterGuidanceKind;
     now?: Date;
 }): Promise<Reserved> {
     const now = input.now ?? new Date();
@@ -351,6 +354,7 @@ export async function reserveOptimizerCycle(input: {
                 incumbentGuidance: input.incumbentGuidance,
                 reservedMicroUsd: 0,
                 startedBy: input.actor === "system" ? "system" : "person",
+                target: input.target ?? "routing",
             },
             select: { id: true },
         });
@@ -358,7 +362,7 @@ export async function reserveOptimizerCycle(input: {
             action: "auto.llm_router_optimizer.cycle_started",
             targetId: cycle.id,
             summary: "Started an Auto router optimizer cycle.",
-            metadata: { budgetMicroUsd: admitted.budgetMicroUsd },
+            metadata: { budgetMicroUsd: admitted.budgetMicroUsd, target: input.target ?? "routing" },
         });
         return { cycle: { id: cycle.id, budgetMicroUsd: admitted.budgetMicroUsd } };
     });
@@ -420,7 +424,7 @@ const AUTO_PLANS_WIDEST_FIRST: readonly ModelTier[] = ["Max", "Pro", "Free"];
  * output cap. The plan is the widest the Auto cohort admits (Max when none is
  * configured), so the menu is the fullest one Auto offers.
  */
-async function autoCandidateMenu(runtimeModels: readonly AiModel[]) {
+export async function autoCandidateMenu(runtimeModels: readonly AiModel[]) {
     const models = runtimeModels.filter((model) => model.enabled && !model.catalogDeleted);
     const signals = await getRouterRuntimeSignals();
     const eligiblePlans = autoCohortConfig().eligiblePlans;
@@ -802,9 +806,11 @@ export async function promoteAutoRouterOptimizerCycle(
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
         const cycle = await tx.autoRouterOptimizerCycle.findUnique({
             where: { id: cycleId },
-            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true },
+            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true, target: true },
         });
-        if (!cycle) return { refused: "not_found" as const };
+        // A rewrite cycle's proposal is rewrite guidance: lib/autoRewriteOptimizer.ts
+        // promotes it, and never into the routing guidance.
+        if (!cycle || cycle.target !== "routing") return { refused: "not_found" as const };
         if (cycle.promotedAt) return { refused: "already_promoted" as const };
         if (cycle.status !== "passed" || !cycle.candidateGuidance) return { refused: "not_passed" as const };
         const active = await readActiveRouterGuidance(tx);
@@ -881,6 +887,9 @@ export async function readAutoRouterOptimizerState() {
         readOptimizerAutomation(),
         readActiveRouterGuidance(),
         prisma.autoRouterOptimizerCycle.findMany({
+            // Rewrite cycles are listed by lib/autoRewriteOptimizer.ts; the
+            // spend below counts both, as the shared caps do.
+            where: { target: "routing" },
             orderBy: { createdAt: "desc" },
             take: 10,
             select: {

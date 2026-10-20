@@ -215,6 +215,14 @@ const AUTO_LLM_ROUTER_REWRITE_TAIL = [
     "If the message is already clear and self-contained, return an empty rewrite.",
 ].join("\n");
 
+/**
+ * The two improvable parts of the router prompt. Also what an optimizer cycle
+ * improves (AutoRouterOptimizerCycle.target), held to this list by the
+ * column's CHECK constraint (scripts/check-enum-constraints.mjs).
+ */
+export const AUTO_LLM_ROUTER_GUIDANCE_KINDS = ["routing", "rewrite"] as const;
+export type AutoLlmRouterGuidanceKind = (typeof AUTO_LLM_ROUTER_GUIDANCE_KINDS)[number];
+
 export const buildAutoLlmRouterSystem = (
     guidance: string,
     options: { rewrite?: boolean; rewriteGuidance?: string } = {}
