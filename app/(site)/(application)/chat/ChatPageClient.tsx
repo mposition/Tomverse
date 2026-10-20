@@ -5719,12 +5719,12 @@ export function ChatPageClient({
       const intentScope = composerDraftConversationId;
       const intentTicket = conversationSelectionTicketRef.current;
       const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
+      const activeComparisonModelIds = () =>
+        latestModelSettingsRef.current.models.filter(
+          (modelId) => !latestModelSettingsRef.current.disabled.includes(modelId)
+        );
       const reviewModelIds =
-        mountedSurface === "workspace"
-          ? latestModelSettingsRef.current.models.filter(
-              (modelId) => !latestModelSettingsRef.current.disabled.includes(modelId)
-            )
-          : undefined;
+        mountedSurface === "workspace" ? activeComparisonModelIds() : undefined;
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
@@ -5742,7 +5742,9 @@ export function ChatPageClient({
         stale text over the edit) nor sent from this render's stale closure.
         The next press decides it. The identity fence comes first: after an
         account switch the same text in the new account's draft is not this
-        request either.
+        request either. In Review the comparison models are part of the
+        request too: a model swapped out or a panel turned off during the wait
+        must not have its maker's image model generate.
       */
       const liveDraft = readDraft(intentScope);
       if (
@@ -5754,7 +5756,9 @@ export function ChatPageClient({
         intentTicket !== conversationSelectionTicketRef.current ||
         isImageDraftActiveRef.current ||
         liveDraft.text !== intentText ||
-        liveDraft.attachments.length > 0
+        liveDraft.attachments.length > 0 ||
+        (reviewModelIds !== undefined &&
+          !sameStringList(reviewModelIds, activeComparisonModelIds()))
       ) {
         return;
       }
