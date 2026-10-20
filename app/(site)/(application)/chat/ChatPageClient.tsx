@@ -2390,8 +2390,7 @@ export function ChatPageClient({
   const currentAccessPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
   // Whether a composer send here asks the image-intent model first and hands
   // an image request to the image workspace (lib/chatImageIntent.ts). The
-  // send gate below and the composer's handoff chip read the same answer, so
-  // the chip never offers what the send is about to do anyway.
+  // send gate in `handleGlobalSubmit` reads this answer.
   const imageIntentRoutedOnSend =
     chatImageIntentEnabled &&
     !isGuestMode &&
@@ -10082,7 +10081,6 @@ export function ChatPageClient({
           onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
-          imageIntentRoutedOnSend={imageIntentRoutedOnSend}
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage ? (text, modelId) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
@@ -10253,7 +10251,6 @@ export function ChatPageClient({
           onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
-          imageIntentRoutedOnSend={imageIntentRoutedOnSend}
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage ? (text, modelId) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {

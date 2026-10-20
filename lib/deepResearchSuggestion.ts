@@ -35,11 +35,10 @@
  * would read as the app second-guessing what it had just said.
  *
  * Korean and English only, like every other heuristic in this repository
- * (`lib/webSearchSuggestion.ts`, `lib/imageIntentSignals.ts`,
- * `lib/taskProfileCore.ts`). A turn in a language none of them read produces
- * no signals and therefore no offer, which is the safe direction: the cost of
- * staying quiet is nothing, and the cost of guessing is a card under an answer
- * that did not need one.
+ * (`lib/webSearchSuggestion.ts`, `lib/taskProfileCore.ts`). A turn in a
+ * language none of them read produces no signals and therefore no offer, which
+ * is the safe direction: the cost of staying quiet is nothing, and the cost of
+ * guessing is a card under an answer that did not need one.
  *
  * Pure and synchronous. No database, no clock, no I/O.
  */
@@ -240,9 +239,7 @@ export const classifyDeepResearchTopic = (
  * Stable key for "this topic has already been answered for in this
  * conversation".
  *
- * The same shape and the same reason as `imageIntentDraftKey` in
- * `lib/imageIntentSignals.ts`: deterministic per trimmed question, not
- * cryptographic.
+ * Deterministic per trimmed question, not cryptographic.
  *
  * Written out here rather than imported. `lib/webSearchSuggestion.ts` used to
  * export a `draftSuggestionKey` of exactly this shape, and it went with the
