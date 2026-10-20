@@ -28,6 +28,8 @@ let mocksInstalled = false;
 // The conversation's recent messages, newest first, and the image prompt.
 let recentMessages: Array<{ id: string; role: string; content: string }> = [];
 let previousGenerationPrompt: string | null = null;
+let imageFlagOn = true;
+let accessRefused = false;
 const prismaMock = {
   message: { findMany: async () => recentMessages },
   imageGenerationGroup: {
@@ -82,6 +84,16 @@ async function load() {
       namedExports: { refreshImageModelCatalog: async () => IMAGE_MODEL_REGISTRY },
     });
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaMock } });
+    mock.module(mod("lib/appSettings.ts"), {
+      namedExports: { isImageGenerationEnabledCached: async () => imageFlagOn },
+    });
+    mock.module(mod("lib/chatSecurity.ts"), {
+      namedExports: {
+        assertUserOperationalAccess: async () => {
+          if (accessRefused) throw new Error("restricted");
+        },
+      },
+    });
     mock.module(mod("lib/activeAiModel.ts"), {
       namedExports: { getActiveAiModel: () => ({}) },
     });
@@ -99,6 +111,8 @@ const reset = () => {
   reserved.length = 0;
   recentMessages = [];
   previousGenerationPrompt = null;
+  imageFlagOn = true;
+  accessRefused = false;
 };
 
 const detect = async (text = "간단한 고양이 아이콘 그려줘") => {
@@ -217,3 +231,36 @@ test("without a recent image answer, no rewrite is taken", async () => {
   assert.doesNotMatch(calls[0].prompt, /Previous image/);
   assert.equal(calls[0].maxOutputTokens, 400);
 });
+
+const turnImage = async (plan: { tier: string } | null) => {
+  const { detectChatTurnImage } = await load();
+  return detectChatTurnImage({
+    userId: "user-1",
+    conversationId: "conv-1",
+    text: "간단한 고양이 아이콘 그려줘",
+    plan: plan as never,
+    traceId: "trace-turn",
+  });
+};
+
+test("an Auto turn's image decision is made for an eligible account", async () => {
+  reset();
+  const decision = await turnImage({ tier: "Pro" });
+  assert.equal(decision.image, true);
+  assert.equal(calls.length, 1);
+});
+
+for (const [name, arrange, plan] of [
+  ["the plan has no image generation", () => {}, { tier: "Free" }],
+  ["the plan is unknown", () => {}, null],
+  ["image generation is off", () => (imageFlagOn = false), { tier: "Pro" }],
+  ["the account is restricted", () => (accessRefused = true), { tier: "Pro" }],
+  ["the Admin switch is off", () => (imageTriageOn = false), { tier: "Pro" }],
+] as const) {
+  test(`no paid call for an Auto turn when ${name}`, async () => {
+    reset();
+    arrange();
+    assert.deepEqual(await turnImage(plan as { tier: string } | null), { image: false });
+    assert.equal(calls.length + reserved.length, 0);
+  });
+}

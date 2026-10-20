@@ -57,6 +57,8 @@ let consumedRefinerDecisions = 0;
 let refinerAdmissions = 0;
 let refinerAdmissionRefused = false;
 let refinerAdmissionEvents: string[] = [];
+// Set when the request's answer id is already a Chat image answer.
+let imageAnswerStored = false;
 
 async function loadRouteWithSpies(): Promise<{
   POST: (req: Request) => Promise<Response>;
@@ -177,6 +179,12 @@ async function loadRouteWithSpies(): Promise<{
             routerChallengerTurns: 0,
             productKey: "review",
           }),
+        },
+        message: {
+          findUnique: async () =>
+            imageAnswerStored
+              ? { role: "assistant", content: "[Image generated] a cat" }
+              : null,
         },
         // The second test deliberately fails after the selection gate; the
         // route's provider-failure bookkeeping then runs. Absorb it -- what
@@ -360,4 +368,19 @@ test("an admitted valid Refiner decision consumes once and a stale replay remain
       "scope", "admission", "preview",
     ]);
   } finally { explicitRefinerAuthority = false; }
+});
+
+test("an answer id a Chat image turn already used is refused before credit or provider work", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+  imageAnswerStored = true;
+  try {
+    const response = await POST(chatRequest(STORED_SELECTED_MODELS[0]));
+    assert.equal(response.status, 409);
+    const payload = (await response.json()) as { code?: string };
+    assert.equal(payload.code, "ASSISTANT_MESSAGE_CONFLICT");
+    assert.equal(spies.creditReservations, 0);
+    assert.equal(spies.streamTextCalls, 0);
+  } finally {
+    imageAnswerStored = false;
+  }
 });

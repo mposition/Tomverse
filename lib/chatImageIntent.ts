@@ -27,6 +27,10 @@ import {
     parseChatImageIntentOutput,
     type ChatImageDecision,
 } from "@/lib/chatImageIntentCore";
+import { isImageGenerationEnabledCached } from "@/lib/appSettings";
+import { planAllowsFeature } from "@/lib/billingEntitlements";
+import type { BillingPlanConfig } from "@/lib/billingPlanDefaults";
+import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { prisma } from "@/lib/prisma";
@@ -225,4 +229,36 @@ export async function detectChatImageRequest(input: {
         })
     );
     return decision;
+}
+
+/**
+ * The image decision for an Auto Chat turn, made inside /api/chat beside the
+ * router call rather than before the send -- the two calls run together, so
+ * an Auto turn waits for the longer one instead of both in a row.
+ *
+ * The same gates as POST /api/chat/image-intent, in the same order, so no
+ * paid call is made for someone the image turn would refuse: the plan, the
+ * image flag, the account's operational access, then the Admin switch inside
+ * detectChatImageRequest. Never throws.
+ */
+export async function detectChatTurnImage(input: {
+    userId: string;
+    conversationId: string;
+    text: string;
+    plan: BillingPlanConfig | null;
+    traceId: string;
+}): Promise<ChatImageDecision> {
+    try {
+        if (!input.plan || !planAllowsFeature(input.plan, "imageGeneration")) return NOT_IMAGE;
+        if (!(await isImageGenerationEnabledCached())) return NOT_IMAGE;
+        await assertUserOperationalAccess(input.userId);
+    } catch {
+        return NOT_IMAGE;
+    }
+    return detectChatImageRequest({
+        text: input.text,
+        traceId: input.traceId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+    });
 }

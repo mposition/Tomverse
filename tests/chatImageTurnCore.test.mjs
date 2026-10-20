@@ -16,3 +16,18 @@ test("anything without a group id is no image turn", () => {
     assert.equal(readChatImageTurnRef(value), null);
   }
 });
+
+test("an Auto turn's image decision is read into an image-turn request", async () => {
+  const { readChatImageTurnRequest } = await import("../lib/chatImageTurnCore.ts");
+  assert.deepEqual(
+    readChatImageTurnRequest({ modelIds: ["gpt-image-2", 3], preset: "draft", prompt: " a blue cat " }),
+    { modelIds: ["gpt-image-2"], preset: "draft", prompt: "a blue cat" }
+  );
+  assert.deepEqual(readChatImageTurnRequest({ modelIds: [], preset: "huge" }), {
+    modelIds: [],
+    preset: null,
+  });
+  for (const value of [null, undefined, {}, { modelIds: "gpt-image-2" }]) {
+    assert.equal(readChatImageTurnRequest(value), null);
+  }
+});

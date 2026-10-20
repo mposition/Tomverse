@@ -5813,6 +5813,9 @@ export function ChatPageClient({
     if (
       options === undefined &&
       imageIntentRoutedOnSend &&
+      // An Auto turn is asked on the server, beside its router call
+      // (app/api/chat/route.ts), so it does not wait for this call first.
+      selectionModeRef.current !== "auto" &&
       !isImageDraftActiveRef.current &&
       attachments.length === 0 &&
       inputValue.trim().length > 0

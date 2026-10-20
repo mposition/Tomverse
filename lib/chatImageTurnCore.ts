@@ -45,3 +45,28 @@ export type ChatImageTurnRequest = {
      */
     assistantMessageId?: string;
 };
+
+const TURN_PRESETS = ["draft", "standard", "final"] as const;
+
+/**
+ * The client's reading of an image decision /api/chat answered with
+ * (`X-Chat-Response-Mode: image-turn`). Null when it is not one; the turn then
+ * fails rather than guessing.
+ */
+export const readChatImageTurnRequest = (value: unknown): ChatImageTurnRequest | null => {
+    if (typeof value !== "object" || value === null) return null;
+    const { modelIds, preset, prompt } = value as {
+        modelIds?: unknown;
+        preset?: unknown;
+        prompt?: unknown;
+    };
+    if (!Array.isArray(modelIds)) return null;
+    return {
+        modelIds: modelIds.filter((id): id is string => typeof id === "string" && id !== ""),
+        preset:
+            typeof preset === "string" && (TURN_PRESETS as readonly string[]).includes(preset)
+                ? (preset as ChatImageTurnRequest["preset"])
+                : null,
+        ...(typeof prompt === "string" && prompt.trim() ? { prompt: prompt.trim() } : {}),
+    };
+};
