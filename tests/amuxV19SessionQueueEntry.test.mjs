@@ -10,6 +10,10 @@ import { amuxV19QueueCursorState } from
   "../lib/amux/ideaLocalSessionQueueCursorState.mjs";
 import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalSessionAnalysisQueuePoll.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
+
+// The queue read is asked again through a gateway answer; run it instantly.
+installAmuxV19FakeAppTiming();
 
 const origin = "https://tomverse.test";
 const previousOrigin = process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];

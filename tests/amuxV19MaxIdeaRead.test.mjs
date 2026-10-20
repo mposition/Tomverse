@@ -59,7 +59,7 @@ test("wrong origin refuses before network and malformed response stays unavailab
     assert.deepEqual(await readAmuxV19MaxIdeaOnce({ origin,
       reservationId, ideaId, claimId,
       fetchImpl: async () => Response.json({ prompt: "", extra: true }),
-    }), { kind: "unavailable" });
+    }), { kind: "unavailable", reason: "response_invalid" });
   }));
 
 test("only an exact fresh Max claim may fetch the idea", async () =>

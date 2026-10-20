@@ -144,7 +144,7 @@ test("Max queue entry drops rejected and corrupt cursor hints without a claim", 
         calls++;
         return new Response(null, { status: 400 });
       },
-    }), { kind: "unavailable" });
+    }), { kind: "unavailable", reason: "cursor_rejected" });
     assert.equal(calls, 1);
     assert.equal(await state.read(), null);
     await writeFile(join(stateDirectory, "queue-cursor"), "invalid cursor\n",
@@ -154,7 +154,7 @@ test("Max queue entry drops rejected and corrupt cursor hints without a claim", 
         calls++;
         throw new Error("unexpected network");
       },
-    }), { kind: "unavailable" });
+    }), { kind: "unavailable", reason: "cursor_corrupt" });
     assert.equal(calls, 1);
     assert.equal(await state.read(), null);
   }));
