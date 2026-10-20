@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-import { installChatModelStub, mockUserUsage, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS } from "./support/chat-state-fixtures";
+import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
 import { openOnScreenKeyboard } from "./support/ui-audit";
 
 test.setTimeout(120_000);
@@ -9,7 +9,11 @@ test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-c
 async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3) {
   await page.setViewportSize({ width, height: width > 768 ? 1000 : 932 });
   await prepareGuestPage(page, "ko", "studio");
-  const account = await mockAuthenticatedApi(page, { selectedModels: models, productKey: "review", assistantProfiles: [] });
+  const account = await mockAuthenticatedApi(page, {
+    selectedModels: models, productKey: "review", assistantProfiles: [],
+    extraConversations: [{ id: "qa-studio-other", title: "Other Studio task", selectedModels: models,
+      messages: [{ id: "other-answer", role: "assistant", content: "The other task's saved answer.", modelId: models[0] }] }],
+  });
   account.theme = theme;
   await mockUserUsage(page, { plan: "Max", limits: { maxModels: 3, creditsDay: 0, creditsMonth: 10000 }, usage: { creditsMonth: 2500 } });
   await restoreActiveConversation(page);
@@ -160,3 +164,55 @@ test("Studio history preserves the collapse preference, traps focus and returns 
   await expect(opener).toBeFocused();
   expect(await page.evaluate(() => localStorage.getItem("tomverse_sidebar_collapsed_v1"))).toBe("collapsed");
 });
+
+for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
+  test(`Studio Professional isolates retry and a streaming history switch at ${width}px ${theme}`, async ({ page }) => {
+    const [failed, ...healthy] = THREE_MODELS;
+    await installChatModelStub(page, {
+      [failed]: [
+        { kind: "error", status: 503, message: "QA fixture: provider busy." },
+        { kind: "success", chunks: ["Recovered Studio answer."] },
+        { kind: "controlled", channel: "studio-history" },
+      ],
+      ...Object.fromEntries(healthy.map(id => [id, { kind: "success", chunks: [`Healthy ${id}.`] }])),
+    });
+    await prepare(page, width, theme);
+    await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+    await page.getByTestId("chat-textarea").fill("Compare, then recover the failed provider.");
+    await page.getByTestId("chat-send-button").click();
+    await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await expect(page.getByText("Recovered Studio answer.", { exact: true })).toBeVisible();
+    const requestedModels = await page.evaluate(() => ((window as typeof window & {
+      __chatModelStubRequests?: Array<{ modelId: string }>;
+    }).__chatModelStubRequests ?? []).map(request => request.modelId));
+    expect(requestedModels.filter(id => id === failed)).toHaveLength(2);
+    for (const id of healthy) expect(requestedModels.filter(model => model === id)).toHaveLength(1);
+
+    if (width < 768) await page.locator(".review-view-switch button").first().click();
+    await page.getByTestId("chat-textarea").fill("Keep this response running while I switch tasks.");
+    await page.getByTestId("chat-send-button").click();
+    await waitForControlledStream(page, "studio-history");
+    await pushControlledChunk(page, "studio-history", "STUDIO-PARTIAL-ONE");
+    await expect(page.getByText("STUDIO-PARTIAL-ONE", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+    const openHistory = async () => {
+      await page.locator(".review-navigation-history").click();
+      return page.getByRole("dialog", { name: "기록", exact: true });
+    };
+    const history = await openHistory();
+    await history.getByTestId("sidebar-conversation-item").filter({ hasText: "Other Studio task" }).click();
+    await expect(page.getByText("The other task's saved answer.", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(history).toHaveCount(0);
+    await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    await pushControlledChunk(page, "studio-history", "-TWO");
+    await expect(page.getByText("STUDIO-PARTIAL-ONE-TWO", { exact: true })).toHaveCount(0);
+    const returnHistory = await openHistory();
+    await returnHistory.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="qa-conversation"]').click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByText("STUDIO-PARTIAL-ONE-TWO", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+    await finishControlledStream(page, "studio-history");
+    await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+  });
+}

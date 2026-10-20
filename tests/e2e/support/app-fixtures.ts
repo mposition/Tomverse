@@ -484,6 +484,7 @@ export type AuthenticatedQaState = {
     status: "current" | "superseded";
   } | null;
   theme: "dark" | "light" | "system";
+  language: QaLanguage;
   timeZone: string;
   timeZoneInitializedAt: string | null;
   timeZoneChangedAt: string | null;
@@ -601,6 +602,7 @@ export async function mockAuthenticatedApi(
      * /chat's welcome screen starts from DEFAULT_MODEL_ID instead.
      */
     selectedModels?: string[];
+    language?: QaLanguage;
     showSidebarTour?: boolean;
     /**
      * Seeds the conversation with history. Panels report themselves empty
@@ -679,6 +681,11 @@ export async function mockAuthenticatedApi(
   } = {}
 ): Promise<AuthenticatedQaState> {
   await page.addInitScript((showSidebarTour) => {
+    // Existing shell contracts exercise Classic; Studio suites explicitly seed
+    // their appearance. Preserve that seed regardless of init-script order.
+    if (!localStorage.getItem("tomverse_review_appearance")) {
+      localStorage.setItem("tomverse_review_appearance", "classic");
+    }
     if (showSidebarTour) {
       localStorage.removeItem("tomverse_sidebar_tour_v1");
       return;
@@ -715,6 +722,7 @@ export async function mockAuthenticatedApi(
     autoSelectionOffered: options.autoSelectionOffered ?? false,
     assistantProfile: options.assistantProfile ?? null,
     theme: "dark",
+    language: options.language ?? "ko",
     timeZone: "UTC",
     timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
     timeZoneChangedAt: "2026-05-01T00:00:00.000Z",
@@ -815,6 +823,9 @@ export async function mockAuthenticatedApi(
       if (body.theme === "dark" || body.theme === "light" || body.theme === "system") {
         state.theme = body.theme;
       }
+      if (body.language === "ko" || body.language === "en" || body.language === "zh") {
+        state.language = body.language;
+      }
       if (typeof body.timeZone === "string") {
         state.timeZone = body.timeZone;
         state.timeZoneInitializedAt ||= "2026-05-01T00:00:00.000Z";
@@ -827,7 +838,7 @@ export async function mockAuthenticatedApi(
           success: true,
           settings: {
             theme: state.theme,
-            language: typeof body.language === "string" ? body.language : "ko",
+            language: state.language,
             defaultModel:
               typeof body.defaultModel === "string"
                 ? body.defaultModel
@@ -846,7 +857,7 @@ export async function mockAuthenticatedApi(
     return route.fulfill(
       json({
         theme: state.theme,
-        language: "ko",
+        language: state.language,
         // "The account default a seeded QA user still has". Moved to
         // gpt-5-6-luna on 2026-08-01 and deliberately not to gpt-6-luna on
         // 2026-10-12: an existing account keeps its stored default when the
