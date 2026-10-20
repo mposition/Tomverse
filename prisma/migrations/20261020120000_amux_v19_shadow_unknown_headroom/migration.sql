@@ -112,12 +112,18 @@ BEGIN
          GREATEST(NEW."settledMicroUsd" - NEW."reservedMicroUsd", 0)::text THEN
       RAISE EXCEPTION 'Max shadow settlement audit mismatch' USING ERRCODE = '23514';
     END IF;
-  ELSIF NEW."status" = 'owner_consumed' THEN
+  ELSIF NEW."status" = 'owner_consumed' AND
+        OLD."status" IS DISTINCT FROM 'owner_consumed' THEN
     -- An unproven subscription run spent no money: it closes at zero and the
     -- same-transaction owner audit says its usage is unknown and uncounted.
+    -- Only the closing transition is checked; an already closed row (settled
+    -- at full headroom before this rule) is not re-judged.
     SELECT * INTO audit_row FROM "AdminAuditLog" WHERE "id" = NEW."resolutionAuditLogId";
     IF NEW."settledMicroUsd" IS DISTINCT FROM 0 OR
        audit_row."id" IS NULL OR audit_row.xmin <> pg_current_xact_id()::xid OR
+       audit_row."action" IS DISTINCT FROM 'amux.v19.session_budget.resolved' OR
+       audit_row."targetType" IS DISTINCT FROM 'AmuxIdeaSessionAnalysisBudgetClaim' OR
+       audit_row."targetId" IS DISTINCT FROM NEW."id"::text OR
        audit_row."metadata"->>'budgetMode' IS DISTINCT FROM 'max_shadow' OR
        audit_row."metadata"->>'shadowUsage' IS DISTINCT FROM 'unknown' OR
        audit_row."metadata"->'headroomCounted' IS DISTINCT FROM 'false'::jsonb OR
