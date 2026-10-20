@@ -2,7 +2,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
  * Copy for the Agent office (/admin/office): the pixel office shell for the
- * eight agent teams, after the original AI OFFICE UI by godseng.mom.
+ * nine agent teams, after the original AI OFFICE UI by godseng.mom.
  *
  * Everything the office says is here, including its staff, because the
  * console is written in English and Korean and nothing else
@@ -91,6 +91,11 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         name: "Product research",
         task: "Issue verdicts copied into observation rows",
         blockReason: "Product research is waiting on its record screen.",
+      },
+      routing: {
+        name: "Chat routing improvement",
+        task: "Every day it tests, analyses and improves how Auto picks a model and refines the question, inside its spend caps, recording and reporting every change.",
+        blockReason: "Chat routing improvement is waiting on its record screen.",
       },
       digest: {
         name: "Digest desk",
@@ -226,6 +231,22 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         name: "Minji Cha",
         role: "Issue signals",
         thoughts: ["Commit mentions are the weakest signal.", "Blocked means do not start."],
+      },
+      "routing-lead": {
+        name: "Seungmin Ryu",
+        role: "Routing improver",
+        callsign: "Router",
+        thoughts: ["Every change gets written down.", "I stay inside the spend caps.", "A promotion has to pass the gate first."],
+      },
+      "routing-m1": {
+        name: "Daon Jeon",
+        role: "Rewrite tuner",
+        thoughts: ["A rewrite must keep what you meant.", "Same question, clearer words."],
+      },
+      "routing-m2": {
+        name: "Yerin Bae",
+        role: "Coding agent",
+        thoughts: ["I open pull requests; merging is yours.", "Only recommendations that are still open."],
       },
       "digest-lead": {
         name: "Seojin Baek",
@@ -459,6 +480,25 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           ],
           switch: "PRODUCT_RESEARCH_AGENT_ENABLED, on its service and in the app, both off by default.",
         },
+        routing: {
+          summary: "Every day it tests, analyses and improves how Auto picks a model and refines the question, inside its spend caps, recording and reporting every change.",
+          does: [
+            "A routing cycle writes test questions, answers them with candidate models side by side, writes an analysis report from the comparison and, when the new guidance passes the gate, promotes it.",
+            "A rewrite cycle does the same for the Prompt Refiner's rewrite rules.",
+            "Planned: it applies settings that stay inside a set range on its own, with an email to the operator for each one.",
+            "Planned: a coding agent on the Ubuntu server (the autorec account) implements open code recommendations and opens a pull request into develop.",
+          ],
+          never: [
+            "Never spends past the optimizer's run, day and month caps; a cycle that would is refused.",
+            "Never merges: a person merges the pull requests the coding agent opens.",
+            "The office shows a cycle's status, spend and times only, never its guidance, cases or report.",
+          ],
+          human: [
+            "Sets the optimizer model, which is the owner's approval of its spending, and turns the daily run and automatic promotion on or off.",
+            "Promotes or rolls back guidance by hand, and merges pull requests.",
+          ],
+          switch: "No optimizer model, no spending. The daily run and automatic promotion are separate switches on the routing screen, both off by default.",
+        },
         digest: {
           summary: "The shared store and screen where the agents' digests land: a place digests are read, not an agent.",
           does: [
@@ -612,6 +652,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         finance: { hello: "Hello. Good to see you.", thanks: "Thank you. Much appreciated.", answer: "Here's what our record says." },
         trust: { hello: "Hello, operator.", thanks: "Thank you. I appreciate it.", answer: "Here's our record." },
         research: { hello: "Hi! So nice to see you.", thanks: "Thanks! You made me smile.", answer: "Here's what our record says." },
+        routing: { hello: "Hello, operator!", thanks: "Thanks! Back to testing.", answer: "Here's what our record says." },
       },
       voiceDefault: { hello: "Hello, operator!", thanks: "Thank you!", answer: "Here's our record." },
       reactions: { hello: "👋", thanks: "😊" },
@@ -640,6 +681,29 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noSuccess: "no success recorded yet",
         silent: (hours: number) => `no success for ${hours} hours`,
         anchorMissing: "silence anchor not recorded yet",
+      },
+      routing: {
+        badges: {
+          running: "Running",
+          passed: "Passed",
+          failed: "Failed",
+          error: "Error",
+          none: "No cycle yet",
+          unread: "Unread",
+          cap: "Cap reached",
+        },
+        targets: { routing: "routing", rewrite: "rewrite" },
+        unread: "Could not read its record",
+        none: "No optimizer cycle recorded yet",
+        running: (target: string, time: string) => `Latest ${target} cycle running since ${time}`,
+        passed: (target: string, time: string) => `Latest ${target} cycle passed · ${time}`,
+        failed: (target: string, time: string, code: string) => `Latest ${target} cycle failed · ${time} · ${code}`,
+        error: (target: string, time: string, code: string) => `Latest ${target} cycle errored · ${time} · ${code}`,
+        capReached: (cap: "day" | "month"): string => (cap === "day" ? "daily spend cap reached" : "monthly spend cap reached"),
+        spend: (spent: string, cap: string, period: "day" | "month") =>
+          `${spent} / ${cap} ${period === "day" ? "today" : "this month"}`,
+        lastPromotion: (time: string) => `last promotion ${time}`,
+        noPromotion: "no promotion yet",
       },
       qa: {
         badges: {
@@ -909,6 +973,11 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         task: "이슈 판정을 관측 행으로 옮겨 적기",
         blockReason: "제품 리서치팀은 기록 화면 연결을 기다리고 있어요.",
       },
+      routing: {
+        name: "Chat 라우팅 개선팀",
+        task: "Auto 모드가 질문마다 더 맞는 모델을 고르고 질문을 더 잘 다듬도록, 매일 스스로 시험·분석·개선합니다. 비용 상한 안에서 움직이고, 바꾼 것은 모두 기록하고 운영자에게 알립니다.",
+        blockReason: "Chat 라우팅 개선팀은 기록 화면 연결을 기다리고 있어요.",
+      },
       digest: {
         name: "다이제스트실",
         task: "팀별 digest 보관·집계",
@@ -1043,6 +1112,22 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         name: "차민지",
         role: "이슈 신호",
         thoughts: ["commit 신호가 제일 약해요.", "blocked는 시작하면 안 되는 거예요."],
+      },
+      "routing-lead": {
+        name: "류승민",
+        role: "라우팅 개선 담당",
+        callsign: "류라우터",
+        thoughts: ["바꾼 건 전부 적어 둬요.", "비용 상한 안에서만 움직여요.", "승격은 합격 기준을 넘어야 해요."],
+      },
+      "routing-m1": {
+        name: "전다온",
+        role: "재작성 규칙 담당",
+        thoughts: ["재작성해도 뜻은 그대로여야 해요.", "같은 질문, 더 또렷한 말로."],
+      },
+      "routing-m2": {
+        name: "배예린",
+        role: "코딩 에이전트",
+        thoughts: ["PR은 제가 열고, 병합은 운영자 몫이에요.", "아직 열려 있는 권장안만 다뤄요."],
       },
       "digest-lead": {
         name: "백서진",
@@ -1276,6 +1361,25 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           ],
           switch: "서비스와 앱 양쪽의 PRODUCT_RESEARCH_AGENT_ENABLED. 둘 다 기본은 꺼짐입니다.",
         },
+        routing: {
+          summary: "Auto 모드가 질문마다 더 맞는 모델을 고르고 질문을 더 잘 다듬도록, 매일 스스로 시험·분석·개선합니다. 비용 상한 안에서 움직이고, 바꾼 것은 모두 기록하고 운영자에게 알립니다.",
+          does: [
+            "라우팅 cycle은 시험 질문을 만들고, 후보 모델들이 직접 답한 것을 나란히 비교하고, 비교로 분석 보고서를 쓰고, 새 guidance가 합격 기준을 넘으면 승격합니다.",
+            "재작성 cycle은 Prompt Refiner의 재작성 규칙에 같은 일을 합니다.",
+            "계획: 정해 둔 범위 안의 설정은 스스로 적용하고, 적용할 때마다 운영자에게 메일을 보냅니다.",
+            "계획: Ubuntu 서버(autorec 계정)의 코딩 에이전트가 열린 코드 권장안을 구현해 develop으로 가는 PR을 엽니다.",
+          ],
+          never: [
+            "optimizer의 실행·일·월 상한을 넘겨 쓰지 않습니다. 넘기게 될 cycle은 거절됩니다.",
+            "병합하지 않습니다. 코딩 에이전트가 연 PR은 사람이 병합합니다.",
+            "오피스는 cycle의 상태·지출·시각만 보이고, guidance·사례·보고서 내용은 보이지 않습니다.",
+          ],
+          human: [
+            "optimizer 모델을 정합니다(지출에 대한 owner 승인). 매일 실행과 자동 승격도 켜고 끕니다.",
+            "guidance를 직접 승격하거나 되돌리고, PR을 병합합니다.",
+          ],
+          switch: "optimizer 모델이 없으면 지출도 없습니다. 매일 실행과 자동 승격은 라우팅 화면의 별도 스위치이며 둘 다 기본은 꺼짐입니다.",
+        },
         digest: {
           summary: "Agent들의 digest가 모이는 공용 저장소이자 화면입니다. Agent가 아니라 digest를 읽는 곳입니다.",
           does: [
@@ -1427,6 +1531,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         finance: { hello: "안녕하세요. 반갑습니다.", thanks: "감사합니다. 고마운 말씀이에요.", answer: "네, 저희 기록을 보여 드릴게요." },
         trust: { hello: "안녕하세요, 운영자님.", thanks: "감사합니다. 마음 써 주셔서요.", answer: "네, 저희 기록은 이래요." },
         research: { hello: "안녕하세요! 정말 반가워요.", thanks: "고마워요! 웃음이 나네요.", answer: "네, 저희 기록을 보여 드릴게요." },
+        routing: { hello: "안녕하세요, 운영자님!", thanks: "고마워요! 다시 시험하러 갈게요.", answer: "네, 저희 기록을 보여 드릴게요." },
       },
       voiceDefault: { hello: "안녕하세요, 운영자님!", thanks: "감사합니다!", answer: "네, 저희 기록은 이래요." },
       reactions: { hello: "👋", thanks: "😊" },
@@ -1455,6 +1560,29 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noSuccess: "아직 성공 기록 없음",
         silent: (hours: number) => `${hours}시간째 성공 없음`,
         anchorMissing: "침묵 판정 기준 시각 미기록",
+      },
+      routing: {
+        badges: {
+          running: "실행 중",
+          passed: "합격",
+          failed: "실패",
+          error: "오류",
+          none: "cycle 없음",
+          unread: "읽지 못함",
+          cap: "상한 도달",
+        },
+        targets: { routing: "라우팅", rewrite: "재작성" },
+        unread: "기록을 읽지 못함",
+        none: "아직 optimizer cycle 기록 없음",
+        running: (target: string, time: string) => `${target} cycle ${time}부터 실행 중`,
+        passed: (target: string, time: string) => `직전 ${target} cycle 합격 · ${time}`,
+        failed: (target: string, time: string, code: string) => `직전 ${target} cycle 실패 · ${time} · ${code}`,
+        error: (target: string, time: string, code: string) => `직전 ${target} cycle 오류 · ${time} · ${code}`,
+        capReached: (cap: "day" | "month"): string => (cap === "day" ? "일 지출 상한 도달" : "월 지출 상한 도달"),
+        spend: (spent: string, cap: string, period: "day" | "month") =>
+          `${period === "day" ? "오늘" : "이번 달"} ${spent} / ${cap}`,
+        lastPromotion: (time: string) => `마지막 승격 ${time}`,
+        noPromotion: "아직 승격 없음",
       },
       qa: {
         badges: {

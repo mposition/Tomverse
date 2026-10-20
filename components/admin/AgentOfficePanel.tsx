@@ -26,6 +26,7 @@ import {
   financeLiveDept,
   qaLiveDept,
   researchLiveDept,
+  routingLiveDept,
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
   type AgentOfficeDecisionView,
@@ -99,7 +100,7 @@ function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; a
 }
 
 /**
- * The Agent office: a pixel office for the eight agent teams, after the
+ * The Agent office: a pixel office for the nine agent teams, after the
  * original AI OFFICE UI by godseng.mom.
  *
  * It shows records and decides nothing. A room marked LIVE is what the
@@ -117,6 +118,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
       research: researchLiveDept(live.research, m.real.research),
       qa: qaLiveDept(live.qa, m.real.qa),
       finance: financeLiveDept(live.finance, m.real.finance),
+      routing: routingLiveDept(live.routing, m.real.routing),
       engineering: engineeringLiveDept(live.engineering, m.real.engineering),
       digest: digestLiveDept(
         live.digest,

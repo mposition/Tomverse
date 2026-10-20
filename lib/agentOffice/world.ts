@@ -1,6 +1,6 @@
 // The Agent office's map, in tiles. Ported from the original AI OFFICE layout
-// and its four-by-three grid: the operator's office, digest desk and Decision
-// Maker room on top, and the eight teams below. Under them, the AMUX execution
+// and its four-by-three grid: the operator's office, digest desk, Decision
+// Maker room and the routing team on top, and the other eight teams below. Under them, the AMUX execution
 // room spans three columns and the independent review room takes the fourth,
 // with the entrance below it. Geometry only: room names come from the console
 // catalog. Nobody walks, so there is no path grid: everyone sits at a desk.
@@ -44,9 +44,9 @@ export type Room = {
 };
 
 /**
- * Four columns. The top row is the operator's office, the digest desk and the
- * Decision Maker room, with the fourth column left open; the two rows below are
- * the eight teams.
+ * Four columns. The top row is the operator's office, the digest desk, the
+ * Decision Maker room and the routing team; the two rows below are the other
+ * eight teams.
  */
 const COL_X = [2, 20, 38, 56];
 const ROW_Y = [17, 31];
@@ -64,6 +64,7 @@ const DEPT_SHORT: Record<AgentOfficeDeptId, string> = {
   finance: "fin.ledger",
   trust: "trust.safety",
   research: "research.obs",
+  routing: "chat.routing",
   digest: "digest.desk",
 };
 
@@ -115,6 +116,9 @@ export const OPERATOR_ROOM: Room = {
 };
 
 export const DIGEST_ROOM: Room = deskRoom("digest", COL_X[1], TOP_Y, TOP_H, "bottom");
+
+/** The Chat routing team sits in the top row's fourth column, opening onto the corridor below it. */
+export const ROUTING_ROOM: Room = deskRoom("routing", COL_X[3], TOP_Y, TOP_H, "bottom");
 
 /**
  * The AMUX Decision Maker room: one desk for each instance, laid out like a
@@ -199,16 +203,18 @@ export const OPERATOR_SEAT: Pt = { x: 9, y: 5 };
 /** The doormat drawn at the entrance, below the review room. */
 export const ENTRANCE_MAT = { x: COL_X[3] + 5, y: ROWS - 3, w: 5, h: 2 };
 
-const TEAM_ROOMS: Room[] = AGENT_OFFICE_TEAM_IDS.map((id, i) =>
+// The routing team has its own room in the top row; the rest fill the two team rows.
+const TEAM_ROOMS: Room[] = AGENT_OFFICE_TEAM_IDS.filter((id) => id !== "routing").map((id, i) =>
   deskRoom(id, COL_X[i % 4], ROW_Y[Math.floor(i / 4)], DEPT_H, "top")
 );
 
-/** Every room with desks and staff: the eight teams, then the digest desk. */
-export const DEPT_ROOMS: Room[] = [...TEAM_ROOMS, DIGEST_ROOM];
+/** Every room with desks and staff: the eight team-row rooms, the routing team, then the digest desk. */
+export const DEPT_ROOMS: Room[] = [...TEAM_ROOMS, ROUTING_ROOM, DIGEST_ROOM];
 export const ROOMS: Room[] = [
   OPERATOR_ROOM,
   DIGEST_ROOM,
   DECISION_ROOM,
+  ROUTING_ROOM,
   ...TEAM_ROOMS,
   AMUX_ROOM,
   REVIEW_ROOM,
