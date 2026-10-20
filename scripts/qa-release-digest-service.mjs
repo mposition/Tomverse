@@ -21,6 +21,7 @@
 import { spawn } from "node:child_process";
 
 import { collectQaReleaseCi } from "../lib/qaReleaseCiCollectCore.ts";
+import { collectQaReleaseLatency } from "../lib/qaReleaseLatencyCollectCore.ts";
 import { QA_RELEASE_DIGEST_HARD_TIMEOUT_MS, runQaReleaseDigestService } from "../lib/qaReleaseDigestServiceCore.ts";
 
 const SCRIPT_TIMEOUT_MS = 4 * 60 * 1000;
@@ -123,6 +124,7 @@ const postJson = async (url, headers, body) => {
 const result = await runQaReleaseDigestService(process.env, {
   runScript,
   collectCi: async (token) => (token ? collectQaReleaseCi({ fetchJson: githubJson(token), nowMs: Date.now() }) : null),
+  collectLatency: async (token) => (token ? collectQaReleaseLatency({ fetchJson: githubJson(token), nowMs: Date.now() }) : { status: "unavailable" }),
   postJson,
   now: () => new Date(),
 });
