@@ -10,6 +10,23 @@ import { AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors"
  * lib/autoRewriteOptimizer.ts automation). Kept apart from the modules that
  * call the administrator writer: one file, one writer.
  */
+/** Its own setting changes (lib/autoRouterTunablesCore.ts), on the settings row. */
+export const writeAutoRouterTunableSystemAudit = (
+    tx: Prisma.TransactionClient,
+    entry: {
+        action: "auto.llm_router_tunable.applied" | "auto.llm_router_tunable.reverted";
+        targetId: string;
+        summary: string;
+        metadata: Prisma.InputJsonObject;
+    }
+) =>
+    writeSystemAuditLog({
+        tx,
+        systemActor: AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR,
+        targetType: "AppSettings",
+        ...entry,
+    });
+
 export const writeAutoRouterOptimizerSystemAudit = (
     tx: Prisma.TransactionClient,
     entry: {

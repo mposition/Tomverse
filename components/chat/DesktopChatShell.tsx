@@ -178,6 +178,8 @@ export type DesktopChatShellProps = {
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
+  /** The send routes image requests itself; see ChatInput. */
+  imageIntentRoutedOnSend?: boolean;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
   onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: React.ReactNode;
@@ -454,6 +456,7 @@ export function DesktopChatShell({
   onNewChat,
   onNewImage,
   imageLock,
+  imageIntentRoutedOnSend = false,
   onLockedImageClick,
   onStartImageDraft,
   imageWorkspace,
@@ -1545,6 +1548,7 @@ export function DesktopChatShell({
               onDismissDeepResearchChip={onDismissDeepResearchChip}
               onStartImageDraft={onStartImageDraft}
               imageGenerationLock={imageLock ?? null}
+              imageIntentRoutedOnSend={imageIntentRoutedOnSend}
               onLockedImageGenerationClick={onLockedImageClick}
               attachments={attachments}
               onAttachmentsChange={setAttachments}

@@ -1,5 +1,6 @@
 ﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
+import type { ChatImageTurnRef } from "@/lib/chatImageTurnCore";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import type { ContinuationSourceState } from "@/lib/continuationTitleContext";
@@ -186,6 +187,12 @@ export type Message = {
    * `ChatStreamArtifact` at all, so neither can arrive here.
    */
   artifacts?: ChatStreamArtifact[];
+  /**
+   * Set when this answer is an image (lib/chatImageTurn.ts): the group its
+   * card polls for the pictures. `content` is then only the plain record
+   * that an image was made, for later turns and exports.
+   */
+  imageTurn?: ChatImageTurnRef;
   /**
    * Runtime only: the server announced that a file is being generated for
    * this answer, and the trailer has not yet said what came of it.

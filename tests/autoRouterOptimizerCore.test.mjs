@@ -799,8 +799,13 @@ test("the report is admitted bounded, of known kinds, and never repeating a user
   assert.equal(admitOptimizerReport({ findings: [], recommendations: [] }, []), null);
   const many = admitOptimizerReport({ findings: Array.from({ length: 20 }, (_, index) => `발견 ${index}`), recommendations: [] }, []);
   assert.equal(many.findings.length, AUTO_ROUTER_REPORT_MAX_ITEMS);
-  // The schema asks for the report before the guidance.
-  assert.deepEqual(Object.keys(autoRouterGeneratorSchema().properties), ["findings", "recommendations", "guidance"]);
+  // The schema asks for the report before the guidance, and setting changes last.
+  assert.deepEqual(Object.keys(autoRouterGeneratorSchema().properties), [
+    "findings",
+    "recommendations",
+    "guidance",
+    "settingChanges",
+  ]);
 });
 
 test("router statistics count outcomes, timeouts, fallbacks and pick shares only", () => {

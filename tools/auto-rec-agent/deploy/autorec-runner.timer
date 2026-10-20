@@ -1,0 +1,12 @@
+[Unit]
+Description=Start the auto-rec agent runner every hour
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+# A missed hour is not made up: the next tick takes the next recommendation.
+Persistent=false
+Unit=autorec-runner.service
+
+[Install]
+WantedBy=timers.target

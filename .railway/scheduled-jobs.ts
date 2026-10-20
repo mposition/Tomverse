@@ -68,11 +68,13 @@ export const isRailwayEnvironment = (
  * (a cycle writes system audit entries, which must join the hash chain the web
  * service signs), the provider keys of the models that answer, judge and
  * route (the catalogue's providers), the Auto cohort's plans (the candidate
- * menu) and its own switch. Names only; the
+ * menu), its own switch, and the operational alert email it sends when the
+ * optimizer changes a setting on its own (lib/autoRouterTunablesAlert.ts). Names only; the
  * operator sets the values in the dashboard after the first apply
  * (docs/ops/railway-iac-scheduled-jobs.md 7절).
  */
 const AUTO_ROUTER_OPTIMIZER_VARIABLES = [
+  "ADMIN_ALERT_EMAIL",
   "ADMIN_AUDIT_INTEGRITY_KEY",
   "ANTHROPIC_API_KEY",
   "AUTO_ROUTER_ELIGIBLE_PLANS",
@@ -80,13 +82,19 @@ const AUTO_ROUTER_OPTIMIZER_VARIABLES = [
   "DASHSCOPE_API_KEY",
   "DATABASE_URL",
   "DEEPSEEK_API_KEY",
+  "EMAIL_FROM",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "GROQ_API_KEY",
   "MINIMAX_API_KEY",
   "MISTRAL_API_KEY",
   "MOONSHOT_API_KEY",
   "OPENAI_API_KEY",
+  "OPS_ALERT_EMAIL",
   "PERPLEXITY_API_KEY",
+  "PUBLIC_APP_URL",
+  "RESEND_API_KEY",
+  "TRANSACTIONAL_EMAIL_FROM",
+  "TRANSACTIONAL_RESEND_API_KEY",
   "XAI_API_KEY",
   "ZHIPU_API_KEY",
 ] as const;
