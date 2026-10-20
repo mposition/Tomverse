@@ -15,6 +15,8 @@ import {
   updateOptimizerAutomation,
   updateOptimizerModel,
 } from "@/lib/autoRouterOptimizer";
+import { setRecommendationStatus } from "@/lib/autoRouterRecommendations";
+import { RECOMMENDATION_STATUSES } from "@/lib/autoRouterRecommendationsCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 
@@ -30,6 +32,14 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set_automation"), daily: z.boolean(), autoPromote: z.boolean() }).strict(),
   z.object({ action: z.literal("promote"), cycleId: z.string().trim().min(1).max(64) }).strict(),
   z.object({ action: z.literal("roll_back") }).strict(),
+  z
+    .object({
+      action: z.literal("set_recommendation"),
+      cycleId: z.string().trim().min(1).max(64),
+      index: z.number().int().min(0).max(63),
+      status: z.enum(RECOMMENDATION_STATUSES),
+    })
+    .strict(),
 ]);
 
 const modelOptions = async () =>
@@ -86,6 +96,14 @@ export async function POST(req: Request) {
 
     if (body.action === "set_automation") {
       await updateOptimizerAutomation(actor, { daily: body.daily, autoPromote: body.autoPromote });
+      return await stateResponse();
+    }
+
+    if (body.action === "set_recommendation") {
+      const outcome = await setRecommendationStatus(actor, body);
+      if ("refused" in outcome) {
+        return NextResponse.json({ error: outcome.refused, code: outcome.refused }, { status: 409 });
+      }
       return await stateResponse();
     }
 
