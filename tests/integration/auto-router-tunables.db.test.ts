@@ -25,7 +25,8 @@ import {
 // worse is undone by the next cycle; an operator can undo any of them.
 // No email leaves: OPS_ALERT_EMAIL is unset here, so the notice only logs.
 
-process.env.ADMIN_AUDIT_INTEGRITY_KEY ||= "tunables-audit-test-key";
+// The audit writer signs with the environment's key, as the other suites in
+// this database do: a suite-only key would break a later whole-chain check.
 delete process.env.OPS_ALERT_EMAIL;
 delete process.env.ADMIN_ALERT_EMAIL;
 
