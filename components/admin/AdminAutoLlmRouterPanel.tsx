@@ -16,7 +16,12 @@ import {
 import { adminFetch } from "@/lib/adminFetch";
 
 type RouterModelOption = { id: string; name: string; provider: string };
-type RouterSetting = { modelId: string | null; rewrite: boolean; options: RouterModelOption[] };
+type RouterSetting = {
+  modelId: string | null;
+  rewrite: boolean;
+  imageTriage: boolean;
+  options: RouterModelOption[];
+};
 
 const OFF = "";
 
@@ -30,6 +35,7 @@ export function AdminAutoLlmRouterPanel() {
   const [setting, setSetting] = useState<RouterSetting | null>(null);
   const [draft, setDraft] = useState(OFF);
   const [rewriteDraft, setRewriteDraft] = useState(false);
+  const [imageTriageDraft, setImageTriageDraft] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
@@ -38,6 +44,7 @@ export function AdminAutoLlmRouterPanel() {
     setSetting(next);
     setDraft(next.modelId ?? OFF);
     setRewriteDraft(next.rewrite);
+    setImageTriageDraft(next.imageTriage);
   };
 
   const load = useCallback(async () => {
@@ -71,7 +78,11 @@ export function AdminAutoLlmRouterPanel() {
       const response = await adminFetch("/api/admin/auto-llm-router", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: draft === OFF ? null : draft, rewrite: rewriteDraft }),
+        body: JSON.stringify({
+          modelId: draft === OFF ? null : draft,
+          rewrite: rewriteDraft,
+          imageTriage: imageTriageDraft,
+        }),
       });
       if (!response.ok) {
         setFailure(
@@ -90,7 +101,10 @@ export function AdminAutoLlmRouterPanel() {
     }
   };
 
-  const unchanged = draft === (setting?.modelId ?? OFF) && rewriteDraft === (setting?.rewrite ?? false);
+  const unchanged =
+    draft === (setting?.modelId ?? OFF) &&
+    rewriteDraft === (setting?.rewrite ?? false) &&
+    imageTriageDraft === (setting?.imageTriage ?? false);
 
   return (
     <section
@@ -154,6 +168,23 @@ export function AdminAutoLlmRouterPanel() {
         <span>
           <span className="font-bold">{m.rewriteLabel}</span>
           <span className="mt-1 block text-xs text-zinc-500">{m.rewriteDescription}</span>
+        </span>
+      </label>
+      <label className="mt-4 flex min-h-11 items-start gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={imageTriageDraft}
+          disabled={!setting || saving}
+          onChange={(event) => {
+            setImageTriageDraft(event.target.checked);
+            setSaved(false);
+          }}
+          data-testid="admin-auto-llm-router-image-triage"
+          className="mt-0.5 h-5 w-5"
+        />
+        <span>
+          <span className="font-bold">{m.imageTriageLabel}</span>
+          <span className="mt-1 block text-xs text-zinc-500">{m.imageTriageDescription}</span>
         </span>
       </label>
       <p className="mt-3 text-xs text-zinc-500">{m.costNote}</p>
