@@ -8,10 +8,11 @@
  * automatic-stop latch, latest observation ok). No I/O.
  *
  * Every vocabulary here is compared with its CHECK by `npm run
- * check:enum-constraints`, and the change rule is the one the guard trigger of
- * migration 20261012100000_amux_worker_registry holds;
- * tests/amuxWorkerRegistryCore.test.mjs reads that migration and fails when
- * the two drift.
+ * check:enum-constraints`, and the change rule is the one the guard trigger
+ * holds (migration 20261012100000_amux_worker_registry, its body replaced by
+ * 20261020200000_amux_worker_registry_direct_activation);
+ * tests/amuxWorkerRegistryStore.test.mjs reads that guard and fails when the
+ * two drift.
  *
  * Since R2c (version 53) the assignment catalog is derived from this registry
  * (lib/amux/workerDerivedCatalogCore.ts); R1's comparison with the catalog
@@ -67,24 +68,6 @@ export const AMUX_CATALOG_WORKER_NAME_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{
 /** Section 3's desired states, set by a person only. */
 export const AMUX_WORKER_DESIRED_STATES = ["requested", "active", "paused", "retired"] as const;
 export type AmuxWorkerDesiredState = (typeof AMUX_WORKER_DESIRED_STATES)[number];
-
-/**
- * The seven workers already in the assignment catalog, activated under
- * versions 23 and 27 before the registry existed. Section 8's R1 registers
- * them `active`; they are the only names whose first event may be `active`.
- * Any other worker reaches `active` only through section 5's trial evidence,
- * host safety observation and owner activation, which is R5 and does not exist
- * yet. The migration's guard holds the same seven.
- */
-export const AMUX_WORKER_REGISTRY_BOOTSTRAP_ACTIVE = Object.freeze([
-  "claude-chore",
-  "claude-contract",
-  "claude-impl",
-  "claude-review",
-  "codex-chore",
-  "codex-contract",
-  "codex-impl",
-] as const);
 
 export type AmuxWorkerSeedEntry = Readonly<{
   workerName: string;
@@ -199,7 +182,6 @@ export const AMUX_WORKER_REGISTRY_REFUSALS = [
   "role_above_class",
   "stale_revision",
   "first_state_invalid",
-  "activation_requires_trial",
   "retired",
   "role_widening_requires_trial",
   "no_change",
@@ -213,12 +195,11 @@ export type AmuxWorkerRegistryRefusal = (typeof AMUX_WORKER_REGISTRY_REFUSALS)[n
  *
  * - The role ceiling never exceeds the class's (section 2).
  * - The person must have seen the newest revision (compare-and-set).
- * - A worker starts `requested`, or `active` only if it is one of the seven
- *   already in the catalog (R1).
+ * - A worker starts `requested` or `active`.
  * - `retired` is final; the name is not reused (section 3).
- * - No later event makes a worker `active` that was not: that is section 5's
- *   activation, R5.
- * - A wider role is a new trial: allowed only while the worker is `requested`.
+ * - The owner may make a `requested` or `paused` worker `active` directly,
+ *   with no trial period (operator decision, 2026-10-20).
+ * - A wider role is allowed only while the new event is `requested`.
  *   Narrowing is never refused (section 2: narrowing has no gate).
  */
 export function amuxWorkerRegistryChangeRefusal(
@@ -228,17 +209,9 @@ export function amuxWorkerRegistryChangeRefusal(
   if (!amuxWorkerRoleWithinClass(change.providerClass, change.roleCeiling)) return "role_above_class";
   if (change.expectedRevision !== (previous?.revision ?? 0)) return "stale_revision";
   if (previous === null) {
-    if (change.desiredState === "requested") return null;
-    if (change.desiredState === "active" &&
-        (AMUX_WORKER_REGISTRY_BOOTSTRAP_ACTIVE as readonly string[]).includes(change.workerName)) {
-      return null;
-    }
-    return change.desiredState === "active" ? "activation_requires_trial" : "first_state_invalid";
+    return change.desiredState === "requested" || change.desiredState === "active" ? null : "first_state_invalid";
   }
   if (previous.desiredState === "retired") return "retired";
-  if (change.desiredState === "active" && previous.desiredState !== "active") {
-    return "activation_requires_trial";
-  }
   if (amuxWorkerRoleRank(change.roleCeiling) > amuxWorkerRoleRank(previous.roleCeiling) &&
       change.desiredState !== "requested") {
     return "role_widening_requires_trial";
