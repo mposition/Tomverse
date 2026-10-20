@@ -122,7 +122,9 @@ export async function scrollUpBy(target: Locator, pixels: number) {
  * `getBoundingClientRect()`, which is what the viewport assertions are about.
  * The coordinates are the same viewport-relative CSS pixels either way.
  *
- * Throws if the element has no box at all, so "not rendered" still fails.
+ * Throws if the element has no box at all, so "not rendered" still fails. A
+ * box is not visibility -- `visibility: hidden` still has one -- so callers
+ * assert `toBeVisible()` first, which `boundingBox()`'s null used to imply.
  */
 export async function layoutBox(target: Locator) {
   const box = await target.evaluate((element) => {

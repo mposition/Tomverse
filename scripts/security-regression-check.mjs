@@ -3617,10 +3617,11 @@ const checks = [
     // 33adbbbb, failed on mobile-safari E2E, and Railway SKIPPED that production
     // deploy. Railway's Wait for CI reads the commit's check suite, so every job
     // here fails as a red check run while the suite still concludes success.
-    // The failure must still be enforced and reported: the shards record their
-    // own outcome, a credential-free verdict job reads it, and the report sends
-    // and enforces that verdict rather than `needs.e2e.result`, which
-    // job-level continue-on-error can turn into `success`.
+    // The failure must still be enforced and reported: a verdict job reads each
+    // shard job's latest conclusion from the jobs API, and the report sends and
+    // enforces that rather than `needs.e2e.result`, which job-level
+    // continue-on-error can turn into `success` (back-merge run 39365870681:
+    // run `success`, two jobs `failure`).
     name: "The scheduled daily audit cannot skip a production deploy and still reports E2E failures",
     file: ".github/workflows/daily-security-audit.yml",
     test: (source) => {
@@ -3631,19 +3632,17 @@ const checks = [
       return (
         jobBodies.length === 4 &&
         jobBodies.every((body) => /\n    continue-on-error: true\n/.test(body)) &&
-        source.includes("id: e2e_suite") &&
-        source.includes("if: steps.e2e_suite.outcome != 'success'") &&
-        source.includes("security-audit-e2e-result-${{ github.run_id }}-shard-") &&
-        // A re-run must replace the shard's record, and an attempt that dies
-        // before its result must leave `pending`, never an earlier pass.
-        source.includes("printf 'pending\\n'") &&
-        (source.match(/\n {10}overwrite: true\n/g) ?? []).length === 2 &&
+        verdict.includes("/actions/runs/${GITHUB_RUN_ID}/jobs") &&
+        verdict.includes('startswith("Full E2E (shard ")') &&
+        verdict.includes('if [ "$conclusion" != "success" ]; then') &&
+        // `filter=all` would let an earlier attempt's pass answer for a re-run.
+        !verdict.includes("filter=all") &&
+        source.includes("name: Full E2E (shard ${{ matrix.shard }}/${{ matrix.shards }})") &&
         source.includes("needs: [audit, e2e, e2e_verdict]") &&
         source.includes("SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
         source.includes("E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
         !/needs\.e2e\.result\s*}}\s*$/m.test(source.split("\n  report:")[1] ?? "x") &&
-        // The verdict job reads artifacts written after third-party install
-        // scripts ran, so it must hold no secret.
+        // Read-only Actions access through the run's own token, no secret.
         !verdict.includes("secrets.")
       );
     },

@@ -32,9 +32,9 @@ permissions:
 # secret-history-scan.yml.
 #
 # With job-level continue-on-error `needs.e2e.result` no longer distinguishes
-# a failed shard, so each shard records its own suite outcome and the
-# `e2e_verdict` job below turns those into the status the report sends and
-# the enforcing step checks.
+# a failed shard, so the `e2e_verdict` job below reads each shard job's own
+# conclusion and that is the status the report sends and the enforcing step
+# checks.
 
 concurrency:
   group: daily-security-audit-${{ github.ref }}
@@ -326,27 +326,6 @@ jobs:
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
 
     steps:
-      # The shard's record says `pending` until the suite step below replaces
-      # it, and both uploads overwrite. So the record is always this shard's
-      # latest attempt: a re-run replaces an earlier attempt's result instead
-      # of colliding with it, and an attempt killed before its result lands
-      # leaves `pending`, which the verdict counts as a failure rather than
-      # reading a stale pass.
-      - name: Mark the shard's suite outcome pending
-        shell: bash
-        run: |
-          mkdir -p e2e-shard-result
-          printf 'pending\n' > "e2e-shard-result/shard-${{ matrix.shard }}.txt"
-
-      - name: Upload the pending shard outcome
-        uses: actions/upload-artifact@v7
-        with:
-          name: security-audit-e2e-result-${{ github.run_id }}-shard-${{ matrix.shard }}
-          path: e2e-shard-result
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 30
-
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -423,14 +402,10 @@ jobs:
         run: scripts/ci/install-playwright.sh chromium webkit
 
       - name: Run full desktop and mobile E2E suite
-        id: e2e_suite
         # Below the job's ceiling, so a shard that overruns fails this step and
         # still uploads its report and traces, instead of the job being
         # cancelled out from under all three.
         timeout-minutes: 60
-        # The step's `outcome` is recorded below and the last step fails the
-        # job on it, so this only defers the failure past the evidence upload.
-        continue-on-error: true
         run: npm run test:e2e:run -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload E2E evidence
@@ -449,40 +424,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # `always()`, so a shard whose build or install failed records
-      # `skipped`. A shard that never reaches this step keeps `pending`.
-      - name: Record the shard's suite outcome
-        if: always()
-        shell: bash
-        env:
-          SUITE_OUTCOME: ${{ steps.e2e_suite.outcome }}
-        run: |
-          mkdir -p e2e-shard-result
-          printf '%s\n' "${SUITE_OUTCOME:-unknown}" > "e2e-shard-result/shard-${{ matrix.shard }}.txt"
-
-      - name: Upload the shard's suite outcome
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: security-audit-e2e-result-${{ github.run_id }}-shard-${{ matrix.shard }}
-          path: e2e-shard-result
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 30
-
-      - name: Fail the shard when its suite failed
-        if: steps.e2e_suite.outcome != 'success'
-        shell: bash
-        env:
-          SUITE_OUTCOME: ${{ steps.e2e_suite.outcome }}
-        run: |
-          echo "::error title=E2E shard failed::Shard ${{ matrix.shard }}/${{ matrix.shards }} finished with ${SUITE_OUTCOME:-unknown}."
-          exit 1
-
-  # The E2E status the report sends and the enforcing step checks. Its own job
-  # rather than a step of `report`: it reads artifacts the shards wrote after
-  # running third-party install scripts, and `report` holds the Slack and
-  # Resend credentials, so that job downloads nothing.
+  # The E2E status the report sends and the enforcing step checks.
+  #
+  # Read from the shard jobs themselves. Job-level continue-on-error can turn
+  # `needs.e2e.result` into `success` while a shard's own job (its check run)
+  # still concludes `failure` -- the split this workflow relies on. The jobs
+  # API's default `filter=latest` returns each job's most recent attempt, so
+  # a re-run is judged by its own result and never by an earlier one.
   e2e_verdict:
     name: Full E2E verdict
     needs: [e2e]
@@ -493,36 +441,33 @@ jobs:
     outputs:
       result: ${{ steps.verdict.outputs.result }}
     steps:
-      - name: Download shard outcomes
-        if: needs.e2e.result != 'skipped'
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          pattern: security-audit-e2e-result-${{ github.run_id }}-shard-*
-          path: e2e-shard-results
-          merge-multiple: true
-
       - name: Decide the E2E result
         id: verdict
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           NEEDS_RESULT: ${{ needs.e2e.result }}
+          # The matrix size. A shard missing from the jobs list fails the
+          # verdict, so a change to the matrix that forgets this fails loudly.
           SHARDS: "6"
         run: |
           # Anything but `success` -- `skipped` (no build or browsers),
-          # `cancelled`, `failure` -- passes through as itself. `success` is
-          # then checked against the shard records, because job-level
-          # continue-on-error can report a failed matrix as `success`.
-          result="success"
+          # `cancelled`, `failure` -- passes through as itself.
           if [ "$NEEDS_RESULT" != "success" ]; then
             result="${NEEDS_RESULT:-unknown}"
+          elif ! jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" --paginate \
+              --jq '.jobs[] | select(.name | startswith("Full E2E (shard ")) | .name + "|" + (.conclusion // "none")')"; then
+            echo "::error title=E2E verdict unavailable::Could not read this run's shard jobs."
+            result="unknown"
           else
+            result="success"
+            echo "$jobs"
             for shard in $(seq 1 "$SHARDS"); do
-              file="e2e-shard-results/shard-${shard}.txt"
-              outcome="missing"
-              if [ -f "$file" ]; then outcome="$(head -n 1 "$file")"; fi
-              echo "Shard ${shard}/${SHARDS}: $(printf '%s' "$outcome" | tr -cd 'a-z')"
-              if [ "$outcome" != "success" ]; then result="failure"; fi
+              conclusion="$(echo "$jobs" | grep -F "Full E2E (shard ${shard}/${SHARDS})|" | tail -n 1 | cut -d'|' -f2)"
+              if [ "$conclusion" != "success" ]; then
+                echo "Shard ${shard}/${SHARDS}: ${conclusion:-missing}"
+                result="failure"
+              fi
             done
           fi
           echo "E2E result: ${result}"
@@ -588,10 +533,11 @@ jobs:
           SECURITY_AUDIT_TYPECHECK_STATUS: ${{ needs.audit.outputs.typecheck }}
           SECURITY_AUDIT_PRODUCTION_STATUS: ${{ needs.audit.outputs.production_check }}
           SECURITY_AUDIT_BROWSER_INSTALL_STATUS: ${{ needs.audit.outputs.browser_install }}
-          # From e2e_verdict: `success` only when every shard recorded a
-          # passing suite, `skipped` when the build or the browsers never got
-          # there, and `failure` for a failed or missing shard. Empty if that
-          # job did not run, which the enforcing step reports as unknown. The
+          # From e2e_verdict: `success` only when every shard job's latest
+          # attempt concluded success, `skipped` when the build or the browsers
+          # never got there, `failure` for a failed or missing shard, and
+          # `unknown` (or empty, if that job did not run) when it could not
+          # tell -- which the enforcing step reports as a failure. The
           # reporter renders each of those as itself rather than folding them
           # into a pass.
           SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}

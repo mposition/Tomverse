@@ -89,9 +89,11 @@ test.describe("landing product evidence", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await openLanding(page);
 
-    const box = await layoutBox(
-      page.locator("section[aria-labelledby='landing-hero-title'] img")
+    const capture = page.locator(
+      "section[aria-labelledby='landing-hero-title'] img"
     );
+    await expect(capture).toBeVisible();
+    const box = await layoutBox(capture);
     expect(box.width).toBeGreaterThan(0);
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(321);
