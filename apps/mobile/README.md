@@ -84,6 +84,13 @@ regressions passed 85 and 28 cases. Broader mobile/session regressions passed
 268 cases before the final recovery/error-copy additions. No product provider
 was called.
 
+An isolated local PostgreSQL 17 cluster built successfully from the existing
+migrations. The existing mobile auth schema/service integration suites passed
+34 cases. A real bearer/DB smoke check also confirmed authenticated ownership,
+foreign-conversation refusal and suspended-account refusal. Claude accepted the
+finished security follow-up at commit 0944c9d;
+that review is not authorization to activate the default-off routes.
+
 The full Next webpack build remains blocked by the existing Admin import chain
 from decisionMakerBodyCore (node:crypto) into AmuxDecisionMakerRequestsPanel.
 Those Admin files are unchanged in this implementation.
