@@ -33,7 +33,7 @@ const GUEST_CHAT_MODEL_COUNT = 1;
 const GUEST_CHAT_CREDITS = SEARCHING_MODEL_CREDITS;
 // The same trio in a restored conversation whose switch is off.
 const GUEST_CREDITS_SEARCH_OFF = GUEST_MODEL_COUNT;
-const GUEST_SEND_LABEL = `Send · ${GUEST_CREDITS} credits`;
+const GUEST_SEND_LABEL = "Send";
 const GUEST_ENTRY = "/review?lang=en&entry=guest-preview";
 
 for (const product of ["chat", "review"] as const) {
@@ -231,7 +231,8 @@ const sendLabelHistory = (history: FirstPaintSample[]) =>
  * page was going to make has already happened.
  */
 async function settleComposer(page: Page) {
-  await expect(page.getByTestId("request-credit-estimate")).toBeVisible();
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
   let previous = "";
   await expect
     .poll(
@@ -270,13 +271,14 @@ function collectHydrationConsoleErrors(page: Page) {
 
 function expectStableGuestDefault(
   history: FirstPaintSample[],
-  credits: number = GUEST_CREDITS,
+  _credits: number = GUEST_CREDITS,
   modelCount: number = GUEST_MODEL_COUNT
 ) {
+  void _credits;
   expect(history.length).toBeGreaterThan(0);
   expect(modelCountHistory(history)).toEqual([modelCount]);
-  expect(creditsHistory(history)).toEqual([credits]);
-  expect(sendLabelHistory(history)).toEqual([`Send · ${credits} credits`]);
+  expect(creditsHistory(history)).toEqual([]);
+  expect(sendLabelHistory(history)).toEqual(["Send"]);
 }
 
 /** Seeds a guest conversation this tab will restore on load. */
@@ -327,7 +329,7 @@ test.describe("guest initial cost hydration", () => {
     await installFirstPaintRecorder(page);
   });
 
-  test("a new guest is never shown a price other than the brand trio's", async ({
+  test("a new guest shows the brand trio without credit labels", async ({
     page,
   }) => {
     const consoleMessages = collectHydrationConsoleErrors(page);
@@ -346,10 +348,7 @@ test.describe("guest initial cost hydration", () => {
     expect([...tabCounts].every((count) => count === 0 || count === GUEST_MODEL_COUNT)).toBe(true);
 
     // The visible number and the accessible name are the same value.
-    await expect(page.getByTestId("request-credit-estimate")).toHaveAttribute(
-      "aria-label",
-      `Estimated ${GUEST_CREDITS} credits, view breakdown`
-    );
+    await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     await expect(page.getByTestId("chat-send-button")).toHaveAttribute(
       "aria-label",
       GUEST_SEND_LABEL
@@ -879,7 +878,8 @@ test.describe("guest initial cost hydration", () => {
     expect(activeId).toMatch(/^guest_chat_/);
     await page.reload();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await expect(page.getByTestId("request-credit-estimate")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     expect(await page.evaluate(() =>
       sessionStorage.getItem("tomverse_chat_active_chat_id")
     )).toBe(activeId);
@@ -1006,7 +1006,7 @@ test.describe("guest initial cost hydration", () => {
 
       const history = await readHistory(page);
       const label = `${viewport.width}x${viewport.height}`;
-      expect(creditsHistory(history), label).toEqual([GUEST_CREDITS]);
+      expect(creditsHistory(history), label).toEqual([]);
       expect(modelCountHistory(history), label).toEqual([GUEST_MODEL_COUNT]);
     }
   });
@@ -1096,8 +1096,8 @@ test.describe("guest initial cost hydration", () => {
 
       const history = await readHistory(page);
       expect(modelCountHistory(history)).toEqual([size]);
-      expect(creditsHistory(history)).toEqual([size]);
-      expect(sendLabelHistory(history)).toEqual([`Send · ${size} credits`]);
+      expect(creditsHistory(history)).toEqual([]);
+      expect(sendLabelHistory(history)).toEqual(["Send"]);
     });
   }
 
@@ -1123,10 +1123,10 @@ test.describe("guest initial cost hydration", () => {
     const history = await readHistory(page);
     expect(modelCountHistory(history)).toEqual([2]);
     // A new conversation, so search is on and both models can search.
-    expect(creditsHistory(history)).toEqual([2 * SEARCHING_MODEL_CREDITS]);
+    expect(creditsHistory(history)).toEqual([]);
   });
 
-  test("changing the selection re-prices immediately and consistently", async ({
+  test("changing selection updates the model count without composer credit labels", async ({
     page,
   }) => {
     await page.goto(GUEST_ENTRY);
@@ -1153,30 +1153,18 @@ test.describe("guest initial cost hydration", () => {
     await expect(option).toBeVisible();
 
     await option.click();
-    await expect(estimate).toHaveAttribute(
-      "aria-label",
-      `Estimated ${GUEST_CREDITS - SEARCHING_MODEL_CREDITS} credits, view breakdown`
-    );
+    await expect(estimate).toHaveCount(0);
     await expect(sendButton).toHaveAttribute(
       "aria-label",
-      `Send · ${GUEST_CREDITS - SEARCHING_MODEL_CREDITS} credits`
+      "Send"
     );
 
     await option.click();
-    await expect(estimate).toHaveAttribute(
-      "aria-label",
-      `Estimated ${GUEST_CREDITS} credits, view breakdown`
-    );
+    await expect(estimate).toHaveCount(0);
     await expect(sendButton).toHaveAttribute("aria-label", GUEST_SEND_LABEL);
 
-    // Sanity check on the recorder itself: it has to be able to see a price
-    // change, otherwise the "history is a single value" assertions in the
-    // other tests would pass vacuously.
-    expect(creditsHistory(await readHistory(page))).toEqual([
-      GUEST_CREDITS,
-      GUEST_CREDITS - SEARCHING_MODEL_CREDITS,
-      GUEST_CREDITS,
-    ]);
+    // The observer must never see a credit label during either selection.
+    expect(creditsHistory(await readHistory(page))).toEqual([]);
 
     // Escape is layered in the two-step picker: the first press leaves the
     // catalogue for the recommendations, the second closes the dialog.
@@ -1185,27 +1173,6 @@ test.describe("guest initial cost hydration", () => {
     await expect(dialog).toBeHidden();
     await expect(modelMenu.getByTestId("composer-active-model-count")).toHaveText(`${GUEST_MODEL_COUNT} models`);
 
-    // The breakdown sheet is derived from the same selection, so its rows
-    // have to sum to exactly what the composer and the Send button quote.
-    await estimate.click();
-    const usageDialog = page.getByRole("dialog", { name: "Estimated usage" });
-    await expect(usageDialog).toBeVisible();
-
-    // One row per model (each already including its search reservation),
-    // the web search reservation broken out on its own, and the total. Search
-    // is on for a new conversation, which is what adds the middle row.
-    const badges = usageDialog.getByTestId("credit-cost-badge");
-    await expect(badges).toHaveCount(GUEST_MODEL_COUNT + 2);
-    const values = (await badges.allInnerTexts()).map((text) =>
-      Number(text.trim())
-    );
-    const rowTotal = values
-      .slice(0, GUEST_MODEL_COUNT)
-      .reduce((sum, value) => sum + value, 0);
-    expect(values[GUEST_MODEL_COUNT]).toBe(
-      GUEST_MODEL_COUNT * WEB_SEARCH_SURCHARGE
-    );
-    expect(rowTotal).toBe(GUEST_CREDITS);
-    expect(values[values.length - 1]).toBe(GUEST_CREDITS);
+    await expect(estimate).toHaveCount(0);
   });
 });

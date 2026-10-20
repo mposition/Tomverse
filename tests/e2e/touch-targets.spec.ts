@@ -132,10 +132,6 @@ test.describe("mobile touch targets (STG-F005)", () => {
         `[${viewport.width}x${viewport.height}] Choose AI models`
       );
       await assertMinTouchTarget(
-        page.getByTestId("request-credit-estimate"),
-        `[${viewport.width}x${viewport.height}] Estimated credits`
-      );
-      await assertMinTouchTarget(
         page.getByTestId("chat-send-button"),
         `[${viewport.width}x${viewport.height}] Send`
       );
@@ -157,7 +153,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
       "Add and tools"
     );
     await assertHitTestReturnsSelf(modelSelectorTrigger(page), "Choose AI models");
-    await assertHitTestReturnsSelf(page.getByTestId("request-credit-estimate"), "Estimated credits");
+    await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     await assertHitTestReturnsSelf(page.getByTestId("chat-send-button"), "Send");
   });
 

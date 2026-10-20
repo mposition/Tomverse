@@ -50,13 +50,7 @@ import {
   nextModeForUserScroll,
   type ChatScrollMode,
 } from "@/lib/chatAutoScroll";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
-import {
-  modelEligibleForWebSearchSurcharge,
-  WEB_SEARCH_SURCHARGE_CREDITS,
-} from "@/lib/webSearchCredits";
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
-import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
 import { recoveryPromptsForMessages } from "@/lib/chatTranscriptRecovery";
 import { splitInlineCode, splitUserMessageSegments } from "@/lib/userMessageSegments";
@@ -427,10 +421,6 @@ export function ChatMessageList({
   importedTranscript,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS, getModel } = useModelCatalog();
-  // The same map the composer's chip was derived from, so the price the badge
-  // quotes beside a finished answer is the price the composer quoted before it
-  // was sent.
-  const searchBackendReadiness = useWebSearchBackendReadiness();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
@@ -964,47 +954,15 @@ export function ChatMessageList({
                       });
                       if (!decision.shown) return null;
                       const status = decision.status;
-                      // "requested-not-executed" only ever occurs for a
-                      // dispatchable native capability -- unsupported,
-                      // unverified and cost-unbounded models are routed to the
-                      // "unsupported" status instead, so the surcharge was
-                      // always reserved (and refunded) here.
-                      //
-                      // Asked of the same predicate that decides the charge,
-                      // rather than re-read off `support`: a native capability
-                      // no request may dispatch is never surcharged, and a
-                      // badge quoting "+N" beside it would name a price nobody
-                      // paid.
-                      const nativeSearchSurcharged =
-                        status === "executed" &&
-                        modelEligibleForWebSearchSurcharge(
-                          getWebSearchCapability(modelInfo),
-                          searchBackendReadiness
-                        );
-                      const label =
-                        status === "deep-research"
-                          ? t("chat.searchStatusDeepResearch")
-                          : status === "unsupported"
-                            ? t("chat.searchStatusUnsupported")
-                            : status === "failed"
-                              ? t("chat.searchStatusFailed")
-                              : status === "executed"
-                                ? nativeSearchSurcharged
-                                  ? `${t("chat.searchStatusWebSearch")} · +${WEB_SEARCH_SURCHARGE_CREDITS}`
-                                  : t("chat.searchStatusWebSearch")
-                                : status === "requested-not-executed"
-                                  ? t("chat.searchStatusRequestedNotExecuted")
-                                  : t("chat.searchStatusNotSearched");
-                      const detail =
-                        status === "requested-not-executed"
-                          ? t("chat.searchStatusRefundDetail")
-                          : undefined;
+                      if (status === "requested-not-executed" || status === "not-searched") return null;
+                      const label = status === "deep-research" ? t("chat.searchStatusDeepResearch")
+                        : status === "unsupported" ? t("chat.searchStatusUnsupported")
+                        : status === "failed" ? t("chat.searchStatusFailed")
+                        : t("chat.searchStatusWebSearch");
                       return (
                         <span
                           data-testid="search-status-badge"
                           data-search-status={status}
-                          title={detail}
-                          aria-label={detail ? `${label} — ${detail}` : undefined}
                           className="shrink-0 whitespace-nowrap rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                         >
                           {label}

@@ -100,7 +100,7 @@ test("an answer that did not search says so, and says nothing more", () => {
             searchMetadata: meta({ requested: false, executed: false }),
             usageClass: "standard",
         }),
-        { shown: true, status: "not-searched" }
+        { shown: false }
     );
 });
 
@@ -109,7 +109,6 @@ test("the search outcomes each report themselves", () => {
         [meta({ supported: false, executed: false }), "unsupported"],
         [meta({ executed: false, failureCode: "SEARCH_PROVIDER_ERROR" }), "failed"],
         [meta(), "executed"],
-        [meta({ executed: false }), "requested-not-executed"],
     ];
     for (const [searchMetadata, expected] of cases) {
         assert.deepEqual(
@@ -169,4 +168,11 @@ test("nothing in the badge names a source of grounding other than the web", () =
             `"${forbidden}" is not a web-search status`
         );
     }
+});
+
+test("requested but unexecuted searches remain quiet; accounting metadata is untouched", () => {
+  const searchMetadata = meta({ executed: false });
+  assert.deepEqual(decideWebSearchBadge({ searchMetadata, usageClass: "standard" }), { shown: false });
+  assert.equal(searchMetadata.requested, true);
+  assert.equal(searchMetadata.executed, false);
 });
