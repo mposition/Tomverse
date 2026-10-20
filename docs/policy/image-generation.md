@@ -822,13 +822,17 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   - **Guest·Free 잠금 조건은 클릭 전에 칩 안에서 표시**한다(아래 잠금 노출
     규칙과 동일).
   - flag가 꺼져 있으면 칩은 **존재하지 않는다**.
-- **⑥ LLM 판정 인계(운영자 결정 2026-10-20, 기본 꺼짐).** 서버 env
-  `CHAT_IMAGE_INTENT_MODEL_ID`가 모델을 지정하면, 이미지 생성을 쓸 수 있는
-  계정의 composer 제출은 먼저 `POST /api/chat/image-intent`
-  (`lib/chatImageIntent.ts`)에 이미지 요청인지 묻고, 그렇다면 채팅으로 보내지
-  않고 ⑤와 같은 인계(서버 행 없음, 취소 시 draft 복원)를 **사용자 대신**
-  수행한다. ⑤의 "사용자가 눌러야 draft로 이동" 조건은 이 경로에 적용하지
-  않는다. **generation 제출 조건은 그대로다**: `imageHandoffAutoGenerate`를
+- **⑥ LLM 판정 인계(운영자 결정 2026-10-20).** Admin Console › Routing이 Auto
+  router 모델(`auto.llmRouterModelId`)을 지정하면 켜지고, 없으면 꺼진다. 이미지
+  생성을 쓸 수 있는 계정의 composer 제출은 먼저 `POST /api/chat/image-intent`
+  (`lib/chatImageIntent.ts`)에서 그 router 모델에 이미지 요청인지 묻고, 같은
+  호출에서 Auto처럼 triage한다: 활성 이미지 모델과 정사각 크레딧 목록을 보고
+  복잡한 이미지는 상위 모델·높은 preset, 간단한 이미지는 하위 모델·낮은
+  preset을 고른다. 목록 밖의 모델이나 그 모델이 제공하지 않는 preset은 버리고
+  워크스페이스 기본값을 쓴다. 이미지 요청이면 채팅으로 보내지 않고 ⑤와 같은
+  인계(서버 행 없음, 취소 시 draft 복원)를 그 모델·preset을 초기값으로
+  **사용자 대신** 수행한다. ⑤의 "사용자가 눌러야 draft로 이동" 조건은 이
+  경로에 적용하지 않는다. **generation 제출 조건은 그대로다**: `imageHandoffAutoGenerate`를
   켠 계정만 착륙 즉시 생성하고, 나머지는 가격이 보이는 워크스페이스에서 한 번
   누른다. 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을
   hold한 뒤 나가며, 실패·시간 초과·거절은 모두 일반 채팅 전송으로 떨어진다.

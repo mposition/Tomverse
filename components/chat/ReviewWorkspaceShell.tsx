@@ -58,7 +58,7 @@ import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
-import { chatImageIntentModelId } from "@/lib/chatImageIntentCore";
+import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -180,6 +180,12 @@ export async function ReviewWorkspaceShell({
   // presented as valid and the server can only refuse, which is what this
   // prop exists to prevent.
   let maxImageModels = imageGroupMaxModels();
+
+  // Whether a chat send asks the Auto router's model to triage image requests
+  // first (lib/chatImageIntent.ts): on exactly when Admin Console › Routing
+  // names a router model. Never throws; an unreadable setting reads as off.
+  const chatImageIntentEnabled =
+    imageGenerationEnabled && (await readAutoLlmRouterModelId()) !== null;
 
   // The image catalogue an operator may have changed at runtime, resolved
   // once here so the composer quotes the prices admission will charge
@@ -333,11 +339,7 @@ export async function ReviewWorkspaceShell({
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
-        // Server-only env, read per request: whether a chat send asks the
-        // image-intent model first (lib/chatImageIntentCore.ts).
-        chatImageIntentEnabled={
-          imageGenerationEnabled && chatImageIntentModelId() !== null
-        }
+        chatImageIntentEnabled={chatImageIntentEnabled}
         voiceInputEnabled={voiceInputEnabled}
         promptRefinerMode={promptRefinerMode}
         promptRefinerProductRelease={promptRefinerProductRelease}
