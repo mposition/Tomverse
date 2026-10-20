@@ -13,7 +13,10 @@ test("portfolio timestamps use the database UTC clock even when the service is a
   } };
   assert.equal(await readAmuxPortfolioClock(tx), databaseNow);
   assert.match(statement, /clock_timestamp\(\) AT TIME ZONE 'UTC'/);
-  assert.match(statement, /::TIMESTAMP\(3\)/);
+  // A rounding cast can return an instant up to 0.5 ms ahead of the clock the
+  // assessment guard compares with; truncation never can.
+  assert.match(statement, /date_trunc\('milliseconds', clock_timestamp\(\)/);
+  assert.doesNotMatch(statement, /::TIMESTAMP\(3\)/i);
 });
 
 test("an unavailable database clock never falls back to application time", async () => {
