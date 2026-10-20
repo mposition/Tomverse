@@ -137,7 +137,7 @@ bridge는 시작할 때와 heartbeat를 보내는 매 회차에 `GET /api/intern
 
 - `ExecStart=/usr/local/libexec/tomverse-wsl-bridge --worker %i`. 인스턴스 이름이 worker다. 템플릿에는 worker별 값도, kind별 값도 없으므로 worker를 더해도 파일을 고치지 않는다.
 - 계정·환경 파일·재시작 규칙은 지금의 두 unit과 같다. `User=tomverse-bridge`, `EnvironmentFile=/etc/tomverse-bridge/bridge.env`, `Restart=on-failure`, `RestartSec=60`, `RestartPreventExitStatus=3`. 로컬 AMUX `/health`를 기다리는 `ExecStartPre`도 같다.
-- `[Install]`이 없다(버전 31 4항). `enable`하지 않는다.
+- `[Install]`(`WantedBy=multi-user.target`)이 있다(운영자 결정 2026-10-20, 버전 31 4항의 "enable하지 않는다"를 바꿈). 3.1에 따라 worker를 옮긴 인스턴스만 `enable`하고, 되돌릴 때는 `disable`한다.
 - sidecar unit과의 `Requires=`·`After=`, 소켓의 `test -S`는 두지 않는다. session kind에는 sidecar가 없고 kind는 앱만 안다. 대신 bridge가 v22로 나열됐는데 소켓이 없으면 등록하지 않는다(위 표).
 - 한 템플릿이 두 kind를 맡으므로 `SupplementaryGroups=amux-v22-ipc`가 session 인스턴스에도 붙는다. bridge는 자기 이름에서 계산한 소켓에만, 앱이 v22로 나열했을 때만 접속한다.
 - 지금의 v22 unit은 worker 넷의 상태 디렉터리를 이름으로 `InaccessiblePaths=`에 적었다. 템플릿은 이름을 적을 수 없으므로 `/var/lib` 전체를 빈 읽기 전용 tmpfs로 덮는다(`TemporaryFileSystem=/var/lib:ro`, sidecar unit과 같은 방식). 나중에 더해질 worker의 디렉터리도 가려진다. bridge가 여는 경로는 모두 `/run` 아래다.
@@ -166,7 +166,7 @@ S3는 운영자 승인(대화, PR에 한 줄)으로 래치 `AMUX_WORKER_BRIDGE_S
 
 watchdog은 `tomverse-bridge.service`를 enable되어 있는 동안만 이름으로 본다. codex 단위를 옮길 때 옛 unit을 `systemctl disable --now`로 멈추면 그 뒤로 down을 보내지 않는다(`bridge-monitoring.md` 1절). 이 변경은 S3 배포와 함께 watchdog 재설치(1.2절)로 호스트에 들어간다.
 
-worker별 unit에는 `[Install]`이 없어(버전 31 4항) 호스트를 재부팅하면 저절로 켜지지 않는다. 버전 31의 R6 조정기가 생기기 전까지는 재부팅 뒤 운영자가 인스턴스를 시작한다. 그동안 watchdog은 로드된 bridge가 하나도 없는 상태를 down으로 알린다.
+옮긴 인스턴스는 `sudo systemctl enable tomverse-amux-bridge@<worker>.service`로 enable해, 재부팅 뒤에도 옛 unit처럼 저절로 켜진다(운영자 결정 2026-10-20). watchdog은 그래도 로드된 bridge가 하나도 없는 상태를 down으로 알린다.
 
 ## 활성화
 
