@@ -13,13 +13,13 @@ import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan, planAllowsFeature } from "@/lib/billingEntitlements";
 import { detectChatImageRequest } from "@/lib/chatImageIntent";
-import { chatImageIntentModelId } from "@/lib/chatImageIntentCore";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 
-// POST /api/chat/image-intent -- asks one small model whether a chat message is
-// a request to create an image, so the composer can hand it to the image
-// workspace instead of sending it to chat. Routing only: nothing is generated
-// or charged here, and the workspace keeps its own price and consent rules.
+// POST /api/chat/image-intent -- asks the Auto router's model whether a chat
+// message is a request to create an image and, if so, which image model and
+// preset it needs, so the composer can hand it to the image workspace instead
+// of sending it to chat. Routing only: nothing is generated or charged here,
+// and the workspace keeps its own price and consent rules.
 //
 // Answers `{ image: false }` without a model call to anyone the image
 // workspace would refuse (flag off, plan without image generation, account
@@ -41,7 +41,6 @@ export async function POST(req: Request) {
       );
     }
     const userId = session.user.id;
-    if (!chatImageIntentModelId()) return notImage();
     await consumeApiRateLimit(req, userId, "chat-image-intent", {
       minute: 30,
       day: 2_000,
@@ -59,11 +58,11 @@ export async function POST(req: Request) {
       return notImage();
     }
 
-    const image = await detectChatImageRequest({
+    const decision = await detectChatImageRequest({
       text: body.text,
       traceId: randomUUID(),
     });
-    return NextResponse.json({ image });
+    return NextResponse.json(decision);
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

@@ -227,6 +227,12 @@ type ImageGenerationWorkspaceProps = {
    */
   initialModelIds?: readonly string[];
   /**
+   * The preset the chat image-intent triage chose for this landing. Only a
+   * starting value: the user can change it before generating, and the price
+   * shown is always the selected one.
+   */
+  initialPreset?: ImagePreset;
+  /**
    * How many models one request may compare, as the running server resolves it
    * (`lib/imageGroupLimits.ts`, read in the chat page's Server Component).
    *
@@ -268,6 +274,7 @@ export function ImageGenerationWorkspace({
   planAllowsImageGeneration,
   initialPrompt = "",
   initialModelIds,
+  initialPreset,
   maxModels,
   onCancelDraft,
   autoGenerateOnArrival = false,
@@ -280,7 +287,7 @@ export function ImageGenerationWorkspace({
   const [generations, setGenerations] = useState<GenerationView[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [prompt, setPrompt] = useState(initialPrompt);
-  const [preset, setPreset] = useState<ImagePreset>("standard");
+  const [preset, setPreset] = useState<ImagePreset>(initialPreset ?? "standard");
   const [size, setSize] = useState<ImageSize>("1024x1024");
   // Seed ids come from the catalogue's image tab and are bounded by the same
   // limit as everything else: a deployment can lower it between the catalogue

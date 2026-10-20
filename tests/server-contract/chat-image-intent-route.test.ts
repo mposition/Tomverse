@@ -22,7 +22,7 @@ let sessionOverride: unknown = null;
 let flagEnabled = true;
 let planTier: "Free" | "Pro" | "Max" = "Pro";
 let accessRefused = false;
-let detectAnswer = true;
+let detectAnswer: unknown = { image: true, modelId: "gpt-image-2", preset: "final" };
 const detectCalls: Array<{ text: string }> = [];
 let mocksInstalled = false;
 
@@ -83,9 +83,8 @@ const reset = () => {
   flagEnabled = true;
   planTier = "Pro";
   accessRefused = false;
-  detectAnswer = true;
+  detectAnswer = { image: true, modelId: "gpt-image-2", preset: "final" };
   detectCalls.length = 0;
-  process.env.CHAT_IMAGE_INTENT_MODEL_ID = "gpt-6-luna";
 };
 
 const answer = async (body: unknown = { text: "고양이 그림 그려줘" }) => {
@@ -102,17 +101,19 @@ test("no session is rejected", async () => {
   assert.equal(detectCalls.length, 0);
 });
 
-test("an eligible caller gets the model's answer", async () => {
+test("an eligible caller gets the triage decision", async () => {
   reset();
-  assert.deepEqual(await answer(), { status: 200, payload: { image: true } });
+  assert.deepEqual(await answer(), {
+    status: 200,
+    payload: { image: true, modelId: "gpt-image-2", preset: "final" },
+  });
   assert.deepEqual(detectCalls, [{ text: "고양이 그림 그려줘" }]);
   reset();
-  detectAnswer = false;
+  detectAnswer = { image: false };
   assert.deepEqual((await answer()).payload, { image: false });
 });
 
 for (const [name, arrange] of [
-  ["the env names no model", () => delete process.env.CHAT_IMAGE_INTENT_MODEL_ID],
   ["image generation is off", () => (flagEnabled = false)],
   ["the plan has no image generation", () => (planTier = "Free")],
   ["the account is restricted", () => (accessRefused = true)],
