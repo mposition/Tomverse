@@ -21,7 +21,12 @@ const seed = {
   queue: [entry(901, "develop", "claude/to-develop/a"), entry(902, "main", "release/2026-10-20-b"), entry(903, "develop", "claude/to-develop/c")],
   released: [],
   events: [{ at: "2026-10-20T01:05:00.000Z", kind: "held", number: 903, shadow: false, detail: "no_slot" }],
-  lastRound: { at: "2026-10-20T01:05:00.000Z", used: 2, running: [{ number: 800, title: "Release in flight", base: "main" }] },
+  lastRound: {
+    at: "2026-10-20T01:05:00.000Z",
+    used: 3,
+    running: [{ number: 800, title: "Release in flight", base: "main" }],
+    deploys: [{ branch: "develop", sha: "e".repeat(40), title: "Merge pull request #799 from mposition/claude/to-develop/z" }],
+  },
 };
 
 const storedOrder = async () => {
@@ -47,8 +52,11 @@ test("the operator reorders the line by dragging and from the keyboard, and each
 
   const section = page.getByTestId("ci-admission-section");
   await expect(section).toBeVisible();
-  await expect(section.getByTestId("ci-admission-slots")).toContainText("2 / 3");
+  await expect(section.getByTestId("ci-admission-slots")).toContainText("3 / 3");
   await expect(section.getByTestId("ci-admission-slots")).toContainText("#800 Release in flight");
+  // Deploy CI on develop is shown in the slots it occupies.
+  await expect(section.getByTestId("ci-admission-deploy-eeeeeee")).toContainText("Merge pull request #799");
+  await expect(section.getByTestId("ci-admission-deploy-eeeeeee")).toContainText("deploy · develop · 1 slot(s)");
   expect(await shownOrder(page)).toEqual([901, 902, 903]);
   await page.screenshot({ path: "test-results-admin/ci-admission-dark.png", fullPage: true });
 
@@ -83,6 +91,12 @@ test("the operator reorders the line by dragging and from the keyboard, and each
   // Move to top, from the button.
   await section.getByTestId("ci-admission-row-901").getByRole("button", { name: "Move to top" }).click();
   await expect.poll(storedOrder).toEqual([901, 903, 902]);
+
+  // Stop: confirmed, then answered. The fixture has no GitHub App, so the
+  // operator is told why nothing was stopped.
+  page.once("dialog", (dialog) => void dialog.accept());
+  await section.getByTestId("ci-admission-running-800").getByRole("button", { name: "Stop #800: back to draft and cancel its CI" }).click();
+  await expect(section.getByRole("status")).toContainText("Stopping needs the CI admission GitHub App.");
 
   // The same section in the Light console theme.
   await page.context().addCookies([{ name: "tomverse_admin_theme", value: "light", url: page.url() }]);
