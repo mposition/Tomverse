@@ -933,6 +933,12 @@ type ChatInputProps = {
   identityKey: string | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
+  /**
+   * True when a send is already routed to the image workspace by the
+   * image-intent model (lib/chatImageIntent.ts). The handoff chip then has
+   * nothing to offer -- the send itself is the handoff -- so it is not shown.
+   */
+  imageIntentRoutedOnSend?: boolean;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
   isDeepResearchPending?: boolean;
   onDismissDeepResearchChip?: () => void;
@@ -1086,6 +1092,7 @@ export function ChatInput({
   onVoiceTranscript,
   identityKey,
   imageGenerationLock = null,
+  imageIntentRoutedOnSend = false,
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
   onDismissDeepResearchChip,
@@ -1805,6 +1812,7 @@ export function ChatInput({
   );
   const imageIntentKey = imageIntentDraftKey(imageIntentSourceText);
   const imageIntentOffered =
+    !imageIntentRoutedOnSend &&
     Boolean(onStartImageDraft || imageGenerationLock) &&
     !isComposingDraft &&
     imageIntentSourceText.trim().length > 0 &&

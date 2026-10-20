@@ -822,25 +822,41 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   - **Guest·Free 잠금 조건은 클릭 전에 칩 안에서 표시**한다(아래 잠금 노출
     규칙과 동일).
   - flag가 꺼져 있으면 칩은 **존재하지 않는다**.
-- **⑥ LLM 판정 인계(운영자 결정 2026-10-20, 기본 꺼짐).** Admin Console ›
-  Routing에서 Auto router 모델(`auto.llmRouterModelId`)이 지정되고 "이미지 요청
-  Triage" 스위치(`auto.llmRouterImageTriage`, 감사 기록)가 켜져야 동작한다. 채팅
-  전송마다 유료 호출이 하나 늘기 때문에 router 모델과 별개로 켠다. 이미지
-  생성을 쓸 수 있는 계정의 composer 제출은 먼저 `POST /api/chat/image-intent`
-  (`lib/chatImageIntent.ts`)에서 그 router 모델에 이미지 요청인지 묻고, 같은
-  호출에서 Auto처럼 triage한다: 활성 이미지 모델과 정사각 크레딧 목록을 보고
-  복잡한 이미지는 상위 모델·높은 preset, 간단한 이미지는 하위 모델·낮은
-  preset을 고른다. 목록 밖의 모델이나 그 모델이 제공하지 않는 preset은 버리고
-  워크스페이스 기본값을 쓴다. 이미지 요청이면 채팅으로 보내지 않고 ⑤와 같은
-  인계(서버 행 없음, 취소 시 draft 복원)를 그 모델·preset을 초기값으로
-  **사용자 대신** 수행한다. ⑤의 "사용자가 눌러야 draft로 이동" 조건은 이
-  경로에 적용하지 않는다. **generation 제출 조건은 그대로다**: `imageHandoffAutoGenerate`를
-  켠 계정만 착륙 즉시 생성하고, 나머지는 가격이 보이는 워크스페이스에서 한 번
-  누른다. 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을
-  hold한 뒤 나가며, 실패·시간 초과·거절은 모두 일반 채팅 전송으로 떨어진다.
-  Chat composer 제출에서만 이 endpoint를 쓰며, 첨부와 override 전송
-  (Deep Research 확장 등)은 묻지 않는다. 판정을 기다리는 동안 초안이 바뀌면
-  인계도 전송도 하지 않는다.
+- **⑥ Chat 대화 안 이미지 답변(운영자 결정 2026-10-20, 기본 꺼짐).** Admin
+  Console › Routing에서 Auto router 모델(`auto.llmRouterModelId`)이 지정되고
+  "이미지 요청 Triage" 스위치(`auto.llmRouterImageTriage`, 감사 기록)가 켜져야
+  동작한다. 채팅 전송마다 유료 호출이 하나 늘기 때문에 router 모델과 별개로
+  켠다. 이미지 생성을 쓸 수 있는 계정의 Chat composer 제출은 먼저
+  `POST /api/chat/image-intent`(`lib/chatImageIntent.ts`)에서 그 router 모델에
+  이미지 요청인지 묻고, 같은 호출에서 Auto처럼 triage한다: 활성 이미지 모델과
+  정사각 크레딧 목록을 보고 복잡한 이미지는 상위 모델·높은 preset, 간단한
+  이미지는 하위 모델·낮은 preset을 고른다. 목록 밖의 모델이나 그 모델이
+  제공하지 않는 preset은 버리고 기본값(기본 모델, standard)을 쓴다.
+  - **이미지 요청이면 그 Chat 대화 안에서 답한다. 이미지 워크스페이스로 가지
+    않고, 확인도 묻지 않는다.** 질문은 일반 전송과 똑같이 저장되고(새 대화
+    생성 포함), 답변만 `/api/chat` 대신
+    `POST /api/conversations/[id]/image-turn`(`lib/chatImageTurn.ts`)이 만든다.
+    이 route는 `requestImageGeneration`을 서버 전용 옵션 `chatTurnHost`로
+    불러 **그 채팅 대화에** 이미지 그룹을 붙인다. 예약·정산·환급·provider
+    예산·동시 실행 lease는 워크스페이스와 같다. 그룹의 idempotency key는
+    assistant 메시지 id이므로 재시도는 같은 그룹을 다시 보여 줄 뿐 다시
+    과금하지 않고, 대화 조회는 이 규칙으로 메시지에 `imageTurn.groupId`를
+    붙인다. 프롬프트는 저장된 질문이며, 요청 body의 텍스트를 쓰지 않는다.
+  - **확인 없는 과금은 운영자 결정이다**(2026-10-20). Chat의 텍스트 턴처럼
+    제출 즉시 생성하며, 위 §3·§11의 "제출 전 가격 표시"와 ⑤의
+    `imageHandoffAutoGenerate` 조건은 이 경로에 적용하지 않는다. 크레딧
+    표시는 계정의 사용량 표시로 옮겨 가는 중이다.
+  - assistant 메시지의 `content`는 `[Image generated] <질문>`이다. 이후 턴의
+    문맥, 공유·export는 이 문장만 담고 이미지 바이트는 담지 않는다(artifact
+    §12와 같은 처리). 대화·계정 삭제는 대화 id로 이미지 asset을 정리하는 기존
+    경로가 그대로 처리한다.
+  - 대화 종류 경계의 예외는 이것 하나다. 공개 `POST /api/images/generations`는
+    `chatTurnHost`를 받지 않으므로 채팅 대화 id를 계속 거절한다.
+  - 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을 hold한 뒤
+    나가며, 실패·시간 초과·거절은 모두 일반 텍스트 전송으로 떨어진다. 첨부가
+    있는 제출과 override 전송(Deep Research 확장 등)은 묻지 않는다. 판정을
+    기다리는 동안 초안이 바뀌면 아무것도 보내지 않는다. 판정이 켜진 Chat
+    화면에서는 ⑤ 칩을 띄우지 않는다. 보내는 순간 판정하므로 제안할 것이 없다.
   - **Review Easy (운영자 승인 2026-10-20)**는 별도 `POST /api/review/route`를
     사용한다. `REVIEW_EASY_ENABLED=true`인 로그인 계정에만 제공하며 기본은 꺼짐이다.
     Chat의 `auto.llmRouterModelId`, 활성 routing guidance와 이미지 triage 판단 기준을
