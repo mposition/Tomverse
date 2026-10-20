@@ -40,7 +40,12 @@ async function loadRoute() {
         startChatImageTurn: async (input: Record<string, unknown>) => {
           turns.push(input);
           if (refusal) throw new ChatAccessError(refusal.status, refusal.code, "refused");
-          return { groupId: "group-1", content: "[Image generated] cat", pendingGenerationIds: [] };
+          return {
+            groupId: "group-1",
+            imageModelIds: ["gpt-image-2"],
+            content: "[Image generated] cat",
+            pendingGenerationIds: [],
+          };
         },
       },
     });
@@ -89,7 +94,10 @@ test("a valid turn names the group its card polls", async () => {
   reset();
   assert.deepEqual(await post(body), {
     status: 202,
-    payload: { content: "[Image generated] cat", imageTurn: { groupId: "group-1" } },
+    payload: {
+      content: "[Image generated] cat",
+      imageTurn: { groupId: "group-1", modelIds: ["gpt-image-2"] },
+    },
   });
   assert.deepEqual(turns, [{ userId: "user-1", conversationId: "conv-1", ...body }]);
 });

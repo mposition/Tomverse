@@ -11,7 +11,11 @@ import { prisma } from "@/lib/prisma";
  */
 export async function attachChatImageTurns<
     T extends { id: string; role: string; content: string },
->(userId: string, conversationId: string, messages: T[]): Promise<Array<T & { imageTurn?: { groupId: string } }>> {
+>(
+    userId: string,
+    conversationId: string,
+    messages: T[]
+): Promise<Array<T & { imageTurn?: { groupId: string; modelIds: string[] } }>> {
     const ids = messages
         .filter(
             (message) =>
@@ -22,11 +26,20 @@ export async function attachChatImageTurns<
     if (ids.length === 0) return messages;
     const groups = await prisma.imageGenerationGroup.findMany({
         where: { userId, conversationId, groupIdempotencyKey: { in: ids } },
-        select: { id: true, groupIdempotencyKey: true },
+        select: {
+            id: true,
+            groupIdempotencyKey: true,
+            targets: { select: { modelId: true }, orderBy: { createdAt: "asc" } },
+        },
     });
-    const byMessage = new Map(groups.map((group) => [group.groupIdempotencyKey, group.id]));
+    const byMessage = new Map(
+        groups.map((group) => [
+            group.groupIdempotencyKey,
+            { groupId: group.id, modelIds: group.targets.map((target) => target.modelId) },
+        ])
+    );
     return messages.map((message) => {
-        const groupId = byMessage.get(message.id);
-        return groupId ? { ...message, imageTurn: { groupId } } : message;
+        const imageTurn = byMessage.get(message.id);
+        return imageTurn ? { ...message, imageTurn } : message;
     });
 }
