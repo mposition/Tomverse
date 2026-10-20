@@ -822,8 +822,10 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   - **Guest·Free 잠금 조건은 클릭 전에 칩 안에서 표시**한다(아래 잠금 노출
     규칙과 동일).
   - flag가 꺼져 있으면 칩은 **존재하지 않는다**.
-- **⑥ LLM 판정 인계(운영자 결정 2026-10-20).** Admin Console › Routing이 Auto
-  router 모델(`auto.llmRouterModelId`)을 지정하면 켜지고, 없으면 꺼진다. 이미지
+- **⑥ LLM 판정 인계(운영자 결정 2026-10-20, 기본 꺼짐).** Admin Console ›
+  Routing에서 Auto router 모델(`auto.llmRouterModelId`)이 지정되고 "이미지 요청
+  Triage" 스위치(`auto.llmRouterImageTriage`, 감사 기록)가 켜져야 동작한다. 채팅
+  전송마다 유료 호출이 하나 늘기 때문에 router 모델과 별개로 켠다. 이미지
   생성을 쓸 수 있는 계정의 composer 제출은 먼저 `POST /api/chat/image-intent`
   (`lib/chatImageIntent.ts`)에서 그 router 모델에 이미지 요청인지 묻고, 같은
   호출에서 Auto처럼 triage한다: 활성 이미지 모델과 정사각 크레딧 목록을 보고

@@ -1,5 +1,5 @@
-// Contract: the chat image-intent triage is the Auto router's call. No router
-// model means no call; a refused budget hold means no call; a made call
+// Contract: the chat image-intent triage is the Auto router's call, behind its
+// own switch. Switch off or no router model means no call; a refused budget hold means no call; a made call
 // returns only a model and preset from the enabled image catalogue.
 
 import assert from "node:assert/strict";
@@ -18,6 +18,7 @@ process.env.DATABASE_URL ||=
   "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1";
 
 let routerModelId: string | null = "gpt-6-luna";
+let imageTriageOn = true;
 let budgetHeld = true;
 let modelOutput: unknown = { image: true, modelId: "gpt-image-2", preset: "draft" };
 let callThrows = false;
@@ -46,7 +47,10 @@ async function load() {
       },
     });
     mock.module(mod("lib/autoLlmRouterSettings.ts"), {
-      namedExports: { readAutoLlmRouterModelId: async () => routerModelId },
+      namedExports: {
+        readAutoLlmRouterModelId: async () => routerModelId,
+        readAutoLlmRouterImageTriage: async () => imageTriageOn,
+      },
     });
     mock.module(mod("lib/autoLlmRouter.ts"), {
       namedExports: {
@@ -72,6 +76,7 @@ async function load() {
 
 const reset = () => {
   routerModelId = "gpt-6-luna";
+  imageTriageOn = true;
   budgetHeld = true;
   modelOutput = { image: true, modelId: "gpt-image-2", preset: "draft" };
   callThrows = false;
@@ -92,6 +97,13 @@ test("the router model triages: model and preset come back", async () => {
   assert.ok(reserved[0] > 0);
   assert.match(calls[0].prompt, /- gpt-image-2 \(/);
   assert.match(calls[0].prompt, /Message:\n간단한 고양이 아이콘 그려줘$/);
+});
+
+test("image triage switched off, no call", async () => {
+  reset();
+  imageTriageOn = false;
+  assert.deepEqual(await detect(), { image: false });
+  assert.equal(calls.length + reserved.length, 0);
 });
 
 test("no router model, no call", async () => {

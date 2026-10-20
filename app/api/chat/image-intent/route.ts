@@ -12,7 +12,10 @@ import {
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan, planAllowsFeature } from "@/lib/billingEntitlements";
-import { detectChatImageRequest } from "@/lib/chatImageIntent";
+import {
+  chatImageTriageModelId,
+  detectChatImageRequest,
+} from "@/lib/chatImageIntent";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 
 // POST /api/chat/image-intent -- asks the Auto router's model whether a chat
@@ -41,6 +44,8 @@ export async function POST(req: Request) {
       );
     }
     const userId = session.user.id;
+    // Off costs nothing, not even the caller's rate-limit allowance.
+    if (!(await chatImageTriageModelId())) return notImage();
     await consumeApiRateLimit(req, userId, "chat-image-intent", {
       minute: 30,
       day: 2_000,
