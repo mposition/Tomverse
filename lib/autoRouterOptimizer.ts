@@ -83,9 +83,14 @@ const GENERATOR_TIMEOUT_MS = 90_000;
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 8_000;
 const SYNTHESIZER_TIMEOUT_MS = 150_000;
 /** An answer long enough to judge, not a full reply (owner, 2026-10-20). */
-const ANSWER_MAX_OUTPUT_TOKENS = 1_500;
+/**
+ * A reasoning model spends its output budget on reasoning first: on Test
+ * (2026-10-20) deepseek-v4-pro used all of 1 500 and returned no text.
+ */
+const ANSWER_MAX_OUTPUT_TOKENS = 4_000;
 const ANSWER_TIMEOUT_MS = 60_000;
-const JUDGE_MAX_OUTPUT_TOKENS = 40;
+/** Room for a model that writes anything before the one-word object. */
+const JUDGE_MAX_OUTPUT_TOKENS = 400;
 const JUDGE_TIMEOUT_MS = 30_000;
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
@@ -524,6 +529,28 @@ async function runInBackground(input: {
             throw error;
         }
     };
+    // `generated.output` throws when the text does not parse as the schema --
+    // after the call was paid. Read here, outside `traced`, it used to make
+    // the call count as failed with no log and no cost; now the cost stays
+    // counted and the cause is logged (shape only, never the text).
+    const outputOf = (
+        kind: "synthesize" | "generate" | "judge",
+        generated: { readonly output: unknown; finishReason: string; usage?: { outputTokens?: number } }
+    ): unknown => {
+        try {
+            return generated.output;
+        } catch (error) {
+            console.warn(JSON.stringify({
+                event: "auto_router_optimizer_output_unparsed",
+                cycleId: input.cycleId,
+                kind,
+                finishReason: generated.finishReason,
+                outputTokens: generated.usage?.outputTokens ?? null,
+                ...optimizerCallFailureDetail(error),
+            }));
+            return null;
+        }
+    };
     const cost = (prices: Prices, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
         callCostMicroUsd({
             inputTokens: usage?.inputTokens,
@@ -562,7 +589,8 @@ async function runInBackground(input: {
                         }),
                         providerOptions: { openai: { strictJsonSchema: true } },
                     }));
-                    const messages = (generated.output as { messages?: unknown } | null)?.messages;
+                    const output = outputOf("synthesize", generated);
+                    const messages = (output as { messages?: unknown } | null)?.messages;
                     console.info(JSON.stringify({
                         event: "auto_router_optimizer_synthesized",
                         cycleId: input.cycleId,
@@ -570,7 +598,7 @@ async function runInBackground(input: {
                         messages: Array.isArray(messages) ? messages.length : null,
                     }));
                     return {
-                        value: generated.output,
+                        value: output,
                         costMicroUsd: cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
@@ -589,7 +617,7 @@ async function runInBackground(input: {
                         }),
                         providerOptions: { openai: { strictJsonSchema: true } },
                     }));
-                    const guidance = (generated.output as { guidance?: unknown } | null)?.guidance;
+                    const guidance = (outputOf("generate", generated) as { guidance?: unknown } | null)?.guidance;
                     const rejection = guidanceRejection(guidance);
                     if (rejection) {
                         console.warn(JSON.stringify({
@@ -669,7 +697,7 @@ async function runInBackground(input: {
                         providerOptions: { openai: { strictJsonSchema: true } },
                     }));
                     return {
-                        value: parseJudgeWinner(generated.output),
+                        value: parseJudgeWinner(outputOf("judge", generated)),
                         costMicroUsd: cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };

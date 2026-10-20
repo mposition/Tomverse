@@ -576,3 +576,24 @@ test("the generator is asked for a length well under the cap it is held to", asy
   assert.equal(overshoot.length, 2_315);
   assert.equal(admitGuidance(overshoot), overshoot);
 });
+
+test("each judged case keeps both orders' verdicts, so an unanswered judge is not read as equal", async () => {
+  let n = 0;
+  const { deps } = fakeDeps({
+    // Every other judge call returns no verdict, as an output that does not parse does.
+    judge: async (message) => {
+      n++;
+      const { answerA } = JSON.parse(message);
+      return { value: n % 2 ? null : answerA === ANSWERS.light ? "A" : "B", costMicroUsd: 20, provider: "opt" };
+    },
+  });
+  const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  const judged = result.cases.filter((item) => item.judged);
+  assert.equal(judged.length, 6);
+  for (const item of judged) {
+    assert.equal(item.judged.length, 2);
+    assert.ok(item.judged.includes(null));
+    assert.equal(item.verdict, "tie");
+  }
+  assert.ok(result.cases.filter((item) => item.verdict === "unchanged").every((item) => item.judged === undefined));
+});
