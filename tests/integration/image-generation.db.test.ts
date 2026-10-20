@@ -923,7 +923,7 @@ test("a Chat image turn answers in the chat conversation and replays without cha
     id: turnInput.assistantMessageId,
     role: "assistant",
     content: "[Image generated] a small cat icon",
-    imageTurn: { groupId: first.groupId },
+    imageTurn: { groupId: first.groupId, modelIds: ["gpt-image-2"] },
   });
 });
 

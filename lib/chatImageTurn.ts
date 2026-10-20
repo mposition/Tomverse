@@ -38,6 +38,8 @@ export type ChatImageTurnInput = {
 
 export type ChatImageTurnResult = {
     groupId: string;
+    /** The image models in the group, in target order. */
+    imageModelIds: string[];
     content: string;
     /**
      * Generations still waiting to start; the route drives them after
@@ -160,6 +162,7 @@ export async function startChatImageTurn(
 
     return {
         groupId: result.groupId,
+        imageModelIds: result.targets.map((target) => target.modelId),
         content,
         pendingGenerationIds: result.targets
             .filter((target) => target.status === "pending")

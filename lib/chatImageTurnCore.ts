@@ -9,14 +9,24 @@
  */
 export const CHAT_IMAGE_TURN_CONTENT_PREFIX = "[Image generated]";
 
-/** What a transcript message carries when it is answered by an image group. */
-export type ChatImageTurnRef = { groupId: string };
+/**
+ * What a transcript message carries when it is answered by an image group:
+ * the group its card polls, and the image models that make it -- which is
+ * what the answer's header names, not the panel's chat model.
+ */
+export type ChatImageTurnRef = { groupId: string; modelIds: string[] };
 
 /** The client's reading of a message's `imageTurn`; anything else is none. */
 export const readChatImageTurnRef = (value: unknown): ChatImageTurnRef | null => {
     if (typeof value !== "object" || value === null) return null;
-    const groupId = (value as { groupId?: unknown }).groupId;
-    return typeof groupId === "string" && groupId ? { groupId } : null;
+    const { groupId, modelIds } = value as { groupId?: unknown; modelIds?: unknown };
+    if (typeof groupId !== "string" || !groupId) return null;
+    return {
+        groupId,
+        modelIds: Array.isArray(modelIds)
+            ? modelIds.filter((id): id is string => typeof id === "string" && id !== "")
+            : [],
+    };
 };
 
 /** What the send asks the image turn for: the image-intent triage's choice. */
