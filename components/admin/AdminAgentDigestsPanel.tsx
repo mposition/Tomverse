@@ -100,6 +100,19 @@ export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsol
                     </p>
                     <p>{fill(m.checks, { count: row.summary.failedChecks })}</p>
                     <p>{fill(m.ci, { count: row.summary.failedCiJobs })}</p>
+                    {row.summary.latency.status === "ok" ? (
+                      <p data-testid="agent-digest-latency">
+                        {fill(m.latency, {
+                          merges: row.summary.latency.merges,
+                          median: row.summary.latency.medianDevDeployedMin ?? m.latencyNone,
+                          max: row.summary.latency.maxDevDeployedMin ?? m.latencyNone,
+                          checks: row.summary.latency.medianLastCheckDoneMin ?? m.latencyNone,
+                          lastStart: row.summary.latency.maxLastCheckStartMin ?? m.latencyNone,
+                        })}
+                      </p>
+                    ) : row.summary.latency.status === "unavailable" ? (
+                      <p data-testid="agent-digest-latency">{m.latencyUnavailable}</p>
+                    ) : null}
                     {row.summary.notChecked.length > 0 ? (
                       <p>
                         {m.notChecked}: <span className="font-mono text-xs">{row.summary.notChecked.join(", ")}</span>

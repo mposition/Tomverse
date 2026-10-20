@@ -40,6 +40,8 @@ export type QaReleaseDigestBuildInput = {
   checks: QaReleaseDigest["checks"];
   ci: QaReleaseDigest["ci"];
   releaseLane: QaReleaseDigest["releaseLane"];
+  /** Develop merge to dev timing; left out of the digest when not collected. */
+  latency?: QaReleaseDigest["latency"];
   /** Codes the caller already knows apply, such as `github_read_unavailable`. */
   notChecked: NotCheckedCode[];
 };
@@ -130,6 +132,7 @@ export function buildQaReleaseDigest(input: QaReleaseDigestBuildInput): QaReleas
     checks: [...input.checks],
     ci: [...input.ci],
     releaseLane: [...input.releaseLane],
+    ...(input.latency ? { latency: input.latency } : {}),
     notChecked: [],
   };
 
