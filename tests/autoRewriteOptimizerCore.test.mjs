@@ -307,9 +307,36 @@ test("a call that throws costs nothing and is counted as failed", async () => {
   const result = await run(deps);
   assert.equal(result.failedCalls, 12);
   assert.equal(result.spentByKind.judge, 0);
-  // Neither order answered: a tie, not a win for either.
-  assert.equal(result.summary.ties, 6);
+  // Neither order answered: undecided and counted, never a tie or a win.
+  assert.equal(result.summary.ties, 0);
+  assert.equal(result.summary.undecided, 6);
+  assert.equal(result.judgeFailed, 12);
   assert.equal(result.failure, "too_few_decided");
+});
+
+test("a judge order with no verdict leaves a rewrite case undecided, as in the routing cycle", async () => {
+  const { AUTO_REWRITE_JUDGE_SYSTEM } = await import("../lib/autoRewriteOptimizerCore.ts");
+  const { AUTO_ROUTER_JUDGE_OUTPUT_RULE, AUTO_ROUTER_JUDGE_SYSTEM } = await import("../lib/autoRouterOptimizerCore.ts");
+  let n = 0;
+  const { deps } = fakeDeps({
+    // The second order of every judgement fails to parse.
+    judge: async (message) => {
+      n++;
+      if (n % 2 === 0) return { value: null, costMicroUsd: 20, provider: "opt" };
+      const { answerA } = JSON.parse(message);
+      return { value: answerA === "Here is f fixed." ? "A" : "B", costMicroUsd: 20, provider: "opt" };
+    },
+  });
+  const result = await run(deps);
+  const judged = result.cases.filter((item) => item.judged);
+  assert.ok(judged.length > 0);
+  assert.ok(judged.every((item) => item.verdict === "undecided" && item.judged.includes(null)));
+  assert.equal(result.summary.ties, 0);
+  assert.equal(result.summary.decided, 0);
+  assert.equal(result.judgeFailed, n / 2);
+  // Both judges end with the same output rule.
+  assert.ok(AUTO_REWRITE_JUDGE_SYSTEM.endsWith(AUTO_ROUTER_JUDGE_OUTPUT_RULE));
+  assert.ok(AUTO_ROUTER_JUDGE_SYSTEM.endsWith(AUTO_ROUTER_JUDGE_OUTPUT_RULE));
 });
 
 test("Admin sees synthetic conversations with both rewrites, and real turns not at all", () => {
