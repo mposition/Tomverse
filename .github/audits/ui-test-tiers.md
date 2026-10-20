@@ -11,7 +11,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 |---|---|---|---|---|
 | PR static | `pr-fast-gate.yml` | `npm run check:accent-tokens` (UI-012 역할 token 강제) | 모든 PR | 예 |
 | PR contract | `pr-fast-gate.yml` | `npm run test:e2e:smoke` (`--grep=@smoke`, `desktop-chromium`) | 모든 PR | 예 |
-| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk:shard -- --shard=i/2` (`--grep=@ui-risk`, `desktop-chromium` + `mobile-chromium` × 2 shard = 4 job) | 모든 PR | 예 |
+| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk:shard -- --shard=i/N` (`--grep=@ui-risk`, `desktop-chromium` 3 shard + `mobile-chromium` 2 shard = 5 job) | 모든 PR | 예 |
 | Main regression | `e2e.yml` | `npm run test:e2e:chromium` (필터 없음) | `main` push | 아니오 |
 | Nightly visual | `nightly-visual-regression.yml` | `npm run test:e2e:visual -- --retries=0` | 매일 | 아니오 |
 | Nightly full | `daily-security-audit.yml` | `npm run test:e2e:run` (chromium + webkit, 필터 없음) | 매일 | 아니오 |
@@ -276,6 +276,45 @@ work로 나누지 않고, `e2e.yml`이 개수는 맞는데 work는 안 맞았던
 — `e2e.yml`이 겪은 count-vs-work 편향은 이 tier에서는 나타나지 않았습니다.
 shard를 하나 더 늘리면 job마다 고정으로 드는 약 1분 30초(setup·build)에 비해
 얻는 것이 적고 runner만 하나 더 씁니다.
+
+**2026-10-20: desktop 3 shard, mobile 2 shard(가중치 재보정).** 53/47은
+유지되지 않았습니다. `fullyParallel`이 꺼져 있어 파일 하나가 한 shard 그룹이고,
+그룹은 첫 test의 index가 속한 shard로 갑니다. 무거운 spec이 앞쪽에 정렬되므로
+(`chat-unified-workspace.spec.ts` 하나가 약 5 test-분) shard 1이 커졌고,
+2026-10-05의 `PWTEST_SHARD_WEIGHTS: "40:55"`로 경계를 옮긴 뒤에도 tier가 계속
+늘었습니다(66개 파일, project당 1,014 test). 2026-10-19 develop 대상 PR
+실행(shard당 약 40회) 실측, 예산 25분:
+
+| Shard | test p50 | test 최대 | job p90 |
+|---|---|---|---|
+| desktop-chromium 1/2 | 15.1분 | 16.1분 | 21.3분 |
+| desktop-chromium 2/2 | 12.1분 | 13.8분 | 18.8분 |
+| mobile-chromium 1/2 | 11.0분 | 12.0분 | 16.7분 |
+| mobile-chromium 2/2 | 7.8분 | 8.4분 | 13.2분 |
+
+그날 desktop 1/2가 모든 test 통과 상태로 25분 제한에 두 번 취소됐습니다. 둘 다
+cache 저장이 최대 6.5분 걸린 post step에서였고, 하나는 develop PR(test 15.1분),
+하나는 가중치가 없는 main 대상 release PR의 run 39278432868(test 19.4분, test
+step 자체 제한 20분까지 36초)입니다. 예산만 올리면 같은 절벽이 옮겨갈 뿐이라
+desktop에 shard를 하나 더 뒀습니다.
+
+develop 실행 하나의 파일별 시간을 Playwright의 그룹 배정 규칙으로 재생하면 그
+실행의 15.2분/12.2분 분할이 그대로 재현되고, 후보는 다음과 같습니다.
+
+| 분할 | shard별 시간 | 파일 하나를 ±40 test 바꾼 500회 중 95번째 최대값 |
+|---|---|---|
+| desktop 40:55 (기존) | 15.2 / 12.2분 | 15.4분 |
+| desktop 1:1:1 (채택) | 9.4 / 10.3 / 7.7분 | 10.7분 |
+| desktop 최적 가중 3분할 | 최대 9.2분 | 10.7분 |
+| mobile 40:55 (기존) | 11.4 / 7.5분 | 11.6분 |
+| mobile 57:100 (채택) | 9.5 / 9.4분 | 10.2분 |
+
+desktop은 어떤 가중치도 95번째 값을 낮추지 못해 균등 개수로 둡니다. mobile은
+runner 추가 없이 가중치만 바꾸고, 세 번째 mobile shard는 약 2분을 위해 runner
+하나를 쓰므로 두지 않았습니다. 가중치는 shard 경계만 옮기므로 모든 test는
+project 안에서 정확히 한 shard에서 실행됩니다. matrix는 project별 `include`
+목록이고, `tests/uiRiskShardWeights.test.mjs`가 project마다 1..N이 빠짐없이
+있고 가중치 개수가 shard 수와 같은지 검사합니다.
 
 합류한 것: `chat-keyboard-policy` · `chat-tools` · `comparison-action-rail` ·
 `comparison-rate-limit` · `credit-entitlement-disclosure` ·

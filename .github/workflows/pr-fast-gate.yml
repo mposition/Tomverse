@@ -14,14 +14,15 @@ name: PR Fast Gate
 #
 # Two Playwright tiers run here, in two jobs: build-and-e2e runs the @smoke
 # contract set, and ui-risk runs the @ui-risk layout/accessibility set
-# (UI-008) as a matrix over both Chromium projects and two shards each.
+# (UI-008) as a matrix over both Chromium projects, desktop in three shards
+# and mobile in two.
 # Neither tier is the full suite -- see .github/audits/ui-test-tiers.md for
 # what runs where.
 #
 # static-and-unit (which also runs the PR-commit secret scan), unit-tests,
 # build-and-e2e and ui-risk run concurrently; fast-gate waits for all four and
 # fails unless every one of them succeeded.
-# A matrix job's result is the roll-up of its shards, so all four of ui-risk's
+# A matrix job's result is the roll-up of its shards, so all five of ui-risk's
 # must pass for it to count as one success. Nothing merges on a green
 # fast-gate that did not pass all four, and no upstream job can go green by
 # being skipped -- see the aggregation step.
@@ -980,14 +981,46 @@ jobs:
   # split out of build-and-e2e to escape: a timeout mid-run with every test
   # passing, a red required check that says nothing about the product.
   #
-  # Two shards, not more. `--shard` divides by test count and not by work --
-  # e2e.yml records a three-way split where the counts matched and the work
-  # did not, because skips are not spread evenly. So this was measured rather
-  # than assumed: desktop's two shards ran 7m38s (349 passed, 20 skipped) and
-  # 6m51s (306 passed, 33 skipped), a 53/47 split of a 13m56s unsharded run
-  # on the same machine. The slowest shard is ~55% of the whole, which puts
-  # desktop's CI test step near 10m and the job near half its budget. A third
-  # shard would buy less than this one did and cost another runner.
+  # Two shards each held while the split stayed near 53/47. It did not.
+  # `fullyParallel` is off, so a whole file is one shard group, and a group
+  # lands in the shard its first test's index falls in; the heavy specs sort
+  # early (chat-unified-workspace.spec.ts alone is ~5 test-minutes). The
+  # 40:55 weights of 2026-10-05 moved the boundary, and the tier kept growing
+  # (66 files, 1,014 tests per project). On the 2026-10-19 runs into develop
+  # (~40 per shard), against this job's 25-minute budget:
+  #
+  #   desktop-chromium 1/2  test p50 15.1m  max 16.1m   job p90 21.3m
+  #   desktop-chromium 2/2  test p50 12.1m  max 13.8m   job p90 18.8m
+  #   mobile-chromium  1/2  test p50 11.0m  max 12.0m   job p90 16.7m
+  #   mobile-chromium  2/2  test p50  7.8m  max  8.4m   job p90 13.2m
+  #
+  # Desktop 1/2 was cancelled at the 25m limit twice that afternoon with every
+  # test passing, each time in the post steps, where cache saves took up to
+  # 6.5m: once on a develop PR (15.1m of tests), and once in run 39278432868
+  # for a release PR into main, whose unweighted 19.4m test step was already
+  # within 36s of that step's own 20m limit. Raising the budget alone would
+  # only move the cliff, so desktop gets a third shard.
+  #
+  # Replaying one develop run's per-file times through Playwright's
+  # group-to-shard rule reproduces its 15.2m/12.2m desktop split exactly, and
+  # gives:
+  #
+  #   desktop 1:1:1    9.4m / 10.3m / 7.7m     (best weighted: 9.2m max)
+  #   mobile  40:55   11.4m /  7.5m             (today)
+  #   mobile  57:100   9.5m /  9.4m
+  #
+  # Growing or shrinking any one file by up to 40 tests kept the slowest
+  # shard at 10.7m (desktop 1:1:1) and 10.2m (mobile 57:100) in 95% of 500
+  # trials. Desktop stays at equal counts because no weighting beat that 95th
+  # percentile; mobile is reweighted, which costs no runner, and a third
+  # mobile shard would save ~2m for one. Weights move shard boundaries only:
+  # every test still runs in exactly one shard of its project, and
+  # tests/uiRiskShardWeights.test.mjs keeps each project's entries a complete
+  # 1..N set with one weight per shard.
+  #
+  # Re-measure from the jobs' own durations when one shard drifts past the
+  # others (`gh api repos/<owner>/<repo>/actions/jobs/<id>`, then the
+  # per-test lines of the list reporter in the job log).
   #
   # The full 63-golden visual matrix stays out of the PR tier -- it runs
   # unfiltered on pull requests into main and nightly.
@@ -995,19 +1028,27 @@ jobs:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: High-risk UI regression checks (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
-    # Each job: install, build, then a quarter of the tier. 25 minutes is well
-    # above the measured work so a slow runner does not fail a passing suite,
-    # while still bounding a hung Playwright web server.
+    # Each job: install, build, then one shard of one project. 25 minutes is
+    # well above the measured work so a slow runner or a slow cache save does
+    # not fail a passing suite, while still bounding a hung Playwright web
+    # server.
     timeout-minutes: 25
     strategy:
       # One job's failure must not cancel its siblings: the other results are
       # what tell a reviewer whether the defect is viewport-specific, and
       # cancelling them turns one red spec into an unreadable run.
       fail-fast: false
+      # Listed rather than crossed because the projects shard differently;
+      # `shards` must equal the number of entries for its project, or tests
+      # past the last listed shard run nowhere. `weights` is one value per
+      # shard, in shard order, and identical across a project's entries.
       matrix:
-        project: [desktop-chromium, mobile-chromium]
-        shard: [1, 2]
-        shards: [2]
+        include:
+          - { project: desktop-chromium, shard: 1, shards: 3, weights: "1:1:1" }
+          - { project: desktop-chromium, shard: 2, shards: 3, weights: "1:1:1" }
+          - { project: desktop-chromium, shard: 3, shards: 3, weights: "1:1:1" }
+          - { project: mobile-chromium, shard: 1, shards: 2, weights: "57:100" }
+          - { project: mobile-chromium, shard: 2, shards: 2, weights: "57:100" }
     env:
       NEXTAUTH_URL: http://127.0.0.1:3100
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
@@ -1097,29 +1138,17 @@ jobs:
         timeout-minutes: 20
         run: scripts/ci/install-playwright.sh chromium
 
-      # Shard weights, shard 1 then shard 2, for both projects.
-      #
-      # `--shard` balances by test count in file-sized groups, and the heavy
-      # specs sort into shard 1 (chat-unified-workspace, 116 tests / 4.1 min;
-      # guest-turnstile-verification, ~5 s a test; image-generation-workspace).
-      # From 2026-08-26 to 2026-10-05 desktop shard 1's test step grew 9.8 ->
-      # 17.0 minutes while shard 2 grew 7.6 -> 9.5, and shard 1 set PR Fast
-      # Gate's wall clock. Both projects split the same files 512 / 435.
-      #
-      # 40:55 moves the boundary to 405 / 542. Replaying the measured per-test
-      # times of a 2026-10-05 run (which reproduce its actual 16.6 / 9.5 split
-      # exactly) gives 13.9 / 12.2 minutes for desktop; file granularity makes
-      # 13.9 the lowest maximum on offer (36:59 gives 12.2 / 14.0). Every test
-      # still lands in exactly one shard, and tests/uiRiskShardWeights.test.mjs
-      # pins one weight per shard. PWTEST_SHARD_WEIGHTS is Playwright's own,
-      # undocumented knob; without it the split falls back to equal counts.
-      # Recalibrate the same way when one shard drifts well past the other.
+      # Shard weights come from the matrix entry; the job's comment has the
+      # measurements behind each project's split. PWTEST_SHARD_WEIGHTS is
+      # Playwright's own, undocumented knob (lib/cli/testActions.js); if a
+      # release drops it the split falls back to equal counts, and a weight
+      # count that does not match the shard total fails the run loudly.
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 20
         env:
           UI_RISK_PROJECT: ${{ matrix.project }}
-          PWTEST_SHARD_WEIGHTS: "40:55"
+          PWTEST_SHARD_WEIGHTS: ${{ matrix.weights }}
         run: npm run test:e2e:ui-risk:shard -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload failed test evidence
