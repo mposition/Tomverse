@@ -10,17 +10,16 @@
 #   otherwise (some activating,
 #   deactivating, unreadable)   -> nothing
 #
-# The units are tomverse-bridge.service (the codex sessions), watched by name
-# while it is enabled, and every loaded instance of tomverse-amux-v22-bridge@ and
-# tomverse-amux-v22-sidecar@ (one pair per v22 worker). A production deploy on
-# 2026-10-12 halted all five bridges at once; one unit alone would have missed
-# four of them. Orchestration policy version 55 adds one bridge per worker,
-# tomverse-amux-bridge@<worker>; every loaded instance of it is checked too.
-# The older names stay for the transition. Stage S3 moves the codex sessions
-# to per-worker units and disables tomverse-bridge.service; from then on it is
-# no longer watched by name. A host with no bridge unit loaded at all -- for
-# example after a reboot with no per-worker instance enabled -- is down, never
-# an empty "all active".
+# The units are every loaded instance of tomverse-amux-bridge@ (orchestration
+# policy version 55: one bridge per worker, tomverse-amux-bridge@<worker>) and
+# of tomverse-amux-v22-sidecar@ (one sidecar per v22 worker). A production
+# deploy on 2026-10-12 halted all five bridges at once; one unit alone would
+# have missed four of them. The older tomverse-bridge.service and
+# tomverse-amux-v22-bridge@ units were removed from the host in stage S4 and
+# are not watched, by name or by pattern. A host with no bridge
+# (tomverse-amux-bridge@) instance loaded -- a host with only sidecars, or one
+# rebooted with no per-worker instance enabled -- is down, never an empty
+# "all active".
 #
 # Sending nothing is a signal too: the monitor turns a silence longer than its
 # grace period into an alert, which is also what the host going down, losing
@@ -35,10 +34,9 @@
 # nor forge the success signal with it. This script never prints it.
 set -euo pipefail
 
-main_unit=tomverse-bridge.service
-unit_patterns=('tomverse-amux-v22-bridge@*.service' 'tomverse-amux-v22-sidecar@*.service'
-  'tomverse-amux-bridge@*.service')
-unit_name='^(tomverse-amux-v22-(bridge|sidecar)|tomverse-amux-bridge)@[A-Za-z0-9_.-]+\.service$'
+unit_patterns=('tomverse-amux-bridge@*.service' 'tomverse-amux-v22-sidecar@*.service')
+bridge_name='^tomverse-amux-bridge@[A-Za-z0-9_.-]+\.service$'
+sidecar_name='^tomverse-amux-v22-sidecar@[A-Za-z0-9_.-]+\.service$'
 # A plain https URL: host, optional port, path segments. No query string, no
 # fragment, no credentials -- the check's own ping URL never needs them.
 url_pattern='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)+$'
@@ -56,22 +54,22 @@ fi
 down=0
 pending=0
 
-# The main unit is checked by name, listed or not, unless it was disabled or
-# removed on purpose (stage S3 and S4): a unit that is not loaded reads as
-# inactive, which is a stop. Any other answer, an unreadable one included,
-# keeps it watched. The instances are whatever is loaded. A listing that fails
-# is not an empty listing: it leaves the instance units unknown, so it counts
-# as unreadable and the run cannot send up.
+# The units are whatever is loaded. A listing that fails is not an empty
+# listing: it leaves the units unknown, so it counts as unreadable and the run
+# cannot send up.
 units=()
-main_file_state=$(systemctl is-enabled "$main_unit" 2>/dev/null || true)
-case "$main_file_state" in
-  disabled | not-found | masked) ;;
-  *) units+=("$main_unit") ;;
-esac
+bridges=0
+listed=no
 if listing=$(systemctl list-units --all --plain --no-legend --type=service \
   "${unit_patterns[@]}" 2>&1); then
+  listed=yes
   while read -r name _; do
-    [[ "$name" =~ $unit_name ]] && units+=("$name")
+    if [[ "$name" =~ $bridge_name ]]; then
+      units+=("$name")
+      bridges=$((bridges + 1))
+    elif [[ "$name" =~ $sidecar_name ]]; then
+      units+=("$name")
+    fi
   done <<<"$listing"
 else
   pending=$((pending + 1))
@@ -103,7 +101,10 @@ for unit in "${units[@]}"; do
   esac
 done
 
-if ((${#units[@]} == 0 && pending == 0)); then
+# Sidecars alone are not a bridge: with no tomverse-amux-bridge@ instance
+# loaded nothing dispatches, whatever the sidecars say. Only a listing that was
+# read can say there is none.
+if [[ "$listed" == yes ]] && ((bridges == 0)); then
   down=$((down + 1))
   echo "tomverse-bridge-watchdog: no bridge unit is loaded"
 fi

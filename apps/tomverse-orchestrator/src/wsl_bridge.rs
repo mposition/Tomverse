@@ -201,40 +201,17 @@ pub const WSL_BRIDGE_ENV_NAME: &str = "TOMVERSE_AMUX_WSL_BRIDGE";
 
 pub const WSL_BRIDGE_LOCAL_URL_ENV: &str = "TOMVERSE_AMUX_WSL_LOCAL_URL";
 
-/// Optional comma-separated session names. When set, only those running
-/// sessions register as runtimes, so a pilot can hold the runner to one
-/// worker and therefore one attempt at a time. It only narrows; unset keeps
-/// every running session.
-pub const WSL_BRIDGE_SESSIONS_ENV: &str = "TOMVERSE_AMUX_WSL_SESSIONS";
-
-/// `None` means no restriction. A value that names no valid session is an
-/// empty allowlist: nothing registers, and the runner exits as it does with
-/// no running session.
-pub fn session_allowlist(value: Option<&str>) -> Option<Vec<String>> {
-    let value = value?;
-    Some(
-        value
-            .split(',')
-            .map(str::trim)
-            .filter(|name| valid_session_name(name))
-            .map(str::to_owned)
-            .collect(),
-    )
-}
-
 pub fn session_allowed(allowlist: &Option<Vec<String>>, name: &str) -> bool {
     allowlist
         .as_ref()
         .is_none_or(|names| names.iter().any(|allowed| allowed == name))
 }
 
-/// Orchestration policy version 35, section 4: whether the session list lets
-/// a session register or be offered for dispatch. Off leaves the environment
-/// allowlist alone; a list narrows it (the two are intersected during the
-/// transition); an unreadable list lets nothing through.
+/// Orchestration policy version 55, section 2: whether the worker-scope list
+/// lets a session register or be offered for dispatch. A list lets through
+/// only the names it holds; an unreadable list lets nothing through.
 pub fn session_listed(list: &WorkerSessionList, name: &str) -> bool {
     match list {
-        WorkerSessionList::Off => true,
         WorkerSessionList::Listed(names) => names.contains(name),
         WorkerSessionList::Unreadable => false,
     }
@@ -243,10 +220,6 @@ pub fn session_listed(list: &WorkerSessionList, name: &str) -> bool {
 /// How the binary was started (orchestration policy version 55, section 2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeArgs {
-    /// No arguments: the bridge exactly as before version 55 -- the
-    /// environment allowlist, the session list and the environment's sidecar
-    /// socket.
-    Sessions,
     /// `--worker <name>`: one bridge for one worker, its scope read from the
     /// app.
     Worker(String),
@@ -255,19 +228,17 @@ pub enum BridgeArgs {
     DmRelay,
 }
 
-/// Exactly three forms are accepted: no arguments, `--worker <name>` with
-/// a name in the session-name grammar, or `--dm-relay` alone. Anything else
-/// -- another flag, a missing or extra value, a name that is not a session
-/// name, an argument that is not UTF-8 -- is refused, and the binary does
-/// not start.
+/// Exactly two forms are accepted: `--worker <name>` with a name in the
+/// session-name grammar, or `--dm-relay` alone. Anything else -- no
+/// arguments (the version 35 mode is gone), another flag, a missing or extra
+/// value, a name that is not a session name, an argument that is not UTF-8 --
+/// is refused, and the binary does not start.
 pub fn parse_bridge_args<I>(args: I) -> Option<BridgeArgs>
 where
     I: IntoIterator<Item = std::ffi::OsString>,
 {
     let mut args = args.into_iter();
-    let Some(flag) = args.next() else {
-        return Some(BridgeArgs::Sessions);
-    };
+    let flag = args.next()?;
     if flag.to_str() == Some("--dm-relay") {
         return args.next().is_none().then_some(BridgeArgs::DmRelay);
     }
@@ -370,9 +341,8 @@ where
     (WorkerScopeGate::Admitted, Some(kind))
 }
 
-/// The gate as the run loop's existing session-list checks read it: the
-/// worker alone when admitted, nobody otherwise. Never `Off`, which would let
-/// every session through.
+/// The gate as the run loop's session-list checks read it: the worker alone
+/// when admitted, nobody otherwise.
 pub fn worker_scope_session_list(gate: WorkerScopeGate, worker: &str) -> WorkerSessionList {
     let mut names = std::collections::BTreeSet::new();
     if gate == WorkerScopeGate::Admitted {
@@ -446,56 +416,24 @@ impl WorkerScope {
         }
     }
 
-    fn v22_socket(&self) -> Option<String> {
-        (self.bound == Some(WorkerBridgeKind::V22)).then(|| v22_sidecar_socket_path(&self.worker))
-    }
-}
-
-/// Which local sessions one bridge process may register and offer for
-/// dispatch.
-pub enum BridgeScope {
-    /// Started without `--worker`: the version 35 session list, the
-    /// environment allowlist and the environment's sidecar socket, exactly as
-    /// before version 55. Kept for the transition (version 55, section 2).
-    SessionList { v22_socket: Option<String> },
-    /// Started with `--worker <name>` (version 55, section 2): that worker's
-    /// session only, gated every round by the bridge-scope route. Neither
-    /// `TOMVERSE_AMUX_WSL_SESSIONS` nor `TOMVERSE_AMUX_V22_SIDECAR_SOCKET` is
-    /// read.
-    Worker(WorkerScope),
-}
-
-impl BridgeScope {
+    /// The one session this bridge may register and offer for dispatch.
     fn allowlist(&self) -> Option<Vec<String>> {
-        match self {
-            BridgeScope::SessionList { .. } => {
-                session_allowlist(std::env::var(WSL_BRIDGE_SESSIONS_ENV).ok().as_deref())
-            }
-            BridgeScope::Worker(scope) => Some(vec![scope.worker.clone()]),
-        }
+        Some(vec![self.worker.clone()])
     }
 
     /// Read at start and at the top of every round. Never a halt.
     async fn session_list(&mut self, api: &crate::tomverse_api::TomverseApi) -> WorkerSessionList {
-        match self {
-            BridgeScope::SessionList { .. } => api.worker_session_list().await,
-            BridgeScope::Worker(scope) => {
-                let answer = api.worker_bridge_scope().await;
-                let gate = scope.observe(&answer, v22_sidecar_socket_present);
-                worker_scope_session_list(gate, &scope.worker)
-            }
-        }
+        let answer = api.worker_bridge_scope().await;
+        let gate = self.observe(&answer, v22_sidecar_socket_present);
+        worker_scope_session_list(gate, &self.worker)
     }
 
-    /// The sidecar socket the run hands to `HttpLocal`. For a `--worker`
-    /// bridge it is set once the worker is first admitted as `v22`, and kept
-    /// after that -- a kind change must not cut off the sidecar an attempt
-    /// already in flight settles through.
+    /// The sidecar socket the run hands to `HttpLocal`. It is set once the
+    /// worker is first admitted as `v22`, and kept after that -- a kind change
+    /// must not cut off the sidecar an attempt already in flight settles
+    /// through.
     fn v22_socket(&self) -> Option<String> {
-        match self {
-            BridgeScope::SessionList { v22_socket } => v22_socket.clone(),
-            BridgeScope::Worker(scope) => scope.v22_socket(),
-        }
+        (self.bound == Some(WorkerBridgeKind::V22)).then(|| v22_sidecar_socket_path(&self.worker))
     }
 }
 
@@ -2825,28 +2763,18 @@ async fn settle_unavailable_review_feedback(
     true
 }
 
-/// The bridge started without arguments: exactly as before orchestration
-/// policy version 55.
-pub async fn run_from_env() -> i32 {
-    run_bridge(BridgeScope::SessionList {
-        v22_socket: std::env::var("TOMVERSE_AMUX_V22_SIDECAR_SOCKET").ok(),
-    })
-    .await
-}
-
 /// The bridge started with `--worker <name>` (orchestration policy version
-/// 55, section 2). The same run, the same halts and the same lease handling;
-/// only which session it may register and offer, and which sidecar it talks
-/// to, come from the bridge-scope route instead of the environment.
+/// 55, section 2). Which session it may register and offer, and which sidecar
+/// it talks to, come from the bridge-scope route.
 pub async fn run_worker_from_env(worker: &str) -> i32 {
     if !valid_session_name(worker) {
         eprintln!("amux wsl bridge worker name is invalid");
         return 1;
     }
-    run_bridge(BridgeScope::Worker(WorkerScope::new(worker))).await
+    run_bridge(WorkerScope::new(worker)).await
 }
 
-async fn run_bridge(mut scope: BridgeScope) -> i32 {
+async fn run_bridge(mut scope: WorkerScope) -> i32 {
     let Ok(local_url) = std::env::var(WSL_BRIDGE_LOCAL_URL_ENV) else {
         eprintln!("amux wsl bridge local url is unset");
         return 1;
@@ -2903,12 +2831,6 @@ async fn run_bridge(mut scope: BridgeScope) -> i32 {
         .partition(|row| session_listed(&session_list, &row.name));
     for row in deferred {
         awaiting_registration.push((row.name, Uuid::new_v4().to_string()));
-    }
-    // A `--worker` bridge has already said why, in its own words.
-    if !awaiting_registration.is_empty() && matches!(scope, BridgeScope::SessionList { .. }) {
-        eprintln!(
-            "amux wsl bridge warn: the session list does not let every running session through yet; waiting"
-        );
     }
     let mut registered = BTreeMap::new();
     for row in &running {
@@ -4327,64 +4249,8 @@ mod tests {
     }
 
     #[test]
-    fn the_session_list_reads_three_ways_and_only_the_exact_shapes_count() {
-        // Orchestration policy version 35, section 4.
-        use crate::tomverse_api::plan_worker_session_list;
-        // Only a field that is present counts: a null is not an absent field.
-        let body = |listed: bool, workers: Option<Vec<&str>>, reason: Option<&str>| {
-            let mut object = serde_json::Map::new();
-            object.insert("listed".into(), serde_json::Value::Bool(listed));
-            if let Some(names) = workers {
-                object.insert("workers".into(), serde_json::json!(names));
-            }
-            if let Some(reason) = reason {
-                object.insert("reason".into(), serde_json::json!(reason));
-            }
-            serde_json::Value::Object(object)
-        };
-        assert_eq!(
-            plan_worker_session_list(&body(true, Some(vec!["claude-impl", "codex-chore"]), None)),
-            WorkerSessionList::Listed(
-                ["claude-impl".to_owned(), "codex-chore".to_owned()]
-                    .into_iter()
-                    .collect()
-            )
-        );
-        assert_eq!(
-            plan_worker_session_list(&body(true, Some(vec![]), None)),
-            WorkerSessionList::Listed(Default::default())
-        );
-        assert_eq!(
-            plan_worker_session_list(&body(false, None, Some("session_list_off"))),
-            WorkerSessionList::Off
-        );
-        // The catalog that cannot be derived, and every malformed shape, is
-        // unreadable -- never a list, never off.
-        for unreadable in [
-            body(false, None, Some("worker_catalog_unavailable")),
-            body(false, None, Some("execution_api_disabled")),
-            body(false, None, None),
-            body(true, None, None),
-            body(true, Some(vec!["claude-impl"]), Some("session_list_off")),
-            body(false, Some(vec![]), Some("session_list_off")),
-            serde_json::json!({ "listed": false, "workers": null, "reason": "session_list_off" }),
-            serde_json::json!({ "listed": true, "workers": ["claude-impl"], "reason": null }),
-            serde_json::json!({ "listed": true, "workers": [1] }),
-            serde_json::json!({ "listed": false, "reason": "session_list_off", "extra": 1 }),
-            serde_json::json!(["claude-impl"]),
-        ] {
-            assert_eq!(
-                plan_worker_session_list(&unreadable),
-                WorkerSessionList::Unreadable
-            );
-        }
-    }
-
-    #[test]
-    fn the_session_list_narrows_the_allowlist_and_an_unreadable_one_lets_nothing_through() {
+    fn the_session_list_lets_through_only_its_names_and_an_unreadable_one_lets_nothing_through() {
         let listed = WorkerSessionList::Listed(["claude-impl".to_owned()].into_iter().collect());
-        assert!(session_listed(&WorkerSessionList::Off, "claude-impl"));
-        assert!(session_listed(&WorkerSessionList::Off, "anything"));
         assert!(session_listed(&listed, "claude-impl"));
         assert!(!session_listed(&listed, "codex-chore"));
         assert!(!session_listed(
@@ -4396,19 +4262,23 @@ mod tests {
     #[test]
     fn the_run_reads_the_session_list_at_start_and_every_round_and_never_halts_on_it() {
         let source = include_str!("wsl_bridge.rs");
-        // Without `--worker` the scope's read is the version 35 session list
-        // itself, and the environment's sidecar socket, both as before.
-        let scope = &source[source.find("impl BridgeScope {").unwrap()..];
+        // The scope's read is the per-worker bridge-scope gate, and nothing of
+        // the version 35 mode (session list route, environment allowlist,
+        // environment sidecar socket) remains in the production code.
+        let scope = &source[source.find("impl WorkerScope {").unwrap()..];
         let scope = &scope[..scope.find("/// Exit status of a runner").unwrap()];
-        assert!(scope.contains("BridgeScope::SessionList { .. } => api.worker_session_list().await,"));
-        assert!(scope.contains(
-            "BridgeScope::SessionList { .. } => {\n                session_allowlist(std::env::var(WSL_BRIDGE_SESSIONS_ENV).ok().as_deref())"
-        ));
-        let legacy = &source[source.find("pub async fn run_from_env").unwrap()..];
-        let legacy = &legacy[..legacy.find("pub async fn run_worker_from_env").unwrap()];
-        assert!(legacy.contains(
-            "run_bridge(BridgeScope::SessionList {\n        v22_socket: std::env::var(\"TOMVERSE_AMUX_V22_SIDECAR_SOCKET\").ok(),"
-        ));
+        assert!(scope.contains("let answer = api.worker_bridge_scope().await;"));
+        let production = &source[..source.find("#[cfg(test)]").unwrap()];
+        for gone in [
+            "worker_session_list(",
+            "TOMVERSE_AMUX_WSL_SESSIONS",
+            "TOMVERSE_AMUX_V22_SIDECAR_SOCKET",
+            "BridgeScope::SessionList",
+            "enum BridgeScope",
+            "pub async fn run_from_env",
+        ] {
+            assert!(!production.contains(gone), "{gone}");
+        }
         let run = &source[source.find("async fn run_bridge(").unwrap()..];
         let start = run
             .find("let session_list = scope.session_list(&api).await;")
@@ -4459,11 +4329,11 @@ mod tests {
     }
 
     #[test]
-    fn the_binary_accepts_no_arguments_or_exactly_one_worker() {
+    fn the_binary_accepts_exactly_one_worker_or_the_relay_and_refuses_no_arguments() {
         // Orchestration policy version 55, section 2.
         use std::ffi::OsString;
         let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
-        assert_eq!(parse_bridge_args(args(&[])), Some(BridgeArgs::Sessions));
+        assert_eq!(parse_bridge_args(args(&[])), None);
         assert_eq!(
             parse_bridge_args(args(&["--worker", "claude-impl"])),
             Some(BridgeArgs::Worker("claude-impl".to_owned()))
@@ -4496,11 +4366,14 @@ mod tests {
             let not_utf8 = vec![OsString::from("--worker"), OsString::from_vec(vec![0xff, 0x61])];
             assert_eq!(parse_bridge_args(not_utf8), None);
         }
-        // The binary parses before anything else and runs the old path for
-        // no arguments.
+        // The binary parses before anything else, and no arguments end at the
+        // same refusal as any other invalid argument list.
         let binary = include_str!("bin/tomverse-wsl-bridge.rs");
         assert!(binary.contains("parse_bridge_args(std::env::args_os().skip(1))"));
-        assert!(binary.contains("BridgeArgs::Sessions => tomverse_orchestrator::wsl_bridge::run_from_env().await,"));
+        assert!(!binary.contains("BridgeArgs::Sessions"));
+        assert!(!binary.contains("run_from_env().await"));
+        assert!(binary.contains("arguments are invalid"));
+        assert!(binary.contains("return std::process::ExitCode::from(1);"));
         assert!(binary.contains("BridgeArgs::Worker(worker) => {"));
         assert!(binary.contains(
             "BridgeArgs::DmRelay => tomverse_orchestrator::wsl_bridge::run_dm_relay_from_env().await,"
@@ -4734,8 +4607,6 @@ mod tests {
         ];
         for gate in gates {
             let list = worker_scope_session_list(gate, "claude-impl");
-            // Never off: off lets every session through.
-            assert_ne!(list, WorkerSessionList::Off);
             assert_eq!(session_listed(&list, "claude-impl"), gate == WorkerScopeGate::Admitted);
             assert!(!session_listed(&list, "codex-chore"));
         }
@@ -4834,22 +4705,17 @@ mod tests {
     fn a_worker_bridge_reads_neither_environment_list_nor_socket() {
         let source = include_str!("wsl_bridge.rs");
         let scope = &source[source.find("pub struct WorkerScope {").unwrap()..];
-        let scope = &scope[..scope.find("/// Which local sessions one bridge process").unwrap()];
+        let scope = &scope[..scope.find("/// Exit status of a runner").unwrap()];
         assert!(!scope.contains("std::env"));
-        let bridge = &source[source.find("impl BridgeScope {").unwrap()..];
-        let bridge = &bridge[..bridge.find("/// Exit status of a runner").unwrap()];
-        assert!(bridge.contains("BridgeScope::Worker(scope) => Some(vec![scope.worker.clone()]),"));
-        assert!(bridge.contains("let answer = api.worker_bridge_scope().await;"));
-        // Exactly one environment read in the scope, and it is the session
-        // list branch's allowlist.
-        assert_eq!(bridge.matches("std::env::var(").count(), 1);
+        assert!(scope.contains("Some(vec![self.worker.clone()])"));
+        assert!(scope.contains("let answer = api.worker_bridge_scope().await;"));
         let worker = &source[source.find("pub async fn run_worker_from_env").unwrap()..];
         let worker = &worker[..worker.find("async fn run_bridge(").unwrap()];
         assert!(!worker.contains("std::env"));
         assert!(worker.contains("if !valid_session_name(worker) {"));
         assert!(worker.contains("return 1;"));
         // A `--worker` allowlist is the worker alone.
-        let only = BridgeScope::Worker(WorkerScope::new("claude-impl")).allowlist();
+        let only = WorkerScope::new("claude-impl").allowlist();
         assert!(session_allowed(&only, "claude-impl"));
         assert!(!session_allowed(&only, "codex-chore"));
     }
@@ -5265,7 +5131,7 @@ mod tests {
         // 0 is a clean shutdown and 1 is a startup failure; a halt is neither.
         assert!(BRIDGE_HALT_EXIT_CODE != 0 && BRIDGE_HALT_EXIT_CODE != 1);
         let source = include_str!("wsl_bridge.rs");
-        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let run = &source[source.find("pub async fn run_worker_from_env").unwrap()..];
         let run = &run[..run.find("fn local_client").unwrap()];
         assert!(run.contains("return BRIDGE_HALT_EXIT_CODE;"));
         assert!(!run.contains("worker_register(&name"), "a lost lease never re-registers");
@@ -5333,7 +5199,7 @@ mod tests {
     #[test]
     fn every_halt_in_the_run_loop_records_its_cause() {
         let source = include_str!("wsl_bridge.rs");
-        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let run = &source[source.find("pub async fn run_worker_from_env").unwrap()..];
         let run = &run[..run.find("fn local_client").unwrap()];
         // `*halted = true;` is `record_bridge_tick_results`, defined in this
         // span; its caller names that cause (`dispatch_outcome_unknown`).
@@ -5620,7 +5486,7 @@ mod tests {
     #[test]
     fn the_run_loop_reads_the_local_board_and_never_writes_it() {
         let source = include_str!("wsl_bridge.rs");
-        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let run = &source[source.find("pub async fn run_worker_from_env").unwrap()..];
         let run = &run[..run.find("fn local_client").unwrap()];
         assert!(run.contains("local_completion(&client, &base, &mut board, &mut entry, now)"));
         assert!(run.contains(".execution_settle_with_review_pr("));
@@ -5631,14 +5497,13 @@ mod tests {
 
     #[test]
     fn the_session_allowlist_only_narrows() {
-        let unset = session_allowlist(None);
+        let unset = None;
         assert!(session_allowed(&unset, "claude-impl"));
-        let one = session_allowlist(Some(" claude-impl , "));
+        let one = Some(vec!["claude-impl".to_owned()]);
         assert!(session_allowed(&one, "claude-impl"));
         assert!(!session_allowed(&one, "codex-impl"));
-        let invalid = session_allowlist(Some("a/b"));
-        assert!(!session_allowed(&invalid, "a/b"));
-        assert!(!session_allowed(&invalid, "claude-impl"));
+        let none: Option<Vec<String>> = Some(vec![]);
+        assert!(!session_allowed(&none, "claude-impl"));
     }
 
     /// A one-request HTTP server that answers every request with this status
@@ -6233,7 +6098,7 @@ mod tests {
             &api,
             &mut awaiting,
             &mut sessions,
-            &WorkerSessionList::Off,
+            &WorkerSessionList::Listed(["codex-impl".to_owned()].into_iter().collect()),
         )
         .await;
         assert!(awaiting.is_empty());
@@ -6259,7 +6124,7 @@ mod tests {
             &api,
             &mut awaiting,
             &mut sessions,
-            &WorkerSessionList::Off,
+            &WorkerSessionList::Listed(["claude-impl".to_owned()].into_iter().collect()),
         )
         .await;
         assert!(awaiting.is_empty());
