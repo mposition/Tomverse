@@ -384,3 +384,24 @@ test("every status a round's actions will write is recorded before they run", ()
   // #8 (release) is owed a status; #9 (only a cancel) is not; #5 stays owed.
   assert.deepEqual(evaluation.state.statusRetry.sort(), [5, 8]);
 });
+
+test("a hold the last round recorded but GitHub still shows ready is judged again, not dropped", () => {
+  const held = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(4)], runningShas: new Set([sha(1), sha(4)]), arrival: 4 });
+  assert.deepEqual(kinds(held), ["hold:4"]);
+  assert.deepEqual(held.state.holding, [4]);
+  // The process stopped before drafting #4: the next round finds it ready.
+  const next = run({ state: held.state, openPulls: [pull(1), pull(4)], runningShas: new Set([sha(1), sha(4)]), nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(next), ["hold:4"]);
+  assert.ok(!next.state.events.some((e) => e.number === 4 && e.detail === "ready_elsewhere"));
+});
+
+test("slots of a pull request held this round count as free for the release that follows", () => {
+  // Budget 2: draft #7 waits; #9 arrives with its runs already visible. Both fit.
+  const evaluation = run({
+    state: state({ capacity: 2, queue: [queued(7)] }),
+    openPulls: [pull(7, { draft: true }), pull(9)],
+    runningShas: new Set([sha(9)]),
+    arrival: 9,
+  });
+  assert.deepEqual(kinds(evaluation), ["release:7", "admit:9"]);
+});

@@ -126,6 +126,8 @@ const stateSchema = z
      * stopped before making it), it goes back to the top of the line.
      */
     releasing: z.array(queueEntrySchema).max(MAX_QUEUE).default([]),
+    /** The pull requests the last round held: one GitHub still shows ready is judged again. */
+    holding: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
     /**
      * Pull requests whose `CI admission` commit status is yet to be written:
      * recorded with the round's judgment, taken off once written. The service
@@ -160,6 +162,7 @@ export const emptyCiAdmissionState = (): CiAdmissionState => ({
   granted: [],
   pendingArrivals: [],
   releasing: [],
+  holding: [],
   statusRetry: [],
   events: [],
   lastRound: null,
@@ -260,7 +263,13 @@ export function evaluateCiAdmission(input: {
 
   // Arrivals left over from a round whose GitHub read failed are judged first,
   // then this round's own, each in turn.
-  const arrivals = [...new Set([...input.state.pendingArrivals, ...(input.arrival === null ? [] : [input.arrival])])];
+  // A hold the last round recorded that GitHub does not show (the pull request
+  // is still ready: the draft conversion failed or never ran) is judged again
+  // too, rather than taken for one made ready elsewhere.
+  const unconfirmedHolds = input.state.holding.filter((number) => open.get(number)?.draft === false);
+  const arrivals = [
+    ...new Set([...input.state.pendingArrivals, ...unconfirmedHolds, ...(input.arrival === null ? [] : [input.arrival])]),
+  ];
 
   // The line keeps only open drafts admission still handles.
   const queue: CiAdmissionQueueEntry[] = [];
@@ -343,10 +352,14 @@ export function evaluateCiAdmission(input: {
     event("cancelled", pull.number, "draft_rerun");
   }
 
-  // Release strictly from the top: the operator's order is the order.
-  let used = usedBy(null);
+  // Release strictly from the top: the operator's order is the order. A pull
+  // request held in this evaluation gives up the slots its runs held.
   const releasedNow = new Set<number>();
   const heldNow = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
+  let used = input.openPulls.reduce((sum, pull) => {
+    const units = ciAdmissionUnits(pull);
+    return units !== null && !heldNow.has(pull.number) && running(pull) ? sum + units : sum;
+  }, 0);
   while (queue.length > 0) {
     const top = queue[0];
     const pull = open.get(top.number);
@@ -396,6 +409,7 @@ export function evaluateCiAdmission(input: {
       granted: [...grantedHead].map(([number, headSha]) => ({ number, headSha })).slice(0, MAX_QUEUE),
       pendingArrivals: [],
       releasing: actions.flatMap((action) => (action.kind === "release" ? [action.entry] : [])),
+      holding: actions.flatMap((action) => (action.kind === "hold" ? [action.pull.number] : [])),
       // Every status this round's actions will write is recorded before they
       // run; the service takes each off once written, so a stop in between
       // leaves it for the next round to write.
