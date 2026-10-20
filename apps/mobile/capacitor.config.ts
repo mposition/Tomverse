@@ -6,6 +6,8 @@ const config: CapacitorConfig = {
   appId: "app.tomverse.shell",
   appName: "Tomverse",
   webDir: "dist",
+  // Bridge debug logs include plugin result data, including access grants.
+  loggingBehavior: "none",
   plugins: { MobileAuth: { apiOrigin: "https://tomverse.app" } },
 };
 export default config;

@@ -9,4 +9,7 @@ android {
         targetCompatibility JavaVersion.VERSION_21
     }
 }
-dependencies { implementation project(':capacitor-android') }
+dependencies {
+    implementation project(':capacitor-android')
+    implementation "androidx.appcompat:appcompat:${rootProject.ext.androidxAppCompatVersion}"
+}

@@ -95,8 +95,60 @@ The full Next webpack build remains blocked by the existing Admin import chain
 from decisionMakerBodyCore (node:crypto) into AmuxDecisionMakerRequestsPanel.
 Those Admin files are unchanged in this implementation.
 
-Android assembly was attempted but this PC has no Java/Android SDK. iOS cannot
-be built on this Windows PC. Native plugin sources, platform projects and
-browser tests are not proof of native compilation, OS secure-store behavior,
-verified links or device restoration. These checks and operational enrollment
-remain open; this is not a released MVP.
+Android assembly, installation and local native authentication have now been
+verified as described below. iOS still cannot be built on this Windows PC.
+Physical-device verification, production links and operational enrollment remain
+open; this is not a released MVP.
+
+## Android native verification (2026-10-20)
+
+The user-authorized toolchain installation used checksum-verified Temurin
+21.0.12.1+1 and Android command-line tools 15859902. Installed SDK components:
+platform 36, build-tools 35.0.0/36.0.0, platform-tools 37.0.1, emulator 37.2.12 and
+the API 36 Google APIs x86_64 image. JAVA_HOME and ANDROID_HOME are configured
+at user scope; an already-open terminal may need those user values reloaded.
+
+The native plugin now declares AppCompat explicitly, fixing its first actual
+Java compilation failure. Bridge logging is disabled even for debug builds,
+because Capacitor debug logs can include access-token results. A regression
+check protects that configuration.
+
+The ordinary debug APK builds with the workspace build:android script. It uses
+the provisional app.tomverse.shell ID, a generated development signer and bundled
+assets. Its verification copy is .tmp/native-01/tomverse-android-debug.apk
+(SHA-256 e517314d5d38b43fa69e678d6a079038c03ec2cc743f3603478d09a8a18a73a6).
+The packaged config was checked for loggingBehavior=none, no remote server URL
+and no local test CA.
+
+No physical phone was connected. The dedicated Android 16/API 36 emulator
+installed and launched the APK. A separate debug fixture APK, built using an
+external Gradle init file, trusted a short-lived local CA for the isolated test.
+Neither that trust override nor its private key is part of the ordinary APK or
+tracked source. All test HTTPS tunnels terminated locally; other TLS hosts and
+paid Chat/voice executions were refused.
+
+The browser form and mail delivery were synthetic. Verification reused the
+existing email-code verifier, PKCE grant service, exchange/refresh/logout route
+handlers, live session checks and authenticated conversation-list handler
+against an isolated PostgreSQL database. Observed results:
+
+- System Chrome opened from the installed app; the code verifier accepted the
+  synthetic code and a user-clicked HTTPS callback returned to the app.
+- Native grant exchange returned 200, followed by bearer conversation-list 200.
+- The native preference held only an AES-GCM IV and ciphertext. Credential-shaped
+  plugin result log count was zero; no raw credentials were exported in evidence.
+- After force-stop and relaunch, native refresh returned 200 and authenticated
+  conversation-list read returned 200 again.
+- Logout returned 204 and cleared the native sealed session record.
+
+The database receipt showed two refresh-rotation records and a family revoked
+for logout. Android Gradle unit tasks passed. Mobile logging/CI admission
+regressions passed 55 cases; the final logging guard passed all eight cases.
+Mobile TypeScript and scoped lint passed. APK Signature Scheme v2 verified.
+
+The emulator's domain state was manually approved for this callback test after
+its unverified state was recorded. This is not domain-ownership verification,
+production AASA/assetlinks publication, real mail receipt or Google/Apple SSO
+evidence. The full Next sign-in page was not used in the final fixture.
+Playwright WebView attachment disrupted native callback completion on this
+image; app actions and screenshots used ADB without attaching that debugger.
