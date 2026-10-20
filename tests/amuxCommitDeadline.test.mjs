@@ -266,6 +266,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // v21 claim mode guard body; no commit-deadline marker, classifier or
   // deferred trigger changes.
   "20261020090000_amux_v19_subscription_channels",
+  // Intake v19 subscription unknown closures return their headroom: a claim
+  // CHECK widening and the v21 claim mode guard body; no commit-deadline
+  // marker, classifier or deferred trigger changes.
+  "20261020120000_amux_v19_shadow_unknown_headroom",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
