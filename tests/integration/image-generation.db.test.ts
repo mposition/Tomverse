@@ -9,6 +9,7 @@ import {
 import { retryImageGenerationTarget } from "@/lib/imageGenerationService";
 import { startChatImageTurn } from "@/lib/chatImageTurn";
 import { attachChatImageTurns } from "@/lib/chatImageTurnRead";
+import { readPreviousImagePrompt } from "@/lib/chatImageIntent";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import {
   auditImageGenerationInvariants,
@@ -918,6 +919,12 @@ test("a Chat image turn answers in the chat conversation and replays without cha
     select: { id: true, role: true, content: true },
   });
   assert.equal(messages.length, 2);
+  // A follow-up ("make it bluer") finds the prompt that made this image,
+  // and only in its owner's conversation.
+  assert.equal(await readPreviousImagePrompt(user.id, chat.id), "a small cat icon");
+  const stranger = await createUser();
+  assert.equal(await readPreviousImagePrompt(stranger.id, chat.id), null);
+
   const read = await attachChatImageTurns(user.id, chat.id, messages);
   assert.deepEqual(read[1], {
     id: turnInput.assistantMessageId,

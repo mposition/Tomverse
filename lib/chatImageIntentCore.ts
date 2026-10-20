@@ -52,9 +52,22 @@ export type ChatImageModelCandidate = {
     credits: Partial<Record<ImagePreset, number>>;
 };
 
+/**
+ * `prompt` is set only for a follow-up to the conversation's previous image
+ * ("make it bluer"): the complete prompt for the new image, the previous one
+ * with the change applied. Null means the message itself is the prompt.
+ */
 export type ChatImageDecision =
     | { image: false }
-    | { image: true; modelId: string | null; preset: ImagePreset | null };
+    | {
+          image: true;
+          modelId: string | null;
+          preset: ImagePreset | null;
+          prompt: string | null;
+      };
+
+/** A follow-up rewrite longer than this is cut, never trusted whole. */
+export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 2_000;
 
 /** Enabled models with at least one square price, in catalogue order. */
 export const chatImageModelCandidates = (
@@ -100,6 +113,8 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
     "A separate image generator exists. Decide whether this message asks for a new image to be created and, if it does, which image model and preset should make it.",
     "",
     CHAT_IMAGE_ROUTING_CRITERIA,
+    "",
+    "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details or composition, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language. In every other case prompt is an empty string.",
     "When image=false, fill modelId and preset with any listed value; they are ignored.",
 ].join("\n");
 
@@ -107,10 +122,11 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
 export const chatImageIntentPrompt = (text: string): string =>
     text.trim().slice(0, CHAT_IMAGE_INTENT_MAX_PROMPT_CHARS);
 
-/** The model list, then the message. */
+/** The model list, the previous image when there is one, then the message. */
 export const chatImageIntentUserMessage = (
     text: string,
-    candidates: readonly ChatImageModelCandidate[]
+    candidates: readonly ChatImageModelCandidate[],
+    previousImagePrompt: string | null = null
 ): string =>
     [
         "Image models (credits per 1024x1024 image, by preset):",
@@ -121,6 +137,13 @@ export const chatImageIntentUserMessage = (
             return `- ${candidate.id} (${candidate.name}; ${candidate.latency}): ${prices}`;
         }),
         "",
+        ...(previousImagePrompt
+            ? [
+                  "Previous image:",
+                  previousImagePrompt.slice(0, CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS),
+                  "",
+              ]
+            : []),
         "Message:",
         chatImageIntentPrompt(text),
     ].join("\n");
@@ -133,8 +156,9 @@ export const chatImageIntentOutputSchema = (
         image: { type: "boolean" as const },
         modelId: { type: "string" as const, enum: candidates.map((candidate) => candidate.id) },
         preset: { type: "string" as const, enum: [...PRESETS] },
+        prompt: { type: "string" as const },
     },
-    required: ["image", "modelId", "preset"],
+    required: ["image", "modelId", "preset", "prompt"],
     additionalProperties: false as const,
 });
 
@@ -145,26 +169,43 @@ export const chatImageIntentOutputSchema = (
  */
 export const parseChatImageIntentOutput = (
     output: unknown,
-    candidates: readonly ChatImageModelCandidate[]
+    candidates: readonly ChatImageModelCandidate[],
+    /** A rewrite is kept only when the call was shown a previous image. */
+    followUpAllowed = false
 ): ChatImageDecision => {
     if (typeof output !== "object" || output === null) return { image: false };
-    const value = output as { image?: unknown; modelId?: unknown; preset?: unknown };
+    const value = output as {
+        image?: unknown;
+        modelId?: unknown;
+        preset?: unknown;
+        prompt?: unknown;
+    };
     if (value.image !== true) return { image: false };
+    const rewrite =
+        followUpAllowed && typeof value.prompt === "string"
+            ? value.prompt.trim().slice(0, CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS)
+            : "";
+    const prompt = rewrite || null;
     const candidate = candidates.find((entry) => entry.id === value.modelId);
-    if (!candidate) return { image: true, modelId: null, preset: null };
+    if (!candidate) return { image: true, modelId: null, preset: null, prompt };
     const preset =
         typeof value.preset === "string" &&
         (PRESETS as readonly string[]).includes(value.preset) &&
         candidate.credits[value.preset as ImagePreset] !== undefined
             ? (value.preset as ImagePreset)
             : null;
-    return { image: true, modelId: candidate.id, preset };
+    return { image: true, modelId: candidate.id, preset, prompt };
 };
 
 /** The client's reading of the route's JSON; anything malformed is chat. */
 export const readChatImageDecision = (data: unknown): ChatImageDecision => {
     if (typeof data !== "object" || data === null) return { image: false };
-    const value = data as { image?: unknown; modelId?: unknown; preset?: unknown };
+    const value = data as {
+        image?: unknown;
+        modelId?: unknown;
+        preset?: unknown;
+        prompt?: unknown;
+    };
     if (value.image !== true) return { image: false };
     return {
         image: true,
@@ -173,6 +214,10 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
             typeof value.preset === "string" &&
             (PRESETS as readonly string[]).includes(value.preset)
                 ? (value.preset as ImagePreset)
+                : null,
+        prompt:
+            typeof value.prompt === "string" && value.prompt.trim()
+                ? value.prompt.trim().slice(0, CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS)
                 : null,
     };
 };

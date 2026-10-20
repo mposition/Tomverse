@@ -5825,7 +5825,11 @@ export function ChatPageClient({
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
-        decision = await askChatImageIntent(intentText);
+        // The conversation lets a follow-up ("make it bluer") find the
+        // image it changes.
+        decision = await askChatImageIntent(intentText, {
+          conversationId: currentChatIdRef.current,
+        });
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
@@ -5866,6 +5870,7 @@ export function ChatPageClient({
               imageTurn: {
                 modelIds: decision.modelId ? [decision.modelId] : [],
                 preset: decision.preset,
+                ...(decision.prompt ? { prompt: decision.prompt } : {}),
               },
             }
           : {}),

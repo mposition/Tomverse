@@ -34,6 +34,11 @@ export type ChatImageTurnRequest = {
     modelIds: string[];
     preset: "draft" | "standard" | "final" | null;
     /**
+     * A follow-up's rewritten prompt (the previous image with the change
+     * applied). Absent means the saved question is the prompt.
+     */
+    prompt?: string;
+    /**
      * Set on a retry only: the answer id the first try used, which is also
      * the image group's idempotency key, so the retry recovers that group
      * instead of reserving a second one.

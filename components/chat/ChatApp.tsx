@@ -1749,6 +1749,7 @@ function ChatAppComponent({
           imageTurn: {
             modelIds: imageTurn.modelIds,
             preset: imageTurn.preset,
+            ...(imageTurn.prompt ? { prompt: imageTurn.prompt } : {}),
             assistantMessageId,
           },
         });
@@ -1776,6 +1777,7 @@ function ChatAppComponent({
                 modelId,
                 imageModelIds: imageTurn.modelIds,
                 preset: imageTurn.preset,
+                ...(imageTurn.prompt ? { prompt: imageTurn.prompt } : {}),
               }),
               signal: controller.signal,
             }

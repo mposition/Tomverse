@@ -34,6 +34,8 @@ export type ChatImageTurnInput = {
     modelId: string;
     imageModelIds: string[];
     preset: ImagePreset | null;
+    /** A follow-up's rewritten prompt; the saved question otherwise. */
+    prompt?: string;
 };
 
 export type ChatImageTurnResult = {
@@ -101,7 +103,9 @@ export async function startChatImageTurn(
         },
         select: { content: true },
     });
-    // The prompt is the saved question, never text the request carries.
+    // The question is the saved one, never text the request carries; a
+    // follow-up's rewrite (input.prompt) only changes what the image is made
+    // from, not what the answer says was asked.
     const prompt = source?.content.trim() ?? "";
     if (!prompt) {
         throw new ChatAccessError(404, "SOURCE_MESSAGE_NOT_FOUND", "The question was not found.");
@@ -124,7 +128,8 @@ export async function startChatImageTurn(
 
     const result = await requestImageGeneration({
         userId: input.userId,
-        prompt,
+        // The answer's text still names the question that was asked.
+        prompt: input.prompt?.trim() || prompt,
         size: "1024x1024",
         quality: IMAGE_QUALITY_BY_PRESET[input.preset ?? "standard"],
         conversationId: input.conversationId,
