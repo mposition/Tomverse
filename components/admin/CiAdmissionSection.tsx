@@ -19,6 +19,7 @@ export type CiAdmissionView = { mode: CiAdmissionMode; configured: boolean; stat
 type View = CiAdmissionView;
 
 const RUNNER_REFRESH_MS = 20_000;
+const VIEW_REFRESH_MS = 20_000;
 
 /**
  * GitHub runner usage right now (lib/ciRunnerUsage.ts), refreshed every 20
@@ -207,6 +208,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   // A pointer drag follows the pointer on window: the dragged row turns into
   // the drop gap, so its handle leaves the DOM mid-drag.
   const dragRef = useRef<Drag | null>(null);
+  const busyRef = useRef(false);
   const commitRef = useRef<(number: number, to: number) => void>(() => {});
   const pointerDragging = drag?.by === "pointer" ? drag.number : null;
 
@@ -223,6 +225,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
 
   useEffect(() => {
     dragRef.current = drag;
+    busyRef.current = busy;
   });
 
   useEffect(() => {
@@ -252,9 +255,42 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
     };
   }, [pointerDragging]);
 
+  // The line changes under webhooks: re-read it every 20 s, on the console's
+  // refresh and when the tab comes back -- one request at a time, and never
+  // over a drag or a save in progress.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
+    let stopped = false;
+    let inFlight = false;
+    const refresh = async (trigger: AdminPollTrigger) => {
+      if (dragRef.current || busyRef.current) return;
+      if (!shouldIssueAdminPoll({ inFlight, documentVisible: document.visibilityState === "visible", trigger })) return;
+      inFlight = true;
+      try {
+        const response = await adminFetch("/api/admin/ci-admission", { cache: "no-store" });
+        const next = response.ok ? ((await response.json()) as View) : null;
+        if (next && !stopped && !dragRef.current && !busyRef.current) setView(next);
+      } catch {
+        // The next tick tries again; what is on screen stays.
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      void refresh("interval");
+    }, VIEW_REFRESH_MS);
+    const onRefresh = () => void refresh("event");
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh("event");
+    };
+    window.addEventListener("admin:refresh", onRefresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener("admin:refresh", onRefresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const send = async (body: Record<string, unknown>, rollback?: View) => {

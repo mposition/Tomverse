@@ -313,8 +313,15 @@ export async function changeCiAdmission(actor: AdminActor, change: CiAdmissionAd
         : null;
       summary = `Moved #${change.number} to the top of the CI admission line.`;
     } else if (change.action === "remove") {
+      // Out of the line for good: not put back as an unconfirmed release, nor
+      // judged again as a pending arrival.
       after = before.queue.some((entry) => entry.number === change.number)
-        ? { ...before, queue: before.queue.filter((entry) => entry.number !== change.number) }
+        ? {
+            ...before,
+            queue: before.queue.filter((entry) => entry.number !== change.number),
+            releasing: before.releasing.filter((entry) => entry.number !== change.number),
+            pendingArrivals: before.pendingArrivals.filter((number) => number !== change.number),
+          }
         : null;
       summary = `Removed #${change.number} from the CI admission line; it stays a draft.`;
     } else {
