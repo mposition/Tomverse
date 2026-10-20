@@ -21,14 +21,25 @@ import {
 /** Long enough to read the request; the rest of a long message adds nothing. */
 export const CHAT_IMAGE_INTENT_MAX_PROMPT_CHARS = 2_000;
 
-/** One small JSON object plus slack for providers that count reasoning. */
-export const CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS = 160;
+/**
+ * One small JSON object plus room for reasoning: an OpenAI reasoning model
+ * counts its reasoning against this, and a ceiling it hits returns no object.
+ */
+export const CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS = 400;
 
-/** The send waits on this call, so a slow answer reads as "not an image". */
-export const CHAT_IMAGE_INTENT_TIMEOUT_MS = 4_000;
+/**
+ * The send waits on this call, so a slow answer reads as "not an image".
+ *
+ * Measured on dev 2026-10-20 with gpt-6-luna as the router model: the Auto
+ * router's own call took 3.1 s and the first image-intent call, at a 4 s
+ * deadline, was cut off at 4,005 ms -- every image request then fell through
+ * to a text answer. The deadline only bounds the worst case; a send waits as
+ * long as the call actually takes.
+ */
+export const CHAT_IMAGE_INTENT_TIMEOUT_MS = 8_000;
 
 /** The composer's wait: the server's deadline plus the round trip. */
-export const CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS = 5_000;
+export const CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS = 10_000;
 
 const PRESETS: readonly ImagePreset[] = ["draft", "standard", "final"];
 
