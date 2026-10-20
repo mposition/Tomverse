@@ -132,3 +132,12 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 
 .brand-lockup { display: flex; align-items: center; gap: 8px; }
 .brand-lockup .icon-logo { width: 28px; height: 28px; border-radius: 8px; }
+/* App-owned email proof uses the existing bottom sheet and brand tokens. */
+.email-login { display: grid; gap: 20px; padding-bottom: 16px; }
+.email-login p { margin: 0; }
+.email-login label { display: grid; gap: 8px; font-weight: 600; }
+.email-login input { width: 100%; min-height: 52px; padding: 12px 14px; border: 1px solid var(--mobile-border); border-radius: 14px; background: var(--mobile-surface); color: var(--mobile-ink); font: inherit; font-size: 16px; }
+.email-login .email-code { font-size: 28px; letter-spacing: .3em; font-variant-numeric: tabular-nums; }
+.email-login .login-actions { display: flex; justify-content: space-between; gap: 12px; }
+.email-login .login-actions button { min-height: 44px; }
+.email-login .login-error { border-left: 3px solid currentColor; padding: 8px 12px; }

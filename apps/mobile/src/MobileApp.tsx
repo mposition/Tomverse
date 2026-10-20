@@ -8,6 +8,7 @@ import { ReviewPreview } from "./ReviewPreview";
 import { ModelSheet } from "./ModelSheet";
 import { Sheet } from "./Sheet";
 import { mobileErrorText } from "../../../locales/mobileErrors";
+import { EmailLogin } from "./EmailLogin";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 export function MobileApp({ transport, demo = false }: { transport: ChatTransport; demo?: boolean }) {
@@ -19,6 +20,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const copy = mobileCopy[language];
   const workspaceCopy = mobileWorkspaceCopy[language];
   const [signedIn, setSignedIn] = useState(false);
+  const [emailLogin, setEmailLogin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -153,12 +155,19 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}>◐</button>
     </header>
     {demo && <div className="demo-label">{copy.demo}</div>}
+    {emailLogin && !signedIn && <EmailLogin transport={transport} language={language} onClose={() => setEmailLogin(false)} onComplete={async () => {
+      const current = ++requestEpoch.current;
+      setSignedIn(true); setEmailLogin(false); setLoading(true); setError("");
+      try { const list = await transport.list(); if (current === requestEpoch.current) setChats(list); }
+      catch { if (current === requestEpoch.current) setError(copy.error); }
+      finally { if (current === requestEpoch.current) setLoading(false); }
+    }} />}
     {signedIn && <nav className="product-navigation" aria-label={workspaceCopy.product}><div className="segmented">{(["chat", "review"] as const).map((target) => <button key={target} aria-current={product === target ? "page" : undefined} disabled={streaming || uncertain} onClick={() => { setProduct(target); setView("chat"); }}>{target === "chat" ? "Chat" : "Review"}</button>)}</div></nav>}
     {loading && <p role="status" className="notice">{copy.loading}</p>}
     {error && <div role="alert" className="notice error">{error}</div>}
     {!signedIn ? <section className="welcome">
       <div className="welcome-mark"><AppIcon name="logo" /></div><h1>{copy.welcome}</h1><p>{copy.intro}</p>
-      <button className="primary" onClick={() => void signIn()} disabled={loading}>{copy.signIn} <span aria-hidden="true">↗</span></button>
+      <button className="primary" onClick={() => { if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true); else void signIn(); }} disabled={loading}>{copy.signIn} <span aria-hidden="true">→</span></button>
     </section> : product === "review" ? <ReviewPreview language={language} /> : view === "list" ? <section className="conversation-list">
       <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" onClick={() => { requestEpoch.current++; setConversation(null); setDraft(""); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); setView("chat"); }}>{copy.newChat} +</button></div>
       {chats.length === 0 && <p>{copy.emptyList}</p>}

@@ -44,22 +44,39 @@ public class MobileAuthPlugin extends Plugin {
             || uri.getPort() != -1 || uri.getUserInfo() != null || (uri.getPath() != null && !uri.getPath().isEmpty()) || uri.getQuery() != null || uri.getFragment() != null) throw new Exception("INVALID_API_ORIGIN");
     }
     private String random() { byte[] bytes = new byte[32]; new SecureRandom().nextBytes(bytes); return Base64.encodeToString(bytes, Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING); }
-    private JSONObject post(String path, JSONObject body) throws Exception {
+    private static class AuthFailure extends Exception {
+        final String code;
+        AuthFailure(String code) { super("Authentication request refused"); this.code = code; }
+    }
+    private String refusalCode(int status, JSONObject body) {
+        if (status == 404 || status == 503) return "MOBILE_LOGIN_UNAVAILABLE";
+        if (status == 429) return "MOBILE_RATE_LIMITED";
+        String code = body.optString("code");
+        return Arrays.asList("EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED").contains(code) ? code : "MOBILE_LOGIN_FAILED";
+    }
+    private JSONObject post(String path, JSONObject body) throws Exception { return request(path, body, null); }
+    private JSONObject request(String path, JSONObject body, String language) throws Exception {
         validateOrigin();
         HttpURLConnection connection = (HttpURLConnection) new URL(origin + path).openConnection();
         connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(15000); connection.setReadTimeout(20000);
-        connection.setRequestMethod("POST"); connection.setDoOutput(true); connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestMethod(body == null ? "GET" : "POST"); connection.setRequestProperty("Content-Type", "application/json");
+        if (language != null && Arrays.asList("en", "ko", "zh", "de", "fr", "es", "pt").contains(language)) connection.setRequestProperty("Accept-Language", language);
         connection.setRequestProperty("Cookie", "");
         try {
-            try (var output = connection.getOutputStream()) { output.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
+            if (body != null) { connection.setDoOutput(true); try (var output = connection.getOutputStream()) { output.write(body.toString().getBytes(StandardCharsets.UTF_8)); } }
             int status = connection.getResponseCode();
-            if (status < 200 || status >= 300) throw new Exception("AUTH_REQUEST_REFUSED");
             if (status == 204) return new JSONObject();
-            try (var input = connection.getInputStream()) {
+            boolean success = status >= 200 && status < 300;
+            try (var input = success ? connection.getInputStream() : connection.getErrorStream()) {
+                if (input == null) throw new AuthFailure(refusalCode(status, new JSONObject()));
                 ByteArrayOutputStream output = new ByteArrayOutputStream(); byte[] chunk = new byte[1024]; int count;
-                while ((count = input.read(chunk)) != -1) { output.write(chunk, 0, count); if (output.size() > 16384) throw new Exception("AUTH_RESPONSE_TOO_LARGE"); }
+                while ((count = input.read(chunk)) != -1) { output.write(chunk, 0, count); if (output.size() > 16384) throw new AuthFailure(refusalCode(status, new JSONObject())); }
                 byte[] bytes = output.toByteArray();
-                return new JSONObject(new String(bytes, StandardCharsets.UTF_8));
+                JSONObject result;
+                try { result = new JSONObject(new String(bytes, StandardCharsets.UTF_8)); }
+                catch (Exception invalid) { throw new AuthFailure(refusalCode(status, new JSONObject())); }
+                if (!success) throw new AuthFailure(refusalCode(status, result));
+                return result;
             }
         } finally { connection.disconnect(); }
     }
@@ -89,6 +106,14 @@ public class MobileAuthPlugin extends Plugin {
         });
     }
     @PluginMethod public void signIn(PluginCall call) {
+        queue.execute(() -> {
+            try {
+                if (!request("/api/auth/mobile/email", null, null).optBoolean("browserSignIn")) throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE");
+                openBrowser(call);
+            } catch (Exception e) { call.reject("Sign-in is not available on this server", "MOBILE_LOGIN_UNAVAILABLE"); }
+        });
+    }
+    private void openBrowser(PluginCall call) {
         main.post(() -> {
             if (pendingLogin != null) { call.reject("Sign-in already in progress", "LOGIN_IN_PROGRESS"); return; }
             try {
@@ -98,6 +123,27 @@ public class MobileAuthPlugin extends Plugin {
                 getActivity().startActivity(new Intent(Intent.ACTION_VIEW, url).addCategory(Intent.CATEGORY_BROWSABLE));
                 main.postDelayed(() -> { if (pendingLogin == call) { pendingLogin = null; verifier = null; state = null; call.reject("Sign-in expired", "LOGIN_EXPIRED"); } }, 180000);
             } catch (Exception e) { pendingLogin = null; verifier = null; state = null; call.reject("Could not open sign-in", "LOGIN_UNAVAILABLE"); }
+        });
+    }
+    @PluginMethod public void requestEmailCode(PluginCall call) {
+        queue.execute(() -> {
+            try {
+                String email = call.getString("email");
+                if (email == null || email.length() > 320) throw new AuthFailure("MOBILE_LOGIN_FAILED");
+                request("/api/auth/mobile/email", new JSONObject().put("action", "request").put("email", email), call.getString("language"));
+                call.resolve();
+            } catch (Exception e) { call.reject("Could not send sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
+        });
+    }
+    @PluginMethod public void verifyEmailCode(PluginCall call) {
+        queue.execute(() -> {
+            try {
+                String email = call.getString("email"); String code = call.getString("code");
+                if (email == null || email.length() > 320 || code == null || !code.matches("[0-9]{6}")) throw new AuthFailure("EMAIL_CODE_INVALID");
+                clear();
+                accept(post("/api/auth/mobile/email", new JSONObject().put("action", "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL)));
+                call.resolve();
+            } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Could not verify sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });
     }
     @Override protected void handleOnNewIntent(Intent intent) {

@@ -32,8 +32,17 @@ The iOS MVP targets iOS 17.4+ and requires macOS and Xcode. Signing and real dev
 
 ## Authentication and operational boundary
 
-The native plugin opens system-browser sign-in with S256 PKCE. The existing
-email/Google/Apple web sign-in is reused and issues a single-use login grant.
+The default app UI signs existing accounts in using an email address and a
+six-digit code entered inside the app. The native plugin calls the exact
+`/api/auth/mobile/email` path; the server reuses the existing email delivery,
+OTP verification, rate limits and mobile session issuer. Cookies cannot grant
+identity on this path. Signup and additional Turnstile verification are directed
+to the website rather than bypassed. The initial form has English/Korean copy,
+with English fallback for the other app locales.
+
+System-browser sign-in with S256 PKCE remains available in the native plugin
+for browser-based identity providers. Existing web sign-in issues a single-use grant.
+It now probes the public mobile capability endpoint before opening the browser.
 Only a claimed HTTPS callback is accepted; there is no custom-scheme fallback.
 The native layer exchanges the grant and serializes refresh rotation. Android
 stores AES-GCM ciphertext with a Keystore key; iOS uses a non-synchronizing,
@@ -55,6 +64,8 @@ preparation, not proof of verified links. Browser screenshots and sync output
 are not physical-device authentication evidence. iOS uses ASWebAuthenticationSession with an exact HTTPS callback, rather than
 relying on Safari same-domain navigation. Physical app-link and session evidence
 remains required before release.
+The email-code path itself needs no app-link callback or production app ID.
+It still requires a deployed, enabled server and the existing mobile keyring.
 The iOS entitlements prepare both `applinks` and `webcredentials` for the HTTPS
 authentication session. AASA registration for either service still requires the
 owner's actual application/Team IDs and separate operational approval.
@@ -152,3 +163,33 @@ production AASA/assetlinks publication, real mail receipt or Google/Apple SSO
 evidence. The full Next sign-in page was not used in the final fixture.
 Playwright WebView attachment disrupted native callback completion on this
 image; app actions and screenshots used ADB without attaching that debugger.
+
+## Installed APK login correction (2026-10-20)
+
+The owner reported that Continue with Tomverse opened a 404 page. A read-only
+production check confirmed GET /auth/mobile returned 404; GET on the existing
+exchange route returned 405. The earlier successful auth test used a local
+fixture and did not establish production login readiness. The installed APK
+therefore could not complete its advertised production sign-in.
+
+Continue now opens the app-owned email form. Missing/disabled server support
+shows a specific error inside the app, with no automatic browser navigation.
+The new route is behind the unchanged default-off native enrollment switch.
+It accepts only existing-account OTP proof, checks active account state before
+issuing a session, and delegates mail/abuse checks to the existing request handler.
+The native layer stores issued rotating credentials; the form receives no tokens.
+An uncertain verify result is not retried automatically and requires a new code.
+
+Verification: 12 new server route tests, 14 bridge/origin tests and all 16 browser
+UI scenarios passed. The actual installed Android emulator also completed app
+email entry, synthetic mail request, invalid-code refusal, real existing-code
+verification/session issuance, bearer list read and force-stop/relaunch refresh.
+No browser or callback link was needed for that native email flow. Only mail
+delivery was synthetic; the verifier, route, DB, native bridge and secure store
+were real. This remains local-fixture evidence, not production login evidence.
+
+The updated ordinary APK is .tmp/native-01/tomverse-android-email-debug.apk
+(SHA-256 064b37b21ad7235486808dadef63f0e72e30aa608f4f3eae2257782d93ce6076).
+It supersedes the earlier APK for the login UI fix. It contains no fixture CA.
+Installing it alone does not enable production login: server deployment and
+native route activation still require their separate owner approvals.

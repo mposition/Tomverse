@@ -14,6 +14,8 @@ import type { MobileAuthBridge } from "./authBridgeContract";
  */
 const unavailableBridge: MobileAuthBridge = {
   signIn: () => Promise.reject(new Error("Sign-in requires the native app.")),
+  requestEmailCode: () => Promise.reject(new Error("Sign-in requires the native app.")),
+  verifyEmailCode: () => Promise.reject(new Error("Sign-in requires the native app.")),
   getAccessToken: () =>
     Promise.reject(
       new Error(

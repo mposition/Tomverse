@@ -11,6 +11,8 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     public let jsName = "MobileAuth"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "signIn", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestEmailCode", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "verifyEmailCode", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "hasSession", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getAccessToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "signOut", returnType: CAPPluginReturnPromise)
@@ -61,15 +63,24 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         let result = SecItemDelete(query() as CFDictionary)
         if result != errSecSuccess && result != errSecItemNotFound { throw Failure.storage }
     }
-    private enum Failure: Error { case storage, invalid, network }
+    private enum Failure: Error { case storage, invalid, network, refused(String) }
+    private func refusalCode(_ status: Int, _ body: [String: Any]) -> String {
+        if status == 404 || status == 503 { return "MOBILE_LOGIN_UNAVAILABLE" }
+        if status == 429 { return "MOBILE_RATE_LIMITED" }
+        let code = body["code"] as? String ?? ""
+        return ["EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED"].contains(code) ? code : "MOBILE_LOGIN_FAILED"
+    }
     private func validateOrigin() throws {
         guard let u = URLComponents(string: origin), u.scheme == "https", ["tomverse.app", "dev.tomverse.app", "staging.tomverse.app"].contains(u.host ?? ""),
               u.port == nil, u.user == nil, u.password == nil, u.path.isEmpty, u.query == nil, u.fragment == nil else { throw Failure.invalid }
     }
-    private func post(_ path: String, _ body: [String: Any]) throws -> [String: Any] {
+    private func post(_ path: String, _ body: [String: Any]) throws -> [String: Any] { try request(path, body) }
+    private func request(_ path: String, _ body: [String: Any]?, language: String? = nil) throws -> [String: Any] {
         try validateOrigin()
         guard let url = URL(string: origin + path) else { throw Failure.invalid }
-        var request = URLRequest(url: url); request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        var request = URLRequest(url: url); request.httpMethod = body == nil ? "GET" : "POST"
+        if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
+        if let language, ["en", "ko", "zh", "de", "fr", "es", "pt"].contains(language) { request.setValue(language, forHTTPHeaderField: "Accept-Language") }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.timeoutInterval = 25
         let config = URLSessionConfiguration.ephemeral; config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCache = nil
         let delegate = NoRedirect(); let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
@@ -77,7 +88,11 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         let task = session.dataTask(with: request) { data, response, _ in received = data; code = (response as? HTTPURLResponse)?.statusCode ?? 0; semaphore.signal() }
         task.resume(); let outcome = semaphore.wait(timeout: .now() + 30)
         defer { session.invalidateAndCancel() }
-        guard outcome == .success, (200..<300).contains(code) else { throw Failure.network }
+        guard outcome == .success else { throw Failure.network }
+        guard (200..<300).contains(code) else {
+            let body = received.flatMap { $0.count <= 16384 ? (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] : nil } ?? [:]
+            throw Failure.refused(refusalCode(code, body))
+        }
         if code == 204 { return [:] }
         guard let received, received.count <= 16384, let body = try JSONSerialization.jsonObject(with: received) as? [String: Any] else { throw Failure.invalid }
         return body
@@ -114,6 +129,35 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     }
     private func encode(_ data: Data) -> String { data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") }
     @objc public func signIn(_ call: CAPPluginCall) {
+        queue.async { [self] in
+            do {
+                guard try request("/api/auth/mobile/email", nil)["browserSignIn"] as? Bool == true else { throw Failure.invalid }
+                openBrowser(call)
+            } catch { call.reject("Sign-in is not available on this server", "MOBILE_LOGIN_UNAVAILABLE") }
+        }
+    }
+    @objc public func requestEmailCode(_ call: CAPPluginCall) {
+        queue.async { [self] in
+            do {
+                guard let email = call.getString("email"), email.count <= 320 else { throw Failure.invalid }
+                _ = try request("/api/auth/mobile/email", ["action": "request", "email": email], language: call.getString("language"))
+                call.resolve()
+            } catch Failure.refused(let code) { call.reject("Could not send sign-in code", code) }
+            catch { call.reject("Could not send sign-in code", "MOBILE_LOGIN_FAILED") }
+        }
+    }
+    @objc public func verifyEmailCode(_ call: CAPPluginCall) {
+        queue.async { [self] in
+            do {
+                guard let email = call.getString("email"), email.count <= 320, let code = call.getString("code"), code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { throw Failure.refused("EMAIL_CODE_INVALID") }
+                try clear()
+                try accept(post("/api/auth/mobile/email", ["action": "verify", "email": email, "code": code, "platform": "ios", "deviceLabel": UIDevice.current.model]))
+                call.resolve()
+            } catch Failure.refused(let code) { try? clear(); call.reject("Could not verify sign-in code", code) }
+            catch { try? clear(); call.reject("Could not verify sign-in code", "MOBILE_LOGIN_FAILED") }
+        }
+    }
+    private func openBrowser(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [self] in
             guard pending == nil else { call.reject("Sign-in already in progress", "LOGIN_IN_PROGRESS"); return }
             do {
