@@ -187,6 +187,11 @@ verification/session issuance, bearer list read and force-stop/relaunch refresh.
 No browser or callback link was needed for that native email flow. Only mail
 delivery was synthetic; the verifier, route, DB, native bridge and secure store
 were real. This remains local-fixture evidence, not production login evidence.
+Logout returned 204. A separate local plain-HTML 404 test through the actual
+native plugin showed the Korean unavailable-service message inside the app.
+Credential-shaped bridge log count remained zero. Root/mobile type checks,
+scoped lint and diff checks passed. The ordinary APK was reinstalled after the
+fixture tests; the emulator, fixture servers, local DB and Gradle daemon stopped.
 
 The updated ordinary APK is .tmp/native-01/tomverse-android-email-debug.apk
 (SHA-256 064b37b21ad7235486808dadef63f0e72e30aa608f4f3eae2257782d93ce6076).
