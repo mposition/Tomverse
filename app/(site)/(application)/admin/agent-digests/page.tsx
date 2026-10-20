@@ -5,8 +5,6 @@ import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPane
 import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { CiAdmissionSection } from "@/components/admin/CiAdmissionSection";
-import { QaReleaseTrainSection } from "@/components/admin/QaReleaseTrainSection";
-import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
 import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
@@ -33,6 +31,11 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
   // offered a form that can only refuse; the routes check again. Only the open
   // tab's data is loaded.
   const canWrite = hasAdminPermission(session, "ops:write");
+  // The waiting line is one stored row; its length is the CI admission tab's
+  // chip on every tab, so a waiting line shows from QA and release too.
+  const now = new Date();
+  const admission = await readCiAdmissionAdminView();
+  const waiting = admission.state.queue.length;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -42,25 +45,27 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
         activeTabId={tab.id}
         label="Agent digest sections"
         query={query}
+        chips={{ "ci-admission": waiting > 0 ? { label: String(waiting), attention: true } : undefined }}
       />
       {tab.id === "billing-finance-ops" ? (
         <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={await readBillingFinanceOpsConsole(canWrite)} />
+      ) : tab.id === "ci-admission" ? (
+        <CiAdmissionSection key={tab.id} initial={admission} canWrite={canWrite} />
       ) : (
-        <>
-          <AdminAgentDigestsPanel key={tab.id} initial={await readAgentDigestConsole(canWrite)} />
-          <CiAdmissionSection initial={await readCiAdmissionAdminView()} canWrite={canWrite} />
-          <QaReleaseMainCandidatesSection data={await readQaReleaseMainCandidates()} />
-          <QaReleaseTrainSection
-            trains={(await readQaReleaseTrainReports()).map(({ slot, at, report }) => ({
-              slot,
-              at: at.toISOString(),
-              outcome: report.outcome,
-              pullRequestNumber: report.pullRequestNumber,
-              failure: report.failure,
-              picks: report.picks,
-            }))}
-          />
-        </>
+        <AdminAgentDigestsPanel
+          key={tab.id}
+          initial={await readAgentDigestConsole(canWrite)}
+          main={await readQaReleaseMainCandidates()}
+          trains={(await readQaReleaseTrainReports()).map(({ slot, at, report }) => ({
+            slot,
+            at: at.toISOString(),
+            outcome: report.outcome,
+            pullRequestNumber: report.pullRequestNumber,
+            failure: report.failure,
+            picks: report.picks,
+          }))}
+          nowMs={now.getTime()}
+        />
       )}
     </div>
   );

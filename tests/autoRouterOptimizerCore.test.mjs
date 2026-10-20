@@ -148,7 +148,8 @@ const decisions = Array.from({ length: 24 }, (_, index) => ({
   pickedModelId: "strong",
   reason: "r",
 }));
-const NEW_GUIDANCE = "Send greetings and small talk to the light model.\nSend code to the strong model.";
+// Names no candidate id: the lightest and strongest models, not `light` and `strong`.
+const NEW_GUIDANCE = "Send greetings and small talk to the lightest model.\nSend code to the strongest model.";
 const REPORT = { findings: ["인사에는 가벼운 모델로 충분합니다."], recommendations: [{ kind: "guidance", text: "인사는 가벼운 모델로 보내세요." }] };
 const proposal = (guidance = NEW_GUIDANCE) => ({ ...REPORT, guidance });
 
@@ -948,7 +949,234 @@ test("each judged case keeps both orders' verdicts, so an unanswered judge is no
   for (const item of judged) {
     assert.equal(item.judged.length, 2);
     assert.ok(item.judged.includes(null));
-    assert.equal(item.verdict, "tie");
+    // A judge with no verdict leaves the case undecided, never a tie.
+    assert.equal(item.verdict, "undecided");
   }
+  assert.equal(result.summary.ties, 0);
+  assert.equal(result.summary.undecided, 6);
+  assert.equal(result.judgeFailed, 6);
   assert.ok(result.cases.filter((item) => item.verdict === "unchanged").every((item) => item.judged === undefined));
+});
+
+test("guidance may name only candidates the direct comparisons judged", async () => {
+  const { guidanceNamingRejection } = await import("../lib/autoRouterOptimizerCore.ts");
+  const menu = ["gpt-5-4-mini", "gemini-2-5-flash", "gemini-flash-lite-latest", "minimax-m3", "gpt-6-luna", "claude-haiku-5-5", "perplexity/sonar"];
+  const judged = ["gpt-5-4-mini", "gemini-2-5-flash", "gemini-flash-lite-latest", "minimax-m3", "gpt-6-luna"];
+  // Named on evidence, including an id with no digit; prose is not a model.
+  assert.equal(
+    guidanceNamingRejection(
+      "Among 9-credit standard candidates, prefer gemini-2-5-flash or GPT-6-LUNA over gpt-5-4-mini for short factual questions.\n" +
+        "Spread easy and/or step-by-step work across low-credit models, e.g. gemini-flash-lite-latest.",
+      menu,
+      judged
+    ),
+    null
+  );
+  assert.equal(guidanceNamingRejection("Send greetings to light, low-credit models.", menu, judged), null);
+  // Not a candidate: refused, whether or not it was ever in the catalogue.
+  assert.deepEqual(
+    guidanceNamingRejection("Prefer gpt-9-ultra over gpt-5-4-mini for code.", menu, judged),
+    { reason: "unknown_model", ids: ["gpt-9-ultra"] }
+  );
+  // A candidate the comparisons never judged: refused as unproven.
+  assert.deepEqual(
+    guidanceNamingRejection("Prefer claude-haiku-5-5 over gpt-5-4-mini.\nUse perplexity/sonar for news.", menu, judged),
+    { reason: "unproven_model", ids: ["claude-haiku-5-5", "perplexity/sonar"] }
+  );
+  // An unknown id is reported before an unproven one.
+  assert.equal(guidanceNamingRejection("Prefer claude-haiku-5-5 or gemini-9-pro for maths.", menu, judged).reason, "unknown_model");
+  // Technical terms with digits are not models: their letters are no model family.
+  assert.equal(
+    guidanceNamingRejection("Keep UTF-8 text, ISO-8601 dates and top-3 lists on gpt-6-luna.", menu, judged),
+    null
+  );
+  // The same shape with a catalogue family is a model, and not a candidate here.
+  assert.deepEqual(
+    guidanceNamingRejection("Send ISO-8601 work to kimi-k9.", menu, judged, ["kimi-k2.7-code"]),
+    { reason: "unknown_model", ids: ["kimi-k9"] }
+  );
+});
+
+test("a cycle refuses a proposal that names a model off the menu or without evidence", async () => {
+  // The direct comparisons judge strong against rival; light is never compared.
+  const run = async (guidance) => {
+    const rejected = [];
+    const { calls, deps } = rankedDeps({
+      generate: async () => ({ value: proposal(guidance), costMicroUsd: 100, provider: "opt" }),
+      guidanceRejected: (rejection) => rejected.push(rejection),
+    });
+    const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+    return { result, calls, rejected };
+  };
+  const evidenced = await run("Among 5-credit candidates, prefer rival over strong for greetings and small talk.");
+  assert.notEqual(evidenced.result.failure, "candidate_invalid");
+  assert.deepEqual(evidenced.rejected, []);
+
+  const unproven = await run("Send greetings and small talk to light, never to rival-2b or strong.");
+  assert.equal(unproven.result.failure, "candidate_invalid");
+  assert.deepEqual(unproven.rejected, [{ reason: "unknown_model", ids: ["rival-2b"] }]);
+  // Refused before the proposal is replayed: only the current picks were routed.
+  assert.equal(unproven.calls.route, 12);
+
+  // light is a candidate, but no comparison judged it: named without evidence.
+  const offEvidence = await run("Send greetings and small talk to light; keep code on strong.");
+  assert.equal(offEvidence.result.failure, "candidate_invalid");
+  assert.deepEqual(offEvidence.rejected, [{ reason: "unproven_model", ids: ["light"] }]);
+  assert.equal(offEvidence.calls.route, 12);
+});
+
+test("a candidate id counts as named only as a whole word", async () => {
+  const { guidanceNamingRejection } = await import("../lib/autoRouterOptimizerCore.ts");
+  const menu = ["light", "strong", "o3"];
+  // Words that contain an id are not the id.
+  assert.equal(guidanceNamingRejection("Use the lightest, light-weight or strongest models; lighter work first.", menu, []), null);
+  // The id alone, at the end of a sentence, or a short id with no separator.
+  assert.deepEqual(guidanceNamingRejection("Send small talk to light.", menu, []), { reason: "unproven_model", ids: ["light"] });
+  assert.deepEqual(guidanceNamingRejection("Proofs go to o3, code to strong", menu, ["strong"]), { reason: "unproven_model", ids: ["o3"] });
+  assert.equal(guidanceNamingRejection("Proofs go to o3, code to strong", menu, ["strong", "o3"]), null);
+});
+
+test("the live router can pick only a candidate, whatever the guidance names", () => {
+  const candidates = [candidate("gpt-6-luna", 9), candidate("gemini-2-5-flash", 9)];
+  const system = buildAutoLlmRouterSystem("Prefer retired-model-9 over gpt-6-luna for short questions.");
+  assert.match(system, /retired-model-9/);
+  return import("../lib/autoLlmRouterCore.ts").then(({ autoLlmRouterOutputSchema, parseAutoLlmRouterOutput }) => {
+    assert.deepEqual(autoLlmRouterOutputSchema(candidates).properties.modelId.enum, ["gpt-6-luna", "gemini-2-5-flash"]);
+    assert.equal(parseAutoLlmRouterOutput({ modelId: "retired-model-9", reason: "r", topic: "t" }, candidates), null);
+    assert.equal(parseAutoLlmRouterOutput({ modelId: "gemini-2-5-flash", reason: "r", topic: "t" }, candidates).modelId, "gemini-2-5-flash");
+  });
+});
+
+test("a name outside the candidates is caught however it is shaped, and prose is not a name", async () => {
+  const { guidanceNamingRejection } = await import("../lib/autoRouterOptimizerCore.ts");
+  const menu = ["gpt-6-luna", "gemini-2-5-flash", "perplexity/sonar"];
+  const judged = menu;
+  const catalogue = [...menu, "perplexity/sonar-pro", "qwen3.7-plus", "deepseek-r1", "claude-haiku-5-5"];
+  // A catalogue id with no digit that is not a candidate this cycle.
+  assert.deepEqual(
+    guidanceNamingRejection("Send news questions to perplexity/sonar-pro.", menu, judged, catalogue),
+    { reason: "unknown_model", ids: ["perplexity/sonar-pro"] }
+  );
+  // A retired catalogue model, a short o-series id, a family name with no separator.
+  assert.deepEqual(
+    guidanceNamingRejection("Prefer deepseek-r1 or o4 for proofs; qwen3 for Chinese.", menu, judged, catalogue),
+    { reason: "unknown_model", ids: ["deepseek-r1", "o4", "qwen3"] }
+  );
+  // Prose with letters and digits that names no model family.
+  assert.equal(
+    guidanceNamingRejection("If p90 latency is high, prefer gpt-6-luna; base64, utf8 and sha256 work is light.", menu, judged, catalogue),
+    null
+  );
+  // Candidate ids still pass on evidence, a digit-less one included.
+  assert.equal(guidanceNamingRejection("Use perplexity/sonar for news, gemini-2-5-flash for chat.", menu, judged, catalogue), null);
+});
+
+test("a comparison whose judge never answered is no evidence for naming a model", async () => {
+  // Every judgement fails to parse: each direct comparison is undecided, with no verdicts.
+  const rejected = [];
+  const { deps } = rankedDeps({
+    judge: async () => ({ value: null, costMicroUsd: 20, provider: "opt" }),
+    generate: async () => ({ value: proposal("Among 5-credit candidates, prefer rival over strong for greetings."), costMicroUsd: 100, provider: "opt" }),
+    guidanceRejected: (rejection) => rejected.push(rejection),
+  });
+  const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.ok(result.comparisons.every((item) => item.verdict === "undecided" && item.judged[0] === null && item.judged[1] === null));
+  assert.equal(result.judgeFailed, 12 * 2);
+  assert.equal(result.failure, "candidate_invalid");
+  assert.deepEqual(rejected, [{ reason: "unproven_model", ids: ["rival", "strong"] }]);
+
+  // A tie both orders did answer is evidence.
+  const answered = [];
+  const tied = rankedDeps({
+    judge: async () => ({ value: "equal", costMicroUsd: 20, provider: "opt" }),
+    generate: async () => ({ value: proposal("Among 5-credit candidates, prefer rival over strong for greetings."), costMicroUsd: 100, provider: "opt" }),
+    guidanceRejected: (rejection) => answered.push(rejection),
+  });
+  const ok = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, tied.deps);
+  assert.notEqual(ok.failure, "candidate_invalid");
+  assert.deepEqual(answered, []);
+});
+
+test("a judge that returns nothing is counted as a failure and leaves the comparison undecided, apart from ties", async () => {
+  const { judgedVerdict } = await import("../lib/autoRouterOptimizerCore.ts");
+  assert.equal(judgedVerdict(["B", "A"]), "candidate");
+  assert.equal(judgedVerdict(["A", "B"]), "incumbent");
+  assert.equal(judgedVerdict(["equal", "equal"]), "tie");
+  assert.equal(judgedVerdict(["A", "A"]), "tie");
+  assert.equal(judgedVerdict([null, "A"]), "undecided");
+  assert.equal(judgedVerdict(["B", null]), "undecided");
+  // One order fails for every direct comparison: no tie is recorded, each
+  // comparison is undecided, and every failed call is counted once.
+  let n = 0;
+  const { deps } = rankedDeps({
+    judge: async (message) => {
+      n++;
+      const { answerA, answerB } = JSON.parse(message);
+      if (n % 2 === 1) return { value: null, costMicroUsd: 20, provider: "opt" };
+      const order = rank(answerA) - rank(answerB);
+      return { value: order > 0 ? "A" : order < 0 ? "B" : "equal", costMicroUsd: 20, provider: "opt" };
+    },
+  });
+  const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.ok(result.comparisons.every((item) => item.verdict !== "tie"));
+  const undecided = result.comparisons.filter((item) => item.verdict === "undecided");
+  assert.ok(undecided.length > 0);
+  assert.ok(undecided.every((item) => item.judged.includes(null)));
+  assert.equal(result.judgeFailed, n - Math.floor(n / 2));
+  // The judge is told to return the object alone.
+  assert.match(AUTO_ROUTER_JUDGE_SYSTEM, /Return only the object/);
+});
+
+test("answers are counted per model, and a model whose answers all failed is not drawn as the next challenger", async () => {
+  const { unreliableAnswerModels, AUTO_ROUTER_UNRELIABLE_MIN_FAILURES } = await import("../lib/autoRouterOptimizerCore.ts");
+  assert.equal(AUTO_ROUTER_UNRELIABLE_MIN_FAILURES, 2);
+  assert.deepEqual(
+    unreliableAnswerModels({
+      "deepseek-v4-pro": { answered: 0, failed: 5 },
+      "gpt-6-luna": { answered: 3, failed: 1 },
+      "once-failed": { answered: 0, failed: 1 },
+      "mixed": { answered: 1, failed: 4 },
+      "bad": "x",
+    }),
+    ["deepseek-v4-pro"]
+  );
+  assert.deepEqual(unreliableAnswerModels(null), []);
+  assert.deepEqual(unreliableAnswerModels("nope"), []);
+
+  // rival times out on every answer: counted as failed, strong as answered.
+  const timedOut = rankedDeps({
+    answer: async (modelId) => {
+      if (modelId === "rival") throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
+      return { value: RANKED[modelId], costMicroUsd: 30, provider: `${modelId}-co` };
+    },
+  });
+  const first = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, timedOut.deps);
+  assert.deepEqual(first.answerStats.rival, { answered: 0, failed: 12 });
+  assert.equal(first.answerStats.strong.failed, 0);
+  assert.ok(first.answerStats.strong.answered >= 12);
+  assert.deepEqual(unreliableAnswerModels(first.answerStats), ["rival"]);
+
+  // The next cycle does not draw rival: strong has no other same-credit or
+  // higher candidate, so there is nothing to compare and rival never answers.
+  const asked = [];
+  const next = rankedDeps({
+    answer: async (modelId) => {
+      asked.push(modelId);
+      return { value: RANKED[modelId], costMicroUsd: 30, provider: `${modelId}-co` };
+    },
+  });
+  const second = await runOptimizerCycle(
+    { decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, unreliableModels: ["rival"] },
+    next.deps
+  );
+  assert.ok(second.comparisons.every((item) => item.verdict === "no_alternative" && item.b === null));
+  assert.ok(!asked.includes("rival"));
+
+  // The router's own pick still answers, even when it failed last time.
+  const pickStays = rankedDeps();
+  const third = await runOptimizerCycle(
+    { decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, unreliableModels: ["strong"] },
+    pickStays.deps
+  );
+  assert.ok(third.comparisons.every((item) => item.a === "strong" && item.b === "rival"));
 });
