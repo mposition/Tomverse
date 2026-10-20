@@ -14,6 +14,7 @@ const world = {
   sessionCalls: [] as unknown[], v4Calls: 0,
   sessionError: null as null | { code: string; readBack?: string },
   seen: { status: "absent" } as Record<string, unknown>,
+  owned: { requestId, status: "absent" } as Record<string, unknown>,
 };
 
 class SessionError extends Error {
@@ -45,7 +46,7 @@ async function loadRoute(): Promise<{
       IdeaSubmissionError: class extends Error {},
       submitIdea: async () => { world.v4Calls += 1;
         return { ideaId: "v4-idea", requestId, auditId: "a" }; },
-      readIdeaSubmissionRequest: async () => ({ requestId, status: "absent" }) } });
+      readIdeaSubmissionRequest: async () => world.owned } });
     mock.module(mod("lib/amux/ideaSessionSubmissionService.ts"), { namedExports: {
       AmuxIdeaSessionSubmissionError: SessionError,
       submitAmuxIdeaFromSession: async (input: unknown) => {
@@ -143,6 +144,34 @@ test("the read-back finds a session idea the owner path does not know", () =>
     assert.deepEqual(await response.json(), { requestId, status: "committed",
       ideaId: "session-idea", origin: "session", hasExternalSources: true });
     world.seen = { status: "absent" };
+  }));
+
+test("a session idea reads back as committed even when the v4 owner read sees its row as partial", () =>
+  withSwitches(SWITCHES, async () => {
+    world.owned = { requestId, status: "partial", ideaId: "session-idea" };
+    world.seen = { requestId, status: "committed", ideaId: "session-idea",
+      reservationId: "r", hasExternalSources: true };
+    try {
+      const { GET } = await loadRoute();
+      const response = await GET(new Request(
+        `https://tomverse.test/api/admin/amux/ideas/submissions?requestId=${requestId}`));
+      assert.deepEqual(await response.json(), { requestId, status: "committed",
+        ideaId: "session-idea", origin: "session", hasExternalSources: true });
+    } finally {
+      world.owned = { requestId, status: "absent" };
+      world.seen = { status: "absent" };
+    }
+  }));
+
+test("a row that is not a session idea still reads back through the v4 owner path", () =>
+  withSwitches(SWITCHES, async () => {
+    world.owned = { requestId, status: "committed", ideaId: "v4-idea" };
+    try {
+      const { GET } = await loadRoute();
+      const response = await GET(new Request(
+        `https://tomverse.test/api/admin/amux/ideas/submissions?requestId=${requestId}`));
+      assert.deepEqual(await response.json(), { requestId, status: "committed", ideaId: "v4-idea" });
+    } finally { world.owned = { requestId, status: "absent" }; }
   }));
 
 test("with session intake off, the Admin input keeps the v4 owner path", () =>
