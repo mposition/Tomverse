@@ -22,8 +22,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   };
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await run(path, { cache: "no-store", ...init });
-    const body = await response.json();
-    if (!response.ok) throw new MobileApiError(response.status, body.code ?? "MOBILE_REQUEST_FAILED");
+    const body = await response.json().catch(() => {
+      if (response.ok) throw Error("MOBILE_RESPONSE_INVALID");
+      return {};
+    });
+    if (!response.ok) throw new MobileApiError(response.status, typeof body?.code === "string" ? body.code : "MOBILE_REQUEST_FAILED");
     return body as T;
   }
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -93,8 +96,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }), signal: controller.signal });
       watchdog.noteHeaders();
       if (!response.ok) {
-        const body = await response.json();
-        throw new MobileApiError(response.status, body.code ?? "CHAT_REQUEST_FAILED");
+        const body = await response.json().catch(() => ({}));
+        throw new MobileApiError(response.status, typeof body?.code === "string" ? body.code : "CHAT_REQUEST_FAILED");
       }
       if (!response.body) throw Error("CHAT_STREAM_MISSING");
       const reader = response.body.getReader();

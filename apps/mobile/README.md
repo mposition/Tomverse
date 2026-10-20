@@ -55,6 +55,9 @@ preparation, not proof of verified links. Browser screenshots and sync output
 are not physical-device authentication evidence. iOS uses ASWebAuthenticationSession with an exact HTTPS callback, rather than
 relying on Safari same-domain navigation. Physical app-link and session evidence
 remains required before release.
+The iOS entitlements prepare both `applinks` and `webcredentials` for the HTTPS
+authentication session. AASA registration for either service still requires the
+owner's actual application/Team IDs and separate operational approval.
 
 ## Product surface
 
@@ -76,7 +79,7 @@ The local bundle, Capacitor Android/iOS sync, TypeScript, scoped lint, shared
 package purity and Vite package execution checks passed. Synthetic browser
 coverage passed 14 cases: first/follow-up answer, tab restart, IME, cancellation,
 model sheet, product modes, attachments, voice, denied microphone and sign-out.
-Focused bearer/transport checks passed 36 cases; existing server and web product
+Focused bearer/transport/stream checks passed 54 cases; existing server and web product
 regressions passed 85 and 28 cases. Broader mobile/session regressions passed
 268 cases before the final recovery/error-copy additions. No product provider
 was called.

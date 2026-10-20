@@ -1,4 +1,3 @@
-import { chatStreamDisplayText } from "@tomverse/chat-core";
 /**
  * Reading the chat response stream: what the user sees, and what the
  * liveness watchdog is told about it.
@@ -27,6 +26,7 @@ import { chatStreamDisplayText } from "@tomverse/chat-core";
  * remaining text, so a marker cannot hide inside another marker's payload.
  */
 
+import { chatStreamDisplayText } from "@tomverse/chat-core";
 import { splitStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
 import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
 import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";

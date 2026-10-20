@@ -115,3 +115,8 @@ test("browser cancellation codes preserve the recovery message", () => {
   assert.equal(mobileErrorText({ code: null }, "en", "Fallback"), "Fallback");
   assert.match(mobileErrorText({ code: "ATTACHMENT_UNSUPPORTED_FORMAT" }, "en", "Fallback"), /not supported/);
 });
+
+test("a non-JSON server refusal preserves its status without exposing HTML", async () => {
+  const transport = createApiTransport(async () => new Response("<html>Unavailable</html>", { status: 503 }), bridge);
+  await assert.rejects(transport.list(), (error) => error.status === 503 && error.code === "MOBILE_REQUEST_FAILED");
+});

@@ -12,7 +12,7 @@
     "cap:sync": "cap sync",
     "brand:assets": "node brand-assets.mjs",
     "test:ui": "playwright test --config playwright.config.ts",
-    "build:android": "cd android && gradlew.bat assembleDebug"
+    "build:android": "node build-android.mjs"
   },
   "dependencies": {
     "@tomverse/mobile-auth": "file:./native-auth",
