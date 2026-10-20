@@ -27,6 +27,7 @@ import type {
   AgentOfficeOperatorQueue,
   AgentOfficeQaState,
   AgentOfficeResearchState,
+  AgentOfficeRoutingState,
 } from "@/lib/agentOffice/live";
 import {
   countAutoFixActionCases,
@@ -43,6 +44,7 @@ import {
   agentOfficeEngineeringState,
 } from "@/lib/agentOfficeEngineeringState";
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
+import { agentOfficeRoutingMonthStart, agentOfficeRoutingState } from "@/lib/agentOfficeRoutingState";
 import { agentOfficeReviewState } from "@/lib/agentOfficeReviewState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
@@ -188,6 +190,36 @@ async function readFinance(): Promise<AgentOfficeFinanceState> {
     });
   } catch {
     console.warn({ event: "admin_agent_office_read_failed", read: "billing_finance_ops" });
+    return { kind: "unread" };
+  }
+}
+
+/**
+ * Chat routing improvement: the newest optimizer cycle of either target, this
+ * month's cycle spend and the newest promotion. Only status, code, spend and
+ * time columns are selected: no guidance, case or summary, which stay on the
+ * routing screen.
+ */
+async function readRouting(now: Date): Promise<AgentOfficeRoutingState> {
+  try {
+    const [last, monthCycles, promoted] = await Promise.all([
+      prisma.autoRouterOptimizerCycle.findFirst({
+        orderBy: { createdAt: "desc" },
+        select: { target: true, status: true, failure: true, createdAt: true, finishedAt: true },
+      }),
+      prisma.autoRouterOptimizerCycle.findMany({
+        where: { createdAt: { gte: agentOfficeRoutingMonthStart(now) } },
+        select: { createdAt: true, spentMicroUsd: true },
+      }),
+      prisma.autoRouterOptimizerCycle.findFirst({
+        where: { promotedAt: { not: null } },
+        orderBy: { promotedAt: "desc" },
+        select: { promotedAt: true },
+      }),
+    ]);
+    return agentOfficeRoutingState({ last, monthCycles, lastPromotedAt: promoted?.promotedAt ?? null, now });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "auto_router_optimizer" });
     return { kind: "unread" };
   }
 }
@@ -361,10 +393,11 @@ async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
 }
 
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, engineering, amux, review, decision, digest, queue] = await Promise.all([
+  const [research, qa, finance, routing, engineering, amux, review, decision, digest, queue] = await Promise.all([
     readResearch(now),
     readQa(),
     readFinance(),
+    readRouting(now),
     readEngineering(),
     readAmuxWorkers(),
     readReview(),
@@ -372,5 +405,5 @@ export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<
     readDigest(now),
     readOperatorQueue(),
   ]);
-  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review, decision, digest, queue };
+  return { readAt: now.toISOString(), research, qa, finance, routing, engineering, amux, review, decision, digest, queue };
 }

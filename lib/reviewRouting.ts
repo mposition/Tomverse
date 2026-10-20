@@ -3,7 +3,7 @@ import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { reserveRouterCost, settleRouterCost } from "@/lib/autoLlmRouter";
-import { AUTO_LLM_ROUTER_TIMEOUT_MS, autoLlmRouterProviderOptions, autoLlmRouterWorstCaseMicroUsd, resolveAutoLlmRouterModel } from "@/lib/autoLlmRouterCore";
+import { AUTO_LLM_ROUTER_TIMEOUT_MS, CHAT_RESEARCH_ROUTING_CRITERIA, autoLlmRouterProviderOptions, autoLlmRouterWorstCaseMicroUsd, resolveAutoLlmRouterModel } from "@/lib/autoLlmRouterCore";
 import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
 import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
@@ -25,7 +25,7 @@ export async function routeReviewPrompt(input: {
   const active = await readActiveRouterGuidance();
   // The same live guidance as Chat, including optimizer improvements. No copy
   // of its fitness rules is maintained for Review.
-  const system = [active.guidance, CHAT_IMAGE_ROUTING_CRITERIA,
+  const system = [active.guidance, CHAT_IMAGE_ROUTING_CRITERIA, CHAT_RESEARCH_ROUTING_CRITERIA,
     "For Tomverse Review, classify the request once, then choose exactly one eligible model per requested provider.",
     "When requestedKind=image, the user pressed Generate in the image workspace: select image models and a preset, even for a short subject-only prompt.",
     "For text use textCandidates; for image use imageCandidates. Never substitute another provider.",

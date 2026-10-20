@@ -17,8 +17,9 @@
 import { ADMIN_NAVIGATION } from "@/lib/adminNavigation";
 
 /**
- * Room order. The eight teams fill the two rows of team rooms in this order; the
- * digest desk sits in the top row beside the operator's office.
+ * Room order. The first eight teams fill the two rows of team rooms in this
+ * order; the routing team and the digest desk sit in the top row beside the
+ * operator's office.
  */
 export const AGENT_OFFICE_DEPT_IDS = [
   "engineering",
@@ -29,12 +30,13 @@ export const AGENT_OFFICE_DEPT_IDS = [
   "finance",
   "trust",
   "research",
+  "routing",
   "digest",
 ] as const;
 
 export type AgentOfficeDeptId = (typeof AGENT_OFFICE_DEPT_IDS)[number];
 
-/** The eight agent teams. The digest desk is where their digests are read, not a team. */
+/** The nine agent teams. The digest desk is where their digests are read, not a team. */
 export const AGENT_OFFICE_TEAM_IDS = AGENT_OFFICE_DEPT_IDS.filter(
   (id): id is Exclude<AgentOfficeDeptId, "digest"> => id !== "digest"
 );
@@ -98,6 +100,12 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
     icon: "🔭",
     policy: "docs/policy/product-research-agent.md",
     recordHref: "/admin/product-research",
+  },
+  {
+    id: "routing",
+    icon: "🧭",
+    policy: "docs/ui-contracts/auto-model-selection.md",
+    recordHref: "/admin/routing",
   },
   { id: "digest", icon: "📋", policy: null, recordHref: "/admin/agent-digests" },
 ];
@@ -164,6 +172,10 @@ export const AGENT_OFFICE_STAFF: readonly AgentOfficeStaffMeta[] = [
   { id: "research-m1", dept: "research", rank: "member", colors: ["#2f2a3d", "#bae6fd", "#b8f0dd"] },
   { id: "research-m2", dept: "research", rank: "member", colors: ["#5a3450", "#fde68a", "#93c5fd"] },
 
+  { id: "routing-lead", dept: "routing", rank: "lead", colors: ["#3a3550", "#bae6fd", "#fde68a"] },
+  { id: "routing-m1", dept: "routing", rank: "member", colors: ["#5b3a2e", "#b8f0dd", "#93c5fd"] },
+  { id: "routing-m2", dept: "routing", rank: "member", colors: ["#2b3d45", "#fde68a", "#b8f0dd"] },
+
   { id: "digest-lead", dept: "digest", rank: "lead", colors: ["#7a453c", "#bae6fd", "#bae6fd"] },
   { id: "digest-m1", dept: "digest", rank: "member", colors: ["#334a3a", "#e4e4e7", "#fde68a"] },
 ];
@@ -194,6 +206,7 @@ export const AGENT_OFFICE_DEPT_KEYWORDS: readonly [AgentOfficeDeptId, readonly s
   ["marketing", ["마케팅", "marketing", "guard", "게시", "소셜", "social", "seo"]],
   ["finance", ["재무", "과금", "finance", "billing", "가격", "price", "정산", "ledger"]],
   ["trust", ["신뢰", "안전", "trust", "safety", "컴플라이언스", "compliance", "dsr", "개인정보 요청"]],
+  ["routing", ["라우팅", "routing", "auto", "라우터", "router", "리파이너", "refiner", "재작성"]],
   ["digest", ["다이제스트", "digest", "비서"]],
 ];
 
@@ -207,7 +220,7 @@ export const AGENT_OFFICE_DIGEST_SENDERS: Readonly<Record<string, AgentOfficeDep
   "sre-ops": "sre",
 };
 
-/** Everything on the floor that has a team window: the nine desk rooms and the three record rooms. */
+/** Everything on the floor that has a team window: the ten desk rooms and the three record rooms. */
 export type AgentOfficeTeamId = AgentOfficeDeptId | "amux" | "review" | "decision";
 
 /** The document each record room is governed by, as the team window names it. */

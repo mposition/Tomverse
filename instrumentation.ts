@@ -5,7 +5,8 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("./sentry.server.config");
     await reportCostConfigurationIssues();
-    // Keep this import inside the runtime branch so Edge never bundles Prisma.
+    // Keep the Node-only dependency inside the runtime branch so Edge builds
+    // never traverse Prisma/pg. The existing sweep gates remain unchanged.
     try {
       const { startCiAdmissionSweep } = await import("@/lib/ciAdmissionRound");
       startCiAdmissionSweep();

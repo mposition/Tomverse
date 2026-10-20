@@ -715,6 +715,7 @@ const loadExternalScript = (src: string) =>
   });
 
 type ChatInputProps = {
+  workspaceAppearance?: "studio" | "classic";
   review?: ReviewWorkspaceControls;
   /** The product this composer belongs to; switches navigate without rewriting it. */
   currentProduct?: ChatWorkspaceProduct;
@@ -933,6 +934,12 @@ type ChatInputProps = {
   identityKey: string | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
+  /**
+   * True when a send is already routed to the image workspace by the
+   * image-intent model (lib/chatImageIntent.ts). The handoff chip then has
+   * nothing to offer -- the send itself is the handoff -- so it is not shown.
+   */
+  imageIntentRoutedOnSend?: boolean;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
   isDeepResearchPending?: boolean;
   onDismissDeepResearchChip?: () => void;
@@ -1025,6 +1032,7 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 
 export function ChatInput({
   review,
+  workspaceAppearance,
   currentProduct,
   showProductSwitcher = true,
   showReviewModelRow = true,
@@ -1086,6 +1094,7 @@ export function ChatInput({
   onVoiceTranscript,
   identityKey,
   imageGenerationLock = null,
+  imageIntentRoutedOnSend = false,
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
   onDismissDeepResearchChip,
@@ -1805,6 +1814,7 @@ export function ChatInput({
   );
   const imageIntentKey = imageIntentDraftKey(imageIntentSourceText);
   const imageIntentOffered =
+    !imageIntentRoutedOnSend &&
     Boolean(onStartImageDraft || imageGenerationLock) &&
     !isComposingDraft &&
     imageIntentSourceText.trim().length > 0 &&
@@ -2172,6 +2182,11 @@ export function ChatInput({
   }, []);
 
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
+  const deepResearchModel = AVAILABLE_MODELS.find(model => model.id === "perplexity/sonar-deep-research");
+  const deepResearchLocked = !deepResearchModel || !canUseModelWithPlan(currentPlan, deepResearchModel);
+  const deepResearchReason = !deepResearchModel ? null
+    : isGuestMode ? t("modelStatusReasons.loginRequired")
+      : deepResearchLocked ? t("modelStatusReasons.upgradeRequired") : null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -3266,7 +3281,7 @@ export function ChatInput({
   // (Above md the bar's md:py-4/md:pb-4 applies and no inset was ever added.) The
   // dock's bottom edge is the only place the inset belongs.
   return (
-      <div data-review-composer={review?.appearance === "studio" ? "studio" : undefined} className={variant === "floating"
+      <div data-chat-composer={currentProduct === "chat" ? workspaceAppearance : undefined} data-review-composer={review?.appearance === "studio" ? "studio" : undefined} className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
         : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-[clamp(0.25rem,2vw,0.5rem)] py-1 pb-0 transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-1 ${
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
@@ -3976,7 +3991,7 @@ export function ChatInput({
           </button>
           {showWebSearchInFooter && webSearchChip}
           {review?.appearance === "studio" && !webSearchState.isVisible && <button type="button" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
-          {review?.appearance === "studio" && <button type="button" className="review-research-shortcut" onClick={() => {
+          {review?.appearance === "studio" && review.mode !== "easy" && <button type="button" className="review-research-shortcut" onClick={() => {
             if (isGuestMode) { onGuestSignInPrompt?.(); return; }
             onOpenDeepResearchSetup?.();
           }} disabled={isDeepResearchPending || review.pending}>{t("chat.toolsDeepResearch")}</button>}
@@ -4414,20 +4429,7 @@ export function ChatInput({
                     </button>
                   )}
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
-                  {(() => {
-                    const deepResearchModel = AVAILABLE_MODELS.find(
-                      (model) => model.id === "perplexity/sonar-deep-research"
-                    );
-                    const deepResearchLocked =
-                      !deepResearchModel || !canUseModelWithPlan(currentPlan, deepResearchModel);
-                    const deepResearchReason = !deepResearchModel
-                      ? null
-                      : isGuestMode
-                        ? t("modelStatusReasons.loginRequired")
-                        : deepResearchLocked
-                          ? t("modelStatusReasons.upgradeRequired")
-                          : null;
-                    return (
+                  {review?.mode !== "easy" && (
                       <button
                         type="button"
                         data-testid="tools-deep-research-row"
@@ -4460,8 +4462,7 @@ export function ChatInput({
                           </span>
                         </span>
                       </button>
-                    );
-                  })()}
+                  )}
                   {(onStartImageDraft || imageGenerationLock) && (
                     <button
                       type="button"

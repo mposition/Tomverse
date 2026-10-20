@@ -27,6 +27,11 @@
  * digest was recorded (the agent's own silence verdict) and when the newest
  * one was stored -- never the verdict, models or deadlines inside it, which
  * docs/policy/billing-finance-ops.md §1.4 keeps to its digest tab.
+ *
+ * Chat routing improvement shows its latest optimizer cycle's status, which
+ * guidance it was for, the spend against the optimizer's day and month caps
+ * and when a cycle was last promoted -- never the guidance, cases or summary,
+ * which stay on the routing screen.
  */
 
 import type { DeptStatus } from "@/lib/agentOffice/sim";
@@ -168,6 +173,35 @@ export type AgentOfficeFinanceState =
       latestDigestAt: string | null;
     };
 
+/** The two guidance kinds an optimizer cycle improves: the router's picks, and the question rewrite rules. */
+export type AgentOfficeRoutingTarget = "routing" | "rewrite";
+
+/** An optimizer cycle's status, as the cycle row holds it. */
+export type AgentOfficeRoutingCycleStatus = "running" | "passed" | "failed" | "error";
+
+export type AgentOfficeRoutingState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      /** The newest cycle of either target, or null when none was ever recorded. */
+      last: {
+        target: AgentOfficeRoutingTarget;
+        status: AgentOfficeRoutingCycleStatus;
+        /** The gate failure or run error code; null when passed or running. */
+        failure: string | null;
+        /** UTC ISO. */
+        createdAt: string;
+        finishedAt: string | null;
+      } | null;
+      /** Spend this UTC day and month by both targets' cycles, in millionths of a USD. */
+      spentTodayMicroUsd: number;
+      spentMonthMicroUsd: number;
+      dayCapMicroUsd: number;
+      monthCapMicroUsd: number;
+      /** When the newest promoted cycle was promoted (UTC ISO), or null if none ever was. */
+      lastPromotedAt: string | null;
+    };
+
 /** One reviewer of the independent review server, as its latest report shows it. */
 export type AgentOfficeReviewerState = "reviewing" | "idle" | "off" | "lost";
 
@@ -253,6 +287,7 @@ export type AgentOfficeLiveRooms = {
   research: AgentOfficeResearchState;
   qa: AgentOfficeQaState;
   finance: AgentOfficeFinanceState;
+  routing: AgentOfficeRoutingState;
   engineering: AgentOfficeEngineeringState;
   amux: AgentOfficeAmuxState;
 };
@@ -754,6 +789,80 @@ export function financeLiveDept(state: AgentOfficeFinanceState, copy: FinanceCop
   // The recorded and silent lines already carry the newest digest's time.
   if (last && state.verdict !== "recorded" && state.verdict !== "silent") facts.push(copy.lastDigest(last));
   return { status, badge: copy.badges[state.verdict], line, detail: facts.join(" · ") };
+}
+
+/** Whether the optimizer's day or month cap is reached: the next cycle would be refused. */
+export function routingCapReached(state: Extract<AgentOfficeRoutingState, { kind: "observed" }>): "day" | "month" | null {
+  if (state.spentTodayMicroUsd >= state.dayCapMicroUsd) return "day";
+  if (state.spentMonthMicroUsd >= state.monthCapMicroUsd) return "month";
+  return null;
+}
+
+/**
+ * The routing room's colour. A read that failed, a failed or errored latest
+ * cycle and a spend cap reached need a look; a cycle running is working; a
+ * passed one is done; no cycle on record is waiting.
+ */
+export function routingTone(state: AgentOfficeRoutingState): DeptStatus {
+  if (state.kind === "unread") return "attention";
+  if (routingCapReached(state)) return "attention";
+  if (!state.last) return "waiting";
+  if (state.last.status === "running") return "working";
+  if (state.last.status === "passed") return "done";
+  return "attention";
+}
+
+type RoutingCopy = {
+  badges: Record<AgentOfficeRoutingCycleStatus | "none" | "unread" | "cap", string>;
+  targets: Record<AgentOfficeRoutingTarget, string>;
+  unread: string;
+  none: string;
+  running: (target: string, time: string) => string;
+  passed: (target: string, time: string) => string;
+  failed: (target: string, time: string, code: string) => string;
+  error: (target: string, time: string, code: string) => string;
+  /** The cap that is reached, then what has been spent against it. */
+  capReached: (cap: "day" | "month") => string;
+  spend: (spent: string, cap: string, period: "day" | "month") => string;
+  lastPromotion: (time: string) => string;
+  noPromotion: string;
+};
+
+const usd = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
+
+/** The routing room's line and detail, from its state and the console's copy. */
+export function routingLiveDept(state: AgentOfficeRoutingState, copy: RoutingCopy): AgentOfficeLiveDept {
+  const status = routingTone(state);
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
+
+  const cap = routingCapReached(state);
+  const last = state.last;
+  const target = last ? copy.targets[last.target] : "";
+  const time = last ? aestStamp(last.status === "running" ? last.createdAt : (last.finishedAt ?? last.createdAt)) : "";
+  const code = last?.failure ?? "unknown";
+  const line = !last
+    ? copy.none
+    : last.status === "running"
+      ? copy.running(target, time)
+      : last.status === "passed"
+        ? copy.passed(target, time)
+        : last.status === "failed"
+          ? copy.failed(target, time, code)
+          : copy.error(target, time, code);
+
+  const facts: string[] = [];
+  if (cap) facts.push(copy.capReached(cap));
+  facts.push(copy.spend(usd(state.spentTodayMicroUsd), usd(state.dayCapMicroUsd), "day"));
+  facts.push(copy.spend(usd(state.spentMonthMicroUsd), usd(state.monthCapMicroUsd), "month"));
+  facts.push(state.lastPromotedAt ? copy.lastPromotion(aestStamp(state.lastPromotedAt)) : copy.noPromotion);
+
+  return {
+    status,
+    badge: cap ? copy.badges.cap : last ? copy.badges[last.status] : copy.badges.none,
+    line,
+    detail: facts.join(" · "),
+    revision: last ? `${last.status}@${last.createdAt}@${last.finishedAt ?? ""}` : "none",
+  };
 }
 
 /** A reviewer's colour: reviewing is working, idle is ready, off waits, lost needs a look. */

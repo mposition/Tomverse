@@ -108,3 +108,30 @@ export async function scrollUpBy(target: Locator, pixels: number) {
     element.scrollTop -= amount;
   }, pixels);
 }
+
+/**
+ * An element's layout box, measured by the page rather than by the protocol.
+ *
+ * `locator.boundingBox()` on WebKit asks the inspector for content quads and
+ * answers `null` when that call fails, without saying why. On the audit's
+ * Linux WebKit it did so for elements well below the fold -- the landing hero
+ * capture and a CTA at a 320px viewport, run 39345904342, all three attempts --
+ * while the snapshot of the same moment shows both attached and laid out, and
+ * the same specs pass on Windows WebKit and on Chromium. A `null` there is a
+ * missing capability, not a missing element, so these specs measure through
+ * `getBoundingClientRect()`, which is what the viewport assertions are about.
+ * The coordinates are the same viewport-relative CSS pixels either way.
+ *
+ * Throws if the element has no box at all, so "not rendered" still fails. A
+ * box is not visibility -- `visibility: hidden` still has one -- so callers
+ * assert `toBeVisible()` first, which `boundingBox()`'s null used to imply.
+ */
+export async function layoutBox(target: Locator) {
+  const box = await target.evaluate((element) => {
+    if (element.getClientRects().length === 0) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+  if (!box) throw new Error("element has no layout box");
+  return box;
+}

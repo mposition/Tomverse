@@ -7,6 +7,8 @@ import {
   setImageGenerationEnabled,
 } from "@/lib/appSettings";
 import { retryImageGenerationTarget } from "@/lib/imageGenerationService";
+import { startChatImageTurn } from "@/lib/chatImageTurn";
+import { attachChatImageTurns } from "@/lib/chatImageTurnRead";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import {
   auditImageGenerationInvariants,
@@ -832,6 +834,137 @@ test("retrying a failed target adds an attempt to the same target, not a new gro
   assert.equal(targetRow?.currentGenerationId, attempts[1].id);
   // Exactly one group: the retry must not spawn a second one.
   assert.equal(await prisma.imageGenerationGroup.count(), 1);
+});
+
+const createChatConversation = (userId: string) =>
+  prisma.conversation.create({
+    data: {
+      userId,
+      title: "chat",
+      kind: "chat",
+      productKey: "chat",
+      selectedModels: "[]",
+      disabledPanels: "[]",
+    },
+  });
+
+test("a chat conversation takes an image group only through a Chat image turn", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const chat = await createChatConversation(user.id);
+
+  await assert.rejects(
+    requestImageGeneration(requestInput(user.id, { conversationId: chat.id })),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.code, "CONVERSATION_KIND_NOT_SUPPORTED");
+      return true;
+    }
+  );
+  assert.equal(await prisma.imageGenerationGroup.count(), 0);
+
+  const turn = await requestImageGeneration(
+    requestInput(user.id, { conversationId: chat.id, chatTurnHost: true })
+  );
+  assert.equal(turn.conversationId, chat.id);
+  // Attached to the chat conversation: no image conversation was created.
+  assert.equal(await prisma.conversation.count(), 1);
+});
+
+test("a Chat image turn answers in the chat conversation and replays without charging again", async () => {
+  await enableImageGeneration();
+  await prisma.appSetting.createMany({
+    data: [
+      { key: "auto.llmRouterModelId", value: "gpt-6-luna" },
+      { key: "auto.llmRouterImageTriage", value: "on" },
+    ],
+  });
+  const user = await createUser();
+  const chat = await createChatConversation(user.id);
+  const question = await prisma.message.create({
+    data: { conversationId: chat.id, role: "user", content: "a small cat icon" },
+  });
+  const turnInput = {
+    userId: user.id,
+    conversationId: chat.id,
+    sourceUserMessageId: question.id,
+    assistantMessageId: randomUUID(),
+    modelId: "gpt-6-luna",
+    imageModelIds: ["gpt-image-2"],
+    preset: "draft" as const,
+  };
+
+  const first = await startChatImageTurn(turnInput);
+  const replay = await startChatImageTurn(turnInput);
+  assert.equal(replay.groupId, first.groupId);
+  // Nothing ran the first request's work here, so the replay is what starts
+  // it -- the same generation, still one reservation.
+  assert.deepEqual(replay.pendingGenerationIds, first.pendingGenerationIds);
+  assert.equal(await prisma.imageCreditReservation.count(), 1);
+  assert.equal(await prisma.conversation.count(), 1);
+
+  const group = await prisma.imageGenerationGroup.findUniqueOrThrow({
+    where: { id: first.groupId },
+  });
+  assert.equal(group.conversationId, chat.id);
+  const generation = await prisma.imageGeneration.findFirstOrThrow({
+    where: { groupId: first.groupId },
+  });
+  assert.equal(generation.prompt, "a small cat icon");
+  assert.equal(generation.quality, "low");
+
+  const messages = await prisma.message.findMany({
+    where: { conversationId: chat.id },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, role: true, content: true },
+  });
+  assert.equal(messages.length, 2);
+  const read = await attachChatImageTurns(user.id, chat.id, messages);
+  assert.deepEqual(read[1], {
+    id: turnInput.assistantMessageId,
+    role: "assistant",
+    content: "[Image generated] a small cat icon",
+    imageTurn: { groupId: first.groupId, modelIds: ["gpt-image-2"] },
+  });
+});
+
+test("a failed image in a chat conversation can be retried there", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const chat = await createChatConversation(user.id);
+  const first = await requestImageGeneration(
+    requestInput(user.id, { conversationId: chat.id, chatTurnHost: true })
+  );
+  const target = first.targets[0];
+  await prisma.imageGeneration.update({
+    where: { id: target.generationId },
+    data: { status: "failed", failedAt: new Date() },
+  });
+  await prisma.chatRequestLease.deleteMany({});
+
+  // With the Chat image switch off, the paid retry is refused.
+  await assert.rejects(
+    retryImageGenerationTarget({
+      userId: user.id,
+      targetId: target.targetId,
+      retryIdempotencyKey: "chat-retry-off-abcdefgh",
+    }),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.code, "CONVERSATION_KIND_NOT_SUPPORTED");
+      return true;
+    }
+  );
+  const retry = await retryImageGenerationTarget({
+    userId: user.id,
+    targetId: target.targetId,
+    retryIdempotencyKey: "chat-retry-abcdefgh",
+    chatTurnHostAllowed: true,
+  });
+  assert.equal(retry.groupId, first.groupId);
+  assert.equal(retry.conversationId, chat.id);
+  assert.equal(
+    await prisma.imageGeneration.count({ where: { targetId: target.targetId } }),
+    2
+  );
 });
 
 test("a succeeded target cannot be retried into a double charge", async () => {

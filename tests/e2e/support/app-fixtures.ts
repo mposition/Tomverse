@@ -201,7 +201,7 @@ export async function mockPublicProofMetrics(page: Page) {
   );
 }
 
-export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", reviewAppearance: "classic" | "studio" = "classic") {
+export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", reviewAppearance: "classic" | "studio" = "classic", chatAppearance: "classic" | "studio" = "classic") {
   // Existing workspace contracts exercise the retained Classic appearance.
   // Studio has its own responsive coverage in review-studio.spec.ts.
   await mockPublicBillingConfig(page);
@@ -213,7 +213,8 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", 
     route.fulfill(json({ generatedAt: "2099-01-01T00:00:00.000Z", models: [] }))
   );
   await page.route("**/api/auth/session**", (route) =>
-    route.fulfill(json(null))
+    // NextAuth's client interprets an empty object as a signed-out session.
+    route.fulfill(json({}))
   );
   // Guests run the aggregate comparison preflight too -- it is what admits all
   // three panels of a comparison at once instead of letting them race for
@@ -233,7 +234,7 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", 
     );
   });
 
-  await page.addInitScript(({ lang, appearance }) => {
+  await page.addInitScript(({ lang, appearance, chatAppearance }) => {
     // A scriptable stand-in for Cloudflare's widget. The default -- "silent" --
     // is what every pre-existing spec relies on: verification passes without
     // any interaction, so no verification UI is ever supposed to appear. The
@@ -417,12 +418,13 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", 
 
     localStorage.clear();
     localStorage.setItem("tomverse_review_appearance", appearance);
+    localStorage.setItem("tomverse_chat_appearance", chatAppearance);
     localStorage.setItem("tomverse_language", lang);
     localStorage.setItem("tomverse_onboarding_seen_v1", "1");
     localStorage.setItem("guest_count", "0");
     localStorage.setItem("guest_date", new Date().toDateString());
     sessionStorage.setItem("__tomverse_qa_guest_ready", "true");
-  }, { lang: language, appearance: reviewAppearance });
+  }, { lang: language, appearance: reviewAppearance, chatAppearance });
 }
 
 export async function mockChatStream(
@@ -686,6 +688,9 @@ export async function mockAuthenticatedApi(
     // their appearance. Preserve that seed regardless of init-script order.
     if (!localStorage.getItem("tomverse_review_appearance")) {
       localStorage.setItem("tomverse_review_appearance", "classic");
+    }
+    if (!localStorage.getItem("tomverse_chat_appearance")) {
+      localStorage.setItem("tomverse_chat_appearance", "classic");
     }
     if (showSidebarTour) {
       localStorage.removeItem("tomverse_sidebar_tour_v1");
@@ -1071,43 +1076,45 @@ export async function mockAuthenticatedApi(
   await page.route("**/api/conversations/*/generate-title", route =>
     route.fulfill(json({ title: state.title || "QA conversation" }))
   );
-  if (options.productKey === "chat") {
-    const drafts = new Map<string, {
-      text: string;
-      revision: number;
-      attachmentReferences: JsonValue[];
-    }>();
-    await page.route("**/api/products/chat/drafts/**", async (route) => {
-      const scopeKey = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() ?? "");
-      const current = drafts.get(scopeKey);
-      const canonical = (draft: NonNullable<typeof current>) => ({
-        ...draft, scopeKey, attachments: [],
-        createdAt: "2026-09-21T00:00:00.000Z",
-        updatedAt: "2026-09-21T00:00:00.000Z",
-      });
-      if (route.request().method() === "GET") {
-        await route.fulfill(json({ scopeKey, draft: current ? canonical(current) : null }));
-        return;
-      }
-      const body = route.request().postDataJSON() as {
-        text?: string; expectedRevision?: number; attachmentReferences?: JsonValue[];
-      };
-      if (body.expectedRevision !== (current?.revision ?? 0)) {
-        await route.fulfill(json({ code: "CHAT_DRAFT_REVISION_CONFLICT",
-          currentRevision: current?.revision ?? null,
-          currentDraft: current ? canonical(current) : null }, 409));
-        return;
-      }
-      if (route.request().method() === "DELETE") {
-        drafts.delete(scopeKey);
-        await route.fulfill({ status: 204, body: "" });
-        return;
-      }
-      const next = { text: body.text ?? "", revision: (current?.revision ?? 0) + 1,
-        attachmentReferences: body.attachmentReferences ?? [] };
-      drafts.set(scopeKey, next);
-      await route.fulfill(json({ draft: canonical(next) }));
+  const drafts = new Map<string, {
+    text: string;
+    revision: number;
+    attachmentReferences: JsonValue[];
+  }>();
+  // A blank Chat can be opened beside a saved Review fixture too.
+  // Keep the default below page-specific draft mocks, regardless of setup order.
+  await page.context().route("**/api/products/chat/drafts/**", async (route) => {
+    const scopeKey = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() ?? "");
+    const current = drafts.get(scopeKey);
+    const canonical = (draft: NonNullable<typeof current>) => ({
+      ...draft, scopeKey, attachments: [],
+      createdAt: "2026-09-21T00:00:00.000Z",
+      updatedAt: "2026-09-21T00:00:00.000Z",
     });
+    if (route.request().method() === "GET") {
+      await route.fulfill(json({ scopeKey, draft: current ? canonical(current) : null }));
+      return;
+    }
+    const body = route.request().postDataJSON() as {
+      text?: string; expectedRevision?: number; attachmentReferences?: JsonValue[];
+    };
+    if (body.expectedRevision !== (current?.revision ?? 0)) {
+      await route.fulfill(json({ code: "CHAT_DRAFT_REVISION_CONFLICT",
+        currentRevision: current?.revision ?? null,
+        currentDraft: current ? canonical(current) : null }, 409));
+      return;
+    }
+    if (route.request().method() === "DELETE") {
+      drafts.delete(scopeKey);
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    const next = { text: body.text ?? "", revision: (current?.revision ?? 0) + 1,
+      attachmentReferences: body.attachmentReferences ?? [] };
+    drafts.set(scopeKey, next);
+    await route.fulfill(json({ draft: canonical(next) }));
+  });
+  if (options.productKey === "chat") {
     await page.route(
       "**/api/products/chat/conversations",
       handleConversationCollection
@@ -1136,11 +1143,25 @@ export async function mockAuthenticatedApi(
   await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
+        draftConsume?: { scopeKey: string; expectedRevision: number; requestId: string };
         messages?: Array<Omit<QaConversationMessage, "id"> & {
           clientRequestId: string;
           attachmentUploadIds?: string[];
         }>;
       };
+      let draftConsumed = false;
+      if (body.draftConsume) {
+        const consume = body.draftConsume;
+        const draft = drafts.get(consume.scopeKey);
+        const message = body.messages?.[0];
+        if (!draft || draft.revision !== consume.expectedRevision ||
+            message?.clientRequestId !== consume.requestId || message.content !== draft.text) {
+          await route.fulfill(json({ code: "CHAT_DRAFT_REVISION_CONFLICT" }, 409));
+          return;
+        }
+        drafts.delete(consume.scopeKey);
+        draftConsumed = true;
+      }
       /*
         Binding, the way the real endpoint does it: the opaque upload ids
         become durable attachment rows in the same step that saves the message,
@@ -1194,6 +1215,7 @@ export async function mockAuthenticatedApi(
           created: body?.messages?.length ?? 0,
           messageMappings,
           attachments: bound,
+          draftConsumed,
         }, 201)
       );
       return;
@@ -1740,4 +1762,20 @@ export async function expectNoHorizontalOverflow(page: Page) {
   }));
 
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+}
+
+/**
+ * Waits until React owns the element with this test id.
+ *
+ * `goto()` and `toBeVisible()` only guarantee the server HTML. Filling a
+ * controlled input before hydration writes the DOM but not React's state, so
+ * the value is dropped the moment the component re-renders -- WebKit hydrates
+ * late enough for that to happen on every mobile-safari run of a form that is
+ * filled straight after navigation.
+ */
+export async function waitForHydration(page: Page, testId: string) {
+  await page.waitForFunction((id) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    return !!element && Object.keys(element).some((key) => key.startsWith("__reactFiber$"));
+  }, testId);
 }

@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from
+  "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { AMUX_V19_EXCLUDED_PATH_DIGEST_KEY_ID,
+import { AMUX_V19_DIAGNOSTIC_DETAIL_ENV, AMUX_V19_EXCLUDED_PATH_DIGEST_KEY_ID,
   AMUX_V19_MAX_SESSION_CYCLE_ENV, amuxV19SessionAnalysisFailure,
-  runAmuxV19MaxSessionCycleOnce } from
+  runAmuxV19MaxSessionCycleOnce, writeAmuxV19DiagnosticDetail } from
   "../lib/amux/ideaLocalMaxSessionCycle.mjs";
 import { observeAmuxTrackedCheckoutChild } from
   "../lib/amux/ideaTrackedCheckoutProcessResult.mjs";
@@ -34,10 +38,12 @@ const references = [{ referenceOrdinal: 0, commitSha: "a".repeat(40) },
 
 async function withSwitches(fn) {
   const names = [AMUX_V19_MAX_SESSION_CYCLE_ENV,
-    "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"];
+    "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET", AMUX_V19_DIAGNOSTIC_DETAIL_ENV];
   const old = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   process.env[AMUX_V19_MAX_SESSION_CYCLE_ENV] = "enabled";
   process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
+  // The detail switch is off unless a test turns it on.
+  delete process.env[AMUX_V19_DIAGNOSTIC_DETAIL_ENV];
   try { return await fn(); }
   finally {
     for (const name of names) {
@@ -391,3 +397,216 @@ test("a real diagnostic observation reaches the status line without its stderr o
       "cliError=authentication_failed terminal=api_error apiStatus=401 " +
       "exit=1 unknownReport=recorded\n");
   });
+
+// Diagnostic detail (TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL): local file only.
+const detailSecret = "sk-ant-oat01-SyntheticSecret_0123456789";
+const rejectedDetail = Object.freeze({
+  events: [{ code: "system_event_other", subtype: "tengu.private_event",
+    keys: ["type", "subtype", "session_id"],
+    // Fields the observers never produce: the writer must drop them.
+    message: `prompt ${detailSecret}`, body: { token: detailSecret } }],
+  trace: [{ code: "unlisted_open", path: ".claude/settings.json",
+    flags: ["O_RDONLY", "O_CLOEXEC", "not a flag"], content: detailSecret },
+  { code: "escaped_checkout", path: "<outside>", flags: ["O_RDONLY"] },
+  { code: "Bad Code", path: "x" }] });
+const parserRejected = (extra = {}) => ({ kind: "outcome_unknown",
+  cliStarted: true, failureStage: "parser_rejected", childExitCode: 0,
+  approvedConnects: 3, deniedConnects: 0,
+  parserReason: { code: "system_event_other", also: [], usageModels: null,
+    traceReason: "unlisted_open" },
+  preparedReferences: references, ...extra });
+
+async function withDetail(fn) {
+  const directory = await mkdtemp(join(tmpdir(), "amux-v19-detail-"));
+  process.env[AMUX_V19_DIAGNOSTIC_DETAIL_ENV] = "enabled";
+  try { return await fn(directory); }
+  finally {
+    delete process.env[AMUX_V19_DIAGNOSTIC_DETAIL_ENV];
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test("with the detail switch off nothing is asked for and no file is written", () =>
+  withSwitches(async () => {
+    const directory = await mkdtemp(join(tmpdir(), "amux-v19-detail-"));
+    try {
+      let asked;
+      const fake = steps({ analyse: async (input) => { asked = input;
+        return parserRejected({ diagnosticDetail: rejectedDetail }); } });
+      const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+        stateDirectory: directory }, fake.steps);
+      assert.equal("diagnosticDetail" in asked, false);
+      assert.equal("detail" in result, false);
+      assert.deepEqual(await readdir(directory), []);
+      assert.doesNotMatch(amuxV19MaxSessionCycleStatus(result).line, /detail=/);
+      // Any value but "enabled" is off.
+      process.env[AMUX_V19_DIAGNOSTIC_DETAIL_ENV] = "true";
+      await runAmuxV19MaxSessionCycleOnce({ origin, stateDirectory: directory },
+        steps({ analyse: async () => parserRejected({
+          diagnosticDetail: rejectedDetail }) }).steps);
+      assert.deepEqual(await readdir(directory), []);
+    } finally {
+      delete process.env[AMUX_V19_DIAGNOSTIC_DETAIL_ENV];
+      await rm(directory, { recursive: true, force: true });
+    }
+  }));
+
+test("with the detail switch on a rejected analysis writes one private file of names only", () =>
+  withSwitches(() => withDetail(async (directory) => {
+    let asked;
+    const fake = steps({ analyse: async (input) => { asked = input;
+      return parserRejected({ diagnosticDetail: rejectedDetail }); } });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: directory }, fake.steps);
+    assert.equal(asked.diagnostic, true);
+    assert.equal(asked.diagnosticDetail, true);
+    assert.equal(result.detail, "written");
+    assert.equal(result.unknownReport, "recorded");
+    const files = await readdir(directory);
+    assert.equal(files.length, 1);
+    assert.match(files[0], /^diagnostic-\d{8}T\d{6}\.\d{3}Z\.json$/);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(join(directory, files[0]))).mode & 0o777, 0o600);
+    }
+    const text = await readFile(join(directory, files[0]), "utf8");
+    const written = JSON.parse(text);
+    assert.deepEqual(written.events, [{ code: "system_event_other",
+      subtype: "tengu.private_event", keys: ["type", "subtype", "session_id"] }]);
+    assert.deepEqual(written.trace, [
+      { code: "unlisted_open", path: ".claude/settings.json",
+        flags: ["O_RDONLY", "O_CLOEXEC"] },
+      { code: "escaped_checkout", path: "<outside>", flags: ["O_RDONLY"] }]);
+    assert.equal(written.analysis.parser, "system_event_other");
+    assert.equal(written.analysis.trace, "unlisted_open");
+    assert.equal(written.version, 1);
+    assert.match(written.recordedAt, /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
+    assert.equal(text.includes(detailSecret), false);
+    assert.equal(text.includes("prompt"), false);
+    assert.equal(text.includes(origin), false);
+    assert.equal(text.includes(identity.claimId), false);
+    // The status line only says whether the file was written.
+    const { line } = amuxV19MaxSessionCycleStatus(result);
+    assert.match(line, / unknownReport=recorded detail=written\n$/);
+    assert.equal(line.includes("tengu"), false);
+    assert.equal(line.includes("settings.json"), false);
+    // The app request is the plain unknown body: no detail in it, nor in
+    // anything else the cycle handed to a step that talks to the app.
+    assert.deepEqual(fake.reports, [{ origin, fetchImpl: undefined,
+      input: unknownBody }]);
+    assert.equal(JSON.stringify(fake.reports).includes("tengu"), false);
+    assert.equal(JSON.stringify(fake.reports).includes("settings.json"), false);
+    assert.equal(fake.released(), 0, "the halt marker still waits for the operator");
+  })));
+
+test("the real unknown report carries the claim identity only, never the detail", () =>
+  withSwitches(() => withDetail(async (directory) => {
+    const keep = [process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN];
+    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN = origin;
+    const sent = [];
+    try {
+      const { settleAmuxV19MaxShadowResultOnce } = await import(
+        "../lib/amux/ideaLocalMaxShadowResultOnce.mjs");
+      const fake = steps({
+        analyse: async () => parserRejected({ diagnosticDetail: rejectedDetail }),
+        reportUnknown: settleAmuxV19MaxShadowResultOnce });
+      const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+        stateDirectory: directory, fetchImpl: async (url, options) => {
+          sent.push(`${url}\n${JSON.stringify(options.headers)}\n${options.body ?? ""}`);
+          return Response.json({ claimId: identity.claimId,
+            status: "outcome_unknown", settledMicroUsd: null,
+            auditId: "clsyntheticaudit123" });
+        } }, fake.steps);
+      assert.equal(result.unknownReport, "recorded");
+      assert.equal(result.detail, "written");
+      assert.equal(sent.length, 1);
+      assert.match(sent[0], /analysis-budget\/unknown/);
+      assert.deepEqual(JSON.parse(sent[0].split("\n")[2]), unknownBody);
+      assert.doesNotMatch(sent[0], /tengu|settings\.json|diagnosticDetail|O_RDONLY|session_id/);
+    } finally {
+      if (keep[0] === undefined) delete process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN;
+      else process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN = keep[0];
+    }
+  })));
+
+test("an unwritable state directory is only noted, and changes nothing else", () =>
+  withSwitches(() => withDetail(async (directory) => {
+    const missing = join(directory, "not-created");
+    for (const stateDirectory of [missing, "relative/state", undefined]) {
+      const fake = steps({ analyse: async () => parserRejected({
+        diagnosticDetail: rejectedDetail }) });
+      const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+        stateDirectory }, fake.steps);
+      assert.equal(result.detail, "unwritten");
+      assert.equal(result.unknownReport, "recorded", "the report still goes out");
+      assert.equal(fake.reports.length, 1);
+      assert.equal(fake.released(), 0);
+      assert.match(amuxV19MaxSessionCycleStatus(result).line,
+        / unknownReport=recorded detail=unwritten\n$/);
+    }
+    // A regular file in place of the directory, and a directory that is a
+    // symbolic link, are not state directories.
+    const file = join(directory, "file");
+    await writeFile(file, "x");
+    assert.equal(await writeAmuxV19DiagnosticDetail(file, null, rejectedDetail),
+      "unwritten");
+    assert.deepEqual(await readdir(directory), ["file"]);
+  })));
+
+test("a failure with no names to record writes nothing and says nothing", () =>
+  withSwitches(() => withDetail(async (directory) => {
+    for (const diagnosticDetail of [undefined, { events: [], trace: [] },
+      { events: [{ code: "Bad Code" }], trace: "x" }]) {
+      const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+        stateDirectory: directory }, steps({ analyse: async () => parserRejected({
+        diagnosticDetail }) }).steps);
+      assert.equal("detail" in result, false);
+    }
+    // Proven to stop before the CLI: nothing to explain, nothing written.
+    const before = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: directory }, steps({ analyse: async () => ({
+      kind: "outcome_unknown", cliStarted: false, beforeCli: true,
+      failureStage: "prepare_unavailable", diagnosticDetail: rejectedDetail }) }).steps);
+    assert.equal("detail" in before, false);
+    assert.deepEqual(await readdir(directory), []);
+  })));
+
+test("a verified analysis writes no detail file and sends none", () =>
+  withSwitches(() => withDetail(async (directory) => {
+    let finalized;
+    const fake = steps({ finalize: async (input, observed) => {
+      finalized = { input, observed };
+      return { kind: "recorded", recovered: false, retryWrite: false,
+        planState: "plan_ready", registrationState: "write_disabled" }; } });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin,
+      stateDirectory: directory }, fake.steps);
+    assert.equal(result.kind, "recorded");
+    assert.equal(JSON.stringify(finalized.input).includes("diagnosticDetail"), false);
+    assert.deepEqual(await readdir(directory), []);
+  })));
+
+test("only the newest ten detail files are kept and other files are left alone", () =>
+  withDetail(async (directory) => {
+    const old = [];
+    for (let index = 0; index < 12; index += 1) {
+      const name = `diagnostic-20260101T0000${String(index).padStart(2, "0")}.000Z.json`;
+      old.push(name);
+      await writeFile(join(directory, name), "{}\n");
+    }
+    await writeFile(join(directory, "analysis-outcome-unknown.halt"), "marker\n");
+    await writeFile(join(directory, "diagnostic-notes.txt"), "mine\n");
+    assert.equal(await writeAmuxV19DiagnosticDetail(directory, null,
+      rejectedDetail, new Date("2026-10-20T01:23:45.678Z")), "written");
+    const names = (await readdir(directory)).sort();
+    const kept = names.filter((name) => /^diagnostic-\d{8}T\d{6}\.\d{3}Z\.json$/.test(name));
+    assert.equal(kept.length, 10);
+    assert.equal(kept.at(-1), "diagnostic-20261020T012345.678Z.json");
+    assert.deepEqual(kept.slice(0, 9), old.slice(3));
+    assert.ok(names.includes("analysis-outcome-unknown.halt"));
+    assert.ok(names.includes("diagnostic-notes.txt"));
+    // A second file in the same millisecond is refused, not overwritten.
+    assert.equal(await writeAmuxV19DiagnosticDetail(directory, null,
+      rejectedDetail, new Date("2026-10-20T01:23:45.678Z")), "unwritten");
+    await mkdir(join(directory, "sub"));
+    assert.equal(await writeAmuxV19DiagnosticDetail(join(directory, "sub"), null,
+      { events: [], trace: [] }), null);
+  }));

@@ -9,7 +9,10 @@
  * held as outcome_unknown in the app (`unknownReport`, with `reportReason`
  * when that stayed unconfirmed). Every other stop names its fixed reason too,
  * such as stop_requested, stop_unreachable, read_unreachable,
- * readback_unreachable or network_unsent_retry_exhausted. */
+ * readback_unreachable or network_unsent_retry_exhausted.
+ * With TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL=enabled a failed analysis also
+ * prints `detail=written` or `detail=unwritten`: the names themselves go to
+ * a local 0600 file in the state directory, never to this line or the app. */
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -82,7 +85,7 @@ export function amuxV19MaxSessionCycleStatus(result) {
   }
   if (analysis) {
     parts.push(...analysisParts(result.analysis));
-    for (const key of ["unknownReport", "receipt", "reportReason"]) {
+    for (const key of ["unknownReport", "receipt", "reportReason", "detail"]) {
       const value = result?.[key];
       if (typeof value === "string" && STATES.test(value)) {
         parts.push(`${key}=${value}`);

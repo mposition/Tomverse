@@ -49,8 +49,10 @@ async function requireOwnerAndStepUp(session: Session): Promise<string> {
 }
 
 async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {
+  // Truncate, never round: the session budget claim guard refuses a price
+  // whose approvedAt is ahead of the unrounded clock.
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    SELECT date_trunc('milliseconds', clock_timestamp() AT TIME ZONE 'UTC') AS "now"
   `;
   const now = clock[0]?.now;
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {

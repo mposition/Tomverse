@@ -59,6 +59,7 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
       bridge_not_started: "Not running",
       operator_excluded: "Held back",
       latch_open: "Stopped automatically",
+      capability_missing: "No capability recorded",
       not_in_assignment: "Not in the assignment list",
       live_unread: "Not read",
       waiting_activation: "Not on yet",
@@ -77,6 +78,8 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
       bridge_not_started: (): string => "It is turned on, but its bridge has never connected. Start the process on the Ubuntu host.",
       operator_excluded: (): string => "It is held back from assignment, even though it is turned on.",
       latch_open: (): string => "It stopped itself after repeated failures. A person has to look at why before it is released.",
+      capability_missing: (): string =>
+        "It is turned on, but no model or routing tags are recorded, so the assignment list leaves it out. Record them under Details.",
       not_in_assignment: (): string => "It is turned on, but the assignment list does not include it yet.",
       live_unread: (): string => "The live state could not be read, so it is not shown as connected.",
       waiting_activation: (): string => "Registered only. Turn it on and it takes work from the next assignment.",
@@ -227,6 +230,7 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
       bridge_not_started: "실행 안 됨",
       operator_excluded: "배정에서 제외",
       latch_open: "자동 정지",
+      capability_missing: "능력 기록 없음",
       not_in_assignment: "배정 목록에 없음",
       live_unread: "읽지 못함",
       waiting_activation: "활성화 전",
@@ -245,6 +249,8 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
       bridge_not_started: (): string => "켜져 있지만 bridge가 한 번도 연결되지 않았습니다. Ubuntu 호스트에서 프로세스를 시작하세요.",
       operator_excluded: (): string => "켜져 있지만 배정에서 제외돼 있습니다.",
       latch_open: (): string => "실패가 이어져 스스로 멈췄습니다. 원인을 사람이 확인한 뒤에 풀어야 합니다.",
+      capability_missing: (): string =>
+        "켜져 있지만 모델과 라우팅 태그가 기록되지 않아 배정 목록에서 빠져 있습니다. 자세히에서 기록하세요.",
       not_in_assignment: (): string => "켜져 있지만 아직 배정 목록에 들어 있지 않습니다.",
       live_unread: (): string => "실시간 상태를 읽지 못해 연결된 것으로 표시하지 않습니다.",
       waiting_activation: (): string => "등록만 돼 있습니다. 켜면 다음 배정부터 일을 받습니다.",

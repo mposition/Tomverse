@@ -6,11 +6,12 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   CI_ADMISSION_MAX_CAPACITY,
   CI_ADMISSION_STATE_SETTING_KEY,
+  ciAdmissionUnits,
   reorderCiAdmissionQueue,
   type CiAdmissionMode,
   type CiAdmissionState,
 } from "@/lib/ciAdmissionCore";
-import { ciAdmissionGithubConfig } from "@/lib/ciAdmissionGithub";
+import { ciAdmissionGithubConfig, createCiAdmissionGithub } from "@/lib/ciAdmissionGithub";
 import { ciAdmissionMode, readState, serially, takeLock, writeState } from "@/lib/ciAdmissionRound";
 import { prisma } from "@/lib/prisma";
 
@@ -108,4 +109,97 @@ async function applyCiAdmissionChange(actor: AdminActor, change: CiAdmissionAdmi
     });
     return after;
   });
+}
+
+/* ------------------------------------------------------------------------- */
+/* Operator stop                                                              */
+/* ------------------------------------------------------------------------- */
+
+export type CiAdmissionStopOutcome =
+  | { outcome: "stopped"; drafted: boolean; cancelled: number; failure: string | null }
+  | { outcome: "not_configured" | "not_found" | "not_handled" }
+  | { outcome: "failed"; failure: string };
+
+const failureCode = (error: unknown) => (error instanceof Error ? error.message.slice(0, 80) : "unknown");
+
+/**
+ * The operator's stop for one pull request using runners it should not: back
+ * to draft (when open and ready) and every queued or running pull_request run
+ * of it force-cancelled, in any mode admission is configured for. It is not
+ * put in the line -- a free slot would release it straight away -- so it
+ * stays a draft until someone marks it ready again, which is then an arrival
+ * judged like any other. Whatever happened on GitHub is audited.
+ */
+export function stopCiAdmissionPull(actor: AdminActor, number: number): Promise<CiAdmissionStopOutcome> {
+  return serially(() => stopPull(actor, number));
+}
+
+async function stopPull(actor: AdminActor, number: number): Promise<CiAdmissionStopOutcome> {
+  const config = ciAdmissionGithubConfig();
+  if (!config) return { outcome: "not_configured" };
+  const github = createCiAdmissionGithub(config);
+  let found: Awaited<ReturnType<typeof github.pull>>;
+  try {
+    found = await github.pull(number);
+  } catch (error) {
+    return { outcome: "failed", failure: failureCode(error) };
+  }
+  if (!found) return { outcome: "not_found" };
+  const { pull, open } = found;
+  if (ciAdmissionUnits(pull) === null) return { outcome: "not_handled" };
+
+  // Each step on its own: runs are cancelled even when the draft conversion
+  // failed, and a draft made is recorded even when a cancellation failed.
+  let drafted = false;
+  let cancelled = 0;
+  const failures: string[] = [];
+  if (open && !pull.draft) {
+    try {
+      await github.convertToDraft(pull);
+      drafted = true;
+    } catch (error) {
+      failures.push(`draft:${failureCode(error)}`);
+    }
+  }
+  try {
+    cancelled = await github.cancelRuns(pull, { force: true });
+  } catch (error) {
+    failures.push(`cancel:${failureCode(error)}`);
+  }
+  const failure = failures.length > 0 ? failures.join(" ").slice(0, 100) : null;
+  if (!drafted && cancelled === 0 && failure) return { outcome: "failed", failure };
+
+  await prisma.$transaction(async (tx) => {
+    await takeLock(tx);
+    await takeAuditChainLock(tx);
+    const before = await readState(tx);
+    // Admission no longer owes it anything: no grant, reservation or retry.
+    await writeState(tx, {
+      ...before,
+      granted: before.granted.filter((grant) => grant.number !== number),
+      released: before.released.filter((entry) => entry.number !== number),
+      holding: before.holding.filter((held) => held !== number),
+      pendingArrivals: before.pendingArrivals.filter((arrival) => arrival !== number),
+      events: [
+        ...before.events,
+        {
+          at: new Date().toISOString(),
+          kind: "stopped" as const,
+          number,
+          shadow: false,
+          detail: `${drafted ? "drafted " : ""}cancelled_runs:${cancelled}${failure ? ` ${failure}` : ""}`.slice(0, 120),
+        },
+      ].slice(-50),
+    });
+    await writeAdminAuditLog({
+      ...actor,
+      tx,
+      action: "ci.admission.stopped",
+      targetType: "PullRequest",
+      targetId: String(number),
+      summary: `Stopped #${number}: ${drafted ? "converted to draft, " : ""}${cancelled} run(s) force-cancelled.`,
+      metadata: { number, base: pull.base, head: pull.head, open, drafted, cancelled, failure },
+    });
+  });
+  return { outcome: "stopped", drafted, cancelled, failure };
 }

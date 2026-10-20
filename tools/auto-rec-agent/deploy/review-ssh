@@ -1,0 +1,5 @@
+#!/bin/sh
+# ssh for the auto-rec runner's review client (REVIEW_ORCH_SSH). The config is
+# root-owned, so the autorec account's ~/.ssh/config -- which agent-written
+# code can edit, say with a ProxyCommand or another HostName -- is never read.
+exec /usr/bin/ssh -F /etc/autorec-ssh/config "$@"
