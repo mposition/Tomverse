@@ -57,6 +57,7 @@ import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
+import { chatImageIntentModelId } from "@/lib/chatImageIntentCore";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -326,6 +327,11 @@ export async function ReviewWorkspaceShell({
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
+        // Server-only env, read per request: whether a chat send asks the
+        // image-intent model first (lib/chatImageIntentCore.ts).
+        chatImageIntentEnabled={
+          imageGenerationEnabled && chatImageIntentModelId() !== null
+        }
         voiceInputEnabled={voiceInputEnabled}
         promptRefinerMode={promptRefinerMode}
         promptRefinerProductRelease={promptRefinerProductRelease}
