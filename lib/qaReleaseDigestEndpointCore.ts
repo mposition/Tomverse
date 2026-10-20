@@ -95,12 +95,13 @@ export const QA_RELEASE_MERGE_LANE_PATHNAMES = Object.freeze({
   instruction: "/api/internal/agents/qa-release/merge-lane/instruction",
   consume: "/api/internal/agents/qa-release/merge-lane/consume",
   report: "/api/internal/agents/qa-release/merge-lane/report",
+  train: "/api/internal/agents/qa-release/merge-lane/train",
 } as const);
 
 export type QaReleaseMergeLaneCall = keyof typeof QA_RELEASE_MERGE_LANE_PATHNAMES;
 
 /**
- * The merge lane service's four destinations: the same fixed origins and
+ * The merge lane service's five destinations (the fifth is the release train's): the same fixed origins and
  * Railway name rule as the digest, one exact path per call, and the same
  * written-form comparison before each request is built.
  */

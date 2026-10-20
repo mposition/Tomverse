@@ -150,3 +150,19 @@ test("the merge lane runs only on a declared, empty kill switch; unset is unread
   delete noFlag.QA_RELEASE_MERGE_LANE_ENABLED;
   assert.equal(decideQaReleaseServiceStart("mergeLane", noFlag), "disabled");
 });
+
+test("the release train starts on its own flag, with the lane off, and stops on the kill switch", async () => {
+  const { decideQaReleaseTrainStart } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  const train = (overrides = {}) => laneEnv({ QA_RELEASE_MERGE_LANE_ENABLED: "false", QA_RELEASE_TRAIN_ENABLED: "true", ...overrides });
+  assert.equal(decideQaReleaseTrainStart(train()), "run");
+  assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_TRAIN_SLOTS: "9,15" })), "run");
+  // The develop lane's own decision is unchanged: off.
+  assert.equal(decideQaReleaseServiceStart("mergeLane", train()), "disabled");
+  // The Railway token is the develop lane's, not the train's.
+  assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN: undefined })), "run");
+  for (const flag of [undefined, "false", "TRUE", "1"]) assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_TRAIN_ENABLED: flag })), "disabled", String(flag));
+  for (const value of [undefined, "1", " "]) assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: value })), "disabled", String(value));
+  assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY: "" })), "refuse");
+  assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_CONTROL_REVISION: "0" })), "refuse");
+  assert.equal(decideQaReleaseTrainStart(train({ GITHUB_TOKEN: "x" })), "refuse");
+});

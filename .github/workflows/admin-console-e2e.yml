@@ -80,7 +80,10 @@ jobs:
   admin-console-e2e-shard:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Admin Console E2E (PostgreSQL, shard ${{ matrix.shard }}/${{ matrix.shards }})
-    runs-on: ubuntu-latest
+    # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
+    # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
+    # requests always stay on GitHub. Unset or anything else: GitHub, as before.
+    runs-on: ${{ vars.CI_RUNNER_OVERFLOW == 'on' && github.event.pull_request.head.repo.fork != true && 'ubicloud-standard-4-ubuntu-2404' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:

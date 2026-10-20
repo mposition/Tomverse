@@ -353,6 +353,28 @@ test("where a job runs can be a credential the file never names", () => {
   }
 });
 
+test("the Ubicloud overflow runner counts as hosted only as the exact label and the exact switch", () => {
+  const job = (runsOn) => READ_ONLY_PR.replace("    runs-on: ubuntu-latest", `    runs-on: ${runsOn}`);
+  const overflow = (label, fallback = "ubuntu-latest", variable = "CI_RUNNER_OVERFLOW") =>
+    `"\${{ vars.${variable} == 'on' && github.event.pull_request.head.repo.fork != true && '${label}' || '${fallback}' }}"`;
+  for (const [label, runsOn] of Object.entries({
+    "overflow label": "ubicloud-standard-4-ubuntu-2404",
+    "overflow switch": overflow("ubicloud-standard-4-ubuntu-2404"),
+    "overflow switch to ubuntu-24.04": overflow("ubicloud-standard-4-ubuntu-2404", "ubuntu-24.04"),
+  })) {
+    assert.equal(analyse([wf("ci", job(runsOn))]).forbidsAll, false, label);
+  }
+  for (const [label, runsOn] of Object.entries({
+    "another Ubicloud size": "ubicloud-standard-8",
+    "another Ubicloud label in the switch": overflow("ubicloud-standard-8"),
+    "a self-hosted fallback": overflow("ubicloud-standard-4-ubuntu-2404", "self-hosted"),
+    "another variable": overflow("ubicloud-standard-4-ubuntu-2404", "ubuntu-latest", "RUNNER"),
+    "no fork guard": `"\${{ vars.CI_RUNNER_OVERFLOW == 'on' && 'ubicloud-standard-4-ubuntu-2404' || 'ubuntu-latest' }}"`,
+  })) {
+    assert.equal(analyse([wf("ci", job(runsOn))]).forbidsAll, true, label);
+  }
+});
+
 test("a human exclusion never lifts the cache rule", () => {
   const nightly = `
 name: nightly
