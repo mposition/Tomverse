@@ -17,7 +17,7 @@
  *
  * ## What this file is not
  *
- * It is not the plugin. The Swift and Kotlin halves are unwritten, and nothing
+ * The Swift and Android implementations live in native-auth. Nothing
  * here has run on a device. `AUTH-03`'s evidence -- that a refresh token is
  * absent from the WebView JS context and from every bridge response -- is a
  * physical-device check (approved decision 16) and is not claimed by this file
@@ -40,8 +40,10 @@ export type MobileAccessGrant = {
  * many tabs and components happen to ask at once.
  */
 export type MobileAuthBridge = {
+  /** Opens system-browser PKCE sign-in. Credentials stay in the native layer. */
+  signIn(): Promise<void>;
   /** A usable access token, refreshing behind the bridge if that is needed. */
-  getAccessToken(): Promise<MobileAccessGrant>;
+  getAccessToken(options?: { rejectedAccessToken?: string }): Promise<MobileAccessGrant>;
   /** Whether the device holds a session at all. Never says what it holds. */
   hasSession(): Promise<{ signedIn: boolean }>;
   /** Ends the session. The native layer clears its own stored credential. */
@@ -56,6 +58,7 @@ export type MobileAuthBridge = {
  * is the moment to ask what it returns.
  */
 export const MOBILE_AUTH_BRIDGE_METHODS = [
+  "signIn",
   "getAccessToken",
   "hasSession",
   "signOut",
