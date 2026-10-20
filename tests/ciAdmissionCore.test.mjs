@@ -244,24 +244,36 @@ test("a full line takes no more, so the stored state stays inside its schema", (
   assert.equal(parseCiAdmissionState(JSON.stringify(evaluation.state)).queue.length, 100);
 });
 
-test("new commits on a pull request that already used slots keep them; on one that did not, they ask again", () => {
-  const first = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], runningShas: new Set([sha(1)]) });
-  assert.deepEqual(first.state.lastRound.running.map((p) => p.number), [1]);
-  // A fix push to #1 while #2 waits: #1 keeps its slot.
+test("new commits on a granted pull request keep its slots, reserved for the new head", () => {
+  const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
+  assert.deepEqual(admitted.state.granted, [1]);
+  const seen = run({ state: admitted.state, openPulls: [pull(1)], runningShas: new Set([sha(1)]), nowMs: T0 + 60_000 });
+  assert.equal(seen.state.released[0].observed, true);
+  // A fix push while #2 waits: #1 keeps its slot, and its new head is reserved
+  // until its runs show, so #2 is not released into the same slot.
+  const head = "f".repeat(40);
   const fix = run({
-    state: { ...first.state, queue: [queued(2)] },
-    openPulls: [pull(1, { headSha: "f".repeat(40) }), pull(2, { draft: true })],
+    state: { ...seen.state, queue: [queued(2)] },
+    openPulls: [pull(1, { headSha: head }), pull(2, { draft: true })],
     arrival: 1,
-    nowMs: T0 + 10 * 60_000,
+    nowMs: T0 + 2 * 60_000,
   });
   assert.deepEqual(kinds(fix), []);
-  // A push to #3, which held no slot, while the line waits: it joins the line.
-  const other = run({
-    state: { ...first.state, queue: [queued(2)] },
-    openPulls: [pull(1), pull(2, { draft: true }), pull(3)],
-    runningShas: new Set([sha(1)]),
-    arrival: 3,
-    nowMs: T0 + 10 * 60_000,
-  });
-  assert.deepEqual(kinds(other), ["hold:3"]);
+  assert.deepEqual(fix.state.released.map((r) => [r.number, r.headSha, r.observed]), [[1, head, false]]);
+  assert.equal(fix.state.events.at(-1).detail, "continuing");
+});
+
+test("a pull request seen running but never granted is judged like any arrival", () => {
+  // #3's runs were seen (an event raced ahead of its ready event); it was never granted.
+  const raced = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(3)], runningShas: new Set([sha(1), sha(3)]) });
+  assert.deepEqual(raced.state.granted, []);
+  const arrives = run({ state: raced.state, openPulls: [pull(1), pull(3)], runningShas: new Set([sha(1), sha(3)]), arrival: 3, nowMs: T0 + 1_000 });
+  assert.deepEqual(kinds(arrives), ["hold:3"]);
+});
+
+test("a grant ends when its pull request no longer runs", () => {
+  const admitted = run({ state: state(), openPulls: [pull(1)], runningShas: new Set([sha(1)]), arrival: 1 });
+  assert.deepEqual(admitted.state.granted, [1]);
+  const finished = run({ state: admitted.state, openPulls: [pull(1)], nowMs: T0 + 60_000 });
+  assert.deepEqual(finished.state.granted, []);
 });

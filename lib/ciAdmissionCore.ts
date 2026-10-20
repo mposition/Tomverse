@@ -100,13 +100,21 @@ const stateSchema = z
         z
           .object({
             number: z.number().int().positive(),
+            /** The head the reservation is for: a new commit needs a new reservation. */
+            headSha: z.string().max(40).default(""),
             atMs: z.number().int().nonnegative(),
-            /** Its runs have been seen: from then on they, not the reservation, count. */
+            /** Runs for that head have been seen: from then on they, not the reservation, count. */
             observed: z.boolean().default(false),
           })
           .strict(),
       )
       .max(MAX_QUEUE),
+    /**
+     * Pull requests admission let run (admitted, released, or continuing) that
+     * still hold their slots. Only these keep their slots across a new push;
+     * a pull request merely seen running was never granted anything.
+     */
+    granted: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
     /** The latest round: when, how many slots were in use after it, and by which pull requests. */
     lastRound: z
@@ -131,6 +139,7 @@ export const emptyCiAdmissionState = (): CiAdmissionState => ({
   capacity: CI_ADMISSION_DEFAULT_CAPACITY,
   queue: [],
   released: [],
+  granted: [],
   events: [],
   lastRound: null,
 });
@@ -190,12 +199,17 @@ export function evaluateCiAdmission(input: {
 
   const released = input.state.released
     .filter((entry) => nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS && open.get(entry.number)?.draft === false)
-    .map((entry) => ({ ...entry, observed: entry.observed || input.runningShas.has(open.get(entry.number)!.headSha) }));
-  // Ours: its own ready event is not an arrival. Reserved: counts until its runs are seen.
+    .map((entry) => ({ ...entry, observed: entry.observed || input.runningShas.has(entry.headSha) }));
+  // Reserved: counts until runs for the reserved head are seen.
+  const reserve = (pull: CiAdmissionPull) => {
+    const index = released.findIndex((entry) => entry.number === pull.number);
+    if (index >= 0) released.splice(index, 1);
+    released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: input.runningShas.has(pull.headSha) });
+  };
   const releasedNumbers = new Set(released.map((entry) => entry.number));
-  // A pull request that used slots in the previous round keeps them when new
-  // commits restart its CI: a fix push does not go to the back of the line.
-  const continuing = new Set((input.state.lastRound?.running ?? []).map((pull) => pull.number));
+  // Granted earlier and still holding: a new push keeps its slots (its new
+  // runs replace the old ones), so a fix push never goes to the back of the line.
+  const granted = new Set(input.state.granted);
   const reserved = () => new Set(released.filter((entry) => !entry.observed).map((entry) => entry.number));
 
   // The line keeps only open drafts admission still handles.
@@ -228,10 +242,12 @@ export function evaluateCiAdmission(input: {
   const capacity = input.state.capacity;
 
   const arrival = input.arrival === null ? undefined : open.get(input.arrival);
-  if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !releasedNumbers.has(arrival.number) && continuing.has(arrival.number)) {
-    // Its new runs replace the old ones in the same slots; reserve them until they show.
-    released.push({ number: arrival.number, atMs: nowMs, observed: input.runningShas.has(arrival.headSha) });
-    event("admitted", arrival.number, "continuing");
+  if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && granted.has(arrival.number)) {
+    // Its own release echoing back, or new commits on a pull request already
+    // granted: same slots, reserved for this head until its runs show.
+    const priorHead = released.find((entry) => entry.number === arrival.number)?.headSha;
+    reserve(arrival);
+    if (priorHead !== arrival.headSha) event("admitted", arrival.number, "continuing");
   } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !releasedNumbers.has(arrival.number)) {
     const units = ciAdmissionUnits(arrival)!;
     const waiting = queue.some((entry) => entry.number !== arrival.number);
@@ -248,7 +264,8 @@ export function evaluateCiAdmission(input: {
     } else {
       const index = queue.findIndex((entry) => entry.number === arrival.number);
       if (index >= 0) queue.splice(index, 1);
-      released.push({ number: arrival.number, atMs: nowMs, observed: input.runningShas.has(arrival.headSha) });
+      reserve(arrival);
+      granted.add(arrival.number);
       actions.push({ kind: "admit", pull: arrival });
       event("admitted", arrival.number, null);
     }
@@ -278,7 +295,8 @@ export function evaluateCiAdmission(input: {
     if (used + units > capacity) break;
     queue.shift();
     actions.push({ kind: "release", pull: asDraft, entry: top });
-    released.push({ number: pull.number, atMs: nowMs, observed: false });
+    released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: false });
+    granted.add(pull.number);
     releasedNow.add(pull.number);
     used += units;
     event("released", pull.number, null);
@@ -291,12 +309,18 @@ export function evaluateCiAdmission(input: {
     actions.splice(actions.findIndex((a) => a.kind === "hold" && a.pull.number === number), 1);
     actions.splice(actions.findIndex((a) => a.kind === "release" && a.pull.number === number), 1);
     const reservation = released.find((entry) => entry.number === number);
-    if (reservation) reservation.observed = input.runningShas.has(open.get(number)!.headSha);
+    if (reservation) reservation.observed = input.runningShas.has(reservation.headSha);
     for (let i = events.length - 1; i >= 0; i -= 1) {
       if (events[i].number === number && (events[i].kind === "held" || events[i].kind === "released")) events.splice(i, 1);
     }
     actions.push({ kind: "admit", pull: open.get(number)! });
     event("admitted", number, null);
+  }
+
+  // A grant ends when its pull request no longer runs and holds no reservation.
+  for (const number of [...granted]) {
+    const pull = open.get(number);
+    if (!pull || pull.draft || !(running(pull) || releasedNow.has(number))) granted.delete(number);
   }
 
   return {
@@ -305,6 +329,7 @@ export function evaluateCiAdmission(input: {
       capacity,
       queue,
       released,
+      granted: [...granted].slice(0, MAX_QUEUE),
       events: [...input.state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,
