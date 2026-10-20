@@ -154,3 +154,13 @@ test("stored agent fields round-trip, and a reason outside the closed list is dr
   });
   assert.equal(actionableRecommendations(opened, NOW)[0].prUrl, "https://github.com/mposition/Tomverse/pull/5");
 });
+
+test("the app takes every failure reason the runner can report, and the runner sends the claim token", async () => {
+  const { FAILURE_REASONS } = await import("../tools/auto-rec-agent/lib/contract.mjs");
+  const { RECOMMENDATION_FAILURE_REASONS } = await import("../lib/autoRouterRecommendationsCore.ts");
+  assert.deepEqual([...FAILURE_REASONS].sort(), [...RECOMMENDATION_FAILURE_REASONS].sort());
+  const { CLAIM_TOKEN, buildResultBody } = await import("../tools/auto-rec-agent/lib/core.mjs");
+  const claimId = "11111111-2222-4333-8444-555555555555";
+  assert.match(claimId, CLAIM_TOKEN);
+  assert.equal(buildResultBody({ id: "c1:1", claimId, outcome: "failed", reason: "tests" }).claimId, claimId);
+});

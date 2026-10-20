@@ -11,7 +11,7 @@
  * line, followed for `publish` by a git bundle; the answer is one JSON line.
  *
  *   {"op":"claim"}                                  -> claimed | empty | error | unknown
- *   {"op":"result","id","outcome","prUrl"|"reason"} -> reported | error | unknown
+ *   {"op":"result","id","claimId","outcome","prUrl"|"reason"} -> reported | error | unknown
  *   {"op":"publish","id","branch","head","title","body"} + bundle
  *                                                   -> published | refused | failed | unknown
  *

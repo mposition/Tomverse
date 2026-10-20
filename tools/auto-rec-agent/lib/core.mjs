@@ -25,6 +25,12 @@ import {
 
 /** A recommendation id the runner accepts: what fits in a log line and a branch hash. */
 export const RECOMMENDATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+/**
+ * The token the app issues with each claim (#2835). A result is stored only
+ * against the claim it names, so a late result of an earlier claim of the
+ * same recommendation never lands on a later one.
+ */
+export const CLAIM_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function branchNameFor(id) {
   if (!RECOMMENDATION_ID.test(id)) throw new Error("recommendation_id_invalid");
@@ -177,6 +183,7 @@ export function validateClaim(body) {
   if (body.instruction.length > LIMITS.instructionChars) return { ok: false, code: "claim_instruction_too_long" };
   if (typeof body.recommendation !== "string") return { ok: false, code: "claim_recommendation_missing" };
   if (!isIsoTime(body.leaseUntil)) return { ok: false, code: "claim_lease_invalid" };
+  if (typeof body.claimId !== "string" || !CLAIM_TOKEN.test(body.claimId)) return { ok: false, code: "claim_token_invalid" };
   return {
     ok: true,
     claim: {
@@ -186,21 +193,23 @@ export function validateClaim(body) {
       target: body.target ?? null,
       instruction: body.instruction,
       leaseUntil: body.leaseUntil,
+      claimId: body.claimId,
       cycleUrl: typeof body.cycleUrl === "string" ? body.cycleUrl : null,
     },
   };
 }
 
 /** The result body the app receives. Throws on a body the contract does not allow. */
-export function buildResultBody({ id, outcome, prUrl, reason }) {
+export function buildResultBody({ id, claimId, outcome, prUrl, reason }) {
   if (!RECOMMENDATION_ID.test(id ?? "")) throw new Error("result_id_invalid");
+  if (!CLAIM_TOKEN.test(claimId ?? "")) throw new Error("result_claim_invalid");
   if (outcome === OUTCOME_PR_OPENED) {
     if (!isPrUrl(prUrl)) throw new Error("result_pr_url_invalid");
-    return { id, outcome, prUrl };
+    return { id, claimId, outcome, prUrl };
   }
   if (outcome === OUTCOME_FAILED) {
     if (!FAILURE_REASONS.includes(reason)) throw new Error("result_reason_invalid");
-    return { id, outcome, reason };
+    return { id, claimId, outcome, reason };
   }
   throw new Error("result_outcome_invalid");
 }

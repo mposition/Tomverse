@@ -347,8 +347,8 @@ async function cleanup(deps, ctx) {
 async function report(deps, claim, outcome) {
   const body =
     outcome.outcome === OUTCOME_PR_OPENED
-      ? { op: "result", id: claim.id, outcome: OUTCOME_PR_OPENED, prUrl: outcome.prUrl }
-      : { op: "result", id: claim.id, outcome: OUTCOME_FAILED, reason: outcome.reason };
+      ? { op: "result", id: claim.id, claimId: claim.claimId, outcome: OUTCOME_PR_OPENED, prUrl: outcome.prUrl }
+      : { op: "result", id: claim.id, claimId: claim.claimId, outcome: OUTCOME_FAILED, reason: outcome.reason };
   let reply;
   try {
     reply = await deps.gateway(body, null, 3 * 60_000);

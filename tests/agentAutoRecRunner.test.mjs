@@ -18,6 +18,7 @@ const CLAIM = {
   target: { area: "auto-router" },
   instruction: "Implement the retry in lib/chatAttemptExecution.ts with a unit test.",
   leaseUntil: "2026-10-20T06:00:00.000Z",
+  claimId: "11111111-2222-4333-8444-555555555555",
 };
 const BRANCH = branchNameFor(CLAIM.id);
 const raw = (path, status = "M", mode = "100644") => `:${mode} ${mode} ${"a".repeat(40)} ${"b".repeat(40)} ${status}\0${path}\0`;
@@ -102,7 +103,7 @@ test("happy path: claim, agent, tests, lint, review, publish, report the PR", as
   const { deps, calls, gatewayCalls } = fakeRunner();
   assert.equal(await runOnce(deps), 0);
   assert.deepEqual(ops(gatewayCalls), ["claim", "publish", "result"]);
-  assert.deepEqual(resultOf(gatewayCalls), { op: "result", id: CLAIM.id, outcome: "pr_opened", prUrl: PR_URL });
+  assert.deepEqual(resultOf(gatewayCalls), { op: "result", id: CLAIM.id, claimId: CLAIM.claimId, outcome: "pr_opened", prUrl: PR_URL });
 
   const publish = gatewayCalls[1];
   assert.equal(publish.header.branch, BRANCH);
@@ -193,7 +194,7 @@ for (const [name, rules, reason, files] of FAILURES) {
     const { deps, gatewayCalls, calls } = fakeRunner({ rules, files });
     assert.equal(await runOnce(deps), 0);
     assert.deepEqual(ops(gatewayCalls), ["claim", "result"]);
-    assert.deepEqual(resultOf(gatewayCalls), { op: "result", id: CLAIM.id, outcome: "failed", reason });
+    assert.deepEqual(resultOf(gatewayCalls), { op: "result", id: CLAIM.id, claimId: CLAIM.claimId, outcome: "failed", reason });
     assert.ok(!ran(calls, / bundle create /));
   });
 }

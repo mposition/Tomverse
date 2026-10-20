@@ -37,6 +37,7 @@ const CLAIM = {
   target: { area: "auto-router", cycleUrl: "https://tomverse.app/admin/auto-router/cycles/42" },
   instruction: "Implement the retry in lib/chatAttemptExecution.ts and cover it with a unit test.",
   leaseUntil: "2026-10-20T12:00:00.000Z",
+  claimId: "11111111-2222-4333-8444-555555555555",
 };
 
 test("a recommendation gets one deterministic branch that Auto PR to Develop opens a PR for", () => {
@@ -187,25 +188,33 @@ test("a claim is checked before the runner acts on it", () => {
   assert.equal(validateClaim({ ...CLAIM, instruction: " " }).code, "claim_instruction_missing");
   assert.equal(validateClaim({ ...CLAIM, instruction: "x".repeat(LIMITS.instructionChars + 1) }).code, "claim_instruction_too_long");
   assert.equal(validateClaim({ ...CLAIM, recommendation: undefined }).code, "claim_recommendation_missing");
+  // The claim token the result must name: required, and a uuid.
+  assert.equal(ok.claim.claimId, CLAIM.claimId);
+  assert.equal(validateClaim({ ...CLAIM, claimId: undefined }).code, "claim_token_invalid");
+  assert.equal(validateClaim({ ...CLAIM, claimId: "not-a-token" }).code, "claim_token_invalid");
   assert.equal(validateClaim({ ...CLAIM, leaseUntil: "soon" }).code, "claim_lease_invalid");
 });
 
 test("result bodies carry a PR URL or a known reason code, never free text", () => {
   const prUrl = "https://github.com/mposition/Tomverse/pull/7";
-  assert.deepEqual(buildResultBody({ id: CLAIM.id, outcome: "pr_opened", prUrl, reason: "x" }), {
+  assert.deepEqual(buildResultBody({ id: CLAIM.id, claimId: CLAIM.claimId, outcome: "pr_opened", prUrl, reason: "x" }), {
     id: CLAIM.id,
+    claimId: CLAIM.claimId,
     outcome: "pr_opened",
     prUrl,
   });
-  assert.deepEqual(buildResultBody({ id: CLAIM.id, outcome: "failed", reason: "tests", prUrl }), {
+  assert.deepEqual(buildResultBody({ id: CLAIM.id, claimId: CLAIM.claimId, outcome: "failed", reason: "tests", prUrl }), {
     id: CLAIM.id,
+    claimId: CLAIM.claimId,
     outcome: "failed",
     reason: "tests",
   });
-  for (const reason of FAILURE_REASONS) assert.equal(buildResultBody({ id: "a", outcome: "failed", reason }).reason, reason);
-  assert.throws(() => buildResultBody({ id: CLAIM.id, outcome: "failed", reason: "the tests broke" }), /result_reason_invalid/);
-  assert.throws(() => buildResultBody({ id: CLAIM.id, outcome: "pr_opened", prUrl: "https://example.com/pull/1" }), /result_pr_url_invalid/);
-  assert.throws(() => buildResultBody({ id: CLAIM.id, outcome: "merged" }), /result_outcome_invalid/);
+  for (const reason of FAILURE_REASONS) assert.equal(buildResultBody({ id: "a", claimId: CLAIM.claimId, outcome: "failed", reason }).reason, reason);
+  assert.throws(() => buildResultBody({ id: CLAIM.id, claimId: CLAIM.claimId, outcome: "failed", reason: "the tests broke" }), /result_reason_invalid/);
+  assert.throws(() => buildResultBody({ id: CLAIM.id, claimId: CLAIM.claimId, outcome: "pr_opened", prUrl: "https://example.com/pull/1" }), /result_pr_url_invalid/);
+  assert.throws(() => buildResultBody({ id: CLAIM.id, claimId: CLAIM.claimId, outcome: "merged" }), /result_outcome_invalid/);
+  // A result without the claim token it answers is never sent.
+  assert.throws(() => buildResultBody({ id: CLAIM.id, outcome: "failed", reason: "tests" }), /result_claim_invalid/);
 });
 
 test("publishing needs the lease margin", () => {

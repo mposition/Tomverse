@@ -124,6 +124,7 @@ test("claim posts with the bearer secret and passes a valid claim through", asyn
     target: {},
     instruction: "Do it",
     leaseUntil: "2026-10-20T03:00:00.000Z",
+    claimId: "11111111-2222-4333-8444-555555555555",
   };
   const { deps, fetchCalls } = fakeDeps({ app: [jsonResponse(200, claim)] });
   const answer = await handleRequest(deps, { op: "claim" }, Buffer.alloc(0));
@@ -153,18 +154,23 @@ test("claim answers: 204 empty, 4xx error, 5xx and no answer unknown, bad body e
 
 test("result sends only the contract's fields and refuses anything else without calling the app", async () => {
   const { deps, fetchCalls } = fakeDeps({ app: [jsonResponse(200, {})] });
-  const answer = await handleRequest(deps, { op: "result", id: ID, outcome: "pr_opened", prUrl: PR_URL, extra: "x" }, Buffer.alloc(0));
+  const answer = await handleRequest(deps, { op: "result", id: ID, claimId: "11111111-2222-4333-8444-555555555555", outcome: "pr_opened", prUrl: PR_URL, extra: "x" }, Buffer.alloc(0));
   assert.deepEqual(answer, { status: "reported" });
   assert.equal(fetchCalls[0].url, "https://app.example.test/api/internal/auto-router/recommendations/result");
-  assert.deepEqual(JSON.parse(fetchCalls[0].init.body), { id: ID, outcome: "pr_opened", prUrl: PR_URL });
+  assert.deepEqual(JSON.parse(fetchCalls[0].init.body), {
+    id: ID,
+    claimId: "11111111-2222-4333-8444-555555555555",
+    outcome: "pr_opened",
+    prUrl: PR_URL,
+  });
 
   const bad = fakeDeps();
-  assert.equal((await handleRequest(bad.deps, { op: "result", id: ID, outcome: "failed", reason: "free text" }, Buffer.alloc(0))).code, "result_reason_invalid");
-  assert.equal((await handleRequest(bad.deps, { op: "result", id: ID, outcome: "pr_opened", prUrl: "https://evil.test/pull/1" }, Buffer.alloc(0))).code, "result_pr_url_invalid");
+  assert.equal((await handleRequest(bad.deps, { op: "result", id: ID, claimId: "11111111-2222-4333-8444-555555555555", outcome: "failed", reason: "free text" }, Buffer.alloc(0))).code, "result_reason_invalid");
+  assert.equal((await handleRequest(bad.deps, { op: "result", id: ID, claimId: "11111111-2222-4333-8444-555555555555", outcome: "pr_opened", prUrl: "https://evil.test/pull/1" }, Buffer.alloc(0))).code, "result_pr_url_invalid");
   assert.equal(bad.fetchCalls.length, 0);
 
   const lost = fakeDeps({ app: [new Error("timeout")] });
-  assert.equal((await handleRequest(lost.deps, { op: "result", id: ID, outcome: "failed", reason: "tests" }, Buffer.alloc(0))).status, "unknown");
+  assert.equal((await handleRequest(lost.deps, { op: "result", id: ID, claimId: "11111111-2222-4333-8444-555555555555", outcome: "failed", reason: "tests" }, Buffer.alloc(0))).status, "unknown");
 });
 
 test("publish refuses a branch that is not the recommendation's own, before any git or network call", async () => {
