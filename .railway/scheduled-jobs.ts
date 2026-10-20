@@ -153,7 +153,6 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
     variables: {
       production: AUTO_ROUTER_OPTIMIZER_VARIABLES,
       staging: AUTO_ROUTER_OPTIMIZER_VARIABLES,
-      dev: AUTO_ROUTER_OPTIMIZER_VARIABLES,
     },
   },
 ];
