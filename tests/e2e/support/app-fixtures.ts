@@ -1,5 +1,6 @@
 import { expect, type Page, type Route, type TestInfo } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { isLanguage, type Language } from "../../../lib/language";
 
 export const qaPersistedMessageId = (conversationId: string, requestId: string) => {
   const bytes = createHash("sha256")
@@ -200,7 +201,9 @@ export async function mockPublicProofMetrics(page: Page) {
   );
 }
 
-export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") {
+export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", reviewAppearance: "classic" | "studio" = "classic") {
+  // Existing workspace contracts exercise the retained Classic appearance.
+  // Studio has its own responsive coverage in review-studio.spec.ts.
   await mockPublicBillingConfig(page);
   await mockPublicProofMetrics(page);
   await page.route("**/api/app-settings**", (route) =>
@@ -230,7 +233,7 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
     );
   });
 
-  await page.addInitScript((lang) => {
+  await page.addInitScript(({ lang, appearance }) => {
     // A scriptable stand-in for Cloudflare's widget. The default -- "silent" --
     // is what every pre-existing spec relies on: verification passes without
     // any interaction, so no verification UI is ever supposed to appear. The
@@ -413,12 +416,13 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
     }
 
     localStorage.clear();
+    localStorage.setItem("tomverse_review_appearance", appearance);
     localStorage.setItem("tomverse_language", lang);
     localStorage.setItem("tomverse_onboarding_seen_v1", "1");
     localStorage.setItem("guest_count", "0");
     localStorage.setItem("guest_date", new Date().toDateString());
     sessionStorage.setItem("__tomverse_qa_guest_ready", "true");
-  }, language);
+  }, { lang: language, appearance: reviewAppearance });
 }
 
 export async function mockChatStream(
@@ -481,6 +485,7 @@ export type AuthenticatedQaState = {
     status: "current" | "superseded";
   } | null;
   theme: "dark" | "light" | "system";
+  language: Language;
   timeZone: string;
   timeZoneInitializedAt: string | null;
   timeZoneChangedAt: string | null;
@@ -598,6 +603,7 @@ export async function mockAuthenticatedApi(
      * /chat's welcome screen starts from DEFAULT_MODEL_ID instead.
      */
     selectedModels?: string[];
+    language?: Language;
     showSidebarTour?: boolean;
     /**
      * Seeds the conversation with history. Panels report themselves empty
@@ -676,6 +682,11 @@ export async function mockAuthenticatedApi(
   } = {}
 ): Promise<AuthenticatedQaState> {
   await page.addInitScript((showSidebarTour) => {
+    // Existing shell contracts exercise Classic; Studio suites explicitly seed
+    // their appearance. Preserve that seed regardless of init-script order.
+    if (!localStorage.getItem("tomverse_review_appearance")) {
+      localStorage.setItem("tomverse_review_appearance", "classic");
+    }
     if (showSidebarTour) {
       localStorage.removeItem("tomverse_sidebar_tour_v1");
       return;
@@ -712,6 +723,7 @@ export async function mockAuthenticatedApi(
     autoSelectionOffered: options.autoSelectionOffered ?? false,
     assistantProfile: options.assistantProfile ?? null,
     theme: "dark",
+    language: options.language ?? "ko",
     timeZone: "UTC",
     timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
     timeZoneChangedAt: "2026-05-01T00:00:00.000Z",
@@ -796,7 +808,7 @@ export async function mockAuthenticatedApi(
     )
   );
 
-  await page.route("**/api/user/settings", async (route) => {
+  await page.route("**/api/user/settings**", async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
         theme?: unknown;
@@ -812,6 +824,9 @@ export async function mockAuthenticatedApi(
       if (body.theme === "dark" || body.theme === "light" || body.theme === "system") {
         state.theme = body.theme;
       }
+      if (isLanguage(body.language)) {
+        state.language = body.language;
+      }
       if (typeof body.timeZone === "string") {
         state.timeZone = body.timeZone;
         state.timeZoneInitializedAt ||= "2026-05-01T00:00:00.000Z";
@@ -824,7 +839,7 @@ export async function mockAuthenticatedApi(
           success: true,
           settings: {
             theme: state.theme,
-            language: typeof body.language === "string" ? body.language : "ko",
+            language: state.language,
             defaultModel:
               typeof body.defaultModel === "string"
                 ? body.defaultModel
@@ -839,11 +854,19 @@ export async function mockAuthenticatedApi(
       );
     }
 
+    // Unless a test seeds an account preference, keep its requested page
+    // locale when the account hydrates. Later preference writes stay stateful.
+    if (state.userSettingsReads === 0 && options.language === undefined) {
+      const requestedLanguage = new URL(page.url()).searchParams.get("lang");
+      if (isLanguage(requestedLanguage)) {
+        state.language = requestedLanguage;
+      }
+    }
     state.userSettingsReads += 1;
     return route.fulfill(
       json({
         theme: state.theme,
-        language: "ko",
+        language: state.language,
         // "The account default a seeded QA user still has". Moved to
         // gpt-5-6-luna on 2026-08-01 and deliberately not to gpt-6-luna on
         // 2026-10-12: an existing account keeps its stored default when the
@@ -1045,6 +1068,9 @@ export async function mockAuthenticatedApi(
     await route.fulfill(json(conversation(), 201));
   };
   await page.route("**/api/conversations", handleConversationCollection);
+  await page.route("**/api/conversations/*/generate-title", route =>
+    route.fulfill(json({ title: state.title || "QA conversation" }))
+  );
   if (options.productKey === "chat") {
     const drafts = new Map<string, {
       text: string;

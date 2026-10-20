@@ -8,7 +8,7 @@ import {
 import { readAmuxWorkerRegistryOrThrow } from "@/lib/amux/workerRegistryStore";
 
 /**
- * AMUX › Execution › Workers (orchestration policy version 31, sections 3
+ * AMUX › Operations settings › Workers (orchestration policy version 31, sections 3
  * and 8): the registry from one read inside the AMUX DB boundary. Nothing
  * here assigns or changes anything. R1's comparison with the catalog
  * environment variable went with the variable at R2e.

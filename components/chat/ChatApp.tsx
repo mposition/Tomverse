@@ -1,5 +1,6 @@
 "use client";
 
+import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
 import {
   memo,
   useCallback,
@@ -212,6 +213,7 @@ type ChatAppProps = {
   currentProduct?: ChatWorkspaceProduct;
   modelId: string;
   transcriptScope?: "model" | "conversation";
+  reviewProvider?: string;
   /**
    * The models the other panels of this conversation show. Their answers stay
    * in their own panels; only an answer no panel shows is carried into this
@@ -447,6 +449,7 @@ function ChatAppComponent({
   currentProduct = "review",
   modelId,
   transcriptScope = "model",
+  reviewProvider,
   otherPanelModelIds,
   onRestorePrompt,
   initialConversationId = null,
@@ -507,7 +510,7 @@ function ChatAppComponent({
   const runtimeKey = chatRuntimeKey({
     identityKey: panelIdentityKey,
     conversationId: initialConversationId,
-    modelId,
+    modelId: reviewProvider ? `@provider:${reviewProvider}` : modelId,
     transcriptScope,
   });
   const subscribeRuntime = useCallback(
@@ -600,6 +603,7 @@ function ChatAppComponent({
    * first will settle the record either way.
    */
   const settledViewKeyRef = useRef<string | null>(null);
+  const previousReviewProjectionRef = useRef(reviewProvider);
   const [historyLoadRetry, setHistoryLoadRetry] = useState(0);
   /**
    * The send barrier and this panel's current model, read through refs by the
@@ -924,8 +928,10 @@ function ChatAppComponent({
   //    instead of starting a second one.
   useEffect(() => {
     if (!isGuestMode && !sessionUserId) return;
-    if (ownsChatRuntimeTranscript(runtimeKey)) return;
-    if (settledViewKeyRef.current === runtimeKey) return;
+    const projectionChanged = previousReviewProjectionRef.current !== reviewProvider;
+    previousReviewProjectionRef.current = reviewProvider;
+    if (ownsChatRuntimeTranscript(runtimeKey) && (!projectionChanged || isChatRuntimeStreaming(runtimeKey))) return;
+    if (settledViewKeyRef.current === runtimeKey && !projectionChanged) return;
     if (isChatRuntimeLoadInFlight(runtimeKey)) return;
 
     const loadKey = runtimeKey;
@@ -991,8 +997,8 @@ function ChatAppComponent({
           // shows only its own, but a turn its model never answered is filled
           // from the model that did, and the per-model filter would have
           // removed exactly those answers.
-          const modelQuery = transcriptScope === "conversation"
-            ? ""
+          const modelQuery = transcriptScope === "conversation" || reviewProvider
+            ? "answers=all"
             : `modelId=${encodeURIComponent(modelId)}&answers=all`;
           const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
@@ -1045,7 +1051,9 @@ function ChatAppComponent({
             if (isChatRuntimeStreaming(loadKey)) return;
 
           if (data.messages && data.messages.length > 0) {
-            const filteredMessages = transcriptScope === "conversation"
+            const filteredMessages = reviewProvider
+              ? reviewProviderTranscript<Message>(data.messages, reviewProvider, id => getModel(id)?.provider)
+              : transcriptScope === "conversation"
               ? transcriptMessagesForScope(data.messages, modelId, transcriptScope)
               : gapFilledModelTranscript(
                   data.messages,
@@ -1156,6 +1164,8 @@ function ChatAppComponent({
     runtimeKey,
     transcriptScope,
     historyLoadRetry,
+    reviewProvider,
+    getModel,
   ]);
 
   // A reload never resubmits /api/chat. The history read above discovers
@@ -1473,7 +1483,7 @@ function ChatAppComponent({
         isGuestMode ? { kind: "guest" } : { kind: "account", userId: sessionUserId }
       ),
       conversationId: targetChatId,
-      modelId,
+      modelId: reviewProvider ? `@provider:${reviewProvider}` : modelId,
       transcriptScope,
     });
     if ((!text && attachments.length === 0) || isChatRuntimeStreaming(runKey)) {
@@ -2608,6 +2618,7 @@ function ChatAppComponent({
     t,
     webSearchMode,
     transcriptScope,
+    reviewProvider,
   ]);
 
   const handleRestoreQuestion = useCallback((assistantMessageId: string) => {

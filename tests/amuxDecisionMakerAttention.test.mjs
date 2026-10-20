@@ -85,7 +85,7 @@ test("Execution reads the waiting requests for its board and opens the panel on 
   assert.match(page, /const canJudge = hasAdminPermission\(session, "ops:write"\);/);
   assert.match(page, /if \(!canJudge\) return \{ kind: "restricted" \};/);
   assert.match(page, /decisionMaker=\{decisionMaker\}/);
-  assert.equal(page.match(/\{drawer\}/g)?.length, 3, "cards, workers and assignment each render the panel");
+  assert.equal(page.match(/\{drawer\}/g)?.length, 2, "cards and assignment each render the panel");
   assert.match(page, /countDecisionMakerAttention\(\)\.catch\(\(\) => null\)/);
 
   const workspace = read("components/admin/AmuxExecutionWorkspace.tsx");

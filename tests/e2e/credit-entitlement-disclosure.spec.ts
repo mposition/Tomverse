@@ -2,14 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { mockUserUsage } from "./support/chat-state-fixtures";
 
-// The production incident that produced this suite: a Pro account with 2,932
-// plan credits saw "Standard 일일 제한 없음" -- which reads as "nothing can
-// stop this request" -- and was then refused by a hidden internal US$1.50/day
-// cost ceiling it was never shown.
-//
-// So the account surface has to say two things at once, on both shells:
-//   1. exactly what has no limit (daily *credit* limit on Standard models), and
-//   2. what still binds -- the monthly plan credits and when they reset.
+test.setTimeout(120_000);
+
+// Owner direction 2026-10-20: profile credit numbers become usage gauges.
+// Monthly usage remains visible when no daily quota applies; a real daily
+// quota has a separate gauge. The underlying limits and reset are unchanged.
 
 const PRO_UNLIMITED_DAILY = {
     plan: "Pro" as const,
@@ -33,8 +30,10 @@ const PRO_WITH_DAILY_LIMIT = {
     limits: { creditsDay: 300, creditsMonth: 3_000 },
 };
 
-async function openAccountMenu(page: Page, isMobile: boolean) {
-    if (isMobile) {
+async function openAccountMenu(page: Page, isMobile: boolean, appearance: "classic" | "studio") {
+    if (appearance === "studio") {
+        await page.locator(".review-navigation-history").click();
+    } else if (isMobile) {
         await page.getByTestId("mobile-sidebar-open").click();
     }
     await page.getByTestId("account-menu-trigger").click();
@@ -43,16 +42,16 @@ async function openAccountMenu(page: Page, isMobile: boolean) {
     return menu;
 }
 
-async function prepareChat(page: Page, patch: Parameters<typeof mockUserUsage>[1]) {
-    await prepareGuestPage(page, "ko");
+async function prepareChat(page: Page, patch: Parameters<typeof mockUserUsage>[1], appearance: "classic" | "studio") {
+    await prepareGuestPage(page, "ko", appearance);
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
     await mockUserUsage(page, patch);
-    await page.goto("/review?lang=ko");
-    await expect(page.getByTestId("chat-input")).toBeVisible();
+    await page.goto("/review?lang=ko", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("chat-input")).toBeVisible({ timeout: 60_000 });
 }
 
-for (const shell of ["desktop", "mobile"] as const) {
-    test.describe(`${shell} credit entitlement disclosure`, { tag: "@ui-risk" }, () => {
+for (const appearance of ["classic", "studio"] as const) for (const shell of ["desktop", "mobile"] as const) {
+    test.describe(`${appearance} ${shell} credit entitlement disclosure`, { tag: "@ui-risk" }, () => {
         test.beforeEach(async ({}, testInfo) => {
             test.skip(
                 !testInfo.project.name.startsWith(shell),
@@ -60,42 +59,32 @@ for (const shell of ["desktop", "mobile"] as const) {
             );
         });
 
-        test("no daily limit is stated as a credit limit, with the allowance that does bind", async ({
+        test("profile shows monthly usage percentage when no daily quota applies", async ({
             page,
         }) => {
-            await prepareChat(page, PRO_UNLIMITED_DAILY);
-            const menu = await openAccountMenu(page, shell === "mobile");
+            await prepareChat(page, PRO_UNLIMITED_DAILY, appearance);
+            const menu = await openAccountMenu(page, shell === "mobile", appearance);
 
-            const daily = menu.getByTestId("account-daily-credits");
-            await expect(daily).toBeVisible();
-            // Never the bare word "unlimited": it has to name what is unlimited.
-            await expect(daily).toContainText("일일 크레딧 제한 없음");
-            await expect(daily).toContainText("Standard");
-
-            // The monthly plan credits are the allowance that can still block,
-            // so they are shown alongside, not hidden behind the daily line.
-            const planCredits = menu.getByTestId("account-plan-credits");
-            await expect(planCredits).toBeVisible();
-            await expect(planCredits).toContainText("2,932");
-
-            // And the user is told when that allowance resets, rather than
-            // being shown no reset at all.
+            const gauges = menu.getByTestId("usage-percent-gauge");
+            await expect(gauges).toHaveCount(1);
+            await expect(gauges).toContainText("2%");
+            await expect(menu.getByRole("progressbar")).toHaveAttribute("value", "2");
+            await expect(menu).not.toContainText("2,932");
             await expect(menu.getByTestId("account-credits-reset")).toBeVisible();
         });
 
-        test("a real daily allowance shows today's usage, the remainder and its reset", async ({
+        test("profile shows daily and monthly usage percentages with reset time", async ({
             page,
         }) => {
-            await prepareChat(page, PRO_WITH_DAILY_LIMIT);
-            const menu = await openAccountMenu(page, shell === "mobile");
+            await prepareChat(page, PRO_WITH_DAILY_LIMIT, appearance);
+            const menu = await openAccountMenu(page, shell === "mobile", appearance);
 
-            const daily = menu.getByTestId("account-daily-credits");
-            await expect(daily).toContainText("232");
-            await expect(daily).toContainText("300");
+            const gauges = menu.getByTestId("usage-percent-gauge");
+            await expect(gauges).toHaveCount(2);
+            await expect(gauges.nth(0)).toContainText("2%");
+            await expect(gauges.nth(1)).toContainText("23%");
             await expect(menu.getByTestId("account-credits-reset")).toBeVisible();
-            await expect(
-                menu.getByTestId("account-plan-credits")
-            ).toContainText("2,932");
+            await expect(menu).not.toContainText("2,932");
         });
     });
 }

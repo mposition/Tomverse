@@ -123,12 +123,7 @@ test("mobile exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) =
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
-  await page
-    .getByTestId("mobile-chat-shell")
-    .locator("header")
-    .getByRole("button")
-    .first()
-    .click();
+  await page.getByTestId("mobile-sidebar-open").click();
   const organizerToggle = page.getByTestId("sidebar-organizer-toggle");
   if ((await organizerToggle.getAttribute("aria-expanded")) !== "true") {
     await organizerToggle.click();

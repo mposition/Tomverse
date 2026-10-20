@@ -1,5 +1,10 @@
 "use client";
 
+import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
+import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import { ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
+import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -21,7 +26,6 @@ import {
 } from "@/components/chat/ComparisonActionRail";
 import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationDesktopSlot } from "@/components/chat/GuestVerificationDesktopSlot";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import {
   deriveDeepResearchSuggestion,
@@ -52,9 +56,7 @@ import {
   type ModelRuntimeStatus,
 } from "@/lib/chatRuntimeStatus";
 import { useGuestChatContentSeed } from "@/components/chat/useGuestChatContentSeed";
-import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
-  getModelUsageProfile,
   type ChatAttachment,
   type Conversation,
   type Message,
@@ -101,7 +103,10 @@ type PromptPayload = {
   promptRefinerDecision?: PromptRefinerProductChatDecision;
 };
 
-type DesktopChatShellProps = {
+export type DesktopChatShellProps = {
+  review?: ReviewWorkspaceControls;
+  studioStarterCards?: readonly VisibleStarterCard[];
+  onStudioStarter?: (id: string) => void;
   /** Current product chrome; switching routes never rewrites this conversation. */
   currentProduct?: ChatWorkspaceProduct;
   productSwitchDisabled?: boolean;
@@ -403,6 +408,9 @@ type DesktopChatShellProps = {
 };
 
 export function DesktopChatShell({
+  review,
+  studioStarterCards,
+  onStudioStarter,
   currentProduct,
   productSwitchDisabled = false,
   onProductSwitch,
@@ -522,6 +530,10 @@ export function DesktopChatShell({
   onFollowupSent,
   onContextBundleStale,
 }: DesktopChatShellProps) {
+  const studio = review?.appearance === "studio";
+  const [studioView, setStudioView] = useState<"write" | "results">("write");
+  const [studioComparison, setStudioComparison] = useState<"focus" | "compare">("focus");
+  useEffect(() => { if (promptPayload || imageWorkspace || review?.imageRequest) queueMicrotask(() => setStudioView("results")); }, [promptPayload, imageWorkspace, review?.imageRequest]);
   const singleTranscript = transcriptScope === "conversation";
   const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
   const statusModels = useMemo(() => singleTranscript ? ["@conversation"] : selectedModels, [singleTranscript, selectedModels]);
@@ -764,6 +776,10 @@ export function DesktopChatShell({
   // into the welcome screen and move to the dock on the first send; now the
   // welcome screen is only the greeting and the starters above the dock, and
   // the first message leaves the composer where it was.
+  useEffect(() => {
+    if (conversationContentState === "non-empty") queueMicrotask(() => setStudioView("results"));
+    if (conversationContentState === "empty" && !review?.imageRequest) queueMicrotask(() => setStudioView("write"));
+  }, [currentChatId, conversationContentState, review?.imageRequest]);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
   // STG-F003: portal into a host rather than into the slot itself, so a slot
   // that remounts never rebuilds the composer and drops a draft in progress.
@@ -825,8 +841,7 @@ export function DesktopChatShell({
     (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
   const useTabsLayout =
     !singleTranscript && selectedModels.length > 1 &&
-    perModelWidth(isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH) <
-      MIN_PANEL_WIDTH;
+    (studio ? viewportWidth < 900 : perModelWidth(isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH) < MIN_PANEL_WIDTH);
 
   const [activeModelId, setActiveModelId] = useState<string | null>(
     selectedModels[0] || null
@@ -889,15 +904,7 @@ export function DesktopChatShell({
     [activateModel, selectedModels, switchModelByOffset]
   );
 
-  return (
-    <main
-      data-testid="desktop-chat-shell"
-      // Observable so a regression test can assert on the state machine itself
-      // -- "unknown" must never be rendered as the welcome screen -- rather
-      // than only on what happened to be painted when it looked.
-      data-content-state={conversationContentState}
-      className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
-    >
+  const sidebarElement = (
       <ChatSidebar
         currentProduct={currentProduct}
         conversations={conversations}
@@ -920,9 +927,32 @@ export function DesktopChatShell({
         currentModelId={selectedModels[0]}
         attachmentCount={attachments.length}
         autoCollapseSuggested={autoCollapseSuggested}
+        isMobileDrawer={studio}
       />
+  );
 
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+  return (
+    <main
+      data-testid="desktop-chat-shell"
+      data-review-appearance={review?.appearance}
+      data-studio-view={studioView}
+      data-studio-comparison={studioComparison}
+      data-studio-has-results={!showsWelcomeSurface || Boolean(review?.imageRequest)}
+      // Observable so a regression test can assert on the state machine itself
+      // -- "unknown" must never be rendered as the welcome screen -- rather
+      // than only on what happened to be painted when it looked.
+      data-content-state={conversationContentState}
+      className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+    >
+      {studio ? <ReviewNavigation sidebar={sidebarElement} onNewChat={onNewChat}
+        locked={productSwitchDisabled || isAnyModelResponding || review?.pending}
+        onChat={() => onProductSwitch?.("chat") ?? false} /> : sidebarElement}
+
+      <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding}
+          view={studioView} setView={studio ? setStudioView : undefined} />}
+        <div className={studio ? "review-studio-body" : "contents"}>
+
         {/*
           An image conversation replaces the entire chat surface -- panels,
           welcome overlay, comparison rail and composer are all chat-only
@@ -938,6 +968,15 @@ export function DesktopChatShell({
           </div>
         ) : (
           <>
+        <div className={studio ? "review-studio-results" : "contents"}>
+        {review?.imageRequest && review.unsupportedProviders.length > 0 && <ReviewUnsupportedProviders providers={review.unsupportedProviders} />}
+        {studio && <div className="review-result-toolbar">
+          <button type="button" onClick={() => setStudioView("write")}>{reviewWorkspaceCopy[lang].edit}</button>
+          <div role="group" aria-label={reviewWorkspaceCopy[lang].results}>
+            <button type="button" aria-pressed={studioComparison === "focus"} onClick={() => setStudioComparison("focus")}>{reviewWorkspaceCopy[lang].focus}</button>
+            <button type="button" aria-pressed={studioComparison === "compare"} onClick={() => setStudioComparison("compare")}>{reviewWorkspaceCopy[lang].sideBySide}</button>
+          </div>
+        </div>}
         <ProviderStatusBanner
           selectedModels={selectedModels}
           compact
@@ -1041,7 +1080,7 @@ export function DesktopChatShell({
           data-testid="desktop-conversation-surface"
           className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950"
         >
-          {showsWelcomeSurface && (
+          {showsWelcomeSurface && !review?.imageRequest && (
             // UI-EMPTY-001. The light overlay has always been translucent, so
             // the three comparison panels stay legible behind the welcome
             // screen and the first screen still reads as a comparison
@@ -1058,7 +1097,7 @@ export function DesktopChatShell({
             // No recent-conversation cards here: the sidebar next to this
             // screen already lists the same conversations.
             <div className="absolute inset-0 z-10 overflow-y-auto bg-zinc-100/80 dark:bg-zinc-950/80">
-              <ChatWelcomeScreen starterGallery={starterGallery} />
+              {studio ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen starterGallery={starterGallery} />}
             </div>
           )}
           {selectedModels.length === 0 && (
@@ -1071,17 +1110,16 @@ export function DesktopChatShell({
 
           {panelModels.map((modelId, panelIndex) => {
             const modelInfo = AVAILABLE_MODELS.find((model) => model.id === modelId);
-            const usageProfile = modelInfo
-              ? getModelUsageProfile(modelInfo)
-              : null;
             const isPanelDisabled = !singleTranscript && disabledPanels.includes(modelId);
-            const isPanelVisible = !useTabsLayout || modelId === resolvedActiveModelId;
+            const isPanelVisible = !review?.imageRequest && (!useTabsLayout || modelId === resolvedActiveModelId);
 
             return (
               <div
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
+                data-studio-focused={modelId === resolvedActiveModelId}
+                onClick={studio ? () => activateModel(modelId, false) : undefined}
                 {...(useTabsLayout
                   ? {
                       role: "tabpanel",
@@ -1154,13 +1192,6 @@ export function DesktopChatShell({
                         <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
                         <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
-                          {usageProfile && (
-                            <CreditCostBadge
-                              credits={usageProfile.credits}
-                              size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
-                            />
-                          )}
                         </span>
                       </span>
                         ) : (
@@ -1175,6 +1206,7 @@ export function DesktopChatShell({
                           name stays stable across a selection change and the
                           three names stay unique.
                         */}
+                        {review?.mode === "easy" ? <span className="text-sm font-semibold">{modelInfo?.name ?? modelId}</span> : (
                         <select
                           value={modelId}
                           onChange={(event) => onChangePanelModel(modelId, event.target.value)}
@@ -1205,16 +1237,9 @@ export function DesktopChatShell({
                               </option>
                             );
                           })}
-                        </select>
+                        </select>) }
                         <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
-                          {usageProfile && (
-                            <CreditCostBadge
-                              credits={usageProfile.credits}
-                              size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
-                            />
-                          )}
                         </span>
                       </span>
                         )}
@@ -1282,6 +1307,7 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  reviewProvider={review?.mode === "easy" ? modelInfo?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
@@ -1421,13 +1447,17 @@ export function DesktopChatShell({
           <GuestVerificationDesktopSlot variant="fallback" />
         )}
 
+        </div>
+        <div className={studio ? "review-studio-task" : "contents"}>
+        {studio && <h2>{reviewWorkspaceCopy[lang].question}</h2>}
         <div className="w-full shrink-0 px-4 md:px-6">
           <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-5xl" />
         </div>
-        <div ref={setBottomInputSlot} />
+        <div ref={setBottomInputSlot} className={studio ? "review-studio-composer-slot" : undefined} />
         {composerPortalHost &&
           createPortal(
             <ChatInput
+              review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
               currentProduct={currentProduct}
               productSwitchDisabled={productSwitchDisabled}
               onProductSwitch={onProductSwitch}
@@ -1494,8 +1524,11 @@ export function DesktopChatShell({
             />,
             composerPortalHost
           )}
+        {studio && <div className="review-mobile-starters"><ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /></div>}
+        </div>
           </>
         )}
+        </div>
       </section>
     </main>
   );

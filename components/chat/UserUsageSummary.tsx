@@ -1,5 +1,6 @@
 "use client";
 
+import { UsagePercentGauge } from "./UsagePercentGauge";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { BarChart3, Coins } from "lucide-react";
@@ -96,11 +97,7 @@ export function UserUsageSummary({
           <BarChart3 className="h-4 w-4" />
           {t("usage.guestUsage")}
         </div>
-        <div className="mt-2 flex items-center justify-between font-semibold">
-          <span>{t("usage.today")}</span>
-          <span>{Math.max(0, limit - used)} {t("usage.left")}</span>
-        </div>
-        <UsageBar used={used} limit={limit} />
+        <UsagePercentGauge compact used={used} limit={limit} label={t("usage.today")} />
       </section>
     );
   }
@@ -124,10 +121,6 @@ export function UserUsageSummary({
   );
 
   if (compact) {
-    const dailyRemaining = Math.max(
-      0,
-      usage.limits.creditsDay - usage.usage.creditsDay
-    );
     const upgradeTarget = usage.plan === "Free" ? "Pro" : usage.plan === "Pro" ? "Max" : null;
     const showAddCredits = usage.plan === "Max" && warningLevel > 0;
 
@@ -148,31 +141,9 @@ export function UserUsageSummary({
             </span>
           </span>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-2 font-semibold text-zinc-500 dark:text-zinc-400">
-          <span>{t("sidebar.todayUsage")}</span>
-          <span className="text-right">
-            {isDailyUnlimited
-              ? t("usage.noDailyCreditLimit")
-              : `${dailyRemaining} ${t("sidebar.remaining")}`}
-          </span>
+        <div className="mt-3">
+          <UsagePercentGauge used={usage.usage.creditsMonth} limit={usage.limits.creditsMonth} label={t("sidebar.currentUsage")} />
         </div>
-        {!isDailyUnlimited && (
-          <UsageBar
-            used={usage.usage.creditsDay}
-            limit={usage.limits.creditsDay}
-          />
-        )}
-        {/* The allowance that actually binds, always shown -- an account with
-            no daily limit is still bounded by its monthly plan credits. */}
-        <p
-          data-testid="usage-plan-credits-remaining"
-          className="mt-1 text-[11px] font-medium leading-4 text-zinc-500 dark:text-zinc-400"
-        >
-          {t("usage.planCreditsRemaining").replace(
-            "{credits}",
-            usage.balances.planRemainingCredits.toLocaleString(lang)
-          )}
-        </p>
 
         {upgradeTarget && (
           <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">

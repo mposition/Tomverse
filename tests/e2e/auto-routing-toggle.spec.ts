@@ -241,7 +241,7 @@ test.describe("Auto is offered", () => {
     await expect(page.getByTestId("composer-active-model-count")).toHaveText("Auto");
     await expect(composerToggle).toHaveAccessibleName("Smart Adaptive");
     await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
-    await expect(page.getByTestId("auto-variable-credit-notice")).toBeVisible();
+    await expect(page.getByTestId("auto-variable-credit-notice")).toHaveCount(0);
     await testInfo.attach("auto-on-composer-picker", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
@@ -345,7 +345,7 @@ test.describe("Auto is offered", () => {
         "자동"
       );
       await expect(composerToggle).toHaveAccessibleName("스마트 자동");
-      await expect(page.getByTestId("auto-variable-credit-notice")).toBeVisible();
+      await expect(page.getByTestId("auto-variable-credit-notice")).toHaveCount(0);
 
       await expectNoHorizontalOverflow(page);
 

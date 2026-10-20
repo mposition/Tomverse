@@ -2392,7 +2392,7 @@ const checks = [
       !source.includes("Discounts apply to the first month of Pro and Max"),
   },
   {
-    name: "Chat model picker hides internal classes and shows exact credit costs",
+    name: "Chat model picker retains catalogue pricing while the composer omits credit estimates",
     file: "components/chat/ChatInput.tsx",
     test: (source) => {
       const panel = read("components/chat/ModelPickerPanel.tsx");
@@ -2427,7 +2427,7 @@ const checks = [
         catalogue.includes('data-testid="model-filter-sheet"') &&
         catalogue.includes('data-testid="model-filter-reset-all"') &&
         catalogue.includes('data-testid="model-catalogue-result-count"') &&
-        source.includes('data-testid="request-credit-estimate"') &&
+        !source.includes('data-testid="request-credit-estimate"') &&
         !panel.includes('data-testid="show-all-models"') &&
         !catalogue.includes('option value="Research"') &&
         !catalogue.includes("usageClassFilter") &&

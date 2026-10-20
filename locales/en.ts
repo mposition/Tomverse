@@ -1196,6 +1196,7 @@ export const en = {
         dailyCreditsUnlimitedStandard: "No daily credit limit on Standard models",
         planCreditsRemaining: "Monthly plan credits remaining",
         purchasedCreditsRemaining: "Purchased credits remaining",
+        extraUsageAvailable: "Extra usage is available",
         planCreditsCompact: "Monthly: {count} credits left",
         analyticsSettings: "Analytics settings",
         analyticsCookieSettings: "Analytics cookie settings",
