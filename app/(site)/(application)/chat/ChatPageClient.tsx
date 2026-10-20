@@ -6569,16 +6569,27 @@ export function ChatPageClient({
         return true;
       };
       if (!chatSendIsCurrent()) return;
-      const preflight = await runComparisonPreflight({
-        comparisonId,
-        conversationId: activeChatId,
-        prompt: authoredPrompt,
-        promptAttachments,
-        modelIds: activeModelIds,
-        ...(options?.webSearchOverride
-          ? { webSearchMode: options.webSearchOverride }
-          : {}),
-      });
+      /*
+        An image turn never reaches /api/chat (lib/chatImageTurn.ts), so it
+        takes none of the text path's preparation: the preflight would reserve
+        a Chat concurrency slot and request capacity that nothing claims or
+        returns (chat-concurrency-and-identity.md §3), and a memory context
+        bundle would be prepared for a prompt no text model reads. The image
+        reservation applies its own gates.
+      */
+      const imageTurnSend = Boolean(options?.imageTurn) && activeModelIds.length === 1;
+      const preflight = imageTurnSend
+        ? { allowed: true as const, admissionToken: null, contextBundle: null }
+        : await runComparisonPreflight({
+            comparisonId,
+            conversationId: activeChatId,
+            prompt: authoredPrompt,
+            promptAttachments,
+            modelIds: activeModelIds,
+            ...(options?.webSearchOverride
+              ? { webSearchMode: options.webSearchOverride }
+              : {}),
+          });
       if (!preflight.allowed || !chatSendIsCurrent()) return;
       // The comparison preflight prices the whole set and hands back one
       // bundle for it. A single-model send never had a preparation step, so
@@ -6589,7 +6600,9 @@ export function ChatPageClient({
           ? ("comparison" as const)
           : ("single" as const);
       const contextBundle =
-        contextLayout === "comparison"
+        imageTurnSend
+          ? null
+          : contextLayout === "comparison"
           ? preflight.contextBundle
           : await prepareChatContextBundle({
               conversationId: isGuestMode ? null : activeChatId,
@@ -7137,7 +7150,7 @@ export function ChatPageClient({
         // One answer per question: every panel named in modelIds consumes
         // this payload, and each image turn reserves its own paid group, so
         // a send made for more than one panel never carries one.
-        ...(options?.imageTurn && activeModelIds.length === 1
+        ...(imageTurnSend && options?.imageTurn
           ? { imageTurn: options.imageTurn }
           : {}),
       });
