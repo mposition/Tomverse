@@ -90,8 +90,10 @@ export async function commitAmuxDueReadManifestPurge(tx: Prisma.TransactionClien
   const idea = await tx.amuxIdeaSubmission.findUnique({
     where: { id: found.ideaId }, select: { submittedAt: true },
   });
+  // Truncate, never round: bodyPurgedAt is refused by the guard when it is
+  // ahead of the unrounded clock, and ::TIMESTAMP(3) rounds up half the time.
   const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
+    SELECT date_trunc('milliseconds', clock_timestamp() AT TIME ZONE 'UTC') AS "now"`;
   const now = nowRows[0]?.now;
   if (!row || !idea || !now || row.bodyPurgedAt || !row.ciphertext) return "skipped";
   if (amuxReadManifestDueAt(idea.submittedAt) > now ||
