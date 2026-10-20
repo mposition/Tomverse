@@ -41,6 +41,7 @@ async function load() {
   return import(mod("lib/reviewRouting.ts"));
 }
 const { reviewRoutingCandidates } = require(resolve(root, "lib/reviewRoutingCore.ts"));
+const { buildAutoLlmRouterSystem, CHAT_RESEARCH_ROUTING_CRITERIA } = require(resolve(root, "lib/autoLlmRouterCore.ts"));
 const input = { text: "Explain this code", context: "", providers: ["openai"], models: AVAILABLE_MODELS,
   candidates: reviewRoutingCandidates({ providers: ["openai"], models: AVAILABLE_MODELS, imageModels: [], plan: "Max", hasImages: false }) };
 function reset() { process.env.REVIEW_EASY_ENABLED = "true"; configured = "gpt-6-luna"; budget = true; failed = false; usage = { inputTokens: 100, outputTokens: 10 }; calls.length = holds.length = settlements.length = 0; }
@@ -64,6 +65,8 @@ test("Review reads the same live Chat guidance on each prompt and settles report
   guidance = "Shared Chat routing criteria, revision two.";
   await routeReviewPrompt(input);
   assert.match(calls[0].system, /revision one/); assert.match(calls[1].system, /revision two/);
+  assert.ok(calls[0].system.includes(CHAT_RESEARCH_ROUTING_CRITERIA));
+  assert.ok(buildAutoLlmRouterSystem(guidance).includes(CHAT_RESEARCH_ROUTING_CRITERIA));
   assert.equal(calls[0].maxRetries, 0); assert.equal(settlements.length, 2);
   assert.ok(holds.every(amount => amount > 0));
 });
