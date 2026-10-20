@@ -50,7 +50,7 @@ test("assemble picks in order, leaves a conflict out, skips what main has, and p
         { number: 1, title: "one", mergeCommitSha: one, mergedAt: "2026-10-20T00:00:00Z" },
         { number: 2, title: "two", mergeCommitSha: conflict, mergedAt: "2026-10-20T00:01:00Z" },
         { number: 3, title: "three", mergeCommitSha: already, mergedAt: "2026-10-20T00:02:00Z" },
-      ]);
+      ], 30);
       assert.equal(result.mainSha, mainSha);
       assert.deepEqual(result.picks, [
         { number: 1, outcome: "included" },
@@ -65,6 +65,24 @@ test("assemble picks in order, leaves a conflict out, skips what main has, and p
       assert.equal(git("show", "release/train-20261020-1100:shared.txt"), "main's line");
     } finally {
       await ports.cleanup();
+    }
+
+    // Capacity counts riders: a pull request main already has does not take a
+    // seat, so the one after it rides and only the next is over capacity.
+    const second = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo });
+    try {
+      const full = await second.assemble("release/train-20261020-1400", [
+        { number: 3, title: "three", mergeCommitSha: already, mergedAt: "2026-10-20T00:00:00Z" },
+        { number: 1, title: "one", mergeCommitSha: one, mergedAt: "2026-10-20T00:01:00Z" },
+        { number: 2, title: "two", mergeCommitSha: conflict, mergedAt: "2026-10-20T00:02:00Z" },
+      ], 1);
+      assert.deepEqual(full.picks, [
+        { number: 3, outcome: "already_in_main" },
+        { number: 1, outcome: "included" },
+        { number: 2, outcome: "over_capacity" },
+      ]);
+    } finally {
+      await second.cleanup();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

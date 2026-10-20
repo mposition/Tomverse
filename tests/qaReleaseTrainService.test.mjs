@@ -44,8 +44,8 @@ function ports(overrides = {}) {
       },
     },
     git: {
-      assemble: async (branch, list) => {
-        note("assemble", { branch, numbers: list.map((c) => c.number) });
+      assemble: async (branch, list, capacity) => {
+        note("assemble", { branch, numbers: list.map((c) => c.number), capacity });
         const outcomes = overrides.outcomes ?? {};
         return { mainSha: MAIN, headSha: HEAD, picks: list.map((c) => ({ number: c.number, outcome: outcomes[c.number] ?? "included" })) };
       },
@@ -99,7 +99,8 @@ test("cargo rides in develop merge order; a conflict is left out and named; the 
   const outcome = await runQaReleaseTrainRound(env(), p, NOW);
   assert.deepEqual(outcome, { exitCode: 0, train: "opened", slot: "20261020-1100", pullRequestNumber: 4242, included: 1, leftOut: 1 });
   const get = (name) => calls.find(([n]) => n === name)[1];
-  assert.deepEqual(get("assemble"), { branch: "release/train-20261020-1100", numbers: [10, 11, 12] });
+  // Every labelled pull request goes to assembly; capacity counts riders there.
+  assert.deepEqual(get("assemble"), { branch: "release/train-20261020-1100", numbers: [10, 11, 12], capacity: 30 });
   assert.equal(get("push"), "release/train-20261020-1100");
   const pr = get("openPullRequest");
   assert.equal(pr.head, "release/train-20261020-1100");

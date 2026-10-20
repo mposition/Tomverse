@@ -40,9 +40,10 @@ export type QaReleaseTrainPorts = {
     /**
      * On a fresh clone of main: a branch with each commit cherry-picked with
      * -m 1, in order, a conflict aborted and left out, an already applied one
-     * skipped. Returns main's head before the picks and the branch head after.
+     * skipped; once `capacity` have ridden, the rest are over capacity without
+     * being picked. Returns main's head before the picks and the branch head after.
      */
-    assemble(branch: string, cargo: readonly QaReleaseTrainCandidate[]): Promise<{
+    assemble(branch: string, cargo: readonly QaReleaseTrainCandidate[], capacity: number): Promise<{
       mainSha: string;
       headSha: string;
       picks: QaReleaseTrainPick[];
@@ -104,8 +105,6 @@ export async function runQaReleaseTrainRound(
   }
   if (!admission.admitted) return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
 
-  const riding = cargo.slice(0, QA_RELEASE_TRAIN_MAX_CARGO);
-  const waiting: QaReleaseTrainPick[] = cargo.slice(QA_RELEASE_TRAIN_MAX_CARGO).map((c) => ({ number: c.number, outcome: "over_capacity" }));
   const fail = async (failure: string, picks: QaReleaseTrainPick[] = [], rcSha: string | null = null, pushed = false): Promise<QaReleaseTrainOutcome> => {
     try {
       await ports.app.report({ slot: departure.slot, outcome: "failed", pullRequestNumber: null, branch: pushed ? branch : null, rcSha, failure, picks });
@@ -117,11 +116,11 @@ export async function runQaReleaseTrainRound(
 
   let assembled;
   try {
-    assembled = await ports.git.assemble(branch, riding);
+    assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO);
   } catch {
     return fail("assemble_failed");
   }
-  const picks = [...assembled.picks, ...waiting];
+  const picks = assembled.picks;
   if (!picks.some((p) => p.outcome === "included")) {
     try {
       await ports.app.report({ slot: departure.slot, outcome: "empty", pullRequestNumber: null, branch: null, rcSha: null, failure: null, picks });

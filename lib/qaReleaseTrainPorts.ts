@@ -70,7 +70,10 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
         const pull = await request("GET", `${API}/pulls/${number}`);
         if (pull.status !== 200) throw new Error(`github_${pull.status}`);
         const data = record(pull.json());
-        // The search index can lag: the pull request itself is the authority.
+        // The search index can lag: the pull request itself is the authority,
+        // its label included -- removing the label takes a pull request off.
+        const labels = Array.isArray(data.labels) ? data.labels.map((label) => record(label).name) : [];
+        if (!labels.includes(QA_RELEASE_TRAIN_LABEL)) continue;
         if (record(data.base).ref !== "develop" || typeof data.merged_at !== "string" || typeof data.merge_commit_sha !== "string") continue;
         cargo.push({ number, title: String(data.title ?? ""), mergeCommitSha: data.merge_commit_sha, mergedAt: data.merged_at });
       }
@@ -92,9 +95,14 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
  */
 export function createQaReleaseTrainGitPorts(input: { token: () => Promise<string>; remote?: string }): QaReleaseTrainPorts["git"] & { cleanup(): Promise<void> } {
   let dir: string | null = null;
-  const git = async (args: string[], options: { cwd?: string; allowFail?: boolean } = {}) => {
+  const git = async (args: string[], options: { cwd?: string; allowFail?: boolean; extraEnv?: Record<string, string> } = {}) => {
     try {
-      const { stdout } = await run("git", args, { cwd: options.cwd ?? dir ?? undefined, timeout: 180_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      const { stdout } = await run("git", args, {
+        cwd: options.cwd ?? dir ?? undefined,
+        timeout: 180_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.extraEnv },
+      });
       return { ok: true, stdout: stdout.trim() };
     } catch {
       if (options.allowFail) return { ok: false, stdout: "" };
@@ -102,7 +110,7 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
     }
   };
   return {
-    async assemble(branch, cargo) {
+    async assemble(branch, cargo, capacity) {
       dir = await mkdtemp(join(tmpdir(), "qa-release-train-"));
       await git(["clone", "--quiet", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", "main", input.remote ?? `https://github.com/${REPOSITORY}.git`, dir], { cwd: tmpdir() });
       await git(["config", "user.name", "tomverse-qa-release-train"]);
@@ -113,6 +121,10 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
       await git(["switch", "--quiet", "-c", branch]);
       const picks: QaReleaseTrainPick[] = [];
       for (const pull of cargo) {
+        if (picks.filter((p) => p.outcome === "included").length >= capacity) {
+          picks.push({ number: pull.number, outcome: "over_capacity" });
+          continue;
+        }
         // Already reachable from main (a full release carried it).
         if ((await git(["merge-base", "--is-ancestor", pull.mergeCommitSha, "HEAD"], { allowFail: true })).ok) {
           picks.push({ number: pull.number, outcome: "already_in_main" });
@@ -140,9 +152,20 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
     },
     async push(branch) {
       if (!dir) throw new Error("git_not_assembled");
-      // The token is in the URL of this one command only, never in a remote or a log.
-      const target = input.remote ?? `https://x-access-token:${await input.token()}@github.com/${REPOSITORY}.git`;
-      await git(["push", "--quiet", target, `HEAD:refs/heads/${branch}`]);
+      if (input.remote) {
+        await git(["push", "--quiet", input.remote, `HEAD:refs/heads/${branch}`]);
+        return;
+      }
+      // The token travels as an environment-supplied config value for this one
+      // command: never in argv, a remote, the repository config or a log.
+      const basic = Buffer.from(`x-access-token:${await input.token()}`).toString("base64");
+      await git(["push", "--quiet", `https://github.com/${REPOSITORY}.git`, `HEAD:refs/heads/${branch}`], {
+        extraEnv: {
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+          GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
+        },
+      });
     },
     async cleanup() {
       if (dir) await rm(dir, { recursive: true, force: true });

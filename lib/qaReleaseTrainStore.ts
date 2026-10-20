@@ -2,7 +2,6 @@ import "server-only";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
-import { readQaReleaseMergeLaneState } from "@/lib/qaReleaseMergeLaneStore";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
 import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
 
@@ -18,26 +17,35 @@ const TARGET_TYPE = "QaReleaseTrain";
 /** Prisma's interactive-transaction limit: one lock, one read, one audit append. */
 const TRANSACTION_MS = 15_000;
 
-export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "latched";
+export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "latched" | "already_admitted";
 
 /**
- * Whether this departure may run: the caller's revision is the newest, and
- * the merge lane is not latched. A refusal writes nothing.
+ * Whether this departure may run: the caller's revision is the newest, the
+ * merge lane is not latched, and this departure was not admitted before. All
+ * three are read after the audit chain lock, which every lane writer and
+ * every latch change also takes first, so none can change between the read
+ * and the admission. A refusal writes nothing.
  */
 export async function admitQaReleaseTrain(input: {
   callerRevision: number | null;
   slot: string;
 }): Promise<{ admitted: true; controlRevision: number } | { admitted: false; reason: QaReleaseTrainRefusal }> {
-  // Outside the transaction: the latch belongs to the develop lane's writer,
-  // and the train only reads it.
-  const lane = await readQaReleaseMergeLaneState();
-  if (lane.latched) return { admitted: false, reason: "latched" };
   return prisma.$transaction(
     async (tx) => {
       await takeAuditChainLock(tx);
       const control = await readLatestQaReleaseOperatorControl(tx);
       if (!control) return { admitted: false as const, reason: "no_control" as const };
       if (input.callerRevision !== control.revision) return { admitted: false as const, reason: "revision_mismatch" as const };
+      // The newest latch event; none yet is not latched. Read, never written, here.
+      const latch = await tx.qaReleaseMergeLaneLatch.findFirst({ orderBy: { sequence: "desc" }, select: { latched: true } });
+      if (latch?.latched === true) return { admitted: false as const, reason: "latched" as const };
+      // One admission per departure: an empty or failed train is not rerun
+      // by the next tick inside the same hour.
+      const earlier = await tx.adminAuditLog.findFirst({
+        where: { action: QA_RELEASE_TRAIN_ADMITTED_ACTION, targetType: TARGET_TYPE, targetId: input.slot },
+        select: { id: true },
+      });
+      if (earlier) return { admitted: false as const, reason: "already_admitted" as const };
       await writeSystemAuditLog({
         tx,
         systemActor: "qa-release-merge-lane",
