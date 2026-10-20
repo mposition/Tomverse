@@ -157,6 +157,11 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
   await page.goto(`/${productKey ?? "review"}?lang=${lang}`, { waitUntil: "domcontentloaded" });
   const renderedShell = options.appearance === "studio" && productKey !== "chat" ? "desktop" : shell;
   await expect(page.getByTestId(`${renderedShell}-chat-shell`)).toBeVisible({ timeout: 60_000 });
+  if (options.appearance === "studio" && productKey !== "chat") {
+    if (!emptyConversation) await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-content-state", "non-empty");
+    await page.locator(".review-view-switch button").first().click();
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-view", "write");
+  }
   if (renderedShell === "mobile") await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
