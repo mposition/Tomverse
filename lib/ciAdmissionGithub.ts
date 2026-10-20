@@ -90,8 +90,6 @@ export type CiAdmissionGithub = {
   runnerUsage(): Promise<CiRunnerUsageCounts>;
   /** The `CI admission` commit status on the pull request's head. */
   setStatus(pull: CiAdmissionPull, state: "pending" | "success", description: string): Promise<void>;
-  /** One open pull request, or null when it is closed or not found. */
-  openPull(number: number): Promise<CiAdmissionPull | null>;
 };
 
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
@@ -152,13 +150,6 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     return record(body.data);
   };
   return {
-    async openPull(number) {
-      const answer = await call("GET", `${REPO}/pulls/${number}`, await installationToken());
-      if (answer.status === 404) return null;
-      if (answer.status !== 200) throw new Error(`github_${answer.status}`);
-      const body = record(answer.json());
-      return body.state === "open" ? toPull(body) : null;
-    },
     async setStatus(pull, state, description) {
       if (!SHA.test(pull.headSha)) throw new Error("head_sha_invalid");
       const target = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/$/, "");

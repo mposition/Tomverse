@@ -279,20 +279,11 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   }
   // A release that failed is back at the top: try again shortly, since the
   // failed call itself promises no further webhook.
-  scheduleRecheck(
-    putBack.length > 0 || rejudge.size > 0 || statusFailed.size > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs,
-  );
+  // Any failed GitHub write -- a release, a hold, a status, a cancellation --
+  // is picked up again by the next round, which judges from GitHub as it is
+  // then (a draft still running CI is cancelled again); make sure one comes.
+  scheduleRecheck(failures.length > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs);
   return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
-}
-
-/** After the operator removes a pull request from the line: its "waiting" status is cleared. */
-export async function clearCiAdmissionStatus(number: number): Promise<void> {
-  if (ciAdmissionMode() !== "on") return;
-  const config = ciAdmissionGithubConfig();
-  if (!config) return;
-  const github = createCiAdmissionGithub(config);
-  const pull = await github.openPull(number);
-  if (pull) await github.setStatus(pull, "success", STATUS.left);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -349,6 +340,9 @@ async function applyCiAdmissionChange(actor: AdminActor, change: CiAdmissionAdmi
             queue: before.queue.filter((entry) => entry.number !== change.number),
             releasing: before.releasing.filter((entry) => entry.number !== change.number),
             pendingArrivals: before.pendingArrivals.filter((number) => number !== change.number),
+            // Its "waiting in line" status is cleared by the next round (the
+            // route runs one at once), and retried until it is written.
+            statusRetry: [...new Set([...before.statusRetry, change.number])].slice(-100),
           }
         : null;
       summary = `Removed #${change.number} from the CI admission line; it stays a draft.`;
