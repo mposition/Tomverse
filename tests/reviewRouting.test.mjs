@@ -45,6 +45,17 @@ test("disabled and hidden text or image models never reach the routing prompt", 
   });
   assert.equal(result.text.length, 0); assert.equal(result.images.length, 0);
 });
+
+test("research candidates stay provider-scoped and plan-gated without inventing support", () => {
+  const build = plan => reviewRoutingCandidates({ providers: ["perplexity", "openai"], models: AVAILABLE_MODELS, imageModels: [], plan, hasImages: false });
+  const paid = build("Max");
+  const deep = paid.text.find(model => model.id === "perplexity/sonar-deep-research");
+  assert.equal(deep.provider, "perplexity");
+  assert.equal(deep.tier, "deep-research");
+  assert.ok(!build("Free").text.some(model => model.id === deep.id));
+  assert.ok(!paid.text.some(model => model.provider === "openai" && model.tier === "deep-research"));
+  assert.equal(parseReviewRoute({ kind: "text", preset: "standard", choices: [{ provider: "openai", modelId: deep.id }] }, ["openai"], paid), null);
+});
 test("the client sends providers and attachments capability and refuses malformed or failed routing", async () => {
   const input = { text: "Create a poster", providers, hasImages: false };
   assert.deepEqual(await askReviewRoute(input, async (url, init) => {

@@ -10,6 +10,13 @@ const TABLE_OR_DIAGRAM_CHAR_PATTERN = /[│┌┐└┘├┤┬┴┼─╔╗�
 const MARKDOWN_TABLE_ROW_PATTERN = /^\s*\|.*\|\s*$/m;
 const LOG_LINE_PATTERN = /^(\s*(\[[^\]]+\]|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}|[$#>])\s)/m;
 const INDENTED_LINE_PATTERN = /^[ \t]{2,}\S/m;
+// A colon-delimited block can have just one body line (for example a short
+// Python loop). Require the block header and its indented body together, so
+// ordinary prose with one indented line stays proportional.
+const SHORT_INDENTED_BLOCK_PATTERN = /^[ \t]*(?:(?:async[ \t]+)?(?:def|for|with)|class|if|elif|else|while|try|except|finally|match|case)\b[^\n]*:[ \t]*(?:#[^\n]*)?\n[ \t]{2,}\S/m;
+
+export const hasIndentedPythonBlock = (text: string): boolean =>
+  SHORT_INDENTED_BLOCK_PATTERN.test(text.replace(/\r\n/g, "\n"));
 
 const countIndentedLines = (lines: string[]) =>
   lines.filter((line) => INDENTED_LINE_PATTERN.test(line)).length;
@@ -22,6 +29,7 @@ export function looksLikeStructuredText(text: string): boolean {
   if (!trimmed) return false;
 
   const lines = trimmed.split("\n");
+  if (hasIndentedPythonBlock(trimmed)) return true;
   if (lines.length < 3) return false;
 
   if (CODE_FENCE_PATTERN.test(trimmed)) return true;

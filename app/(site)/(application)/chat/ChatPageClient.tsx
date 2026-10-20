@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
-import { useReviewWorkspace } from "@/components/chat/useReviewWorkspace";
+import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
 import { askReviewRoute } from "@/lib/reviewRoutingClient";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPanels } from "@/lib/reviewProviderTranscript";
@@ -1048,6 +1048,7 @@ export function ChatPageClient({
     ? guestActiveChatStorageKey
     : GUEST_ACTIVE_CHAT_STORAGE_KEY;
   const reviewWorkspace = useReviewWorkspace(identityKey, reviewEasyAvailable && !isGuestMode, currentChatId);
+  const chatWorkspace = useWorkspaceAppearance("chat");
   const reviewWorkspaceRef = useRef(reviewWorkspace);
   useLayoutEffect(() => { reviewWorkspaceRef.current = reviewWorkspace; }, [reviewWorkspace]);
   const reviewRoutingPendingRef = useRef(false);
@@ -9834,7 +9835,7 @@ export function ChatPageClient({
       initialModelIds={imageDraftSeedModelIds}
       modelSelectionLocked={mountedSurface === "workspace" && reviewWorkspace.mode === "easy"}
       onResolveModels={mountedSurface === "workspace" && reviewWorkspace.mode === "easy" ? resolveReviewImageModels : undefined}
-      layout={mountedSurface === "workspace" && reviewWorkspace.appearance === "studio" ? "studio" : "classic"}
+      layout={(mountedSurface === "workspace" ? reviewWorkspace.appearance : chatWorkspace.appearance) === "studio" ? "studio" : "classic"}
       initialPreset={imageDraftSeedPreset}
       onCancelDraft={chatDraftBeforeImage ? () => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setUnsupportedProviders([]); handleCancelImageDraft(); } : undefined}
       flagEnabled={imageGenerationEnabled}
@@ -10041,6 +10042,7 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport && !(mountedSurface === "workspace" && reviewWorkspace.appearance === "studio") ? (
         <MobileChatShell
+          chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           review={mountedSurface === "workspace" ? {
             ...reviewWorkspace,
             setMode: handleReviewModeChange,
@@ -10202,6 +10204,7 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
           onStudioStarter={id => {
             const card = starterCards.find(item => item.entry.id === id);

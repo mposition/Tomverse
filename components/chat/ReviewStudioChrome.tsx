@@ -6,12 +6,12 @@ import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { useUserUsage } from "./useUserUsage";
 import { usagePercent } from "./UsagePercentGauge";
-import { localizedProductHref } from "@/lib/chatProductUiCopy";
+import { chatProductUiCopy, localizedProductHref, type ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 import { ArrowRight, BarChart3, Check, ChevronDown, Moon, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
-import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { storeAndApplyThemePreference } from "@/lib/theme";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
@@ -31,9 +31,6 @@ export function ReviewCommandBar({ review, locked = false, view, setView }: {
 }) {
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
-  const { data: session } = useSession();
-  const usage = useUserUsage(Boolean(session?.user));
-  const percent = usage ? usagePercent(usage.usage.creditsMonth, usage.limits.creditsMonth) : null;
   return <header className="review-command-bar" data-testid="review-command-bar">
     <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong>Review</strong><span>/ {c.newTask}</span></div>
     <div className="review-mode" role="group" aria-label={c.mode}>
@@ -43,16 +40,36 @@ export function ReviewCommandBar({ review, locked = false, view, setView }: {
       <button type="button" aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button>
       <button type="button" aria-pressed={view === "results"} onClick={() => setView("results")}>{c.results}</button>
     </div>}
+    <WorkspaceAppearanceActions workspace={review} disabled={locked || review.pending} testId="review-appearance" />
+  </header>;
+}
+
+function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace: WorkspaceAppearanceControls; disabled: boolean; testId: string }) {
+  const { lang } = useLanguage();
+  const c = reviewWorkspaceCopy[lang];
+  const { data: session } = useSession();
+  const usage = useUserUsage(Boolean(session?.user));
+  const percent = usage ? usagePercent(usage.usage.creditsMonth, usage.limits.creditsMonth) : null;
+  return <>
     <button type="button" className="review-credit-button" onClick={() => openAccountSettings("plan")} aria-label={`${c.settings}${percent === null ? "" : ` · ${percent}%`}`}><BarChart3 size={17} /><span>{percent === null ? "—" : `${percent}%`}</span></button>
     <button type="button" className="review-icon-button" aria-label={c.color} onClick={() => {
       const dark = document.documentElement.classList.contains("dark") || (!document.documentElement.classList.contains("light") && matchMedia("(prefers-color-scheme: dark)").matches);
       storeAndApplyThemePreference(dark ? "light" : "dark");
     }}><Moon size={17} /></button>
-    <select disabled={locked || review.pending} data-testid="review-appearance" aria-label={c.appearance} value={review.appearance} onChange={event => review.setAppearance(event.target.value === "classic" ? "classic" : "studio")}><option value="studio">Studio</option><option value="classic">Classic</option></select>
+    <select disabled={disabled} data-testid={testId} aria-label={c.appearance} value={workspace.appearance} onChange={event => workspace.setAppearance(event.target.value === "classic" ? "classic" : "studio")}><option value="studio">Studio</option><option value="classic">Classic</option></select>
+  </>;
+}
+
+export function ChatCommandBar({ workspace, locked = false }: { workspace: WorkspaceAppearanceControls; locked?: boolean }) {
+  const { lang, t } = useLanguage();
+  return <header className="review-command-bar chat-command-bar" data-testid="chat-command-bar">
+    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong>Chat</strong><span>/ {t("sidebar.newChat")}</span></div>
+    <span className="chat-studio-description">{chatProductUiCopy[lang].chat.description}</span>
+    <WorkspaceAppearanceActions workspace={workspace} disabled={locked} testId="chat-appearance" />
   </header>;
 }
 
-export function ReviewNavigation({ sidebar, onNewChat, onChat, locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; locked?: boolean }) {
+export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct; locked?: boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const [open, setOpen] = useState(false);
   const keyboardInset = useKeyboardInset();
@@ -79,8 +96,10 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, locked = false }:
     <nav className="review-navigation" aria-label="Tomverse">
       <Image loading="eager" unoptimized className="review-nav-logo" src="/tomverse-logo.png" alt="Tomverse" width={44} height={44} />
       <button type="button" className="review-new-task" disabled={locked} onClick={onNewChat}><Icon file="5d798" /><span>{c.newTask}</span></button>
-      <button type="button" aria-current="page" onClick={() => setOpen(false)}><Icon file="96fdd" /><span>Review</span></button>
-      <Link className="review-navigation-chat" aria-disabled={locked} href={localizedProductHref("chat", lang)} onClick={event => { if (locked || (onChat && !onChat())) event.preventDefault(); }}><Icon file="63e9a" /><span>Chat</span></Link>
+      {product === "review" ? <button type="button" aria-current="page" onClick={() => setOpen(false)}><Icon file="96fdd" /><span>Review</span></button>
+        : <Link className="review-navigation-chat" aria-disabled={locked} href={localizedProductHref("review", lang)} onClick={event => { if (locked || (onReview && !onReview())) event.preventDefault(); }}><Icon file="96fdd" /><span>Review</span></Link>}
+      {product === "chat" ? <button type="button" aria-current="page" onClick={() => setOpen(false)}><Icon file="63e9a" /><span>Chat</span></button>
+        : <Link className="review-navigation-chat" aria-disabled={locked} href={localizedProductHref("chat", lang)} onClick={event => { if (locked || (onChat && !onChat())) event.preventDefault(); }}><Icon file="63e9a" /><span>Chat</span></Link>}
       <button className="review-navigation-history" ref={trigger} type="button" onClick={() => setOpen(true)} aria-expanded={open}><Icon file="c8527" /><span>{c.history}</span></button>
       <div className="review-nav-spacer" />
       <Link href="/help"><Icon file="2b087" /><span>{c.help}</span></Link>

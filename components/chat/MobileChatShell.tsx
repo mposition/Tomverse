@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
-import { ReviewCommandBar } from "./ReviewStudioChrome";
+import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
+import { ChatCommandBar, ReviewCommandBar } from "./ReviewStudioChrome";
 import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import {
@@ -154,6 +154,7 @@ const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
   review?: ReviewWorkspaceControls;
+  chatWorkspace?: WorkspaceAppearanceControls;
   /** Current product chrome; switching routes never rewrites this conversation. */
   currentProduct?: ChatWorkspaceProduct;
   productSwitchDisabled?: boolean;
@@ -454,6 +455,7 @@ const mobileModelTabPanelId = (modelId: string) =>
 
 export function MobileChatShell({
   review,
+  chatWorkspace,
   currentProduct,
   productSwitchDisabled = false,
   onProductSwitch,
@@ -1011,7 +1013,7 @@ export function MobileChatShell({
   // The expansion offer, decided from the same status map the rail reads.
   const deepResearchSuggestion = deriveDeepResearchSuggestion({
     conversationId: currentChatId,
-    turn: deepResearchSuggestionTurn,
+    turn: review?.mode === "easy" ? null : deepResearchSuggestionTurn,
     selectedModelIds: selectedModels,
     disabledModelIds: disabledPanels,
     modelStatuses,
@@ -1229,7 +1231,8 @@ export function MobileChatShell({
     // cannot quietly absorb a real sideways overflow.
     <main
       data-testid="mobile-chat-shell"
-      data-review-appearance={review?.appearance}
+      data-review-appearance={review?.appearance ?? chatWorkspace?.appearance}
+      data-studio-product={currentProduct}
       // Observable so a regression test can assert on the state machine itself
       // -- "unknown" must never be rendered as the welcome surface -- rather
       // than only on what happened to be painted when it looked.
@@ -1840,6 +1843,7 @@ export function MobileChatShell({
       {composerPortalHost &&
         createPortal(
           <ChatInput
+            workspaceAppearance={chatWorkspace?.appearance}
             review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
             currentProduct={currentProduct}
             showProductSwitcher={!isCompactBottomDock}
@@ -2005,6 +2009,7 @@ export function MobileChatShell({
                     onProductSwitch={onProductSwitch}
                   />
                   {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                  {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
                 </>
               ) : undefined}
             />

@@ -4,6 +4,10 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { ReviewMode } from "@/lib/reviewRoutingCore";
 
 export type ReviewAppearance = "studio" | "classic";
+export type WorkspaceAppearanceControls = {
+  appearance: ReviewAppearance;
+  setAppearance: (value: ReviewAppearance) => void;
+};
 export type ReviewWorkspaceControls = {
   appearance: ReviewAppearance;
   setAppearance: (value: ReviewAppearance) => void;
@@ -24,7 +28,7 @@ export type ReviewWorkspaceControls = {
 
 /** Browser preferences never change a conversation's product or entitlements. */
 export function useReviewWorkspace(identityKey: string | null, easyAvailable: boolean, conversationId: string | null) {
-  const appearance = useSyncExternalStore<ReviewAppearance>(subscribePreferences, readAppearance, () => "studio");
+  const { appearance, setAppearance } = useWorkspaceAppearance("review");
   const readMode = useCallback((): ReviewMode => {
     if (!easyAvailable) return "professional";
     try {
@@ -65,16 +69,21 @@ export function useReviewWorkspace(identityKey: string | null, easyAvailable: bo
 
 const PREFERENCES_CHANGED = "tomverse:review-preferences";
 const memoryModes = new Map<string | null, ReviewMode>();
-let memoryAppearance: ReviewAppearance = "studio";
-const readAppearance = (): ReviewAppearance => {
-  try { return localStorage.getItem("tomverse_review_appearance") === "classic" ? "classic" : "studio"; }
-  catch { return memoryAppearance; }
-};
-const setAppearance = (value: ReviewAppearance) => {
-  memoryAppearance = value;
-  try { localStorage.setItem("tomverse_review_appearance", value); } catch { /* Browser-only preference. */ }
-  window.dispatchEvent(new Event(PREFERENCES_CHANGED));
-};
+const memoryAppearances = new Map<string, ReviewAppearance>();
+export function useWorkspaceAppearance(product: "chat" | "review"): WorkspaceAppearanceControls {
+  const key = `tomverse_${product}_appearance`;
+  const readAppearance = useCallback((): ReviewAppearance => {
+    try { return localStorage.getItem(key) === "classic" ? "classic" : "studio"; }
+    catch { return memoryAppearances.get(key) ?? "studio"; }
+  }, [key]);
+  const appearance = useSyncExternalStore(subscribePreferences, readAppearance, () => "studio" as const);
+  const setAppearance = useCallback((value: ReviewAppearance) => {
+    memoryAppearances.set(key, value);
+    try { localStorage.setItem(key, value); } catch { /* Browser-only preference. */ }
+    window.dispatchEvent(new Event(PREFERENCES_CHANGED));
+  }, [key]);
+  return { appearance, setAppearance };
+}
 const subscribePreferences = (notify: () => void) => {
   window.addEventListener(PREFERENCES_CHANGED, notify);
   window.addEventListener("storage", notify);
