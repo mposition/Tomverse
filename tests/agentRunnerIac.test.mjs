@@ -395,6 +395,16 @@ test("the sre-ops digest service declares the supervisor's digest list, daily at
   assert.ok(existsSync(CHILD_SCRIPTS.digest), CHILD_SCRIPTS.digest);
 });
 
+test("the merge lane runs in production only, every 10 minutes, with exactly its start check's variables", async () => {
+  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_merge_lane");
+  assert.ok(runner);
+  assert.deepEqual(Object.keys(runner.environments), ["production"]);
+  assert.deepEqual([...runner.environments.production].sort(), [...QA_RELEASE_SERVICE_VARIABLES.mergeLane].sort());
+  assert.equal(runner.cronSchedule, "*/10 * * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs");
+});
+
 test("the AMUX orchestrator is a long-running production service that cannot run commands", () => {
   // development-agent-orchestration.md, version 28.
   const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "amux_orchestrator");
