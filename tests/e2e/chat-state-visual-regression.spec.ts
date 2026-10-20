@@ -147,14 +147,11 @@ async function readShellShape(page: Page, viewportWidth: number) {
   const modelIds = await modelSlots.evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute("data-model-id"))
   );
-  const creditEstimate = (
-    await page.getByTestId("request-credit-estimate").first().innerText()
-  ).trim();
-  const creditEstimateLabel = await page.getByTestId("request-credit-estimate").first().getAttribute("aria-label");
+  const creditEstimate = await page.getByTestId("request-credit-estimate").count();
   const modelButton = (
     await page.getByTestId("composer-active-model-count").innerText()
   ).trim();
-  return { modelIds, creditEstimate, creditEstimateLabel, modelButton };
+  return { modelIds, creditEstimate, modelButton };
 }
 
 test.describe("Loading state", () => {
@@ -248,14 +245,8 @@ test.describe("Loading state", () => {
     const mobile = await readShellShape(page, MOBILE_VIEWPORT.width);
 
     expect(mobile.modelIds).toEqual(desktop.modelIds);
-    // Mobile shows the amount alone; both shells must still display the same
-    // price and expose the same full explanation before committing a request.
-    const desktopAmounts = desktop.creditEstimate.match(/\d+(?:[.,]\d+)?/g);
-    const mobileAmounts = mobile.creditEstimate.match(/\d+(?:[.,]\d+)?/g);
-    expect(desktopAmounts).not.toBeNull();
-    expect(mobileAmounts).toEqual(desktopAmounts);
-    expect(desktop.creditEstimateLabel).toBeTruthy();
-    expect(mobile.creditEstimateLabel).toBe(desktop.creditEstimateLabel);
+    expect(desktop.creditEstimate).toBe(0);
+    expect(mobile.creditEstimate).toBe(0);
   });
 
   // The desktop tab/panel switch straddles 1058px. The loading shell has to

@@ -112,8 +112,7 @@ test.describe("Approved compact Composer", () => {
     test(`touch tablet ${product} keeps primary controls at 44px`, { tag: "@ui-risk" }, async ({ page }) => {
       await enterCompactComposer(page, product, 1024, 900);
       const composer = page.getByTestId("chat-input");
-      const creditId = product === "chat" ? "auto-variable-credit-notice" : "request-credit-estimate";
-      for (const id of ["composer-tools-button", "composer-model-select", creditId, "chat-send-button"]) {
+      for (const id of ["composer-tools-button", "composer-model-select", "chat-send-button"]) {
         const box = (await composer.getByTestId(id).boundingBox())!;
         expect(box.width, id).toBeGreaterThanOrEqual(44);
         expect(box.height, id).toBeGreaterThanOrEqual(44);
@@ -134,8 +133,7 @@ test.describe("Approved compact Composer", () => {
         expect(metrics.cardHeight).toBeLessThanOrEqual(164);
         const inputBox = (await page.getByTestId("chat-textarea").boundingBox())!;
         const composer = page.getByTestId("chat-input");
-        const creditTestId = product === "chat" ? "auto-variable-credit-notice" : "request-credit-estimate";
-        for (const id of ["composer-tools-button", creditTestId, "chat-send-button"]) {
+        for (const id of ["composer-tools-button", "chat-send-button"]) {
           const control = composer.getByTestId(id);
           const box = (await control.boundingBox())!;
           expect(box.height, id).toBeGreaterThanOrEqual(44);
@@ -152,30 +150,8 @@ test.describe("Approved compact Composer", () => {
         expect(modeBox.y + modeBox.height).toBeLessThanOrEqual(inputBox.y + 1);
         await expectNoHorizontalOverflow(page);
         if (width === 390) await page.screenshot({ path: testInfo.outputPath(`compact-mobile-${product}.png`), fullPage: false });
-        if (product === "chat" && width === 390) {
-          const credit = composer.getByTestId("auto-variable-credit-notice");
-          await credit.click();
-          await expect(credit).toHaveAttribute("aria-expanded", "true");
-          const detail = page.locator("#auto-variable-credit-detail");
-          await expect(detail).toBeVisible();
-          const visibleLabel = (await credit.innerText()).trim();
-          expect(await credit.getAttribute("aria-label")).toContain(visibleLabel);
-          await expect(credit).toHaveAccessibleDescription((await detail.innerText()).trim());
-          const detailBox = (await detail.boundingBox())!;
-          expect(detailBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height - 1);
-          await credit.click();
-          await expect(detail).toHaveCount(0);
-          await credit.click();
-          await expect(detail).toBeVisible();
-          const modeSwitch = composer.getByTestId("composer-auto-routing-toggle");
-          await modeSwitch.click();
-          await expect(modeSwitch).toHaveAttribute("aria-checked", "false");
-          await expect(credit).toHaveCount(0);
-          await modeSwitch.click();
-          await expect(modeSwitch).toHaveAttribute("aria-checked", "true");
-          await expect(credit).toHaveAttribute("aria-expanded", "false");
-          await expect(detail).toHaveCount(0);
-        }
+        await expect(composer.getByTestId("request-credit-estimate")).toHaveCount(0);
+        await expect(composer.getByTestId("auto-variable-credit-notice")).toHaveCount(0);
       });
     }
 

@@ -200,7 +200,9 @@ export async function mockPublicProofMetrics(page: Page) {
   );
 }
 
-export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") {
+export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", reviewAppearance: "classic" | "studio" = "classic") {
+  // Existing workspace contracts exercise the retained Classic appearance.
+  // Studio has its own responsive coverage in review-studio.spec.ts.
   await mockPublicBillingConfig(page);
   await mockPublicProofMetrics(page);
   await page.route("**/api/app-settings**", (route) =>
@@ -230,7 +232,7 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
     );
   });
 
-  await page.addInitScript((lang) => {
+  await page.addInitScript(({ lang, appearance }) => {
     // A scriptable stand-in for Cloudflare's widget. The default -- "silent" --
     // is what every pre-existing spec relies on: verification passes without
     // any interaction, so no verification UI is ever supposed to appear. The
@@ -413,12 +415,13 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
     }
 
     localStorage.clear();
+    localStorage.setItem("tomverse_review_appearance", appearance);
     localStorage.setItem("tomverse_language", lang);
     localStorage.setItem("tomverse_onboarding_seen_v1", "1");
     localStorage.setItem("guest_count", "0");
     localStorage.setItem("guest_date", new Date().toDateString());
     sessionStorage.setItem("__tomverse_qa_guest_ready", "true");
-  }, language);
+  }, { lang: language, appearance: reviewAppearance });
 }
 
 export async function mockChatStream(
@@ -796,7 +799,7 @@ export async function mockAuthenticatedApi(
     )
   );
 
-  await page.route("**/api/user/settings", async (route) => {
+  await page.route("**/api/user/settings**", async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
         theme?: unknown;

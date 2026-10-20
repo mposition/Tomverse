@@ -14,6 +14,14 @@ half: what must be on screen, in what shape, and what a change may not do.
 Where the two overlap the policy wins; where the policy is silent about
 rendering, this contract is the answer.
 
+## Studio appearance (2026-10-20)
+
+The approved Review Studio layout and credit presentation are specified in
+[Review Studio](review-studio.md). Classic retains the original layout. Both
+reuse the same input, execution, entitlement and cancellation controls; the
+Studio Write/Results view must never resubmit a request. The textarea retains
+its own complete full-width row.
+
 ## Scope
 
 | Area | File |

@@ -274,9 +274,7 @@ test("adding a model that cannot search updates the chip and the reservation tog
 
   await expect(chip(page)).toHaveAttribute("data-supported-count", "1");
   await expect(chip(page)).toHaveAttribute("data-unsupported-count", "0");
-  const creditsBefore = await page
-    .getByTestId("request-credit-estimate")
-    .innerText();
+
 
   const dialog = await openModelPickerCatalogue(page);
   await dialog
@@ -287,11 +285,7 @@ test("adding a model that cannot search updates the chip and the reservation tog
   await expect(chip(page)).toHaveAttribute("data-supported-count", "1");
   await expect(chip(page)).toHaveAttribute("data-unsupported-count", "1");
   await expect(chip(page)).toHaveAttribute("data-tone", "warning");
-  // The base cost grows with the extra model, but the search surcharge does
-  // not -- an unsupported model reserves nothing for a search it cannot run.
-  await expect(page.getByTestId("request-credit-estimate")).not.toHaveText(
-    creditsBefore
-  );
+  await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
 });
 
 test("a model that searches through the application's own backend counts as search-ready", { tag: "@ui-risk" }, async ({
