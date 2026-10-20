@@ -140,10 +140,10 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
 
   // 1. GitHub, outside any transaction.
   let openPulls: CiAdmissionPull[];
-  let runningShas: Set<string>;
+  let running: Set<string>;
   try {
     openPulls = await github.openPulls();
-    runningShas = await github.runningShas();
+    running = await github.runningPulls();
   } catch (error) {
     return { outcome: "read_failed", failure: code(error) };
   }
@@ -153,7 +153,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, runningShas, arrival, nowMs: now(), shadow: mode === "shadow" });
+      const judged = evaluateCiAdmission({ state, openPulls, running, arrival, nowMs: now(), shadow: mode === "shadow" });
       await writeState(
         tx,
         mode === "shadow" ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound } : judged.state,

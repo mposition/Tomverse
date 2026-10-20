@@ -2,7 +2,7 @@ import "server-only";
 
 import { createSign } from "node:crypto";
 
-import type { CiAdmissionPull } from "@/lib/ciAdmissionCore";
+import { ciRunKey, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
@@ -55,6 +55,12 @@ const list = (value: unknown): unknown[] => {
   return value;
 };
 
+/** The pull requests a workflow run is for (GitHub lists them on the run; empty for a fork's). */
+const runPullNumbers = (run: Json): number[] =>
+  (Array.isArray(run.pull_requests) ? run.pull_requests : [])
+    .map((pr) => (typeof pr === "object" && pr !== null ? (pr as Json).number : null))
+    .filter((n): n is number => typeof n === "number");
+
 const toPull = (item: unknown): CiAdmissionPull | null => {
   const pull = record(item);
   const head = record(pull.head);
@@ -74,11 +80,11 @@ const toPull = (item: unknown): CiAdmissionPull | null => {
 
 export type CiAdmissionGithub = {
   openPulls(): Promise<CiAdmissionPull[]>;
-  /** Head SHAs with a pull_request workflow run queued or in progress, repository-wide. */
-  runningShas(): Promise<Set<string>>;
+  /** `ciRunKey(number, head)` for every pull_request workflow run queued or in progress, repository-wide. */
+  runningPulls(): Promise<Set<string>>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
-  /** Cancels the pull request's queued and running pull_request runs; returns how many. */
+  /** Cancels the pull request's own queued and running pull_request runs (never another pull request's on the same commit); returns how many. */
   cancelRuns(pull: CiAdmissionPull): Promise<number>;
   /** Jobs holding or waiting for a runner right now, repository-wide, split by GitHub-hosted and Ubicloud. */
   runnerUsage(): Promise<CiRunnerUsageCounts>;
@@ -181,19 +187,20 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       }
       return pulls;
     },
-    async runningShas() {
-      const shas = new Set<string>();
+    async runningPulls() {
+      const keys = new Set<string>();
       for (const status of ACTIVE_RUN_STATUSES) {
         for (let page = 1; page <= 3; page += 1) {
           const runs = list(record(await get(`${REPO}/actions/runs?status=${status}&event=pull_request&per_page=100&page=${page}`)).workflow_runs);
           for (const run of runs) {
-            const sha = record(run).head_sha;
-            if (typeof sha === "string") shas.add(sha);
+            const data = record(run);
+            if (typeof data.head_sha !== "string") continue;
+            for (const number of runPullNumbers(data)) keys.add(ciRunKey(number, data.head_sha));
           }
           if (runs.length < 100) break;
         }
       }
-      return shas;
+      return keys;
     },
     async convertToDraft(pull) {
       const data = await graphql(
@@ -240,6 +247,8 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       let cancelled = 0;
       for (const run of await pullRuns(pull)) {
         if (!ACTIVE_RUN_STATUSES.has(String(run.status)) || typeof run.id !== "number") continue;
+        // The same commit may be the head of another pull request too.
+        if (!runPullNumbers(run).includes(pull.number)) continue;
         const answer = await call("POST", `${REPO}/actions/runs/${run.id}/cancel`, await installationToken());
         // 409: the run finished meanwhile; nothing left to cancel.
         if (answer.status === 202) cancelled += 1;

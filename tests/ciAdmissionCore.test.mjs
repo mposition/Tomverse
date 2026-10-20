@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CI_ADMISSION_RELEASE_GRACE_MS,
   ciAdmissionUnits,
+  ciRunKey,
   emptyCiAdmissionState,
   evaluateCiAdmission,
   parseCiAdmissionMode,
@@ -26,8 +27,15 @@ const pull = (number, overrides = {}) => ({
 });
 const queued = (number, base = "develop") => ({ number, title: `Pull ${number}`, base, head: `h${number}`, queuedAt: "2026-10-20T01:00:00.000Z" });
 const state = (overrides = {}) => ({ ...emptyCiAdmissionState(), ...overrides });
-const run = (input) =>
-  evaluateCiAdmission({ arrival: null, nowMs: T0, shadow: false, runningShas: new Set(), ...input });
+// Tests name running heads by SHA; a run belongs to every listed pull request on that head.
+const run = ({ runningShas = new Set(), ...input }) =>
+  evaluateCiAdmission({
+    arrival: null,
+    nowMs: T0,
+    shadow: false,
+    ...input,
+    running: input.running ?? new Set(input.openPulls.filter((p) => runningShas.has(p.headSha)).map((p) => ciRunKey(p.number, p.headSha))),
+  });
 const kinds = (evaluation) => evaluation.actions.map((a) => `${a.kind}:${a.pull.number}`);
 
 test("mode: undeclared or empty is off; only off, shadow and on", () => {
@@ -323,4 +331,16 @@ test("a fix push seen first by another round keeps its slot (the push event arri
   // Then the synchronize arrives: still #1's slot, nothing held.
   const sync = run({ state: between.state, openPulls: [pull(1, { headSha: head }), pull(2, { draft: true })], arrival: 1, nowMs: T0 + 2 * 60_000 + 5_000 });
   assert.deepEqual(kinds(sync), []);
+});
+
+test("a run on a shared commit counts, and is cancelled, only for the pull request it runs for", () => {
+  // #1 (granted, running) and draft #2 point at the same commit; the run is #1's.
+  const shared = "a".repeat(40);
+  const evaluation = run({
+    state: state({ capacity: 1 }),
+    openPulls: [pull(1, { headSha: shared }), pull(2, { draft: true, headSha: shared })],
+    running: new Set([ciRunKey(1, shared)]),
+  });
+  assert.deepEqual(kinds(evaluation), [], "#2 runs nothing, so nothing of #2 is cancelled");
+  assert.equal(evaluation.used, 1);
 });

@@ -158,6 +158,13 @@ export function parseCiAdmissionState(value: string | null | undefined): CiAdmis
   }
 }
 
+/**
+ * A pull_request run is identified by the pull request it runs for and the
+ * head it runs on: two pull requests can point at the same commit, and a run
+ * for one must never count, or be cancelled, for the other.
+ */
+export const ciRunKey = (number: number, headSha: string) => `${number}@${headSha}`;
+
 export type CiAdmissionAction =
   | { kind: "hold"; pull: CiAdmissionPull }
   /** `entry` is its place in line, put back at the top if marking it ready fails. */
@@ -182,13 +189,14 @@ export type CiAdmissionEvaluation = {
 
 /**
  * One evaluation. `arrival` is the pull request whose event triggered it when
- * that event made it ready for review; `runningShas` are the head SHAs with a
+ * that event made it ready for review; `running` holds `ciRunKey(number, head)`
+ * for every pull request with a
  * pull_request workflow run queued or in progress.
  */
 export function evaluateCiAdmission(input: {
   state: CiAdmissionState;
   openPulls: readonly CiAdmissionPull[];
-  runningShas: ReadonlySet<string>;
+  running: ReadonlySet<string>;
   arrival: number | null;
   nowMs: number;
   shadow: boolean;
@@ -202,12 +210,12 @@ export function evaluateCiAdmission(input: {
 
   const released = input.state.released
     .filter((entry) => nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS && open.get(entry.number)?.draft === false)
-    .map((entry) => ({ ...entry, observed: entry.observed || input.runningShas.has(entry.headSha) }));
+    .map((entry) => ({ ...entry, observed: entry.observed || input.running.has(ciRunKey(entry.number, entry.headSha)) }));
   // Reserved: counts until runs for the reserved head are seen.
   const reserve = (pull: CiAdmissionPull) => {
     const index = released.findIndex((entry) => entry.number === pull.number);
     if (index >= 0) released.splice(index, 1);
-    released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: input.runningShas.has(pull.headSha) });
+    released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: input.running.has(ciRunKey(pull.number, pull.headSha)) });
   };
   // Its own release echoing back is recognised by number and head together: a
   // reservation for an older head never exempts new commits from judgment.
@@ -251,7 +259,7 @@ export function evaluateCiAdmission(input: {
     queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200) });
   }
 
-  const running = (pull: CiAdmissionPull) => !pull.draft && (input.runningShas.has(pull.headSha) || reserved().has(pull.number));
+  const running = (pull: CiAdmissionPull) => !pull.draft && (input.running.has(ciRunKey(pull.number, pull.headSha)) || reserved().has(pull.number));
   const usedBy = (exclude: number | null) =>
     input.openPulls.reduce((sum, pull) => {
       const units = ciAdmissionUnits(pull);
@@ -297,7 +305,7 @@ export function evaluateCiAdmission(input: {
   const holding = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
   for (const pull of input.openPulls) {
     if (!pull.draft || ciAdmissionUnits(pull) === null || holding.has(pull.number)) continue;
-    if (!input.runningShas.has(pull.headSha)) continue;
+    if (!input.running.has(ciRunKey(pull.number, pull.headSha))) continue;
     actions.push({ kind: "cancel", pull });
     event("cancelled", pull.number, "draft_rerun");
   }
@@ -330,7 +338,7 @@ export function evaluateCiAdmission(input: {
     actions.splice(actions.findIndex((a) => a.kind === "hold" && a.pull.number === number), 1);
     actions.splice(actions.findIndex((a) => a.kind === "release" && a.pull.number === number), 1);
     const reservation = released.find((entry) => entry.number === number);
-    if (reservation) reservation.observed = input.runningShas.has(reservation.headSha);
+    if (reservation) reservation.observed = input.running.has(ciRunKey(reservation.number, reservation.headSha));
     for (let i = events.length - 1; i >= 0; i -= 1) {
       if (events[i].number === number && (events[i].kind === "held" || events[i].kind === "released")) events.splice(i, 1);
     }
