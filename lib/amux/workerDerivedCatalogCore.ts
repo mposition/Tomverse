@@ -17,18 +17,6 @@ import {
  */
 
 /**
- * R2d shipped with its own code latch off (version 35 section 5); version 54
- * (approved 2026-10-18, after the host bridge binaries were replaced) is the
- * operator's activation record and sets it true, so the bridge session list
- * route answers the derived catalog's names (without the engineering runner).
- * While it is false the route answers that the list is off, and the bridge
- * keeps its environment allowlist as before. The latch test fails unless the
- * latch and version 54's approval record move together.
- */
-export const AMUX_WORKER_SESSION_LIST_LATCH = true;
-export const amuxWorkerSessionListOpen = (): boolean => AMUX_WORKER_SESSION_LIST_LATCH;
-
-/**
  * Orchestration policy version 55, section 1: the bridge-scope route's code
  * latch. Stage S1 shipped it off, so the route answered `bridge_scope_off`
  * and a bridge started with `--worker` registered nothing. Stage S3 turns it

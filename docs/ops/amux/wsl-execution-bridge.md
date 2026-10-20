@@ -76,7 +76,7 @@ release 빌드:
 cargo build --release --locked --bin tomverse-wsl-bridge
 ```
 
-환경 파일은 `~/.config/tomverse-wsl-bridge.env`에 두고 권한은 `600`이다. 넣는 이름은 `TOMVERSE_AMUX_WSL_BRIDGE`, `TOMVERSE_AMUX_WSL_LOCAL_URL`, `TOMVERSE_INTERNAL_URL`, `TOMVERSE_AMUX_SYNC_SECRET`이다. 선택으로 `TOMVERSE_AMUX_WSL_SESSIONS`에 쉼표로 세션 이름을 적으면 그 세션만 등록한다. 범위를 좁히기만 하며, 한 세션만 두면 한 번에 한 attempt만 돈다. 값은 이 문서와 대화에 적지 않는다.
+환경 파일은 `~/.config/tomverse-wsl-bridge.env`에 두고 권한은 `600`이다. 넣는 이름은 `TOMVERSE_AMUX_WSL_BRIDGE`, `TOMVERSE_AMUX_WSL_LOCAL_URL`, `TOMVERSE_INTERNAL_URL`, `TOMVERSE_AMUX_SYNC_SECRET`이다. (정책 버전 55 S4부터 bridge는 `--worker <이름>`으로 시작하며 세션 목록 환경 변수는 읽지 않는다.)
 
 systemd user unit `~/.config/systemd/user/tomverse-wsl-bridge.service`의 핵심은 셋이다. `After=amux-server.service`로 로컬 AMUX 뒤에 시작하고, `Restart=on-failure`와 `RestartSec=60`으로 시작 실패만 다시 시도하며, `RestartPreventExitStatus=3`으로 halt는 다시 시작하지 않는다.
 
@@ -98,27 +98,17 @@ WantedBy=default.target
 
 halt 뒤에는 로그(`journalctl --user -u tomverse-wsl-bridge`)와 Tomverse의 attempt 상태를 확인한 다음 사람이 `systemctl --user restart tomverse-wsl-bridge`로 다시 시작한다.
 
-### 세션 목록 (정책 버전 35, R2d)
+### 세션 목록 (정책 버전 35, R2d): S4에서 지움
 
-bridge는 시작할 때와 heartbeat를 보내는 매 회차에 `GET /api/internal/amux/workers/session-list`를 읽는다. 이 route는 등록부에서 유도한 카탈로그의 이름 목록을 돌려준다. `engineering-runner`는 이 목록에 들어가지 않는다. 읽기 전용이며 등록·갱신·배정을 하지 않는다. worker별 v22 bridge(`tomverse-amux-v22-bridge@<worker>`)도 같은 바이너리라서 같은 규칙을 따른다.
+R2d의 `GET /api/internal/amux/workers/session-list` route와, 그것을 읽던 인자 없는 bridge 실행 모드(`TOMVERSE_AMUX_WSL_SESSIONS` 허용 목록과 `TOMVERSE_AMUX_V22_SIDECAR_SOCKET`)는 정책 버전 55 S4(2026-10-20)에서 지웠다. 새로 빌드한 bridge는 `--worker <이름>` 또는 `--dm-relay`로만 시작한다.
 
-| 답 | bridge의 동작 |
-|---|---|
-| `session_list_off`(R2d 코드 래치가 꺼져 있음), 또는 그 route가 없는 앱의 404 | 지금과 같다. `TOMVERSE_AMUX_WSL_SESSIONS`만 따른다. |
-| 목록 | `TOMVERSE_AMUX_WSL_SESSIONS`와의 교집합만 등록하고 배정 대상으로 내놓는다. 목록 밖의 실행 중 세션은 아직 등록하지 않고 대기열에 두며, 이후 회차에 목록에 들어오면 등록한다. 이미 등록된 세션이 목록 밖이 되면 상태는 그대로 보고하되 `dispatch_ready: false`로 heartbeat하고, 진행 중인 attempt는 끝낸다. |
-| 그 밖의 모든 답(카탈로그를 유도할 수 없음, 응답 없음, 형식 오류) | 새로 등록하지 않는다. 시작할 때라면 실행 중 세션 모두가 대기열에 들어간다. 등록된 세션도 진행 중인 일도 없이 등록만 기다리는 동안에는 배정 조회를 하지 않으므로, 장애가 이어져도 halt하지 않는다. 등록된 세션은 배정 대상으로 내놓지 않는다. |
-
-어느 경우도 halt(종료 코드 3)가 아니다.
-
-전환 기간에는 `TOMVERSE_AMUX_WSL_SESSIONS`가 목록을 좁히기만 하는 이중 장치로 남는다. R2e에서 지운다.
-
-404를 "꺼짐"으로 읽으므로 앱 배포와 호스트 바이너리 교체의 순서는 상관없다. 바이너리 교체는 운영자가 한다(버전 23).
+예외 하나: FIRST Task 복구용 API bridge(`tomverse-amux-v22-api-bridge@`, 호스트에만 있는 운영자 시작 전용 unit)는 `/opt/tomverse-amux-v22/tomverse-wsl-bridge`(2026-10-18 빌드)를 인자 없이, 두 환경 변수를 넣어 실행한다. 그 바이너리는 `session-list`의 404를 "꺼짐"으로 읽고 환경 변수 목록만 따르므로 S4 뒤에도 그대로 동작한다. 그래서 `/opt`의 그 바이너리는 지우지 않는다.
 
 ### worker별 bridge: `--worker` 모드 (정책 버전 55, S2)
 
-같은 바이너리를 `--worker <worker 이름>`으로 시작하면 그 worker 하나만 맡는다. 인자는 둘 중 하나만 받는다. 인자가 없으면 위의 세션 bridge와 v22 bridge 그대로이고(전환 기간의 호환), `--worker <이름>`이면 이 절이다. 그 밖의 인자나 세션 이름 문법(영숫자와 `.` `_` `:` `-`)에 맞지 않는 이름은 시작하지 않는다(종료 코드 1).
+같은 바이너리를 `--worker <worker 이름>`으로 시작하면 그 worker 하나만 맡는다. 인자는 `--worker <이름>`과 `--dm-relay` 가운데 하나만 받는다. 인자가 없거나 그 밖의 인자, 세션 이름 문법(영숫자와 `.` `_` `:` `-`)에 맞지 않는 이름은 시작하지 않는다(종료 코드 1).
 
-`--worker` bridge는 시작할 때와 매 회차에 `GET /api/internal/amux/workers/bridge-scope`를 bridge bearer로 읽는다. `TOMVERSE_AMUX_WSL_SESSIONS`와 `TOMVERSE_AMUX_V22_SIDECAR_SOCKET`은 읽지 않으며 `session-list`도 부르지 않는다. 답은 정확히 세 모양만 인정한다. 다른 키, 다른 kind, 같은 이름이 두 번 나온 목록, 404, 응답 없음은 모두 "읽지 못함"이다(세션 목록과 달리 404를 "꺼짐"으로 읽지 않는다).
+`--worker` bridge는 시작할 때와 매 회차에 `GET /api/internal/amux/workers/bridge-scope`를 bridge bearer로 읽는다. 답은 정확히 세 모양만 인정한다. 다른 키, 다른 kind, 같은 이름이 두 번 나온 목록, 404, 응답 없음은 모두 "읽지 못함"이다(404를 "꺼짐"으로 읽지 않는다).
 
 | 답 | `--worker` bridge의 동작 |
 |---|---|
@@ -164,13 +154,26 @@ S3는 운영자 승인(대화, PR에 한 줄)으로 래치 `AMUX_WORKER_BRIDGE_S
 - 되돌리기는 같은 조건을 반대로 따른다. 래치를 끄는 것만으로는 되돌리기가 아니다.
 - 어느 확인이든 하지 못하면 멈추고 사람이 판단한다.
 
-watchdog은 `tomverse-bridge.service`를 enable되어 있는 동안만 이름으로 본다. codex 단위를 옮길 때 옛 unit을 `systemctl disable --now`로 멈추면 그 뒤로 down을 보내지 않는다(`bridge-monitoring.md` 1절). 이 변경은 S3 배포와 함께 watchdog 재설치(1.2절)로 호스트에 들어간다.
+S3 전환은 2026-10-20에 끝났다(codex 셋 12:06, claude 셋 14:47 AEST 등록). 운영자는 같은 날 3일 관측을 두지 않기로 정했다.
 
 옮긴 인스턴스는 `sudo systemctl enable tomverse-amux-bridge@<worker>.service`로 enable해, 재부팅 뒤에도 옛 unit처럼 저절로 켜진다(운영자 결정 2026-10-20). watchdog은 그래도 로드된 bridge가 하나도 없는 상태를 down으로 알린다.
 
+#### 정리 (S4)
+
+코드: 인자 없는 bridge 모드, `session-list` route, 두 환경 변수를 읽는 코드를 지웠다. watchdog·자동 재시작·polkit은 `tomverse-amux-bridge@*`(와 sidecar)만 본다.
+
+호스트(운영자, `tomverse-admin`, S4 release가 배포된 뒤):
+
+1. 옛 unit 파일 둘을 백업 폴더로 옮기고 다시 읽는다. `sudo mkdir -p /root/amux-s4-backup && sudo mv /etc/systemd/system/tomverse-bridge.service /etc/systemd/system/tomverse-amux-v22-bridge@.service /root/amux-s4-backup/ && sudo systemctl daemon-reload`
+2. `/etc/tomverse-bridge/bridge.env`에서 `TOMVERSE_AMUX_WSL_SESSIONS`·`TOMVERSE_AMUX_V22_SIDECAR_SOCKET` 줄을 지운다(값은 출력하지 않는다). `sudo sed -i.before-s4 '/^TOMVERSE_AMUX_WSL_SESSIONS=/d;/^TOMVERSE_AMUX_V22_SIDECAR_SOCKET=/d' /etc/tomverse-bridge/bridge.env`. 실행 중인 worker별 bridge는 이 둘을 읽지 않으므로 다시 시작하지 않아도 된다.
+3. S4 release의 SHA로 watchdog(`bridge-monitoring.md` 1.2절)과 자동 재시작(5.1절)을 다시 설치한다.
+4. S4 release에서 빌드한 `tomverse-wsl-bridge`로 `/usr/local/libexec/tomverse-wsl-bridge`를 바꾸고(S2 1번과 같은 방식, 이전 파일은 백업) worker별 bridge를 하나씩 다시 시작한다. `/opt/tomverse-amux-v22/tomverse-wsl-bridge`는 FIRST Task API bridge가 쓰므로 그대로 둔다.
+
+되돌리기: 백업한 unit 파일과 `bridge.env.before-s4`를 제자리로 옮기고 `daemon-reload`한 뒤, 이전 release와 바이너리 백업으로 되돌린다.
+
 ## 활성화
 
-버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 `run_from_env`로 들어간다. 그 함수는 `bridge_tick_sourced`를 호출하고, 실행 attempt의 전달 본문은 Tomverse의 delivery pull로 받는다. `bridge_tick`은 고정 본문을 받는 테스트용 진입점이다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
+버전 14가 코드 래치를 켰다. `tomverse-wsl-bridge`는 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`이고 `TOMVERSE_AMUX_WSL_LOCAL_URL`이 loopback일 때만 실행 루프로 들어간다(정책 버전 55 S4부터 `--worker <이름>`으로 시작한 `run_worker_from_env`). 그 루프는 `bridge_tick_sourced`를 호출하고, 실행 attempt의 전달 본문은 Tomverse의 delivery pull로 받는다. `bridge_tick`은 고정 본문을 받는 테스트용 진입점이다. 세션이 없으면 `start_for_dispatch`가 실패하고 프로세스를 만들지 않는다. 환경 변수가 없으면 바이너리와 `scripts/amux-wsl-bridge.mjs`는 소켓을 열지 않고 끝난다.
 
 이 버전은 두 환경 변수를 설정하지 않는다. `TOMVERSE_AMUX_EXECUTE`를 켜지 않는다.
 

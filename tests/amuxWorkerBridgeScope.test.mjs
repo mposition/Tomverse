@@ -1,9 +1,9 @@
 // Orchestration policy version 55, section 1 (stage S1): the bridge scope --
 // which workers a bridge started with `--worker` may serve, and of which
-// kind. It ships latched off and sits beside the R2d session list.
+// kind. S3 turned it on, and S4 removed the R2d session list it sat beside.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -61,6 +61,7 @@ test("the route only reads, checks the bearer before anything, and answers off w
   const scope = read("lib/amux/workerBridgeScope.ts");
   assert.match(scope, /if \(!open\) return \{ listed: false, reason: "bridge_scope_off" \};/);
   assert.match(scope, /AMUX_DB_BOUNDARIES\.workerBridgeScopeRead/);
-  // The R2d session list is left alone: installed bridges accept only its keys.
-  assert.match(read("lib/amux/workerSessionList.ts"), /\| \{ listed: true; workers: string\[\] \}/);
+  // Version 55 S4: the R2d session list went with the bridges that read it.
+  assert.equal(existsSync(new URL("../lib/amux/workerSessionList.ts", import.meta.url)), false);
+  assert.equal(existsSync(new URL("../app/api/internal/amux/workers/session-list/route.ts", import.meta.url)), false);
 });
