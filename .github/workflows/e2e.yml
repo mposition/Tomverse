@@ -105,10 +105,7 @@ jobs:
     # See docs/qa/canonical-visual-baseline.md. Sharding does not weaken this:
     # every shard runs the same pinned image, so a golden is compared on the
     # canonical environment no matter which shard happens to own it.
-    # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
-    # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
-    # requests always stay on GitHub. Unset or anything else: GitHub, as before.
-    runs-on: ${{ vars.CI_RUNNER_OVERFLOW == 'on' && github.event.pull_request.head.repo.fork != true && 'ubicloud-standard-4-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     # One shard's share of the suite, plus its own build. The single-job
     # version needed 75 minutes and was still growing into it.
