@@ -3741,17 +3741,22 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     const textarea = page.getByTestId("chat-textarea");
     const chatDraft = "An unsent draft that belongs only to Tomverse Chat.";
     const reviewDraft = "A separate unsent draft that belongs only to Tomverse Review.";
+    const switchProduct = async (product: "chat" | "review") => {
+      const control = page.getByTestId(`chat-product-${product}`);
+      await expect(control).toBeEnabled();
+      await control.click();
+    };
 
     await textarea.fill(chatDraft);
-    await page.getByTestId("chat-product-review").click();
+    await switchProduct("review");
     await expect(page).toHaveURL(/\/review\?lang=en$/);
     await expect(textarea).toHaveValue("");
     await textarea.fill(reviewDraft);
 
-    await page.getByTestId("chat-product-chat").click();
+    await switchProduct("chat");
     await expect(page).toHaveURL(/\/chat\?lang=en$/);
     await expect(textarea).toHaveValue(chatDraft);
-    await page.getByTestId("chat-product-review").click();
+    await switchProduct("review");
     await expect(page).toHaveURL(/\/review\?lang=en$/);
     await expect(textarea).toHaveValue(reviewDraft);
     expect(await requests(page)).toHaveLength(0);

@@ -207,6 +207,9 @@ const interpolateCopy = (
   );
 
 type ImageGenerationWorkspaceProps = {
+  layout?: "studio" | "classic";
+  modelSelectionLocked?: boolean;
+  onResolveModels?: (prompt: string) => Promise<{ modelIds: string[]; preset: ImagePreset } | null>;
   /** Null while this is a client-side draft: no server row exists yet. */
   conversationId: string | null;
   /**
@@ -268,6 +271,9 @@ type ImageGenerationWorkspaceProps = {
 };
 
 export function ImageGenerationWorkspace({
+  layout = "classic",
+  modelSelectionLocked = false,
+  onResolveModels,
   conversationId,
   onConversationCreated,
   flagEnabled,
@@ -298,7 +304,7 @@ export function ImageGenerationWorkspace({
       enabled.has(modelId)
     );
     if (seeded.length === 0) {
-      return { modelIds: [DEFAULT_IMAGE_MODEL_ID], excludedModelIds: [] };
+      return { modelIds: modelSelectionLocked ? [] : [DEFAULT_IMAGE_MODEL_ID], excludedModelIds: [] };
     }
     return limitImageModelSelection({ modelIds: seeded, maxModels });
   });
@@ -331,6 +337,7 @@ export function ImageGenerationWorkspace({
   } | null>(null);
   const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const preparedPromptRef = useRef<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [downloadingIds, setDownloadingIds] = useState<string[]>([]);
   // Kept apart from submitError: a download that failed says nothing about the
@@ -663,6 +670,7 @@ export function ImageGenerationWorkspace({
         aria-describedby={limitReached ? MODEL_LIMIT_NOTICE_ID : undefined}
         data-testid={`image-model-${model.id}`}
         data-limit-reached={limitReached ? "true" : undefined}
+        disabled={modelSelectionLocked}
         onClick={() => toggleModel(model.id)}
         className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
           selected
@@ -712,6 +720,20 @@ export function ImageGenerationWorkspace({
     setDownloadError(null);
     const requestPrompt = prompt.trim();
     try {
+      if (modelSelectionLocked && onResolveModels && preparedPromptRef.current !== requestPrompt) {
+        const routed = await onResolveModels(requestPrompt);
+        if (!routed || routed.modelIds.length === 0) {
+          setSubmitError(t("chat.imageGenerationErrorGeneric"));
+          return;
+        }
+        preparedPromptRef.current = requestPrompt;
+        if (routed.preset !== preset || routed.modelIds.join("\0") !== selectedModelIds.join("\0")) {
+          setSelectedModelIds(routed.modelIds);
+          setPreset(routed.preset);
+          // Requote the newly selected model before the existing paid send.
+          return;
+        }
+      }
       const response = await fetch("/api/images/generations", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -792,6 +814,7 @@ export function ImageGenerationWorkspace({
         });
       }
       setPrompt("");
+      preparedPromptRef.current = null;
       notifyUserUsageChanged();
     } catch {
       setSubmitError(t("chat.imageGenerationErrorGeneric"));
@@ -1029,11 +1052,6 @@ export function ImageGenerationWorkspace({
                 ? t("chat.imageGenerationModerationBlocked")
                 : t("chat.imageGenerationFailed")}
             </p>
-            {generation.refunded && (
-              <p className="mt-1 text-xs opacity-80">
-                {t("chat.imageGenerationRefunded")}
-              </p>
-            )}
             {generation.targetId && (
               <button
                 type="button"
@@ -1231,7 +1249,7 @@ export function ImageGenerationWorkspace({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div data-image-layout={layout} className="flex min-h-0 flex-1 flex-col">
       <header className="flex shrink-0 items-center gap-2.5 border-b border-zinc-200 bg-white px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-950">
         <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent-image-500/10 text-accent-image-500">
           <ImageIcon className="h-4 w-4" aria-hidden="true" />
@@ -1326,7 +1344,7 @@ export function ImageGenerationWorkspace({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-zinc-200 bg-white px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div data-testid="image-workspace-composer" className="shrink-0 border-t border-zinc-200 bg-white px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-3 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-2.5">
           {(submitError || downloadError || gateNotice) && (
             <p
@@ -1364,7 +1382,7 @@ export function ImageGenerationWorkspace({
             aria-label={t("chat.imageGenerationModelLabel")}
             className="flex w-full flex-wrap items-center gap-1.5"
           >
-            {inlineModels.map((model) => modelChip(model))}
+            {inlineModels.filter(model => !modelSelectionLocked || selectedModelIds.includes(model.id)).map((model) => modelChip(model))}
             {compactPicker && pickerModels.length > 0 && (
               <button
                 type="button"
@@ -1432,7 +1450,7 @@ export function ImageGenerationWorkspace({
             forbids any control overlapping the textarea's row, and a panel
             that opens over it would do exactly that.
           */}
-          {compactPicker && pickerOpen && pickerModels.length > 0 && (
+          {!modelSelectionLocked && compactPicker && pickerOpen && pickerModels.length > 0 && (
             <div
               id="image-model-picker-panel"
               data-testid="image-model-picker-panel"

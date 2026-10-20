@@ -67,10 +67,7 @@ export const chatImageModelCandidates = (
         return [{ id: model.id, name: model.name, latency: model.latencyClass, credits }];
     });
 
-export const CHAT_IMAGE_INTENT_SYSTEM = [
-    "You route messages sent to a chat assistant that cannot draw.",
-    "A separate image generator exists. Decide whether this message asks for a new image to be created and, if it does, which image model and preset should make it.",
-    "",
+export const CHAT_IMAGE_ROUTING_CRITERIA = [
     "image=true when the user wants a picture made: draw, paint, generate, render or illustrate a photo, illustration, artwork, logo, poster, wallpaper, character, scene or similar visual, in any language.",
     "image=false for everything else, including:",
     "- questions about images or about how image generation works;",
@@ -85,6 +82,13 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
     "- standard: the ordinary request, one clear subject or scene;",
     "- final: detailed or photorealistic work, several subjects, legible text inside the image, posters or other final deliverables, or the user asks for the best quality.",
     "Give simple requests a cheaper or faster model and complex ones a stronger, pricier model. Use only a preset the chosen model lists.",
+].join("\n");
+
+export const CHAT_IMAGE_INTENT_SYSTEM = [
+    "You route messages sent to a chat assistant that cannot draw.",
+    "A separate image generator exists. Decide whether this message asks for a new image to be created and, if it does, which image model and preset should make it.",
+    "",
+    CHAT_IMAGE_ROUTING_CRITERIA,
     "When image=false, fill modelId and preset with any listed value; they are ignored.",
 ].join("\n");
 

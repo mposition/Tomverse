@@ -57,6 +57,7 @@ import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
+import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
@@ -201,8 +202,10 @@ export async function ReviewWorkspaceShell({
   // readiness fails outright if those vars are ever set there
   // (lib/securityEnvironment.ts e2eBypassDisabled).
   const fixtureMode = isE2EFixtureMode();
+  let reviewEasyFixtureOffered = false;
   if (fixtureMode) {
     const jar = await cookies();
+    reviewEasyFixtureOffered = jar.get("__tomverse_e2e_review_easy")?.value === "1";
     if (!imageGenerationEnabled) {
       imageGenerationEnabled =
         jar.get("__tomverse_e2e_image_generation")?.value === "1";
@@ -330,6 +333,7 @@ export async function ReviewWorkspaceShell({
         <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
       ) : null}
       <ChatPageClient
+        reviewEasyAvailable={reviewEasyEnabled() || reviewEasyFixtureOffered}
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
