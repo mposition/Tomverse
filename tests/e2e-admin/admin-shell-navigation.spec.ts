@@ -44,6 +44,11 @@ const NAVIGATION = [
   { group: "Operations", label: "Marketing", href: "/admin/marketing" },
   {
     group: "Operations",
+    label: "Product research",
+    href: "/admin/product-research",
+  },
+  {
+    group: "Operations",
     label: "Engineering agent",
     href: "/admin/engineering-agent",
   },

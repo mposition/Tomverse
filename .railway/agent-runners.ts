@@ -117,6 +117,17 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
 ] as const;
 
 /**
+ * The Scout walker's variables (docs/policy/product-research-agent.md §13):
+ * its switch, the app's scout route and the shared secret. It holds no model
+ * key and no database credential.
+ */
+const PRODUCT_RESEARCH_SCOUT_VARIABLES = [
+  "PRODUCT_RESEARCH_SCOUT_ENABLED",
+  "PRODUCT_RESEARCH_SCOUT_INGEST_URL",
+  "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
+] as const;
+
+/**
  * The billing-finance-ops stage W trigger's variables
  * (docs/policy/billing-finance-ops.md §3 item 6): the run secret, the dead-man
  * signal URL and the deployment setting, and nothing else. The same list
@@ -356,6 +367,32 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: PRODUCT_RESEARCH_PROBE_VARIABLES,
       staging: PRODUCT_RESEARCH_PROBE_VARIABLES,
+    },
+  },
+  {
+    // The Scout walker (docs/policy/product-research-agent.md §10, §13): once a
+    // day at 18:00 UTC (04:00 Brisbane) it captures the public pages, generated
+    // files and catalogue and posts each to its environment's app, which asks
+    // the model. Built from its own Dockerfile because Chromium and its system
+    // libraries come with Playwright's image. Not staging, which builds from
+    // `test` (docs/ops/dev-test-lanes.md).
+    key: "product_research_scout",
+    service: "Product Research Scout",
+    startCommand: "npm run agent:product-research-scout",
+    cronSchedule: "0 18 * * *",
+    dockerfile: {
+      path: "docker/product-research-scout.Dockerfile",
+      watchPatterns: [
+        "docker/product-research-scout.Dockerfile",
+        "scripts/agents/product-research-scout.mjs",
+        "scripts/report-product-consistency-core.mjs",
+        "lib/productResearchScout*",
+        "lib/generatedArtifact*",
+        "package-lock.json",
+      ],
+    },
+    environments: {
+      production: PRODUCT_RESEARCH_SCOUT_VARIABLES,
     },
   },
   ...ENGINEERING_AGENT_SERVICES,
