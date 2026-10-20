@@ -35,6 +35,7 @@ import {
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import {
   CONVERSATION_KIND_NOT_SUPPORTED,
+  isChatConversationKind,
   isImageConversationKind,
 } from "@/lib/conversationKindGuard";
 import { lockCreditAccount } from "@/lib/creditDebt";
@@ -187,6 +188,14 @@ export type ImageGenerationRequestInput = {
    * Omitted (older clients) skips the check.
    */
   expectedPricingVersions?: Record<string, string>;
+  /**
+   * Server-only: the image answers a turn inside this chat conversation
+   * (Tomverse Chat, lib/chatImageTurn.ts), so `conversationId` may name a
+   * chat conversation as well as an image one. Never read from a request
+   * body -- POST /api/images/generations does not pass it, and keeps
+   * refusing a chat conversation.
+   */
+  chatTurnHost?: boolean;
 };
 
 export type ImageGenerationTargetResult = {
@@ -548,7 +557,10 @@ export const requestImageGeneration = async (
             "Conversation not found."
           );
         }
-        if (!isImageConversationKind(conversation.kind)) {
+        if (
+          !isImageConversationKind(conversation.kind) &&
+          !(input.chatTurnHost === true && isChatConversationKind(conversation.kind))
+        ) {
           throw new ChatAccessError(
             409,
             CONVERSATION_KIND_NOT_SUPPORTED,

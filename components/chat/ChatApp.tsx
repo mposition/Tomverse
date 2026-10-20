@@ -52,6 +52,8 @@ import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { readChatImageTurnRef } from "@/lib/chatImageTurnCore";
+import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import {
   answeringModelId,
   CHAT_WELCOME_MESSAGE_ID as WELCOME_MESSAGE_ID,
@@ -267,6 +269,11 @@ type ChatAppProps = {
     contextLayout?: "single" | "comparison";
     /** Opaque reference to a server-held Refiner decision; carries no prompt. */
     promptRefinerDecision?: PromptRefinerProductChatDecision;
+    /**
+     * Answer this turn with an image instead of text (lib/chatImageTurn.ts):
+     * the image-intent triage's models and preset.
+     */
+    imageTurn?: ChatImageTurnRequest;
   } | null;
   /**
    * Asks the shell for a context the whole run can share, after this panel's
@@ -1451,7 +1458,9 @@ function ChatAppComponent({
     onDispatchStarted?: () => void,
     /** One server-held Refiner decision. Never reused by a recovery send. */
     promptRefinerDecision?: PromptRefinerProductChatDecision,
-    guestAutoCapability?: string
+    guestAutoCapability?: string,
+    /** Answer with an image instead of text; see the branch below. */
+    imageTurn?: ChatImageTurnRequest
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1705,6 +1714,64 @@ function ChatAppComponent({
     // Keep that uncertainty scoped to this exact logical turn; ordinary Guest
     // manual and pre-POST verification failures retain their existing retry.
     let guestAutoRequestStarted = false;
+
+    /*
+      An image turn: the saved question is answered by an image in this same
+      conversation (POST .../image-turn), not by /api/chat. The route reserves
+      and starts the image and writes the answer; the card on the answer polls
+      the group for the pictures. Account Chat only -- a Guest has no saved
+      question to answer.
+    */
+    if (imageTurn && !isGuestMode) {
+      try {
+        onDispatchStarted?.();
+        const res = await fetch(
+          `/api/conversations/${encodeURIComponent(targetChatId)}/image-turn`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sourceUserMessageId,
+              assistantMessageId,
+              modelId,
+              imageModelIds: imageTurn.modelIds,
+              preset: imageTurn.preset,
+            }),
+            signal: controller.signal,
+          }
+        );
+        const data: unknown = await res.json().catch(() => null);
+        const body = (data ?? {}) as { content?: unknown; imageTurn?: unknown; error?: unknown; code?: unknown };
+        const imageTurnRef = res.ok ? readChatImageTurnRef(body.imageTurn) : null;
+        if (!imageTurnRef) {
+          const errorCode =
+            typeof body.code === "string" ? body.code : "CHAT_IMAGE_TURN_FAILED";
+          setAssistantMessage(
+            assistantMessageId,
+            typeof body.error === "string" ? body.error : t("chat.responseError"),
+            "error",
+            { errorCode }
+          );
+          return;
+        }
+        const content = typeof body.content === "string" ? body.content : "";
+        setAssistantMessage(assistantMessageId, content, "normal", undefined, {
+          imageTurn: imageTurnRef,
+        });
+        onResponseComplete?.(analyticsPromptId, modelId, content);
+      } catch {
+        setAssistantMessage(
+          assistantMessageId,
+          controller.signal.aborted ? t("chat.responseCancelled") : t("chat.responseError"),
+          controller.signal.aborted ? "cancelled" : "error",
+          controller.signal.aborted ? undefined : { errorCode: "CHAT_IMAGE_TURN_FAILED" }
+        );
+      } finally {
+        liveness.stop();
+        endChatRuntimeRun(runKey, controller);
+      }
+      return;
+    }
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
@@ -2828,7 +2895,8 @@ function ChatAppComponent({
             );
           },
           promptPayload.promptRefinerDecision,
-          promptPayload.guestAutoCapability
+          promptPayload.guestAutoCapability,
+          promptPayload.imageTurn
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

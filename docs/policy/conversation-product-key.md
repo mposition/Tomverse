@@ -13,7 +13,8 @@ Router 실행 기록은 `docs/policy/tomverse-chat-routing.md`가 소유합니�
 
 `kind`는 UI 구분이 아닙니다. `lib/conversationKindGuard.ts`가 그 경계를 소유하고,
 chat·비교·공유·export·제목 생성 endpoint가 이미지 대화를 거부하며 반대 방향도
-거부합니다. 그 파일의 주석이 대가를 적어두었습니다 — *"UI non-exposure is not a
+거부합니다(예외 하나: Tomverse Chat의 대화 안 이미지 답변이 서버 내부에서 채팅
+대화에 이미지 그룹을 붙입니다. `docs/policy/image-generation.md` §13 ⑥). 그 파일의 주석이 대가를 적어두었습니다 — *"UI non-exposure is not a
 security boundary — every server endpoint checks."*
 
 계획서 §5: **"Do not reuse Conversation.kind as product identity."**

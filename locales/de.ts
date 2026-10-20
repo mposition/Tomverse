@@ -291,6 +291,8 @@ export const de = {
         firstResponseTimeout: "Die Antwort wurde nach ungewöhnlich langer Zeit noch immer vorbereitet, daher wurde die Verbindung geschlossen. Bitte versuchen Sie es in Kürze erneut.",
         streamIdleTimeout: "Die Übertragung der Antwort stockte länger als erwartet, daher wurde die Verbindung geschlossen. Diese Antwort ist unvollständig.",
         responseGenerating: "Antwort wird generiert.",
+        imageTurnGenerating: "Bild wird erstellt…",
+        imageTurnFailed: "Das Bild konnte nicht erstellt werden. Bitte versuchen Sie es erneut.",
         responseComplete: "Antwort abgeschlossen.",
         responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
         responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",

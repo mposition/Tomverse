@@ -1,0 +1,145 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLanguage } from "@/components/LanguageProvider";
+import { discardResponseBody } from "@/lib/discardResponseBody";
+import { isImageAssetUrlExpired } from "@/lib/imageAssetPayload";
+import { getImageModel } from "@/lib/imageModelRegistry";
+
+/**
+ * The picture a Tomverse Chat image turn answered with (lib/chatImageTurn.ts),
+ * shown in the conversation where a text answer would be.
+ *
+ * Polls the group (GET /api/images/groups/[groupId]) until every model's
+ * current attempt has finished, then stops. Signed URLs are never kept past
+ * a reload (docs/policy/image-generation.md §9.2): an expired one is fetched
+ * again the moment the picture is asked for.
+ */
+
+const POLL_INTERVAL_MS = 4_000;
+
+type GroupAsset = { role: string; url: string; urlExpiresAt?: string };
+type GroupGeneration = {
+  generationId: string;
+  status: string;
+  modelId: string | null;
+  prompt: string;
+  assets: GroupAsset[];
+};
+type GroupTarget = { targetId: string; modelId: string; currentGenerationId: string | null };
+type GroupView = {
+  status: string;
+  targets: GroupTarget[];
+  generations: GroupGeneration[];
+};
+
+const isGroupView = (value: unknown): value is GroupView =>
+  typeof value === "object" &&
+  value !== null &&
+  Array.isArray((value as GroupView).targets) &&
+  Array.isArray((value as GroupView).generations);
+
+export function ChatImageTurnCard({ groupId }: { groupId: string }) {
+  const { t } = useLanguage();
+  const [group, setGroup] = useState<GroupView | null>(null);
+  const [readFailed, setReadFailed] = useState(false);
+  const inFlightRef = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      const response = await fetch(`/api/images/groups/${encodeURIComponent(groupId)}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        await discardResponseBody(response);
+        // A refused poll is "no update" unless there is nothing to show yet.
+        setReadFailed(true);
+        return;
+      }
+      const data: unknown = await response.json();
+      if (isGroupView(data)) {
+        setGroup(data);
+        setReadFailed(false);
+      }
+    } catch {
+      setReadFailed(true);
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [groupId]);
+
+  useEffect(() => {
+    queueMicrotask(() => void refresh());
+  }, [refresh]);
+
+  const inProgress = !group || group.status === "in_progress";
+  useEffect(() => {
+    if (!inProgress) return;
+    const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [inProgress, refresh]);
+
+  const current = (group?.targets ?? []).map((target) => ({
+    target,
+    generation:
+      group?.generations.find(
+        (generation) => generation.generationId === target.currentGenerationId
+      ) ?? null,
+  }));
+
+  if (!group) {
+    return (
+      <p data-testid="chat-image-turn-pending" className="text-sm text-zinc-500 dark:text-zinc-400">
+        {readFailed ? t("chat.imageTurnFailed") : t("chat.imageTurnGenerating")}
+      </p>
+    );
+  }
+
+  return (
+    <div
+      data-testid="chat-image-turn"
+      className={`grid gap-3 ${current.length > 1 ? "sm:grid-cols-2" : ""}`}
+    >
+      {current.map(({ target, generation }) => {
+        const modelName = getImageModel(target.modelId)?.name ?? target.modelId;
+        const asset =
+          generation?.assets.find((entry) => entry.role === "original") ??
+          generation?.assets[0];
+        return (
+          <figure key={target.targetId} className="min-w-0">
+            {generation?.status === "succeeded" && asset ? (
+              // eslint-disable-next-line @next/next/no-img-element -- signed, short-lived R2 URL; the optimizer would cache a link that expires
+              <img
+                src={asset.url}
+                alt={generation.prompt}
+                className="w-full max-w-md rounded-xl border border-zinc-200 dark:border-zinc-700"
+                onError={() => {
+                  if (isImageAssetUrlExpired(asset.urlExpiresAt ?? null, Date.now())) void refresh();
+                }}
+              />
+            ) : generation?.status === "failed" ? (
+              <p
+                data-testid="chat-image-turn-failed"
+                className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+              >
+                {t("chat.imageTurnFailed")}
+              </p>
+            ) : (
+              <div
+                data-testid="chat-image-turn-generating"
+                className="flex aspect-square w-full max-w-md items-center justify-center rounded-xl border border-dashed border-zinc-300 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+              >
+                {t("chat.imageTurnGenerating")}
+              </div>
+            )}
+            <figcaption className="mt-1 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+              {modelName}
+            </figcaption>
+          </figure>
+        );
+      })}
+    </div>
+  );
+}
