@@ -5,6 +5,7 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("./sentry.server.config");
     await reportCostConfigurationIssues();
+    await startCiAdmissionSweepQuietly();
   }
   if (process.env.NEXT_RUNTIME === "edge") {
     await import("./sentry.edge.config");
@@ -84,3 +85,15 @@ export const onRequestError: typeof Sentry.captureRequestError = (
   }
   Sentry.captureRequestError(error, request, context);
 };
+
+// CI admission's periodic sweep (lib/ciAdmissionRound.ts): resumes recorded
+// but undone work after a restart. Each tick is a no-op while the mode is off;
+// a failure to start is reported, never fatal to boot.
+async function startCiAdmissionSweepQuietly() {
+  try {
+    const { startCiAdmissionSweep } = await import("@/lib/ciAdmissionRound");
+    startCiAdmissionSweep();
+  } catch (error) {
+    console.error("CI admission sweep not started:", error instanceof Error ? error.message : "unknown");
+  }
+}

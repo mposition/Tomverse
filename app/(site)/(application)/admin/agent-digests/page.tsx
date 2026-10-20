@@ -4,9 +4,11 @@ import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
 import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { CiAdmissionSection } from "@/components/admin/CiAdmissionSection";
 import { QaReleaseTrainSection } from "@/components/admin/QaReleaseTrainSection";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
+import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
 import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
 import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
 import { readQaReleaseTrainReports } from "@/lib/qaReleaseTrainStore";
@@ -46,6 +48,7 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
       ) : (
         <>
           <AdminAgentDigestsPanel key={tab.id} initial={await readAgentDigestConsole(canWrite)} />
+          <CiAdmissionSection initial={await readCiAdmissionAdminView()} canWrite={canWrite} />
           <QaReleaseMainCandidatesSection data={await readQaReleaseMainCandidates()} />
           <QaReleaseTrainSection
             trains={(await readQaReleaseTrainReports()).map(({ slot, at, report }) => ({

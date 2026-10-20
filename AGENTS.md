@@ -70,6 +70,10 @@ Report implemented and tested behavior separately from documentation, review, me
   `npm run merge-train`이 합니다. 사람이 끈 스위치를 자동화가 다시 켜지 않습니다.
 - PR은 draft로 시작하고 끝나면 ready로 바꿉니다(draft는 CI가 돌지 않습니다). develop은 dev
   환경에, Test는 `test` 브랜치에 배포됩니다(`docs/ops/dev-test-lanes.md`).
+- **CI 입장 관리**: head 커밋의 `CI admission` 상태가 pending인 PR은 대기열에서 차례를 기다리는 중입니다.
+  다시 ready로 바꾸거나 CI를 re-run하지 않습니다 — 칸이 나면 자동으로 ready가 되고, 순서는 운영자가
+  Admin › Agent digests에서 정합니다. push 직후 같은 순간에 ready로 바꾸지 말고, push의 CI 실행이 생긴 뒤에
+  바꿉니다(두 이벤트가 겹치면 draft 시점의 skipped 실행만 남을 수 있습니다).
 
 # 독립 검토와 모델 역할
 

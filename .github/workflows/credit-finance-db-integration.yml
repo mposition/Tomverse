@@ -100,7 +100,10 @@ jobs:
   credit-finance-db:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
     name: Credit and finance PostgreSQL scenarios (${{ matrix.group }})
-    runs-on: ubuntu-latest
+    # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
+    # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
+    # requests always stay on GitHub. Unset or anything else: GitHub, as before.
+    runs-on: ${{ vars.CI_RUNNER_OVERFLOW == 'on' && github.event.pull_request.head.repo.fork != true && 'ubicloud-standard-4-ubuntu-2404' || 'ubuntu-latest' }}
 
     # Nine lanes, because one job stopped fitting -- and then seven stopped
     # fitting evenly.
@@ -210,7 +213,10 @@ jobs:
   ops-observer-pg16:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
     name: Ops observer transaction bounds (PostgreSQL 16)
-    runs-on: ubuntu-latest
+    # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
+    # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
+    # requests always stay on GitHub. Unset or anything else: GitHub, as before.
+    runs-on: ${{ vars.CI_RUNNER_OVERFLOW == 'on' && github.event.pull_request.head.repo.fork != true && 'ubicloud-standard-4-ubuntu-2404' || 'ubuntu-latest' }}
     timeout-minutes: 10
 
     services:
