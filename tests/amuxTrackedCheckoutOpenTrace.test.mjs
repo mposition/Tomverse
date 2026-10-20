@@ -241,3 +241,73 @@ test("an unpaired resume or a split open that never resumed is never certified",
   assert.deepEqual(run(`11 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY <unfinished ...>\n` +
     `11 <... openat resumed>) = ?\n`), { kind: "unverified", reason: "undecoded_open" });
 });
+
+test("detail mode names refused opens by relative path and flags, and changes no verdict", () => {
+  const detailed = () => createAmuxTrackedCheckoutOpenTraceObserver({
+    directory, files, diagnostic: true, detail: true });
+  const text =
+    `123 openat(AT_FDCWD<${directory}>, "CLAUDE.md", O_RDONLY|O_CLOEXEC) = 3<${directory}/CLAUDE.md>\n` +
+    line("src/a.ts") +
+    `123 openat(AT_FDCWD<${directory}>, ".git/config", O_RDONLY|O_NOFOLLOW) = 4<${directory}/.git/config>\n` +
+    `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_WRONLY|O_TRUNC) = 5<${directory}/src/a.ts>\n` +
+    `123 openat(AT_FDCWD<${directory}>, "/home/runner/.claude/x", O_RDONLY) = 6</home/runner/.claude/x>\n` +
+    `123 openat(AT_FDCWD<${directory}>, "../x", O_RDONLY|O_CLOEXEC) = 3</tmp/x>\n` +
+    `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 4<${directory}/src/a.ts<block 8:1>>\n`;
+  const quiet = make();
+  quiet.observeChunk(Buffer.from(text));
+  assert.deepEqual(quiet.finish({ traceComplete: true }), { kind: "unverified" });
+  const plain = createAmuxTrackedCheckoutOpenTraceObserver({
+    directory, files, diagnostic: true });
+  plain.observeChunk(Buffer.from(text));
+  const verdict = plain.finish({ traceComplete: true });
+  assert.deepEqual(verdict, { kind: "unverified", reason: "unlisted_open" });
+  const loud = detailed();
+  const bytes = Buffer.from(text, "utf8");
+  for (let offset = 0; offset < bytes.length; offset += 7)
+    loud.observeChunk(bytes.subarray(offset, offset + 7));
+  const result = loud.finish({ traceComplete: true });
+  assert.equal(result.kind, verdict.kind);
+  assert.equal(result.reason, verdict.reason, "the first refusal stays the reason");
+  assert.deepEqual(result.detail, [
+    { code: "unlisted_open", path: "CLAUDE.md", flags: ["O_RDONLY", "O_CLOEXEC"] },
+    { code: "unlisted_open", path: ".git/config", flags: ["O_RDONLY", "O_NOFOLLOW"] },
+    { code: "non_read_open", path: "src/a.ts", flags: ["O_WRONLY", "O_TRUNC"] },
+    { code: "escaped_checkout", path: "<outside>", flags: ["O_RDONLY", "O_CLOEXEC"] },
+    { code: "device_open", path: "src/a.ts", flags: ["O_RDONLY"] },
+  ]);
+  assert.equal(JSON.stringify(result).includes("/home/runner"), false,
+    "an absolute path outside the checkout is never recorded");
+  assert.equal(JSON.stringify(result).includes(directory), false);
+});
+
+test("detail mode caps entries, cuts long paths and records nothing without a refusal", () => {
+  const clean = createAmuxTrackedCheckoutOpenTraceObserver({
+    directory, files, diagnostic: true, detail: true });
+  clean.observeChunk(Buffer.from(line("src/a.ts")));
+  assert.deepEqual(clean.finish({ traceComplete: true }),
+    { kind: "complete", files: ["src/a.ts"] });
+  const many = createAmuxTrackedCheckoutOpenTraceObserver({
+    directory, files, diagnostic: true, detail: true });
+  let text = "";
+  for (let index = 0; index < 40; index += 1)
+    text += `123 openat(AT_FDCWD<${directory}>, "x${index}", O_RDONLY) = 3<${directory}/x${index}>\n`;
+  const longName = `${"d/".repeat(150)}é.ts`;
+  text += `123 openat(AT_FDCWD<${directory}>, "${longName}", O_RDONLY) = 3<${directory}/${longName}>\n`;
+  many.observeChunk(Buffer.from(text));
+  const result = many.finish({ traceComplete: true });
+  assert.equal(result.detail.length, 20);
+  assert.equal(result.detail[19].path, "x19");
+  const long = createAmuxTrackedCheckoutOpenTraceObserver({
+    directory, files, diagnostic: true, detail: true });
+  long.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "${longName}", O_RDONLY) = 3<${directory}/${longName}>\n`));
+  const [entry] = long.finish({ traceComplete: true }).detail;
+  assert.equal(entry.path.length, 200);
+  assert.match(entry.path, /^[\x20-\x7e]+$/);
+  // Detail is opt-in: the diagnostic result alone never carries it.
+  const off = createAmuxTrackedCheckoutOpenTraceObserver({
+    directory, files, diagnostic: true });
+  off.observeChunk(Buffer.from(text));
+  assert.deepEqual(off.finish({ traceComplete: true }),
+    { kind: "unverified", reason: "unlisted_open" });
+});

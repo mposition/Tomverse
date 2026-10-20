@@ -321,3 +321,40 @@ test("the diagnostic parser never throws and enforces its line limit on every li
   exact.observeChunk(Buffer.from(line + "\n"));
   assert.equal(exact.finish().terminalReason, "max_turns");
 });
+
+test("detail rides on the failed diagnostic observation only, and only when asked for", async () => {
+  const secret = "sk-ant-oat01-SyntheticSecret_0123456789";
+  const unknownEvent = { type: "system", subtype: "tengu.private_event",
+    message: `prompt ${secret}` };
+  const openTrace = { kind: "unverified", reason: "unlisted_open",
+    detail: [{ code: "unlisted_open", path: "CLAUDE.md", flags: ["O_RDONLY"] }] };
+  const run = async (options, sequence = [init, unknownEvent, ...events.slice(1)],
+    ...override) => {
+    const trace = override.length > 0 ? override[0] : openTrace;
+    const process = child();
+    const observed = observeAmuxTrackedCheckoutChild(process,
+      { ...input, ...options });
+    process.stderr.end(`stderr ${secret}`);
+    await send(process, sequence);
+    return observed.finish({ code: 0, signal: null }, trace);
+  };
+  const detailed = await run({ diagnostic: true, detail: true });
+  assert.equal(detailed.failureStage, "parser_rejected");
+  assert.deepEqual(detailed.diagnosticDetail, {
+    events: [{ code: "system_event_other", keys: ["type", "subtype", "message"],
+      subtype: "tengu.private_event" }],
+    trace: openTrace.detail });
+  assert.equal(detailed.parserReason.code, "system_event_other");
+  assert.equal(JSON.stringify(detailed).includes(secret), false);
+  // Detail changes nothing else about the observation.
+  const plain = await run({ diagnostic: true });
+  const withoutDetail = { ...detailed };
+  delete withoutDetail.diagnosticDetail;
+  assert.deepEqual(plain, withoutDetail);
+  assert.equal("diagnosticDetail" in plain, false);
+  // Detail needs diagnostic mode, and a verified run never carries it.
+  assert.equal("diagnosticDetail" in await run({ detail: true }), false);
+  const good = await run({ diagnostic: true, detail: true }, events, undefined);
+  assert.equal(good.kind, "verified_success");
+  assert.equal("diagnosticDetail" in good, false);
+});
