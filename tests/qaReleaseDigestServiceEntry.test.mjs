@@ -15,6 +15,7 @@ test("the entry imports node builtins and the QA-release cores only", () => {
   assert.deepEqual(imports.sort(), [
     "../lib/qaReleaseCiCollectCore.ts",
     "../lib/qaReleaseDigestServiceCore.ts",
+    "../lib/qaReleaseLatencyCollectCore.ts",
     "node:child_process",
   ]);
 });

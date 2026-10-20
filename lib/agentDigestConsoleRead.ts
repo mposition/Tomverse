@@ -1,7 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { qaReleaseDigestSchema } from "@/lib/qaReleaseDigestSchemaCore";
+import { qaReleaseDigestSchema, type QaReleaseDigest } from "@/lib/qaReleaseDigestSchemaCore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
 import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
@@ -36,6 +36,13 @@ export type AgentDigestConsoleRow = {
     failedChecks: number;
     failedCiJobs: number;
     notChecked: string[];
+    /**
+     * Develop merge to dev timing (lib/qaReleaseLatencyCollectCore.ts):
+     * "absent" for a digest stored before it was measured.
+     */
+    latency:
+      | { status: "absent" | "unavailable" }
+      | ({ status: "ok"; merges: number } & Extract<NonNullable<QaReleaseDigest["latency"]>, { status: "ok" }>["summary"]);
   } | null;
 };
 
@@ -163,6 +170,11 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
         failedChecks: digest.checks.filter((check) => check.result === "fail").length,
         failedCiJobs: digest.ci.filter((job) => job.label !== null).length,
         notChecked: [...digest.notChecked],
+        latency: !digest.latency
+          ? { status: "absent" }
+          : digest.latency.status === "ok"
+            ? { status: "ok", merges: digest.latency.merges.length, ...digest.latency.summary }
+            : { status: "unavailable" },
       },
     };
   });
