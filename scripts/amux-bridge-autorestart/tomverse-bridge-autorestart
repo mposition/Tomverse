@@ -41,16 +41,16 @@
 # account restart the bridge units and nothing else; it reads their journal
 # through the systemd-journal group the unit grants it.
 #
-# The bridge units are tomverse-bridge.service, every tomverse-amux-v22-bridge@
-# instance and, from orchestration policy version 55, every
-# tomverse-amux-bridge@ instance (one bridge per worker, started with
-# --worker). The older names stay for the transition. A --worker bridge's own
-# lines about its scope end in "not halted", so they are harmless below.
+# The bridge units are the loaded tomverse-amux-bridge@ instances (orchestration
+# policy version 55: one bridge per worker, started with --worker). The older
+# tomverse-bridge.service and tomverse-amux-v22-bridge@ units were removed from
+# the host in stage S4 and are neither looked for nor restarted. A --worker
+# bridge's own lines about its scope end in "not halted", so they are harmless
+# below.
 set -euo pipefail
 
-main_unit=tomverse-bridge.service
-unit_patterns=('tomverse-amux-v22-bridge@*.service' 'tomverse-amux-bridge@*.service')
-unit_name='^(tomverse-amux-v22-bridge|tomverse-amux-bridge)@[A-Za-z0-9_.-]+\.service$'
+unit_patterns=('tomverse-amux-bridge@*.service')
+unit_name='^tomverse-amux-bridge@[A-Za-z0-9_.-]+\.service$'
 amux_health=https://127.0.0.1:8824/health
 app_health=https://tomverse.app/api/health
 
@@ -125,13 +125,16 @@ answers() {
   curl --silent --show-error --fail --max-time 5 --output /dev/null "$@" 2>/dev/null
 }
 
-units=("$main_unit")
+# A listing that cannot be read leaves the bridge units unknown: this run
+# restarts nothing and only logs it.
+units=()
 if listing=$(systemctl list-units --all --plain --no-legend --type=service "${unit_patterns[@]}" 2>&1); then
   while read -r name _; do
     [[ "$name" =~ $unit_name ]] && units+=("$name")
   done <<<"$listing"
 else
-  log "the bridge instance list is unreadable (systemctl: ${listing%%$'\n'*}); checking $main_unit only"
+  log "the bridge instance list is unreadable (systemctl: ${listing%%$'\n'*}); no restart this run"
+  exit 0
 fi
 
 halted=()

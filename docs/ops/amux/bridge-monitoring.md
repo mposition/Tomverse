@@ -18,8 +18,9 @@ bridge는 결과를 모르면 종료 코드 3으로 halt하고, systemd는 이�
 | 2026-10-09 03:37 | 2026-10-10 00:59 | 21시간 | 없음 |
 | 2026-10-12 03:44 | 2026-10-12 04:26~04:32 | 42~48분 | 없음(production 배포 중 앱이 응답하지 않음. bridge 5개가 함께 halt) |
 
-bridge는 하나가 아니다. `tomverse-bridge.service`가 codex 세션을 맡고, v22 worker마다
-`tomverse-amux-v22-bridge@<worker>`와 `tomverse-amux-v22-sidecar@<worker>`가 한 쌍씩 돈다(2026-10-12 기준 claude 4쌍).
+bridge는 하나가 아니다. worker마다 `tomverse-amux-bridge@<worker>`가 하나씩 돌고(정책 버전 55, 2026-10-20 기준 codex 셋과
+claude 셋), v22 worker는 그 옆에 `tomverse-amux-v22-sidecar@<worker>`가 하나씩 돈다. 2026-10-12에는
+`tomverse-bridge.service`(codex 세션)와 `tomverse-amux-v22-bridge@<worker>`였고, S4에서 지웠다.
 
 ## 신호 셋
 
@@ -35,17 +36,15 @@ bridge는 하나가 아니다. `tomverse-bridge.service`가 codex 세션을 맡�
 
 파일: `scripts/amux-bridge-watchdog/`. 테스트: `tests/amuxBridgeWatchdog.test.mjs`.
 
-한 번 실행할 때 bridge unit 전부의 상태를 읽고 본문 없는 요청 하나를 보낸다. 대상은 `tomverse-bridge.service`(enable되어 있는 동안 이름으로)와,
-로드된 `tomverse-amux-v22-bridge@*`·`tomverse-amux-v22-sidecar@*`·`tomverse-amux-bridge@*` 인스턴스 전부다.
-`tomverse-amux-bridge@*`는 정책 버전 55의 worker별 bridge(`wsl-execution-bridge.md`의 `--worker` 절)이고, 전환
-기간에는 옛 이름과 함께 본다. 시작하지 않은 인스턴스는 보통 로드되지 않으므로 템플릿을 설치만 한 동안에는 대상이
+한 번 실행할 때 bridge unit 전부의 상태를 읽고 본문 없는 요청 하나를 보낸다. 대상은 로드된
+`tomverse-amux-bridge@*`(정책 버전 55의 worker별 bridge, `wsl-execution-bridge.md`의 `--worker` 절)와
+`tomverse-amux-v22-sidecar@*` 인스턴스 전부다. 옛 이름(`tomverse-bridge.service`, `tomverse-amux-v22-bridge@*`)은
+S4부터 보지 않는다. 시작하지 않은 인스턴스는 보통 로드되지 않으므로 템플릿을 설치만 한 동안에는 대상이
 아니다. 다만 `systemctl status tomverse-amux-bridge@<이름>`처럼 이름으로 조회하면 그 인스턴스가 잠시 로드되어
 `inactive`로 읽히고 down 신호가 나갈 수 있다.
 
-- `tomverse-bridge.service`는 `disabled`·`not-found`·`masked`일 때 이름으로 보지 않는다. v55 S3에서 codex 세션을
-  worker별 unit으로 옮기며 이 unit을 `disable`하고, S4에서 파일을 지운다. 그 밖의 답(읽지 못함 포함)이면 계속 본다.
-- 로드된 bridge unit이 **하나도 없으면** down이다. worker별 unit은 `[Install]`이 없어 재부팅 뒤 저절로 켜지지
-  않으므로, 그 상태를 빈 "전부 정상"으로 보내지 않는다.
+- 로드된 `tomverse-amux-bridge@*`가 **하나도 없으면** down이다. sidecar만 있어도 down이다. 재부팅 뒤 아무 bridge도
+  켜지지 않은 상태를 빈 "전부 정상"으로 보내지 않는다. 목록을 읽지 못한 실행은 이 판정 없이 신호를 보내지 않는다.
 
 | 상태 | 보내는 것 | monitor |
 |---|---|---|
@@ -106,8 +105,8 @@ journalctl -u tomverse-bridge-watchdog.service -n 5 --no-pager -o short-iso
 ```
 
 **탐지 실험(선택, 운영자):** 실제 경로로 알림을 받아 보려면, bridge가 처리 중인 attempt가 없을 때
-`sudo systemctl stop tomverse-bridge.service`로 멈추고 5분 안에 Slack과 이메일이 오는지 본다. 그 뒤
-`sudo systemctl start tomverse-bridge.service`. 20분 넘게 멈춰 두면 앱 쪽 신호(2절)도 알린다.
+`sudo systemctl stop tomverse-amux-bridge@<worker>.service`로 하나를 멈추고 5분 안에 Slack과 이메일이 오는지 본다. 그 뒤
+`sudo systemctl start tomverse-amux-bridge@<worker>.service`. 20분 넘게 멈춰 두면 앱 쪽 신호(2절)도 알린다.
 
 ### 1.3 의도적으로 멈출 때
 
@@ -165,7 +164,7 @@ engineering Agent가 30분마다 실행할 때 앱이 직접 90초짜리 runtime
   그러면 받는 메일함의 정크·필터를 확인한다.
 - 알림 내용: 코드 `AMUX_EXECUTION_BRIDGE_LOST`, 멈춘 worker 이름과 각 lease가 끝난 시각, 살아 있는 runtime 수,
   `/admin/office`, 각 bridge unit의 halt 줄을 먼저 보라는 문장. 이름은 어느 unit을 볼지 알려 주므로 싣는다
-  (`claude-*`는 `tomverse-amux-v22-bridge@<이름>`, `codex-*`는 `tomverse-bridge.service`). 평범한 식별자가 아닌
+  (정책 버전 55 S3 뒤로는 모두 `tomverse-amux-bridge@<이름>`). 평범한 식별자가 아닌
   이름은 `unnamed-runtime`으로 바꾼다. 카드와 멈춘 이유는 싣지 않는다.
 - 폐기한 worker의 lease는 48시간 동안 `lost`로 남아 3시간마다 다시 알리고, 그동안 복구 알림도 나가지 않는다.
   worker를 폐기할 때는 이 점을 감안한다.
@@ -236,8 +235,8 @@ amux wsl bridge halted: no new assignments; cause=<원인>; restart only after c
 
 동작:
 
-- systemd timer가 2분마다 실행한다. 대상은 `tomverse-bridge.service`, `tomverse-amux-v22-bridge@*`,
-  `tomverse-amux-bridge@*`(정책 버전 55의 worker별 bridge) 중 `failed`이고 종료 코드가 3인 unit뿐이다. 종료 코드 1(시작 실패)은 unit의 `Restart=on-failure`가 이미 다시
+- systemd timer가 2분마다 실행한다. 대상은 `tomverse-amux-bridge@*`(정책 버전 55의 worker별 bridge) 중 `failed`이고
+  종료 코드가 3인 unit뿐이다. 목록을 읽지 못하면 아무것도 재시작하지 않는다. 종료 코드 1(시작 실패)은 unit의 `Restart=on-failure`가 이미 다시
   시작하고, 손으로 멈춘 unit은 `inactive`라 건드리지 않는다. sidecar도 건드리지 않는다.
 - 원인은 그 실패한 실행(invocation)의 journal만 읽는다. 이전 실행의 줄이 섞이지 않는다.
 - halt 줄은 처음 원인만 적고, halt 뒤에 결과를 모르게 된 작업(예: 열린 채 남은 읽기 전용 API attempt)은 다른 줄을

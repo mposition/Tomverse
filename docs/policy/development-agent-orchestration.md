@@ -3253,7 +3253,7 @@ r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승
 
 ### 3. 호스트 (운영자, root 한 번)
 
-1. 새 템플릿 `tomverse-amux-bridge@.service`를 설치한다. `enable`하지 않는다(버전 31 4항).
+1. 새 템플릿 `tomverse-amux-bridge@.service`를 설치한다. 설치만으로는 아무 인스턴스도 enable하지 않는다. 운영자 결정(2026-10-20)으로 템플릿에 `[Install]`이 있어, 3.1에 따라 옮긴 인스턴스는 enable해 재부팅 뒤에도 켜지게 한다.
 2. 자동 재시작과 watchdog의 대상에 `tomverse-amux-bridge@*`를 넣고, polkit 규칙도 그 이름으로 고친다.
 3. 활성화(5항) 때 옛 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*` 인스턴스에서
    `tomverse-amux-bridge@<worker>` 인스턴스로 옮긴다. 옮기는 조건과 순서는 3.1이다.
@@ -3310,6 +3310,10 @@ r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승
 - R2는 이 버전의 S4, R2e의 코드 삭제와 그 배포, IaC 항목 삭제, Railway에서 두 카탈로그 환경 변수의 삭제가 모두
   끝나면 끝난다. 2026-10-19 운영자 지침(AGENTS.md의 Frontier 절)에 따라 활성화와 종료는 새 정책 버전 없이
   운영자의 대화 승인과 PR의 한 줄로 남긴다. production 병합·배포는 계속 운영자 승인이다.
+- 2026-10-20 진행: R2e는 production에 반영됐고 두 카탈로그 환경 변수와 IaC 항목을 지웠다. S3 전환은 같은 날
+  끝났고(codex 셋 12:06, claude 셋 14:47 AEST 등록, 여섯 인스턴스 모두 enable), 운영자는 3일 관측을 두지 않기로
+  정했다. S4는 이어서 진행한다. FIRST Task 복구용 API bridge는 호스트의 옛 바이너리(`/opt/tomverse-amux-v22/`)로
+  계속 동작하므로 S4의 "남지 않음" 조건에서 그 unit의 실행 줄은 예외다.
 
 ### 6. 이 버전으로 끝나지 않는 것
 

@@ -6,8 +6,9 @@
  * worker or by kind, and the old v22 unit's sidecar coupling cannot be in it.
  * It keeps the account, environment file, restart rules and hardening of the
  * two units it replaces (tomverse-bridge.service and
- * tomverse-amux-v22-bridge@.service on the host), and it has no [Install]
- * (version 31, section 4).
+ * tomverse-amux-v22-bridge@.service on the host). Like them, an enabled
+ * instance starts at boot (owner decision 2026-10-20, replacing version 31
+ * section 4's "no [Install]").
  */
 
 import test from "node:test";
@@ -47,10 +48,11 @@ test("a halt waits for a person; a start failure is retried", () => {
   assert.deepEqual(values("RestartPreventExitStatus"), ["3"]);
 });
 
-test("the template has no [Install]: nothing starts at boot", () => {
-  assert.doesNotMatch(unit, /^\[Install\]/m);
-  assert.doesNotMatch(unit, /^WantedBy=/m);
+test("an enabled instance starts at boot, like the units it replaces", () => {
+  assert.match(unit, /^\[Install\]$/m);
+  assert.deepEqual(values("WantedBy"), ["multi-user.target"]);
   assert.doesNotMatch(unit, /^Alias=/m);
+  assert.doesNotMatch(unit, /^DefaultInstance=/m);
 });
 
 test("nothing in the template differs by worker or by kind", () => {
@@ -127,7 +129,7 @@ test("every directive in the template is one this test names", () => {
     "NoNewPrivileges", "CapabilityBoundingSet", "AmbientCapabilities", "ProtectHome",
     "ProtectSystem", "PrivateTmp", "PrivateDevices", "ProtectKernelTunables",
     "ProtectKernelModules", "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality",
-    "RestrictAddressFamilies", "TemporaryFileSystem", "UMask",
+    "RestrictAddressFamilies", "TemporaryFileSystem", "UMask", "WantedBy",
   ]);
   assert.deepEqual(directives.filter((name) => !known.has(name)), []);
   assert.equal(new Set(directives).size, directives.length, "no directive is repeated");

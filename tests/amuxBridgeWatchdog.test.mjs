@@ -34,28 +34,38 @@ const URL_VALUE = "https://hc-ping.example/0f3c5a8e-1b2d-4c6e-9f00-123456789abc"
  * One watchdog run. Every path handed to bash is relative to the temporary
  * working directory, so no Windows path has to survive the trip.
  */
-const MAIN = "tomverse-bridge.service";
-const V22 = [
-  "tomverse-amux-v22-bridge@claude-impl.service",
-  "tomverse-amux-v22-sidecar@claude-impl.service",
-  "tomverse-amux-v22-bridge@claude-review.service",
+// Orchestration policy version 55: one bridge per worker, from one template,
+// plus one v22 sidecar per v22 worker. Stage S4 removed tomverse-bridge.service
+// and tomverse-amux-v22-bridge@ from the host; they are kept below only to
+// prove the watchdog no longer watches them.
+const BRIDGE = "tomverse-amux-bridge@codex-impl.service";
+const WORKER = [
+  BRIDGE,
+  "tomverse-amux-bridge@claude-impl.service",
+  "tomverse-amux-bridge@claude-review.service",
 ];
+const SIDECAR = [
+  "tomverse-amux-v22-sidecar@claude-impl.service",
+  "tomverse-amux-v22-sidecar@claude-review.service",
+];
+const REMOVED_MAIN = "tomverse-bridge.service";
+const REMOVED_V22 = "tomverse-amux-v22-bridge@claude-impl.service";
 
 /**
- * `systemctl` as the host answers it: `list-units` prints every fake unit but
- * the main one (which, being enabled, the script checks by name anyway), and
- * `is-active` answers from FAKE_STATES, `inactive` for a unit it does not know,
- * and `is-enabled` answers FAKE_MAIN_FILE_STATE (`enabled` unless a test says).
- * FAKE_STATES is space-separated, so a space inside an answer travels as `~`.
+ * `systemctl` as the host answers it: `list-units` prints every fake unit (the
+ * script itself keeps only the names it watches) or fails when FAKE_LIST_FAIL
+ * is 1, and `is-active` answers from FAKE_STATES, `inactive` for a unit it does
+ * not know. FAKE_STATES is space-separated, so a space inside an answer
+ * travels as `~`. Any other verb is a failure, which is what the script would
+ * see if it still asked about a unit by name.
  */
 const SYSTEMCTL_STUB = [
   "systemctl() {",
   '  if [ "$1" = list-units ]; then',
   '    if [ "$FAKE_LIST_FAIL" = 1 ]; then printf "Failed to list units: Access denied\\n" >&2; return 1; fi',
-  '    for pair in $FAKE_STATES; do unit=${pair%%=*}; [ "$unit" = tomverse-bridge.service ] || printf "%s loaded active running fake\\n" "$unit"; done',
+  '    for pair in $FAKE_STATES; do unit=${pair%%=*}; printf "%s loaded active running fake\\n" "$unit"; done',
   "    return 0",
   "  fi",
-  '  if [ "$1" = is-enabled ]; then printf "%s\\n" "$FAKE_MAIN_FILE_STATE"; [ "$FAKE_MAIN_FILE_STATE" = enabled ]; return; fi',
   '  if [ "$1" = is-active ]; then',
   '    for pair in $FAKE_STATES; do if [ "${pair%%=*}" = "$2" ]; then answer=${pair#*=}; printf "%s\\n" "${answer//\\~/ }"; [ "$answer" = active ]; return; fi; done',
   '    printf "inactive\\n"; return 3',
@@ -66,12 +76,11 @@ const SYSTEMCTL_STUB = [
 
 const run = ({
   state,
-  states = { [MAIN]: state },
+  states = { [BRIDGE]: state },
   url = URL_VALUE,
   credential = true,
   curlStatus = 0,
   listFails = false,
-  mainFileState = "enabled",
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-watchdog-"));
   try {
@@ -96,7 +105,6 @@ const run = ({
           .join(" "),
         FAKE_CURL_STATUS: String(curlStatus),
         FAKE_LIST_FAIL: listFails ? "1" : "0",
-        FAKE_MAIN_FILE_STATE: mainFileState,
       },
     });
     const lines = (name) =>
@@ -142,24 +150,32 @@ for (const state of ["activating", "deactivating", "reloading", ""]) {
   });
 }
 
-// The v22 workers each run their own bridge and sidecar. On 2026-10-12 a
-// production deploy halted all five bridges; watching the main unit alone
-// would have missed four.
-const allActive = Object.fromEntries([MAIN, ...V22].map((unit) => [unit, "active"]));
+// Every worker runs its own bridge, and every v22 worker a sidecar beside it.
+// On 2026-10-12 a production deploy halted all five bridges; watching one unit
+// alone would have missed four.
+const allActive = Object.fromEntries([...WORKER, ...SIDECAR].map((unit) => [unit, "active"]));
 
 test("every bridge and sidecar active sends the success signal", { skip: noBash }, () => {
   const result = run({ states: allActive });
   assert.equal(result.status, 0, result.output);
   assert.deepEqual(result.requests, [URL_VALUE]);
-  assert.match(
-    result.output,
-    /4 unit\(s\), 0 down, 0 in transition or unreadable; sent up/
+  assert.match(result.output, /5 unit\(s\), 0 down, 0 in transition or unreadable; sent up/);
+});
+
+test("only the per-worker bridges and the v22 sidecars are listed", () => {
+  assert.deepEqual(
+    script.match(/^unit_patterns=\(([\s\S]*?)\)$/m)?.[1].match(/'[^']+'/g),
+    ["'tomverse-amux-bridge@*.service'", "'tomverse-amux-v22-sidecar@*.service'"]
   );
+  // Stage S4: nothing is looked up by a fixed name any more, and the older
+  // units are named nowhere outside comments.
+  assert.doesNotMatch(script, /main_unit|main_file_state|is-enabled/);
+  assert.doesNotMatch(script, /^[^#\n]*tomverse-bridge\.service/m);
+  assert.doesNotMatch(script, /^[^#\n]*tomverse-amux-v22-bridge/m);
 });
 
 // Review round 1 of the follow-up: a listing that failed used to read as "no
-// v22 units", so an active main unit alone sent up while four bridges went
-// unchecked.
+// units", so an active unit alone sent up while the others went unchecked.
 test("an unreadable unit list never sends up", { skip: noBash }, () => {
   const result = run({ states: allActive, listFails: true });
   assert.equal(result.status, 0, result.output);
@@ -168,65 +184,11 @@ test("an unreadable unit list never sends up", { skip: noBash }, () => {
     result.output,
     /the instance unit list is unreadable \(systemctl: Failed to list units: Access denied\)/
   );
+  // An unreadable listing is not "no bridge loaded" either.
+  assert.doesNotMatch(result.output, /no bridge unit is loaded/);
 });
 
-// Orchestration policy version 55: one bridge per worker from one template,
-// tomverse-amux-bridge@<worker>. The older names stay for the transition, so
-// both sets are watched together.
-const WORKER = [
-  "tomverse-amux-bridge@codex-impl.service",
-  "tomverse-amux-bridge@claude-impl.service",
-];
-const allActiveWithWorkers = Object.fromEntries(
-  [MAIN, ...V22, ...WORKER].map((unit) => [unit, "active"])
-);
-
-test("the per-worker bridges are watched beside the older units", { skip: noBash }, () => {
-  const result = run({ states: allActiveWithWorkers });
-  assert.equal(result.status, 0, result.output);
-  assert.deepEqual(result.requests, [URL_VALUE]);
-  assert.match(result.output, /6 unit\(s\), 0 down, 0 in transition or unreadable; sent up/);
-  assert.deepEqual(
-    script.match(/^unit_patterns=\(([\s\S]*?)\)$/m)?.[1].match(/'[^']+'/g),
-    [
-      "'tomverse-amux-v22-bridge@*.service'",
-      "'tomverse-amux-v22-sidecar@*.service'",
-      "'tomverse-amux-bridge@*.service'",
-    ]
-  );
-});
-
-for (const unit of WORKER) {
-  test(`a failed ${unit} sends the failure signal`, { skip: noBash }, () => {
-    const result = run({ states: { ...allActiveWithWorkers, [unit]: "failed" } });
-    assert.equal(result.status, 0, result.output);
-    assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
-    assert.ok(result.output.includes(`${unit} is failed`), result.output);
-  });
-}
-
-test("a per-worker bridge in transition with nothing down sends nothing", { skip: noBash }, () => {
-  const result = run({ states: { ...allActiveWithWorkers, [WORKER[0]]: "activating" } });
-  assert.deepEqual(result.requests, []);
-});
-
-test("a listed name outside the per-worker bridge's grammar is ignored", { skip: noBash }, () => {
-  for (const unit of [
-    "tomverse-amux-bridge@x;y.service",
-    "tomverse-amux-bridgex@codex-impl.service",
-    "tomverse-amux-sidecar@codex-impl.service",
-  ]) {
-    const result = run({ states: { ...allActiveWithWorkers, [unit]: "failed" } });
-    assert.deepEqual(result.requests, [URL_VALUE], unit);
-  }
-});
-
-test("an unreadable unit list still reports a confirmed stop", { skip: noBash }, () => {
-  const result = run({ states: { [MAIN]: "failed" }, listFails: true });
-  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
-});
-
-for (const unit of V22) {
+for (const unit of [...WORKER, ...SIDECAR]) {
   test(`a failed ${unit} sends the failure signal`, { skip: noBash }, () => {
     const result = run({ states: { ...allActive, [unit]: "failed" } });
     assert.equal(result.status, 0, result.output);
@@ -238,56 +200,79 @@ for (const unit of V22) {
 
 test("a failure outranks a unit still in transition", { skip: noBash }, () => {
   const result = run({
-    states: { ...allActive, [V22[0]]: "activating", [V22[1]]: "failed" },
+    states: { ...allActive, [WORKER[0]]: "activating", [SIDECAR[0]]: "failed" },
   });
   assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
 });
 
-test("a v22 unit in transition with nothing down sends nothing", { skip: noBash }, () => {
-  const result = run({ states: { ...allActive, [V22[2]]: "activating" } });
-  assert.equal(result.status, 0, result.output);
-  assert.deepEqual(result.requests, []);
-});
-
-test("a main unit that is not loaded at all is down", { skip: noBash }, () => {
-  const withoutMain = Object.fromEntries(
-    Object.entries(allActive).filter(([unit]) => unit !== MAIN)
-  );
-  const result = run({ states: withoutMain });
-  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
-});
-
-// Stage S3 (orchestration policy version 55): the codex sessions move to
-// per-worker units and tomverse-bridge.service is disabled, then removed (S4).
-const perWorker = {
-  "tomverse-amux-bridge@codex-impl.service": "active",
-  "tomverse-amux-bridge@claude-review.service": "active",
-};
-
-test("a disabled or removed main unit is no longer watched by name", { skip: noBash }, () => {
-  for (const mainFileState of ["disabled", "not-found", "masked"]) {
-    const result = run({ states: perWorker, mainFileState });
-    assert.deepEqual(result.requests, [URL_VALUE], mainFileState);
-    assert.match(result.output, /2 unit\(s\), 0 down/, mainFileState);
+test("a unit in transition with nothing down sends nothing", { skip: noBash }, () => {
+  for (const unit of [WORKER[0], SIDECAR[1]]) {
+    const result = run({ states: { ...allActive, [unit]: "activating" } });
+    assert.equal(result.status, 0, result.output);
+    assert.deepEqual(result.requests, [], unit);
   }
 });
 
-test("a main unit whose file state is unreadable stays watched", { skip: noBash }, () => {
-  const result = run({ states: perWorker, mainFileState: "" });
-  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+test("a listed name outside the watched grammar is ignored", { skip: noBash }, () => {
+  for (const unit of [
+    "tomverse-amux-bridge@x;y.service",
+    "tomverse-amux-bridgex@codex-impl.service",
+    "tomverse-amux-sidecar@codex-impl.service",
+    "tomverse-amux-v22-sidecar@x;y.service",
+    "tomverse-amux-bridge@.service",
+  ]) {
+    const result = run({ states: { ...allActive, [unit]: "failed" } });
+    assert.deepEqual(result.requests, [URL_VALUE], unit);
+  }
 });
 
-test("no bridge unit loaded at all is down, never an empty success", { skip: noBash }, () => {
-  const result = run({ states: {}, mainFileState: "disabled" });
+// Stage S4 removed tomverse-bridge.service and tomverse-amux-v22-bridge@ from
+// the host. A stale unit file or listing that still names one is not a bridge
+// this watchdog answers for, so it can neither raise nor hold back an alert.
+test("the removed units are not watched, even when listed", { skip: noBash }, () => {
+  for (const unit of [REMOVED_MAIN, REMOVED_V22]) {
+    for (const state of ["failed", "inactive", "activating"]) {
+      const result = run({ states: { ...allActive, [unit]: state } });
+      assert.deepEqual(result.requests, [URL_VALUE], `${unit} ${state}`);
+      assert.match(result.output, /5 unit\(s\), 0 down/, `${unit} ${state}`);
+    }
+  }
+});
+
+test("the removed units do not stand in for a bridge", { skip: noBash }, () => {
+  const result = run({
+    states: { [REMOVED_MAIN]: "active", [REMOVED_V22]: "active", [SIDECAR[0]]: "active" },
+  });
   assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
   assert.match(result.output, /no bridge unit is loaded/);
 });
 
-test("a listed unit outside the bridge names is ignored", { skip: noBash }, () => {
-  const result = run({
-    states: { ...allActive, "tomverse-amux-v22-bridge@x;y.service": "failed" },
-  });
-  assert.deepEqual(result.requests, [URL_VALUE]);
+test("no unit loaded at all is down, never an empty success", { skip: noBash }, () => {
+  const result = run({ states: {} });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+  assert.match(result.output, /no bridge unit is loaded/);
+});
+
+// Sidecars alone dispatch nothing: with no tomverse-amux-bridge@ instance
+// loaded the host is down however healthy the sidecars are.
+test("sidecars without any bridge are down, never an empty success", { skip: noBash }, () => {
+  const result = run({ states: Object.fromEntries(SIDECAR.map((unit) => [unit, "active"])) });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+  assert.match(result.output, /no bridge unit is loaded/);
+  assert.match(result.output, /2 unit\(s\), 1 down/);
+});
+
+test("sidecars in transition without any bridge are still down", { skip: noBash }, () => {
+  const result = run({ states: { [SIDECAR[0]]: "activating" } });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+});
+
+test("one loaded bridge is enough to send up, with or without sidecars", { skip: noBash }, () => {
+  for (const states of [{ [BRIDGE]: "active" }, { [BRIDGE]: "active", [SIDECAR[0]]: "active" }]) {
+    const result = run({ states });
+    assert.deepEqual(result.requests, [URL_VALUE]);
+    assert.doesNotMatch(result.output, /no bridge unit is loaded/);
+  }
 });
 
 test("no credential sends nothing and fails the run", { skip: noBash }, () => {
@@ -376,12 +361,12 @@ test("the install script reads the URL without echoing it", () => {
 // nothing more, and the install reported success because a run that sends
 // nothing exits 0.
 test("an unreadable unit names systemctl's error, and sends nothing", { skip: noBash }, () => {
-  const result = run({ states: { ...allActive, [MAIN]: "Failed~to~connect~to~bus:~Permission~denied" } });
+  const result = run({ states: { ...allActive, [BRIDGE]: "Failed~to~connect~to~bus:~Permission~denied" } });
   assert.equal(result.status, 0, result.output);
   assert.deepEqual(result.requests, []);
   assert.match(
     result.output,
-    /tomverse-bridge\.service is unreadable \(systemctl: Failed to connect to bus: Permission denied\)/
+    /tomverse-amux-bridge@codex-impl\.service is unreadable \(systemctl: Failed to connect to bus: Permission denied\)/
   );
 });
 
@@ -498,7 +483,7 @@ test("an install whose run sent a signal turns the timer on", { skip: noBash }, 
 for (const [name, options] of [
   [
     "a run that sent nothing",
-    { runLog: "tomverse-bridge-watchdog: tomverse-bridge.service is unreadable (systemctl: x); no signal this run" },
+    { runLog: "tomverse-bridge-watchdog: tomverse-amux-bridge@codex-impl.service is unreadable (systemctl: x); no signal this run" },
   ],
   // Review round 1 of the follow-up: a failed start ended the script under
   // set -e before the timer was switched off.
@@ -525,7 +510,7 @@ for (const [name, options] of [
 test("an earlier run's signal never counts for this install's run", { skip: noBash }, () => {
   const result = runInstall({
     priorLog: "tomverse-bridge-watchdog: 9 unit(s), 0 down, 0 in transition or unreadable; sent up",
-    runLog: "tomverse-bridge-watchdog: tomverse-bridge.service is unreadable (systemctl: x); no signal this run",
+    runLog: "tomverse-bridge-watchdog: tomverse-amux-bridge@codex-impl.service is unreadable (systemctl: x); no signal this run",
   });
   assert.notEqual(result.status, 0, result.output);
   assert.equal(result.actions.at(-1), TIMER_OFF, result.actions.join("\n"));
