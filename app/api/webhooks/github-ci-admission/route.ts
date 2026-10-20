@@ -61,7 +61,8 @@ export async function POST(request: Request) {
 
   try {
     const outcome = await runCiAdmissionRound(decision.arrival);
-    return NextResponse.json(outcome);
+    // A failed GitHub read is retried by the service; the delivery shows it failed.
+    return NextResponse.json(outcome, { status: outcome.outcome === "read_failed" ? 503 : 200 });
   } catch (error) {
     console.error("CI admission round failed:", error instanceof Error ? error.message : "unknown");
     return NextResponse.json({ error: "Round failed." }, { status: 500 });

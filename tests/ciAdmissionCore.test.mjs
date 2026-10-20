@@ -344,3 +344,12 @@ test("a run on a shared commit counts, and is cancelled, only for the pull reque
   assert.deepEqual(kinds(evaluation), [], "#2 runs nothing, so nothing of #2 is cancelled");
   assert.equal(evaluation.used, 1);
 });
+
+test("a draft running a re-run of an older head is cancelled too", () => {
+  const evaluation = run({
+    state: state(),
+    openPulls: [pull(4, { draft: true, headSha: "9".repeat(40) })],
+    running: new Set([ciRunKey(4, "8".repeat(40))]),
+  });
+  assert.deepEqual(kinds(evaluation), ["cancel:4"]);
+});

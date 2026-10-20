@@ -300,12 +300,14 @@ export function evaluateCiAdmission(input: {
     }
   }
 
-  // A draft running CI is a replayed event: stop it. (A pull request held in
+  // A draft running CI is a replayed event -- on any head it ever had, since a
+  // re-run of an older head's run counts too: stop it. (A pull request held in
   // this evaluation has its runs cancelled by the hold itself.)
   const holding = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
+  const runningNumbers = new Set([...input.running].map((key) => Number(key.split("@")[0])));
   for (const pull of input.openPulls) {
     if (!pull.draft || ciAdmissionUnits(pull) === null || holding.has(pull.number)) continue;
-    if (!input.running.has(ciRunKey(pull.number, pull.headSha))) continue;
+    if (!runningNumbers.has(pull.number)) continue;
     actions.push({ kind: "cancel", pull });
     event("cancelled", pull.number, "draft_rerun");
   }

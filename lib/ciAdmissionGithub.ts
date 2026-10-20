@@ -151,11 +151,6 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     if (body.errors !== undefined) throw new Error("github_graphql_errors");
     return record(body.data);
   };
-  const pullRuns = async (pull: CiAdmissionPull) => {
-    const body = record(await get(`${REPO}/actions/runs?head_sha=${pull.headSha}&event=pull_request&per_page=50`));
-    return list(body.workflow_runs).map(record);
-  };
-
   return {
     async openPull(number) {
       const answer = await call("GET", `${REPO}/pulls/${number}`, await installationToken());
@@ -244,11 +239,20 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       return counts;
     },
     async cancelRuns(pull) {
+      // Every queued or running pull_request run of this pull request, on any
+      // head (a re-run of an older head's run included), and no other's -- the
+      // same commit may be the head of another pull request too.
+      const runs: Json[] = [];
+      for (const status of ACTIVE_RUN_STATUSES) {
+        for (let page = 1; page <= 3; page += 1) {
+          const batch = list(record(await get(`${REPO}/actions/runs?status=${status}&event=pull_request&per_page=100&page=${page}`)).workflow_runs).map(record);
+          runs.push(...batch.filter((run) => runPullNumbers(run).includes(pull.number)));
+          if (batch.length < 100) break;
+        }
+      }
       let cancelled = 0;
-      for (const run of await pullRuns(pull)) {
-        if (!ACTIVE_RUN_STATUSES.has(String(run.status)) || typeof run.id !== "number") continue;
-        // The same commit may be the head of another pull request too.
-        if (!runPullNumbers(run).includes(pull.number)) continue;
+      for (const run of runs) {
+        if (typeof run.id !== "number") continue;
         const answer = await call("POST", `${REPO}/actions/runs/${run.id}/cancel`, await installationToken());
         // 409: the run finished meanwhile; nothing left to cancel.
         if (answer.status === 202) cancelled += 1;

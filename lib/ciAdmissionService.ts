@@ -53,6 +53,7 @@ import { prisma } from "@/lib/prisma";
 
 const LOCK = "tomverse-ci-admission";
 const TX_TIMEOUT_MS = 15_000;
+/** Retry after a failed GitHub read or a failed release. */
 const RETRY_AFTER_FAILED_RELEASE_MS = 60_000;
 
 const STATUS = {
@@ -145,6 +146,9 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     openPulls = await github.openPulls();
     running = await github.runningPulls();
   } catch (error) {
+    // The event that brought this round may be the last one for a while: try
+    // again shortly rather than leave a free slot unused.
+    scheduleRecheck(RETRY_AFTER_FAILED_RELEASE_MS);
     return { outcome: "read_failed", failure: code(error) };
   }
 
