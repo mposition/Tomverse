@@ -266,7 +266,7 @@ test("a state change is sent once with the revision the person saw, then the reg
 });
 
 test("the server's own refusal of a turn-on is shown as a refusal and writes nothing", async () => {
-  for (const code of ["activation_requires_trial", "stale_revision", "registry_writes_off", "retired"]) {
+  for (const code of ["role_widening_requires_trial", "stale_revision", "registry_writes_off", "retired"]) {
     const { posted, last } = await changeWith(() => Promise.resolve(json(409, { error: code })), PARTIAL);
     assert.equal(posted.length, 1, code);
     assert.equal(last("notice"), "stopped", code);

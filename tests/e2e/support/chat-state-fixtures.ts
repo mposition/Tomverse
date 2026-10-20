@@ -837,7 +837,7 @@ export async function enterConversation(
     modelStub,
     usagePatch,
   } = options;
-  const authState = await mockAuthenticatedApi(page, { selectedModels });
+  const authState = await mockAuthenticatedApi(page, { selectedModels, language: lang });
   authState.theme = theme;
   // Deterministic, pre-navigation theme source: see setDeterministicTheme's
   // docstring for why this -- not the mocked GET /api/user/settings response

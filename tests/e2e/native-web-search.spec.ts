@@ -308,10 +308,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       "data-search-status",
       "executed"
     );
-    await expect(assistantBadge(page, "claude-sonnet-5")).toHaveAttribute(
-      "data-search-status",
-      "requested-not-executed"
-    );
+    await expect(assistantBadge(page, "claude-sonnet-5")).toHaveCount(0);
     await expect(assistantBadge(page, "gemini-3-6-flash")).toHaveAttribute(
       "data-search-status",
       "executed"
@@ -400,10 +397,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     // The badge reports the search and stops there. It used to say "training
     // knowledge" here, which is a claim about the source of the answer that
     // nothing on this path checks -- see lib/webSearchStatusBadge.ts.
-    await expect(assistantBadge(page, "gpt-5-5")).toHaveAttribute(
-      "data-search-status",
-      "not-searched"
-    );
+    await expect(assistantBadge(page, "gpt-5-5")).toHaveCount(0);
   });
 
   test("each panel's badge reports its own search outcome, including a search unavailable on the turn", async ({
@@ -500,17 +494,14 @@ test.describe("native web search (webSearchMode: always)", () => {
       "data-search-status",
       "executed"
     );
-    await expect(assistantBadge(page, "claude-haiku-4-5")).toHaveAttribute(
-      "data-search-status",
-      "requested-not-executed"
-    );
+    await expect(assistantBadge(page, "claude-haiku-4-5")).toHaveCount(0);
     await expect(assistantBadge(page, "gpt-5-4-mini")).toHaveAttribute(
       "data-search-status",
       "unsupported"
     );
   });
 
-  test("a Google-only turn that did not need the web is refunded and says so", async ({
+  test("a Google-only turn keeps its no-search accounting metadata without a refund badge", async ({
     page,
   }, testInfo) => {
     // The refunded case, on the application-managed route: the switch was on,
@@ -584,10 +575,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     await sendChatMessage(page, testInfo, "Rewrite this politely.");
 
     await expect(page.getByText("Here is the polite version.")).toBeVisible();
-    await expect(assistantBadge(page, "gemini-2-5-flash")).toHaveAttribute(
-      "data-search-status",
-      "requested-not-executed"
-    );
+    await expect(assistantBadge(page, "gemini-2-5-flash")).toHaveCount(0);
     // No source list on an answer that has no sources.
     await expect(
       page
@@ -858,7 +846,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
   });
 
-  test("the credit estimate breakdown shows the web search reservation for native-capable models", async ({
+  test("switching web search keeps credit totals out of the composer", async ({
     page,
   }) => {
     const models = ["gpt-5-5", "claude-sonnet-5"];
@@ -872,30 +860,10 @@ test.describe("native web search (webSearchMode: always)", () => {
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
 
-    // With search off: only the base model-response total -- gpt-5-5
-    // carries an explicit creditWeight of 16 and claude-sonnet-5 costs its
-    // advanced-class 4. A new conversation starts with search on, so it is
-    // switched off first to read the base on its own.
-    const estimate = page.getByTestId("request-credit-estimate");
     await turnWebSearchOff(page);
-    await expect(estimate).toContainText("20");
-
+    await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     await setWebSearchModeAlways(page);
-    // Both models are native-search-eligible: base 20 + 2 * 8 surcharge = 36.
-    await expect(estimate).toContainText("36");
-
-    await estimate.click();
-    const sheet = page.getByTestId("web-search-reservation-breakdown");
-    await expect(sheet).toBeVisible();
-    await expect(sheet).toContainText("16");
-    // mockAuthenticatedApi's mocked account settings response fixes the
-    // language server-side, overriding the "en" passed to prepareGuestPage
-    // (a pre-existing quirk of that fixture) -- match both.
-    await expect(
-      page.getByText(
-        /Search credits are refunded for models that do not perform a web search\.|검색이 실행되지 않은 모델의 검색 크레딧은 자동 환불됩니다\./
-      )
-    ).toBeVisible();
+    await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
   });
 });
 

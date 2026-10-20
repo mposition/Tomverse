@@ -126,6 +126,38 @@ test("Max output is posted only after both exact source receipts", async () => {
   ]);
 });
 
+test("diagnostic detail on an observation never reaches an evidence, manifest or result request", async () => {
+  const sent = [];
+  const tainted = { ...observed, diagnosticDetail: {
+    events: [{ code: "system_event_other", subtype: "tengu.private_event",
+      keys: ["type", "subtype", "leakedKey"] }],
+    trace: [{ code: "unlisted_open", path: "LEAKED_PATH.md", flags: ["O_RDONLY"] }] } };
+  const result = await finalizeAmuxV19MaxSessionResultWithReceipts(
+    input(async (url, options) => {
+      const path = new URL(url).pathname;
+      sent.push(`${url}\n${JSON.stringify(options.headers)}\n${options.body ?? ""}`);
+      if (path.endsWith("/session-analysis-stop")) return Response.json({
+        claimId: identity.claimId, reservationId: identity.reservationId,
+        stop: false });
+      const body = JSON.parse(options.body);
+      if (path.endsWith("/max-checkout-evidence")) return Response.json({
+        evidenceId, ideaId: identity.ideaId, referenceOrdinal: 0 });
+      if (path.endsWith("/max-read-manifest")) return Response.json({
+        manifestId: body.manifestId, ideaId: identity.ideaId,
+        referenceOrdinal: 0, fileCount: 1 });
+      return Response.json({ claimId: identity.claimId,
+        resultAuditId: "clsyntheticresult123",
+        settlementAuditId: "clsyntheticsettlement123",
+        digest: "c".repeat(64), digestKeyId: "synthetic-digest",
+        plan: { state: "plan_refused", reason: "invalid_result" },
+        registration: { state: "not_planned" } });
+    }), tainted);
+  assert.equal(result.kind, "recorded");
+  assert.ok(sent.some((request) => request.includes("session-analysis-result")));
+  for (const request of sent)
+    assert.doesNotMatch(request, /tengu|leakedKey|LEAKED_PATH|diagnosticDetail|unlisted_open/);
+});
+
 test("a verified answer without its claim channel's attestation writes nothing", async () => {
   let calls = 0;
   const fetchImpl = async () => { calls++; throw new Error("network reached"); };

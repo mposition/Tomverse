@@ -111,7 +111,7 @@ test.describe("comparison panel controls", () => {
     async ({ page }) => {
       await openWithPanels(page, 2);
 
-      const toggle = page.locator("button[aria-pressed]").first();
+      const toggle = page.getByTestId("desktop-model-panel").first().locator("button[aria-pressed]");
       await expect(toggle).toHaveAttribute("aria-pressed", "true");
       await expect(toggle).toHaveAccessibleName(/pause/i);
 

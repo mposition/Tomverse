@@ -34,6 +34,8 @@ import {
     type AutoLlmRouterPick,
     type AutoLlmRouterSession,
 } from "@/lib/autoLlmRouterCore";
+import { effectiveRouterTimeoutMs, withoutExcludedModels } from "@/lib/autoRouterTunablesCore";
+import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
 
 export type AutoLlmRouterCallResult = {
     outcome: "picked" | "invalid" | "error";
@@ -265,10 +267,14 @@ export async function pickAutoModelWithLlm(input: {
         (await readAutoLlmRouterModelId()) ?? undefined
     );
     if (!routerModel) return null;
-    const candidates = autoLlmRouterCandidates(
-        input.eligibleModelIds,
-        input.models,
-        input.creditsByModelId
+    // The optimizer's own setting changes, applied under the owner's switch
+    // (lib/autoRouterTunablesCore.ts): a tuned deadline and models left out
+    // for a while after their calls kept failing.
+    const tunables = await readAutoRouterTunables();
+    const candidates = withoutExcludedModels(
+        autoLlmRouterCandidates(input.eligibleModelIds, input.models, input.creditsByModelId),
+        tunables,
+        Date.now()
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
@@ -277,6 +283,7 @@ export async function pickAutoModelWithLlm(input: {
         readActiveRouterGuidance(),
         readAutoLlmRouterRewrite(),
     ]);
+    const timeoutMs = effectiveRouterTimeoutMs(tunables, AUTO_LLM_ROUTER_TIMEOUT_MS);
     // Rewriting pays off on short, context-dependent turns; a long message is
     // routed as it is.
     const rewrite =
@@ -300,6 +307,8 @@ export async function pickAutoModelWithLlm(input: {
         session,
         rewrite,
         rewriteGuidance: rewriteGuidance?.guidance,
+        // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
+        timeoutMs: rewrite ? Math.max(AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS, timeoutMs) : timeoutMs,
     };
     const prices = routerPrices(routerModel);
     const request = routerRequest(call);

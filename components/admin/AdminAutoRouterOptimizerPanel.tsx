@@ -8,9 +8,19 @@ import {
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AutoRouterTunables, type TunableAction, type TunableSettingsState } from "@/components/admin/AdminAutoRouterTunables";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
+import {
+  OpenRecommendationsInbox,
+  RecommendationControls,
+  optimizerCycleAnchor,
+} from "@/components/admin/AdminAutoRouterRecommendations";
+import {
+  actionableRecommendations,
+  type RecommendationStatus,
+} from "@/lib/autoRouterRecommendationsCore";
 
 type Summary = {
   evaluated: number;
@@ -65,6 +75,10 @@ type OptimizerState = {
     dayCapMicroUsd: number;
     monthCapMicroUsd: number;
   };
+  /** The optimizer's own setting changes; absent from an older server. */
+  settings?: TunableSettingsState;
+  /** The coding agent on the Ubuntu runner; absent from an older server. */
+  recAgent?: { enabled: boolean };
 };
 
 type Action =
@@ -72,7 +86,10 @@ type Action =
   | { action: "run" }
   | { action: "set_automation"; daily: boolean; autoPromote: boolean }
   | { action: "promote"; cycleId: string }
-  | { action: "roll_back" };
+  | { action: "roll_back" }
+  | TunableAction
+  | { action: "set_recommendation"; cycleId: string; index: number; status: RecommendationStatus }
+  | { action: "set_rec_agent"; enabled: boolean };
 
 const OFF = "";
 const ENDPOINT = "/api/admin/auto-llm-router/optimizer";
@@ -150,6 +167,9 @@ export function AdminAutoRouterOptimizerPanel() {
       setBusy(false);
     }
   };
+
+  const setRecommendation = (cycleId: string, index: number, status: RecommendationStatus) =>
+    void send({ action: "set_recommendation", cycleId, index, status });
 
   const reason = (code: string | null) =>
     code ? (m.reasons as Record<string, string>)[code] ?? code : null;
@@ -266,6 +286,8 @@ export function AdminAutoRouterOptimizerPanel() {
       ) : null}
       {failure ? <AdminApiFailureNotice failure={failure} onRetry={() => void load()} /> : null}
 
+      <AutoRouterTunables settings={state?.settings} busy={busy} send={(action) => void send(action)} />
+
       {state ? (
         <div className="mt-5 rounded-2xl border border-zinc-800 p-4" data-testid="admin-auto-router-optimizer-active">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -292,12 +314,37 @@ export function AdminAutoRouterOptimizerPanel() {
         </div>
       ) : null}
 
+      {state ? (
+        <label
+          className="mt-5 flex min-h-11 items-center gap-2 text-sm text-zinc-300"
+          data-testid="admin-auto-router-rec-agent"
+        >
+          <input
+            type="checkbox"
+            checked={state.recAgent?.enabled === true}
+            disabled={busy || !state.recAgent}
+            onChange={(event) => void send({ action: "set_rec_agent", enabled: event.target.checked })}
+            data-testid="admin-auto-router-rec-agent-toggle"
+            className="h-5 w-5"
+          />
+          <span>
+            <span className="font-bold">{m.recAgentLabel}</span>
+            <span className="block text-xs text-zinc-500">{m.recAgentNote}</span>
+          </span>
+        </label>
+      ) : null}
+
+      {state ? (
+        <OpenRecommendationsInbox cycles={state.cycles} busy={busy} onSetStatus={setRecommendation} />
+      ) : null}
+
       <h3 className="mt-5 text-sm font-bold text-zinc-200">{m.cyclesTitle}</h3>
       {state && state.cycles.length === 0 ? <p className="mt-2 text-sm text-zinc-500">{m.noCycles}</p> : null}
       <ul className="mt-2 space-y-3">
         {state?.cycles.map((cycle) => (
           <li
             key={cycle.id}
+            id={optimizerCycleAnchor(cycle.id)}
             data-testid="admin-auto-router-optimizer-cycle"
             className="rounded-2xl border border-zinc-800 p-4 text-sm text-zinc-300"
           >
@@ -348,15 +395,29 @@ export function AdminAutoRouterOptimizerPanel() {
                 {cycle.summary.report.recommendations.length > 0 ? (
                   <>
                     <p className="mt-2 text-xs font-bold text-zinc-300">{m.recommendationsTitle}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{m.recommendationHandled}</p>
                     <ul className="mt-1 space-y-1 text-xs text-zinc-300">
-                      {cycle.summary.report.recommendations.map((item, index) => (
-                        <li key={index} className="whitespace-pre-wrap">
-                          <span className="mr-1 rounded border border-zinc-600 px-1 text-[11px] text-zinc-400">
-                            {recommendationKind(item.kind)}
-                          </span>
-                          {item.text}
-                        </li>
-                      ))}
+                      {cycle.summary.report.recommendations.map((item, index) => {
+                        const actionable = actionableRecommendations(cycle.summary).find(
+                          (candidate) => candidate.index === index
+                        );
+                        return (
+                          <li key={index} className="whitespace-pre-wrap">
+                            <span className="mr-1 rounded border border-zinc-600 px-1 text-[11px] text-zinc-400">
+                              {recommendationKind(item.kind)}
+                            </span>
+                            {item.text}
+                            {actionable ? (
+                              <RecommendationControls
+                                cycle={cycle}
+                                item={actionable}
+                                busy={busy}
+                                onSetStatus={setRecommendation}
+                              />
+                            ) : null}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </>
                 ) : null}

@@ -1191,6 +1191,7 @@ export const pt = {
         dailyCreditsUnlimitedStandard: "Sem limite diário de créditos nos modelos Standard",
         planCreditsRemaining: "Créditos mensais restantes",
         purchasedCreditsRemaining: "Créditos comprados restantes",
+        extraUsageAvailable: "Uso adicional disponível",
         planCreditsCompact: "Mensal: restam {count} créditos",
         analyticsSettings: "Definições de análise",
         analyticsCookieSettings: "Definições de cookies analíticos",
