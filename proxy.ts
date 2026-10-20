@@ -41,6 +41,8 @@ import {
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
+import { nativeChatBearerRoute } from "@/lib/nativeChatRoutes";
+import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
@@ -271,15 +273,14 @@ export function proxy(request: NextRequest) {
   // mutation-origin check or N1b does not exist -- that ordering is the one
   // surviving reason the design rejected verifying only inside routes.
   //
-  // `N1B_BEARER_ROUTES` is empty by approval (decision 13), so today every
-  // verdict is `not_applicable` and this changes nothing about any request.
-  // The order is what is being put in place; opening it is a separate act, one
-  // route at a time, each with evidence that the route reads the bearer rather
-  // than the cookie session.
+  // The original N1b list remains empty. The default-off native Chat switch
+  // enrolls only the exact method/path pairs whose handlers resolve bearers
+  // and verify live session state. Operational activation is a separate step.
+  const nativeChat = nativeChatBearerRoute(request.nextUrl.pathname, request.method);
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),
-    registeredRoutes: N1B_BEARER_ROUTES,
+    registeredRoutes: nativeChat ? [...N1B_BEARER_ROUTES, request.nextUrl.pathname] : N1B_BEARER_ROUTES,
     verify: (token) => {
       const verdict = verifyMobileAccessTokenString(token);
       return verdict.ok
@@ -291,6 +292,9 @@ export function proxy(request: NextRequest) {
     return withNativeCors(blockedBearerResponse(), request);
   }
   if (bearer.kind === "yes") {
+    if (nativeChat && request.headers.get("origin") && !isNativeAppOrigin(request.headers.get("origin"))) {
+      return withNativeCors(blockedBearerResponse(), request);
+    }
     applyMobileIdentityHeaders(requestHeaders, bearer.identity);
   }
 
