@@ -39,6 +39,65 @@ async function withState(fn) {
   }
 }
 
+/** An in-memory marker with the real file's claim/release contract. */
+function fakeHalt({ releaseFails = false } = {}) {
+  const state = { held: false, claims: 0, releases: 0 };
+  return { state, haltFile: (stateDirectory, kind) => {
+    assert.equal(stateDirectory, "/state");
+    assert.equal(kind, "analysis");
+    return {
+      async claim() { state.claims++; if (state.held) return false; state.held = true; return true; },
+      async release() {
+        state.releases++;
+        if (releaseFails) throw new Error("local_state_unavailable");
+        state.held = false;
+      },
+    };
+  } };
+}
+
+test("an app refusal confirmed absent clears the marker; claims and unknowns keep it", async () => {
+  for (const [answer, kept] of [
+    [{ kind: "budget_hold", reason: "monthly_shadow_reached", retryWrite: false }, false],
+    [{ kind: "not_ready", retryWrite: false }, false],
+    [{ kind: "budget_unavailable", retryWrite: false }, false],
+    [{ kind: "integrity_unavailable", retryWrite: false }, false],
+    [{ kind: "claim_disabled", retryWrite: false }, false],
+    [{ kind: "refused" }, false],
+    [{ kind: "auth_unavailable" }, false],
+    [{ kind: "outcome_unknown", receiptStatus: "absent", retryWrite: false }, true],
+    [{ kind: "claimed", recovered: true, retryWrite: false }, true],
+    [{ kind: "made_up" }, true],
+  ]) {
+    const halt = fakeHalt();
+    const result = await claimAmuxV19MaxShadowBudgetWithHaltOnce(
+      { stateDirectory: "/state" }, async () => answer, halt.haltFile);
+    assert.deepEqual(result, answer);
+    assert.equal(halt.state.held, kept, answer.kind);
+  }
+});
+
+test("a held marker stops the claim before any write, and a failed release is reported", async () => {
+  const halted = fakeHalt();
+  halted.state.held = true;
+  let claims = 0;
+  assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
+    { stateDirectory: "/state" }, async () => { claims++; return { kind: "not_ready" }; },
+    halted.haltFile), { kind: "halted" });
+  assert.equal(claims, 0);
+  const stuck = fakeHalt({ releaseFails: true });
+  assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
+    { stateDirectory: "/state" }, async () => ({ kind: "budget_hold",
+      reason: "monthly_shadow_reached", retryWrite: false }), stuck.haltFile),
+  { kind: "halt_unavailable" });
+  assert.equal(stuck.state.held, true);
+  const thrown = fakeHalt();
+  assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
+    { stateDirectory: "/state" }, async () => { throw new Error("lost"); },
+    thrown.haltFile), { kind: "outcome_unknown", retryWrite: false });
+  assert.equal(thrown.state.held, true);
+});
+
 test("pre-write refusal clears its marker and performs no network call",
   { skip: process.platform !== "linux" }, async () => withState(async (stateDirectory) => {
     let calls = 0;

@@ -481,6 +481,9 @@ run(
     // Subscription claims run on all four CLI channels, each bound to its own
     // sign-in profile and to the reservation's channel and model.
     "tests/integration/amux-v19-subscription-channels.db.test.ts",
+    // An unproven subscription closure returns its headroom instead of filling
+    // the month, and the runner reads a pre-write 409 as that refusal.
+    "tests/integration/amux-v19-shadow-unknown-headroom.db.test.ts",
     // Each prepared v19 direct-read reference records only its pinned SHA and
     // aggregate exclusion proof under same-transaction system evidence.
     "tests/integration/amux-v19-tracked-checkout-evidence.db.test.ts",

@@ -3,6 +3,8 @@
  * TOMVERSE_AMUX_V19_MAX_SESSION_CYCLE=enabled and the tracked-checkout CLI
  * switch are both set. An unknown outcome exits non-zero and keeps the local
  * halt marker, so the next tick stays halted until the operator resolves it.
+ * A claim the app refused before writing, confirmed absent by its exact
+ * readback, keeps no marker and prints its fixed reason word.
  * A failed analysis also names why, in fixed words, and whether its claim was
  * held as outcome_unknown in the app (`unknownReport`). */
 import { homedir } from "node:os";
@@ -13,12 +15,19 @@ import { AMUX_V19_SESSION_CYCLE_WORD, runAmuxV19MaxSessionCycleOnce } from
 import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalSessionAnalysisQueuePoll.mjs";
 
+// A claim the app refused before writing (budget_hold, not_ready, the claim
+// switch off) leaves no claim and no halt marker: the next tick asks again.
 const QUIET = new Set(["recorded", "idle", "disabled",
-  "catalog_unapproved", "more_unexamined", "discovered"]);
+  "catalog_unapproved", "more_unexamined", "discovered",
+  "budget_hold", "not_ready", "claim_disabled"]);
 // `halted` means an earlier unknown outcome still waits for the operator.
+// budget_unavailable and integrity_unavailable are pre-write refusals too,
+// but they exit non-zero so the operator looks at the ledger.
 const KINDS = new Set([...QUIET, "halted", "outcome_unknown", "refused",
   "unavailable", "price_unavailable", "cursor_rejected", "halt_unavailable",
-  "auth_unavailable"]);
+  "auth_unavailable", "budget_unavailable", "integrity_unavailable"]);
+const REFUSALS = new Set(["budget_hold", "not_ready", "claim_disabled",
+  "budget_unavailable", "integrity_unavailable"]);
 const STAGES = new Set(["claim", "idea_read", "prompt", "analysis", "result"]);
 const STATES = AMUX_V19_SESSION_CYCLE_WORD;
 const ANALYSIS_WORDS = ["reason", "failure", "parser", "trace", "stderr",
@@ -54,6 +63,9 @@ export function amuxV19MaxSessionCycleStatus(result) {
   const kind = KINDS.has(result?.kind) ? result.kind : "unavailable";
   const parts = [`AMUX_V19_MAX_SESSION_CYCLE_${kind}`];
   if (STAGES.has(result?.stage)) parts.push(`stage=${result.stage}`);
+  if (REFUSALS.has(kind) && STATES.test(result?.reason ?? "")) {
+    parts.push(`reason=${result.reason}`);
+  }
   if (kind === "recorded") {
     for (const key of ["planState", "registrationState"]) {
       if (STATES.test(result?.[key] ?? "")) parts.push(`${key}=${result[key]}`);
