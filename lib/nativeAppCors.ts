@@ -1,5 +1,8 @@
 // N1a. Cross-origin access for the locally bundled Capacitor shell, and
 // nothing else.
+// The historical N1a rationale below describes CORS alone. Native Chat
+// authentication now lives in nativeChatRoutes/chatRouteSession behind a
+// default-off enrollment switch; this file still grants no authorization.
 //
 // Contract: .github/audits/2026-08-30-native-mobile-readiness.md §3.1, and
 // `AUTH-04` in docs/release-gates/tomverse-chat-v1.yaml ("CORS bypass and

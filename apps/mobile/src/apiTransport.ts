@@ -1,4 +1,4 @@
-import { chatStreamDisplayText } from "@tomverse/chat-core";
+import { consumeChatStream } from "../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
 import { toChatRequestMessage } from "../../../lib/chatMessageSerialization";
 import { resolveChatAttachmentFormat } from "../../../lib/chatAttachmentFormats";
@@ -98,19 +98,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }
       if (!response.body) throw Error("CHAT_STREAM_MISSING");
       const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let raw = "";
-      let visibleLength = 0;
       try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          raw += decoder.decode(value, { stream: true });
-          const visible = chatStreamDisplayText(raw);
-          if (visible.length > visibleLength) { visibleLength = visible.length; watchdog.noteVisibleChunk(); }
-          onProgress(visible);
-        }
-        raw += decoder.decode(); onProgress(chatStreamDisplayText(raw));
+        await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText }) => onProgress(displayText) });
       } finally { reader.releaseLock(); }
       // A closed HTTP body alone does not establish a completed paid execution.
       const final = await load(conversation.id);
