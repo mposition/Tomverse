@@ -206,7 +206,9 @@ export function evaluateCiAdmission(input: {
     if (index >= 0) released.splice(index, 1);
     released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: input.runningShas.has(pull.headSha) });
   };
-  const releasedNumbers = new Set(released.map((entry) => entry.number));
+  // Its own release echoing back is recognised by number and head together: a
+  // reservation for an older head never exempts new commits from judgment.
+  const reservedHead = (pull: CiAdmissionPull) => released.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
   // Granted earlier and still holding: a new push keeps its slots (its new
   // runs replace the old ones), so a fix push never goes to the back of the line.
   const granted = new Set(input.state.granted);
@@ -248,7 +250,7 @@ export function evaluateCiAdmission(input: {
     const priorHead = released.find((entry) => entry.number === arrival.number)?.headSha;
     reserve(arrival);
     if (priorHead !== arrival.headSha) event("admitted", arrival.number, "continuing");
-  } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !releasedNumbers.has(arrival.number)) {
+  } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !reservedHead(arrival)) {
     const units = ciAdmissionUnits(arrival)!;
     const waiting = queue.some((entry) => entry.number !== arrival.number);
     const queued = queue.some((entry) => entry.number === arrival.number);
@@ -319,8 +321,10 @@ export function evaluateCiAdmission(input: {
 
   // A grant ends when its pull request no longer runs and holds no reservation.
   for (const number of [...granted]) {
+    // Released in this evaluation: still a draft in this snapshot, about to run.
+    if (releasedNow.has(number)) continue;
     const pull = open.get(number);
-    if (!pull || pull.draft || !(running(pull) || releasedNow.has(number))) granted.delete(number);
+    if (!pull || pull.draft || !running(pull)) granted.delete(number);
   }
 
   return {

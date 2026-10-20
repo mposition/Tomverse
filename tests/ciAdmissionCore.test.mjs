@@ -277,3 +277,28 @@ test("a grant ends when its pull request no longer runs", () => {
   const finished = run({ state: admitted.state, openPulls: [pull(1)], nowMs: T0 + 60_000 });
   assert.deepEqual(finished.state.granted, []);
 });
+
+test("a pull request released from the line stays granted, so a later fix push keeps its slot", () => {
+  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
+  assert.deepEqual(released.state.granted, [8]);
+  const running = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), nowMs: T0 + 20 * 60_000 });
+  assert.deepEqual(running.state.granted, [8]);
+  const fix = run({ state: running.state, openPulls: [pull(8, { headSha: "d".repeat(40) }), pull(9, { draft: true })], arrival: 8, nowMs: T0 + 21 * 60_000 });
+  assert.deepEqual(kinds(fix), []);
+});
+
+test("an older head's reservation does not exempt new commits from judgment", () => {
+  // #1 admitted, its CI seen and finished within the grace period: grant ends, reservation (old head) remains.
+  const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
+  const seen = run({ state: admitted.state, openPulls: [pull(1)], runningShas: new Set([sha(1)]), nowMs: T0 + 30_000 });
+  const finished = run({ state: { ...seen.state, queue: [queued(2)] }, openPulls: [pull(1), pull(2, { draft: true })], nowMs: T0 + 60_000 });
+  assert.deepEqual(finished.state.granted, [2]);
+  // A new commit on #1 while #2 holds the only slot: #1 is held, not let through.
+  const push = run({
+    state: finished.state,
+    openPulls: [pull(1, { headSha: "c".repeat(40) }), pull(2)],
+    arrival: 1,
+    nowMs: T0 + 90_000,
+  });
+  assert.deepEqual(kinds(push), ["hold:1"]);
+});
