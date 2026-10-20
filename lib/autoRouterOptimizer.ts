@@ -281,17 +281,18 @@ export async function optimizerCatalogueIds(): Promise<string[]> {
  */
 export async function readUnreliableAnswerModels(): Promise<string[]> {
     try {
-        const rows = await prisma.autoRouterOptimizerCycle.findMany({
-            where: { status: { in: ["passed", "failed", "error"] } },
-            orderBy: { createdAt: "desc" },
-            take: 5,
-            select: { summary: true },
-        });
-        const recorded = rows.find((row) => {
-            const summary = row.summary as { answerStats?: unknown } | null;
-            return summary?.answerStats != null && typeof summary.answerStats === "object";
-        });
-        return recorded ? unreliableAnswerModels((recorded.summary as { answerStats: unknown }).answerStats) : [];
+        // Searched in the database rather than among the last few rows: any
+        // number of cycles that record no answers (rewrite cycles, older
+        // routing ones) may have finished since.
+        const rows = await prisma.$queryRaw<Array<{ answerStats: unknown }>>`
+            SELECT "summary"->'answerStats' AS "answerStats"
+            FROM "AutoRouterOptimizerCycle"
+            WHERE "status" IN ('passed', 'failed', 'error')
+              AND jsonb_typeof("summary"->'answerStats') = 'object'
+            ORDER BY "createdAt" DESC
+            LIMIT 1
+        `;
+        return rows[0] ? unreliableAnswerModels(rows[0].answerStats) : [];
     } catch {
         return [];
     }

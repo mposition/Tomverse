@@ -581,6 +581,17 @@ test("the next challenger leaves out models whose answers all failed in the last
     },
   });
   assert.deepEqual(await readUnreliableAnswerModels(), ["deepseek-v4-pro"]);
+  // However many newer finished cycles recorded no answers (rewrite cycles do not).
+  for (let index = 0; index < 7; index += 1) {
+    await prisma.autoRouterOptimizerCycle.create({
+      data: {
+        optimizerModelId: "optimizer-model", routerModelId: "router-model",
+        incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+        status: "failed", createdAt: at(15 - index), summary: { evaluated: 12, answerStats: "none" },
+      },
+    });
+  }
+  assert.deepEqual(await readUnreliableAnswerModels(), ["deepseek-v4-pro"]);
   // A newer finished cycle in which the model answered clears it.
   await prisma.autoRouterOptimizerCycle.create({
     data: {

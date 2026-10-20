@@ -618,15 +618,18 @@ export const admitGuidance = (raw: unknown): string | null => {
 /**
  * What in guidance text counts as naming a model:
  * - an id-shaped token -- a letter, then parts joined by "-", "." or "/" --
- *   with a digit (every catalogue id but a few has one), or equal to a known id;
+ *   equal to a known id, or with a digit and leading letters that are a
+ *   catalogue model family (gpt-9-ultra, kimi-k9) or OpenAI's o-series
+ *   (o4-mini), so technical terms such as UTF-8 or ISO-8601 are not models;
  * - any known id (this cycle's candidates and the whole catalogue, retired
  *   models included) written as a whole word, whatever its shape, which
  *   catches ids with no digit such as perplexity/sonar-pro;
  * - a token with no separator made of letters then digits, when its letters
  *   are a catalogue model family (gpt4, qwen3) or it is OpenAI's o-series
  *   (o3, o4).
- * Prose such as "and/or", "step-by-step", "9-credit", "p90" or "base64" is
- * not a model.
+ * Prose such as "and/or", "step-by-step", "9-credit", "p90", "base64",
+ * "UTF-8" or "ISO-8601" is not a model. A made-up id of a family the
+ * catalogue has never held is not caught; the live router cannot pick it.
  */
 const MODEL_ID_TOKEN = /[a-z][a-z0-9]*(?:[-./][a-z0-9]+)+/gi;
 const SHORT_MODEL_TOKEN = /(?<![a-z0-9\-./])([a-z]+)(\d+[a-z0-9]*)(?![a-z0-9\-/]|\.[a-z0-9])/gi;
@@ -670,11 +673,15 @@ export const guidanceNamingRejection = (
     );
     const lower = guidance.toLowerCase();
     const named = new Set<string>();
+    const isFamily = (letters: string) => families.has(letters) || letters === "o";
     for (const match of lower.matchAll(MODEL_ID_TOKEN)) {
-        if (/\d/.test(match[0]) || known.has(match[0])) named.add(match[0]);
+        const token = match[0];
+        if (known.has(token) || (/\d/.test(token) && isFamily(/^[a-z]+/.exec(token)?.[0] ?? ""))) {
+            named.add(token);
+        }
     }
     for (const match of lower.matchAll(SHORT_MODEL_TOKEN)) {
-        if (families.has(match[1]) || match[1] === "o") named.add(match[0]);
+        if (isFamily(match[1])) named.add(match[0]);
     }
     for (const id of known) {
         if (standsAlone(lower, id)) named.add(id);

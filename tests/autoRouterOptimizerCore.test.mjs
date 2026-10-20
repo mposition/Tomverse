@@ -984,7 +984,17 @@ test("guidance may name only candidates the direct comparisons judged", async ()
     { reason: "unproven_model", ids: ["claude-haiku-5-5", "perplexity/sonar"] }
   );
   // An unknown id is reported before an unproven one.
-  assert.equal(guidanceNamingRejection("Prefer claude-haiku-5-5 or kimi-k9 for maths.", menu, judged).reason, "unknown_model");
+  assert.equal(guidanceNamingRejection("Prefer claude-haiku-5-5 or gemini-9-pro for maths.", menu, judged).reason, "unknown_model");
+  // Technical terms with digits are not models: their letters are no model family.
+  assert.equal(
+    guidanceNamingRejection("Keep UTF-8 text, ISO-8601 dates and top-3 lists on gpt-6-luna.", menu, judged),
+    null
+  );
+  // The same shape with a catalogue family is a model, and not a candidate here.
+  assert.deepEqual(
+    guidanceNamingRejection("Send ISO-8601 work to kimi-k9.", menu, judged, ["kimi-k2.7-code"]),
+    { reason: "unknown_model", ids: ["kimi-k9"] }
+  );
 });
 
 test("a cycle refuses a proposal that names a model off the menu or without evidence", async () => {
