@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedApi } from "./support/app-fixtures";
+import { setDeterministicTheme } from "./support/chat-state-fixtures";
 import { formatContrastSample, measureContrast } from "./support/ui-audit";
 
 /**
@@ -24,10 +25,9 @@ test.describe("conversation context menu", () => {
     "the panel follows the light theme instead of staying dark",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
-      await page.addInitScript(() =>
-        window.localStorage.setItem("tomverse_theme_preference", "light")
-      );
+      const account = await mockAuthenticatedApi(page, { language: "en" });
+      account.theme = "light";
+      await setDeterministicTheme(page, "light");
       await page.setViewportSize({ width: 1366, height: 768 });
       await page.goto("/review?lang=en");
       await expect(page.locator("html")).not.toHaveClass(/dark/);
@@ -68,10 +68,9 @@ test.describe("conversation context menu", () => {
     "the actions trigger stays visible on hover in light theme",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
-      await page.addInitScript(() =>
-        window.localStorage.setItem("tomverse_theme_preference", "light")
-      );
+      const account = await mockAuthenticatedApi(page, { language: "en" });
+      account.theme = "light";
+      await setDeterministicTheme(page, "light");
       await page.setViewportSize({ width: 1366, height: 768 });
       await page.goto("/review?lang=en");
 

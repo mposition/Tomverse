@@ -284,8 +284,8 @@ for (const viewport of VIEWPORTS) {
     // outside the header.
     const countBox = await modelCount(page).boundingBox();
     const headerBox = await page
-      .getByTestId("mobile-chat-shell")
       .locator("header")
+      .filter({ has: page.getByTestId("mobile-sidebar-open") })
       .boundingBox();
     expect(countBox).not.toBeNull();
     expect(headerBox).not.toBeNull();

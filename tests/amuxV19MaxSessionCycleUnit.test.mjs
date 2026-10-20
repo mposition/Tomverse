@@ -20,6 +20,9 @@ test("the v19 cycle unit refreshes mirrors before any claim and installs switche
   assert.match(env, /^# TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET=$/m,
     "no secret value is ever committed");
   assert.doesNotMatch(env, /DATABASE_URL=|API_KEY=/);
+  // The local-only diagnostic detail switch ships commented out (off).
+  assert.match(env, /^# TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL=enabled$/m);
+  assert.doesNotMatch(env, /^TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL=/m);
   assert.match(refresh, /^set -euo pipefail$/m);
   assert.match(refresh, /fetch --quiet --prune --no-tags origin/);
   assert.doesNotMatch(refresh, /\b(?:checkout|reset|clean|pull)\b/,

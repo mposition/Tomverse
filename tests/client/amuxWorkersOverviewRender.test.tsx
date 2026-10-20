@@ -313,18 +313,18 @@ test("a read-only viewer sees the drawer without edit or on-off controls", () =>
   assert.equal(byTestId(tree, "amux-worker-drawer-read-only").length, 1);
 });
 
-test("a refused turn-on is said in plain words, on the worker's own drawer", () => {
+test("a refused change is said in plain words, on the worker's own drawer", () => {
   const tree = render({
     openWorker: "cursor-impl",
     lastRun: "change",
     changeWorker: "cursor-impl",
     notice: "stopped",
-    refusal: { workerName: "cursor-impl", code: "activation_requires_trial" },
+    refusal: { workerName: "cursor-impl", code: "role_widening_requires_trial" },
   });
   const text = textOf(byTestId(tree, "amux-workers-refused")[0]!.children as ReactNode);
-  assert.match(text, /cursor-impl: This worker cannot be turned on yet\./);
+  assert.match(text, /cursor-impl: A wider role needs a new trial first\./);
   assert.match(text, /Nothing was changed\./);
-  assert.doesNotMatch(text, /activation_requires_trial/);
+  assert.doesNotMatch(text, /role_widening_requires_trial/);
   // Without the drawer the same sentence sits under the list.
   const closed = render({ lastRun: "change", changeWorker: "cursor-impl", notice: "stopped", refusal: { workerName: "cursor-impl", code: "stale_revision" } });
   assert.equal(byTestId(closed, "amux-workers-refused").length, 1);
@@ -357,7 +357,7 @@ test("the first-registration control is folded away, offered to the owner only w
 });
 
 test("no sentence on the screen names a policy version, a build stage or an internal refusal code", () => {
-  const internal = /\bR[1-5][a-e]?\b|\bv3\d\b|\bversion \d+\b|policy version|stage R|activation_requires_trial|stale_revision|registry_writes_off|catalog_unknown|not_admitted/i;
+  const internal = /\bR[1-5][a-e]?\b|\bv3\d\b|\bversion \d+\b|policy version|stage R|role_widening_requires_trial|stale_revision|registry_writes_off|catalog_unknown|not_admitted/i;
   const texts: string[] = [];
   const collect = (value: unknown) => {
     if (typeof value === "string") texts.push(value);

@@ -9,11 +9,13 @@ import {
   freezeAnimations,
   restoreActiveConversation,
   mockUserUsage,
+  setDeterministicTheme,
 } from "./support/chat-state-fixtures";
 import {
   modelWebSearchIsDispatchable,
 } from "@/lib/webSearchCapability";
 import { ALL_WEB_SEARCH_BACKENDS_READY } from "@/lib/webSearchBackends";
+import { measureContrast } from "./support/ui-audit";
 
 // ---------------------------------------------------------------------------
 // How much of a phone screen the *answers* actually get.
@@ -82,6 +84,7 @@ const seededMessages = (models: string[]): QaConversationMessage[] => [
 
 type EnterOptions = {
   lang?: string;
+  theme?: "light" | "dark";
   models?: string[];
   viewport: { width: number; height: number };
   webSearchMode?: "off" | "auto" | "always";
@@ -90,17 +93,20 @@ type EnterOptions = {
 async function enterMobileComparison(page: Page, options: EnterOptions) {
   const {
     lang = "ko",
+    theme = "light",
     models = THREE_MODELS,
     viewport,
     webSearchMode = "always",
   } = options;
 
   await prepareGuestPage(page, "en");
-  await mockAuthenticatedApi(page, {
+  const account = await mockAuthenticatedApi(page, {
     selectedModels: models,
     messages: seededMessages(models),
     webSearchMode,
   });
+  account.theme = theme;
+  await setDeterministicTheme(page, theme);
   if (models.includes(DEEP_RESEARCH_MODEL)) {
     // A Pro model; a Free account would have it trimmed from the selection.
     // Pro's own 300-credit day: Deep Research's 16 plus two searching
@@ -478,53 +484,36 @@ test.describe("AI and security disclaimer", { tag: "@ui-risk" }, () => {
     await expect(details(page)).toBeFocused();
   });
 
-  test("the details control has a 44px target and passes AA contrast", async ({
-    page,
-  }) => {
-    await enterMobileComparison(page, {
-      lang: "en",
-      viewport: { width: 390, height: 680 },
-    });
+  for (const theme of ["light", "dark"] as const) {
+    test(`the details control has a 44px target and passes AA contrast in ${theme}`, async ({
+      page,
+    }) => {
+      await enterMobileComparison(page, {
+        lang: "en",
+        theme,
+        viewport: { width: 390, height: 680 },
+      });
+      await expect(page.locator("html")).toHaveClass(new RegExp(theme));
 
-    // The visible control is one line tall; the box a finger actually hits is
-    // painted by a pseudo-element, so this measures that instead.
-    const target = await details(page).evaluate((node) => {
-      const before = getComputedStyle(node, "::before");
-      const rect = node.getBoundingClientRect();
-      const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
-      return {
-        width: rect.width + inset(before.left) + inset(before.right),
-        height: rect.height + inset(before.top) + inset(before.bottom),
-      };
-    });
-    expect(target.width).toBeGreaterThanOrEqual(43.5);
-    expect(target.height).toBeGreaterThanOrEqual(43.5);
-
-    // Small text must clear 4.5:1. zinc-400 on white (the old colour) is 2.8:1.
-    const contrast = await disclaimer(page).evaluate((node) => {
-      const parse = (value: string) =>
-        (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
-      const luminance = ([r, g, b]: number[]) => {
-        const channel = (c: number) => {
-          const s = c / 255;
-          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      // The visible control is one line tall; the box a finger actually hits is
+      // painted by a pseudo-element, so this measures that instead.
+      const target = await details(page).evaluate((node) => {
+        const before = getComputedStyle(node, "::before");
+        const rect = node.getBoundingClientRect();
+        const inset = (value: string) => Math.abs(Number.parseFloat(value) || 0);
+        return {
+          width: rect.width + inset(before.left) + inset(before.right),
+          height: rect.height + inset(before.top) + inset(before.bottom),
         };
-        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-      };
-      let background = "rgb(255, 255, 255)";
-      for (let el: Element | null = node; el; el = el.parentElement) {
-        const value = getComputedStyle(el).backgroundColor;
-        if (value && !value.includes("rgba(0, 0, 0, 0)")) {
-          background = value;
-          break;
-        }
-      }
-      const a = luminance(parse(getComputedStyle(node).color));
-      const b = luminance(parse(background));
-      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+      expect(target.width).toBeGreaterThanOrEqual(43.5);
+      expect(target.height).toBeGreaterThanOrEqual(43.5);
+
+      // Small text must clear 4.5:1. zinc-400 on white (the old colour) is 2.8:1.
+      const contrast = await measureContrast(disclaimer(page), "AI and security disclaimer");
+      expect(contrast.ratio, JSON.stringify(contrast)).toBeGreaterThanOrEqual(4.5);
     });
-    expect(contrast).toBeGreaterThanOrEqual(4.5);
-  });
+  }
 });
 
 test.describe("Answer canvas protections", { tag: "@ui-risk" }, () => {
