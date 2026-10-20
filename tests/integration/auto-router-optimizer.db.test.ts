@@ -510,3 +510,42 @@ test("a live router call holds its worst case in both provider buckets or neithe
   assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), day - 70);
   assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-month"), 30);
 });
+
+test("the naming check knows every catalogue id, models deleted from the catalogue included", async () => {
+  const { optimizerCatalogueIds } = await import("@/lib/autoRouterOptimizer");
+  const { guidanceNamingRejection } = await import("@/lib/autoRouterOptimizerCore");
+  await optimizerCatalogueIds(); // seeds the registry on a fresh database
+  const source = await prisma.modelRegistryEntry.findFirstOrThrow({ where: { catalogDeleted: false } });
+  // A registry-only model with no digit, deleted from the catalogue: neither
+  // the static catalogue nor an id-shaped token would catch its name.
+  const deletedId = `deletedtest/alpha-${randomUUID().slice(0, 4).replace(/\d/g, "x")}`;
+  await prisma.modelRegistryEntry.create({
+    data: {
+      id: deletedId,
+      name: "Deleted test model",
+      apiModel: source.apiModel,
+      provider: source.provider,
+      apiBaseUrl: source.apiBaseUrl,
+      apiKeyEnvName: source.apiKeyEnvName,
+      minimumPlan: source.minimumPlan,
+      usageClass: source.usageClass,
+      creditWeight: source.creditWeight,
+      enabled: false,
+      status: "disabled",
+      catalogDeleted: true,
+    },
+  });
+  try {
+    const ids = await optimizerCatalogueIds();
+    assert.ok(ids.includes(deletedId));
+    assert.ok(ids.includes(source.id));
+    assert.deepEqual(
+      guidanceNamingRejection(`Send news questions to ${deletedId}.`, ["gpt-6-luna"], ["gpt-6-luna"], ids),
+      { reason: "unknown_model", ids: [deletedId] }
+    );
+    // Without the deleted rows the same name would slip through.
+    assert.equal(guidanceNamingRejection(`Send news questions to ${deletedId}.`, ["gpt-6-luna"], ["gpt-6-luna"], []), null);
+  } finally {
+    await prisma.modelRegistryEntry.deleteMany({ where: { id: deletedId } });
+  }
+});

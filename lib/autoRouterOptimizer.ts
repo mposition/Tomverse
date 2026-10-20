@@ -60,7 +60,7 @@ import {
 } from "@/lib/autoRouterOptimizerCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
-import { DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -255,6 +255,16 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
  * pick shares from the last two weeks of decisions. Counts only; null when
  * the read fails, and the cycle goes on without it.
  */
+/**
+ * Every model id the catalogue knows -- registry rows deleted from the
+ * catalogue and the static catalogue included -- for the guidance naming
+ * check: a name the menu no longer offers is caught however it is shaped.
+ */
+export async function optimizerCatalogueIds(): Promise<string[]> {
+    const registered = await getRuntimeModels({ includeCatalogDeleted: true });
+    return [...new Set([...registered, ...AVAILABLE_MODELS].map((model) => model.id))];
+}
+
 async function readRouterStats(now: Date): Promise<RouterStats | null> {
     try {
         const rows = await prisma.autoRouterDecision.findMany({
@@ -596,16 +606,17 @@ async function runInBackground(input: {
         spentByProvider: new Map(),
     };
     try {
-        const [candidatesFor, routerStats] = await Promise.all([
+        const [candidatesFor, routerStats, catalogueIds] = await Promise.all([
             autoCandidateMenu(input.models),
             readRouterStats(new Date()),
+            optimizerCatalogueIds(),
         ]);
         const result = await runOptimizerCycle(
             {
                 decisions: input.decisions,
                 incumbentGuidance: input.incumbentGuidance,
                 routerStats,
-                catalogueIds: input.models.map((model) => model.id),
+                catalogueIds,
             },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
