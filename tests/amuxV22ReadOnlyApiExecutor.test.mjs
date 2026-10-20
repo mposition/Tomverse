@@ -313,12 +313,9 @@ test("a claimed unknown replays before expired runtime readiness without exposin
         delete active.fetcher;
         delete active.clock;
         const executor = createAmuxV22ReadOnlyApiExecutor(active);
-        // This test runs on the real clock, so the pricing record must be
-        // current relative to it rather than to the fixed fixture date.
-        const basis = frame({
-          pricingVerifiedAt: new Date(Date.now() - 60_000).toISOString(),
-          pricingExpiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
-        });
+        // The real clock runs here (no injected clock), so the frame's
+        // pricing must outlive today rather than the fixed fixture date.
+        const basis = frame({ pricingExpiresAt: new Date(Date.now() + 86_400_000).toISOString() });
         const original = request(basis);
         const claimed = await executor.execute(original);
         assert.equal(claimed.kind, "outcome_unknown");
