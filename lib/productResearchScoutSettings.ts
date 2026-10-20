@@ -18,6 +18,9 @@ import { SCOUT_DAILY_CALL_CAP_MAX, type ScoutCallRow } from "@/lib/productResear
 export const SCOUT_MODEL_SETTING_KEY = "productResearch.scoutModelId";
 export const SCOUT_DAILY_CALL_CAP_SETTING_KEY = "productResearch.scoutDailyCallCap";
 
+/** Lock id for the call ledger and the settings, so a reservation and a settings change never interleave. */
+const SCOUT_CALL_LOCK = 734_209_118;
+
 export type ScoutSettings = { readonly modelId: string | null; readonly dailyCallCap: number };
 
 const parseCap = (value: string | undefined) => {
@@ -25,26 +28,35 @@ const parseCap = (value: string | undefined) => {
   return Number.isInteger(parsed) && parsed >= 0 ? Math.min(parsed, SCOUT_DAILY_CALL_CAP_MAX) : 0;
 };
 
+const settingsFrom = async (client: Pick<Prisma.TransactionClient, "appSetting">): Promise<ScoutSettings> => {
+  const rows = await client.appSetting.findMany({
+    where: { key: { in: [SCOUT_MODEL_SETTING_KEY, SCOUT_DAILY_CALL_CAP_SETTING_KEY] } },
+    select: { key: true, value: true },
+  });
+  const value = (key: string) => rows.find((row) => row.key === key)?.value.trim();
+  return { modelId: value(SCOUT_MODEL_SETTING_KEY) || null, dailyCallCap: parseCap(value(SCOUT_DAILY_CALL_CAP_SETTING_KEY)) };
+};
+
 /** The stored settings; an unreadable store reads as off. Never throws. */
 export async function readScoutSettings(): Promise<ScoutSettings> {
   try {
-    const rows = await prisma.appSetting.findMany({
-      where: { key: { in: [SCOUT_MODEL_SETTING_KEY, SCOUT_DAILY_CALL_CAP_SETTING_KEY] } },
-      select: { key: true, value: true },
-    });
-    const value = (key: string) => rows.find((row) => row.key === key)?.value.trim();
-    return { modelId: value(SCOUT_MODEL_SETTING_KEY) || null, dailyCallCap: parseCap(value(SCOUT_DAILY_CALL_CAP_SETTING_KEY)) };
+    return await settingsFrom(prisma);
   } catch {
     return { modelId: null, dailyCallCap: 0 };
   }
 }
 
-/** Writes both rows; `audit` runs in the same transaction, so the change and its record land together. */
+/**
+ * Writes both rows; `audit` runs in the same transaction, so the change and
+ * its record land together. It takes the call lock first, so a reservation
+ * that starts after this commits reads the new model and cap.
+ */
 export async function writeScoutSettings(
   settings: ScoutSettings,
   audit: (tx: Prisma.TransactionClient) => Promise<unknown>,
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SCOUT_CALL_LOCK})`;
     if (settings.modelId === null) {
       await tx.appSetting.deleteMany({ where: { key: SCOUT_MODEL_SETTING_KEY } });
     } else {
@@ -66,28 +78,30 @@ export async function writeScoutSettings(
 
 const startOfUtcDay = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
-/** Lock id for the cap check, so two calls cannot both take the last slot. */
-const SCOUT_CALL_LOCK = 734_209_118;
+export type ScoutCallReservation = { readonly id: string } | { readonly refused: "model_off" | "daily_cap_reached" };
 
 /**
  * Takes one call from today's cap (UTC day): a ledger row is written before
- * the model is called. Answers the row id, or null when the cap is used up.
+ * the model is called. The model and the cap are read again under the call
+ * lock, which a settings write also takes, so turning the model off or
+ * lowering the cap stops every reservation after it. A reservation for a model
+ * that is no longer the chosen one is refused as model_off.
  */
 export async function startScoutCall(input: {
   readonly subject: string;
   readonly modelId: string;
-  readonly dailyCallCap: number;
-}): Promise<string | null> {
-  if (input.dailyCallCap <= 0) return null;
+}): Promise<ScoutCallReservation> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SCOUT_CALL_LOCK})`;
+    const current = await settingsFrom(tx);
+    if (current.modelId === null || current.modelId !== input.modelId) return { refused: "model_off" as const };
     const used = await tx.productResearchScoutLlmCall.count({ where: { createdAt: { gte: startOfUtcDay(new Date()) } } });
-    if (used >= input.dailyCallCap) return null;
+    if (used >= current.dailyCallCap) return { refused: "daily_cap_reached" as const };
     const row = await tx.productResearchScoutLlmCall.create({
       data: { subject: input.subject, modelId: input.modelId },
       select: { id: true },
     });
-    return row.id;
+    return { id: row.id };
   });
 }
 

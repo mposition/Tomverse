@@ -106,7 +106,9 @@ export function qaReleaseLaneRulesets(input: {
   let suffix = "";
   if (scope.kind === "real") {
     updateInclude = ["~ALL"];
-    updateExclude = [ref("develop")];
+    // The release train pushes its own branches (policy section 8 item 12);
+    // owner-approved exception 2026-10-20.
+    updateExclude = [ref("develop"), "refs/heads/release/train-*"];
     developInclude = [ref("develop")];
   } else {
     const names = [...scope.updateBranches, scope.developBranch];
@@ -220,6 +222,7 @@ export const QA_RELEASE_NON_BRANCH_SECRETS: readonly string[] = Object.freeze([
   "OPENAI_API_KEY",
   "OPS_ALERT_EMAIL",
   "OPS_ALERT_SLACK_WEBHOOK_URL",
+  "PR_AUTO_FIX_ANTHROPIC_API_KEY",
   "RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL",
   "RESEND_API_KEY",
   "SECURITY_AUDIT_EMAILS",

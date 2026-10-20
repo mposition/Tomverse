@@ -46,20 +46,6 @@ type Bulk =
   | { readonly kind: "running"; readonly action: Action; readonly done: number; readonly total: number }
   | { readonly kind: "finished"; readonly done: number; readonly total: number; readonly failure: AdminApiFailure | null };
 
-/** One request id per suggestion, kept across reloads, so a lost answer is read back rather than sent twice. */
-const sendRequestId = (suggestionId: string) => {
-  const key = `product-research-scout-send:${suggestionId}`;
-  try {
-    const kept = window.sessionStorage.getItem(key);
-    if (kept) return kept;
-    const created = window.crypto.randomUUID();
-    window.sessionStorage.setItem(key, created);
-    return created;
-  } catch {
-    return window.crypto.randomUUID();
-  }
-};
-
 const BUTTON =
   "inline-flex min-h-11 flex-1 items-center justify-center rounded-lg border px-3.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 sm:flex-none";
 const DISMISS_BUTTON = `${BUTTON} border-zinc-700 text-zinc-300 hover:bg-zinc-800 sm:border-transparent`;
@@ -127,7 +113,8 @@ export function AdminScoutSuggestionsPanel({ initial }: { initial: ScoutConsoleV
       response = await adminFetch(`/api/admin/product-research/suggestions/${encodeURIComponent(suggestion.id)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(action === "send" ? { action, requestId: sendRequestId(suggestion.id) } : { action }),
+        // The server derives the AMUX request id from the suggestion, so a resend is the same request.
+        body: JSON.stringify({ action }),
       });
     } catch {
       const failure = adminNetworkFailure(locale);

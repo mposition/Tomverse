@@ -15,6 +15,8 @@ import { createQaReleaseMergeLaneAppPorts } from "../lib/qaReleaseMergeLaneAppCl
 import { createQaReleaseGithubPorts, qaReleaseInstallationToken } from "../lib/qaReleaseMergeLaneGithub.ts";
 import { createQaReleaseRailwayPorts } from "../lib/qaReleaseMergeLaneRailway.ts";
 import { runQaReleaseMergeLaneRound } from "../lib/qaReleaseMergeLaneServiceCore.ts";
+import { createQaReleaseTrainAppPorts, createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
+import { runQaReleaseTrainRound } from "../lib/qaReleaseTrainService.ts";
 
 // The app routes budget each call at 50 s (lib/qaReleaseMergeLaneRoutes.ts);
 // this side waits a little longer so it never aborts a call the route still
@@ -50,15 +52,27 @@ const privateKey = (env.QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY ?? "").includes("\
   : (env.QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY ?? "").replaceAll("\\n", "\n");
 
 const readHttp = httpWith(READ_TIMEOUT_MS);
+const token = qaReleaseInstallationToken(readHttp, (env.QA_RELEASE_MERGE_LANE_APP_ID ?? "").trim(), privateKey, Date.now);
 const result = await runQaReleaseMergeLaneRound(env, {
   app: createQaReleaseMergeLaneAppPorts({ http: httpWith(APP_TIMEOUT_MS), env }),
-  github: createQaReleaseGithubPorts({
-    http: readHttp,
-    token: qaReleaseInstallationToken(readHttp, (env.QA_RELEASE_MERGE_LANE_APP_ID ?? "").trim(), privateKey, Date.now),
-  }),
+  github: createQaReleaseGithubPorts({ http: readHttp, token }),
   railway: createQaReleaseRailwayPorts({ http: readHttp, token: env.QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN ?? "" }),
 });
+console.log(JSON.stringify(result));
+
+// The release train (policy section 8 item 12) runs after the develop round,
+// on its own switch, so it can run while the develop lane is off.
+const git = createQaReleaseTrainGitPorts({ token });
+const train = await runQaReleaseTrainRound(
+  env,
+  {
+    github: createQaReleaseTrainGithubPorts({ http: readHttp, token }),
+    git,
+    app: createQaReleaseTrainAppPorts({ http: httpWith(APP_TIMEOUT_MS), env }),
+  },
+  Date.now(),
+).finally(() => git.cleanup().catch(() => {}));
 
 clearTimeout(supervisor);
-console.log(JSON.stringify(result));
-process.exitCode = result.exitCode;
+console.log(JSON.stringify(train));
+process.exitCode = Math.max(result.exitCode, train.exitCode);

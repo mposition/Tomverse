@@ -776,6 +776,10 @@ run(
     // one writer, compare-and-set on the row, only a pinned model, the cap
     // within its ceiling, and a refused save that writes nothing.
     "tests/integration/marketing-llm-settings.db.test.ts",
+    // The Scout's spending stop: a call reserved against the model and cap as
+    // they are under the ledger lock, so turning the model off or lowering the
+    // cap stops every later call, and racing reservations stay within the cap.
+    "tests/integration/product-research-scout-settings.db.test.ts",
     // The Marketing console overview: each of its four reads against the real
     // tables, and an empty record reading as zeros rather than as unreadable.
     "tests/integration/marketing-console-overview.db.test.ts",

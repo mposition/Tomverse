@@ -312,14 +312,14 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
 
 1. **앱 변수**(그 환경의 Tomverse 서비스): `PRODUCT_RESEARCH_SCOUT_ENABLED`(아무 값),
    `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(32자 이상, 새로 만든 값). 꺼져 있으면 route는 404입니다.
-2. **walker 서비스**(Tomverse Agents의 dev 환경): IaC apply로 만들지 대시보드에서 만들지는 운영자가 정합니다
+2. **walker 서비스**(Tomverse Agents의 그 환경: dev는 `develop`, production은 `main`에서 빌드): IaC apply로 만들지 대시보드에서 만들지는 운영자가 정합니다
    (`docs/ops/dev-test-lanes.md`는 서비스 생성이 보이는 plan을 apply하지 말라고 적습니다). 대시보드라면 아래를 모두 맞춥니다.
 
    | 설정 | 값 |
    |---|---|
-   | 환경 | Tomverse Agents → **dev** |
+   | 환경 | Tomverse Agents → **dev** 또는 **production** |
    | 이름 | `Product Research Scout` |
-   | Source | GitHub `mposition/Tomverse`, branch `develop`, Root directory 비움 |
+   | Source | GitHub `mposition/Tomverse`, branch `develop`(dev) 또는 `main`(production), Root directory 비움 |
    | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout.Dockerfile`(앞에 `/` 없이) |
    | Deploy → Start command | `npm run agent:product-research-scout` |
    | Deploy → Cron schedule | `0 18 * * *` |

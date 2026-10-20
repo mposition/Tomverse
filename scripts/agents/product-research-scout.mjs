@@ -236,7 +236,8 @@ async function walkFiles() {
     } else {
       const parts = unzipSync(bytes);
       const textParts = Object.keys(parts)
-        .filter((name) => /^(word\/document|xl\/sharedStrings|ppt\/slides\/slide\d+)\.xml$/.test(name))
+        // A workbook's cell text is in its worksheets (the renderer writes inline strings) and in sharedStrings when present.
+        .filter((name) => /^(word\/document|xl\/sharedStrings|xl\/worksheets\/sheet\d+|ppt\/slides\/slide\d+)\.xml$/.test(name))
         .sort();
       const text = textParts.map((name) => xmlText(strFromU8(parts[name]))).join("\n").slice(0, 1_500);
       await deliver({
