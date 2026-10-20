@@ -15,7 +15,6 @@ import {
   updateAutoLlmRouterModelId,
 } from "@/lib/autoLlmRouterSettings";
 import { reserveRouterCost, settleRouterCost } from "@/lib/autoLlmRouter";
-import { getProviderCostBudget } from "@/lib/providerCostBudget";
 import {
   AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
   finishOptimizerCycle,
