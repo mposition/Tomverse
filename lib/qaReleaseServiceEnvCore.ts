@@ -28,6 +28,9 @@ export const QA_RELEASE_SERVICE_VARIABLES = Object.freeze({
     "QA_RELEASE_MERGE_LANE_ENABLED",
     "QA_RELEASE_MERGE_LANE_KILL_SWITCH",
     "QA_RELEASE_CONTROL_REVISION",
+    // The release train (section 8 item 12) runs in the same service.
+    "QA_RELEASE_TRAIN_ENABLED",
+    "QA_RELEASE_TRAIN_SLOTS",
   ]),
 } as const);
 
@@ -184,6 +187,24 @@ export function decideQaReleaseServiceStart(
     if (value("QA_RELEASE_MERGE_LANE_ENABLED") !== "true") return "disabled";
   }
   if (REQUIRED[service].some((name) => value(name) === "")) return "refuse";
+  if (!/^[1-9][0-9]{0,8}$/.test(value("QA_RELEASE_CONTROL_REVISION"))) return "refuse";
+  return "run";
+}
+
+/**
+ * The release train's own start decision (section 8 item 12), so the train
+ * can run while the develop lane is off. Same name check and kill switch as
+ * the lane; its own enable flag; it needs the lane's secret, App and revision
+ * but not the Railway token, which only the develop lane reads.
+ */
+export function decideQaReleaseTrainStart(env: Readonly<Record<string, string | undefined>>): QaReleaseStartDecision {
+  const names = Object.keys(env).filter((name) => env[name] !== undefined);
+  if (!checkQaReleaseServiceEnv("mergeLane", names).ok) return "refuse";
+  const value = (name: string) => (env[name] ?? "").trim();
+  if (env.QA_RELEASE_MERGE_LANE_KILL_SWITCH !== "") return "disabled";
+  if (value("QA_RELEASE_TRAIN_ENABLED") !== "true") return "disabled";
+  const required = ["QA_RELEASE_MERGE_LANE_SECRET", "QA_RELEASE_MERGE_LANE_APP_ID", "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY", "QA_RELEASE_CONTROL_REVISION"];
+  if (required.some((name) => value(name) === "")) return "refuse";
   if (!/^[1-9][0-9]{0,8}$/.test(value("QA_RELEASE_CONTROL_REVISION"))) return "refuse";
   return "run";
 }
