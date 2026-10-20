@@ -628,11 +628,11 @@ test.describe("admin console shell", () => {
   }) => {
     await page.goto("/admin/amux-execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Cards, Assignment and Workers; recovery and Decision Maker are settings sections.
-    await expect(strip.getByRole("link")).toHaveCount(3);
+    // Cards and Assignment; Workers, recovery and Decision Maker are settings sections.
+    await expect(strip.getByRole("link")).toHaveCount(2);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
-    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
+    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(0);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=cards$/
@@ -700,11 +700,11 @@ test.describe("the AMUX group by role", () => {
     await page.goto("/admin/amux-execution");
     await expect(consoleHeading(page)).toHaveText("Execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Assignment and Workers remain here; safety and switches belong to Operations settings.
-    await expect(strip.getByRole("link")).toHaveCount(2);
+    // Assignment remains here; workers, safety and switches belong to Operations settings.
+    await expect(strip.getByRole("link")).toHaveCount(1);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
-    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(1);
+    await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(0);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=assignment$/
@@ -713,33 +713,34 @@ test.describe("the AMUX group by role", () => {
     await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
   });
 
-  test("Workers shows the registry to every role, and offers registration to the owner only", async ({
+  test("Workers sits in Operations settings, shows the list to every role, and offers changes to the owner only", async ({
     page,
     signInAs,
   }) => {
-    // Orchestration policy version 31, sections 3 and 8: any administrator
-    // reads the registry; only the owner may register (version 32 turned R1's
-    // code latch on). R1's comparison with the catalog variable went with the
-    // variable at R2e. Nothing is clicked here: a registration is a write.
+    // Any administrator reads the list; only the owner may change a worker.
+    // Nothing is clicked here: a change is a write.
     await signInAs("readonly");
-    await page.goto("/admin/amux-execution?tab=workers");
+    await page.goto("/admin/amux-settings?tab=workers");
+    const strip = page.getByRole("navigation", { name: "AMUX operations settings sections" });
+    await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=workers$/);
     // Streaming may retain a hidden page copy during the role transition.
-    const panel = page.getByTestId("amux-worker-registry-panel").filter({ visible: true });
+    const panel = page.getByTestId("amux-workers-overview").filter({ visible: true });
     await expect(panel).toHaveCount(1);
-    await expect(panel.getByTestId("amux-worker-registry-read-only")).toBeVisible();
-    // The fixture registers no worker, so the registry reads back empty.
-    await expect(panel.getByTestId("amux-worker-registry-empty")).toBeVisible();
-    await expect(panel.getByTestId("amux-worker-registry-seed")).toHaveCount(0);
-    await expect(panel.getByRole("button")).toHaveCount(0);
+    await expect(panel.getByTestId("amux-workers-read-only")).toBeVisible();
+    // The fixture registers no worker, so the list reads back empty.
+    await expect(panel.getByTestId("amux-workers-empty")).toBeVisible();
+    await expect(panel.getByTestId("amux-workers-seed")).toHaveCount(0);
 
     await signInAs("owner");
-    await page.goto("/admin/amux-execution?tab=workers");
+    await page.goto("/admin/amux-settings?tab=workers");
     await expect(panel).toHaveCount(1);
-    await expect(panel.getByTestId("amux-worker-registry-read-only")).toHaveCount(0);
-    await expect(panel.getByTestId("amux-worker-registry-latch")).toBeVisible();
-    await expect(panel.getByTestId("amux-worker-registry-seed")).toBeVisible();
-    await expect(panel.getByTestId("amux-worker-registry-seed-register")).toBeEnabled();
+    await expect(panel.getByTestId("amux-workers-read-only")).toHaveCount(0);
+    await expect(panel.getByTestId("amux-workers-seed")).toBeVisible();
     expect(await adminFixtureDatabase().amuxWorkerRegistryEvent.count()).toBe(0);
+
+    // The old Execution address still lands here, with the rest of its query.
+    await page.goto("/admin/amux-execution?tab=workers");
+    await expect(page).toHaveURL("/admin/amux-settings?tab=workers");
   });
 
   test("Decision Maker shows the switches to every role, and a stale sign-in is refused a change with the way back", async ({

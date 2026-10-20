@@ -325,11 +325,11 @@ test("the AMUX group holds Backlog, Promotion, Execution and Operations settings
   );
   assert.deepEqual(
     adminNavItemTabs("amux-execution").map((tab) => tab.id),
-    ["cards", "assignment", "workers"]
+    ["cards", "assignment"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-settings").map((tab) => tab.id),
-    ["automatic-admission", "safety", "decision-maker", "analysis"]
+    ["automatic-admission", "workers", "safety", "decision-maker", "analysis"]
   );
   // Between Operations and Governance.
   assert.deepEqual(
@@ -401,17 +401,17 @@ test("the owner sees every AMUX section while other roles cannot see owner opera
     const visible = adminNavigationFor(role);
     const amux = visible.filter((item) => item.group === "AMUX");
     assert.deepEqual(amux.map((item) => item.id), ["amux-execution", "amux-settings"], `${role}: AMUX entries`);
-    // Workers is read by every role; a registry change takes the owner role
-    // (orchestration policy version 31, section 3). Safety and Decision Maker
-    // remain in Operations settings and are also readable by every role.
+    // Workers is read by every role, in Operations settings; a registry change
+    // takes the owner role (orchestration policy version 31, section 3). Safety
+    // and Decision Maker are also readable by every role.
     assert.deepEqual(
       amux[0].tabs.map((tab) => tab.id),
-      ["assignment", "workers"],
+      ["assignment"],
       `${role}: Execution sections`
     );
     assert.deepEqual(
       amux[1].tabs.map((tab) => tab.id),
-      ["safety", "decision-maker"],
+      ["workers", "safety", "decision-maker"],
       `${role}: Operations settings sections`
     );
     // Nothing outside AMUX moves for this role.
@@ -431,7 +431,7 @@ test("a role that cannot be determined sees only what every role sees", () => {
       adminNavigationFor(role)
         .filter((item) => item.group === "AMUX")
         .map((item) => [item.id, item.tabs.map((tab) => tab.id)]),
-      [["amux-execution", ["assignment", "workers"]], ["amux-settings", ["safety", "decision-maker"]]]
+      [["amux-execution", ["assignment"]], ["amux-settings", ["workers", "safety", "decision-maker"]]]
     );
   }
 });
@@ -498,13 +498,15 @@ test("Execution and Operations settings open on the first section each role may 
   const tabs = adminNavItemTabs("amux-execution");
   assert.equal(resolveAdminTabFor(tabs, "owner", undefined).tab.id, "cards");
   assert.equal(resolveAdminTabFor(tabs, "owner", "assignment").tab.id, "assignment");
-  assert.equal(resolveAdminTabFor(tabs, "owner", "workers").tab.id, "workers");
+  // Workers moved to Operations settings; Execution no longer offers it.
+  assert.equal(resolveAdminTabFor(tabs, "owner", "workers").tab.id, "cards");
+  assert.equal(resolveAdminTabFor(adminNavItemTabs("amux-settings"), "owner", "workers").tab.id, "workers");
   assert.equal(resolveAdminTabFor(tabs, "owner", "not-a-tab").tab.id, "cards");
   for (const role of [...NON_OWNER_ROLES, null]) {
     const opened = resolveAdminTabFor(tabs, role, undefined);
     assert.equal(opened.tab.id, "assignment", String(role));
-    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment", "workers"]);
-    assert.equal(resolveAdminTabFor(tabs, role, "workers").tab.id, "workers", String(role));
+    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment"]);
+    assert.equal(resolveAdminTabFor(adminNavItemTabs("amux-settings"), role, "workers").tab.id, "workers", String(role));
     assert.equal(resolveAdminTabFor(adminNavItemTabs("amux-settings"), role, "safety").tab.id, "safety", String(role));
     assert.equal(resolveAdminTabFor(adminNavItemTabs("amux-settings"), role, "decision-maker").tab.id, "decision-maker", String(role));
     // A stale value that names no section still falls back...
@@ -521,10 +523,10 @@ test("Execution and Operations settings open on the first section each role may 
   );
   for (const role of [...NON_OWNER_ROLES, null]) {
     const opened = resolveAdminTabFor(settings, role, undefined);
-    assert.equal(opened.tab.id, "safety", String(role));
+    assert.equal(opened.tab.id, "workers", String(role));
     assert.deepEqual(
       opened.visible.map((tab) => tab.id),
-      ["safety", "decision-maker"],
+      ["workers", "safety", "decision-maker"],
       String(role)
     );
     assert.equal(
@@ -712,7 +714,20 @@ test("legacy execution controls retain their exact settings section and query", 
   assert.deepEqual(ADMIN_AMUX_EXECUTION_LEGACY_TABS, {
     halts: "/admin/amux-settings?tab=safety",
     "decision-maker": "/admin/amux-settings?tab=decision-maker",
+    workers: "/admin/amux-settings?tab=workers",
   });
   assert.equal(adminRedirectTarget(ADMIN_AMUX_EXECUTION_LEGACY_TABS.halts, {tab:"halts", taskId:"task-1"}), "/admin/amux-settings?tab=safety&taskId=task-1");
-  assert.deepEqual(adminNavItemTabs("amux-settings").map(tab => tab.id), ["automatic-admission", "safety", "decision-maker", "analysis"]);
+  // The old Workers address keeps the request's own query and drops its stale tab.
+  assert.equal(
+    adminRedirectTarget(ADMIN_AMUX_EXECUTION_LEGACY_TABS.workers, { tab: "workers", from: "office" }),
+    "/admin/amux-settings?tab=workers&from=office"
+  );
+  assert.equal(adminNavItemTabs("amux-execution").some((tab) => tab.id === "workers"), false);
+  assert.deepEqual(adminNavItemTabs("amux-settings").map(tab => tab.id), ["automatic-admission", "workers", "safety", "decision-maker", "analysis"]);
+  const executionPage = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/amux-execution/page.tsx"), "utf8");
+  assert.ok(executionPage.includes("ADMIN_AMUX_EXECUTION_LEGACY_TABS[query.tab]"));
+  assert.ok(executionPage.includes("redirect(adminRedirectTarget(legacy, query))"));
+  assert.doesNotMatch(executionPage, /AmuxWorker/);
+  const settingsPage = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/amux-settings/page.tsx"), "utf8");
+  assert.ok(settingsPage.includes('tab.id === "workers"'));
 });
