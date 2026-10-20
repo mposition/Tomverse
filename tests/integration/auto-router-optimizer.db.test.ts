@@ -96,6 +96,8 @@ const bucket = async (provider: string, period: "provider-cost-day" | "provider-
   (await prisma.chatUsageBucket.findMany({ where: { key: `provider:${provider}`, period } }))
     .reduce((sum, row) => sum + Number(row.count), 0);
 
+const utcDay = (at: Date) => new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
+
 const seedCycle = (data: {
   status: string;
   createdAt?: Date;
