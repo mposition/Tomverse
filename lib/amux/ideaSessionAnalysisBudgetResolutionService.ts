@@ -11,6 +11,7 @@ import { auditRowActorKind, AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION,
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { readAmuxSessionBudgetClaimReceipt } from
   "./ideaSessionAnalysisBudgetClaimService.ts";
+import { resolveSessionUnknownClaim } from "./ideaSessionShadowBudgetCore.ts";
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -131,9 +132,11 @@ export async function readAmuxSessionBudgetResolution(tx: Tx, input: {
 }
 
 /** The owner records an exact claim read-back and local execution proof. Only
- * positive evidence of no CLI start releases zero; otherwise the full
- * reservation (bounded ceiling or Max shadow occupancy) is consumed. This
- * never retries or resumes that claim. */
+ * positive evidence of no CLI start releases zero. Otherwise a bounded claim
+ * consumes its full reservation, and a subscription (max_shadow) claim closes
+ * at zero with its shadow usage unknown: its headroom returns to the month
+ * instead of filling it (owner decision 2026-10-20). This never retries or
+ * resumes that claim. */
 export async function commitAmuxSessionBudgetUnknownResolution(tx: Tx, input: {
   claimId: string;
   session: Session;
@@ -218,14 +221,23 @@ export async function commitAmuxSessionBudgetUnknownResolution(tx: Tx, input: {
       now < claim.createdAt) {
     throw new AmuxSessionBudgetResolutionError("integrity_unavailable");
   }
-  const status = input.verification === "proven_not_started"
-    ? "released" as const : "owner_consumed" as const;
-  const settled = status === "released" ? BigInt(0) : claim.reservedMicroUsd;
+  const resolution = resolveSessionUnknownClaim({
+    budgetMode: claim.budgetMode, verification: input.verification,
+    reservedMicroUsd: claim.reservedMicroUsd.toString(),
+  });
+  if (resolution.decision !== "resolve") {
+    throw new AmuxSessionBudgetResolutionError("integrity_unavailable");
+  }
+  const status = resolution.status;
+  const settled = BigInt(resolution.settledMicroUsd);
+  const shadowUnknown = resolution.shadowUsage === "unknown";
   const auditId = await writeAdminAuditLog({
     tx, session: input.session, request: input.request,
     action: AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION,
     targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: claim.id,
-    summary: "Owner resolved one unknown v19 session CLI claim from exact read-back and local evidence.",
+    summary: shadowUnknown
+      ? "Owner closed one unknown subscription CLI claim; shadow usage unknown, headroom not counted."
+      : "Owner resolved one unknown v19 session CLI claim from exact read-back and local evidence.",
     metadata: { reservationId: claim.reservationId,
       previousResolutionAuditLogId: claim.resolutionAuditLogId,
       verification: input.verification,
@@ -235,13 +247,17 @@ export async function commitAmuxSessionBudgetUnknownResolution(tx: Tx, input: {
       reservedMicroUsd: claim.reservedMicroUsd.toString(),
       namespace: AMUX_V4_ANALYSIS_NAMESPACE,
       monthStart: claim.monthStart.toISOString(),
-      modelCallStarted: status === "released" ? false : "unproven" },
+      modelCallStarted: status === "released" ? false : "unproven",
+      // A subscription claim held headroom, not money. The database binds
+      // these three fields to a zero settlement (owner decision 2026-10-20).
+      ...(shadowUnknown ? { budgetMode: "max_shadow", shadowUsage: "unknown",
+        headroomCounted: false } : {}) },
   });
   const moved = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({
     where: { namespace: claim.namespace, monthStart: claim.monthStart,
       spentMicroUsd: window.spentMicroUsd,
       reservedMicroUsd: window.reservedMicroUsd },
-    data: { spentMicroUsd: { increment: settled },
+    data: { spentMicroUsd: { increment: BigInt(resolution.spentIncrementMicroUsd) },
       reservedMicroUsd: { decrement: claim.reservedMicroUsd } },
   });
   const updated = await tx.amuxIdeaSessionAnalysisBudgetClaim.updateMany({

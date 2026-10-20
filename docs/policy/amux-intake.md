@@ -66,6 +66,14 @@ API 키 호출, v4 분석, 다른 Agent, 사용자 크레딧과 실제 추가 �
    호출이 동시에 예산을 쓰지 못하게 한다. 이 점유액은 비용 상한이나 실제
    청구액이 아니라 동시성·중단 판단용이다. 결과 불명은 재호출하지 않고
    점유와 중지 상태를 유지하며, 기존 exact-ID 증거와 owner 판정으로만 닫는다.
+   owner가 CLI 미시작을 증명하지 못해(`not_proven`) 닫을 때도 구독 채널은 실제 돈이
+   나가지 않으므로 점유액을 그 달 사용량으로 세지 않는다(운영자 결정 2026-10-20).
+   claim은 `owner_consumed`·정산 0으로 닫히고 점유한 여유분은 그 달로 돌아가며, 같은
+   트랜잭션의 owner 감사에 `shadowUsage: unknown`·`headroomCounted: false`를 남긴다. DB
+   트리거가 새 정리마다 이 감사와 정산 0을 확인한다. 이 결정 전에 예약 전액으로 정리된
+   행과 그 감사는 고쳐 쓰지 않는다. bounded(API) claim은 그대로 예약 전액을 소비로 둔다.
+   앱이 쓰기 전에 거절한 청구(409 `budget_hold`·`not_ready` 등)는 runner가 exact-ID
+   재조회로 claim이 없음을 확인하면 결과 불명으로 보지 않고 halt 표식을 남기지 않는다.
    구독 인증 증거는 Ubuntu의 고정 launcher가 그 채널의 로그인 파일(Claude Max 전용
    OAuth 토큰, Codex `~/.codex/auth.json`, Copilot `~/.copilot/config.json`, Cursor
    `~/.config/cursor/auth.json`)의 소유자·권한·형식·만료를

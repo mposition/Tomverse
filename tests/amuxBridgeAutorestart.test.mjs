@@ -32,13 +32,15 @@ const noBash = bash
   ? false
   : "no usable bash: git's installation has no bin/bash.exe or usr/bin/bash.exe, and PATH offers only the WSL launcher";
 
-const MAIN = "tomverse-bridge.service";
-const IMPL = "tomverse-amux-v22-bridge@claude-impl.service";
-const REVIEW = "tomverse-amux-v22-bridge@claude-review.service";
 const SIDECAR = "tomverse-amux-v22-sidecar@claude-impl.service";
 // Orchestration policy version 55: one bridge per worker, from one template.
 const WORKER_CODEX = "tomverse-amux-bridge@codex-impl.service";
 const WORKER_CLAUDE = "tomverse-amux-bridge@claude-impl.service";
+const WORKER_REVIEW = "tomverse-amux-bridge@claude-review.service";
+// Stage S4 removed these from the host. They stay here only to prove that the
+// script and the polkit rule no longer know them.
+const REMOVED_MAIN = "tomverse-bridge.service";
+const REMOVED_V22 = "tomverse-amux-v22-bridge@claude-impl.service";
 
 const invocation = (n) => n.toString(16).padStart(32, "0");
 
@@ -134,14 +136,16 @@ const HALT = {
 
 /**
  * `systemctl` as the host answers it. FAKE_UNITS holds `unit|state|status|id`
- * entries separated by spaces; `list-units` prints every v22 one, `show`
- * answers the three properties the script reads, and `restart` is logged and
- * answered with FAKE_RESTART_STATUS.
+ * entries separated by spaces; `list-units` prints every one of them (the
+ * script itself keeps only the names it knows) or fails when FAKE_LIST_FAIL
+ * is 1, `show` answers the three properties the script reads, and `restart`
+ * is logged and answered with FAKE_RESTART_STATUS.
  */
 const SYSTEMCTL_STUB = [
   "systemctl() {",
   '  if [ "$1" = list-units ]; then',
-  '    for entry in $FAKE_UNITS; do unit=${entry%%|*}; [ "$unit" = tomverse-bridge.service ] || printf "%s loaded failed failed fake\\n" "$unit"; done',
+  '    if [ "$FAKE_LIST_FAIL" = 1 ]; then printf "Failed to list units: Access denied\\n" >&2; return 1; fi',
+  '    for entry in $FAKE_UNITS; do unit=${entry%%|*}; printf "%s loaded failed failed fake\\n" "$unit"; done',
   "    return 0",
   "  fi",
   '  if [ "$1" = show ]; then',
@@ -170,6 +174,7 @@ const run = ({
   appUp = true,
   restartStatus = 0,
   flip = null,
+  listFails = false,
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-autorestart-"));
   try {
@@ -193,6 +198,7 @@ const run = ({
         FAKE_AMUX_STATUS: amuxUp ? "0" : "22",
         FAKE_APP_STATUS: appUp ? "0" : "22",
         FAKE_RESTART_STATUS: String(restartStatus),
+        FAKE_LIST_FAIL: listFails ? "1" : "0",
         FAKE_FLIP_UNIT: flip?.unit ?? "",
         FAKE_FLIP_AFTER: String(flip?.after ?? 0),
       },
@@ -216,7 +222,7 @@ const halted = (unit, n) => [unit, "failed", "3", invocation(n)];
 const active = (unit) => [unit, "active", "0", invocation(99)];
 
 test("nothing halted: no health check, no restart, no output", { skip: noBash }, () => {
-  const result = run({ units: [active(MAIN), active(IMPL)] });
+  const result = run({ units: [active(WORKER_CODEX), active(WORKER_CLAUDE)] });
   assert.equal(result.status, 0, result.output);
   assert.deepEqual(result.restarts, []);
   assert.deepEqual(result.curls, []);
@@ -224,36 +230,39 @@ test("nothing halted: no health check, no restart, no output", { skip: noBash },
 });
 
 test("a bridge halted with worker_runtime_lease_lost is restarted", { skip: noBash }, () => {
-  const result = run({ units: [halted(MAIN, 1)], journals: { [invocation(1)]: HALT.leaseLost } });
+  const result = run({ units: [halted(WORKER_CODEX, 1)], journals: { [invocation(1)]: HALT.leaseLost } });
   assert.equal(result.status, 0, result.output);
-  assert.deepEqual(result.restarts, [MAIN]);
-  assert.match(result.output, /tomverse-bridge\.service halted with cause=worker_runtime_lease_lost; restarted/);
+  assert.deepEqual(result.restarts, [WORKER_CODEX]);
+  assert.match(
+    result.output,
+    /tomverse-amux-bridge@codex-impl\.service halted with cause=worker_runtime_lease_lost; restarted/
+  );
 });
 
 test("a tick that failed after committing nothing is restarted", { skip: noBash }, () => {
   const result = run({
-    units: [active(MAIN), halted(IMPL, 2)],
+    units: [active(WORKER_CODEX), halted(WORKER_CLAUDE, 2)],
     journals: { [invocation(2)]: HALT.tickNothingCommitted },
   });
   assert.equal(result.status, 0, result.output);
-  assert.deepEqual(result.restarts, [IMPL]);
+  assert.deepEqual(result.restarts, [WORKER_CLAUDE]);
   assert.match(result.output, /cause=tick_failed_http_500; restarted/);
 });
 
 test("a restart is asked for without waiting on the unit", { skip: noBash }, () => {
-  const dir = run({ units: [halted(MAIN, 1)], journals: { [invocation(1)]: HALT.leaseLost } });
-  assert.deepEqual(dir.restarts, [MAIN]);
+  const dir = run({ units: [halted(WORKER_CODEX, 1)], journals: { [invocation(1)]: HALT.leaseLost } });
+  assert.deepEqual(dir.restarts, [WORKER_CODEX]);
   assert.match(script, /systemctl restart --no-block "\$unit"/);
 });
 
 test("every harmless line the bridges print still allows a restart", { skip: noBash }, () => {
-  const result = run({ units: [halted(IMPL, 2)], journals: { [invocation(2)]: HALT.harmlessNoise } });
-  assert.deepEqual(result.restarts, [IMPL], result.output);
+  const result = run({ units: [halted(WORKER_CLAUDE, 2)], journals: { [invocation(2)]: HALT.harmlessNoise } });
+  assert.deepEqual(result.restarts, [WORKER_CLAUDE], result.output);
 });
 
 test("a per-worker bridge halted for an approved cause is restarted", { skip: noBash }, () => {
   const result = run({
-    units: [active(MAIN), halted(WORKER_CODEX, 6), halted(WORKER_CLAUDE, 7)],
+    units: [active(WORKER_REVIEW), halted(WORKER_CODEX, 6), halted(WORKER_CLAUDE, 7)],
     journals: {
       [invocation(6)]: HALT.workerScopeThenLeaseLost,
       [invocation(7)]: HALT.tickNothingCommitted,
@@ -276,18 +285,58 @@ test("a per-worker bridge halted for an unknown outcome stays halted", { skip: n
   assert.match(result.output, /tomverse-amux-bridge@claude-impl\.service halted; cause=dispatch_outcome_unknown/);
 });
 
-test("the per-worker bridges are judged beside the older units", () => {
+test("only the per-worker bridges are judged", () => {
+  assert.match(script, /^unit_patterns=\('tomverse-amux-bridge@\*\.service'\)$/m);
   assert.match(
     script,
-    /^unit_patterns=\('tomverse-amux-v22-bridge@\*\.service' 'tomverse-amux-bridge@\*\.service'\)$/m
-  );
-  assert.match(
-    script,
-    /^unit_name='\^\(tomverse-amux-v22-bridge\|tomverse-amux-bridge\)@\[A-Za-z0-9_\.-\]\+\\\.service\$'$/m
+    /^unit_name='\^tomverse-amux-bridge@\[A-Za-z0-9_\.-\]\+\\\.service\$'$/m
   );
   assert.match(script, /"\$\{unit_patterns\[@\]\}"/);
-  // Never a sidecar.
+  // Never a sidecar, and nothing is looked up by a fixed name any more.
   assert.doesNotMatch(script.match(/^unit_patterns=.*$/m)[0], /sidecar/);
+  assert.doesNotMatch(script, /main_unit/);
+  assert.doesNotMatch(script, /^[^#\n]*tomverse-bridge\.service/m);
+  assert.doesNotMatch(script, /^[^#\n]*tomverse-amux-v22-bridge/m);
+});
+
+// Stage S4 removed tomverse-bridge.service and tomverse-amux-v22-bridge@ from
+// the host. A listing that still names one (a stale unit file) is not a bridge
+// this script restarts, however cleanly it halted.
+test("the removed units are never restarted, even when listed and halted", { skip: noBash }, () => {
+  const result = run({
+    units: [halted(REMOVED_MAIN, 1), halted(REMOVED_V22, 2), active(WORKER_CODEX)],
+    journals: { [invocation(1)]: HALT.leaseLost, [invocation(2)]: HALT.leaseLost },
+  });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.restarts, []);
+  assert.deepEqual(result.curls, []);
+  assert.equal(result.output, "");
+});
+
+test("a sidecar halted with an approved cause is not restarted", { skip: noBash }, () => {
+  const result = run({
+    units: [halted(SIDECAR, 1)],
+    journals: { [invocation(1)]: HALT.leaseLost },
+  });
+  assert.deepEqual(result.restarts, []);
+  assert.deepEqual(result.curls, []);
+});
+
+// With the main unit gone there is no fixed name to fall back to: a listing
+// that cannot be read leaves the bridge units unknown, so nothing restarts.
+test("an unreadable unit list restarts nothing and says so", { skip: noBash }, () => {
+  const result = run({
+    units: [halted(WORKER_CODEX, 1)],
+    journals: { [invocation(1)]: HALT.leaseLost },
+    listFails: true,
+  });
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(result.restarts, []);
+  assert.deepEqual(result.curls, []);
+  assert.match(
+    result.output,
+    /the bridge instance list is unreadable \(systemctl: Failed to list units: Access denied\); no restart this run/
+  );
 });
 
 test("the --worker scope lines above are the ones the bridge prints", () => {
@@ -327,7 +376,7 @@ for (const [name, lines, reason] of [
   ["an empty journal", [], /0 halt lines in the halted run/],
 ]) {
   test(`${name} stays halted`, { skip: noBash }, () => {
-    const result = run({ units: [halted(REVIEW, 3)], journals: { [invocation(3)]: lines } });
+    const result = run({ units: [halted(WORKER_REVIEW, 3)], journals: { [invocation(3)]: lines } });
     assert.equal(result.status, 0, result.output);
     assert.deepEqual(result.restarts, []);
     assert.match(result.output, reason);
@@ -336,7 +385,7 @@ for (const [name, lines, reason] of [
 }
 
 test("a run whose invocation id cannot be read stays halted", { skip: noBash }, () => {
-  const result = run({ units: [[MAIN, "failed", "3", ""]] });
+  const result = run({ units: [[WORKER_CODEX, "failed", "3", ""]] });
   assert.deepEqual(result.restarts, []);
   assert.match(result.output, /no invocation id\), left halted/);
 });
@@ -345,7 +394,7 @@ test("a unit that failed for any reason but a halt is left to systemd", { skip: 
   // Exit 1 (for example a refused registration) is restarted by the unit's
   // own Restart=on-failure; a unit stopped by hand is inactive, not failed.
   const result = run({
-    units: [[MAIN, "failed", "1", invocation(4)], [IMPL, "inactive", "0", invocation(5)]],
+    units: [[WORKER_CODEX, "failed", "1", invocation(4)], [WORKER_CLAUDE, "inactive", "0", invocation(5)]],
     journals: { [invocation(4)]: HALT.leaseLost, [invocation(5)]: HALT.leaseLost },
   });
   assert.deepEqual(result.restarts, []);
@@ -354,7 +403,7 @@ test("a unit that failed for any reason but a halt is left to systemd", { skip: 
 
 test("no restart while the local AMUX server does not answer", { skip: noBash }, () => {
   const result = run({
-    units: [halted(MAIN, 1)],
+    units: [halted(WORKER_CODEX, 1)],
     journals: { [invocation(1)]: HALT.leaseLost },
     amuxUp: false,
   });
@@ -365,7 +414,7 @@ test("no restart while the local AMUX server does not answer", { skip: noBash },
 
 test("no restart while the Tomverse app does not answer", { skip: noBash }, () => {
   const result = run({
-    units: [halted(MAIN, 1)],
+    units: [halted(WORKER_CODEX, 1)],
     journals: { [invocation(1)]: HALT.leaseLost },
     appUp: false,
   });
@@ -375,7 +424,7 @@ test("no restart while the Tomverse app does not answer", { skip: noBash }, () =
 
 test("each halted bridge is judged on its own", { skip: noBash }, () => {
   const result = run({
-    units: [halted(MAIN, 1), halted(IMPL, 2), halted(REVIEW, 3), active(SIDECAR)],
+    units: [halted(WORKER_CODEX, 1), halted(WORKER_CLAUDE, 2), halted(WORKER_REVIEW, 3), active(SIDECAR)],
     journals: {
       [invocation(1)]: HALT.leaseLost,
       [invocation(2)]: HALT.dispatchUnknown,
@@ -383,7 +432,7 @@ test("each halted bridge is judged on its own", { skip: noBash }, () => {
     },
   });
   assert.equal(result.status, 0, result.output);
-  assert.deepEqual(result.restarts, [MAIN, REVIEW]);
+  assert.deepEqual(result.restarts, [WORKER_CODEX, WORKER_REVIEW]);
   assert.match(result.output, /claude-impl\.service halted; cause=dispatch_outcome_unknown/);
 });
 
@@ -394,23 +443,23 @@ test("a unit that changed while it was being checked is left alone", { skip: noB
   // Three reads judge it halted (ActiveState, ExecMainStatus, InvocationID);
   // the fourth, right before the restart, sees it running again.
   const result = run({
-    units: [halted(MAIN, 1)],
+    units: [halted(WORKER_CODEX, 1)],
     journals: { [invocation(1)]: HALT.leaseLost },
-    flip: { unit: MAIN, after: 3 },
+    flip: { unit: WORKER_CODEX, after: 3 },
   });
   assert.equal(result.status, 0, result.output);
   assert.deepEqual(result.restarts, []);
-  assert.match(result.output, /tomverse-bridge\.service changed while it was being checked; left alone/);
+  assert.match(result.output, /tomverse-amux-bridge@codex-impl\.service changed while it was being checked; left alone/);
 });
 
 test("a refused restart is reported and the run goes on", { skip: noBash }, () => {
   const result = run({
-    units: [halted(MAIN, 1), halted(IMPL, 2)],
+    units: [halted(WORKER_CODEX, 1), halted(WORKER_CLAUDE, 2)],
     journals: { [invocation(1)]: HALT.leaseLost, [invocation(2)]: HALT.leaseLost },
     restartStatus: 1,
   });
   assert.equal(result.status, 0, result.output);
-  assert.deepEqual(result.restarts, [MAIN, IMPL]);
+  assert.deepEqual(result.restarts, [WORKER_CODEX, WORKER_CLAUDE]);
   assert.equal(result.output.match(/the restart was refused/g)?.length, 2);
 });
 
@@ -448,8 +497,7 @@ const polkitDecision = (user, unit, verb, actionId = "org.freedesktop.systemd1.m
 };
 
 test("polkit lets the account restart the bridge units", () => {
-  for (const unit of [MAIN, IMPL, REVIEW, "tomverse-amux-v22-bridge@codex-x.1.service",
-    WORKER_CODEX, WORKER_CLAUDE]) {
+  for (const unit of [WORKER_CODEX, WORKER_CLAUDE, WORKER_REVIEW, "tomverse-amux-bridge@codex-x.1.service"]) {
     assert.equal(polkitDecision("tomverse-bridge-autorestart", unit, "restart"), "yes", unit);
   }
 });
@@ -457,8 +505,13 @@ test("polkit lets the account restart the bridge units", () => {
 test("polkit grants nothing else", () => {
   const user = "tomverse-bridge-autorestart";
   for (const verb of ["start", "stop", "reload", "reload-or-restart", "try-restart"]) {
-    assert.equal(polkitDecision(user, MAIN, verb), "no answer", verb);
     assert.equal(polkitDecision(user, WORKER_CODEX, verb), "no answer", `${verb} ${WORKER_CODEX}`);
+    assert.equal(polkitDecision(user, WORKER_REVIEW, verb), "no answer", `${verb} ${WORKER_REVIEW}`);
+  }
+  // Stage S4: the older bridge units are gone from the host, and a unit file
+  // that reappears under one of their names is not something to restart.
+  for (const unit of [REMOVED_MAIN, REMOVED_V22, "tomverse-amux-v22-bridge@codex-x.1.service"]) {
+    assert.equal(polkitDecision(user, unit, "restart"), "no answer", unit);
   }
   for (const unit of [SIDECAR, "ssh.service", "tomverse-bridge-watchdog.service",
     "tomverse-amux-v22-bridge@x.service.d", "xtomverse-bridge.service",
@@ -468,10 +521,10 @@ test("polkit grants nothing else", () => {
     undefined]) {
     assert.equal(polkitDecision(user, unit, "restart"), "no answer", String(unit));
   }
-  assert.equal(polkitDecision("tommy", MAIN, "restart"), "no answer");
-  assert.equal(polkitDecision("tomverse-bridge-watchdog", MAIN, "restart"), "no answer");
+  assert.equal(polkitDecision("tommy", WORKER_CODEX, "restart"), "no answer");
+  assert.equal(polkitDecision("tomverse-bridge-watchdog", WORKER_CODEX, "restart"), "no answer");
   assert.equal(
-    polkitDecision(user, MAIN, "restart", "org.freedesktop.systemd1.manage-unit-files"),
+    polkitDecision(user, WORKER_CODEX, "restart", "org.freedesktop.systemd1.manage-unit-files"),
     "no answer"
   );
 });
@@ -490,10 +543,9 @@ test("the service runs as its own account with journal read access and no creden
 test("the installer proves the rule's reach before it enables the timer", () => {
   const enable = install.indexOf("systemctl enable --now tomverse-bridge-autorestart.timer");
   for (const check of [
-    "granted tomverse-bridge.service restart",
-    "granted tomverse-amux-v22-bridge@claude-impl.service restart",
     "granted tomverse-amux-bridge@codex-impl.service restart",
-    "refused tomverse-bridge.service stop",
+    "refused tomverse-bridge.service restart",
+    "refused tomverse-amux-v22-bridge@claude-impl.service restart",
     "refused tomverse-amux-bridge@codex-impl.service stop",
     "refused tomverse-amux-bridge@codex-impl.service start",
     "refused ssh.service restart",
@@ -502,6 +554,9 @@ test("the installer proves the rule's reach before it enables the timer", () => 
     const at = install.indexOf(check);
     assert.ok(at > 0 && at < enable, check);
   }
+  // Nothing is granted to the removed units.
+  assert.doesNotMatch(install, /^granted tomverse-bridge\.service/m);
+  assert.doesNotMatch(install, /^granted tomverse-amux-v22-bridge@/m);
   assert.match(install, /test "\$\(stat -c %U "\$src"\)" != tommy/);
   // Review r-20261013-231119-e051d6: an explicit failure exits through fail(),
   // which the ERR trap never sees. The timer goes off before the first change

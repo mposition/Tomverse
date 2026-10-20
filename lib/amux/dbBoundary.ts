@@ -317,13 +317,6 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // setup + the derived worker catalog in one statement (orchestration policy
-  // version 35, section 4: the bridge session list) + fence
-  workerSessionListRead: {
-    operation: "worker_session_list_read",
-    prismaCallCeiling: 3,
-    isolation: "read",
-  },
-  // setup + the derived worker catalog in one statement (orchestration policy
   // version 55, section 1: the bridge scope) + fence
   workerBridgeScopeRead: {
     operation: "worker_bridge_scope_read",

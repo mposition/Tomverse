@@ -201,6 +201,38 @@ test("a queue answer without a claim is reported as is", () =>
     }
   }));
 
+test("a claim the app refused before writing is reported with its reason, not as halted", () =>
+  withSwitches(async () => {
+    const fake = steps({ claim: async () => ({ kind: "budget_hold",
+      reason: "monthly_shadow_reached", retryWrite: false }) });
+    const result = await runAmuxV19MaxSessionCycleOnce({ origin }, fake.steps);
+    assert.deepEqual(result, { kind: "budget_hold", stage: "claim",
+      reason: "monthly_shadow_reached" });
+    assert.deepEqual(fake.calls, []);
+    assert.deepEqual(amuxV19MaxSessionCycleStatus(result), { line:
+      "AMUX_V19_MAX_SESSION_CYCLE_budget_hold stage=claim reason=monthly_shadow_reached\n",
+    exitCode: 0 });
+    const noisy = await runAmuxV19MaxSessionCycleOnce({ origin }, steps({
+      claim: async () => ({ kind: "budget_hold", reason: "Bearer x-1" }) }).steps);
+    assert.deepEqual(noisy, { kind: "budget_hold", stage: "claim" });
+  }));
+
+test("pre-write refusals are quiet except the two that need the operator", () => {
+  for (const kind of ["budget_hold", "not_ready", "claim_disabled"]) {
+    assert.deepEqual(amuxV19MaxSessionCycleStatus({ kind, stage: "claim" }),
+      { line: `AMUX_V19_MAX_SESSION_CYCLE_${kind} stage=claim\n`, exitCode: 0 });
+  }
+  for (const kind of ["budget_unavailable", "integrity_unavailable"]) {
+    assert.deepEqual(amuxV19MaxSessionCycleStatus({ kind, stage: "claim" }),
+      { line: `AMUX_V19_MAX_SESSION_CYCLE_${kind} stage=claim\n`, exitCode: 1 });
+  }
+  // A reason is printed only for a refusal and only as a fixed word.
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "not_ready", stage: "claim",
+    reason: "Bearer x-1" }).line, "AMUX_V19_MAX_SESSION_CYCLE_not_ready stage=claim\n");
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "halted",
+    reason: "monthly_shadow_reached" }).line, "AMUX_V19_MAX_SESSION_CYCLE_halted\n");
+});
+
 test("the status line carries fixed words only", () => {
   assert.deepEqual(amuxV19MaxSessionCycleStatus({ kind: "recorded",
     claimId: identity.claimId, haltReleased: true, planState: "plan_ready",

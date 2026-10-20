@@ -121,3 +121,102 @@ test("absent readback after lost POST remains outcome unknown", {
   assert.equal(writes, 1);
   assert.equal(reads, 1);
 }));
+
+// The 409 path runs on any platform: the Ubuntu sign-in preflight is replaced
+// by a fixed ready answer, and only the POST and its one readback are faked.
+const prepareReady = async (input) => ({ kind: "ready",
+  identity: { ...input, provider: "anthropic" },
+  authVerifiedAt: "2026-10-20T00:00:00.000Z", authProof: "a".repeat(64),
+  authProfile: "claude-max-oauth" });
+
+async function claimWith({ post, receipt }) {
+  const calls = { writes: 0, reads: 0 };
+  const result = await claimAmuxV19MaxShadowBudgetOnce({ origin, identity,
+    fetchImpl: async (_url, options) => {
+      if (options.method === "POST") {
+        calls.writes++;
+        return post();
+      }
+      calls.reads++;
+      assert.equal(options.method, "GET");
+      return receipt();
+    },
+  }, prepareReady);
+  return { result, ...calls };
+}
+
+const refusal = (body) => () => Response.json(body, { status: 409 });
+const absent = () => Response.json({ status: "absent" });
+
+test("a 409 pre-write refusal confirmed absent is that refusal, not an unknown outcome",
+  () => withLauncherEnv(async () => {
+    for (const [body, expected] of [
+      [{ error: "budget_hold", reason: "monthly_shadow_reached" },
+        { kind: "budget_hold", reason: "monthly_shadow_reached" }],
+      [{ error: "not_ready" }, { kind: "not_ready" }],
+      [{ error: "budget_unavailable" }, { kind: "budget_unavailable" }],
+      [{ error: "integrity_unavailable" }, { kind: "integrity_unavailable" }],
+      [{ available: false, reason: "session_budget_claim_disabled" },
+        { kind: "claim_disabled" }],
+    ]) {
+      const { result, writes, reads } = await claimWith({
+        post: refusal(body), receipt: absent });
+      assert.deepEqual(result, { ...expected, retryWrite: false },
+        JSON.stringify(body));
+      assert.equal(writes, 1);
+      assert.equal(reads, 1, "the refusal is still checked by exact readback");
+    }
+  }));
+
+test("a 409 refusal whose readback finds the claim in flight is the recovered claim",
+  () => withLauncherEnv(async () => {
+    const { result, writes, reads } = await claimWith({
+      post: refusal({ error: "budget_hold", reason: "monthly_shadow_reached" }),
+      receipt: () => Response.json({ status: "committed",
+        claimId: identity.claimId, claimStatus: "in_flight" }) });
+    assert.deepEqual(result, { kind: "claimed", claimId: identity.claimId,
+      reservationId: identity.reservationId, requestId: identity.requestId,
+      reservedMicroUsd: null, recovered: true, retryWrite: false });
+    assert.equal(writes, 1);
+    assert.equal(reads, 1);
+  }));
+
+test("a 409 refusal without a clean absent readback stays outcome unknown",
+  () => withLauncherEnv(async () => {
+    const hold = refusal({ error: "budget_hold", reason: "monthly_shadow_reached" });
+    for (const [receipt, receiptStatus] of [
+      [() => Response.json({ status: "partial" }), "partial"],
+      [() => Response.json({ error: "outcome_unknown" }, { status: 503 }), null],
+      [() => { throw new Error("synthetic readback loss"); }, null],
+      [() => Response.json({ status: "committed", claimId: identity.claimId,
+        claimStatus: "outcome_unknown" }), null],
+    ]) {
+      const { result, writes, reads } = await claimWith({ post: hold, receipt });
+      assert.deepEqual(result, { kind: "outcome_unknown", receiptStatus,
+        retryWrite: false });
+      assert.equal(writes, 1);
+      assert.equal(reads, 1);
+    }
+  }));
+
+test("only the route's exact 409 bodies count as refusals; a lost or 5xx answer stays unknown",
+  () => withLauncherEnv(async () => {
+    for (const post of [
+      refusal({ error: "outcome_unknown" }),
+      refusal({ error: "budget_hold", reason: "Bearer x-1" }),
+      refusal({ error: "budget_hold", reason: "monthly_shadow_reached", extra: 1 }),
+      refusal({ error: "not_ready", reason: 7 }),
+      refusal({ available: false, reason: "session_budget_claim_read_disabled" }),
+      refusal(["not_ready"]),
+      () => new Response("not_ready", { status: 409,
+        headers: { "content-type": "text/plain" } }),
+      () => Response.json({ error: "outcome_unknown" }, { status: 503 }),
+      () => { throw new Error("synthetic lost response"); },
+    ]) {
+      const { result, writes, reads } = await claimWith({ post, receipt: absent });
+      assert.deepEqual(result, { kind: "outcome_unknown",
+        receiptStatus: "absent", retryWrite: false });
+      assert.equal(writes, 1);
+      assert.equal(reads, 1);
+    }
+  }));

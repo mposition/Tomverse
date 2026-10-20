@@ -79,6 +79,47 @@ export function assessSessionShadowBudget(raw: unknown): SessionShadowBudgetDeci
     amountMeaning: "cli_shadow_headroom_not_ceiling" };
 }
 
+/** The owner's closure of one outcome_unknown session claim. Positive proof
+ * that the CLI never started releases the hold in either mode. Without that
+ * proof a bounded claim consumes its full reservation (its API ceiling may
+ * have been spent). A subscription (max_shadow) claim spends no money and its
+ * held amount is headroom, not usage: its shadow usage stays unknown and the
+ * headroom is returned instead of being counted as this month's usage (owner
+ * decision 2026-10-20). Either way the claim closes as owner_consumed and is
+ * never retried. */
+export type SessionUnknownResolution = {
+  status: "released" | "owner_consumed";
+  settledMicroUsd: string;
+  spentIncrementMicroUsd: string;
+  shadowUsage: "unknown" | null;
+};
+
+export function resolveSessionUnknownClaim(raw: unknown):
+  | ({ decision: "resolve" } & SessionUnknownResolution)
+  | { decision: "refuse" } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { decision: "refuse" };
+  }
+  const value = raw as Record<string, unknown>;
+  if (Reflect.ownKeys(value).length !== 3 ||
+      (value.budgetMode !== "bounded" && value.budgetMode !== "max_shadow") ||
+      (value.verification !== "proven_not_started" &&
+       value.verification !== "not_proven") ||
+      !validAmount(value.reservedMicroUsd) ||
+      BigInt(value.reservedMicroUsd) === BigInt(0)) return { decision: "refuse" };
+  if (value.verification === "proven_not_started") {
+    return { decision: "resolve", status: "released", settledMicroUsd: "0",
+      spentIncrementMicroUsd: "0", shadowUsage: null };
+  }
+  if (value.budgetMode === "max_shadow") {
+    return { decision: "resolve", status: "owner_consumed", settledMicroUsd: "0",
+      spentIncrementMicroUsd: "0", shadowUsage: "unknown" };
+  }
+  return { decision: "resolve", status: "owner_consumed",
+    settledMicroUsd: value.reservedMicroUsd,
+    spentIncrementMicroUsd: value.reservedMicroUsd, shadowUsage: null };
+}
+
 /** Measured API-equivalent cost is retained even when it exceeds the hold. */
 export function settleSessionShadowUsage(raw: unknown):
   | { decision: "measured"; settledMicroUsd: string;

@@ -189,6 +189,9 @@ export function UnknownClaimRow({ row, onStatus }: {
   };
 
   const canConsume = readback?.status === "outcome_unknown" && confirmed && !busy && !pending;
+  // A subscription claim held headroom, not money: closing it returns that
+  // headroom instead of counting it as used (owner decision 2026-10-20).
+  const shadow = row.budgetMode === "max_shadow";
   return <li className="space-y-2 rounded-lg border border-zinc-700 p-3"
     data-testid="amux-session-budget-unknown-row" aria-labelledby={`${rowId}-title`}>
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
@@ -206,7 +209,7 @@ export function UnknownClaimRow({ row, onStatus }: {
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={confirmed} disabled={busy}
           onChange={(event) => setConfirmed(event.target.checked)} className="size-5" />{m.confirm}</label>
-      <p className="text-zinc-400">{m.consumeHint}</p>
+      <p className="text-zinc-400">{shadow ? m.consumeHintShadow : m.consumeHint}</p>
     </> : null}
     <div className="flex flex-wrap gap-2">
       <button type="button" disabled={busy} onClick={() => void readBack()}
@@ -214,10 +217,11 @@ export function UnknownClaimRow({ row, onStatus }: {
       {readback?.status === "outcome_unknown" && !pending ? <button type="button"
         disabled={!canConsume} onClick={() => void consume()}
         className="min-h-11 rounded-lg border border-red-500 px-4 text-red-300 disabled:opacity-50">
-        {m.consume}</button> : null}
+        {shadow ? m.consumeShadow : m.consume}</button> : null}
     </div>
     {pending ? <p role="alert">{m.unknown}</p> : null}
-    {notice ? <p role={notice === "resolved" ? "status" : "alert"}>{m[notice]}</p> : null}
+    {notice ? <p role={notice === "resolved" ? "status" : "alert"}>
+      {notice === "resolved" && shadow ? m.resolvedShadow : m[notice]}</p> : null}
     {evidence && (pending || notice === "resolved") ? <div className="space-y-1">
       <p>{m.evidence} <span className="font-mono break-all">{evidence.digest}</span></p>
       <pre className="whitespace-pre-wrap break-all font-mono text-xs text-zinc-400">{evidence.text}</pre>

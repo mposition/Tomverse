@@ -19,8 +19,10 @@ test("v19 unknown-cost resolution is owner-only, step-up, same-origin and dark",
   assert.match(service, /assertRecentAdminAuthentication\(input\.session\)/);
   assert.match(service, /readback\.readbackDigest !== input\.readbackDigest/);
   assert.match(service, /writeAdminAuditLog/);
-  assert.match(service, /verification === "proven_not_started"/);
+  assert.match(service, /resolveSessionUnknownClaim\(\{\s+budgetMode: claim\.budgetMode, verification: input\.verification,/);
   assert.match(service, /claim\.reservedMicroUsd/);
+  // A subscription closure records why its headroom was not counted.
+  assert.match(service, /shadowUsage: "unknown",\s+headroomCounted: false/);
   assert.doesNotMatch(route + service,
     /CreditAccount|CreditLot|ChatCost|Conversation/);
 });
