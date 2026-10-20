@@ -15,6 +15,8 @@ import {
 } from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import {
+    CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS,
+    CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS,
     CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
     CHAT_IMAGE_INTENT_SYSTEM,
     CHAT_IMAGE_INTENT_TIMEOUT_MS,
@@ -145,10 +147,17 @@ export async function detectChatImageRequest(input: {
             ? await readPreviousImagePrompt(input.userId, input.conversationId)
             : null;
     const prompt = chatImageIntentUserMessage(input.text, candidates, previous);
+    // A follow-up writes a whole prompt, not just a decision.
+    const maxOutputTokens = previous
+        ? CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS
+        : CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS;
+    const timeoutMs = previous
+        ? CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS
+        : CHAT_IMAGE_INTENT_TIMEOUT_MS;
     const worstCase = autoLlmRouterWorstCaseMicroUsd({
         system: CHAT_IMAGE_INTENT_SYSTEM,
         prompt,
-        maxOutputTokens: CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens,
         ...prices,
     });
     const reservedAt = new Date();
@@ -172,9 +181,9 @@ export async function detectChatImageRequest(input: {
             model: getActiveAiModel(model),
             system: CHAT_IMAGE_INTENT_SYSTEM,
             prompt,
-            maxOutputTokens: CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
+            maxOutputTokens,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(CHAT_IMAGE_INTENT_TIMEOUT_MS),
+            abortSignal: AbortSignal.timeout(timeoutMs),
             output: Output.object({
                 schema: jsonSchema(
                     chatImageIntentOutputSchema(candidates) as unknown as JSONSchema7

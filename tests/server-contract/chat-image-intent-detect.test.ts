@@ -22,7 +22,7 @@ let imageTriageOn = true;
 let budgetHeld = true;
 let modelOutput: unknown = { image: true, modelId: "gpt-image-2", preset: "draft" };
 let callThrows = false;
-const calls: Array<{ prompt: string }> = [];
+const calls: Array<{ prompt: string; maxOutputTokens?: number }> = [];
 const reserved: number[] = [];
 let mocksInstalled = false;
 // The conversation's recent messages, newest first, and the image prompt.
@@ -53,9 +53,9 @@ async function load() {
     mock.module("ai", {
       namedExports: {
         ...realAi,
-        generateText: async (options: { prompt: string }) => {
+        generateText: async (options: { prompt: string; maxOutputTokens?: number }) => {
           if (callThrows) throw new Error("timeout");
-          calls.push({ prompt: options.prompt });
+          calls.push({ prompt: options.prompt, maxOutputTokens: options.maxOutputTokens });
           return { output: modelOutput, usage: { inputTokens: 100, outputTokens: 10 } };
         },
       },
@@ -197,6 +197,8 @@ test("a follow-up sees the previous image and comes back with its rewrite", asyn
     preset: "draft",
     prompt: "파란색의 간단한 고양이 아이콘",
   });
+  // Room to write the whole new prompt, and the budget hold sized to it.
+  assert.equal(calls[0].maxOutputTokens, 2_000);
   assert.match(calls[0].prompt, /Previous image:\n간단한 고양이 아이콘 그려줘\n\nMessage:\n더 파랗게 해줘$/);
 });
 
@@ -213,4 +215,5 @@ test("without a recent image answer, no rewrite is taken", async () => {
   });
   assert.equal(decision.image && decision.prompt, null);
   assert.doesNotMatch(calls[0].prompt, /Previous image/);
+  assert.equal(calls[0].maxOutputTokens, 400);
 });

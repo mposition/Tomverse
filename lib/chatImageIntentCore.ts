@@ -38,8 +38,18 @@ export const CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS = 400;
  */
 export const CHAT_IMAGE_INTENT_TIMEOUT_MS = 8_000;
 
-/** The composer's wait: the server's deadline plus the round trip. */
-export const CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS = 10_000;
+/**
+ * A follow-up ("make it bluer") writes the whole new prompt as well as the
+ * decision, so it gets room for up to CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS of
+ * any script (a Korean character can be more than one token) plus reasoning,
+ * and the time to write it. Used only when a previous image is shown; the
+ * worst-case budget hold is taken at this ceiling then.
+ */
+export const CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS = 2_000;
+export const CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS = 12_000;
+
+/** The composer's wait: the longest server deadline plus the round trip. */
+export const CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS = 14_000;
 
 const PRESETS: readonly ImagePreset[] = ["draft", "standard", "final"];
 
@@ -67,7 +77,7 @@ export type ChatImageDecision =
       };
 
 /** A follow-up rewrite longer than this is cut, never trusted whole. */
-export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 2_000;
+export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 1_000;
 
 /** Enabled models with at least one square price, in catalogue order. */
 export const chatImageModelCandidates = (
