@@ -1,7 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { qaReleaseDigestSchema } from "@/lib/qaReleaseDigestSchemaCore";
+import { qaReleaseDigestSchema, type QaReleaseDigest } from "@/lib/qaReleaseDigestSchemaCore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
 import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
@@ -35,7 +35,16 @@ export type AgentDigestConsoleRow = {
     issuesAvailable: boolean;
     failedChecks: number;
     failedCiJobs: number;
+    /** The failed CI rows themselves, as the digest classed them. */
+    failedCi: { workflow: string; job: string; shard: number | null; conclusion: string; label: string; runId: string }[];
     notChecked: string[];
+    /**
+     * Develop merge to dev timing (lib/qaReleaseLatencyCollectCore.ts):
+     * "absent" for a digest stored before it was measured.
+     */
+    latency:
+      | { status: "absent" | "unavailable" }
+      | ({ status: "ok"; merges: number } & Extract<NonNullable<QaReleaseDigest["latency"]>, { status: "ok" }>["summary"]);
   } | null;
 };
 
@@ -162,7 +171,17 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
         issuesAvailable: digest.issues.status === "ok",
         failedChecks: digest.checks.filter((check) => check.result === "fail").length,
         failedCiJobs: digest.ci.filter((job) => job.label !== null).length,
+        failedCi: digest.ci.flatMap((job) =>
+          job.label === null
+            ? []
+            : [{ workflow: job.workflow, job: job.job, shard: job.shard, conclusion: job.jobConclusion, label: job.label, runId: job.runId }],
+        ),
         notChecked: [...digest.notChecked],
+        latency: !digest.latency
+          ? { status: "absent" }
+          : digest.latency.status === "ok"
+            ? { status: "ok", merges: digest.latency.merges.length, ...digest.latency.summary }
+            : { status: "unavailable" },
       },
     };
   });

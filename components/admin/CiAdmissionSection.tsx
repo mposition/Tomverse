@@ -157,7 +157,8 @@ const clock = (iso: string) => {
 };
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
-const PAGE_PATH = "/admin/agent-digests";
+const COMMIT_URL = "https://github.com/mposition/Tomverse/commit/";
+const PAGE_PATH = "/admin/agent-digests?tab=ci-admission";
 
 type Kind = "develop" | "main" | "hotfix";
 const kindOf = (entry: Pick<CiAdmissionQueueEntry, "base" | "head">): Kind =>
@@ -180,6 +181,7 @@ const EVENT_DOT: Record<CiAdmissionEvent["kind"], string> = {
   dropped: "bg-zinc-500",
   cancelled: "bg-zinc-400",
   failed: "bg-amber-300",
+  stopped: "bg-rose-400",
 };
 
 const moved = (order: number[], number: number, to: number) => {
@@ -307,7 +309,11 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const payload = (await response.json().catch(() => ({}))) as Partial<View> & { code?: unknown };
+      const payload = (await response.json().catch(() => ({}))) as Partial<View> & {
+        code?: unknown;
+        round?: { outcome?: string; failure?: string };
+        stop?: { outcome?: string; cancelled?: number; failure?: string | null };
+      };
       if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
         restore();
         setReauthenticationRequired(true);
@@ -329,6 +335,29 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         return;
       }
       setView(payload as View);
+      // What the server did beyond saving: a stop's result, or a round that
+      // could not run. Silent before, which hid a missing App installation.
+      const number = typeof body.number === "number" ? body.number : 0;
+      const stop = payload.stop;
+      if (stop?.outcome === "stopped") {
+        setNotice(
+          stop.failure
+            ? fill(m.stoppedPartly, { number, failure: stop.failure })
+            : fill(m.stopped, { number, cancelled: stop.cancelled ?? 0 }),
+        );
+      } else if (stop?.outcome === "failed") {
+        setNotice(fill(m.stopFailed, { number, failure: stop.failure ?? "unknown" }));
+      } else if (stop?.outcome === "not_handled") {
+        setNotice(fill(m.stopNotHandled, { number }));
+      } else if (stop?.outcome === "not_found") {
+        setNotice(fill(m.stopNotFound, { number }));
+      } else if (stop?.outcome === "not_configured") {
+        setNotice(m.stopNotConfigured);
+      } else if (payload.round?.outcome === "read_failed") {
+        setNotice(fill(m.roundFailed, { failure: payload.round.failure ?? "unknown" }));
+      } else if (payload.round?.outcome === "not_configured") {
+        setNotice(m.roundNotConfigured);
+      }
     } catch {
       restore();
       setNotice(m.saveFailed);
@@ -429,6 +458,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const button =
     "inline-flex min-h-8 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50";
   const running = state.lastRound?.running ?? [];
+  const deploys = state.lastRound?.deploys ?? [];
   const used = state.lastRound?.used ?? 0;
   const free = Math.max(0, state.capacity - used);
   const minutes = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
@@ -509,22 +539,60 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           <p className="text-xs text-zinc-500">{m.noRound}</p>
         ) : (
           <div className="flex flex-wrap gap-2">
+            {deploys.map((deploy) => {
+              const kind: Kind = deploy.branch === "main" ? "main" : "develop";
+              const units = unitsOf(kind);
+              return (
+                <a
+                  key={`${deploy.branch}@${deploy.sha}`}
+                  href={`${COMMIT_URL}${deploy.sha}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`flex min-w-[10rem] flex-col gap-0.5 rounded-lg border border-dashed px-3 py-2.5 ${SLOT[kind]}`}
+                  style={{ flexGrow: units, flexBasis: `${units * 8}rem` }}
+                  data-testid={`ci-admission-deploy-${deploy.sha.slice(0, 7)}`}
+                >
+                  <span className="truncate text-[13px] font-medium text-zinc-100">
+                    {deploy.title || fill(m.deployTitle, { sha: deploy.sha.slice(0, 7) })}
+                  </span>
+                  <span className="font-mono text-[11px] text-zinc-400">
+                    {fill(m.deploy, { branch: deploy.branch, units })} · {deploy.sha.slice(0, 7)}
+                  </span>
+                </a>
+              );
+            })}
             {running.map((pull) => {
               const kind: Kind = pull.base === "main" ? "main" : "develop";
               return (
-                <a
+                <div
                   key={pull.number}
-                  href={`${PULL_URL}${pull.number}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`flex min-w-[10rem] flex-col gap-0.5 rounded-lg border px-3 py-2.5 ${SLOT[kind]}`}
+                  className={`flex min-w-[10rem] items-start gap-2 rounded-lg border px-3 py-2.5 ${SLOT[kind]}`}
                   style={{ flexGrow: unitsOf(kind), flexBasis: `${unitsOf(kind) * 8}rem` }}
+                  data-testid={`ci-admission-running-${pull.number}`}
                 >
-                  <span className="truncate text-[13px] font-medium text-zinc-100">
-                    #{pull.number} {pull.title}
-                  </span>
-                  <span className="font-mono text-[11px] text-zinc-400">{badgeText(kind)}</span>
-                </a>
+                  <a href={`${PULL_URL}${pull.number}`} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-[13px] font-medium text-zinc-100 hover:underline">
+                      #{pull.number} {pull.title}
+                    </span>
+                    <span className="font-mono text-[11px] text-zinc-400">{badgeText(kind)}</span>
+                  </a>
+                  {canWrite ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md border border-rose-400/40 px-2 py-1 text-[11px] font-medium text-rose-300 hover:bg-rose-400/10 disabled:opacity-50"
+                      disabled={busy}
+                      aria-label={fill(m.stopLabel, { number: pull.number })}
+                      title={fill(m.stopLabel, { number: pull.number })}
+                      onClick={() => {
+                        if (window.confirm(fill(m.stopConfirm, { number: pull.number }))) {
+                          void send({ action: "stop", number: pull.number });
+                        }
+                      }}
+                    >
+                      {m.stop}
+                    </button>
+                  ) : null}
+                </div>
               );
             })}
             {free > 0 ? (
@@ -706,6 +774,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                         dropped: m.eventDropped,
                         cancelled: m.eventCancelled,
                         failed: m.eventFailed,
+                        stopped: m.eventStopped,
                       }[event.kind]
                     }
                   </span>

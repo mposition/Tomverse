@@ -249,9 +249,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   "agent-digests": {
     label: "Agent digest",
     description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",
-    aliases: ["digest", "QA", "릴리스", "릴리스 준비", "병합 레인", "제어 revision"],
+    aliases: ["digest", "QA", "릴리스", "릴리스 준비", "병합 레인", "제어 revision", "CI 입장", "러너"],
     tabs: {
-      "qa-release": { label: "QA·릴리스", description: "일일 릴리스 준비 digest와 운영자 제어 revision" },
+      "qa-release": { label: "QA·릴리스", description: "확인할 일, production과 main, 병합 레인, 최근 digest" },
+      "ci-admission": { label: "CI 입장 관리", description: "러너를 기다리는 PR, 그 순서와 실시간 러너 사용량" },
       "billing-finance-ops": { label: "과금·재무", description: "가격 검증 기한 일일 digest, Agent 스위치와 monitor 확인" },
     },
   },

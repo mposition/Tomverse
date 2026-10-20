@@ -662,12 +662,17 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "What each agent reported each day, and the operator control it runs under",
     group: "Operations",
     writeRoles: ["owner", "ops"],
-    aliases: ["digest", "qa", "release", "release readiness", "merge lane", "control revision", "price deadline", "billing-finance-ops"],
+    aliases: ["digest", "qa", "release", "release readiness", "merge lane", "control revision", "price deadline", "billing-finance-ops", "ci admission", "runners"],
     tabs: [
       {
         id: "qa-release",
         label: "QA and release",
-        description: "The daily release-readiness digest and the operator control revision",
+        description: "What needs the operator, production against main, the merge lane and the latest digest",
+      },
+      {
+        id: "ci-admission",
+        label: "CI admission",
+        description: "Pull requests waiting for runners, their order and live runner usage",
       },
       {
         id: "billing-finance-ops",
