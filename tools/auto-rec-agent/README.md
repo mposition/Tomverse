@@ -143,7 +143,7 @@ sudo stat -c '%U:%G %a %n' /etc/autorec /etc/autorec/autorec.env   # root:root 7
 | 변수 | 값 |
 |---|---|
 | `AUTOREC_APP_URL` | 앱 origin, https, 경로 없음(예: `https://tomverse.app`) |
-| `AUTOREC_APP_SECRET` | 앱의 recommendation route가 검사하는 공유 비밀(16자 이상). 앱 쪽 Railway 변수에 같은 값을 넣습니다 |
+| `AUTOREC_APP_SECRET` | 앱의 recommendation route가 검사하는 공유 비밀(**32자 이상**, 짧으면 앱이 모든 요청을 404로 답합니다). 앱 쪽 Railway 웹 서비스의 `AUTO_ROUTER_REC_AGENT_SECRET`에 같은 값을 넣습니다 |
 | `AUTOREC_GITHUB_TOKEN` | 1단계의 토큰 |
 
 공유 비밀은 `openssl rand -hex 32`로 만들 수 있습니다. 값은 파일과 Railway 대시보드에만 붙이고
