@@ -298,11 +298,12 @@ export function evaluateCiAdmission(input: {
   }
 
   const running = (pull: CiAdmissionPull) => !pull.draft && (input.running.has(ciRunKey(pull.number, pull.headSha)) || reserved().has(pull.number));
-  // A draft whose runs have not stopped yet (a re-run, or a hold whose
-  // cancellation has not taken) still occupies runners: its slots count until
-  // they are actually free, whatever the cancellation's outcome.
   const runningNumbers = new Set([...input.running].map((key) => Number(key.split("@")[0])));
-  const occupying = (pull: CiAdmissionPull) => running(pull) || (pull.draft && runningNumbers.has(pull.number));
+  // Runs GitHub shows for a pull request -- on any head, ready or draft --
+  // occupy its slots until they stop; a cancellation requested is not a run
+  // stopped. A ready pull request whose runs have not shown yet holds its
+  // reservation instead.
+  const occupying = (pull: CiAdmissionPull) => runningNumbers.has(pull.number) || running(pull);
   const usedBy = (exclude: number | null) =>
     input.openPulls.reduce((sum, pull) => {
       const units = ciAdmissionUnits(pull);
@@ -357,12 +358,15 @@ export function evaluateCiAdmission(input: {
   }
 
   // Release strictly from the top: the operator's order is the order. A pull
-  // request held in this evaluation gives up the slots its runs held.
+  // request held in this evaluation keeps occupying its slots while its runs
+  // show: they are freed by the round that sees the runs gone, never by this
+  // one on the strength of a cancellation request. A held pull request that
+  // is itself released here adds nothing -- it already occupies its slots.
   const releasedNow = new Set<number>();
   const heldNow = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
   let used = input.openPulls.reduce((sum, pull) => {
     const units = ciAdmissionUnits(pull);
-    return units !== null && !heldNow.has(pull.number) && occupying(pull) ? sum + units : sum;
+    return units !== null && occupying(pull) ? sum + units : sum;
   }, 0);
   while (queue.length > 0) {
     const top = queue[0];
@@ -371,13 +375,14 @@ export function evaluateCiAdmission(input: {
     const units = ciAdmissionUnits(pull)!;
     // A pull request held in this same evaluation is a draft from here on.
     const asDraft = heldNow.has(pull.number) ? { ...pull, draft: true } : pull;
-    if (used + units > capacity) break;
+    const adds = heldNow.has(pull.number) && occupying(pull) ? 0 : units;
+    if (used + adds > capacity) break;
     queue.shift();
     actions.push({ kind: "release", pull: asDraft, entry: top });
     released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: false });
     granted.add(pull);
     releasedNow.add(pull.number);
-    used += units;
+    used += adds;
     event("released", pull.number, null);
   }
 
@@ -401,11 +406,8 @@ export function evaluateCiAdmission(input: {
     // Released in this evaluation: still a draft in this snapshot, about to run.
     if (releasedNow.has(number)) continue;
     const pull = open.get(number);
-    if (!pull || pull.draft || !running(pull)) grantedHead.delete(number);
+    if (!pull || pull.draft || !occupying(pull)) grantedHead.delete(number);
   }
-
-  // The same final state the budget uses: held pull requests give up their slots.
-  const finalHeld = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
 
   return {
     state: {
@@ -434,7 +436,7 @@ export function evaluateCiAdmission(input: {
           .filter(
             (pull) =>
               ciAdmissionUnits(pull) !== null &&
-              ((running(pull) && !finalHeld.has(pull.number)) || releasedNow.has(pull.number)),
+              (occupying(pull) || releasedNow.has(pull.number)),
           )
           .map((pull) => ({ number: pull.number, title: pull.title.slice(0, 200), base: pull.base })),
       },

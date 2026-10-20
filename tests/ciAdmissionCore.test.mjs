@@ -406,24 +406,40 @@ test("slots of a pull request held this round count as free for the release that
   assert.deepEqual(kinds(evaluation), ["release:7", "admit:9"]);
 });
 
-test("the slots shown as running leave out a pull request held this round", () => {
+test("the slots shown as running match the budget: a held pull request's runs still show", () => {
   const evaluation = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
-  assert.deepEqual(kinds(evaluation), ["hold:9", "release:7"]);
-  assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [7]);
-  assert.equal(evaluation.used, 1);
+  assert.deepEqual(kinds(evaluation), ["hold:9"]);
+  assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [9]);
+  assert.equal(evaluation.state.lastRound.used, 1);
 });
 
 test("a draft whose runs have not stopped keeps its slots, round after round, until they do", () => {
   // Round 1: #9 arrives running while #7 waits (budget 1): hold #9, release #7.
   const first = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
-  assert.deepEqual(kinds(first), ["hold:9", "release:7"]);
-  // #9 was drafted but cancelling its runs failed, so the release was deferred:
-  // #7 is back at the top (as the service's correction leaves it).
-  const deferred = { ...first.state, queue: [queued(7), ...first.state.queue.filter((e) => e.number !== 7)], released: [], granted: [], releasing: [] };
+  // #7 is not released in the round that holds #9: #9's runs still show.
+  assert.deepEqual(kinds(first), ["hold:9"]);
+  const deferred = first.state;
   // Round 2: #9 is a draft whose runs still run. #7 must not be released beside them.
   const second = run({ state: deferred, openPulls: [pull(7, { draft: true }), pull(9, { draft: true })], runningShas: new Set([sha(9)]), nowMs: T0 + 60_000 });
   assert.deepEqual(kinds(second), ["cancel:9"]);
   // Round 3: #9's runs stopped. Now #7 goes.
   const third = run({ state: second.state, openPulls: [pull(7, { draft: true }), pull(9, { draft: true })], nowMs: T0 + 120_000 });
   assert.deepEqual(kinds(third), ["release:7"]);
+});
+
+test("a hold's cancellation does not free its slots in the same round", () => {
+  // Budget 1: #9 arrives with its runs visible while #7 waits. #9 is held and
+  // its runs cancelled, but #7 waits for a round that sees them stopped.
+  const evaluation = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
+  assert.deepEqual(kinds(evaluation), ["hold:9"]);
+});
+
+test("a ready pull request re-running an older head's run occupies its slots", () => {
+  const evaluation = run({
+    state: state({ capacity: 1, queue: [queued(7)] }),
+    openPulls: [pull(7, { draft: true }), pull(5, { headSha: "5".repeat(39) + "a" })],
+    running: new Set([ciRunKey(5, "5".repeat(40))]),
+  });
+  assert.deepEqual(kinds(evaluation), []);
+  assert.equal(evaluation.used, 1);
 });
