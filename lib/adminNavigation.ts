@@ -844,9 +844,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "AMUX cards, their execution state, and why AMUX assigned the work",
     group: "AMUX",
     // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
-    // route checks it); the owner-only card list writes nothing. A worker
-    // registry change takes the owner role and a recent step-up in its route
-    // (orchestration policy version 31, section 3).
+    // route checks it); the owner-only card list writes nothing.
     writeRoles: ["owner", "ops"],
     // Halts belong to Operations settings, so this counts what waits on a
     // person here: escalations and Decision Maker requests.
@@ -855,15 +853,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "amux",
       "cards",
       "execution",
-      "worker",
       "attempt",
       "assignment",
       "escalation",
       "human review",
       "review",
       "incident",
-      "registry",
-      "worker registry",
     ],
     tabs: [
       {
@@ -879,11 +874,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "Why AMUX assigned the work, and escalations waiting on a person",
         badge: "amuxEscalations",
       },
-      {
-        id: "workers",
-        label: "Workers",
-        description: "The worker registry, each worker's desired and effective state, and whether the assignment catalog agrees",
-      },
     ],
   },
   {
@@ -891,13 +881,19 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Operations settings",
     href: "/admin/amux-settings",
     description:
-      "AMUX automatic admission, execution safety, recovery evidence and Decision Maker controls",
+      "AMUX automatic admission, workers, execution safety, recovery evidence and Decision Maker controls",
     group: "AMUX",
+    // A worker registry change takes the owner role and a recent step-up in
+    // its route (orchestration policy version 31, section 3).
     writeRoles: ["owner", "ops"],
     badge: "amuxOrchestratorHalts",
     aliases: [
       "amux",
       "settings",
+      "worker",
+      "workers",
+      "registry",
+      "worker registry",
       "automatic admission",
       "auto admission",
       "recovery",
@@ -915,6 +911,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Automatic admission",
         description: "Owner approval for ready Tasks to enter unassigned Todo",
         viewRoles: ["owner"],
+      },
+      {
+        id: "workers",
+        label: "Workers",
+        description: "Register AI workers, choose what each can do, and turn them on or off",
       },
       { id: "safety", label: "Execution safety and recovery", description: "Automatic recovery, evidence to inspect and operator halt decisions", badge: "amuxOrchestratorHalts" },
       { id: "decision-maker", label: "Decision Maker", description: "The Decision Maker kill switch and the mode of each instance" },
@@ -1304,6 +1305,7 @@ export const ADMIN_ENGINEERING_AGENT_LEGACY_TABS: Readonly<Record<string, string
 export const ADMIN_AMUX_EXECUTION_LEGACY_TABS: Readonly<Record<string, string>> = {
   halts: "/admin/amux-settings?tab=safety",
   "decision-maker": "/admin/amux-settings?tab=decision-maker",
+  workers: "/admin/amux-settings?tab=workers",
 };
 
 /**

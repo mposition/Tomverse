@@ -13,8 +13,6 @@ import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspac
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxDecisionMakerRequestDrawer } from "@/components/admin/AmuxDecisionMakerRequestDrawer";
 import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
-import { AmuxWorkerCapabilityPanel } from "@/components/admin/AmuxWorkerCapabilityPanel";
-import { AmuxWorkerRegistryPanel } from "@/components/admin/AmuxWorkerRegistryPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -30,9 +28,6 @@ import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
 import { countDecisionMakerAttention, readDecisionMakerAttentionForAdmin } from "@/lib/amux/decisionMakerAttention";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
-import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
-import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
-import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -94,9 +89,6 @@ export default async function AdminAmuxExecutionPage({
     cards: isOwner ? undefined : "read_only",
     // The same permission every escalation, proposal and review route checks.
     assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
-    // A registry change takes the owner role, the stage's code latch and a
-    // recent step-up (orchestration policy version 31, sections 3 and 8).
-    workers: !isOwner ? "read_only" : amuxWorkerRegistryWritesOpen() ? undefined : "behind_server_switch",
   };
 
   const tabs = (
@@ -138,25 +130,6 @@ export default async function AdminAmuxExecutionPage({
           <AmuxCardDisplayKeyBackfillPanel />
           <AmuxCliUsagePanel view={usage} />
         </AmuxExecutionSupportingRecords>
-      </div>
-    );
-  }
-
-  if (tab.id === "workers") {
-    // Every admin role reads the registry; only the owner is offered
-    // registration, and the route decides that again. A read that fails is
-    // shown as such, never as an empty registry. Capabilities (version 35,
-    // R2a) sit under the registry they extend.
-    const [view, capabilities] = await Promise.all([
-      readAmuxWorkerRegistryForAdmin().catch(() => null),
-      readAmuxWorkerCapabilitiesForAdmin().catch(() => null),
-    ]);
-    return (
-      <div className="flex min-w-0 flex-col gap-5">
-        {tabs}
-        {drawer}
-        <AmuxWorkerRegistryPanel view={view} isOwner={isOwner} />
-        <AmuxWorkerCapabilityPanel view={capabilities} isOwner={isOwner} />
       </div>
     );
   }

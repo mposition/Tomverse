@@ -15,6 +15,7 @@ import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePa
 import { AmuxMaxSubscriptionPricePanel } from "@/components/admin/AmuxMaxSubscriptionPricePanel";
 import { AmuxSessionBudgetResolutionPanel } from "@/components/admin/AmuxSessionBudgetResolutionPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
+import { AmuxWorkersOverviewPanel } from "@/components/admin/AmuxWorkersOverview";
 import {
   amuxSwitchedTabStatus,
   amuxTabChips,
@@ -39,6 +40,10 @@ import {
   countOpenAmuxOrchestratorHalts,
   readAmuxOrchestratorHaltsForAdmin,
 } from "@/lib/amux/orchestratorHaltStore";
+import { readAgentOfficeAmuxWorkers } from "@/lib/agentOfficeLiveRead";
+import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityAdminRead";
+import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
+import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
 import { AMUX_V4_TASK_CATALOG_WRITE_ENV, amuxV4TaskCatalogWriteEnabled } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
@@ -50,6 +55,9 @@ import {
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 
 const TABS = adminNavItemTabs("amux-settings");
+
+/** The clock for the Workers ages, read after the data it is counted against. */
+const currentTimeMs = () => Date.now();
 
 export default async function AdminAmuxSettingsPage({
   searchParams,
@@ -71,6 +79,9 @@ export default async function AdminAmuxSettingsPage({
     "automatic-admission": isOwner
       ? amuxSwitchedTabStatus("automatic-admission")
       : undefined,
+    // A registry change takes the owner role, the stage's code latch and a
+    // recent step-up (orchestration policy version 31, sections 3 and 8).
+    workers: !isOwner ? "read_only" : amuxWorkerRegistryWritesOpen() ? undefined : "behind_server_switch",
     safety: isOwner ? undefined : "read_only",
     "decision-maker": canChange ? undefined : "read_only",
   };
@@ -81,6 +92,19 @@ export default async function AdminAmuxSettingsPage({
   if (tab.id === "automatic-admission") {
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxV22PromotionControl /></div>;
+  }
+  if (tab.id === "workers") {
+    // Every admin role reads the list; only the owner is offered changes, and
+    // the route decides that again. Each of the three reads that fails is
+    // shown as such, never as an empty list or a guessed connection.
+    const [registry, capabilities, live] = await Promise.all([
+      readAmuxWorkerRegistryForAdmin().catch(() => null),
+      readAmuxWorkerCapabilitiesForAdmin().catch(() => null),
+      readAgentOfficeAmuxWorkers(),
+    ]);
+    return <div className="flex min-w-0 flex-col gap-5">{tabs}
+      <AmuxWorkersOverviewPanel registry={registry} capabilities={capabilities} live={live}
+        readAtMs={currentTimeMs()} isOwner={isOwner} /></div>;
   }
   // Owner only (the tab's viewRoles); resolveAdminTabFor has already refused other roles.
   // Approved backlog redesign, screen C: the monthly analysis budget, the

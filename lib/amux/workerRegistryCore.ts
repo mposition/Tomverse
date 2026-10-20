@@ -402,7 +402,7 @@ export type AmuxWorkerRegistryAdminView = {
 };
 
 /**
- * What AMUX › Execution › Workers shows, from one read of the registry.
+ * What AMUX › Operations settings › Workers shows, from one read of the registry.
  * Section 3: the desired state and the effective state are shown apart.
  */
 export function buildAmuxWorkerRegistryAdminView(input: {

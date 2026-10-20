@@ -247,7 +247,7 @@ export type AmuxWorkerCapabilityAdminRow = {
 };
 
 /**
- * What AMUX › Execution › Workers shows of the capabilities: each registered,
+ * What AMUX › Operations settings › Workers shows of the capabilities: each registered,
  * non-retired worker's newest recorded capability. Stage R2a's one-time
  * import from the catalog variables went with the variables at R2e, so
  * nothing here is read from the environment.

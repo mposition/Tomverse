@@ -9,7 +9,7 @@ import { readAmuxWorkerCapabilitiesOrThrow } from "@/lib/amux/workerCapabilitySt
 import { readAmuxWorkerRegistryOrThrow } from "@/lib/amux/workerRegistryStore";
 
 /**
- * AMUX › Execution › Workers, capabilities (orchestration policy version 35,
+ * AMUX › Operations settings › Workers, capabilities (orchestration policy version 35,
  * section 2): each registered worker's recorded capability. Nothing here
  * changes anything; the catalog variables R2a imported from are gone since
  * R2e, so nothing is read from the environment either.
