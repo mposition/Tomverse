@@ -187,8 +187,10 @@ export async function GET(request: Request) {
     if (!requestId || !isAmuxIdeaRequestId(requestId)) {
       return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
     }
-    const owned = await readIdeaSubmissionRequest(session, requestId);
-    if (owned.status === "absent" && sessionIntakeOn()) {
+    // A session idea saved from Admin has the operator as its actor, so the v4 owner
+    // read finds the row and, with no v4-shaped audit, calls it partial. The session
+    // read answers first (it is absent for any row that is not a session idea).
+    if (sessionIntakeOn()) {
       const seen = await readAmuxIdeaSessionSubmissionRequest(requestId);
       if (seen.status !== "absent") {
         return NextResponse.json(seen.status === "committed"
@@ -198,6 +200,7 @@ export async function GET(request: Request) {
         { headers: noStore });
       }
     }
+    const owned = await readIdeaSubmissionRequest(session, requestId);
     return NextResponse.json(owned, { headers: noStore });
   } catch (error) {
     return failure(error);
