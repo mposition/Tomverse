@@ -15,7 +15,8 @@ import {
   updateOptimizerAutomation,
   updateOptimizerModel,
 } from "@/lib/autoRouterOptimizer";
-import { setRecommendationStatus } from "@/lib/autoRouterRecommendations";
+import { readRecAgentEnabled } from "@/lib/autoRouterRecAgent";
+import { setRecommendationStatus, updateRecAgentSwitch } from "@/lib/autoRouterRecommendations";
 import { RECOMMENDATION_STATUSES } from "@/lib/autoRouterRecommendationsCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
@@ -32,6 +33,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set_automation"), daily: z.boolean(), autoPromote: z.boolean() }).strict(),
   z.object({ action: z.literal("promote"), cycleId: z.string().trim().min(1).max(64) }).strict(),
   z.object({ action: z.literal("roll_back") }).strict(),
+  z.object({ action: z.literal("set_rec_agent"), enabled: z.boolean() }).strict(),
   z
     .object({
       action: z.literal("set_recommendation"),
@@ -48,7 +50,11 @@ const modelOptions = async () =>
     .map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
 
 const stateResponse = async () =>
-  NextResponse.json({ ...(await readAutoRouterOptimizerState()), options: await modelOptions() });
+  NextResponse.json({
+    ...(await readAutoRouterOptimizerState()),
+    options: await modelOptions(),
+    recAgent: { enabled: await readRecAgentEnabled() },
+  });
 
 export async function GET(req: Request) {
   try {
@@ -96,6 +102,11 @@ export async function POST(req: Request) {
 
     if (body.action === "set_automation") {
       await updateOptimizerAutomation(actor, { daily: body.daily, autoPromote: body.autoPromote });
+      return await stateResponse();
+    }
+
+    if (body.action === "set_rec_agent") {
+      await updateRecAgentSwitch(actor, body.enabled);
       return await stateResponse();
     }
 
