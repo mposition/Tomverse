@@ -100,6 +100,11 @@ export type OptimizerCase = {
     source?: "synthetic";
     message?: string;
     kind?: SyntheticMessageKind;
+    /**
+     * Each order's verdict on a judged case -- A is the current pick first,
+     * then the proposal's -- so an unanswered judge (null) is not read as equal.
+     */
+    judged?: [JudgeWinner | null, JudgeWinner | null];
 };
 
 export type OptimizerSummary = {
@@ -783,7 +788,11 @@ export async function runOptimizerCycle(
                 call("judge", () => deps.judge(autoRouterJudgeMessage(decision, incumbent, candidate))),
                 call("judge", () => deps.judge(autoRouterJudgeMessage(decision, candidate, incumbent))),
             ]);
-            return { ...base, verdict: combineJudgeOrders(incumbentFirst, candidateFirst) };
+            return {
+                ...base,
+                verdict: combineJudgeOrders(incumbentFirst, candidateFirst),
+                judged: [incumbentFirst, candidateFirst],
+            };
         }),
         AUTO_ROUTER_OPTIMIZER_CONCURRENCY
     );
