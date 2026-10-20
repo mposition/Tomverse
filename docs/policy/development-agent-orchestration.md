@@ -3253,7 +3253,7 @@ r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승
 
 ### 3. 호스트 (운영자, root 한 번)
 
-1. 새 템플릿 `tomverse-amux-bridge@.service`를 설치한다. `enable`하지 않는다(버전 31 4항).
+1. 새 템플릿 `tomverse-amux-bridge@.service`를 설치한다. 설치만으로는 아무 인스턴스도 enable하지 않는다. 운영자 결정(2026-10-20)으로 템플릿에 `[Install]`이 있어, 3.1에 따라 옮긴 인스턴스는 enable해 재부팅 뒤에도 켜지게 한다.
 2. 자동 재시작과 watchdog의 대상에 `tomverse-amux-bridge@*`를 넣고, polkit 규칙도 그 이름으로 고친다.
 3. 활성화(5항) 때 옛 `tomverse-bridge.service`와 `tomverse-amux-v22-bridge@*` 인스턴스에서
    `tomverse-amux-bridge@<worker>` 인스턴스로 옮긴다. 옮기는 조건과 순서는 3.1이다.
