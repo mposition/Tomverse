@@ -443,3 +443,15 @@ test("a ready pull request re-running an older head's run occupies its slots", (
   assert.deepEqual(kinds(evaluation), []);
   assert.equal(evaluation.used, 1);
 });
+
+test("a closed pull request whose runs still run occupies its slots until they stop", () => {
+  const evaluation = run({
+    state: state({ capacity: 2, queue: [queued(7)] }),
+    openPulls: [pull(7, { draft: true })],
+    running: new Set([ciRunKey(30, "3".repeat(40))]),
+    runningBases: new Map([[30, "main"]]),
+  });
+  assert.deepEqual(kinds(evaluation), []);
+  assert.equal(evaluation.used, 2);
+  assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [30]);
+});

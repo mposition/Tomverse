@@ -218,6 +218,8 @@ export function evaluateCiAdmission(input: {
   state: CiAdmissionState;
   openPulls: readonly CiAdmissionPull[];
   running: ReadonlySet<string>;
+  /** The base of each pull request with a running run, open or not. */
+  runningBases?: ReadonlyMap<number, string>;
   arrival: number | null;
   nowMs: number;
   shadow: boolean;
@@ -304,7 +306,15 @@ export function evaluateCiAdmission(input: {
   // stopped. A ready pull request whose runs have not shown yet holds its
   // reservation instead.
   const occupying = (pull: CiAdmissionPull) => runningNumbers.has(pull.number) || running(pull);
+  // A closed or merged pull request whose runs still run occupies its slots
+  // until they stop, like any other.
+  const closedRunning = [...runningNumbers].filter((number) => !open.has(number));
+  const closedUnits = closedRunning.reduce(
+    (sum, number) => sum + (ciAdmissionUnits({ base: input.runningBases?.get(number) ?? "", fork: false }) ?? 0),
+    0,
+  );
   const usedBy = (exclude: number | null) =>
+    closedUnits +
     input.openPulls.reduce((sum, pull) => {
       const units = ciAdmissionUnits(pull);
       return units !== null && pull.number !== exclude && occupying(pull) ? sum + units : sum;
@@ -364,10 +374,7 @@ export function evaluateCiAdmission(input: {
   // is itself released here adds nothing -- it already occupies its slots.
   const releasedNow = new Set<number>();
   const heldNow = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
-  let used = input.openPulls.reduce((sum, pull) => {
-    const units = ciAdmissionUnits(pull);
-    return units !== null && occupying(pull) ? sum + units : sum;
-  }, 0);
+  let used = usedBy(null);
   while (queue.length > 0) {
     const top = queue[0];
     const pull = open.get(top.number);
@@ -438,7 +445,12 @@ export function evaluateCiAdmission(input: {
               ciAdmissionUnits(pull) !== null &&
               (occupying(pull) || releasedNow.has(pull.number)),
           )
-          .map((pull) => ({ number: pull.number, title: pull.title.slice(0, 200), base: pull.base })),
+          .map((pull) => ({ number: pull.number, title: pull.title.slice(0, 200), base: pull.base }))
+          .concat(
+            closedRunning
+              .filter((number) => ciAdmissionUnits({ base: input.runningBases?.get(number) ?? "", fork: false }) !== null)
+              .map((number) => ({ number, title: "", base: input.runningBases?.get(number) ?? "" })),
+          ),
       },
     },
     actions,

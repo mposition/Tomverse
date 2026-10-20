@@ -53,11 +53,16 @@ const list = (value: unknown): unknown[] => {
   return value;
 };
 
-/** The pull requests a workflow run is for (GitHub lists them on the run; empty for a fork's). */
-const runPullNumbers = (run: Json): number[] =>
-  (Array.isArray(run.pull_requests) ? run.pull_requests : [])
-    .map((pr) => (typeof pr === "object" && pr !== null ? (pr as Json).number : null))
-    .filter((n): n is number => typeof n === "number");
+/** The pull requests a workflow run is for, with their base (GitHub lists them on the run; empty for a fork's). */
+const runPulls = (run: Json): { number: number; base: string | null }[] =>
+  (Array.isArray(run.pull_requests) ? run.pull_requests : []).flatMap((pr) => {
+    if (typeof pr !== "object" || pr === null) return [];
+    const entry = pr as Json;
+    if (typeof entry.number !== "number") return [];
+    const base = typeof entry.base === "object" && entry.base !== null ? (entry.base as Json).ref : null;
+    return [{ number: entry.number, base: typeof base === "string" ? base : null }];
+  });
+const runPullNumbers = (run: Json): number[] => runPulls(run).map((pr) => pr.number);
 
 const toPull = (item: unknown): CiAdmissionPull | null => {
   const pull = record(item);
@@ -79,7 +84,7 @@ const toPull = (item: unknown): CiAdmissionPull | null => {
 export type CiAdmissionGithub = {
   openPulls(): Promise<CiAdmissionPull[]>;
   /** `ciRunKey(number, head)` for every pull_request workflow run queued or in progress, repository-wide. */
-  runningPulls(): Promise<Set<string>>;
+  runningPulls(): Promise<{ keys: Set<string>; bases: Map<number, string> }>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
   /** Cancels the pull request's own queued and running pull_request runs (never another pull request's on the same commit); returns how many. */
@@ -173,18 +178,24 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     },
     async runningPulls() {
       const keys = new Set<string>();
+      // The base of each pull request with a run, so a closed or merged one
+      // whose runs still run is counted at its slots too.
+      const bases = new Map<number, string>();
       for (const status of ACTIVE_RUN_STATUSES) {
         for (let page = 1; page <= 3; page += 1) {
           const runs = list(record(await get(`${REPO}/actions/runs?status=${status}&event=pull_request&per_page=100&page=${page}`)).workflow_runs);
           for (const run of runs) {
             const data = record(run);
             if (typeof data.head_sha !== "string") continue;
-            for (const number of runPullNumbers(data)) keys.add(ciRunKey(number, data.head_sha));
+            for (const { number, base } of runPulls(data)) {
+              keys.add(ciRunKey(number, data.head_sha));
+              if (base) bases.set(number, base);
+            }
           }
           if (runs.length < 100) break;
         }
       }
-      return keys;
+      return { keys, bases };
     },
     async convertToDraft(pull) {
       const data = await graphql(

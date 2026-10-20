@@ -55,7 +55,6 @@ const RETRY_AFTER_FAILED_RELEASE_MS = 60_000;
 const STATUS = {
   waiting: "Waiting in the CI admission line; released automatically when a slot frees. Do not mark ready or re-run.",
   granted: "CI admission: slot granted, CI may run.",
-  left: "No longer waiting in the CI admission line.",
 } as const;
 
 export const ciAdmissionMode = (env: NodeJS.ProcessEnv = process.env): CiAdmissionMode =>
@@ -138,9 +137,10 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   // 1. GitHub, outside any transaction.
   let openPulls: CiAdmissionPull[];
   let running: Set<string>;
+  let runningBases: Map<number, string>;
   try {
     openPulls = await github.openPulls();
-    running = await github.runningPulls();
+    ({ keys: running, bases: runningBases } = await github.runningPulls());
   } catch (error) {
     // Keep the arrival for the next round (it survives a restart), and try
     // again shortly: the event that brought this round may be the last for a while.
@@ -165,7 +165,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, arrival, nowMs: now(), shadow: mode === "shadow" });
+      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, arrival, nowMs: now(), shadow: mode === "shadow" });
       await writeState(
         tx,
         mode === "shadow"
@@ -195,9 +195,15 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   const putBack: CiAdmissionQueueEntry[] = [];
   const statusFailed = new Set<number>();
   const statusResolved = new Set<number>();
-  const status = async (pull: CiAdmissionPull, state: "pending" | "success", text: string) => {
+  // The status lives on the commit, not the pull request: when two open pull
+  // requests share a head, it is pending while either waits in line.
+  const open = new Map(openPulls.map((pull) => [pull.number, pull]));
+  const inLine = new Set(evaluation.state.queue.map((entry) => entry.number));
+  const waitsOn = (sha: string) => openPulls.some((pull) => pull.headSha === sha && inLine.has(pull.number));
+  const status = async (pull: CiAdmissionPull) => {
+    const pending = waitsOn(pull.headSha);
     try {
-      await github.setStatus(pull, state, text);
+      await github.setStatus(pull, pending ? "pending" : "success", pending ? STATUS.waiting : STATUS.granted);
       statusResolved.add(pull.number);
       statusFailed.delete(pull.number);
     } catch (error) {
@@ -208,15 +214,13 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   // Statuses an earlier round could not write, first: what each should say
   // now follows from the line (pending in it, success out of it), and this
   // round's own actions below then write anything newer.
-  const open = new Map(openPulls.map((pull) => [pull.number, pull]));
-  const inLine = new Set(evaluation.state.queue.map((entry) => entry.number));
   for (const number of owedStatuses) {
     const pull = open.get(number);
     if (!pull) {
       statusResolved.add(number);
       continue;
     }
-    await status(pull, inLine.has(number) ? "pending" : "success", inLine.has(number) ? STATUS.waiting : STATUS.left);
+    await status(pull);
   }
   // Holds and cancellations first: a release may count on the slots they
   // free. If any fails (a pull request stays ready, or runs keep running),
@@ -232,19 +236,18 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
       if (action.kind === "hold") {
         await github.convertToDraft(action.pull);
         drafted = true;
-        await status(action.pull, "pending", STATUS.waiting);
+        await status(action.pull);
         const cancelled = await github.cancelRuns(action.pull);
         if (cancelled > 0) extra.push({ at, kind: "held", number, shadow: false, detail: `cancelled_runs:${cancelled}` });
       } else if (action.kind === "release") {
         if (holdFailed) throw new Error("deferred_after_failed_hold");
         await github.markReady(action.pull);
-        await status(action.pull, "success", STATUS.granted);
+        await status(action.pull);
       } else if (action.kind === "cancel") {
         await github.cancelRuns(action.pull);
-      } else if (action.kind === "admit") {
-        await status(action.pull, "success", STATUS.granted);
       } else {
-        await status(action.pull, "success", STATUS.left);
+        // admit or clear: success unless another pull request on this commit waits.
+        await status(action.pull);
       }
     } catch (error) {
       failures.push(`${action.kind}:${number}:${code(error)}`);
