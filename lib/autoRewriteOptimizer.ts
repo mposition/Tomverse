@@ -38,6 +38,7 @@ import {
     autoRouterAnswerSystem,
     autoRouterJudgeSchema,
     callCostMicroUsd,
+    optimizerAnswerOutputTokens,
     optimizerCallFailureDetail,
     optimizerCycleView,
     parseJudgeWinner,
@@ -60,6 +61,7 @@ import {
     type RewriteSyntheticCaseView,
 } from "@/lib/autoRewriteOptimizerCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
+import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
@@ -88,7 +90,6 @@ const GENERATOR_MAX_OUTPUT_TOKENS = 6_000;
 const GENERATOR_TIMEOUT_MS = 90_000;
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 16_000;
 const SYNTHESIZER_TIMEOUT_MS = 180_000;
-const ANSWER_MAX_OUTPUT_TOKENS = 4_000;
 const ANSWER_TIMEOUT_MS = 60_000;
 const JUDGE_MAX_OUTPUT_TOKENS = 400;
 const JUDGE_TIMEOUT_MS = 30_000;
@@ -361,7 +362,8 @@ async function runInBackground(input: {
                         model: getActiveAiModel(model),
                         system: autoRouterAnswerSystem(turn.previousAnswer),
                         prompt: turn.message,
-                        maxOutputTokens: ANSWER_MAX_OUTPUT_TOKENS,
+                        // As the routing cycle: room for a reasoning model to answer.
+                        maxOutputTokens: optimizerAnswerOutputTokens(model, resolveModelPricing(model)),
                         maxRetries: 0,
                         abortSignal: AbortSignal.timeout(ANSWER_TIMEOUT_MS),
                     }));

@@ -54,9 +54,9 @@ import {
     type OptimizerCallKind,
     type OptimizerCallResult,
     type OptimizerCase,
-    type OptimizerCycleResult,
     type OptimizerDecision,
     type OptimizerFailure,
+    type OptimizerSummary,
 } from "@/lib/autoRouterOptimizerCore";
 
 /**
@@ -103,8 +103,22 @@ export type RewriteOptimizerCase = OptimizerCase & {
     candidateRewrite?: string | null;
 };
 
-export type RewriteOptimizerCycleResult = Omit<OptimizerCycleResult, "cases"> & {
+/**
+ * What a rewrite cycle records. The routing cycle's direct model comparisons,
+ * report and evidence gate do not apply: both answers come from one model.
+ */
+export type RewriteOptimizerCycleResult = {
+    status: "passed" | "failed";
+    failure: OptimizerFailure | null;
+    candidateGuidance: string | null;
     cases: RewriteOptimizerCase[];
+    summary: OptimizerSummary;
+    spentMicroUsd: number;
+    spentByKind: Record<OptimizerCallKind, number>;
+    /** By the provider each call was paid to, for the provider budget buckets. */
+    spentByProvider: ReadonlyMap<string, number>;
+    /** Calls that threw; their cost is unknown and counted as nothing. */
+    failedCalls: number;
 };
 
 export type RewriteOptimizerCycleDeps = {
