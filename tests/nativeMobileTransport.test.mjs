@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { chatStreamDisplayText } from "../packages/chat-core/src/streamText.ts";
-import { nativeChatBearerRoute } from "../lib/nativeChatRoutes.ts";
+import { nativeChatBearerRoute } from "../lib/nativeBearerGate.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
 
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
@@ -38,6 +38,7 @@ function fixture({ unknown = false } = {}) {
 }
 
 test("native enrollment is default-off, exact-path and method limited", () => {
+  assert.equal(nativeChatBearerRoute("/api/chat", "POST"), false);
   assert.equal(nativeChatBearerRoute("/api/chat", "POST", false), false);
   assert.equal(nativeChatBearerRoute("/api/chat", "POST", true), true);
   assert.equal(nativeChatBearerRoute("/api/chat", "DELETE", true), false);

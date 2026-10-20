@@ -41,11 +41,11 @@ import {
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
-import { nativeChatBearerRoute } from "@/lib/nativeChatRoutes";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
+  nativeChatBearerRoute,
   stripInternalAuthHeaders,
 } from "@/lib/nativeBearerGate";
 
@@ -276,7 +276,7 @@ export function proxy(request: NextRequest) {
   // The original N1b list remains empty. The default-off native Chat switch
   // enrolls only the exact method/path pairs whose handlers resolve bearers
   // and verify live session state. Operational activation is a separate step.
-  const nativeChat = nativeChatBearerRoute(request.nextUrl.pathname, request.method);
+  const nativeChat = nativeChatBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true");
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),

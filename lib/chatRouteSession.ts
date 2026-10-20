@@ -4,7 +4,7 @@ import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireMobileBearer, mobileAuthRefusal } from "@/lib/mobileAuthRoute";
 import { MOBILE_AUTH_ERROR_CODES } from "@/lib/mobileAuthContract";
-import { nativeChatBearerRoute } from "@/lib/nativeChatRoutes";
+import { nativeChatBearerRoute } from "@/lib/nativeBearerGate";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import { prisma } from "@/lib/prisma";
 
@@ -14,7 +14,7 @@ export async function resolveChatRouteSession(request: Request): Promise<
 > {
   if (!request.headers.has("authorization")) return { session: (await getServerSession(authOptions)) ?? null };
   const origin = request.headers.get("origin");
-  if (!nativeChatBearerRoute(new URL(request.url).pathname, request.method) || (origin && !isNativeAppOrigin(origin))) {
+  if (!nativeChatBearerRoute(new URL(request.url).pathname, request.method, process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true") || (origin && !isNativeAppOrigin(origin))) {
     return { response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.tokenInvalid) };
   }
   const result = await requireMobileBearer(request);

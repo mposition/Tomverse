@@ -1,6 +1,6 @@
 // N1a. Cross-origin access for the locally bundled Capacitor shell, and
 // nothing else.
-// Native Chat authentication lives in nativeChatRoutes/chatRouteSession behind
+// Native Chat authentication lives in nativeBearerGate/chatRouteSession behind
 // a default-off enrollment switch; this file grants no authorization.
 //
 // Contract: .github/audits/2026-08-30-native-mobile-readiness.md §3.1, and
