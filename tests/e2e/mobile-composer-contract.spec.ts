@@ -97,6 +97,7 @@ const seededMessages = (models: string[]): QaConversationMessage[] => [
 ];
 
 type EnterOptions = {
+  appearance?: "classic" | "studio";
   lang?: "en" | "ko" | "de" | "fr" | "es" | "pt" | "zh";
   productKey?: "chat" | "review";
   models?: string[];
@@ -121,7 +122,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
     shell = "mobile",
   } = options;
 
-  await prepareGuestPage(page, "en");
+  await prepareGuestPage(page, "en", options.appearance ?? "classic");
   await mockAuthenticatedApi(page, {
     productKey,
     selectedModels: models,
@@ -154,8 +155,9 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
 
   await page.setViewportSize(viewport);
   await page.goto(`/${productKey ?? "review"}?lang=${lang}`);
-  await expect(page.getByTestId(`${shell}-chat-shell`)).toBeVisible();
-  if (shell === "mobile") await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
+  const renderedShell = options.appearance === "studio" && productKey !== "chat" ? "desktop" : shell;
+  await expect(page.getByTestId(`${renderedShell}-chat-shell`)).toBeVisible();
+  if (renderedShell === "mobile") await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
 }
@@ -374,11 +376,11 @@ async function expectComposerControlsContained(page: Page) {
 }
 
 test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" }, () => {
-  for (const width of MOBILE_WIDTHS) {
-    test(`${width}px keeps a full-width input line beside a partial-support chip`, async ({
+  for (const appearance of ["classic", "studio"] as const) for (const width of MOBILE_WIDTHS) {
+    test(`${appearance} ${width}px keeps a full-width input line beside a partial-support chip`, async ({
       page,
     }) => {
-      await enterMobileComposer(page, { viewport: { width, height: 680 } });
+      await enterMobileComposer(page, { appearance, viewport: { width, height: 680 } });
 
       // The state under test really is the expensive one: a chip that has
       // something to say.

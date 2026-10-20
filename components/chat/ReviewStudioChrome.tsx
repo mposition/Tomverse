@@ -16,8 +16,8 @@ import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { storeAndApplyThemePreference } from "@/lib/theme";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
+import { useKeyboardInset } from "./useVisualViewport";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
-import { useSidebarCollapsePreference } from "./useSidebarCollapse";
 
 const names: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", xai: "xAI", deepseek: "DeepSeek", meta: "Meta", mistral: "Mistral", perplexity: "Perplexity" };
 export const reviewProviderName = (provider: string) => names[provider] ?? provider;
@@ -48,14 +48,14 @@ export function ReviewCommandBar({ review, locked = false, view, setView }: {
       const dark = document.documentElement.classList.contains("dark") || (!document.documentElement.classList.contains("light") && matchMedia("(prefers-color-scheme: dark)").matches);
       storeAndApplyThemePreference(dark ? "light" : "dark");
     }}><Moon size={17} /></button>
-    <select data-testid="review-appearance" aria-label={c.appearance} value={review.appearance} onChange={event => review.setAppearance(event.target.value === "classic" ? "classic" : "studio")}><option value="studio">Studio</option><option value="classic">Classic</option></select>
+    <select disabled={locked || review.pending} data-testid="review-appearance" aria-label={c.appearance} value={review.appearance} onChange={event => review.setAppearance(event.target.value === "classic" ? "classic" : "studio")}><option value="studio">Studio</option><option value="classic">Classic</option></select>
   </header>;
 }
 
-export function ReviewNavigation({ sidebar, onNewChat, onChat }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean }) {
+export function ReviewNavigation({ sidebar, onNewChat, onChat, locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; locked?: boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const [open, setOpen] = useState(false);
-  const [collapsePreference, setCollapsePreference] = useSidebarCollapsePreference();
+  const keyboardInset = useKeyboardInset();
   const trigger = useRef<HTMLButtonElement>(null);
   const drawer = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -70,22 +70,17 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat }: { sidebar: Reac
         if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       }
     };
-    const restore = collapsePreference;
-    setCollapsePreference("expanded");
     drawer.current?.querySelector<HTMLElement>("button")?.focus();
     document.addEventListener("keydown", close);
-    return () => { document.removeEventListener("keydown", close); setCollapsePreference(restore); previous?.focus({ preventScroll: true }); };
-    // The drawer owns one temporary expansion; preference changes inside it
-    // must not restart the focus trap or lose the original preference.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { document.removeEventListener("keydown", close); previous?.focus({ preventScroll: true }); };
   }, [open]);
   const settings = (tab: "account" | "preferences") => { setOpen(true); openAccountSettings(tab); };
   return <>
     <nav className="review-navigation" aria-label="Tomverse">
       <Image loading="eager" unoptimized className="review-nav-logo" src="/tomverse-logo.png" alt="Tomverse" width={44} height={44} />
-      <button type="button" className="review-new-task" onClick={onNewChat}><Icon file="5d798" /><span>{c.newTask}</span></button>
+      <button type="button" className="review-new-task" disabled={locked} onClick={onNewChat}><Icon file="5d798" /><span>{c.newTask}</span></button>
       <button type="button" aria-current="page" onClick={() => setOpen(false)}><Icon file="96fdd" /><span>Review</span></button>
-      <Link className="review-navigation-chat" href={localizedProductHref("chat", lang)} onClick={event => { if (onChat && !onChat()) event.preventDefault(); }}><Icon file="63e9a" /><span>Chat</span></Link>
+      <Link className="review-navigation-chat" aria-disabled={locked} href={localizedProductHref("chat", lang)} onClick={event => { if (locked || (onChat && !onChat())) event.preventDefault(); }}><Icon file="63e9a" /><span>Chat</span></Link>
       <button className="review-navigation-history" ref={trigger} type="button" onClick={() => setOpen(true)} aria-expanded={open}><Icon file="c8527" /><span>{c.history}</span></button>
       <div className="review-nav-spacer" />
       <Link href="/help"><Icon file="2b087" /><span>{c.help}</span></Link>
@@ -93,7 +88,7 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat }: { sidebar: Reac
       <button type="button" className="review-avatar" onClick={() => settings("account")} aria-label={c.settings}>T</button>
     </nav>
     {open && <div className="review-drawer-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
-      <div ref={drawer} className="review-history-drawer" role="dialog" aria-modal="true" aria-label={c.history}>
+      <div ref={drawer} className="review-history-drawer" style={{ bottom: 16 + keyboardInset }} role="dialog" aria-modal="true" aria-label={c.history}>
         <button type="button" className="review-drawer-close" aria-label={c.close} onClick={() => setOpen(false)}><X size={20} /></button>
         {sidebar}
       </div>

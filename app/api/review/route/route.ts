@@ -35,6 +35,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "MODEL_LIMIT_EXCEEDED" }, { status: 400, headers });
     }
     const imagesAvailable = await isImageGenerationEnabledCached() && planAllowsFeature(plan, "imageGeneration");
+    if (body.requestedKind === "image" && !imagesAvailable) {
+      return NextResponse.json({ error: "IMAGE_UNAVAILABLE" }, { status: 403, headers });
+    }
     const imageModels = await refreshImageModelCatalog();
     const candidates = reviewRoutingCandidates({ providers: body.providers, models, imageModels, plan: plan.tier, hasImages: body.hasImages });
     if (body.providers.some(provider => !candidates.text.some(model => model.provider === provider))) {

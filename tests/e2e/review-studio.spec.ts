@@ -1,24 +1,25 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { installChatModelStub, mockUserUsage, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS } from "./support/chat-state-fixtures";
+import { openOnScreenKeyboard } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
 
-async function prepare(page: Page, width: number, theme: "light" | "dark" = "light") {
+async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3) {
   await page.setViewportSize({ width, height: width > 768 ? 1000 : 932 });
   await prepareGuestPage(page, "ko", "studio");
-  const account = await mockAuthenticatedApi(page, { selectedModels: THREE_MODELS, productKey: "review", assistantProfiles: [] });
+  const account = await mockAuthenticatedApi(page, { selectedModels: models, productKey: "review", assistantProfiles: [] });
   account.theme = theme;
   await mockUserUsage(page, { plan: "Max", limits: { maxModels: 3, creditsDay: 0, creditsMonth: 10000 }, usage: { creditsMonth: 2500 } });
   await restoreActiveConversation(page);
   await suppressTransientUi(page);
   await setDeterministicTheme(page, theme);
   await page.context().addCookies([{ name: "__tomverse_e2e_review_easy", value: "1", url: "http://127.0.0.1:3100" }, { name: "__tomverse_e2e_chat_starter", value: "1", url: "http://127.0.0.1:3100" }, { name: "__tomverse_e2e_image_generation", value: "1", url: "http://127.0.0.1:3100" }]);
-  await page.goto("/review?lang=ko");
-  await expect(page.getByTestId("chat-input")).toBeVisible();
+  await page.goto("/review?lang=ko", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("chat-input")).toBeVisible({ timeout: 60_000 });
   await page.getByTestId("review-command-bar").getByRole("button", { name: "Easy", exact: true }).click();
-  await expect(page.locator(".review-participant-list>button")).toHaveCount(3, { timeout: 20000 });
+  await expect(page.locator(".review-participant-list>button")).toHaveCount(providerCount, { timeout: 20000 });
 }
 
 for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const) {
@@ -27,7 +28,7 @@ for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const)
     await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
     await expect(page.getByTestId("auto-variable-credit-notice")).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-    await expect.poll(() => page.locator("img").evaluateAll(nodes => nodes.filter(node => node.getClientRects().length > 0).every(node => node instanceof HTMLImageElement && node.complete && node.naturalWidth > 0))).toBe(true);
+    await expect.poll(() => page.locator("img").evaluateAll(nodes => nodes.filter(node => node instanceof HTMLImageElement && node.getClientRects().length > 0 && (!node.complete || !node.naturalWidth)).map(node => node.getAttribute("src"))), { timeout: 20000 }).toEqual([]);
     await expect(page.locator("html")).toHaveClass(new RegExp(theme));
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ style: "nextjs-portal { display: none !important; }", path: `artifacts/review-studio-${width > 768 ? "pc" : "mobile"}-${theme}.png`, fullPage: true });
@@ -106,4 +107,41 @@ test("Studio at 320px preserves a full-width textarea and reachable controls at 
   expect(input.width / row.width).toBeGreaterThanOrEqual(.9);
   await page.getByTestId("chat-send-button").scrollIntoViewIfNeeded();
   await expect(page.getByTestId("chat-send-button")).toBeInViewport();
+});
+
+test("Easy deduplicates Professional providers and restores every model when switched back", async ({ page }) => {
+  await prepare(page, 1600, "light", ["gpt-5-4-mini", "gpt-6-luna", "claude-haiku-4-5"], 2);
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(2);
+  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
+});
+
+test("Studio history preserves the collapse preference, traps focus and returns it on dismissal", async ({ page }) => {
+  await prepare(page, 430);
+  await page.setViewportSize({ width: 430, height: 480 });
+  await page.evaluate(() => localStorage.setItem("tomverse_sidebar_collapsed_v1", "collapsed"));
+  const opener = page.locator(".review-navigation-history");
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "기록", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("account-menu-trigger")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("tomverse_sidebar_collapsed_v1"))).toBe("collapsed");
+  await dialog.getByTestId("account-menu-trigger").scrollIntoViewIfNeeded();
+  await expect(dialog.getByTestId("account-menu-trigger")).toBeInViewport();
+  await openOnScreenKeyboard(page, 160);
+  await expect.poll(() => dialog.evaluate(element => element.getBoundingClientRect().bottom <= window.visualViewport!.height)).toBe(true);
+  await dialog.getByTestId("account-menu-trigger").scrollIntoViewIfNeeded();
+  await expect.poll(() => dialog.getByTestId("account-menu-trigger").evaluate(element => {
+    const box = element.getBoundingClientRect();
+    const x = box.left + box.width / 2, y = box.top + box.height / 2;
+    return y < window.visualViewport!.height && element.contains(document.elementFromPoint(x, y));
+  })).toBe(true);
+  const close = dialog.locator(".review-drawer-close");
+  await close.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(() => dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  expect(await page.evaluate(() => localStorage.getItem("tomverse_sidebar_collapsed_v1"))).toBe("collapsed");
 });

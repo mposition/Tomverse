@@ -1256,7 +1256,7 @@ export function MobileChatShell({
         not a second copy of it.
       */}
       <h1 className="sr-only">Tomverse</h1>
-      {review && <ReviewCommandBar review={review} />}
+      {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding} />}
       <header
         ref={headerRef}
         data-testid="mobile-chat-header"
@@ -1838,7 +1838,7 @@ export function MobileChatShell({
       {composerPortalHost &&
         createPortal(
           <ChatInput
-            review={review}
+            review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
             currentProduct={currentProduct}
             showProductSwitcher={!isCompactBottomDock}
             showReviewModelRow={!isCompactBottomDock}

@@ -1048,6 +1048,9 @@ export async function mockAuthenticatedApi(
     await route.fulfill(json(conversation(), 201));
   };
   await page.route("**/api/conversations", handleConversationCollection);
+  await page.route("**/api/conversations/*/generate-title", route =>
+    route.fulfill(json({ title: state.title || "QA conversation" }))
+  );
   if (options.productKey === "chat") {
     const drafts = new Map<string, {
       text: string;

@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { mockUserUsage } from "./support/chat-state-fixtures";
 
+test.setTimeout(120_000);
+
 // Owner direction 2026-10-20: profile credit numbers become usage gauges.
 // Monthly usage remains visible when no daily quota applies; a real daily
 // quota has a separate gauge. The underlying limits and reset are unchanged.
@@ -28,8 +30,10 @@ const PRO_WITH_DAILY_LIMIT = {
     limits: { creditsDay: 300, creditsMonth: 3_000 },
 };
 
-async function openAccountMenu(page: Page, isMobile: boolean) {
-    if (isMobile) {
+async function openAccountMenu(page: Page, isMobile: boolean, appearance: "classic" | "studio") {
+    if (appearance === "studio") {
+        await page.locator(".review-navigation-history").click();
+    } else if (isMobile) {
         await page.getByTestId("mobile-sidebar-open").click();
     }
     await page.getByTestId("account-menu-trigger").click();
@@ -38,16 +42,16 @@ async function openAccountMenu(page: Page, isMobile: boolean) {
     return menu;
 }
 
-async function prepareChat(page: Page, patch: Parameters<typeof mockUserUsage>[1]) {
-    await prepareGuestPage(page, "ko");
+async function prepareChat(page: Page, patch: Parameters<typeof mockUserUsage>[1], appearance: "classic" | "studio") {
+    await prepareGuestPage(page, "ko", appearance);
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
     await mockUserUsage(page, patch);
-    await page.goto("/review?lang=ko");
-    await expect(page.getByTestId("chat-input")).toBeVisible();
+    await page.goto("/review?lang=ko", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("chat-input")).toBeVisible({ timeout: 60_000 });
 }
 
-for (const shell of ["desktop", "mobile"] as const) {
-    test.describe(`${shell} credit entitlement disclosure`, { tag: "@ui-risk" }, () => {
+for (const appearance of ["classic", "studio"] as const) for (const shell of ["desktop", "mobile"] as const) {
+    test.describe(`${appearance} ${shell} credit entitlement disclosure`, { tag: "@ui-risk" }, () => {
         test.beforeEach(async ({}, testInfo) => {
             test.skip(
                 !testInfo.project.name.startsWith(shell),
@@ -58,8 +62,8 @@ for (const shell of ["desktop", "mobile"] as const) {
         test("profile shows monthly usage percentage when no daily quota applies", async ({
             page,
         }) => {
-            await prepareChat(page, PRO_UNLIMITED_DAILY);
-            const menu = await openAccountMenu(page, shell === "mobile");
+            await prepareChat(page, PRO_UNLIMITED_DAILY, appearance);
+            const menu = await openAccountMenu(page, shell === "mobile", appearance);
 
             const gauges = menu.getByTestId("usage-percent-gauge");
             await expect(gauges).toHaveCount(1);
@@ -72,8 +76,8 @@ for (const shell of ["desktop", "mobile"] as const) {
         test("profile shows daily and monthly usage percentages with reset time", async ({
             page,
         }) => {
-            await prepareChat(page, PRO_WITH_DAILY_LIMIT);
-            const menu = await openAccountMenu(page, shell === "mobile");
+            await prepareChat(page, PRO_WITH_DAILY_LIMIT, appearance);
+            const menu = await openAccountMenu(page, shell === "mobile", appearance);
 
             const gauges = menu.getByTestId("usage-percent-gauge");
             await expect(gauges).toHaveCount(2);

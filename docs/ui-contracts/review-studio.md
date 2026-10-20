@@ -39,6 +39,9 @@ monthly allowance, clamped to 0–100. A real daily allowance has a separate dai
 gauge in the profile menu. Unknown/unbounded denominators show no invented
 percentage. Purchased balances remain in billing details rather than receiving
 a fabricated percentage. Guest usage uses the existing guest allowance.
+When a purchased allowance remains, the menu indicates that extra usage is
+available without displaying a credit count or treating the monthly gauge as
+an execution gate.
 
 Answers omit quiet no-search/refund labels and search surcharges. Executed
 search, research, source links, failed-search notices and normal error handling

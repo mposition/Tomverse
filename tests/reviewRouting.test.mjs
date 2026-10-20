@@ -4,7 +4,7 @@ import { parseReviewRoute, reviewRoutingCandidates } from "../lib/reviewRoutingC
 import { askReviewRoute } from "../lib/reviewRoutingClient.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
-import { reviewProviderTranscript } from "../lib/reviewProviderTranscript.ts";
+import { reviewProviderPanels, reviewProviderTranscript } from "../lib/reviewProviderTranscript.ts";
 
 const providers = ["openai", "anthropic", "google"];
 const textModels = providers.map((provider, index) => ({ ...AVAILABLE_MODELS[0], id: `text-${index}`, provider, enabled: true, publiclyListed: true, catalogDeleted: false, requiredTier: "Free" }));
@@ -64,4 +64,12 @@ test("Easy retains a provider's earlier model answers without mixing another pro
     { role: "assistant", modelId: "new-openai" }, { role: "assistant", modelId: "unknown" } ];
   assert.deepEqual(reviewProviderTranscript(messages, "openai", id => id.endsWith("openai") ? "openai" : id === "anthropic" ? "anthropic" : undefined),
     [messages[0], messages[1], messages[3], messages[4]]);
+});
+
+test("Easy projects one panel per provider without changing a Professional model selection", () => {
+  const selected = ["openai-old", "openai-new", "anthropic"];
+  const provider = id => id.startsWith("openai") ? "openai" : "anthropic";
+  assert.deepEqual(reviewProviderPanels(selected, [], provider), ["openai-old", "anthropic"]);
+  assert.deepEqual(reviewProviderPanels(selected, ["openai-old"], provider), ["openai-new", "anthropic"]);
+  assert.deepEqual(selected, ["openai-old", "openai-new", "anthropic"]);
 });

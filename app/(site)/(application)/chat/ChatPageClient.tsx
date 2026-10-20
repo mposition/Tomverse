@@ -4,6 +4,8 @@ import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome
 import { useReviewWorkspace } from "@/components/chat/useReviewWorkspace";
 import { askReviewRoute } from "@/lib/reviewRoutingClient";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import { reviewProviderPanels } from "@/lib/reviewProviderTranscript";
+import { flushSync } from "react-dom";
 import React, {
   useState,
   useEffect,
@@ -5756,10 +5758,8 @@ export function ChatPageClient({
       }
       reviewWorkspace.setImageRequest(false);
       reviewWorkspace.setUnsupportedProviders([]);
-      mutateModelSettings(currentChatIdRef.current, chosen, []);
-      // The ordinary Review send retains persistence, admission, credits and
-      // provider execution. Wait for React to commit the newly selected ids.
-      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      // Commit both the panels and the submit closure before ordinary dispatch.
+      flushSync(() => mutateModelSettings(currentChatIdRef.current, chosen, []));
       if (owner !== identityNamespaceKey(identityNamespaceRef.current) ||
         epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
         !sameStringList(chosen, latestModelSettingsRef.current.models)) return;
@@ -5809,17 +5809,10 @@ export function ChatPageClient({
       const intentScope = composerDraftConversationId;
       const intentTicket = conversationSelectionTicketRef.current;
       const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
-      const activeComparisonModelIds = () =>
-        latestModelSettingsRef.current.models.filter(
-          (modelId) => !latestModelSettingsRef.current.disabled.includes(modelId)
-        );
-      const reviewModelIds: string[] | undefined = undefined;
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
-        decision = await askChatImageIntent(intentText, {
-          chatModelIds: reviewModelIds,
-        });
+        decision = await askChatImageIntent(intentText);
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
@@ -5831,9 +5824,7 @@ export function ChatPageClient({
         stale text over the edit) nor sent from this render's stale closure.
         The next press decides it. The identity fence comes first: after an
         account switch the same text in the new account's draft is not this
-        request either. In Review the comparison models are part of the
-        request too: a model swapped out or a panel turned off during the wait
-        must not have its maker's image model generate.
+        request either.
       */
       const liveDraft = readDraft(intentScope);
       if (
@@ -5845,9 +5836,7 @@ export function ChatPageClient({
         intentTicket !== conversationSelectionTicketRef.current ||
         isImageDraftActiveRef.current ||
         liveDraft.text !== intentText ||
-        liveDraft.attachments.length > 0 ||
-        (reviewModelIds !== undefined &&
-          !sameStringList(reviewModelIds, activeComparisonModelIds()))
+        liveDraft.attachments.length > 0
       ) {
         return;
       }
@@ -8566,7 +8555,7 @@ export function ChatPageClient({
   // handleGlobalSubmit itself in the dependency array, which would fire the
   // effect on every render instead of only when selectedModels changes.
   const handleGlobalSubmitRef = useRef(handleGlobalSubmit);
-  useEffect(() => {
+  useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
   const pendingDeepResearchSubmitRef = useRef<{
@@ -9959,6 +9948,9 @@ export function ChatPageClient({
     draftSyncFailed;
   const handleProductSwitch = () =>
     !productSwitchDisabled && preserveDraftsForProductSwitch();
+  const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
+    ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
+    : selectedModels;
 
   return (
     // Every surface that decides whether a model searches reads this: the
@@ -10009,7 +10001,7 @@ export function ChatPageClient({
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
-          selectedModels={selectedModels}
+          selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
           inputValue={inputValue}
@@ -10177,7 +10169,7 @@ export function ChatPageClient({
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
-          selectedModels={selectedModels}
+          selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
           inputValue={inputValue}

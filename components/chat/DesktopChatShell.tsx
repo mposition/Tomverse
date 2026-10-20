@@ -924,6 +924,7 @@ export function DesktopChatShell({
         currentModelId={selectedModels[0]}
         attachmentCount={attachments.length}
         autoCollapseSuggested={autoCollapseSuggested}
+        isMobileDrawer={studio}
       />
   );
 
@@ -941,10 +942,11 @@ export function DesktopChatShell({
       className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       {studio ? <ReviewNavigation sidebar={sidebarElement} onNewChat={onNewChat}
+        locked={productSwitchDisabled || isAnyModelResponding || review?.pending}
         onChat={() => onProductSwitch?.("chat") ?? false} /> : sidebarElement}
 
       <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {review && <ReviewCommandBar review={review} locked={isAnyModelResponding}
+        {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding}
           view={studioView} setView={studio ? setStudioView : undefined} />}
         <div className={studio ? "review-studio-body" : "contents"}>
 
@@ -1452,7 +1454,7 @@ export function DesktopChatShell({
         {composerPortalHost &&
           createPortal(
             <ChatInput
-              review={review}
+              review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
               currentProduct={currentProduct}
               productSwitchDisabled={productSwitchDisabled}
               onProductSwitch={onProductSwitch}

@@ -1274,6 +1274,7 @@ export function AuthButton({
               {accountUsage && <div className="my-3 space-y-4 rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900">
                 <UsagePercentGauge used={accountUsage.usage.creditsMonth} limit={accountUsage.limits.creditsMonth} label={t("sidebar.currentUsage")} />
                 {hasDailyCreditGuardrail && <UsagePercentGauge used={accountUsage.usage.creditsDay} limit={dailyCreditsLimit} label={t("sidebar.todayUsage")} />}
+                {accountUsage.balances.purchasedRemainingCredits > 0 && <p data-testid="account-extra-usage" className="text-xs text-zinc-600 dark:text-zinc-300">{t("auth.extraUsageAvailable")}</p>}
                 {(hasDailyCreditGuardrail ? dailyCreditsResetLabel : planCreditsResetLabel) && <p data-testid="account-credits-reset" className="text-xs text-zinc-500 dark:text-zinc-400">{formatCopy("auth.dailyCreditsResetAt", { time: (hasDailyCreditGuardrail ? dailyCreditsResetLabel : planCreditsResetLabel)! })}</p>}
               </div>}
 
