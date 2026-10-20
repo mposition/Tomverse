@@ -42,8 +42,8 @@ test("the operator reorders the line by dragging and from the keyboard, and each
   });
   await signInAs("owner");
   await page.goto("/admin/agent-digests");
-  const decline = page.getByRole("button", { name: "Decline", exact: true });
-  if (await decline.isVisible().catch(() => false)) await decline.click();
+  // The analytics consent banner sits over the bottom of the page until declined.
+  await page.getByRole("button", { name: "Decline", exact: true }).click();
 
   const section = page.getByTestId("ci-admission-section");
   await expect(section).toBeVisible();
@@ -54,6 +54,7 @@ test("the operator reorders the line by dragging and from the keyboard, and each
 
   // Mouse: drag #903 by its handle above #901.
   const handle = section.getByTestId("ci-admission-handle-903");
+  await section.getByTestId("ci-admission-queue").scrollIntoViewIfNeeded();
   const from = (await handle.boundingBox())!;
   const top = (await section.getByTestId("ci-admission-row-901").boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
