@@ -6,6 +6,7 @@ import {
   parseCiAdmissionMode,
   parseCiAdmissionState,
   type CiAdmissionAction,
+  type CiAdmissionDeploy,
   type CiAdmissionEvent,
   type CiAdmissionMode,
   type CiAdmissionPull,
@@ -140,9 +141,10 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   let openPulls: CiAdmissionPull[];
   let running: Set<string>;
   let runningBases: Map<number, string>;
+  let deploys: CiAdmissionDeploy[];
   try {
     openPulls = await github.openPulls();
-    ({ keys: running, bases: runningBases } = await github.runningPulls());
+    ({ keys: running, bases: runningBases, deploys } = await github.runningPulls());
   } catch (error) {
     // Keep the arrival for the next round (it survives a restart), and try
     // again shortly: the event that brought this round may be the last for a while.
@@ -167,7 +169,7 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, arrival, nowMs: now(), shadow: mode === "shadow" });
+      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, arrival, nowMs: now(), shadow: mode === "shadow" });
       await writeState(
         tx,
         mode === "shadow"

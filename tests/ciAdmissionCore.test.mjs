@@ -480,3 +480,38 @@ test("new commits on a waiting draft move its waiting status and redo the old co
   assert.deepEqual(evaluation.state.owedCommits.sort(), [oldHead, newHead].sort());
   assert.equal(evaluation.state.queue[0].headSha, newHead);
 });
+
+test("deploy CI on develop and main occupies slots like a pull request into the same branch, and is shown", () => {
+  const deploys = [
+    { branch: "main", sha: "a".repeat(40), title: "Merge pull request #2825 from mposition/release/x" },
+    { branch: "develop", sha: "b".repeat(40), title: "Merge pull request #2820 from mposition/claude/to-develop/y" },
+  ];
+  // main 2 + develop 1 fill the 3-slot budget: a ready develop pull request waits.
+  const held = run({ state: state(), openPulls: [pull(31)], arrival: 31, deploys });
+  assert.deepEqual(kinds(held), ["hold:31"]);
+  assert.equal(held.state.events.at(-1).detail, "no_slot");
+  assert.equal(held.used, 3);
+  assert.deepEqual(held.state.lastRound.deploys, deploys);
+
+  // Once the main deploy's CI stops, the same arrival fits.
+  const admitted = run({ state: state(), openPulls: [pull(31)], arrival: 31, deploys: deploys.slice(1) });
+  assert.deepEqual(kinds(admitted), ["admit:31"]);
+  assert.equal(admitted.used, 2);
+});
+
+test("deploy CI keeps the head of the line waiting until its slots free", () => {
+  const waiting = state({ queue: [queued(41)] });
+  const deploys = [{ branch: "main", sha: "c".repeat(40), title: "" }, { branch: "develop", sha: "d".repeat(40), title: "" }];
+  assert.deepEqual(kinds(run({ state: waiting, openPulls: [pull(41, { draft: true })], deploys })), []);
+  assert.deepEqual(kinds(run({ state: waiting, openPulls: [pull(41, { draft: true })], deploys: [] })), ["release:41"]);
+});
+
+test("a state stored before deploys were recorded reads with none, and an operator stop is a known event", () => {
+  const stored = state({
+    lastRound: { at: "2026-10-20T01:00:00.000Z", used: 1, running: [{ number: 1, title: "a", base: "develop" }] },
+    events: [{ at: "2026-10-20T01:00:00.000Z", kind: "stopped", number: 1, shadow: false, detail: "drafted cancelled_runs:3" }],
+  });
+  const parsed = parseCiAdmissionState(JSON.stringify(stored));
+  assert.deepEqual(parsed.lastRound.deploys, []);
+  assert.equal(parsed.events[0].kind, "stopped");
+});
