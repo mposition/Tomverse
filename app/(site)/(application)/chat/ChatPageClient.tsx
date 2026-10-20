@@ -5671,6 +5671,7 @@ export function ChatPageClient({
       const intentText = inputValue;
       const intentScope = composerDraftConversationId;
       const intentTicket = conversationSelectionTicketRef.current;
+      const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
       imageIntentCheckPendingRef.current = true;
       let imageRequested = false;
       try {
@@ -5684,10 +5685,17 @@ export function ChatPageClient({
         different request: neither handed off (it could start a paid
         generation for words already withdrawn, and cancel would restore the
         stale text over the edit) nor sent from this render's stale closure.
-        The next press decides it.
+        The next press decides it. The identity fence comes first: after an
+        account switch the same text in the new account's draft is not this
+        request either.
       */
       const liveDraft = readDraft(intentScope);
       if (
+        !identityKey ||
+        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
+        intentIdentityEpoch !== submitIdentityFenceRef.current.epoch ||
+        !activeChatIdentityIs(identityKey, intentIdentityEpoch) ||
+        submitIdentityFenceRef.current.identityKey !== identityKey ||
         intentTicket !== conversationSelectionTicketRef.current ||
         isImageDraftActiveRef.current ||
         liveDraft.text !== intentText ||
