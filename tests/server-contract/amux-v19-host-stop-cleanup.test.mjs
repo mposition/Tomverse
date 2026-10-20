@@ -159,7 +159,7 @@ test("operator stop aborts checkout materialization before any CLI spawn", {
   try {
     assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
       async () => ++checks === 1 ? false : (await started, true))),
-    { kind: "outcome_unknown", cliStarted: false });
+    { kind: "outcome_unknown", reason: "stop_requested", cliStarted: false });
     assert.ok(checks >= 2);
     assert.equal(checkoutSignal.aborted, true);
     assert.equal(gitAbortObserved, true);
@@ -202,7 +202,8 @@ test("staged CLI digest mismatch refuses before any child spawn", {
   sandboxVerificationError = null;
   try {
     assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis(input(
-      async () => false)), { kind: "outcome_unknown", cliStarted: false });
+      async () => false)), { kind: "outcome_unknown", reason: "host_error",
+      cliStarted: false });
     assert.equal(stageCount, 1);
     assert.equal(sandboxCount, 1);
     assert.equal(spawnCount, 0);
