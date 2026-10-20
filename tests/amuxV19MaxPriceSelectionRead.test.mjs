@@ -56,7 +56,8 @@ test("the price hint names its CLI channel or stays unavailable", async () =>
     delete withoutProvider.provider;
     for (const body of [withoutProvider, { ...ready, provider: "gemini" },
       { ...ready, extra: 1 }]) {
-      assert.deepEqual(await answer(body), { kind: "unavailable" });
+      assert.deepEqual(await answer(body), { kind: "unavailable",
+        reason: "response_invalid" });
     }
   }));
 
@@ -73,5 +74,5 @@ test("unbound origin refuses before network and malformed price stays unavailabl
         kind: "ready", priceVersionId: "bad price", provider: "anthropic",
         modelId: "claude-opus-5-5", reasoningEffort: "high",
       }),
-    }), { kind: "unavailable" });
+    }), { kind: "unavailable", reason: "response_invalid" });
   }));

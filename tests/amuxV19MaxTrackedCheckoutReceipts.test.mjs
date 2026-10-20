@@ -4,7 +4,9 @@ import { after, test } from "node:test";
 import { finalizeAmuxV19MaxSessionResultWithReceipts,
   finishAmuxV19MaxTrackedCheckoutWithReceipts } from
   "../lib/amux/ideaLocalMaxTrackedCheckoutReceipts.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
 
+installAmuxV19FakeAppTiming();
 const names = ["TOMVERSE_AMUX_V4_ANALYSIS_APP_ORIGIN",
   "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN",
   "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"];
@@ -137,7 +139,8 @@ test("a verified answer without its claim channel's attestation writes nothing",
       modelAttestation: "unknown" } }]]) {
     assert.deepEqual(await finalizeAmuxV19MaxSessionResultWithReceipts(
       { ...input(fetchImpl), ...(provider ? { provider } : {}) }, seen),
-    { kind: "outcome_unknown", retryWrite: false });
+    { kind: "outcome_unknown", retryWrite: false,
+      reason: "attestation_invalid" });
   }
   assert.equal(calls, 0);
 });
@@ -148,16 +151,44 @@ test("stop and mismatched identity suppress output before evidence writes", asyn
     return Response.json({ claimId: identity.claimId,
       reservationId: identity.reservationId, stop: true }); };
   assert.deepEqual(await finishAmuxV19MaxTrackedCheckoutWithReceipts(
-    input(fetchImpl), observed), { kind: "outcome_unknown", cliStarted: true });
+    input(fetchImpl), observed), { kind: "outcome_unknown",
+    reason: "stop_requested", cliStarted: true });
   assert.equal(calls, 1);
   assert.deepEqual(await finishAmuxV19MaxTrackedCheckoutWithReceipts(
     { ...input(fetchImpl), identity: { ...identity, claimId: "other" } },
     observed), { kind: "refused" });
   assert.deepEqual(await finishAmuxV19MaxTrackedCheckoutWithReceipts(
     input(fetchImpl), { ...observed, commitSha: "c".repeat(40) }),
-  { kind: "outcome_unknown", cliStarted: true });
+  { kind: "outcome_unknown", reason: "commit_mismatch", cliStarted: true });
   assert.equal(calls, 1);
 });
+
+test("a dropped stop read after the CLI waits for the app instead of stopping",
+  async () => {
+    let stopReads = 0;
+    const writes = [];
+    const result = await finishAmuxV19MaxTrackedCheckoutWithReceipts(
+      input(async (url, options) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith("/session-analysis-stop")) {
+          stopReads += 1;
+          if (stopReads <= 2) throw new DOMException("synthetic", "TimeoutError");
+          return Response.json({ claimId: identity.claimId,
+            reservationId: identity.reservationId, stop: false });
+        }
+        const body = JSON.parse(options.body);
+        writes.push(path);
+        return path.endsWith("/max-checkout-evidence")
+          ? Response.json({ evidenceId, ideaId: identity.ideaId,
+            referenceOrdinal: 0 })
+          : Response.json({ manifestId: body.manifestId,
+            ideaId: identity.ideaId, referenceOrdinal: 0, fileCount: 1 });
+      }), observed);
+    assert.equal(result.kind, "verified_success");
+    assert.equal(stopReads, 5);
+    assert.deepEqual(writes, ["/api/internal/amux/v19/max-checkout-evidence",
+      "/api/internal/amux/v19/max-read-manifest"]);
+  });
 
 test("an uncertain manifest write reads once but never replays or releases output", async () => {
   const calls = [];
@@ -240,27 +271,30 @@ test("invalid multi-reference roots and pins cause no receipt write", async () =
     excludedPathDigest: observed.excludedPathDigest,
     excludedReasons: observed.excludedReasons,
   }));
+  const path = "read_path_invalid";
   const invalid = [
-    { readFiles: ["reference-0/docs/guide.md", "reference-1/../secret"] },
-    { readFiles: ["reference-0/docs/guide.md", "reference-2/README.md"] },
-    { readFiles: ["reference-0/docs/guide.md", "reference-01/README.md"] },
-    { readFiles: ["reference-0/docs/guide.md", "reference-1//abs"] },
-    { readFiles: ["reference-0/docs/guide.md", "reference-1/path/"] },
-    { readFiles: ["reference-0/docs/guide.md", "reference-1/.git/config"] },
-    { readFiles: ["reference-0/docs/guide.md", "reference-1/\u0001bad"] },
-    { readFiles: ["reference-0/docs/guide.md",
-      "reference-1/README.md", "reference-1/README.md"] },
-    { references: checked.slice(0, 1) },
-    { references: [checked[0], { ...checked[1], commitSha: "d".repeat(40) }] },
+    [{ readFiles: ["reference-0/docs/guide.md", "reference-1/../secret"] }, path],
+    [{ readFiles: ["reference-0/docs/guide.md", "reference-2/README.md"] }, path],
+    [{ readFiles: ["reference-0/docs/guide.md", "reference-01/README.md"] }, path],
+    [{ readFiles: ["reference-0/docs/guide.md", "reference-1//abs"] }, path],
+    [{ readFiles: ["reference-0/docs/guide.md", "reference-1/path/"] }, path],
+    [{ readFiles: ["reference-0/docs/guide.md", "reference-1/.git/config"] }, path],
+    [{ readFiles: ["reference-0/docs/guide.md", "reference-1/\u0001bad"] }, path],
+    [{ readFiles: ["reference-0/docs/guide.md",
+      "reference-1/README.md", "reference-1/README.md"] }, path],
+    [{ references: checked.slice(0, 1) }, "references_mismatch"],
+    [{ references: [checked[0], { ...checked[1], commitSha: "d".repeat(40) }] },
+      "references_mismatch"],
   ];
-  for (const mutation of invalid) {
+  for (const [mutation, reason] of invalid) {
     const result = await finalizeAmuxV19MaxSessionResultWithReceipts({
       ...input(async () => { calls++; throw new Error("unexpected request"); }),
       references,
     }, { ...observed, references: checked,
       readFiles: ["reference-0/docs/guide.md",
         "reference-1/README.md"], ...mutation });
-    assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false });
+    assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false,
+      reason });
   }
   assert.equal(calls, 0);
 });
@@ -331,7 +365,8 @@ test("a missing second reference receipt never releases the Max answer", async (
         ideaId: identity.ideaId, referenceOrdinal: 0, fileCount: 1 });
     }), references,
   }, multi);
-  assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false });
+  assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false,
+    reason: "network_sent_unconfirmed" });
   assert.deepEqual(writes, [
     { path: "/api/internal/amux/v19/max-checkout-evidence", ordinal: 0 },
     { path: "/api/internal/amux/v19/max-read-manifest", ordinal: 0 },

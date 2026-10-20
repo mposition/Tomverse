@@ -10,6 +10,11 @@ import { prepareAmuxV19MaxTrackedCheckout,
   "../lib/amux/ideaLocalMaxTrackedCheckoutPreflight.mjs";
 import { runAmuxV19MaxClaimedTrackedCheckoutOnce } from
   "../lib/amux/ideaLocalMaxClaimedTrackedCheckoutOnce.mjs";
+import { AMUX_V19_STOP_UNREACHABLE_LIMIT_MS } from
+  "../lib/amux/ideaLocalAppRequest.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
+
+const timing = installAmuxV19FakeAppTiming();
 
 const origin = "https://amux.example.test/";
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
@@ -112,15 +117,63 @@ test("recovered claim and mismatched identity refuse without a network call", as
 
 test("stop request and invalid pin fail closed before local checkout", async () =>
   withEnvironment(async () => {
-    for (const options of [{ stop: true }, { badPin: true }]) {
+    for (const [options, reason] of [[{ stop: true }, "stop_requested"],
+      [{ badPin: true }, "response_invalid"]]) {
       const calls = [];
       assert.deepEqual(await prepareAmuxV19MaxTrackedCheckout({ origin,
         identity, claim, referenceOrdinal: 0,
         fetchImpl: fetchFor({ ...options, calls }) }),
-      { kind: "unavailable" });
+      { kind: "unavailable", reason });
+      // An explicit stop answer ends the preflight at once.
       if (options.stop) assert.equal(calls.length, 2);
       else assert.equal(calls.length, 3);
     }
+  }));
+
+const dropped = () => Object.assign(new TypeError("fetch failed"),
+  { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN"),
+    { code: "EAI_AGAIN" }) });
+
+test("a short stop-read drop waits for the app's answer instead of stopping",
+  async () => withEnvironment(async () => {
+    const clock = timing;
+    const start = clock.now;
+    const calls = [];
+    const answer = fetchFor({ calls });
+    let stopReads = 0;
+    const result = await prepareAmuxV19MaxTrackedCheckout({ origin,
+      identity, claim, referenceOrdinal: 0,
+      fetchImpl: async (url, options) => {
+        if (new URL(url).pathname.endsWith("/session-analysis-stop") &&
+            ++stopReads <= 3) throw dropped();
+        return answer(url, options);
+      } });
+    assert.equal(result.kind, "ready");
+    assert.equal(stopReads, 5);
+    assert.ok(clock.now - start < AMUX_V19_STOP_UNREACHABLE_LIMIT_MS);
+  }));
+
+test("a stop read unanswered for the contact limit stops before checkout",
+  async () => withEnvironment(async () => {
+    const start = timing.now;
+    let references = 0;
+    const result = await prepareAmuxV19MaxTrackedCheckout({ origin,
+      identity, claim, referenceOrdinal: 0,
+      fetchImpl: async (url) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith("/analysis-budget/claim")) return Response.json({
+          status: "committed", claimId: identity.claimId,
+          claimStatus: "in_flight" });
+        if (path.endsWith("/session-analysis-stop")) {
+          return new Response(null, { status: 503 });
+        }
+        references += 1;
+        throw new Error("no checkout reference after a lost stop answer");
+      } });
+    assert.deepEqual(result, { kind: "unavailable",
+      reason: "stop_unreachable" });
+    assert.equal(references, 0);
+    assert.ok(timing.now - start >= AMUX_V19_STOP_UNREACHABLE_LIMIT_MS);
   }));
 
 test("settled claim cannot resolve a checkout even with a matching ID", async () =>
@@ -134,7 +187,7 @@ test("settled claim cannot resolve a checkout even with a matching ID", async ()
     };
     assert.deepEqual(await prepareAmuxV19MaxTrackedCheckout({ origin,
       identity, claim, referenceOrdinal: 0, fetchImpl }),
-    { kind: "unavailable" });
+    { kind: "unavailable", reason: "claim_inactive" });
     assert.deepEqual(calls,
       ["/api/internal/amux/v19/analysis-budget/claim"]);
   }));
@@ -193,7 +246,8 @@ test("changed reference count and stop mid-list refuse the whole set", async () 
           pinnedCommitSha: pin });
         },
       });
-      assert.deepEqual(result, { kind: "unavailable" });
+      assert.deepEqual(result, { kind: "unavailable", reason: failure === "stop"
+        ? "stop_requested" : "reference_count_changed" });
       assert.equal(references, failure === "stop" ? 1 : 2);
     }
   }));
@@ -247,19 +301,21 @@ test("claimed dispatch resolves every reference before the default-closed host",
     try {
       delete process.env[switchName];
       assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce(input),
-        { kind: "refused", cliStarted: false, beforeCli: true });
+        { kind: "refused", reason: "analysis_refused", cliStarted: false,
+          beforeCli: true });
       // Diagnostic mode adds only the fixed stage code.
       calls.length = 0;
       assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce({
         ...input, diagnostic: true,
-      }), { kind: "refused", cliStarted: false, beforeCli: true,
-        failureStage: "analysis_refused" });
+      }), { kind: "refused", reason: "analysis_refused", cliStarted: false,
+        beforeCli: true, failureStage: "analysis_refused" });
       assert.equal(calls.filter((path) =>
         path.endsWith("/checkout-reference")).length, 2);
       calls.length = 0;
       assert.deepEqual(await runAmuxV19MaxClaimedTrackedCheckoutOnce({
         ...input, claim: { ...claim, recovered: true },
-      }), { kind: "refused", cliStarted: false, beforeCli: true });
+      }), { kind: "refused", reason: "prepare_refused", cliStarted: false,
+        beforeCli: true });
       assert.equal(calls.length, 0);
     } finally {
       if (old === undefined) delete process.env[switchName];

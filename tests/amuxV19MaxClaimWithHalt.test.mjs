@@ -94,7 +94,8 @@ test("a held marker stops the claim before any write, and a failed release is re
   const thrown = fakeHalt();
   assert.deepEqual(await claimAmuxV19MaxShadowBudgetWithHaltOnce(
     { stateDirectory: "/state" }, async () => { throw new Error("lost"); },
-    thrown.haltFile), { kind: "outcome_unknown", retryWrite: false });
+    thrown.haltFile), { kind: "outcome_unknown", retryWrite: false,
+    reason: "claim_threw" });
   assert.equal(thrown.state.held, true);
 });
 

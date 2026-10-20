@@ -151,7 +151,8 @@ test("a purged manifest readback cannot release an analysis result", async () =>
       bodyPurged: true });
   };
   assert.deepEqual(await recordAmuxV19LocalReadManifest(input(fetchImpl)),
-    { kind: "outcome_unknown", manifestId });
+    { kind: "outcome_unknown", manifestId,
+      reason: "network_sent_unconfirmed" });
   assert.deepEqual(methods, ["POST", "GET"]);
 });
 

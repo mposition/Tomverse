@@ -62,26 +62,26 @@ test("idle, stale and mismatched selections never write a claim", async () => {
 
 test("uncertain or mismatched claim is never reported as safe to retry",
   async () => {
-    for (const claimOnce of [
-      async () => { throw Error("claim response lost"); },
-      async () => ({ kind: "outcome_unknown", retryWrite: false }),
-      async ({ identity }) => ({ kind: "claimed",
+    for (const [claimOnce, reason] of [
+      [async () => { throw Error("claim response lost"); }, "claim_threw"],
+      [async () => ({ kind: "outcome_unknown", retryWrite: false }), null],
+      [async ({ identity }) => ({ kind: "claimed",
         claimId: identity.claimId, requestId: identity.requestId,
         reservationId: ideaId, reservedMicroUsd: "1000000",
-        recovered: false, retryWrite: false }),
-      async ({ identity }) => ({ kind: "claimed",
+        recovered: false, retryWrite: false }), "claim_mismatch"],
+      [async ({ identity }) => ({ kind: "claimed",
         claimId: identity.claimId, requestId: identity.requestId,
         reservationId: identity.reservationId, reservedMicroUsd: null,
-        recovered: true, retryWrite: false }),
-      async ({ identity }) => ({ kind: "claimed",
+        recovered: true, retryWrite: false }), "claim_read_back"],
+      [async ({ identity }) => ({ kind: "claimed",
         claimId: identity.claimId, requestId: identity.requestId,
         reservationId: identity.reservationId, reservedMicroUsd: "invalid",
-        recovered: false, retryWrite: false }),
+        recovered: false, retryWrite: false }), "claim_mismatch"],
     ]) {
       const result = await claimAmuxV19MaxQueueSelectionOnce(selection, {},
         claimOnce);
       assert.deepEqual(result, { kind: "outcome_unknown",
-        retryWrite: false });
+        retryWrite: false, ...(reason ? { reason } : {}) });
     }
     assert.deepEqual(await claimAmuxV19MaxQueueSelectionOnce(selection, {},
       async () => ({ kind: "outcome_unknown", receiptStatus: "partial",

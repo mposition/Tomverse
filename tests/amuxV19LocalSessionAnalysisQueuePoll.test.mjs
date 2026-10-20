@@ -5,7 +5,9 @@ import { AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV,
   pollAmuxV19SessionAnalysisCandidateIds,
   pollAmuxV19MaxSessionAnalysisCandidateIds } from
   "../lib/amux/ideaLocalSessionAnalysisQueuePoll.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
 
+installAmuxV19FakeAppTiming();
 const origin = "https://staging.tomverse.example/";
 const secret = "local_v19_session_012345678901234567890123456";
 const candidate = (index) => ({
@@ -112,19 +114,24 @@ test("local v19 poll rejects redirects, unbounded or content-bearing responses",
   const prior = process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];
   process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV] = origin;
   try {
+    const invalid = { kind: "unavailable", reason: "response_invalid" };
     assert.deepEqual(await poll({ fetchImpl: async () => new Response(null,
       { status: 302, headers: { location: "https://other.example/" } }) }),
-    { kind: "unavailable" });
+    invalid);
     const redirected = Response.json(page);
     Object.defineProperty(redirected, "url", { value: "https://other.example/" });
-    assert.deepEqual(await poll({ fetchImpl: async () => redirected }),
-      { kind: "unavailable" });
+    assert.deepEqual(await poll({ fetchImpl: async () => redirected }), invalid);
     assert.deepEqual(await poll({ fetchImpl: async () => new Response(null, { status: 409 }) }),
       { kind: "disabled" });
     assert.deepEqual(await poll({ after: "stale_cursor", fetchImpl: async () =>
       new Response(null, { status: 400 }) }), { kind: "cursor_rejected" });
-    assert.deepEqual(await poll({ fetchImpl: async () => { throw Error("sensitive transport"); } }),
-      { kind: "unavailable" });
+    // A read-only poll is asked again through a lost answer, then gives up.
+    let lost = 0;
+    assert.deepEqual(await poll({ fetchImpl: async () => {
+      lost += 1;
+      throw Error("sensitive transport");
+    } }), { kind: "unavailable", reason: "read_unreachable" });
+    assert.ok(lost > 1);
     for (const body of [
       { ...page, prompt: "never pass text" },
       { ...page, candidates: [{ ...candidate(0), prompt: "bad" },
@@ -143,7 +150,7 @@ test("local v19 poll rejects redirects, unbounded or content-bearing responses",
       { ...page, huge: "x".repeat(65_536) },
     ]) {
       assert.deepEqual(await poll({ fetchImpl: async () => Response.json(body) }),
-        { kind: "unavailable" });
+        invalid);
     }
   } finally {
     if (prior === undefined) delete process.env[AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN_ENV];

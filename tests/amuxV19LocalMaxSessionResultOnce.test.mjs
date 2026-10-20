@@ -83,7 +83,9 @@ test("absent readback halts without a second result write", async () => {
         { status: 503 }) : Response.json({ status: "absent",
         claimId: input.claimId });
     } });
-  assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false });
+  // A 503 answer to the write is not resent; only its readback decides.
+  assert.deepEqual(result, { kind: "outcome_unknown", retryWrite: false,
+    reason: "write_unconfirmed" });
   assert.deepEqual(calls, ["POST", "GET"]);
 });
 

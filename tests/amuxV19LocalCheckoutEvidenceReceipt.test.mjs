@@ -123,7 +123,7 @@ test("mismatched receipt or evidence from another checkout remains unknown", asy
         : json(readback, readback.status === "absent" ? 404 : 200);
     };
     assert.deepEqual(await recordAmuxV19LocalCheckoutEvidence(input(fetchImpl)),
-      { kind: "outcome_unknown" });
+      { kind: "outcome_unknown", reason: "write_unconfirmed" });
     assert.deepEqual(methods, ["POST", "GET"]);
   }
 });
