@@ -20,7 +20,7 @@ let triageOn = true;
 let conversation: Row = { kind: "chat", productKey: "chat", continuationBridge: null };
 let source: Row = { content: "  간단한 고양이 아이콘 그려줘 " };
 let existing: Row = null;
-let groups: Array<{ id: string; groupIdempotencyKey: string }> = [];
+let groups: Array<{ id: string; groupIdempotencyKey: string; targets: Array<{ modelId: string }> }> = [];
 const requests: Array<Record<string, unknown>> = [];
 const created: Array<Record<string, unknown>> = [];
 let groupQueries = 0;
@@ -114,6 +114,7 @@ test("an image turn reserves on the chat conversation, keyed by the answer id", 
   const result = await turn.startChatImageTurn(input);
   assert.deepEqual(result, {
     groupId: "group-1",
+    imageModelIds: ["gpt-image-2"],
     content: "[Image generated] 간단한 고양이 아이콘 그려줘",
     pendingGenerationIds: ["gen-1"],
   });
@@ -213,7 +214,7 @@ test("the transcript read attaches groups only to image answers", async () => {
   ];
   assert.deepEqual(await read.attachChatImageTurns("user-1", "conv-1", plain), plain);
   assert.equal(groupQueries, 0);
-  groups = [{ id: "group-9", groupIdempotencyKey: "a2" }];
+  groups = [{ id: "group-9", groupIdempotencyKey: "a2", targets: [{ modelId: "gpt-image-2" }] }];
   const withImage = await read.attachChatImageTurns("user-1", "conv-1", [
     ...plain,
     { id: "a2", role: "assistant", content: "[Image generated] cat" },
@@ -223,7 +224,7 @@ test("the transcript read attaches groups only to image answers", async () => {
     id: "a2",
     role: "assistant",
     content: "[Image generated] cat",
-    imageTurn: { groupId: "group-9" },
+    imageTurn: { groupId: "group-9", modelIds: ["gpt-image-2"] },
   });
   assert.equal("imageTurn" in withImage[1], false);
 });

@@ -74,7 +74,10 @@ export async function POST(req: Request, { params }: Params) {
     }
 
     return NextResponse.json(
-      { content: turn.content, imageTurn: { groupId: turn.groupId } },
+      {
+        content: turn.content,
+        imageTurn: { groupId: turn.groupId, modelIds: turn.imageModelIds },
+      },
       { status: 202 }
     );
   } catch (error) {
