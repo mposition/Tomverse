@@ -22,9 +22,11 @@ import {
     chatImageIntentPrompt,
     chatImageIntentUserMessage,
     chatImageModelCandidates,
+    imageCandidatesForChatModels,
     parseChatImageIntentOutput,
     type ChatImageDecision,
 } from "@/lib/chatImageIntentCore";
+import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
@@ -61,6 +63,12 @@ export async function chatImageTriageModelId(): Promise<string | null> {
 export async function detectChatImageRequest(input: {
     text: string;
     traceId: string;
+    /**
+     * Review's selected chat models. When any of their makers has an enabled
+     * image model, those image models make the image and the call picks only
+     * the preset; otherwise (and in Chat) it picks the model too.
+     */
+    chatModelIds?: readonly string[];
 }): Promise<ChatImageDecision> {
     if (!chatImageIntentPrompt(input.text)) return NOT_IMAGE;
     const configured = await chatImageTriageModelId();
@@ -68,6 +76,7 @@ export async function detectChatImageRequest(input: {
 
     let model;
     let candidates;
+    let fixedModels;
     try {
         const [runtimeModels, imageModels] = await Promise.all([
             getRuntimeModels(),
@@ -78,6 +87,15 @@ export async function detectChatImageRequest(input: {
             configured
         );
         candidates = chatImageModelCandidates(imageModels);
+        const chatModels = (input.chatModelIds ?? []).flatMap((modelId) => {
+            const found = runtimeModels.find((entry) => entry.id === modelId);
+            return found ? [found] : [];
+        });
+        fixedModels = imageCandidatesForChatModels(
+            chatModels,
+            candidates,
+            imageGroupMaxModels()
+        );
     } catch {
         return NOT_IMAGE;
     }
@@ -93,7 +111,10 @@ export async function detectChatImageRequest(input: {
     } catch {
         return NOT_IMAGE;
     }
-    const prompt = chatImageIntentUserMessage(input.text, candidates);
+    const offered = fixedModels.length > 0 ? fixedModels : candidates;
+    const prompt = chatImageIntentUserMessage(input.text, offered, {
+        fixed: fixedModels.length > 0,
+    });
     const worstCase = autoLlmRouterWorstCaseMicroUsd({
         system: CHAT_IMAGE_INTENT_SYSTEM,
         prompt,
@@ -126,13 +147,13 @@ export async function detectChatImageRequest(input: {
             abortSignal: AbortSignal.timeout(CHAT_IMAGE_INTENT_TIMEOUT_MS),
             output: Output.object({
                 schema: jsonSchema(
-                    chatImageIntentOutputSchema(candidates) as unknown as JSONSchema7
+                    chatImageIntentOutputSchema(offered) as unknown as JSONSchema7
                 ),
                 name: "chat_image_intent",
             }),
             providerOptions: autoLlmRouterProviderOptions(model.provider),
         });
-        decision = parseChatImageIntentOutput(generated.output, candidates);
+        decision = parseChatImageIntentOutput(generated.output, offered, fixedModels);
         outcome = decision.image ? "image" : "chat";
         const usage = generated.usage as
             | { inputTokens?: number; outputTokens?: number }
@@ -157,7 +178,8 @@ export async function detectChatImageRequest(input: {
             traceId: input.traceId,
             modelId: model.id,
             outcome,
-            imageModelId: decision.image ? decision.modelId : null,
+            imageModelIds: decision.image ? decision.modelIds : null,
+            fixedModelCount: fixedModels.length,
             preset: decision.image ? decision.preset : null,
             candidateCount: candidates.length,
             latencyMs: Date.now() - startedAt,
