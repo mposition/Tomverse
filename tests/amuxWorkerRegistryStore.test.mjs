@@ -8,11 +8,13 @@
 // tests/integration/amux-worker-registry.db.test.ts.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
 
 import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
+import { presenceDeclarationIn } from "../scripts/baseline-presence-core.mjs";
 import {
   AMUX_WORKER_DESIRED_STATES,
   AMUX_WORKER_LATCH_ACTOR_KINDS,
@@ -21,7 +23,6 @@ import {
   AMUX_WORKER_PROVIDER_CLASSES,
   AMUX_WORKER_PROVIDER_CLASS_TABLE,
   AMUX_WORKER_REGISTRY_AUDIT_ACTIONS,
-  AMUX_WORKER_REGISTRY_BOOTSTRAP_ACTIVE,
   AMUX_WORKER_ROLE_CEILINGS,
   AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD,
   AMUX_WORKER_TRIAL_CARD_COUNT,
@@ -37,6 +38,9 @@ const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/workerRegistryStore.ts";
 const MIGRATION = "prisma/migrations/20261012100000_amux_worker_registry/migration.sql";
+// The guard's current body: the operator's 2026-10-20 direct activation.
+const GUARD_MIGRATION = "prisma/migrations/20261020200000_amux_worker_registry_direct_activation/migration.sql";
+const GUARD_HEAD = 'CREATE OR REPLACE FUNCTION "amux_worker_registry_event_guard"()';
 const TABLES = ["AmuxWorkerRegistryEvent", "AmuxWorkerObservation", "AmuxWorkerTrialEvidence", "AmuxWorkerLatchEvent"];
 
 const withoutSqlComments = (sql) =>
@@ -90,6 +94,20 @@ test("the migration's CHECKs hold exactly the core's vocabularies", () => {
   );
 });
 
+/** A function statement, from its CREATE line to the end of its `$$` body. */
+const functionStatement = (sql, head) => {
+  const start = sql.indexOf(head);
+  assert.ok(start >= 0, `${head} was found`);
+  const end = sql.indexOf("$$;", start);
+  assert.ok(end > start);
+  return sql.slice(start, end + "$$;".length);
+};
+
+/** What PostgreSQL stores as the function's body (pg_proc.prosrc). */
+const prosrcOf = (statement) => statement.slice(statement.indexOf("AS $$") + "AS $$".length, statement.lastIndexOf("$$;"));
+
+const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+
 test("the migration is additive, and the registry guard holds the core's change rule", () => {
   const sql = withoutSqlComments(read(MIGRATION));
   assert.equal((sql.match(/^CREATE TABLE /gm) ?? []).length, 4);
@@ -105,20 +123,16 @@ test("the migration is additive, and the registry guard holds the core's change 
   assert.equal((sql.match(/REFERENCES "AdminAuditLog"\("id"\) ON DELETE RESTRICT ON UPDATE RESTRICT/g) ?? []).length, 3);
   assert.equal((sql.match(/REFERENCES/g) ?? []).length, 3);
 
-  const guard = sql.slice(
-    sql.indexOf('CREATE OR REPLACE FUNCTION "amux_worker_registry_event_guard"'),
-    sql.indexOf('CREATE TRIGGER "amux_worker_registry_event_guard"'),
-  );
+  // The guard as it runs now: the body 20261020200000 replaced it with.
+  const guard = functionStatement(withoutSqlComments(read(GUARD_MIGRATION)), GUARD_HEAD);
   assert.match(guard, /SET search_path = pg_catalog, pg_temp/);
   assert.match(guard, /current_setting\('transaction_isolation'\) <> 'read committed'/);
   assert.match(guard, /pg_advisory_xact_lock\(\s*pg_catalog\.hashtext\('tomverse-amux-worker-registry:' \|\| NEW\."workerName"\)/);
-  // The bootstrap list in the guard is the core's seven, and nothing else.
-  const bootstrap = /NEW\."workerName" IN \(([^)]*)\)/.exec(guard);
-  assert.ok(bootstrap);
-  assert.deepEqual(
-    [...bootstrap[1].matchAll(/'([^']*)'/g)].map((item) => item[1]),
-    [...AMUX_WORKER_REGISTRY_BOOTSTRAP_ACTIVE],
-  );
+  // A first event is requested or active, for any name; no later rule
+  // refuses an activation (operator decision 2026-10-20).
+  assert.match(guard, /IF NEW\."desiredState" NOT IN \('requested', 'active'\) THEN\s+RAISE EXCEPTION 'AMUX_WORKER_REGISTRY_FIRST_STATE';/);
+  assert.doesNotMatch(guard, /NEW\."workerName" IN \(/);
+  assert.equal(guard.includes("'AMUX_WORKER_REGISTRY_ACTIVATION'"), false);
   for (const code of [
     "IMMUTABLE",
     "ISOLATION",
@@ -127,12 +141,13 @@ test("the migration is additive, and the registry guard holds the core's change 
     "OUT_OF_ORDER",
     "CLASS_CHANGED",
     "RETIRED",
-    "ACTIVATION",
     "ROLE_WIDENING",
     "UNAUDITED",
   ]) {
     assert.ok(guard.includes(`'AMUX_WORKER_REGISTRY_${code}'`), code);
   }
+  // A wider role only while the new event is requested.
+  assert.match(guard, /> pg_catalog\.array_position\([^)]*\], previous_role\)\s+AND NEW\."desiredState" <> 'requested' THEN\s+RAISE EXCEPTION 'AMUX_WORKER_REGISTRY_ROLE_WIDENING';/);
   assert.ok(guard.includes(`ARRAY[${AMUX_WORKER_ROLE_CEILINGS.map((role) => `'${role}'`).join(", ")}]`));
   assert.ok(guard.includes(`expected_action := '${AMUX_WORKER_REGISTRY_AUDIT_ACTIONS.register}'`));
   assert.ok(guard.includes(`expected_action := '${AMUX_WORKER_REGISTRY_AUDIT_ACTIONS.change}'`));
@@ -149,6 +164,78 @@ test("the migration is additive, and the registry guard holds the core's change 
     const body = sql.slice(sql.indexOf(`CREATE OR REPLACE FUNCTION "${fn}"`), sql.indexOf(`CREATE TRIGGER "${fn}"`));
     assert.match(body, new RegExp(`BEGIN\\s+RAISE EXCEPTION '${code}';\\s+END;`), fn);
   }
+});
+
+test("direct activation replaces only the guard's body, pinned to the previous one, with exactly two edits", () => {
+  const lf = (text) => text.split("\r\n").join("\n");
+  const original = lf(read(MIGRATION));
+  const replacement = lf(read(GUARD_MIGRATION));
+  const previous = functionStatement(original, GUARD_HEAD);
+  const current = functionStatement(replacement, GUARD_HEAD);
+
+  // The header and the DO block both pin the exact previous body, as the
+  // baseline guard reads it (pg_proc.prosrc, scripts/baseline-presence-core.mjs).
+  const previousSha = sha256(prosrcOf(previous));
+  assert.deepEqual(presenceDeclarationIn(replacement), {
+    kind: "function-replacement",
+    function: "amux_worker_registry_event_guard",
+    previousBodySha256: previousSha,
+  });
+  assert.ok(
+    replacement.includes(
+      `    IF actual IS DISTINCT FROM '${previousSha}' THEN\n        RAISE EXCEPTION 'AMUX_WORKER_REGISTRY_UNEXPECTED_FUNCTION_BODY';`,
+    ),
+  );
+
+  // The new body is the previous one with the two rules the operator changed
+  // on 2026-10-20 and nothing else: every other refusal is kept as it was.
+  const firstEventBefore = [
+    "        IF NOT (",
+    "            NEW.\"desiredState\" = 'requested'",
+    "            OR (",
+    "                NEW.\"desiredState\" = 'active'",
+    "                AND NEW.\"workerName\" IN (",
+    "                    'claude-chore', 'claude-contract', 'claude-impl', 'claude-review',",
+    "                    'codex-chore', 'codex-contract', 'codex-impl'",
+    "                )",
+    "            )",
+    "        ) THEN",
+    "",
+  ].join("\n");
+  const firstEventAfter = "        IF NEW.\"desiredState\" NOT IN ('requested', 'active') THEN\n";
+  const activationBefore = [
+    "        IF NEW.\"desiredState\" = 'active' AND previous_state <> 'active' THEN",
+    "            RAISE EXCEPTION 'AMUX_WORKER_REGISTRY_ACTIVATION';",
+    "        END IF;",
+    "",
+  ].join("\n");
+  assert.equal(previous.split(firstEventBefore).length, 2);
+  assert.equal(previous.split(activationBefore).length, 2);
+  assert.equal(current, previous.replace(firstEventBefore, firstEventAfter).replace(activationBefore, ""));
+
+  // One function body and nothing else: no table, trigger, constraint or row.
+  const statements = withoutSqlComments(replacement);
+  assert.equal((statements.match(/^CREATE OR REPLACE FUNCTION /gm) ?? []).length, 1);
+  assert.doesNotMatch(statements, /\bCREATE (TABLE|TRIGGER|INDEX|UNIQUE)\b|\bALTER\b|\bDROP\b|\bTRUNCATE\b|^INSERT\b|^UPDATE\b|^DELETE\b/im);
+  assert.match(statements, /^BEGIN;$/m);
+  assert.match(statements, /^COMMIT;$/m);
+
+  // No other migration defines the guard, so this is the body that runs.
+  const definers = readdirSync(join(root, "prisma", "migrations"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => {
+      try {
+        return read(`prisma/migrations/${name}/migration.sql`).includes(GUARD_HEAD);
+      } catch {
+        return false;
+      }
+    })
+    .sort();
+  assert.deepEqual(definers, [
+    "20261012100000_amux_worker_registry",
+    "20261020200000_amux_worker_registry_direct_activation",
+  ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -363,6 +450,40 @@ test("a later change is audited as a change, over the revision the owner saw", a
   });
 });
 
+test("the owner activates directly: a first active event and a requested or paused worker's activation are written", async () => {
+  await withIntegrityKey(null, async () => {
+    {
+      const { tx, sent } = recordingTx();
+      const result = await recordAmuxWorkerRegistryChangeByOwner(tx, {
+        session,
+        workerName: "cursor-impl",
+        roleCeiling: "implementation",
+        desiredState: "active",
+        expectedRevision: 0,
+      });
+      assert.equal(result.action, "amux.worker.register");
+      assert.deepEqual(sent.at(-1).values.slice(1, 6), ["cursor-impl", "cursor", "implementation", "active", 1]);
+    }
+    for (const from of ["requested", "paused"]) {
+      const { tx, sent } = recordingTx({
+        newest: [{ workerName: "copilot-impl", providerClass: "copilot", roleCeiling: "implementation", desiredState: from, revision: 2 }],
+      });
+      const result = await recordAmuxWorkerRegistryChangeByOwner(tx, {
+        session,
+        workerName: "copilot-impl",
+        roleCeiling: "implementation",
+        desiredState: "active",
+        expectedRevision: 2,
+      });
+      assert.equal(result.action, "amux.worker.change", from);
+      assert.equal(result.revision, 3, from);
+      const audit = sent.find((statement) => statement.kind === "create").data;
+      assert.equal(audit.metadata.previous_desired_state, from);
+      assert.equal(audit.metadata.desired_state, "active");
+    }
+  });
+});
+
 test("a refused change writes nothing: bad input sends no statement, a refused rule stops after the read", async () => {
   for (const input of [
     { workerName: "devin-worker", roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 },
@@ -392,7 +513,12 @@ test("a refused change writes nothing: bad input sends no statement, a refused r
     assert.equal(sent.length, 0);
   }
   for (const [newest, input, code] of [
-    [[], { workerName: "cursor-impl", roleCeiling: "chore", desiredState: "active", expectedRevision: 0 }, "activation_requires_trial"],
+    [[], { workerName: "cursor-impl", roleCeiling: "chore", desiredState: "paused", expectedRevision: 0 }, "first_state_invalid"],
+    [
+      [{ workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "paused", revision: 2 }],
+      { workerName: "codex-impl", roleCeiling: "contract", desiredState: "active", expectedRevision: 2 },
+      "role_widening_requires_trial",
+    ],
     [[], { workerName: "cursor-impl", roleCeiling: "contract", desiredState: "requested", expectedRevision: 0 }, "role_above_class"],
     [
       [{ workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "retired", revision: 2 }],

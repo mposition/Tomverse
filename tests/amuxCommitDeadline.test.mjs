@@ -266,6 +266,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // v21 claim mode guard body; no commit-deadline marker, classifier or
   // deferred trigger changes.
   "20261020090000_amux_v19_subscription_channels",
+  // Orchestration policy v31, operator decision 2026-10-20: the worker
+  // registry guard's body without the trial-period activation rule. A
+  // registry change keeps its ordinary mutation boundary; no deadline guard
+  // changes.
+  "20261020200000_amux_worker_registry_direct_activation",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

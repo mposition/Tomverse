@@ -1276,6 +1276,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Creates the registry event table, its indexes, its foreign key to the audit log and the guard trigger that holds the change rule, binds an insert to its audit row and refuses every update and delete. It names those verbs to constrain or refuse them, reads the worker's newest event in the guard, and writes no row.",
   },
   {
+    path: "prisma/migrations/20261020200000_amux_worker_registry_direct_activation/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "Replaces the registry event guard's body (the operator's 2026-10-20 direct activation). Its two mentions are the table the guard reads the worker's newest event from, with EXECUTE over TG_TABLE_SCHEMA, and the targetType the audit row it requires must carry. Its write verbs are the guard's TG_OP comparison with INSERT and the word insert in the body's comment on one insert per worker at a time; it creates no table or trigger and writes no row.",
+  },
+  {
     path: "lib/amux/workerRegistryStore.ts",
     table: "AmuxWorkerRegistryEvent",
     tableMentions: 5,
@@ -1290,6 +1298,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 23,
     reason:
       "The worker registry migration (orchestration policy version 31, sections 3, 5 and 7). Its four AdminAuditLog mentions are the restrictive foreign keys from the registry event's, the trial evidence's and the latch event's auditLogId, and the one SELECT EXISTS read in the registry guard that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLEs adding those keys with their ON DELETE / ON UPDATE RESTRICT, the four triggers' events, the guards' TG_OP comparison and words of comments.",
+  },
+  {
+    path: "prisma/migrations/20261020200000_amux_worker_registry_direct_activation/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The registry event guard's replaced body (the operator's 2026-10-20 direct activation). Its one AdminAuditLog mention is the unchanged SELECT EXISTS read that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the guard's TG_OP comparison with INSERT and the word insert in the body's comment on one insert per worker at a time.",
   },
   {
     path: "prisma/migrations/20261013200000_amux_v22_task_recovery/migration.sql",
@@ -3431,6 +3447,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 2,
     reason:
       "Two reads in the worker registry event guard, both with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the inserted worker's newest event, read after a transaction advisory lock on that worker, and one SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261020200000_amux_worker_registry_direct_activation/migration.sql",
+    count: 2,
+    reason:
+      "The same two reads of the worker registry event guard, in its replaced body without the trial-period activation rule (operator decision 2026-10-20): EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, values bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
