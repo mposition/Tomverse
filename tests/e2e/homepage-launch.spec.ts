@@ -19,10 +19,15 @@ for (const width of [1024, 1100, 1279]) {
     const login = header.getByRole("link", { name: "Sign in", exact: true });
     await expect(login).toBeVisible();
     await expect(page.getByTestId("marketing-menu-button")).toBeHidden();
+    // Both hrefs come from one render, but the guest chat entry is decided only
+    // once the session is known (Review while loading, then Chat). Read them
+    // after that, or the two reads can straddle the re-render -- mobile-safari
+    // did at 1100px in run 39345904342.
+    const cta = page.getByTestId("marketing-header-app-cta");
+    await expect(cta).toHaveAttribute("data-session-state", "unauthenticated");
     const loginUrl = new URL((await login.getAttribute("href"))!, "https://tomverse.test");
     expect(loginUrl.pathname).toBe("/auth/signin");
-    expect(loginUrl.searchParams.get("callbackUrl"))
-      .toBe(await page.getByTestId("marketing-header-app-cta").getAttribute("href"));
+    expect(loginUrl.searchParams.get("callbackUrl")).toBe(await cta.getAttribute("href"));
     expect(new URL(loginUrl.searchParams.get("callbackUrl")!, "https://tomverse.test").searchParams.has("entry")).toBe(false);
     const box = await login.boundingBox();
     expect(box).not.toBeNull();

@@ -1715,3 +1715,19 @@ export async function expectNoHorizontalOverflow(page: Page) {
 
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 }
+
+/**
+ * Waits until React owns the element with this test id.
+ *
+ * `goto()` and `toBeVisible()` only guarantee the server HTML. Filling a
+ * controlled input before hydration writes the DOM but not React's state, so
+ * the value is dropped the moment the component re-renders -- WebKit hydrates
+ * late enough for that to happen on every mobile-safari run of a form that is
+ * filled straight after navigation.
+ */
+export async function waitForHydration(page: Page, testId: string) {
+  await page.waitForFunction((id) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    return !!element && Object.keys(element).some((key) => key.startsWith("__reactFiber$"));
+  }, testId);
+}
