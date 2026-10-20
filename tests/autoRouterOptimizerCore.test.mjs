@@ -1230,3 +1230,17 @@ test("the own process exits 1 only when a started cycle did not record", async (
   // Started but not waited for: nothing says it recorded.
   assert.equal(optimizerProcessExitCode({ started: true }), 1);
 });
+
+test("the own process starts nothing off, without a database, or without the audit signing key", async () => {
+  const { optimizerProcessRefusal } = await import("../lib/autoRouterOptimizerCore.ts");
+  const on = { AUTO_ROUTER_OPTIMIZER_OWN_PROCESS: "on", DATABASE_URL: "postgresql://db.example.test/tomverse" };
+  assert.equal(optimizerProcessRefusal({}), "off");
+  assert.equal(optimizerProcessRefusal({ ...on, AUTO_ROUTER_OPTIMIZER_OWN_PROCESS: "off" }), "off");
+  assert.equal(optimizerProcessRefusal({ ...on, DATABASE_URL: " " }), "no_database");
+  // A cycle's system audit entries would otherwise be stored unsigned.
+  assert.equal(optimizerProcessRefusal(on), "no_audit_key");
+  assert.equal(optimizerProcessRefusal({ ...on, ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS: "old-key" }), "no_audit_key");
+  assert.equal(optimizerProcessRefusal({ ...on, ADMIN_AUDIT_INTEGRITY_KEY: "signing-key" }), null);
+  // The writer's own fallback, so the service signs as the web service does.
+  assert.equal(optimizerProcessRefusal({ ...on, NEXTAUTH_SECRET: "session-secret" }), null);
+});

@@ -64,13 +64,16 @@ export const isRailwayEnvironment = (
 
 /**
  * The Auto Router Optimizer service runs the cycle in its own process, so it
- * holds what the cycle reads directly: the database, the provider keys of the
- * models that answer, judge and route (the catalogue's providers), the Auto
- * cohort's plans (the candidate menu) and its own switch. Names only; the
+ * holds what the cycle reads directly: the database, the audit signing key
+ * (a cycle writes system audit entries, which must join the hash chain the web
+ * service signs), the provider keys of the models that answer, judge and
+ * route (the catalogue's providers), the Auto cohort's plans (the candidate
+ * menu) and its own switch. Names only; the
  * operator sets the values in the dashboard after the first apply
  * (docs/ops/railway-iac-scheduled-jobs.md 7절).
  */
 const AUTO_ROUTER_OPTIMIZER_VARIABLES = [
+  "ADMIN_AUDIT_INTEGRITY_KEY",
   "ANTHROPIC_API_KEY",
   "AUTO_ROUTER_ELIGIBLE_PLANS",
   "AUTO_ROUTER_OPTIMIZER_OWN_PROCESS",

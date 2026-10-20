@@ -169,7 +169,8 @@ cron 서비스입니다. 웹 서비스 재배포(SIGTERM)가 cycle을 끊어 지
     이 서비스가 cycle을 끝까지 기다립니다. 어느 cycle을 돌릴지(routing·rewrite 교대, 하루 한 번, 상한)는 앱과 같은
     코드가 정합니다.
 - 종료 코드: 0은 cycle을 돌려 기록했거나 할 일이 없음(스위치 꺼짐, daily 꺼짐, 오늘 이미 돎, 거절). 1은 시작한 cycle이
-  결과를 기록하지 못함, 실행 오류, 또는 50분 deadline 초과.
+  결과를 기록하지 못함, 실행 오류, 50분 deadline 초과, 또는 `DATABASE_URL`이나 감사 서명 키가 없음(이때는 cycle을
+  시작하지 않습니다).
 - deadline과 stale 판정: 프로세스는 50분이 지나면 기록하지 않고 종료합니다. cycle 행은 `running`으로 남고, 다음 시작이
   60분 stale 판정으로 `interrupted`로 닫습니다. deadline(50분)이 stale(60분)보다 짧으므로, 프로세스가 아직 기록할 수
   있는 cycle이 stale로 닫히는 일은 없습니다. 모든 호출이 제한 시간까지 걸리는 가장 긴 routing cycle은 약 33분입니다
@@ -182,6 +183,7 @@ cron 서비스입니다. 웹 서비스 재배포(SIGTERM)가 cycle을 끊어 지
 | 이름 | 용도 |
 |---|---|
 | `DATABASE_URL` | 그 환경의 앱 DB(웹 서비스와 같은 값. Railway reference variable로 연결 가능) |
+| `ADMIN_AUDIT_INTEGRITY_KEY` | 감사 서명 키. **웹 서비스가 지금 서명에 쓰는 값과 같아야 합니다**: 웹 서비스의 `ADMIN_AUDIT_INTEGRITY_KEY`, 그것이 없으면 웹 서비스의 `NEXTAUTH_SECRET` 값을 이 이름으로 넣습니다(`docs/ops/admin-audit-key-epochs.md`). cycle 시작과 자동 승격이 system 감사 행을 쓰는데, 키가 없으면 서명 없는 행이 되어 체인 밖에 영구히 남습니다(감사 테이블은 append-only). 그래서 키가 없으면 서비스는 cycle을 시작하지 않고 종료 코드 1로 끝납니다 |
 | `AUTO_ROUTER_OPTIMIZER_OWN_PROCESS` | 위 스위치. `on`일 때만 동작 |
 | `AUTO_ROUTER_ELIGIBLE_PLANS` | Auto 후보 메뉴의 plan(웹 서비스와 같은 값) |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `MOONSHOT_API_KEY`, `MINIMAX_API_KEY`, `DASHSCOPE_API_KEY`, `ZHIPU_API_KEY`, `PERPLEXITY_API_KEY` | optimizer·router·답하는 모델의 공급자 key(웹 서비스와 같은 값) |

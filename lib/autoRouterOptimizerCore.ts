@@ -25,6 +25,7 @@
  */
 
 import type { AutoLlmRouterCandidate, AutoLlmRouterSession } from "@/lib/autoLlmRouterCore";
+import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
@@ -345,6 +346,29 @@ export const AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV = "AUTO_ROUTER_OPTIMIZER_OWN_
 
 export const optimizerOwnProcessOn = (env: Record<string, string | undefined> = process.env) =>
     env[AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV]?.trim().toLowerCase() === "on";
+
+/**
+ * Why the own process may not start a cycle, or null when it may. Off is
+ * nothing to do (exit 0); the other two are a misconfigured service (exit 1).
+ * A cycle writes system audit entries (its start, an automatic promotion), and
+ * without the web service's signing key they would be stored unsigned -- out
+ * of the hash chain for good, since the table is append-only -- so a process
+ * without one starts nothing.
+ */
+export const optimizerProcessRefusal = (
+    env: Record<string, string | undefined>
+): "off" | "no_database" | "no_audit_key" | null => {
+    if (!optimizerOwnProcessOn(env)) return "off";
+    if (!env.DATABASE_URL?.trim()) return "no_database";
+    // The current signing key only: with none, the writer would sign with a
+    // retired one listed for verification.
+    const current = adminAuditIntegrityKeys({
+        ADMIN_AUDIT_INTEGRITY_KEY: env.ADMIN_AUDIT_INTEGRITY_KEY,
+        NEXTAUTH_SECRET: env.NEXTAUTH_SECRET,
+    });
+    if (current.length === 0) return "no_audit_key";
+    return null;
+};
 
 /**
  * The own process's whole deadline. Past it the process exits without

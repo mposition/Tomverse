@@ -22,24 +22,28 @@
 // recording; the cycle row stays running and the next start closes it as
 // interrupted (the stale close, 60 minutes, is later than the deadline).
 //
-// Requires DATABASE_URL and the answering providers' API keys.
+// Requires DATABASE_URL, ADMIN_AUDIT_INTEGRITY_KEY (the web service's audit
+// signing key) and the answering providers' API keys.
 
 import {
   AUTO_ROUTER_OPTIMIZER_PROCESS_DEADLINE_MS,
-  optimizerOwnProcessOn,
   optimizerProcessExitCode,
+  optimizerProcessRefusal,
 } from "../lib/autoRouterOptimizerCore.ts";
 
 const log = (event, fields = {}) =>
   console.log(JSON.stringify({ event, ...fields, at: new Date().toISOString() }));
 
-if (!optimizerOwnProcessOn()) {
+// Off is nothing to do. Without the database, or without the audit signing
+// key the web service signs with, the service is misconfigured: a cycle's
+// system audit entries would otherwise be stored unsigned, outside the chain.
+const refusal = optimizerProcessRefusal(process.env);
+if (refusal === "off") {
   log("auto_router_optimizer_process_off");
   process.exit(0);
 }
-
-if (!process.env.DATABASE_URL?.trim()) {
-  console.error("DATABASE_URL is required.");
+if (refusal) {
+  log("auto_router_optimizer_process_refused", { reason: refusal });
   process.exit(1);
 }
 
