@@ -27,6 +27,9 @@ export const adminAgentDigestsMessages = defineAdminMessages({
     issuesUnavailable: "Issues: not read",
     checks: "Failed checks: {count}",
     ci: "Failed CI jobs: {count}",
+    latency: "Merge to dev deploy (last 24h, {merges} merges): median {median} min, worst {max} min; all checks done median {checks} min; latest check start {lastStart} min",
+    latencyUnavailable: "Merge to dev deploy timing: could not be read",
+    latencyNone: "—",
     notChecked: "Not checked",
     formTitle: "Record a control revision",
     formNote:
@@ -119,6 +122,9 @@ export const adminAgentDigestsMessages = defineAdminMessages({
     issuesUnavailable: "이슈: 읽지 못함",
     checks: "실패한 검사: {count}건",
     ci: "실패한 CI job: {count}건",
+    latency: "병합→dev 배포 (최근 24시간, 병합 {merges}건): 중앙값 {median}분, 최장 {max}분 · 모든 check 완료 중앙값 {checks}분 · 가장 늦은 check 시작 {lastStart}분",
+    latencyUnavailable: "병합→dev 배포 시간: 읽지 못함",
+    latencyNone: "—",
     notChecked: "확인하지 못한 것",
     formTitle: "제어 revision 기록",
     formNote:
