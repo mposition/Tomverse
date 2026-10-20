@@ -1083,3 +1083,13 @@ f942c9e83457a075b9a7b921868a75103fd98eeb:tests/amuxDecisionMakerBody.test.mjs:gi
 f942c9e83457a075b9a7b921868a75103fd98eeb:tests/amuxV4ContentRetentionRoute.test.mjs:generic-api-key:12
 f942c9e83457a075b9a7b921868a75103fd98eeb:tests/amuxV4LocalRetentionTrigger.test.mjs:generic-api-key:9
 f942c9e83457a075b9a7b921868a75103fd98eeb:tests/engineeringAgentPublisher.test.mjs:aws-access-token:187
+
+# Synthetic audit-chain test key, not a credential.
+#
+# Commit 529344a introduced tests/integration/auto-router-tunables.db.test.ts
+# with a made-up ADMIN_AUDIT_INTEGRITY_KEY for its throwaway test database;
+# the follow-up commit 15d8077 replaced it with a low-entropy literal the scan
+# does not flag, but the introducing commit is immutable history.
+#
+# Scope: exactly this one finding in that one commit.
+529344aed43d8d5c762aa060e2feadd213dc9011:tests/integration/auto-router-tunables.db.test.ts:generic-api-key:28
