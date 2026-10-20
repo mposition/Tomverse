@@ -1,16 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, prepareGuestPage, type QaConversationMessage } from "./support/app-fixtures";
 import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
 import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
 
-async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3) {
+async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3, messages: QaConversationMessage[] = []) {
   await page.setViewportSize({ width, height: width > 768 ? 1000 : 932 });
   await prepareGuestPage(page, "ko", "studio");
   const account = await mockAuthenticatedApi(page, {
-    selectedModels: models, productKey: "review", assistantProfiles: [],
+    selectedModels: models, productKey: "review", assistantProfiles: [], messages,
     extraConversations: [{ id: "qa-studio-other", title: "Other Studio task", selectedModels: models,
       messages: [{ id: "other-answer", role: "assistant", content: "The other task's saved answer.", modelId: models[0] }] }],
   });
@@ -35,6 +35,43 @@ async function expectHeaderControlsFit(page: Page) {
     return box.left < -1 || box.right > innerWidth + 1 || text.left < box.left - 1 || text.right > box.right + 1
       ? [button.textContent || button.getAttribute("aria-label")] : [];
   }))).toEqual([]);
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`Focus ${theme} moves the large answer by mouse, click and keyboard without sending`, { tag: "@ui-risk" }, async ({ page }) => {
+    let sends = 0;
+    await page.route(/\/api\/(chat|review\/route)(\?|$)/, async route => {
+      if (route.request().method() === "POST") sends++;
+      await route.fulfill({ status: 500, json: { error: "Unexpected execution" } });
+    });
+    await prepare(page, 1600, theme, THREE_MODELS, 3, [
+      { id: "focus-question", role: "user", content: "Compare the stored answers." },
+      ...THREE_MODELS.map((modelId, i) => ({ id: `focus-answer-${i}`, role: "assistant" as const, modelId, content: `Stored answer ${i + 1}.` })),
+    ]);
+    const modelPanel = (id: string) => page.locator(`[data-testid="desktop-model-panel"][data-model-id="${id}"]`);
+    const focus = (id: string) => page.locator(`[data-testid="review-focus-model"][data-model-id="${id}"]`);
+    await expect(focus(THREE_MODELS[0])).toBeVisible();
+    await focus(THREE_MODELS[1]).dragTo(modelPanel(THREE_MODELS[0]), { targetPosition: { x: 100, y: 100 } });
+    await expect(modelPanel(THREE_MODELS[1])).toHaveAttribute("data-studio-focused", "true");
+    expect((await modelPanel(THREE_MODELS[1]).boundingBox())!.width).toBeGreaterThan((await modelPanel(THREE_MODELS[0]).boundingBox())!.width * 1.4);
+    await modelPanel(THREE_MODELS[2]).getByTestId("review-model-drag-handle").dragTo(modelPanel(THREE_MODELS[1]), { targetPosition: { x: 100, y: 100 } });
+    await expect(focus(THREE_MODELS[2])).toHaveAttribute("aria-pressed", "true");
+    await focus(THREE_MODELS[0]).click();
+    await focus(THREE_MODELS[1]).focus();
+    await page.keyboard.press("Enter");
+    await expect(modelPanel(THREE_MODELS[1])).toHaveAttribute("data-studio-focused", "true");
+    for (let i = 1; i <= 3; i++) await expect(page.getByText(`Stored answer ${i}.`, { exact: true })).toBeVisible();
+    await page.locator(".review-result-toolbar").getByRole("button", { name: "나란히 비교", exact: true }).click();
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "compare");
+    await focus(THREE_MODELS[2]).click();
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-comparison", "focus");
+    await page.setViewportSize({ width: 430, height: 932 });
+    await focus(THREE_MODELS[0]).click();
+    await expect(page.getByText("Stored answer 1.", { exact: true })).toBeVisible();
+    await focus(THREE_MODELS[2]).click();
+    await expect(page.getByText("Stored answer 3.", { exact: true })).toBeVisible();
+    expect(sends).toBe(0);
+  });
 }
 
 for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const) {
@@ -88,6 +125,44 @@ test("Classic phone drawer keeps Review controls reachable at short heights and 
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
   await expect(page.getByTestId("mobile-sidebar-open")).toBeFocused();
+});
+
+for (const width of [1600, 430]) test(`Easy ${width}px selects the provider's research model once and omits manual expansion`, { tag: "@ui-risk" }, async ({ page }) => {
+  const models = ["perplexity/sonar", "gpt-6-luna"];
+  const deep = "perplexity/sonar-deep-research";
+  await installChatModelStub(page, {
+    [deep]: { kind: "success", chunks: ["Provider research result with sources."] },
+    "gpt-6-luna": { kind: "success", chunks: ["Other provider result."] },
+  });
+  await prepare(page, width, width > 768 ? "dark" : "light", models, 2);
+  if (width <= 768) await page.getByTestId("review-appearance").selectOption("classic");
+  let routes = 0;
+  await page.route("**/api/review/route", async route => {
+    routes++;
+    expect(route.request().postDataJSON().providers).toEqual(["perplexity", "openai"]);
+    await route.fulfill({ json: { kind: "text", preset: "standard", choices: [
+      { provider: "perplexity", modelId: deep }, { provider: "openai", modelId: "gpt-6-luna" },
+    ] } });
+  });
+  await expect(page.locator(".review-research-shortcut")).toHaveCount(0);
+  await page.getByTestId("composer-tools-button").click();
+  await expect(page.getByTestId("tools-deep-research-row")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByTestId("chat-textarea").fill("Compare the latest market trends across multiple reliable sources with a detailed research report.");
+  await page.getByTestId("chat-send-button").click();
+  await expect(page.getByText("Provider research result with sources.", { exact: true })).toBeVisible();
+  if (width <= 768) await page.locator('[data-testid="mobile-model-tab"][data-model-id="gpt-6-luna"]').click();
+  await expect(page.getByText("Other provider result.", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("deep-research-suggestion")).toHaveCount(0);
+  const requests = await page.evaluate(() => (window as unknown as { __chatModelStubRequests: Array<{ modelId: string }> }).__chatModelStubRequests);
+  expect(requests.map(request => request.modelId).sort()).toEqual([deep, "gpt-6-luna"].sort());
+  expect(routes).toBe(1);
+  if (width <= 768) await page.getByTestId("mobile-sidebar-open").click();
+  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  if (width <= 768) await page.keyboard.press("Escape");
+  else await expect(page.locator(".review-research-shortcut")).toBeVisible();
+  await page.getByTestId("composer-tools-button").click();
+  await expect(page.getByTestId("tools-deep-research-row")).toBeVisible();
 });
 
 test("Easy routes once and dispatches each selected provider through the existing comparison send", async ({ page }) => {

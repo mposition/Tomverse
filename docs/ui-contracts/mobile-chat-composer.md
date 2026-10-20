@@ -21,6 +21,12 @@ reuse the same input, execution, entitlement and cancellation controls; the
 Studio Write/Results view must never resubmit a request. The textarea retains
 its own complete full-width row.
 
+Chat Studio uses the same canonical bottom dock and input anatomy as Classic,
+with Studio colours and rounded surfaces. Its appearance switch lives in the
+conversation drawer; it does not add a permanent row above the answer canvas.
+The split question/result layout is desktop-only. Coverage includes
+`tests/e2e/chat-studio.spec.ts` at 320px, 200% text and a simulated keyboard.
+
 ## Scope
 
 | Area | File |

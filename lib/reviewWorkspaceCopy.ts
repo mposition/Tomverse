@@ -1,5 +1,15 @@
 import type { Language } from "@/lib/language";
 
+export const reviewFocusHint: Record<Language, string> = {
+  en: "Drag a model card into the large answer area, or select a card to focus it.",
+  ko: "모델 카드를 큰 답변 영역으로 드래그하거나 카드를 선택해 집중해서 보세요.",
+  zh: "将模型卡片拖到较大的回答区域，或选择卡片以聚焦查看。",
+  fr: "Glissez une carte de modèle dans la grande zone de réponse, ou sélectionnez-la pour l’agrandir.",
+  de: "Ziehen Sie eine Modellkarte in den großen Antwortbereich oder wählen Sie sie aus.",
+  es: "Arrastra una tarjeta de modelo al área de respuesta grande o selecciónala para enfocarla.",
+  pt: "Arraste um cartão de modelo para a área de resposta maior ou selecione-o para focar.",
+};
+
 const en = {
   newTask: "New task", history: "History", help: "Help", settings: "Settings", credits: "Credits",
   appearance: "Workspace appearance", color: "Switch light / dark", mode: "Review mode", write: "Write", results: "Results",

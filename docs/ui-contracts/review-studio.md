@@ -29,6 +29,34 @@ Owner approved Concept B on 2026-10-20: Figma file
   supported providers retain the existing image execution/consent flow. An
   all-unsupported image request never substitutes a provider or calls text.
 
+## Chat Studio and interactive focus (owner approval, 2026-10-20)
+
+Chat reuses Studio's navigation, palette and rounded conversation canvas.
+Desktop keeps a question panel beside a single transcript; mobile keeps the
+existing bottom composer and drawer. Canonical product navigation, Smart
+Adaptive/manual selection, starters, attachments, tools and history keep their
+existing handlers. Chat and Review appearance preferences are independent
+(`tomverse_chat_appearance` and the existing `tomverse_review_appearance`).
+Both default to Studio; Classic stays selectable without losing the draft.
+Light/Dark is independent of either appearance preference.
+
+In Review Studio, drag a model card or answer header into the large answer
+panel to focus that model. The same cards support click, tap, Enter and Space.
+Changing focus or switching to side-by-side only changes the live layout:
+answers, pending streams and selected models stay intact, and no request is
+sent. Narrow screens use the same cards to select the visible answer. Opening
+a stored conversation with content shows Results rather than hiding answers
+behind the Write view.
+
+Easy has no manual Deep Research expansion offer, shortcut or tools action.
+The initial model choice uses the shared Chat research criteria and the
+eligible provider-scoped catalogue: it may choose a research model when the
+question needs it and that provider/plan supports it. No second paid expansion
+or substitution of an unselected provider is added. Providers without such a
+model continue through an eligible regular model. Professional retains the
+existing manual expansion. Existing admission, entitlement and execution
+limits apply to any selected research model.
+
 ## Credit presentation (owner direction, 2026-10-20)
 
 Text composers show no credit estimate or variable-cost badge, including their
@@ -54,5 +82,6 @@ remain. Accounting metadata, reservations and refunds are unchanged.
 - `tests/reviewRouting.test.mjs`
 - `tests/server-contract/review-routing.test.ts`
 - `tests/e2e/review-studio.spec.ts`
+- `tests/e2e/chat-studio.spec.ts`
 - Existing mobile composer, drawer, comparison rail, image workspace and
   typography checks, plus updated credit presentation regressions.

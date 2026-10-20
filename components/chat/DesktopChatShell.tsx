@@ -1,9 +1,9 @@
 "use client";
 
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
-import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
-import { ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
-import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
+import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
+import { reviewFocusHint, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -85,6 +85,8 @@ const interpolate = (template: string, values: Record<string, string | number>) 
     template
   );
 
+const FOCUS_DRAG_TYPE = "application/x-tomverse-review-model";
+
 type PromptPayload = {
   id: string;
   text: string;
@@ -105,6 +107,7 @@ type PromptPayload = {
 
 export type DesktopChatShellProps = {
   review?: ReviewWorkspaceControls;
+  chatWorkspace?: WorkspaceAppearanceControls;
   studioStarterCards?: readonly VisibleStarterCard[];
   onStudioStarter?: (id: string) => void;
   /** Current product chrome; switching routes never rewrites this conversation. */
@@ -407,6 +410,7 @@ export type DesktopChatShellProps = {
 
 export function DesktopChatShell({
   review,
+  chatWorkspace,
   studioStarterCards,
   onStudioStarter,
   currentProduct,
@@ -527,9 +531,10 @@ export function DesktopChatShell({
   onFollowupSent,
   onContextBundleStale,
 }: DesktopChatShellProps) {
-  const studio = review?.appearance === "studio";
+  const studio = (review?.appearance ?? chatWorkspace?.appearance) === "studio";
   const [studioView, setStudioView] = useState<"write" | "results">("write");
   const [studioComparison, setStudioComparison] = useState<"focus" | "compare">("focus");
+  const [draggingFocusModel, setDraggingFocusModel] = useState<string | null>(null);
   useEffect(() => { if (promptPayload || imageWorkspace || review?.imageRequest) queueMicrotask(() => setStudioView("results")); }, [promptPayload, imageWorkspace, review?.imageRequest]);
   const singleTranscript = transcriptScope === "conversation";
   const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
@@ -595,6 +600,9 @@ export function DesktopChatShell({
     contentState: conversationContentState,
     hasConversationPrelude,
   });
+  useEffect(() => {
+    if (!showsWelcomeSurface) queueMicrotask(() => setStudioView("results"));
+  }, [showsWelcomeSurface]);
   // Keyed by (conversation, model), never by model alone: a run started in one
   // conversation used to disable the composer of every other one, because a
   // model id says nothing about where it was running. See
@@ -666,7 +674,7 @@ export function DesktopChatShell({
   // The expansion offer, decided from the same status map the rail reads.
   const deepResearchSuggestion = deriveDeepResearchSuggestion({
     conversationId: currentChatId,
-    turn: deepResearchSuggestionTurn,
+    turn: review?.mode === "easy" ? null : deepResearchSuggestionTurn,
     selectedModelIds: selectedModels,
     disabledModelIds: disabledPanels,
     modelStatuses,
@@ -871,6 +879,11 @@ export function DesktopChatShell({
     setActiveModelId(modelId);
     if (focus) tabRefs.current[modelId]?.focus();
   }, []);
+  const focusModel = (modelId: string) => {
+    if (!selectedModels.includes(modelId)) return;
+    activateModel(modelId, false);
+    setStudioComparison("focus");
+  };
   const switchModelByOffset = useCallback(
     (offset: number) => {
       if (selectedModels.length < 2 || activeModelIndex < 0) return;
@@ -931,7 +944,8 @@ export function DesktopChatShell({
   return (
     <main
       data-testid="desktop-chat-shell"
-      data-review-appearance={review?.appearance}
+      data-review-appearance={review?.appearance ?? chatWorkspace?.appearance}
+      data-studio-product={currentProduct}
       data-studio-view={studioView}
       data-studio-comparison={studioComparison}
       data-studio-has-results={!showsWelcomeSurface || Boolean(review?.imageRequest)}
@@ -943,11 +957,14 @@ export function DesktopChatShell({
     >
       {studio ? <ReviewNavigation sidebar={sidebarElement} onNewChat={onNewChat}
         locked={productSwitchDisabled || isAnyModelResponding || review?.pending}
-        onChat={() => onProductSwitch?.("chat") ?? false} /> : sidebarElement}
+        product={currentProduct}
+        onChat={() => onProductSwitch?.("chat") ?? false}
+        onReview={() => onProductSwitch?.("review") ?? false} /> : sidebarElement}
 
       <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding}
           view={studioView} setView={studio ? setStudioView : undefined} />}
+        {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
         <div className={studio ? "review-studio-body" : "contents"}>
 
         {/*
@@ -967,12 +984,27 @@ export function DesktopChatShell({
           <>
         <div className={studio ? "review-studio-results" : "contents"}>
         {review?.imageRequest && review.unsupportedProviders.length > 0 && <ReviewUnsupportedProviders providers={review.unsupportedProviders} />}
-        {studio && <div className="review-result-toolbar">
+        {studio && !singleTranscript && <div className="review-result-toolbar">
           <button type="button" onClick={() => setStudioView("write")}>{reviewWorkspaceCopy[lang].edit}</button>
           <div role="group" aria-label={reviewWorkspaceCopy[lang].results}>
             <button type="button" aria-pressed={studioComparison === "focus"} onClick={() => setStudioComparison("focus")}>{reviewWorkspaceCopy[lang].focus}</button>
             <button type="button" aria-pressed={studioComparison === "compare"} onClick={() => setStudioComparison("compare")}>{reviewWorkspaceCopy[lang].sideBySide}</button>
           </div>
+        </div>}
+        {studio && !singleTranscript && !showsWelcomeSurface && selectedModels.length > 1 && <div className="review-focus-controls">
+          <div role="group" aria-label={reviewWorkspaceCopy[lang].focus} aria-describedby="review-focus-instructions">
+            {selectedModels.map(modelId => {
+              const model = AVAILABLE_MODELS.find(item => item.id === modelId);
+              return <button key={modelId} type="button" data-testid="review-focus-model" data-model-id={modelId}
+                aria-pressed={modelId === resolvedActiveModelId} draggable
+                onClick={() => focusModel(modelId)}
+                onDragStart={event => { event.dataTransfer.setData(FOCUS_DRAG_TYPE, modelId); event.dataTransfer.effectAllowed = "move"; setDraggingFocusModel(modelId); }}
+                onDragEnd={() => setDraggingFocusModel(null)}>
+                <ModelLogo model={model} size="sm" /><span>{model?.name ?? modelId}</span><span aria-hidden="true">⠿</span>
+              </button>;
+            })}
+          </div>
+          <p id="review-focus-instructions">{reviewFocusHint[lang]}</p>
         </div>}
         <ProviderStatusBanner
           selectedModels={selectedModels}
@@ -1094,7 +1126,7 @@ export function DesktopChatShell({
             // No recent-conversation cards here: the sidebar next to this
             // screen already lists the same conversations.
             <div className="absolute inset-0 z-10 overflow-y-auto bg-zinc-100/80 dark:bg-zinc-950/80">
-              {studio ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen starterGallery={starterGallery} />}
+              {studio && !singleTranscript ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen starterGallery={starterGallery} />}
             </div>
           )}
           {selectedModels.length === 0 && (
@@ -1116,7 +1148,18 @@ export function DesktopChatShell({
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
                 data-studio-focused={modelId === resolvedActiveModelId}
-                onClick={studio ? () => activateModel(modelId, false) : undefined}
+                data-focus-drop-target={studio && !singleTranscript && studioComparison === "focus" && modelId === resolvedActiveModelId && Boolean(draggingFocusModel)}
+                onDragOver={event => {
+                  if (studio && !singleTranscript && studioComparison === "focus" && modelId === resolvedActiveModelId && draggingFocusModel && selectedModels.includes(draggingFocusModel) && event.dataTransfer.types.includes(FOCUS_DRAG_TYPE)) {
+                    event.preventDefault(); event.dataTransfer.dropEffect = "move";
+                  }
+                }}
+                onDrop={event => {
+                  if (!studio || singleTranscript || studioComparison !== "focus" || modelId !== resolvedActiveModelId || !draggingFocusModel) return;
+                  const droppedModel = event.dataTransfer.getData(FOCUS_DRAG_TYPE);
+                  if (droppedModel !== draggingFocusModel || !selectedModels.includes(droppedModel)) return;
+                  event.preventDefault(); focusModel(droppedModel); setDraggingFocusModel(null);
+                }}
                 {...(useTabsLayout
                   ? {
                       role: "tabpanel",
@@ -1159,7 +1202,14 @@ export function DesktopChatShell({
                   !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
                 }`}
               >
-                <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
+                <div data-testid="review-model-drag-handle" draggable={studio && !singleTranscript && !showsWelcomeSurface}
+                  onDragStart={event => {
+                    if (!studio || singleTranscript) return;
+                    event.dataTransfer.setData(FOCUS_DRAG_TYPE, modelId); event.dataTransfer.effectAllowed = "move"; setDraggingFocusModel(modelId);
+                  }}
+                  onDragEnd={() => setDraggingFocusModel(null)}
+                  title={studio && !singleTranscript ? reviewFocusHint[lang] : undefined}
+                  className={`flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400 ${studio && !singleTranscript ? "cursor-grab active:cursor-grabbing" : ""}`}>
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
                     {isAutoMode ? (
                       <>
@@ -1446,7 +1496,7 @@ export function DesktopChatShell({
 
         </div>
         <div className={studio ? "review-studio-task" : "contents"}>
-        {studio && <h2>{reviewWorkspaceCopy[lang].question}</h2>}
+        {studio && <h2>{singleTranscript ? t("chat.inputPlaceholder") : reviewWorkspaceCopy[lang].question}</h2>}
         <div className="w-full shrink-0 px-4 md:px-6">
           <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-5xl" />
         </div>
@@ -1454,6 +1504,7 @@ export function DesktopChatShell({
         {composerPortalHost &&
           createPortal(
             <ChatInput
+              workspaceAppearance={chatWorkspace?.appearance}
               review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
               currentProduct={currentProduct}
               productSwitchDisabled={productSwitchDisabled}
@@ -1520,7 +1571,7 @@ export function DesktopChatShell({
             />,
             composerPortalHost
           )}
-        {studio && <div className="review-mobile-starters"><ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /></div>}
+        {studio && !singleTranscript && <div className="review-mobile-starters"><ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /></div>}
         </div>
           </>
         )}
