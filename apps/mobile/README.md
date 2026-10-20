@@ -198,3 +198,32 @@ The updated ordinary APK is .tmp/native-01/tomverse-android-email-debug.apk
 It supersedes the earlier APK for the login UI fix. It contains no fixture CA.
 Installing it alone does not enable production login: server deployment and
 native route activation still require their separate owner approvals.
+
+## Production support diagnosis and review follow-up
+
+The owner's second test still could not request a code. Read-only production
+GET /api/auth/mobile/email returned NextAuth's plain-text HTTP 400 unsupported
+action response. A malformed-body POST, containing no email or code, returned
+403 INVALID_REQUEST_ORIGIN before a handler could send mail. This is a missing
+server integration, not evidence that the owner's mailbox rejected a message.
+No real email was sent by the diagnostic probes.
+
+The native email request now requires a positive, read-only capability response
+before submitting any email. Unsupported routes (including the actual NextAuth
+400 behavior) cannot be mistaken for a delivered code. Request, delivery and
+verification errors have distinct copy, and the existing browser sign-in is
+reachable as a secondary action.
+
+Independent review r-20261020-103844-3e4c80 rejected the first email-route diff:
+the token-bearing POST must refuse every browser Origin, including the
+Capacitor origins, because only native HTTP clients should consume its result.
+The route now enforces that rule before processing proof or sending mail.
+The follow-up also removes stale delegated content-length/cookies, preserves
+specific service error codes, and conditionally reactivates expired suspensions
+with a re-read, following web sign-in behavior. Local checks passed 19 route,
+14 bridge/origin and five login UI scenarios. A new independent review covers
+the corrected authentication boundary; no live endpoint was enabled by this work.
+
+Do not hand a local validation APK over as a production-login fix. Real-account
+testing requires separately approved publication/deployment and server enrollment,
+followed by a supported capability response from the actual target server.

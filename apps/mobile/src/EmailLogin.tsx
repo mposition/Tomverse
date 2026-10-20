@@ -18,11 +18,14 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
   const inFlight = useRef(false);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   useEffect(() => { if (!cooldown) return; const timer = setTimeout(() => setCooldown(cooldown - 1), 1000); return () => clearTimeout(timer); }, [cooldown]);
-  async function submit(verify: boolean) {
+  async function submit(verify: boolean | "browser") {
     if (inFlight.current) return;
     inFlight.current = true; setBusy(true); setError("");
     try {
-      if (verify) {
+      if (verify === "browser") {
+        await transport.signIn();
+        if (active.current) await onComplete();
+      } else if (verify) {
         await transport.verifyEmailCode!(email.trim(), code);
         if (active.current) await onComplete();
       } else {
@@ -30,7 +33,7 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
         if (active.current) { setSent(true); setCode(""); setCooldown(60); }
       }
     } catch (failure) {
-      if (active.current) { setError(mobileLoginError(failure, language)); setCode(""); }
+      if (active.current) { setError(mobileLoginError(failure, language, verify ? "verify" : "request")); setCode(""); }
     } finally { inFlight.current = false; if (active.current) setBusy(false); }
   }
   return <Sheet title={copy.title} closeLabel={mobileCopy[language].close} onClose={() => { if (!inFlight.current) onClose(); }}>
@@ -41,6 +44,7 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
       {error && <p role="alert" className="login-error">{error}</p>}
       <button className="primary" type="submit" disabled={busy || (sent && code.length !== 6)}>{busy ? mobileCopy[language].loading : sent ? copy.verify : copy.send}</button>
       {sent && <div className="login-actions"><button type="button" disabled={busy} onClick={() => { setSent(false); setCode(""); setError(""); }}>{copy.change}</button><button type="button" disabled={busy || cooldown > 0} onClick={() => void submit(false)}>{copy.resend}{cooldown > 0 && ` (${cooldown})`}</button></div>}
+      <button type="button" disabled={busy} onClick={() => void submit("browser")}>{copy.otherSignIn}</button>
       <a href="https://tomverse.app/auth/signin" target="_blank" rel="noreferrer">tomverse.app ↗</a>
     </form>
   </Sheet>;

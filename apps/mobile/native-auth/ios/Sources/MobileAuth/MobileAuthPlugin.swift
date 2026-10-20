@@ -65,10 +65,10 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     }
     private enum Failure: Error { case storage, invalid, network, refused(String) }
     private func refusalCode(_ status: Int, _ body: [String: Any]) -> String {
-        if status == 404 || status == 503 { return "MOBILE_LOGIN_UNAVAILABLE" }
         if status == 429 { return "MOBILE_RATE_LIMITED" }
         let code = body["code"] as? String ?? ""
-        return ["EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED"].contains(code) ? code : "MOBILE_LOGIN_FAILED"
+        if ["EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED"].contains(code) { return code }
+        return status == 404 || status == 503 || code == "INVALID_REQUEST_ORIGIN" ? "MOBILE_LOGIN_UNAVAILABLE" : "MOBILE_LOGIN_FAILED"
     }
     private func validateOrigin() throws {
         guard let u = URLComponents(string: origin), u.scheme == "https", ["tomverse.app", "dev.tomverse.app", "staging.tomverse.app"].contains(u.host ?? ""),
@@ -136,10 +136,18 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
             } catch { call.reject("Sign-in is not available on this server", "MOBILE_LOGIN_UNAVAILABLE") }
         }
     }
+    private func requireEmailSupport() throws {
+        do {
+            let support = try request("/api/auth/mobile/email", nil)
+            guard support["ok"] as? Bool == true, support["emailCode"] as? Bool == true else { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
+        } catch Failure.refused { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
+        catch Failure.invalid { throw Failure.refused("MOBILE_LOGIN_UNAVAILABLE") }
+    }
     @objc public func requestEmailCode(_ call: CAPPluginCall) {
         queue.async { [self] in
             do {
                 guard let email = call.getString("email"), email.count <= 320 else { throw Failure.invalid }
+                try requireEmailSupport()
                 _ = try request("/api/auth/mobile/email", ["action": "request", "email": email], language: call.getString("language"))
                 call.resolve()
             } catch Failure.refused(let code) { call.reject("Could not send sign-in code", code) }

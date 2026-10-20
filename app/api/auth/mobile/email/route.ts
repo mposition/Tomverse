@@ -8,7 +8,6 @@ import { mobileAuthReady } from "@/lib/mobileAccessToken";
 import { enforceMobileAuthAdmission, mobileApiSecurityResponse } from "@/lib/mobileAuthRoute";
 import { issueMobileSession } from "@/lib/mobileAuthService";
 import { MOBILE_DEVICE_PLATFORMS } from "@/lib/mobileAuthContract";
-import { NATIVE_APP_ORIGINS } from "@/lib/nativeAppCors";
 import { prisma } from "@/lib/prisma";
 import { POST as requestExistingEmailCode } from "@/app/api/auth/email-login/request/route";
 
@@ -31,7 +30,9 @@ export async function POST(request: Request) {
   try {
     if (!ready()) return reply({ ok: false, code: "MOBILE_LOGIN_UNAVAILABLE" }, 503);
     const origin = request.headers.get("origin");
-    if (origin !== null && !(NATIVE_APP_ORIGINS as readonly string[]).includes(origin)) {
+    // Only the native HTTP clients consume token-bearing responses. Even an
+    // allowed Capacitor WebView origin must never read a rotating credential.
+    if (origin !== null) {
       return reply({ ok: false, code: "MOBILE_LOGIN_REFUSED" }, 403);
     }
     await enforceMobileAuthAdmission(request);
@@ -39,8 +40,11 @@ export async function POST(request: Request) {
     if (body.action === "request") {
       // Reuse delivery, uniform responses, per-address/IP limits and Turnstile.
       const input = { email: body.email, ...(body.turnstileToken ? { turnstileToken: body.turnstileToken } : {}) };
+      const headers = new Headers(request.headers);
+      headers.delete("content-length");
+      headers.delete("cookie");
       const response = await requestExistingEmailCode(new Request(request.url, {
-        method: "POST", headers: request.headers, body: JSON.stringify(input),
+        method: "POST", headers, body: JSON.stringify(input),
       }));
       response.headers.set("Cache-Control", "no-store");
       return response;
@@ -49,7 +53,18 @@ export async function POST(request: Request) {
     if (!proof.ok) return reply({ ok: false, code: proof.reason === "account_not_found" ? "EMAIL_ACCOUNT_NOT_FOUND" : proof.reason === "locked" ? "EMAIL_CODE_LOCKED" : "EMAIL_CODE_INVALID" }, 401);
     // The web sign-in callback also enforces account state. Never bypass it
     // simply because mailbox control was proven. Signup remains its own flow.
-    const account = await prisma.user.findUnique({ where: { id: proof.userId }, select: { accountStatus: true } });
+    const select = { accountStatus: true, accountSuspendedUntil: true } as const;
+    let account = await prisma.user.findUnique({ where: { id: proof.userId }, select });
+    const now = new Date();
+    if (account?.accountStatus === "suspended" && account.accountSuspendedUntil && account.accountSuspendedUntil <= now) {
+      // Same expiry behavior as web sign-in; do not overwrite a newer suspension
+      // or a concurrent deletion decision after reading the account.
+      await prisma.user.updateMany({ where: { id: proof.userId, accountStatus: "suspended", accountSuspendedUntil: { lte: now } }, data: {
+        accountStatus: "active", accountSuspendedAt: null, accountSuspendedUntil: null,
+        accountSuspensionReason: null, accountSuspendedById: null, accountSuspendedByEmail: null,
+      } });
+      account = await prisma.user.findUnique({ where: { id: proof.userId }, select });
+    }
     if (account?.accountStatus !== "active") return reply({ ok: false, code: "MOBILE_LOGIN_REFUSED" }, 403);
     const issued = await issueMobileSession({ request, userId: proof.userId, platform: body.platform, deviceLabel: body.deviceLabel ?? "Mobile" });
     return reply({ ok: true, ...issued.tokens });

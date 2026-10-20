@@ -49,10 +49,10 @@ public class MobileAuthPlugin extends Plugin {
         AuthFailure(String code) { super("Authentication request refused"); this.code = code; }
     }
     private String refusalCode(int status, JSONObject body) {
-        if (status == 404 || status == 503) return "MOBILE_LOGIN_UNAVAILABLE";
         if (status == 429) return "MOBILE_RATE_LIMITED";
         String code = body.optString("code");
-        return Arrays.asList("EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED").contains(code) ? code : "MOBILE_LOGIN_FAILED";
+        if (Arrays.asList("EMAIL_CODE_INVALID", "EMAIL_CODE_LOCKED", "EMAIL_ACCOUNT_NOT_FOUND", "MOBILE_LOGIN_REFUSED", "TURNSTILE_REQUIRED", "TURNSTILE_FAILED", "TURNSTILE_UNAVAILABLE", "SEND_FAILED").contains(code)) return code;
+        return status == 404 || status == 503 || "INVALID_REQUEST_ORIGIN".equals(code) ? "MOBILE_LOGIN_UNAVAILABLE" : "MOBILE_LOGIN_FAILED";
     }
     private JSONObject post(String path, JSONObject body) throws Exception { return request(path, body, null); }
     private JSONObject request(String path, JSONObject body, String language) throws Exception {
@@ -125,11 +125,20 @@ public class MobileAuthPlugin extends Plugin {
             } catch (Exception e) { pendingLogin = null; verifier = null; state = null; call.reject("Could not open sign-in", "LOGIN_UNAVAILABLE"); }
         });
     }
+    private void requireEmailSupport() throws Exception {
+        try {
+            JSONObject support = request("/api/auth/mobile/email", null, null);
+            if (!support.optBoolean("ok") || !support.optBoolean("emailCode")) throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE");
+        } catch (AuthFailure unsupported) { throw new AuthFailure("MOBILE_LOGIN_UNAVAILABLE"); }
+    }
     @PluginMethod public void requestEmailCode(PluginCall call) {
         queue.execute(() -> {
             try {
                 String email = call.getString("email");
                 if (email == null || email.length() > 320) throw new AuthFailure("MOBILE_LOGIN_FAILED");
+                // This read cannot send mail. An undeployed route may be caught
+                // by NextAuth (400) rather than returning a conventional 404.
+                requireEmailSupport();
                 request("/api/auth/mobile/email", new JSONObject().put("action", "request").put("email", email), call.getString("language"));
                 call.resolve();
             } catch (Exception e) { call.reject("Could not send sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
