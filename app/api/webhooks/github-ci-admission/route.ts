@@ -18,14 +18,33 @@ import { ciAdmissionMode, runCiAdmissionRound } from "@/lib/ciAdmissionService";
  */
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
+/** The body as text, or null as soon as it passes `max` bytes: an unsigned body is never buffered whole. */
+async function readCapped(request: Request, max: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function POST(request: Request) {
   if (ciAdmissionMode() === "off") return NextResponse.json({ error: "Not found." }, { status: 404 });
   // Refuse a declared oversize body before reading it; the length check after
   // reading still covers a body sent without a length.
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return NextResponse.json({ error: "Too large." }, { status: 413 });
-  const body = await request.text();
-  if (Buffer.byteLength(body, "utf8") > MAX_BODY_BYTES) return NextResponse.json({ error: "Too large." }, { status: 413 });
+  const body = await readCapped(request, MAX_BODY_BYTES);
+  if (body === null) return NextResponse.json({ error: "Too large." }, { status: 413 });
   if (!verifyCiAdmissionWebhookSignature(body, request.headers.get("x-hub-signature-256"), process.env.CI_ADMISSION_WEBHOOK_SECRET)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }

@@ -243,3 +243,25 @@ test("a full line takes no more, so the stored state stays inside its schema", (
   assert.equal(evaluation.state.events.at(-1).detail, "queue_full");
   assert.equal(parseCiAdmissionState(JSON.stringify(evaluation.state)).queue.length, 100);
 });
+
+test("new commits on a pull request that already used slots keep them; on one that did not, they ask again", () => {
+  const first = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], runningShas: new Set([sha(1)]) });
+  assert.deepEqual(first.state.lastRound.running.map((p) => p.number), [1]);
+  // A fix push to #1 while #2 waits: #1 keeps its slot.
+  const fix = run({
+    state: { ...first.state, queue: [queued(2)] },
+    openPulls: [pull(1, { headSha: "f".repeat(40) }), pull(2, { draft: true })],
+    arrival: 1,
+    nowMs: T0 + 10 * 60_000,
+  });
+  assert.deepEqual(kinds(fix), []);
+  // A push to #3, which held no slot, while the line waits: it joins the line.
+  const other = run({
+    state: { ...first.state, queue: [queued(2)] },
+    openPulls: [pull(1), pull(2, { draft: true }), pull(3)],
+    runningShas: new Set([sha(1)]),
+    arrival: 3,
+    nowMs: T0 + 10 * 60_000,
+  });
+  assert.deepEqual(kinds(other), ["hold:3"]);
+});

@@ -193,6 +193,9 @@ export function evaluateCiAdmission(input: {
     .map((entry) => ({ ...entry, observed: entry.observed || input.runningShas.has(open.get(entry.number)!.headSha) }));
   // Ours: its own ready event is not an arrival. Reserved: counts until its runs are seen.
   const releasedNumbers = new Set(released.map((entry) => entry.number));
+  // A pull request that used slots in the previous round keeps them when new
+  // commits restart its CI: a fix push does not go to the back of the line.
+  const continuing = new Set((input.state.lastRound?.running ?? []).map((pull) => pull.number));
   const reserved = () => new Set(released.filter((entry) => !entry.observed).map((entry) => entry.number));
 
   // The line keeps only open drafts admission still handles.
@@ -225,7 +228,11 @@ export function evaluateCiAdmission(input: {
   const capacity = input.state.capacity;
 
   const arrival = input.arrival === null ? undefined : open.get(input.arrival);
-  if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !releasedNumbers.has(arrival.number)) {
+  if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !releasedNumbers.has(arrival.number) && continuing.has(arrival.number)) {
+    // Its new runs replace the old ones in the same slots; reserve them until they show.
+    released.push({ number: arrival.number, atMs: nowMs, observed: input.runningShas.has(arrival.headSha) });
+    event("admitted", arrival.number, "continuing");
+  } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !releasedNumbers.has(arrival.number)) {
     const units = ciAdmissionUnits(arrival)!;
     const waiting = queue.some((entry) => entry.number !== arrival.number);
     const queued = queue.some((entry) => entry.number === arrival.number);

@@ -12,10 +12,13 @@ test("ready for review, or opened or reopened ready, is an arrival", () => {
   assert.deepEqual(ciAdmissionArrival("pull_request", pr("opened"), REPO), { kind: "round", arrival: 12 });
   assert.deepEqual(ciAdmissionArrival("pull_request", pr("reopened"), REPO), { kind: "round", arrival: 12 });
   assert.deepEqual(ciAdmissionArrival("pull_request", pr("opened", { draft: true }), REPO), { kind: "round", arrival: null });
+  // New commits on a ready pull request ask for CI again; on a draft they run nothing.
+  assert.deepEqual(ciAdmissionArrival("pull_request", pr("synchronize"), REPO), { kind: "round", arrival: 12 });
+  assert.deepEqual(ciAdmissionArrival("pull_request", pr("synchronize", { draft: true }), REPO), { kind: "round", arrival: null });
 });
 
 test("other pull request changes and workflow runs start a round without an arrival", () => {
-  for (const action of ["converted_to_draft", "closed", "synchronize", "edited"]) {
+  for (const action of ["converted_to_draft", "closed", "edited"]) {
     assert.deepEqual(ciAdmissionArrival("pull_request", pr(action), REPO), { kind: "round", arrival: null }, action);
   }
   for (const action of ["completed", "requested", "in_progress"]) {

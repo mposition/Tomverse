@@ -2,8 +2,8 @@
  * Which GitHub webhook deliveries start a CI admission round, and which pull
  * request (if any) arrives with it (lib/ciAdmissionCore.ts). Pure.
  *
- * Arrival is a pull request becoming ready for review, or opened or reopened
- * already ready. Every other pull_request change (draft, close, new commits,
+ * Arrival is a pull request asking for CI while ready: becoming ready for
+ * review, opened or reopened ready, or new commits pushed to a ready one. Every other pull_request change (draft, close, new commits,
  * base edits) and every completed workflow run can free or take a slot, so it
  * starts a round without an arrival; a requested or in-progress workflow run
  * starts one too, so a run on a draft is cancelled as it starts (a GitHub
@@ -54,6 +54,8 @@ export function ciAdmissionArrival(event: string, payload: unknown, repository: 
   if (!isObject(pull) || typeof pull.number !== "number" || !Number.isInteger(pull.number) || pull.number < 1) {
     return { kind: "ignore", reason: "shape" };
   }
-  const arrives = action === "ready_for_review" || ((action === "opened" || action === "reopened") && pull.draft === false);
+  const arrives =
+    action === "ready_for_review" ||
+    ((action === "opened" || action === "reopened" || action === "synchronize") && pull.draft === false);
   return { kind: "round", arrival: arrives ? pull.number : null };
 }

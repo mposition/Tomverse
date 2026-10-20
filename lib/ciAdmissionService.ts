@@ -53,6 +53,7 @@ import { prisma } from "@/lib/prisma";
 
 const LOCK = "tomverse-ci-admission";
 const TX_TIMEOUT_MS = 15_000;
+const RETRY_AFTER_FAILED_RELEASE_MS = 60_000;
 
 const STATUS = {
   waiting: "Waiting in the CI admission line; released automatically when a slot frees. Do not mark ready or re-run.",
@@ -232,7 +233,9 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
       { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
     );
   }
-  scheduleRecheck(evaluation.nextCheckInMs);
+  // A release that failed is back at the top: try again shortly, since the
+  // failed call itself promises no further webhook.
+  scheduleRecheck(putBack.length > 0 ? RETRY_AFTER_FAILED_RELEASE_MS : evaluation.nextCheckInMs);
   return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
 }
 
