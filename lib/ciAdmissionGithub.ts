@@ -1,5 +1,3 @@
-import "server-only";
-
 import { createSign } from "node:crypto";
 
 import { ciRunKey, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
