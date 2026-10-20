@@ -24,7 +24,7 @@ const CANDIDATES = QA_RELEASE_BYPASS_CANDIDATES.map((candidate) => candidate.app
 
 test("the real rulesets: every branch but develop refuses updates and creations; develop takes pull requests only", () => {
   const { update, develop } = qaReleaseLaneRulesets({ scope: { kind: "real" }, bypassAppIds: CANDIDATES, laneAppId: LANE_APP });
-  assert.deepEqual(update.conditions.ref_name, { include: ["~ALL"], exclude: ["refs/heads/develop"] });
+  assert.deepEqual(update.conditions.ref_name, { include: ["~ALL"], exclude: ["refs/heads/develop", "refs/heads/release/train-*"] });
   assert.deepEqual(update.rules.map((rule) => rule.type), ["creation", "update"]);
   assert.deepEqual(update.rules[1].parameters, { update_allows_fetch_and_merge: false });
   assert.deepEqual(update.bypass_actors, [

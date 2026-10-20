@@ -13,6 +13,7 @@ import {
   parseScoutAnswer,
   scoutPromptText,
   scoutSendOutcome,
+  suggestionSendRequestId,
   suggestionIdeaText,
 } from "../lib/productResearchScoutCore.ts";
 
@@ -155,4 +156,13 @@ test("the walker counts a day's cap as capped, not as a failure", () => {
   assert.equal(scoutSendOutcome({ judged: false, reason: "model_failed" }), "failed");
   assert.equal(scoutSendOutcome({}), "failed");
   assert.equal(scoutSendOutcome(null), "failed");
+});
+
+test("every send of one suggestion is the same AMUX request, and different suggestions differ", async () => {
+  const { isAmuxIdeaRequestId } = await import("../lib/amux/ideaRequestIdCore.ts");
+  const id = suggestionSendRequestId("cmgx0suggestion1");
+  assert.equal(suggestionSendRequestId("cmgx0suggestion1"), id);
+  assert.notEqual(suggestionSendRequestId("cmgx0suggestion2"), id);
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(isAmuxIdeaRequestId(id), true);
 });

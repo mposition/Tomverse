@@ -4,10 +4,12 @@ import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
 import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { QaReleaseTrainSection } from "@/components/admin/QaReleaseTrainSection";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
 import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
+import { readQaReleaseTrainReports } from "@/lib/qaReleaseTrainStore";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
@@ -45,6 +47,16 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
         <>
           <AdminAgentDigestsPanel key={tab.id} initial={await readAgentDigestConsole(canWrite)} />
           <QaReleaseMainCandidatesSection data={await readQaReleaseMainCandidates()} />
+          <QaReleaseTrainSection
+            trains={(await readQaReleaseTrainReports()).map(({ slot, at, report }) => ({
+              slot,
+              at: at.toISOString(),
+              outcome: report.outcome,
+              pullRequestNumber: report.pullRequestNumber,
+              failure: report.failure,
+              picks: report.picks,
+            }))}
+          />
         </>
       )}
     </div>
