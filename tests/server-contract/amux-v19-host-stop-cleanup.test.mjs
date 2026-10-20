@@ -24,6 +24,9 @@ let checkoutSignal;
 let gitAbortObserved = false;
 let repositoryPath;
 let commitSha;
+let childInput;
+let childResult = null;
+let traceInput;
 
 mock.module("node:child_process", { namedExports: {
   spawn(command, args, options) {
@@ -77,10 +80,13 @@ mock.module(mod("lib/amux/ideaLocalIsolatedCliRunner.mjs"), {
   } },
 });
 mock.module(mod("lib/amux/ideaTrackedCheckoutProcessResult.mjs"), {
-  namedExports: { awaitAmuxTrackedCheckoutChild: async () => ({
-    kind: "verified_success", rawModelOutput: "{}", readFiles: [],
-    inputTokens: 1, outputTokens: 1,
-  }) },
+  namedExports: { awaitAmuxTrackedCheckoutChild: async (value) => {
+    childInput = value;
+    return childResult ?? {
+      kind: "verified_success", rawModelOutput: "{}", readFiles: [],
+      inputTokens: 1, outputTokens: 1,
+    };
+  } },
 });
 mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
   namedExports: { verifiedAmuxTrackedCheckoutSandbox: async (input) => {
@@ -99,7 +105,8 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutSandbox.mjs"), {
 // seccomp). Its own behaviour is covered by amuxTrackedCheckoutTraceRunner;
 // here a launch counts as the one child spawn and traces nothing.
 mock.module(mod("lib/amux/ideaTrackedCheckoutTraceRunner.mjs"), {
-  namedExports: { launchAmuxV19TracedSandbox: async () => {
+  namedExports: { launchAmuxV19TracedSandbox: async (value) => {
+    traceInput = value;
     spawnCount += 1;
     // Impossible OS PID and an already-exited child keep host kill paths inert.
     return { child: { pid: Number.MAX_SAFE_INTEGER, exitCode: 0, signalCode: null,
@@ -210,4 +217,34 @@ test("staged CLI digest mismatch refuses before any child spawn", {
     assert.ok(sandboxVerificationError instanceof TypeError);
     assert.match(sandboxVerificationError.message, /CLI binary digest changed/);
   } finally { mode = "stop"; }
+}));
+
+test("diagnostic detail is asked of both observers only when the run asks for it", {
+  skip: process.platform !== "linux", timeout: 15_000,
+}, async () => withSwitch(async () => {
+  mode = "detail";
+  const detail = { events: [{ code: "system_event_other", keys: ["type"],
+    subtype: "synthetic.event" }], trace: [] };
+  childResult = { kind: "outcome_unknown", failureStage: "parser_rejected",
+    childExitCode: 0, diagnosticDetail: detail };
+  try {
+    const asked = await runAmuxV19TrackedCheckoutAnalysis({
+      ...input(async () => false), diagnostic: true, diagnosticDetail: true });
+    assert.equal(traceInput.detail, true);
+    assert.equal(childInput.detail, true);
+    assert.equal(asked.failureStage, "parser_rejected");
+    assert.deepEqual(asked.diagnosticDetail, detail);
+    // Without the flag neither observer is asked, and a stray detail on the
+    // child's observation is not passed on.
+    const plain = await runAmuxV19TrackedCheckoutAnalysis({
+      ...input(async () => false), diagnostic: true });
+    assert.equal(traceInput.detail, false);
+    assert.equal(childInput.detail, false);
+    assert.equal("diagnosticDetail" in plain, false);
+    // Detail needs diagnostic mode.
+    const notDiagnostic = await runAmuxV19TrackedCheckoutAnalysis({
+      ...input(async () => false), diagnosticDetail: true });
+    assert.equal(traceInput.detail, false);
+    assert.equal("diagnosticDetail" in notDiagnostic, false);
+  } finally { childResult = null; mode = "stop"; }
 }));

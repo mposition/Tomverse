@@ -20,7 +20,9 @@
  * - Arrival is a pull request becoming ready for review (or opened or reopened
  *   ready). If anything waits in line, or its slots do not fit, it goes back
  *   to draft, its just-started runs are cancelled, and it joins the end of the
- *   line. Pushes to develop and main are never held.
+ *   line. Pushes to develop and main are never held, but their CI (what
+ *   Railway waits for to deploy) occupies slots like a pull request into the
+ *   same branch: it uses the same runners.
  * - A draft runs no CI, so a draft with a pull_request run queued or in
  *   progress is a re-run of an event from before it became a draft (GitHub
  *   re-runs replay the original event, draft flag included): that run is
@@ -81,10 +83,19 @@ const queueEntrySchema = z
   })
   .strict();
 
+const deploySchema = z
+  .object({
+    branch: z.enum(["develop", "main"]),
+    sha: z.string().max(40),
+    /** The run's title: the merge commit's first line. */
+    title: z.string().max(200),
+  })
+  .strict();
+
 const eventSchema = z
   .object({
     at: z.string().max(30),
-    kind: z.enum(["held", "released", "admitted", "dropped", "cancelled", "failed"]),
+    kind: z.enum(["held", "released", "admitted", "dropped", "cancelled", "failed", "stopped"]),
     number: z.number().int().positive(),
     shadow: z.boolean(),
     detail: z.string().max(120).nullable(),
@@ -148,6 +159,8 @@ const stateSchema = z
         running: z
           .array(z.object({ number: z.number().int().positive(), title: z.string().max(200), base: z.string().max(100) }).strict())
           .max(MAX_QUEUE),
+        /** Push runs on develop and main (the deploy CI Railway waits for), one per commit. */
+        deploys: z.array(deploySchema).max(MAX_QUEUE).default([]),
       })
       .strict()
       .nullable(),
@@ -156,6 +169,10 @@ const stateSchema = z
 
 export type CiAdmissionQueueEntry = z.infer<typeof queueEntrySchema>;
 export type CiAdmissionEvent = z.infer<typeof eventSchema>;
+export type CiAdmissionDeploy = z.infer<typeof deploySchema>;
+
+/** Slots a deploy's CI takes: the same as a pull request into the same branch. */
+export const ciAdmissionDeployUnits = (branch: CiAdmissionDeploy["branch"]) => (branch === "main" ? 2 : 1);
 export type CiAdmissionState = z.infer<typeof stateSchema>;
 
 export const emptyCiAdmissionState = (): CiAdmissionState => ({
@@ -223,6 +240,11 @@ export function evaluateCiAdmission(input: {
   running: ReadonlySet<string>;
   /** The base of each pull request with a running run, open or not. */
   runningBases?: ReadonlyMap<number, string>;
+  /**
+   * Push runs on develop and main queued or in progress, one per commit. They
+   * are never held, but they use the same runners, so they occupy slots.
+   */
+  deploys?: readonly CiAdmissionDeploy[];
   arrival: number | null;
   nowMs: number;
   shadow: boolean;
@@ -326,7 +348,10 @@ export function evaluateCiAdmission(input: {
     (sum, number) => sum + (ciAdmissionUnits({ base: input.runningBases?.get(number) ?? "", fork: false }) ?? 0),
     0,
   );
+  const deploys = input.deploys ?? [];
+  const deployUnits = deploys.reduce((sum, deploy) => sum + ciAdmissionDeployUnits(deploy.branch), 0);
   const usedBy = (exclude: number | null) =>
+    deployUnits +
     closedUnits +
     input.openPulls.reduce((sum, pull) => {
       const units = ciAdmissionUnits(pull);
@@ -473,6 +498,7 @@ export function evaluateCiAdmission(input: {
               .filter((number) => ciAdmissionUnits({ base: input.runningBases?.get(number) ?? "", fork: false }) !== null)
               .map((number) => ({ number, title: "", base: input.runningBases?.get(number) ?? "" })),
           ),
+        deploys: deploys.slice(0, MAX_QUEUE).map((deploy) => ({ ...deploy, title: deploy.title.slice(0, 200) })),
       },
     },
     actions,

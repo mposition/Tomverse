@@ -25,9 +25,11 @@
  */
 
 import type { AutoLlmRouterCandidate, AutoLlmRouterSession } from "@/lib/autoLlmRouterCore";
+import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
+import { TUNABLE_GENERATOR_RULE, tunableChangesSchema } from "@/lib/autoRouterTunablesCore";
 
 /** At most this many recent decisions are sampled; half train, half evaluate. */
 export const AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX = 40;
@@ -331,6 +333,65 @@ export const autoLlmRouterVersionFor = (baseVersion: string, cycleId: string | n
  * it spent.
  */
 export const AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS = 60 * 60_000;
+
+/**
+ * The own-process switch (coordinator, 2026-10-20). `on` moves the daily
+ * cycle off the web container -- where a redeploy's SIGTERM cut the first dev
+ * cycle off after 23 seconds, unrecorded -- to the Auto Router Optimizer cron
+ * service (scripts/run-auto-router-optimizer.mjs), which waits for the cycle
+ * to finish. The maintenance route then skips its optimizer step, and the
+ * service does nothing while it is off. Off by default: nothing changes until
+ * an operator sets it on both.
+ */
+export const AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV = "AUTO_ROUTER_OPTIMIZER_OWN_PROCESS";
+
+export const optimizerOwnProcessOn = (env: Record<string, string | undefined> = process.env) =>
+    env[AUTO_ROUTER_OPTIMIZER_OWN_PROCESS_ENV]?.trim().toLowerCase() === "on";
+
+/**
+ * Why the own process may not start a cycle, or null when it may. Off is
+ * nothing to do (exit 0); the other two are a misconfigured service (exit 1).
+ * A cycle writes system audit entries (its start, an automatic promotion), and
+ * without the web service's signing key they would be stored unsigned -- out
+ * of the hash chain for good, since the table is append-only -- so a process
+ * without one starts nothing.
+ */
+export const optimizerProcessRefusal = (
+    env: Record<string, string | undefined>
+): "off" | "no_database" | "no_audit_key" | null => {
+    if (!optimizerOwnProcessOn(env)) return "off";
+    if (!env.DATABASE_URL?.trim()) return "no_database";
+    // The current signing key only: with none, the writer would sign with a
+    // retired one listed for verification.
+    const current = adminAuditIntegrityKeys({
+        ADMIN_AUDIT_INTEGRITY_KEY: env.ADMIN_AUDIT_INTEGRITY_KEY,
+        NEXTAUTH_SECRET: env.NEXTAUTH_SECRET,
+    });
+    if (current.length === 0) return "no_audit_key";
+    return null;
+};
+
+/**
+ * The own process's whole deadline. Past it the process exits without
+ * recording; the cycle row stays running and the next start closes it as
+ * interrupted. Kept below AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS, so a cycle
+ * is never closed as stale while its process can still record it, and above
+ * the longest cycle the call deadlines allow (about 33 minutes, worked out in
+ * tests/autoRouterOptimizerCore.test.mjs).
+ */
+export const AUTO_ROUTER_OPTIMIZER_PROCESS_DEADLINE_MS = 50 * 60_000;
+
+/** How a cycle that was started and waited for ended. */
+export type OptimizerRunOutcome = { recorded: boolean; status: string; failure: string | null };
+
+/**
+ * The own process's exit code: 0 when it ran a cycle that recorded its result
+ * or had nothing to do (the daily switch off, today's cycle already run, a
+ * refusal); 1 when a started cycle could not record its result.
+ */
+export const optimizerProcessExitCode = (
+    run: { started: false } | { started: true; outcome?: OptimizerRunOutcome }
+) => (run.started && (!run.outcome?.recorded || run.outcome.failure === "run_error") ? 1 : 0);
 
 export const optimizerCycleView = (
     cycle: { status: string; failure: string | null; createdAt: Date },
@@ -702,6 +763,7 @@ export const AUTO_ROUTER_GENERATOR_SYSTEM = [
     "Describe kinds of work, never specific messages. Do not quote the messages or include personal details.",
     "You may name a model by its exact candidate id only where directComparisons judged it (verdict a, b or tie) against another candidate -- for example: \"Among 9-credit standard candidates, prefer X or Y over Z for short factual questions.\" Never name a model the comparisons did not judge, and never a model that is not a candidate.",
     `Write the guidance in plain text, one rule per line: aim for about ${AUTO_ROUTER_GUIDANCE_TARGET_CHARS} characters, and never more than ${AUTO_ROUTER_GUIDANCE_MAX_LINES} lines or ${AUTO_ROUTER_GUIDANCE_MAX_CHARS} characters.`,
+    TUNABLE_GENERATOR_RULE,
     `Before the guidance, write a short report for the operator in Korean: findings (what the evidence shows) and recommendations, each with a kind -- guidance (a routing rule), code (something an engineer should change, such as a failing call) or setting (an Admin setting). At most ${AUTO_ROUTER_REPORT_MAX_ITEMS} of each, each under 300 characters. Describe kinds of work and models; never quote or paraphrase a message.`,
 ].join("\n");
 
@@ -724,6 +786,8 @@ export type OptimizerEvidence = {
     models: readonly AutoLlmRouterCandidate[];
     routerStats: RouterStats | null;
     failedCalls: Partial<Record<OptimizerCallKind, number>>;
+    /** Answers per model in this cycle; the evidence a model exclusion rests on. */
+    answerStats?: Readonly<Record<string, OptimizerAnswerStats>>;
 };
 
 export const autoRouterGeneratorMessage = (
@@ -748,6 +812,7 @@ export const autoRouterGeneratorMessage = (
                   models: candidateBrief(evidence.models),
                   routerStats: evidence.routerStats,
                   failedCalls: evidence.failedCalls,
+                  ...(evidence.answerStats ? { answerStats: evidence.answerStats } : {}),
               }
             : {}),
     });
@@ -770,8 +835,9 @@ export const autoRouterGeneratorSchema = () => ({
             },
         },
         guidance: { type: "string" as const },
+        settingChanges: tunableChangesSchema(),
     },
-    required: ["findings", "recommendations", "guidance"],
+    required: ["findings", "recommendations", "guidance", "settingChanges"],
     additionalProperties: false,
 });
 
@@ -1344,6 +1410,7 @@ export async function runOptimizerCycle(
                 failedCalls: Object.fromEntries(
                     Object.entries(failedByKind).filter(([, count]) => count > 0)
                 ),
+                answerStats: Object.fromEntries(answerStats),
             })
         )
     );

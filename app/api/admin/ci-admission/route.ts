@@ -10,7 +10,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { CI_ADMISSION_MAX_CAPACITY } from "@/lib/ciAdmissionCore";
-import { changeCiAdmission, readCiAdmissionAdminView, runCiAdmissionRound } from "@/lib/ciAdmissionService";
+import { changeCiAdmission, readCiAdmissionAdminView, runCiAdmissionRound, stopCiAdmissionPull } from "@/lib/ciAdmissionService";
 
 /**
  * Admin › Agent digests: the CI admission line (lib/ciAdmissionCore.ts).
@@ -26,6 +26,8 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("remove"), number: prNumber }).strict(),
   z.object({ action: z.literal("set_capacity"), capacity: z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY) }).strict(),
   z.object({ action: z.literal("evaluate") }).strict(),
+  // The operator's stop: back to draft and every run force-cancelled.
+  z.object({ action: z.literal("stop"), number: prNumber }).strict(),
 ]);
 
 export async function GET(req: Request) {
@@ -57,7 +59,10 @@ export async function POST(req: Request) {
     await consumeApiRateLimit(req, session.user.id, "admin-ci-admission-write", { minute: 30, day: 500 });
     const body = await readLimitedJson(req, 4096, actionSchema);
 
-    if (body.action !== "evaluate") {
+    let stop: Awaited<ReturnType<typeof stopCiAdmissionPull>> | undefined;
+    if (body.action === "stop") {
+      stop = await stopCiAdmissionPull({ session, request: req }, body.number);
+    } else if (body.action !== "evaluate") {
       const changed = await changeCiAdmission({ session, request: req }, body);
       if (changed === null) {
         return NextResponse.json({ error: "The line changed; reload and try again.", code: "stale" }, { status: 409 });
@@ -69,7 +74,7 @@ export async function POST(req: Request) {
       outcome: "read_failed" as const,
       failure: error instanceof Error ? error.message.slice(0, 80) : "unknown",
     }));
-    return NextResponse.json({ ...(await readCiAdmissionAdminView()), round });
+    return NextResponse.json({ ...(await readCiAdmissionAdminView()), round, ...(stop ? { stop } : {}) });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;

@@ -56,12 +56,17 @@ import {
     syntheticCaseViews,
     type OptimizerCallKind,
     type OptimizerDecision,
+    type OptimizerRunOutcome,
     type RouterStats,
     type SyntheticCaseView,
 } from "@/lib/autoRouterOptimizerCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
+import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizerLock";
+import { applyCycleTunableChanges, revertTunedTimeoutIfWorse } from "@/lib/autoRouterTunables";
+import { effectiveRouterTimeoutMs } from "@/lib/autoRouterTunablesCore";
+import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -129,7 +134,7 @@ export const optimizerJudgeCall = (input: { model: AiModel; system: string; prom
 
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
-export const OPTIMIZER_LOCK = "auto-router-optimizer";
+export { OPTIMIZER_LOCK };
 
 export async function readOptimizerModelId(): Promise<string | null> {
     try {
@@ -199,17 +204,20 @@ async function writeOptimizerAutomation(
 }
 
 /**
- * The daily maintenance run's step: one cycle when the daily switch is on.
- * Off, or any refusal, starts nothing and costs nothing.
+ * The daily run's step: one cycle when the daily switch is on. Off, or any
+ * refusal, starts nothing and costs nothing. `waitForCompletion` runs the
+ * cycle to its end before returning, with its outcome (the own-process
+ * optimizer service); without it the cycle runs on in the background.
  */
-export async function runScheduledAutoRouterOptimizerCycle(): Promise<
-    { started: false; reason: "daily_off" | OptimizerStartRefusal } | { started: true; cycleId: string }
+export async function runScheduledAutoRouterOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
+    | { started: false; reason: "daily_off" | OptimizerStartRefusal }
+    | { started: true; cycleId: string; outcome?: OptimizerRunOutcome }
 > {
     if (!(await readOptimizerAutomation()).daily) return { started: false, reason: "daily_off" };
-    const result = await startAutoRouterOptimizerCycle("system");
+    const result = await startAutoRouterOptimizerCycle("system", options);
     return "refused" in result
         ? { started: false, reason: result.refused }
-        : { started: true, cycleId: result.cycleId };
+        : { started: true, cycleId: result.cycleId, ...(result.outcome ? { outcome: result.outcome } : {}) };
 }
 
 export type Prices = { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
@@ -329,7 +337,9 @@ async function readRouterStats(now: Date): Promise<RouterStats | null> {
             take: ROUTER_STATS_MAX_ROWS,
             select: { outcome: true, pickedModelId: true, ruleModelId: true, latencyMs: true },
         });
-        return summarizeRouterDecisions(rows, AUTO_LLM_ROUTER_TIMEOUT_MS);
+        // Timeouts are counted against the deadline in force, tuned or not.
+        const timeoutMs = effectiveRouterTimeoutMs(await readAutoRouterTunables(), AUTO_LLM_ROUTER_TIMEOUT_MS);
+        return summarizeRouterDecisions(rows, timeoutMs);
     } catch {
         return null;
     }
@@ -552,13 +562,17 @@ export async function autoCandidateMenu(runtimeModels: readonly AiModel[]) {
 }
 
 /**
- * Starts one cycle and returns at once; the calls run in the background and
- * the row is updated when they finish. Refusals cost nothing. Too few recent
+ * Starts one cycle. By default it returns at once; the calls run in the
+ * background and the row is updated when they finish (Admin's button). With
+ * `waitForCompletion` it returns only when the cycle has finished and been
+ * recorded, with the outcome -- the own-process optimizer service, which a
+ * web redeploy cannot cut off. Refusals cost nothing. Too few recent
  * decisions is no longer a refusal: the cycle writes synthetic messages.
  */
-export async function startAutoRouterOptimizerCycle(actor: OptimizerActor): Promise<
-    { cycleId: string } | { refused: OptimizerStartRefusal }
-> {
+export async function startAutoRouterOptimizerCycle(
+    actor: OptimizerActor,
+    options: { waitForCompletion?: boolean } = {}
+): Promise<{ cycleId: string; outcome?: OptimizerRunOutcome } | { refused: OptimizerStartRefusal }> {
     const models = await getRuntimeModels();
     const optimizerModel = resolveAutoLlmRouterModel(models, (await readOptimizerModelId()) ?? undefined);
     if (!optimizerModel) return { refused: "optimizer_off" };
@@ -581,7 +595,7 @@ export async function startAutoRouterOptimizerCycle(actor: OptimizerActor): Prom
     });
     if ("refused" in started) return started;
 
-    void runInBackground({
+    const run = runInBackground({
         cycleId: started.cycle.id,
         budgetMicroUsd: started.cycle.budgetMicroUsd,
         decisions,
@@ -592,9 +606,17 @@ export async function startAutoRouterOptimizerCycle(actor: OptimizerActor): Prom
         optimizerPrices,
         routerPrices,
     });
-    return { cycleId: started.cycle.id };
+    if (!options.waitForCompletion) {
+        void run;
+        return { cycleId: started.cycle.id };
+    }
+    return { cycleId: started.cycle.id, outcome: await run };
 }
 
+/**
+ * Runs a reserved cycle's calls and records the result. Never throws: a
+ * failure is recorded as run_error and reported in the outcome.
+ */
 async function runInBackground(input: {
     cycleId: string;
     budgetMicroUsd: number;
@@ -605,7 +627,7 @@ async function runInBackground(input: {
     routerModel: AiModel;
     optimizerPrices: Prices;
     routerPrices: Prices;
-}) {
+}): Promise<OptimizerRunOutcome> {
     // A failed call costs nothing in the cycle's count and otherwise leaves no
     // trace; its shape is logged so a failed cycle names its cause. Never the
     // content: synthetic messages and answers appear in logs by length only.
@@ -661,6 +683,12 @@ async function runInBackground(input: {
         spentMicroUsd: 0,
         spentByProvider: new Map(),
     };
+    // The settings this optimizer changed on its own, undone first when one
+    // made routing worse since (lib/autoRouterTunablesCore.ts).
+    await revertTunedTimeoutIfWorse().catch(() => "kept" as const);
+    // What the analysis call proposed for the settings, applied after the
+    // cycle is recorded and only when it passes its range and evidence.
+    let proposedSettingChanges: unknown[] = [];
     try {
         const [candidatesFor, routerStats, catalogueIds, unreliableModels] = await Promise.all([
             autoCandidateMenu(input.models),
@@ -733,6 +761,8 @@ async function runInBackground(input: {
                     }));
                     // The report and the proposal together; the cycle admits each.
                     const output = outputOf("generate", generated);
+                    const settingChanges = (output as { settingChanges?: unknown } | null)?.settingChanges;
+                    proposedSettingChanges = Array.isArray(settingChanges) ? settingChanges : [];
                     const guidance = (output as { guidance?: unknown } | null)?.guidance;
                     const rejection = guidanceRejection(guidance);
                     if (rejection) {
@@ -843,6 +873,29 @@ async function runInBackground(input: {
             },
             spentByProvider,
         });
+        // Setting changes only for a cycle it recorded; never fails the cycle.
+        const appliedSettings = recorded
+            ? await applyCycleTunableChanges({
+                  cycleId: input.cycleId,
+                  proposed: proposedSettingChanges,
+                  evidence: {
+                      routerStats,
+                      answerStats: result.answerStats,
+                      // A candidate with no known price cannot stand in for
+                      // another at the same credits, so it is left out.
+                      candidates: candidatesFor("hello").flatMap((candidate) =>
+                          candidate.credits === null ? [] : [{ id: candidate.id, credits: candidate.credits }]
+                      ),
+                  },
+              }).catch((error) => {
+                  console.error(JSON.stringify({
+                      event: "auto_router_tunable_apply_failed",
+                      cycleId: input.cycleId,
+                      error: error instanceof Error ? error.name : "unknown",
+                  }));
+                  return [];
+              })
+            : [];
         // Automatic promotion only of a result this cycle itself recorded, and
         // only through the same compare-and-set a person's click uses.
         let promotion:
@@ -877,10 +930,13 @@ async function runInBackground(input: {
             gate: result.gate,
             judgeFailed: result.judgeFailed,
             unreliableModels,
+            settingsProposed: proposedSettingChanges.length,
+            settingsApplied: appliedSettings.length,
             reportItems: result.report
                 ? result.report.findings.length + result.report.recommendations.length
                 : 0,
         }));
+        return { recorded, status: result.status, failure: result.failure };
     } catch (error) {
         // The cycle could not record its own result. Nothing was reserved, so
         // the spend known by then goes to the row and the provider buckets
@@ -904,6 +960,7 @@ async function runInBackground(input: {
             },
             spentByProvider: known.spentByProvider,
         }).catch(() => undefined);
+        return { recorded: false, status: "error", failure: "run_error" };
     }
 }
 

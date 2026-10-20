@@ -175,7 +175,9 @@ test("production and staging declare every job; dev declares the operator's set,
   // A job missing from production or staging is a service the partial deletes
   // there, so only dev may leave one out. The dev set is the operator's
   // 2026-10-07 decision: no Provider Probe, Provider Usage Sync or Marketing
-  // Publisher (the one job that acts on outside accounts).
+  // Publisher (the one job that acts on outside accounts). The Auto Router
+  // Optimizer joined it on 2026-10-20 (coordinator): dev is where redeploys
+  // cut the optimizer's cycle off.
   for (const environment of ["production", "staging"]) {
     for (const job of RAILWAY_CRON_SERVICES) {
       assert.ok(job.variables[environment], `${job.service} is missing from ${environment}`);
@@ -183,7 +185,7 @@ test("production and staging declare every job; dev declares the operator's set,
   }
   assert.deepEqual(
     RAILWAY_CRON_SERVICES.filter((job) => job.variables.dev !== undefined).map((job) => job.key),
-    ["creditReconciliation", "maintenance", "providerModelCatalog"]
+    ["creditReconciliation", "maintenance", "providerModelCatalog", "autoRouterOptimizer"]
   );
   for (const job of RAILWAY_CRON_SERVICES) {
     if (job.variables.dev === undefined) continue;
