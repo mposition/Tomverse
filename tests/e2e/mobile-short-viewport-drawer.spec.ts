@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-import { setRootFontSize } from "./support/chat-state-fixtures";
+import { mockGuestUsage, setRootFontSize } from "./support/chat-state-fixtures";
 import {
   closeOnScreenKeyboard,
   openOnScreenKeyboard,
@@ -383,11 +383,13 @@ const SHORT_VIEWPORTS = [
 ] as const;
 
 test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
-  test.beforeEach(async ({}, testInfo) => {
+  test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("mobile"),
       "The sidebar drawer only exists in the mobile shell."
     );
+    // Layout fixtures must not inherit a usage-limit sheet from the isolated server.
+    await mockGuestUsage(page);
   });
 
   for (const viewport of SHORT_VIEWPORTS) {

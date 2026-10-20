@@ -28,6 +28,7 @@ import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import {
   ComparisonActionRail,
@@ -1262,7 +1263,7 @@ export function MobileChatShell({
         because the header already shows the brand mark; this is the structure,
         not a second copy of it.
       */}
-      <h1 className="sr-only">Tomverse</h1>
+      <h1 className="sr-only">tomverse.</h1>
       <header
         ref={headerRef}
         data-testid="mobile-chat-header"
@@ -1297,9 +1298,11 @@ export function MobileChatShell({
         </button>
         <p
           data-testid="mobile-header-title"
-          className="min-w-0 flex-1 truncate text-[13px] font-bold"
+          className={currentConversation?.title
+            ? "min-w-0 flex-1 truncate text-[13px] font-bold"
+            : "min-w-max flex-1 @max-[14rem]/header:hidden"}
         >
-          {currentConversation?.title || t("sidebar.newChat")}
+          {currentConversation?.title || <TomverseWordmark />}
         </p>
         {isModelSelectionReady ? (
           <button

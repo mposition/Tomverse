@@ -8,6 +8,7 @@ import {
   freezeAnimations,
   installChatModelStub,
   mockAuthenticatedApi,
+  mockGuestUsage,
   restoreActiveConversation,
   submitComposer,
   type AuthenticatedQaState,
@@ -295,6 +296,7 @@ async function enterGuestChat(
 ) {
   const { lang = "en", viewport = DEFAULT_VIEWPORT } = options;
   await prepareGuestPage(page, "en");
+  await mockGuestUsage(page);
   await page.setViewportSize(viewport);
   await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
