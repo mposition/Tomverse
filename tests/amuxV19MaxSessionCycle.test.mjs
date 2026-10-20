@@ -187,7 +187,7 @@ test("a page prompt for another claim stops before the CLI", () =>
     const result = await runAmuxV19MaxSessionCycleOnce({ origin,
       stateDirectory: "/state" }, fake.steps);
     assert.deepEqual(result, { kind: "outcome_unknown", stage: "prompt",
-      claimId: identity.claimId });
+      claimId: identity.claimId, reason: "prompt_hold" });
     assert.equal(fake.released(), 0);
   }));
 
@@ -226,7 +226,8 @@ test("pre-write refusals are quiet except the two that need the operator", () =>
     assert.deepEqual(amuxV19MaxSessionCycleStatus({ kind, stage: "claim" }),
       { line: `AMUX_V19_MAX_SESSION_CYCLE_${kind} stage=claim\n`, exitCode: 1 });
   }
-  // A reason is printed only for a refusal and only as a fixed word.
+  // A reason is printed only for a refusal or a stopped step, and only as a
+  // fixed word.
   assert.equal(amuxV19MaxSessionCycleStatus({ kind: "not_ready", stage: "claim",
     reason: "Bearer x-1" }).line, "AMUX_V19_MAX_SESSION_CYCLE_not_ready stage=claim\n");
   assert.equal(amuxV19MaxSessionCycleStatus({ kind: "halted",

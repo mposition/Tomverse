@@ -3,7 +3,9 @@ import { after, test } from "node:test";
 
 import { readAmuxV19SessionBudgetClaimReceipt } from
   "../lib/amux/ideaLocalSessionBudgetClaimReceiptRead.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
 
+installAmuxV19FakeAppTiming();
 const name = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN";
 const previous = process.env[name];
 process.env[name] = "https://tomverse.test/";
@@ -107,11 +109,42 @@ test("invalid identity and uncertain responses fail closed", async () => {
       controller.enqueue(new TextEncoder().encode("x".repeat(300)));
       controller.close();
     } }), { headers: { "content-type": "application/json" } }),
-    new Response(null, { status: 503 }),
   ]) {
     assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt(input(
-      async () => response)), { kind: "unavailable", retryWrite: false });
+      async () => response)), { kind: "unavailable", retryWrite: false,
+      reason: "response_invalid" });
   }
-  assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt(input(fetchImpl)),
-    { kind: "unavailable", retryWrite: false });
+  // A gateway answer and a lost read are asked again, then name the link.
+  for (const failing of [async () => new Response(null, { status: 503 }),
+    fetchImpl]) {
+    assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt(input(
+      failing)), { kind: "unavailable", retryWrite: false,
+      reason: "read_unreachable" });
+  }
 });
+
+test("a readback after an uncertain write waits longer through a dropped link",
+  async () => {
+    const attempts = async (readback) => {
+      let calls = 0;
+      const result = await readAmuxV19SessionBudgetClaimReceipt({
+        ...input(async () => { calls += 1; throw new Error("dropped"); }),
+        readback });
+      return { result, calls };
+    };
+    const read = await attempts(false);
+    const readback = await attempts(true);
+    assert.equal(read.result.reason, "read_unreachable");
+    assert.equal(readback.result.reason, "readback_unreachable");
+    assert.ok(readback.calls > read.calls);
+    let calls = 0;
+    assert.deepEqual(await readAmuxV19SessionBudgetClaimReceipt({
+      ...input(async () => {
+        calls += 1;
+        if (calls < 3) throw new Error("dropped");
+        return Response.json({ status: "committed", claimId,
+          claimStatus: "outcome_unknown" });
+      }), readback: true }), { kind: "committed", claimId,
+      claimStatus: "outcome_unknown", retryWrite: false });
+    assert.equal(calls, 3);
+  });

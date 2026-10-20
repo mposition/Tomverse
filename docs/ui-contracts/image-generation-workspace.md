@@ -14,6 +14,14 @@ half: what must be on screen, in what shape, and what a change may not do.
 Where the two overlap the policy wins; where the policy is silent about
 rendering, this contract is the answer.
 
+## Studio appearance (2026-10-20)
+
+The approved Review Studio layout and credit presentation are specified in
+[Review Studio](review-studio.md). Classic retains the original layout. Both
+reuse the same input, execution, entitlement and cancellation controls; the
+Studio Write/Results view must never resubmit a request. The textarea retains
+its own complete full-width row.
+
 ## Scope
 
 | Area | File |
@@ -425,9 +433,10 @@ already-retried failure report `partial_success` while the retry is running.
   quoting a guess.
 - The last selected model cannot be removed: a composer that looks ready must
   not refuse on submit.
-- Refunds are visible on the failed card (`data-refunded`), and the failure
-  reason is distinguished structurally (`data-error-kind="moderation"` vs
-  `"generic"`) rather than only in prose.
+- Refund accounting remains observable on the failed card (`data-refunded`)
+  without a visible refund-credit sentence (owner direction, 2026-10-20).
+  The failure reason remains distinguished structurally
+  (`data-error-kind="moderation"` vs `"generic"`) rather than only in prose.
 - Raw internal USD never appears. Credits are the only unit the user sees.
 
 ## Draft carry-over
@@ -495,7 +504,7 @@ Verified for **both** desktop and mobile projects:
 | 3 | Free | entries visible and locked; click reaches `/pricing`, never a prompt box |
 | 4 | Pro, single model | end-to-end run; price quoted before submit |
 | 5 | Pro, multiple models | one POST carrying every `modelIds`; total = sum of per-model prices |
-| 6 | moderation failure | reason and refund both stated on the card |
+| 6 | moderation failure | reason stated on the card; refund retained in accounting metadata |
 | 7 | failed target retried | one entry, one card per target after the retry |
 | 8 | over-limit prompt | submission disabled before any request is made |
 | 9 | reload | timeline rebuilt from the server, not from client memory |

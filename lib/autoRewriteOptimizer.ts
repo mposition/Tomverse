@@ -24,6 +24,7 @@ import {
     autoCandidateMenu,
     finishOptimizerCycle,
     isCandidate,
+    optimizerJudgeCall,
     pricesOf,
     readOptimizerAutomation,
     readOptimizerModelId,
@@ -35,7 +36,6 @@ import {
 } from "@/lib/autoRouterOptimizer";
 import {
     AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
-    autoRouterJudgeSchema,
     callCostMicroUsd,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
@@ -83,13 +83,12 @@ export const AUTO_REWRITE_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterRewr
 export type RewriteOptimizerAutomation = { daily: boolean; autoPromote: boolean };
 
 // The routing optimizer's call limits (lib/autoRouterOptimizer.ts), except the
-// synthesizer: a two-turn conversation is longer than a single message.
+// synthesizer: a two-turn conversation is longer than a single message. The
+// judge is the routing optimizer's own call (optimizerJudgeCall), limits and all.
 const GENERATOR_MAX_OUTPUT_TOKENS = 6_000;
 const GENERATOR_TIMEOUT_MS = 90_000;
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 16_000;
 const SYNTHESIZER_TIMEOUT_MS = 180_000;
-const JUDGE_MAX_OUTPUT_TOKENS = 400;
-const JUDGE_TIMEOUT_MS = 30_000;
 /** How many times the sample size of recent rewritten turns is read before filtering. */
 const SAMPLE_READ_FACTOR = 4;
 
@@ -281,6 +280,8 @@ async function runInBackground(input: {
                         system: AUTO_REWRITE_SYNTHESIZER_SYSTEM,
                         prompt: message,
                         maxOutputTokens: SYNTHESIZER_MAX_OUTPUT_TOKENS,
+                        // As the routing synthesizer: no reasoning before the object.
+                        reasoning: "none",
                         maxRetries: 0,
                         abortSignal: AbortSignal.timeout(SYNTHESIZER_TIMEOUT_MS),
                         output: Output.object({
@@ -375,18 +376,12 @@ async function runInBackground(input: {
                     };
                 },
                 judge: async (message) => {
-                    const generated = await traced("judge", () => generateText({
-                        model: getActiveAiModel(input.optimizerModel),
+                    // The routing optimizer's judge call: one place for its limits.
+                    const generated = await traced("judge", () => optimizerJudgeCall({
+                        model: input.optimizerModel,
                         system: AUTO_REWRITE_JUDGE_SYSTEM,
                         prompt: message,
-                        maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
-                        maxRetries: 0,
-                        abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
-                        output: Output.object({
-                            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
-                            name: "rewrite_judgement",
-                        }),
-                        providerOptions: { openai: { strictJsonSchema: true } },
+                        name: "rewrite_judgement",
                     }));
                     return {
                         value: parseJudgeWinner(outputOf("judge", generated)),
@@ -404,7 +399,7 @@ async function runInBackground(input: {
                 failure: result.failure,
                 candidateGuidance: result.candidateGuidance,
                 cases: result.cases,
-                summary: { ...result.summary, failedCalls: result.failedCalls },
+                summary: { ...result.summary, failedCalls: result.failedCalls, judgeFailed: result.judgeFailed },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
             },
@@ -430,6 +425,7 @@ async function runInBackground(input: {
             spentByKind: result.spentByKind,
             spentByProvider: Object.fromEntries(result.spentByProvider),
             failedCalls: result.failedCalls,
+            judgeFailed: result.judgeFailed,
             syntheticCases: result.cases.filter((item) => item.source === "synthetic").length,
             decided: result.summary.decided,
             undecided: result.summary.undecided,

@@ -1,5 +1,8 @@
 ﻿"use client";
 
+import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import { ReviewParticipants } from "./ReviewStudioChrome";
+import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import {
   useCallback,
   useEffect,
@@ -43,8 +46,6 @@ import { settingsSectionHref } from "@/lib/settingsNavigation";
 import {
   ComposerArrowUpIcon,
   ComposerChevronDownIcon,
-  ComposerCoinsIcon,
-  ComposerCreditChevronIcon,
   ComposerGlobeIcon,
   ComposerPlusIcon,
 } from "@/components/chat/ComposerAssetIcon";
@@ -91,7 +92,6 @@ import {
 import {
   canUseModelWithPlan,
   getModel as getStaticModel,
-  getInputCreditMultiplier,
   modelSupportsImageInput,
   resolveSelectableModelId,
   type AiModel,
@@ -144,7 +144,6 @@ import {
 } from "@/lib/webSearchComposerState";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { openModelFinder } from "@/lib/modelFinderEvents";
-import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import { looksLikeStructuredText } from "@/lib/structuredPasteDetection";
@@ -716,6 +715,7 @@ const loadExternalScript = (src: string) =>
   });
 
 type ChatInputProps = {
+  review?: ReviewWorkspaceControls;
   /** The product this composer belongs to; switches navigate without rewriting it. */
   currentProduct?: ChatWorkspaceProduct;
   /** Product navigation may also remain in the mobile drawer as a second route. */
@@ -1024,6 +1024,7 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 };
 
 export function ChatInput({
+  review,
   currentProduct,
   showProductSwitcher = true,
   showReviewModelRow = true,
@@ -1172,8 +1173,6 @@ export function ChatInput({
     intentClass: ImageIntentClass;
   } | null>(null);
   const [imageIntentReshownOnce, setImageIntentReshownOnce] = useState(false);
-  const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
-  const [isAutoCreditDetailsOpen, setIsAutoCreditDetailsOpen] = useState(false);
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
@@ -1189,9 +1188,6 @@ export function ChatInput({
       isAutoMode && draftLocked && !autoSelectionOffered;
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
-    useEffect(() => {
-      queueMicrotask(() => setIsAutoCreditDetailsOpen(false));
-    }, [draftScopeId, isAutoCapabilityPending, isAutoMode]);
     const signInCallbackUrl = withChatLanguage(
       currentProduct === "review" ? "/review" : "/chat",
       lang
@@ -1352,7 +1348,6 @@ export function ChatInput({
       attachments.filter((attachment) => attachment.kind === "file").length * 16_000;
     return Math.max(1, Math.ceil(textBytes / 4) + binaryAttachmentTokens);
   }, [attachments, value]);
-  const inputCreditMultiplier = getInputCreditMultiplier(estimatedInputTokens);
   const activeSelectedModelObjects = activeSelectedModels
     .map((modelId) => AVAILABLE_MODELS.find((item) => item.id === modelId))
     .filter((model): model is AiModel => Boolean(model));
@@ -1371,11 +1366,6 @@ export function ChatInput({
   });
   const selectedBaseCredits = requestCreditEstimate.baseCredits;
   const estimatedRequestCredits = requestCreditEstimate.totalEstimatedCredits;
-  const creditEstimateAccessibleLabel = `${t("chat.creditEstimateAria").replace(
-    "{credits}",
-    String(estimatedRequestCredits)
-  )}${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`;
-  const webSearchReservationCredits = requestCreditEstimate.webSearchReservationCredits;
   // Derived from the same active-model list the credit estimate uses, so the
   // chip, its support counts and the reservation can never describe different
   // selections -- changing or pausing a model updates all three together.
@@ -1439,14 +1429,7 @@ export function ChatInput({
     !isAutoMode && webSearchState.hasException;
   const isManualWebSearchBlocked =
     !isAutoMode && webSearchState.allUnsupported;
-  const creditBreakdown = requestCreditEstimate.models
-    .map((entry) => {
-      const model = activeSelectedModelObjects.find((item) => item.id === entry.modelId);
-      return model
-        ? { id: entry.modelId, name: model.name, credits: entry.totalCredits }
-        : null;
-    })
-    .filter((item): item is { id: string; name: string; credits: number } => item !== null);
+
   const dailyCreditLimit = accountUsage?.limits.creditsDay || 0;
   const planCreditsRemaining = accountUsage?.balances.planRemainingCredits || 0;
   const purchasedCreditsRemaining =
@@ -2554,6 +2537,7 @@ export function ChatInput({
     if (!shouldAutoFocus) return;
 
     const id = requestAnimationFrame(() => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       textareaRef.current?.focus();
     });
 
@@ -3282,7 +3266,7 @@ export function ChatInput({
   // (Above md the bar's md:py-4/md:pb-4 applies and no inset was ever added.) The
   // dock's bottom edge is the only place the inset belongs.
   return (
-      <div className={variant === "floating"
+      <div data-review-composer={review?.appearance === "studio" ? "studio" : undefined} className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
         : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-[clamp(0.25rem,2vw,0.5rem)] py-1 pb-0 transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-1 ${
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
@@ -3328,7 +3312,7 @@ export function ChatInput({
                 : "border-zinc-200 dark:border-zinc-800"
             }`}
           >
-          {currentProduct && showProductSwitcher && (
+          {currentProduct && showProductSwitcher && review?.appearance !== "studio" && (
             <div
               data-testid="composer-product-mode-row"
               className="flex min-h-11 min-w-0 flex-wrap items-center justify-between gap-2 md:min-h-0 md:flex-nowrap md:[@media(pointer:fine)]:h-8"
@@ -3352,7 +3336,7 @@ export function ChatInput({
                   }}
                 />
               )}
-              {showReviewContextPicker && (
+              {showReviewContextPicker && review?.mode !== "easy" && (
                 <div
                   data-testid="composer-review-models"
                   className="flex h-11 min-w-0 items-center md:[@media(pointer:fine)]:h-8"
@@ -3897,6 +3881,9 @@ export function ChatInput({
             {t("chat.singleModelRequired")}
           </p>
         )}
+        {review?.mode === "easy" && review.imagePromptMode && <div className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
+        {review && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels}
+          canSelectModel={id => { const model = AVAILABLE_MODELS.find(m => m.id === id); return Boolean(model && canUseModelWithPlan(currentPlan, model)); }} />}
         <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
         {/*
           COMPOSER-FOCUS-CLIP-01. The global focus outline is drawn outside the
@@ -3988,7 +3975,12 @@ export function ChatInput({
             )}
           </button>
           {showWebSearchInFooter && webSearchChip}
-          {(!isReviewProduct || !showReviewContextPicker) && (
+          {review?.appearance === "studio" && !webSearchState.isVisible && <button type="button" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
+          {review?.appearance === "studio" && <button type="button" className="review-research-shortcut" onClick={() => {
+            if (isGuestMode) { onGuestSignInPrompt?.(); return; }
+            onOpenDeepResearchSetup?.();
+          }} disabled={isDeepResearchPending || review.pending}>{t("chat.toolsDeepResearch")}</button>}
+          {review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || review?.appearance === "studio") && (
             <button
               ref={modelMenuButtonRef}
               type="button"
@@ -4064,73 +4056,10 @@ export function ChatInput({
           className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-[360px]:gap-x-0.5 max-[240px]:contents"
         >
 
-          {!isAutoMode && activeSelectedModels.length > 0 && (
-            <button
-              type="button"
-              data-testid="request-credit-estimate"
-              onClick={() => setIsCreditBreakdownOpen(true)}
-              className="flex min-h-11 min-w-0 max-w-full flex-wrap items-center justify-center gap-x-1 gap-y-0.5 rounded-xl px-1.5 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 max-[240px]:h-11 max-[240px]:w-11 max-[240px]:shrink-0 max-[240px]:flex-nowrap max-[240px]:gap-x-0.5 max-[240px]:p-0 dark:text-zinc-300 dark:hover:bg-zinc-800 md:px-2 md:[@media(pointer:fine)]:min-h-9"
-              title={creditEstimateAccessibleLabel}
-              aria-label={creditEstimateAccessibleLabel}
-            >
-              <ComposerCoinsIcon
-                data-testid="credit-coin-icon"
-                aria-hidden="true"
-              />
-              <span className="hidden min-w-0 whitespace-normal break-words text-center leading-4 md:inline">
-                {t("chat.creditEstimateLabel").replace(
-                  "{credits}",
-                  String(estimatedRequestCredits)
-                )}
-              </span>
-              <span
-                aria-hidden="true"
-                className="min-w-0 max-w-full break-all leading-none tabular-nums md:hidden"
-              >
-                {estimatedRequestCredits}
-              </span>
-              {inputCreditMultiplier > 1 && (
-                <span className="shrink-0 text-amber-600 max-[240px]:sr-only dark:text-amber-400">
-                  {inputCreditMultiplier}×
-                </span>
-              )}
-              <ComposerCreditChevronIcon
-                className="max-[240px]:hidden"
-                aria-hidden="true"
-              />
-            </button>
-          )}
           <ChatInputAutoCapabilityPendingNotice
             visible={isAutoCapabilityPending}
             label={`${autoCopy.label} · ${t("auth.loading")}`}
           />
-          {isAutoMode && !isAutoCapabilityPending && (
-            <button
-              type="button"
-              data-testid="auto-variable-credit-notice"
-              onClick={() => setIsAutoCreditDetailsOpen((open) => !open)}
-              aria-expanded={isAutoCreditDetailsOpen}
-              aria-controls={
-                isAutoCreditDetailsOpen ? "auto-variable-credit-detail" : undefined
-              }
-              aria-describedby="auto-variable-credit-description"
-              aria-label={autoCopy.variableCreditLabel}
-              className="flex h-11 min-w-0 max-w-20 items-center justify-center gap-1 rounded-xl px-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 max-[360px]:w-[52px] max-[360px]:gap-0.5 max-[360px]:px-0 dark:text-zinc-300 dark:hover:bg-zinc-800 md:max-w-[9.125rem] md:px-2 md:[@media(pointer:fine)]:h-9"
-            >
-              <ComposerCoinsIcon
-                data-testid="credit-coin-icon"
-                className="max-[360px]:hidden"
-                aria-hidden="true"
-              />
-              <span className="truncate">{autoCopy.variableCreditLabel}</span>
-              <ComposerCreditChevronIcon aria-hidden="true" />
-            </button>
-          )}
-          {isAutoMode && !isAutoCapabilityPending && (
-            <span id="auto-variable-credit-description" className="sr-only">
-              {autoCopy.variableCreditNotice}
-            </span>
-          )}
           {/*
             The microphone is the control immediately left of Send.
 
@@ -4188,6 +4117,8 @@ export function ChatInput({
               }}
               disabled={
                 isDraftMutationDisabled ||
+                Boolean(review?.pending || review?.ready === false) ||
+                Boolean(review?.mode === "easy" && !review.easyAvailable) ||
                 isVoiceSubmissionBlocked ||
                 (singleModelSelection && selectedModels.length !== 1) ||
                 activeSelectedModels.length === 0 ||
@@ -4198,20 +4129,13 @@ export function ChatInput({
                   ? "bg-blue-600 hover:bg-blue-500"
                   : "bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-300"
               }`}
-              title={
-                isAutoMode
-                  ? `${t("chat.send")} · ${autoCopy.variableCreditNotice}`
-                  : `${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`
-              }
-              aria-label={
-                isAutoMode
-                  ? `${t("chat.send")} · ${autoCopy.variableCreditNotice}`
-                  : `${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`
-              }
+              title={t("chat.send")}
+              aria-label={t("chat.send")}
               aria-describedby={
                 sendDisabledReason ? "chat-send-disabled-reason" : undefined
               }
             >
+              {review?.appearance === "studio" && <span className="review-submit-label">{review.pending ? reviewWorkspaceCopy[lang].routing : reviewWorkspaceCopy[lang].compare}</span>}
               <ComposerArrowUpIcon aria-hidden="true" />
             </button>
           ) : null}
@@ -4225,15 +4149,6 @@ export function ChatInput({
             </p>
           )}
         </div>
-
-        {isAutoMode && isAutoCreditDetailsOpen && !isAutoCapabilityPending && (
-          <p
-            id="auto-variable-credit-detail"
-            className="mt-1 w-full rounded-lg bg-zinc-50 px-2 py-1.5 text-[11px] leading-4 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
-          >
-            {autoCopy.variableCreditNotice}
-          </p>
-        )}
 
           {isMenuOpen && (
             <MobileModelMenuPortal>
@@ -5106,6 +5021,7 @@ export function ChatInput({
                       )
                     ) : null;
 
+                    if (review?.mode === "easy") return <ReviewParticipants review={review} initialExpanded selectedModels={selectedModels} canSelectModel={id => { const model = getCatalogModel(id); return Boolean(model && canUseModelWithPlan(currentPlan, model)); }} />;
                     return (
                       <ModelPickerPanel
                         singleModelSelection={singleModelSelection}
@@ -5260,14 +5176,6 @@ export function ChatInput({
           {t("chat.aiDisclaimer")}
         </p>
       )}
-      <CreditBreakdownSheet
-        open={isCreditBreakdownOpen}
-        onClose={() => setIsCreditBreakdownOpen(false)}
-        items={creditBreakdown}
-        total={estimatedRequestCredits}
-        multiplier={inputCreditMultiplier}
-        webSearchReservationCredits={webSearchReservationCredits}
-      />
       <UsageLimitModal
         open={isUsageLimitModalOpen && isUsageLimitReached}
         onClose={() => setIsUsageLimitModalOpen(false)}

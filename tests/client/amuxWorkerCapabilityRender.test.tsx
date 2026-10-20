@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 
 import {
   AmuxWorkerCapabilityEditor,
-  AmuxWorkerCapabilityView,
   runAmuxWorkerCapabilityEdit,
   runAmuxWorkerCapabilityImport,
   type AmuxWorkerCapabilityImport,
@@ -22,10 +21,10 @@ import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "@/lib/
 import { amuxWorkerCapabilityFormFromRow, type AmuxWorkerCapabilityForm } from "@/lib/amux/workerCapabilityEditCore";
 
 /**
- * AMUX › Execution › Workers, capabilities (orchestration policy version 35,
- * R2a), executed: the hook-free view is walked, and the single-change run
- * behind an edit is driven with a fake io. What it offers, to whom, and when
- * it stops. The catalog variables are not read (R2e).
+ * The capability editor of AMUX › Operations settings › Workers (orchestration
+ * policy version 35, R2a), executed: the editor is walked, and the
+ * single-change run behind an edit is driven with a fake io. What it offers
+ * and when it stops. The catalog variables are not read (R2e).
  */
 
 const m = adminAmuxWorkerCapabilityMessages.en;
@@ -62,36 +61,6 @@ const REGISTRY = AMUX_WORKER_REGISTRY_V31_SEED.map((entry) => ({
   revision: 1,
 }));
 const VIEW = buildAmuxWorkerCapabilityAdminView({ registrations: REGISTRY, current: new Map(), writesLatch: true });
-
-const render = (overrides: Partial<{ view: AmuxWorkerCapabilityAdminView | null; isOwner: boolean }> = {}) =>
-  AmuxWorkerCapabilityView({
-    m,
-    view: "view" in overrides ? overrides.view! : VIEW,
-    isOwner: overrides.isOwner ?? true,
-    pending: null,
-    notice: null,
-    refusal: null,
-    failure: null,
-    onReread: () => {},
-  });
-
-test("each registered worker is listed with what is recorded; nothing comes from the catalog variables", () => {
-  const tree = render();
-  assert.equal(byTestId(tree, "amux-worker-capability-import").length, 0);
-  assert.equal(byTestId(tree, "amux-worker-capability-import-run").length, 0);
-  assert.equal(byTestId(tree, "amux-worker-capability-catalog-unreadable").length, 0);
-  for (const row of VIEW.rows) {
-    assert.equal(byTestId(tree, `amux-worker-capability-row-${row.workerName}`).length, 1, row.workerName);
-  }
-  assert.match(textOf(byTestId(tree, "amux-worker-capability-row-claude-chore")[0]!.children as ReactNode), /none/);
-});
-
-test("an unread view offers only reading again", () => {
-  const unread = render({ view: null });
-  assert.equal(byTestId(unread, "amux-worker-capability-unavailable").length, 1);
-  assert.equal(byTestId(unread, "amux-worker-capability-reread").length, 1);
-  assert.equal(byTestId(unread, "amux-worker-capability-edit-claude-chore").length, 0);
-});
 
 const FAILURE = { kind: "failure", message: "failed" } as unknown as AdminApiFailure;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -161,53 +130,7 @@ test("a refusal by the ceiling rule, the latch or a stale revision stops on that
   assert.equal(unread.last("notice"), "unread");
 });
 
-test("the preview shows the tools, so a tools-only change is visible", () => {
-  const view = buildAmuxWorkerCapabilityAdminView({
-    registrations: REGISTRY,
-    current: new Map([["codex-impl", { revision: 1, capability: { model: null, routingTags: ["implementation"], toolCapabilities: ["shell"], v22: null }, changedAt: "2026-10-13T00:00:00.000Z" }]]),
-    writesLatch: true,
-  });
-  const tree = render({ view });
-  const row = byTestId(tree, "amux-worker-capability-row-codex-impl")[0]!;
-  assert.match(textOf(row.children as ReactNode), /tools: shell/);
-});
-
-// Version 35 R2a, "Admin 편집" (version 36): the owner edits one worker's
-// capability in the Workers tab; the save is a single audited change.
-
 const CHORE_ROW = VIEW.rows.find((row) => row.workerName === "claude-chore")!;
-const renderEditing = (editing: AmuxWorkerCapabilityForm | null, overrides: Partial<{ isOwner: boolean; view: AmuxWorkerCapabilityAdminView }> = {}) => {
-  const started: string[] = [];
-  const tree = AmuxWorkerCapabilityView({
-    m,
-    view: overrides.view ?? VIEW,
-    isOwner: overrides.isOwner ?? true,
-    pending: null,
-    notice: null,
-    refusal: null,
-    failure: null,
-    onReread: () => {},
-    editing,
-    onEditStart: (row) => started.push(row.workerName),
-  });
-  return { tree, started };
-};
-
-test("the owner gets an edit control per worker; a non-owner none; latched off or mid-edit, it is held", () => {
-  const { tree, started } = renderEditing(null);
-  const button = byTestId(tree, "amux-worker-capability-edit-cursor-impl")[0]!;
-  assert.equal(button.disabled, false);
-  assert.equal(button["aria-label"], m.editLabel("cursor-impl"));
-  (button.onClick as () => void)();
-  assert.deepEqual(started, ["cursor-impl"]);
-  assert.equal(byTestId(renderEditing(null, { isOwner: false }).tree, "amux-worker-capability-edit-cursor-impl").length, 0);
-  assert.equal(byTestId(renderEditing(null, { view: { ...VIEW, writesLatch: false } }).tree, "amux-worker-capability-edit-cursor-impl")[0]!.disabled, true);
-  const mid = renderEditing(amuxWorkerCapabilityFormFromRow(CHORE_ROW)).tree;
-  assert.equal(byTestId(mid, "amux-worker-capability-edit-cursor-impl")[0]!.disabled, true);
-  const editor = propsOf(mid).find((props) => props.form !== undefined && props.row !== undefined)!;
-  assert.equal((editor.row as { workerName: string }).workerName, "claude-chore");
-});
-
 const renderEditor = (form: AmuxWorkerCapabilityForm, row = CHORE_ROW, busy = false) => {
   const saved: AmuxWorkerCapabilityForm[] = [];
   const tree = AmuxWorkerCapabilityEditor({

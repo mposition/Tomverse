@@ -3,7 +3,9 @@ import test from "node:test";
 
 import { settleAmuxV19MaxShadowResultOnce } from
   "../lib/amux/ideaLocalMaxShadowResultOnce.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
 
+installAmuxV19FakeAppTiming();
 const origin = "https://synthetic-amux.example.test/";
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
 const ids = {
@@ -94,7 +96,75 @@ test("unknown Max usage holds through dedicated endpoint and absent readback sto
     assert.equal(writes, 1);
     assert.equal(reads, 1);
     assert.deepEqual(result, { kind: "outcome_unknown",
-      receiptStatus: "absent", retryWrite: false });
+      receiptStatus: "absent", retryWrite: false,
+      reason: "network_sent_unconfirmed" });
+  }));
+
+const unsent = (code) => Object.assign(new TypeError("fetch failed"),
+  { cause: Object.assign(new Error(`synthetic ${code}`), { code }) });
+
+test("an unknown report that never left the host is sent again, then confirmed",
+  async () => withEnv(async () => {
+    const input = { ...ids, outcome: "outcome_unknown",
+      inputTokens: null, outputTokens: null };
+    const bodies = [];
+    let reads = 0;
+    const result = await settleAmuxV19MaxShadowResultOnce({ origin, input,
+      fetchImpl: async (_url, options) => {
+        if (options.method !== "POST") { reads++; throw new Error("no read"); }
+        bodies.push(options.body);
+        if (bodies.length === 1) throw unsent("ENOTFOUND");
+        if (bodies.length === 2) throw unsent("ECONNREFUSED");
+        return Response.json({ claimId: ids.claimId, status: "outcome_unknown",
+          settledMicroUsd: null, auditId: "synthetic-audit" });
+      },
+    });
+    assert.deepEqual(result, { kind: "recorded", status: "outcome_unknown",
+      settledMicroUsd: null, recovered: false, retryWrite: false });
+    assert.equal(bodies.length, 3);
+    assert.equal(new Set(bodies).size, 1);
+    assert.equal(reads, 0);
+  }));
+
+test("a lost unknown report is read back through a dropped link, never resent",
+  async () => withEnv(async () => {
+    const input = { ...ids, outcome: "outcome_unknown",
+      inputTokens: null, outputTokens: null };
+    let writes = 0;
+    let reads = 0;
+    const result = await settleAmuxV19MaxShadowResultOnce({ origin, input,
+      fetchImpl: async (_url, options) => {
+        if (options.method === "POST") {
+          writes++;
+          throw new DOMException("synthetic timeout", "TimeoutError");
+        }
+        reads++;
+        // The first readbacks fall into the same drop.
+        if (reads < 4) throw unsent("EAI_AGAIN");
+        return Response.json({ status: "committed", claimId: ids.claimId,
+          claimStatus: "outcome_unknown" });
+      },
+    });
+    assert.deepEqual(result, { kind: "recorded", status: "outcome_unknown",
+      settledMicroUsd: null, recovered: true, retryWrite: false });
+    assert.equal(writes, 1);
+    assert.equal(reads, 4);
+  }));
+
+test("an unreachable readback names why the unknown report stayed unconfirmed",
+  async () => withEnv(async () => {
+    const input = { ...ids, outcome: "outcome_unknown",
+      inputTokens: null, outputTokens: null };
+    let writes = 0;
+    const result = await settleAmuxV19MaxShadowResultOnce({ origin, input,
+      fetchImpl: async (_url, options) => {
+        if (options.method === "POST") writes++;
+        throw new Error("synthetic dropped link");
+      },
+    });
+    assert.deepEqual(result, { kind: "outcome_unknown", receiptStatus: null,
+      retryWrite: false, reason: "readback_unreachable" });
+    assert.equal(writes, 1);
   }));
 
 test("missing measured usage cannot be submitted as a known result", async () =>

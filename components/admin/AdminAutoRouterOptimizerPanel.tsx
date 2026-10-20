@@ -20,6 +20,8 @@ type Summary = {
   ties: number;
   /** Absent on a cycle recorded before answers were judged. */
   undecided?: number;
+  /** Judge calls that returned no verdict; absent on older cycles. */
+  judgeFailed?: number;
   incumbentCredits: number;
   candidateCredits: number;
   /** Absent on a cycle recorded before the direct comparison and the report. */
@@ -323,6 +325,7 @@ export function AdminAutoRouterOptimizerPanel() {
                 {cycle.summary.candidateWins} {m.candidateWins} · {cycle.summary.incumbentWins} {m.incumbentWins} ·{" "}
                 {cycle.summary.ties} {m.ties} ·{" "}
                 {cycle.summary.undecided !== undefined ? `${cycle.summary.undecided} ${m.undecided} · ` : ""}
+                {cycle.summary.judgeFailed ? `${cycle.summary.judgeFailed} ${m.judgeFailed} · ` : ""}
                 {m.credits} {cycle.summary.incumbentCredits} → {cycle.summary.candidateCredits}
               </p>
             ) : null}

@@ -89,7 +89,7 @@ test.describe("skip link", () => {
 
 test.describe("project delete arming", () => {
   const openProjects = async (page: Page) => {
-    await mockAuthenticatedApi(page);
+    await mockAuthenticatedApi(page, { language: "en" });
     // The shared fixture returns no projects, and the control under test only
     // exists on a project row.
     await page.unroute("**/api/projects**");

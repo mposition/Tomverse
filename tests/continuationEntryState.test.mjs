@@ -109,7 +109,7 @@ test("both shells decide the welcome surface with the shared function", () => {
     // And the desktop overlay is gated on it too.
     assert.match(
         code("components/chat/DesktopChatShell.tsx"),
-        /\{showsWelcomeSurface && \(/
+        /\{\s*showsWelcomeSurface\s*&&/
     );
 });
 

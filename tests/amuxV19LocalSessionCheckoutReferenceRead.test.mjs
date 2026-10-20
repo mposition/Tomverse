@@ -4,7 +4,9 @@ import { after, test } from "node:test";
 import { readAmuxV19SessionCheckoutReference,
   readAmuxV19MaxCheckoutReference } from
   "../lib/amux/ideaLocalSessionCheckoutReferenceRead.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
 
+installAmuxV19FakeAppTiming();
 const name = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_APP_ORIGIN";
 const previous = process.env[name];
 process.env[name] = "https://tomverse.test/";
@@ -113,9 +115,16 @@ test("missing authority, malformed targets and uncertain transport fail closed",
     Response.json({ ...valid, kind: "pull_request", pullRequestNumber: 0 }),
     new Response("x".repeat(513), { headers: {
       "content-type": "application/json" } }),
-    new Response(null, { status: 503 }),
   ]) {
     assert.deepEqual(await readAmuxV19SessionCheckoutReference(input(
-      async () => response)), { kind: "unavailable" });
+      async () => response)), { kind: "unavailable",
+      reason: "response_invalid" });
   }
+  // A gateway answer to this read-only lookup is asked again, then stays
+  // unavailable with the network reason.
+  let gateway = 0;
+  assert.deepEqual(await readAmuxV19SessionCheckoutReference(input(
+    async () => { gateway += 1; return new Response(null, { status: 503 }); })),
+  { kind: "unavailable", reason: "read_unreachable" });
+  assert.ok(gateway > 1);
 });

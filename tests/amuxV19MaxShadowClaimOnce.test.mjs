@@ -5,6 +5,9 @@ import { claimAmuxV19MaxShadowBudgetOnce } from
   "../lib/amux/ideaLocalMaxShadowClaimOnce.mjs";
 import { verifyAmuxV19MaxClaimAttestation } from
   "../lib/amux/ideaSessionMaxLauncherAttestation.mjs";
+import { installAmuxV19FakeAppTiming } from "./support/amuxV19FakeAppTiming.mjs";
+
+installAmuxV19FakeAppTiming();
 
 const origin = "https://synthetic-amux.example.test/";
 const secret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
@@ -184,39 +187,99 @@ test("a 409 refusal whose readback finds the claim in flight is the recovered cl
 test("a 409 refusal without a clean absent readback stays outcome unknown",
   () => withLauncherEnv(async () => {
     const hold = refusal({ error: "budget_hold", reason: "monthly_shadow_reached" });
-    for (const [receipt, receiptStatus] of [
-      [() => Response.json({ status: "partial" }), "partial"],
-      [() => Response.json({ error: "outcome_unknown" }, { status: 503 }), null],
-      [() => { throw new Error("synthetic readback loss"); }, null],
+    // A readback that never reaches the app is asked again with backoff, and
+    // the write is still never repeated.
+    for (const [receipt, receiptStatus, reason, retried] of [
+      [() => Response.json({ status: "partial" }), "partial",
+        "write_unconfirmed", false],
+      [() => Response.json({ error: "outcome_unknown" }, { status: 503 }), null,
+        "readback_unreachable", true],
+      [() => { throw new Error("synthetic readback loss"); }, null,
+        "readback_unreachable", true],
       [() => Response.json({ status: "committed", claimId: identity.claimId,
-        claimStatus: "outcome_unknown" }), null],
+        claimStatus: "outcome_unknown" }), null, "write_unconfirmed", false],
     ]) {
       const { result, writes, reads } = await claimWith({ post: hold, receipt });
       assert.deepEqual(result, { kind: "outcome_unknown", receiptStatus,
-        retryWrite: false });
+        retryWrite: false, reason });
       assert.equal(writes, 1);
-      assert.equal(reads, 1);
+      if (retried) assert.ok(reads > 1, reason);
+      else assert.equal(reads, 1);
     }
   }));
 
 test("only the route's exact 409 bodies count as refusals; a lost or 5xx answer stays unknown",
   () => withLauncherEnv(async () => {
-    for (const post of [
-      refusal({ error: "outcome_unknown" }),
-      refusal({ error: "budget_hold", reason: "Bearer x-1" }),
-      refusal({ error: "budget_hold", reason: "monthly_shadow_reached", extra: 1 }),
-      refusal({ error: "not_ready", reason: 7 }),
-      refusal({ available: false, reason: "session_budget_claim_read_disabled" }),
-      refusal(["not_ready"]),
-      () => new Response("not_ready", { status: 409,
-        headers: { "content-type": "text/plain" } }),
-      () => Response.json({ error: "outcome_unknown" }, { status: 503 }),
-      () => { throw new Error("synthetic lost response"); },
+    const answered = "write_unconfirmed";
+    for (const [post, reason] of [
+      [refusal({ error: "outcome_unknown" }), answered],
+      [refusal({ error: "budget_hold", reason: "Bearer x-1" }), answered],
+      [refusal({ error: "budget_hold", reason: "monthly_shadow_reached",
+        extra: 1 }), answered],
+      [refusal({ error: "not_ready", reason: 7 }), answered],
+      [refusal({ available: false,
+        reason: "session_budget_claim_read_disabled" }), answered],
+      [refusal(["not_ready"]), answered],
+      [() => new Response("not_ready", { status: 409,
+        headers: { "content-type": "text/plain" } }), answered],
+      // A gateway answer to a write is not resent; only read back.
+      [() => Response.json({ error: "outcome_unknown" }, { status: 503 }),
+        answered],
+      // An answer lost after sending is never resent.
+      [() => { throw new Error("synthetic lost response"); },
+        "network_sent_unconfirmed"],
     ]) {
       const { result, writes, reads } = await claimWith({ post, receipt: absent });
       assert.deepEqual(result, { kind: "outcome_unknown",
-        receiptStatus: "absent", retryWrite: false });
+        receiptStatus: "absent", retryWrite: false, reason });
       assert.equal(writes, 1);
       assert.equal(reads, 1);
     }
+  }));
+
+test("a claim POST that never left the host is sent again with the same bytes",
+  () => withLauncherEnv(async () => {
+    const bodies = [];
+    let reads = 0;
+    const result = await claimAmuxV19MaxShadowBudgetOnce({ origin, identity,
+      fetchImpl: async (_url, options) => {
+        if (options.method !== "POST") { reads++; return absent(); }
+        bodies.push(options.body);
+        if (bodies.length < 3) {
+          throw Object.assign(new TypeError("fetch failed"),
+            { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN"),
+              { code: "EAI_AGAIN" }) });
+        }
+        return Response.json({ claimId: identity.claimId,
+          requestId: identity.requestId, reservationId: identity.reservationId,
+          invocationOrdinal: 0, reservedMicroUsd: "1000000",
+          auditId: "synthetic-audit" });
+      },
+    }, prepareReady);
+    assert.deepEqual(result, { kind: "claimed", claimId: identity.claimId,
+      reservationId: identity.reservationId, requestId: identity.requestId,
+      reservedMicroUsd: "1000000", recovered: false, retryWrite: false });
+    assert.equal(bodies.length, 3);
+    assert.equal(new Set(bodies).size, 1, "every attempt sends the same bytes");
+    assert.equal(reads, 0);
+  }));
+
+test("a claim POST that never left within the budget reads back and names why",
+  () => withLauncherEnv(async () => {
+    let writes = 0;
+    let reads = 0;
+    const result = await claimAmuxV19MaxShadowBudgetOnce({ origin, identity,
+      fetchImpl: async (_url, options) => {
+        if (options.method !== "POST") { reads++; return absent(); }
+        writes++;
+        throw Object.assign(new TypeError("fetch failed"),
+          { cause: Object.assign(new Error("connect ECONNREFUSED"),
+            { code: "ECONNREFUSED" }) });
+      },
+    }, prepareReady);
+    assert.deepEqual(result, { kind: "outcome_unknown",
+      receiptStatus: "absent", retryWrite: false,
+      reason: "network_unsent_retry_exhausted" });
+    assert.ok(writes > 1);
+    assert.equal(reads, 1);
   }));

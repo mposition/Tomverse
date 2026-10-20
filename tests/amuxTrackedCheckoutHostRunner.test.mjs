@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { readAmuxV19StopState } from "../lib/amux/ideaLocalAppRequest.mjs";
 import { AMUX_V19_TRACKED_CHECKOUT_CLI_ENV,
-  amuxV19StopRequested, runAmuxV19TrackedCheckoutAnalysis } from
+  runAmuxV19TrackedCheckoutAnalysis } from
   "../lib/amux/ideaTrackedCheckoutHostRunner.mjs";
 
 const valid = () => ({ modelId: "claude-opus-5-5", reasoningEffort: "high",
@@ -19,24 +20,30 @@ const validMulti = () => {
   })) };
 };
 
-test("stop polling fails closed on refusal, transport failure and timeout", async () => {
-  assert.equal(await amuxV19StopRequested(async () => false), false);
-  assert.equal(await amuxV19StopRequested(async () => true), true);
-  assert.equal(await amuxV19StopRequested(async () => { throw new Error("read failed"); }), true);
+test("a stop read separates continue, stop and an unanswered read", async () => {
+  assert.equal(await readAmuxV19StopState(async () => false), "continue");
+  assert.equal(await readAmuxV19StopState(async () => true), "stop");
+  assert.equal(await readAmuxV19StopState(async () => "unreachable"),
+    "unreachable");
+  // Only an explicit false continues; any other answer is a stop.
+  assert.equal(await readAmuxV19StopState(async () => undefined), "stop");
+  assert.equal(await readAmuxV19StopState(async () => {
+    throw new Error("read failed");
+  }), "unreachable");
   let seenSignal;
-  assert.equal(await amuxV19StopRequested((signal) => {
+  assert.equal(await readAmuxV19StopState((signal) => {
     seenSignal = signal;
     return new Promise(() => {});
-  }, undefined, 10), true);
+  }, undefined, 10), "unreachable");
   assert.equal(seenSignal.aborted, true);
   const parent = new AbortController();
   let calls = 0;
-  const pending = amuxV19StopRequested(() => {
+  const pending = readAmuxV19StopState(() => {
     calls += 1;
     return new Promise(() => {});
   }, parent.signal, 1_000);
   parent.abort();
-  assert.equal(await pending, true);
+  assert.equal(await pending, "aborted");
   assert.equal(calls, 0);
 });
 
@@ -112,7 +119,8 @@ test("missing pinned repository has an unknown outcome before CLI start", {
     process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] = "enabled";
     assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis({ ...valid(),
       stopCheck: async () => false }),
-    { kind: "outcome_unknown", cliStarted: false });
+    { kind: "outcome_unknown", reason: "checkout_unavailable",
+      cliStarted: false });
   } finally {
     if (prior === undefined) delete process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];
     else process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV] = prior;
@@ -128,7 +136,7 @@ test("operator stop is checked before any checkout or CLI access", {
     let checks = 0;
     assert.deepEqual(await runAmuxV19TrackedCheckoutAnalysis({ ...valid(),
       stopCheck: async () => { checks += 1; return true; } }),
-    { kind: "outcome_unknown", cliStarted: false });
+    { kind: "outcome_unknown", reason: "stop_requested", cliStarted: false });
     assert.equal(checks, 1);
   } finally {
     if (prior === undefined) delete process.env[AMUX_V19_TRACKED_CHECKOUT_CLI_ENV];

@@ -334,7 +334,11 @@ for (const hydrationCase of HYDRATION_CASES) {
     });
 
     await page.goto(hydrationCase.path);
-    await page.waitForLoadState("networkidle");
+    // The workspace can poll while idle. Its mounted composer is the positive
+    // hydration signal; unrelated background requests must not hold this test.
+    await expect(page.getByTestId(
+      hydrationCase.path.startsWith("/review") ? "chat-textarea" : "signin-card"
+    )).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
 
     const state = await readLangState(page);

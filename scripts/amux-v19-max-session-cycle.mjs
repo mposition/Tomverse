@@ -6,7 +6,10 @@
  * A claim the app refused before writing, confirmed absent by its exact
  * readback, keeps no marker and prints its fixed reason word.
  * A failed analysis also names why, in fixed words, and whether its claim was
- * held as outcome_unknown in the app (`unknownReport`). */
+ * held as outcome_unknown in the app (`unknownReport`, with `reportReason`
+ * when that stayed unconfirmed). Every other stop names its fixed reason too,
+ * such as stop_requested, stop_unreachable, read_unreachable,
+ * readback_unreachable or network_unsent_retry_exhausted. */
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,6 +31,9 @@ const KINDS = new Set([...QUIET, "halted", "outcome_unknown", "refused",
   "auth_unavailable", "budget_unavailable", "integrity_unavailable"]);
 const REFUSALS = new Set(["budget_hold", "not_ready", "claim_disabled",
   "budget_unavailable", "integrity_unavailable"]);
+// Kinds whose fixed reason word is printed: a refusal's code, or why a step
+// stopped (a stop answer, a dropped link, an unconfirmed write).
+const REASONED = new Set([...REFUSALS, "outcome_unknown", "unavailable"]);
 const STAGES = new Set(["claim", "idea_read", "prompt", "analysis", "result"]);
 const STATES = AMUX_V19_SESSION_CYCLE_WORD;
 const ANALYSIS_WORDS = ["reason", "failure", "parser", "trace", "stderr",
@@ -63,7 +69,9 @@ export function amuxV19MaxSessionCycleStatus(result) {
   const kind = KINDS.has(result?.kind) ? result.kind : "unavailable";
   const parts = [`AMUX_V19_MAX_SESSION_CYCLE_${kind}`];
   if (STAGES.has(result?.stage)) parts.push(`stage=${result.stage}`);
-  if (REFUSALS.has(kind) && STATES.test(result?.reason ?? "")) {
+  const analysis = kind === "outcome_unknown" && result?.stage === "analysis";
+  // An analysis stop prints its reason among its own words below.
+  if (!analysis && REASONED.has(kind) && STATES.test(result?.reason ?? "")) {
     parts.push(`reason=${result.reason}`);
   }
   if (kind === "recorded") {
@@ -72,9 +80,9 @@ export function amuxV19MaxSessionCycleStatus(result) {
     }
     if (result?.haltReleased === false) parts.push("haltReleased=false");
   }
-  if (kind === "outcome_unknown" && result?.stage === "analysis") {
+  if (analysis) {
     parts.push(...analysisParts(result.analysis));
-    for (const key of ["unknownReport", "receipt"]) {
+    for (const key of ["unknownReport", "receipt", "reportReason"]) {
       const value = result?.[key];
       if (typeof value === "string" && STATES.test(value)) {
         parts.push(`${key}=${value}`);

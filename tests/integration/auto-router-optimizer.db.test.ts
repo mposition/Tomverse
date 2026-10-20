@@ -510,3 +510,96 @@ test("a live router call holds its worst case in both provider buckets or neithe
   assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-day"), day - 70);
   assert.equal(await bucket(ROUTER_PROVIDER, "provider-cost-month"), 30);
 });
+
+test("the naming check knows every catalogue id, models deleted from the catalogue included", async () => {
+  const { optimizerCatalogueIds } = await import("@/lib/autoRouterOptimizer");
+  const { guidanceNamingRejection } = await import("@/lib/autoRouterOptimizerCore");
+  await optimizerCatalogueIds(); // seeds the registry on a fresh database
+  const source = await prisma.modelRegistryEntry.findFirstOrThrow({ where: { catalogDeleted: false } });
+  // A registry-only model with no digit, deleted from the catalogue: neither
+  // the static catalogue nor an id-shaped token would catch its name.
+  const deletedId = `deletedtest/alpha-${randomUUID().slice(0, 4).replace(/\d/g, "x")}`;
+  await prisma.modelRegistryEntry.create({
+    data: {
+      id: deletedId,
+      name: "Deleted test model",
+      apiModel: source.apiModel,
+      provider: source.provider,
+      apiBaseUrl: source.apiBaseUrl,
+      apiKeyEnvName: source.apiKeyEnvName,
+      minimumPlan: source.minimumPlan,
+      usageClass: source.usageClass,
+      creditWeight: source.creditWeight,
+      enabled: false,
+      status: "disabled",
+      catalogDeleted: true,
+    },
+  });
+  try {
+    const ids = await optimizerCatalogueIds();
+    assert.ok(ids.includes(deletedId));
+    assert.ok(ids.includes(source.id));
+    assert.deepEqual(
+      guidanceNamingRejection(`Send news questions to ${deletedId}.`, ["gpt-6-luna"], ["gpt-6-luna"], ids),
+      { reason: "unknown_model", ids: [deletedId] }
+    );
+    // Without the deleted rows the same name would slip through.
+    assert.equal(guidanceNamingRejection(`Send news questions to ${deletedId}.`, ["gpt-6-luna"], ["gpt-6-luna"], []), null);
+  } finally {
+    await prisma.modelRegistryEntry.deleteMany({ where: { id: deletedId } });
+  }
+});
+
+test("the next challenger leaves out models whose answers all failed in the last cycle that recorded answers", async () => {
+  const { readUnreliableAnswerModels } = await import("@/lib/autoRouterOptimizer");
+  assert.deepEqual(await readUnreliableAnswerModels(), []);
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+  const stats = (answerStats: Record<string, { answered: number; failed: number }>) => ({ evaluated: 20, answerStats });
+  // The last finished cycle that recorded answers decides.
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "failed", createdAt: at(30),
+      summary: stats({ "deepseek-v4-pro": { answered: 0, failed: 5 }, "gpt-6-luna": { answered: 4, failed: 1 } }),
+    },
+  });
+  // Newer, but a cycle that recorded no answers, and one still running: neither counts.
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "failed", createdAt: at(20), summary: { evaluated: 12 },
+    },
+  });
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "running", createdAt: at(1),
+      summary: stats({ "gpt-6-luna": { answered: 0, failed: 9 } }),
+    },
+  });
+  assert.deepEqual(await readUnreliableAnswerModels(), ["deepseek-v4-pro"]);
+  // However many newer finished cycles recorded no answers (rewrite cycles do not).
+  for (let index = 0; index < 7; index += 1) {
+    await prisma.autoRouterOptimizerCycle.create({
+      data: {
+        optimizerModelId: "optimizer-model", routerModelId: "router-model",
+        incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+        status: "failed", createdAt: at(15 - index), summary: { evaluated: 12, answerStats: "none" },
+      },
+    });
+  }
+  assert.deepEqual(await readUnreliableAnswerModels(), ["deepseek-v4-pro"]);
+  // A newer finished cycle in which the model answered clears it.
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0,
+      status: "passed", createdAt: at(10),
+      summary: stats({ "deepseek-v4-pro": { answered: 2, failed: 3 } }),
+    },
+  });
+  assert.deepEqual(await readUnreliableAnswerModels(), []);
+});

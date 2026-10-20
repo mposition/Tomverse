@@ -39,12 +39,7 @@ async function openSidebarOnMobile(page: Page) {
       return;
     }
 
-    await page
-      .getByTestId("mobile-chat-shell")
-      .locator("header")
-      .getByRole("button")
-      .first()
-      .click();
+    await page.getByTestId("mobile-sidebar-open").click();
   }
 }
 

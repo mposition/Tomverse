@@ -1,5 +1,8 @@
 "use client";
 
+import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import { ReviewCommandBar } from "./ReviewStudioChrome";
+import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import {
   useCallback,
@@ -150,6 +153,7 @@ const PROVIDER_BANNER_MIN_REM = 5;
 const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
+  review?: ReviewWorkspaceControls;
   /** Current product chrome; switching routes never rewrites this conversation. */
   currentProduct?: ChatWorkspaceProduct;
   productSwitchDisabled?: boolean;
@@ -447,6 +451,7 @@ const mobileModelTabPanelId = (modelId: string) =>
   `mobile-model-tabpanel-${modelId}`;
 
 export function MobileChatShell({
+  review,
   currentProduct,
   productSwitchDisabled = false,
   onProductSwitch,
@@ -1221,6 +1226,7 @@ export function MobileChatShell({
     // cannot quietly absorb a real sideways overflow.
     <main
       data-testid="mobile-chat-shell"
+      data-review-appearance={review?.appearance}
       // Observable so a regression test can assert on the state machine itself
       // -- "unknown" must never be rendered as the welcome surface -- rather
       // than only on what happened to be painted when it looked.
@@ -1670,6 +1676,7 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  reviewProvider={review?.mode === "easy" ? AVAILABLE_MODELS.find(model => model.id === modelId)?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
@@ -1830,6 +1837,7 @@ export function MobileChatShell({
       {composerPortalHost &&
         createPortal(
           <ChatInput
+            review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
             currentProduct={currentProduct}
             showProductSwitcher={!isCompactBottomDock}
             showReviewModelRow={!isCompactBottomDock}
@@ -1986,11 +1994,14 @@ export function MobileChatShell({
               attachmentCount={attachments.length}
               isMobileDrawer
               mobileProductSwitcher={currentProduct ? (
-                <ChatProductSwitcher
-                  currentProduct={currentProduct}
-                  disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
-                  onProductSwitch={onProductSwitch}
-                />
+                <>
+                  <ChatProductSwitcher
+                    currentProduct={currentProduct}
+                    disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
+                    onProductSwitch={onProductSwitch}
+                  />
+                  {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                </>
               ) : undefined}
             />
             <button
