@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { parse } from "yaml";
@@ -32,8 +32,9 @@ test("each heavy job picks Ubicloud only behind the switch, and keeps its GitHub
 
 test("no other job uses the overflow switch or an Ubicloud runner", () => {
   const heavy = new Set(HEAVY_JOBS.map(([file, job]) => `${file}#${job}`));
-  for (const file of ["credit-finance-db-integration.yml", "admin-console-e2e.yml", "e2e.yml"]) {
-    for (const [job, body] of Object.entries(workflow(file).jobs)) {
+  const files = readdirSync(new URL("../.github/workflows/", import.meta.url)).filter((name) => /.ya?ml$/.test(name));
+  for (const file of files) {
+    for (const [job, body] of Object.entries(workflow(file).jobs ?? {})) {
       if (heavy.has(`${file}#${job}`)) continue;
       assert.doesNotMatch(String(body["runs-on"]), /ubicloud|CI_RUNNER_OVERFLOW/, `${file} ${job}`);
     }
