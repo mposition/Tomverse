@@ -158,3 +158,79 @@ test("two operators marking different recommendations of one cycle at once keep 
     assert.equal((await auditRows(cycle.id)).length, 2);
   }
 });
+
+// The coding agent's claim and result (lib/autoRouterRecAgent.ts), on a real
+// database: off by default, one claim per open code recommendation with the
+// agent's own audit entry, and a result only over a claim.
+const AGENT_SWITCH = "auto.llmRouterRecAgent";
+
+test("the coding agent claims nothing while its switch is off", async () => {
+  const { claimNextRecommendation } = await import("@/lib/autoRouterRecAgent");
+  await prisma.appSetting.deleteMany({ where: { key: AGENT_SWITCH } });
+  await seed();
+  assert.equal(await claimNextRecommendation({ origin: "https://tomverse.test" }), null);
+});
+
+test("the coding agent claims the open code recommendation once, then reports a PR over its claim", async () => {
+  const { claimNextRecommendation, recordRecommendationResult } = await import("@/lib/autoRouterRecAgent");
+  await prisma.appSetting.upsert({
+    where: { key: AGENT_SWITCH },
+    create: { key: AGENT_SWITCH, value: JSON.stringify({ enabled: true }) },
+    update: { value: JSON.stringify({ enabled: true }) },
+  });
+  try {
+    const cycle = await seed();
+    const claimed = await claimNextRecommendation({ origin: "https://tomverse.test" });
+    assert.ok(claimed);
+    assert.equal(claimed.cycleId, cycle.id);
+    assert.equal(claimed.index, 1);
+    assert.equal(claimed.id, `${cycle.id}:1`);
+    assert.match(claimed.instruction, /retry on a same-credit model/);
+    assert.match(claimed.instruction, new RegExp(`https://tomverse.test/admin/routing#optimizer-cycle-${cycle.id}`));
+    // Only one code recommendation: the second claim finds nothing.
+    assert.equal(await claimNextRecommendation({ origin: "https://tomverse.test" }), null);
+
+    const claimAudit = await prisma.adminAuditLog.findMany({
+      where: { targetId: cycle.id, action: "auto.llm_router_recommendation.claimed" },
+    });
+    assert.equal(claimAudit.length, 1);
+    assert.equal((claimAudit[0].metadata as Record<string, unknown>).index, 1);
+
+    const prUrl = "https://github.com/mposition/Tomverse/pull/9999";
+    assert.deepEqual(
+      await recordRecommendationResult({ cycleId: cycle.id, index: 1, result: { outcome: "pr_opened", prUrl } }),
+      { ok: true, changed: true }
+    );
+    // The same result again changes nothing and adds no audit entry.
+    assert.deepEqual(
+      await recordRecommendationResult({ cycleId: cycle.id, index: 1, result: { outcome: "pr_opened", prUrl } }),
+      { ok: true, changed: false }
+    );
+    assert.equal(
+      (await prisma.adminAuditLog.findMany({
+        where: { targetId: cycle.id, action: "auto.llm_router_recommendation.result_recorded" },
+      })).length,
+      1
+    );
+    const item = actionableRecommendations(await summaryOf(cycle.id)).find((entry) => entry.index === 1);
+    assert.equal(item?.status, "pr_opened");
+    assert.equal(item?.prUrl, prUrl);
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: AGENT_SWITCH } });
+  }
+});
+
+test("a result for a recommendation an operator reopened is refused and changes nothing", async () => {
+  const { recordRecommendationResult } = await import("@/lib/autoRouterRecAgent");
+  const cycle = await seed();
+  assert.deepEqual(
+    await recordRecommendationResult({ cycleId: cycle.id, index: 1, result: { outcome: "failed", reason: "tests" } }),
+    { refused: "not_claimed" }
+  );
+  // A setting recommendation is never the agent's.
+  assert.deepEqual(
+    await recordRecommendationResult({ cycleId: cycle.id, index: 2, result: { outcome: "failed", reason: "tests" } }),
+    { refused: "not_found" }
+  );
+  assert.equal((await summaryOf(cycle.id)).recommendationStatus, undefined);
+});
