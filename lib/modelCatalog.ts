@@ -169,8 +169,10 @@ export type CodingCatalogEntry = {
   draft: unknown;
 };
 
-export const loadCodingCatalog = async (): Promise<CodingCatalogEntry[]> => {
-  const rows = await prisma.modelCatalogEntry.findMany({
+export const loadCodingCatalog = async (
+  client: Pick<Prisma.TransactionClient, "modelCatalogEntry"> = prisma
+): Promise<CodingCatalogEntry[]> => {
+  const rows = await client.modelCatalogEntry.findMany({
     where: { category: "coding" },
     orderBy: [{ sortOrder: "asc" }, { modelId: "asc" }],
   });
@@ -241,12 +243,13 @@ export const publishCodingSnapshot = async (input: {
   now?: Date;
 }): Promise<{ snapshot: PublishedSnapshot; created: boolean }> => {
   const now = input.now ?? new Date();
-  const models = servableCodingRows(await loadCodingCatalog());
-  const contentHash = catalogContentHash(models);
   return prisma.$transaction(async (tx) => {
-    // Same lock as the scheduled renewal, taken before the newest version is
-    // read, so a person and the job cannot each add a version for one state.
+    // Same lock as the scheduled renewal, taken before the catalogue and the
+    // newest version are read, so a person and the job cannot each add a
+    // version for one state, and a change committed while this waited is seen.
     await takeAuditChainLock(tx);
+    const models = servableCodingRows(await loadCodingCatalog(tx));
+    const contentHash = catalogContentHash(models);
     const latest = await tx.modelCatalogSnapshot.findFirst({
       where: { category: "coding" },
       orderBy: { version: "desc" },
@@ -292,8 +295,9 @@ export const publishCodingSnapshot = async (input: {
  * snapshot at all returns its decision and writes nothing.
  *
  * Concurrent runs, or a run beside a manual publish, serialise on the audit
- * chain lock before the newest version is read; the loser sees the renewed
- * coverage and does nothing, so one state never gets two versions.
+ * chain lock before the catalogue and the newest version are read; the loser
+ * sees the renewed coverage and does nothing, so one state never gets two
+ * versions.
  */
 export const renewCodingSnapshotIfUnchanged = async (
   input: { now?: Date } = {}
@@ -303,10 +307,13 @@ export const renewCodingSnapshotIfUnchanged = async (
   coverageUntil: Date | null;
 }> => {
   const now = input.now ?? new Date();
-  const models = servableCodingRows(await loadCodingCatalog());
-  const contentHash = catalogContentHash(models);
   return prisma.$transaction(async (tx) => {
+    // The catalogue is read after the lock, in this transaction: a change an
+    // operator committed while the job waited for it is part of what is judged,
+    // so identical-looking content from before that change is never extended.
     await takeAuditChainLock(tx);
+    const models = servableCodingRows(await loadCodingCatalog(tx));
+    const contentHash = catalogContentHash(models);
     const latest = await tx.modelCatalogSnapshot.findFirst({
       where: { category: "coding" },
       orderBy: { version: "desc" },
