@@ -34,9 +34,39 @@ export type ChatImageTurnRequest = {
     modelIds: string[];
     preset: "draft" | "standard" | "final" | null;
     /**
+     * A follow-up's rewritten prompt (the previous image with the change
+     * applied). Absent means the saved question is the prompt.
+     */
+    prompt?: string;
+    /**
      * Set on a retry only: the answer id the first try used, which is also
      * the image group's idempotency key, so the retry recovers that group
      * instead of reserving a second one.
      */
     assistantMessageId?: string;
+};
+
+const TURN_PRESETS = ["draft", "standard", "final"] as const;
+
+/**
+ * The client's reading of an image decision /api/chat answered with
+ * (`X-Chat-Response-Mode: image-turn`). Null when it is not one; the turn then
+ * fails rather than guessing.
+ */
+export const readChatImageTurnRequest = (value: unknown): ChatImageTurnRequest | null => {
+    if (typeof value !== "object" || value === null) return null;
+    const { modelIds, preset, prompt } = value as {
+        modelIds?: unknown;
+        preset?: unknown;
+        prompt?: unknown;
+    };
+    if (!Array.isArray(modelIds)) return null;
+    return {
+        modelIds: modelIds.filter((id): id is string => typeof id === "string" && id !== ""),
+        preset:
+            typeof preset === "string" && (TURN_PRESETS as readonly string[]).includes(preset)
+                ? (preset as ChatImageTurnRequest["preset"])
+                : null,
+        ...(typeof prompt === "string" && prompt.trim() ? { prompt: prompt.trim() } : {}),
+    };
 };

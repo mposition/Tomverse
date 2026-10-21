@@ -53,7 +53,7 @@ import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
-import { readChatImageTurnRef } from "@/lib/chatImageTurnCore";
+import { readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import {
   answeringModelId,
@@ -1740,21 +1740,26 @@ function ChatAppComponent({
       and starts the image and writes the answer; the card on the answer polls
       the group for the pictures. Account Chat only -- a Guest has no saved
       question to answer.
+
+      Two ways in: the composer's own image-intent call decided before the
+      send (`imageTurn`), or -- on an Auto turn -- /api/chat decided it beside
+      its router call and answered `X-Chat-Response-Mode: image-turn` before
+      reserving anything (see the response-mode branches below).
     */
-    if (imageTurn && !isGuestMode) {
+    const runImageTurn = async (request: ChatImageTurnRequest) => {
       const sentPrompt = getChatRuntimeLastPrompt(runKey);
       if (sentPrompt) {
         setChatRuntimeLastPrompt(runKey, {
           ...sentPrompt,
           imageTurn: {
-            modelIds: imageTurn.modelIds,
-            preset: imageTurn.preset,
+            modelIds: request.modelIds,
+            preset: request.preset,
+            ...(request.prompt ? { prompt: request.prompt } : {}),
             assistantMessageId,
           },
         });
       }
       try {
-        onDispatchStarted?.();
         /*
           The request is idempotent on the answer id, so an outcome this
           client could not read -- a dropped connection, a 5xx, a body that
@@ -1774,8 +1779,9 @@ function ChatAppComponent({
                 sourceUserMessageId,
                 assistantMessageId,
                 modelId,
-                imageModelIds: imageTurn.modelIds,
-                preset: imageTurn.preset,
+                imageModelIds: request.modelIds,
+                preset: request.preset,
+                ...(request.prompt ? { prompt: request.prompt } : {}),
               }),
               signal: controller.signal,
             }
@@ -1824,6 +1830,12 @@ function ChatAppComponent({
           controller.signal.aborted ? "cancelled" : "error",
           controller.signal.aborted ? undefined : { errorCode: "CHAT_IMAGE_TURN_FAILED" }
         );
+      }
+    };
+    if (imageTurn && !isGuestMode) {
+      try {
+        onDispatchStarted?.();
+        await runImageTurn(imageTurn);
       } finally {
         liveness.stop();
         endChatRuntimeRun(runKey, controller);
@@ -2106,6 +2118,19 @@ function ChatAppComponent({
           ? { ...message, modelId: answeringModelId({ requestedModelId: modelId, routedModelId }) }
           : message
       ));
+
+      if (response.headers.get("X-Chat-Response-Mode") === "image-turn") {
+        // The server's Auto turn found an image request and stopped before
+        // reserving anything; the same answer id makes the image.
+        liveness.stop();
+        const decision = readChatImageTurnRequest(
+          ((await response.json().catch(() => null)) as { imageTurn?: unknown } | null)
+            ?.imageTurn
+        );
+        if (!decision) throw new Error(t("chat.responseError"));
+        await runImageTurn(decision);
+        return;
+      }
 
       if (response.headers.get("X-Chat-Response-Mode") === "async-job") {
         // Deep research doesn't stream -- the idle-timeout watchdog is

@@ -840,7 +840,16 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     예산·동시 실행 lease는 워크스페이스와 같다. 그룹의 idempotency key는
     assistant 메시지 id이므로 재시도는 같은 그룹을 다시 보여 줄 뿐 다시
     과금하지 않고, 대화 조회는 이 규칙으로 메시지에 `imageTurn.groupId`를
-    붙인다. 프롬프트는 저장된 질문이며, 요청 body의 텍스트를 쓰지 않는다.
+    붙인다. 프롬프트는 저장된 질문이다. 예외는 후속 수정 하나다.
+  - **후속 수정**("더 파랗게 해줘", 2026-10-21). 판정 호출은 그 대화의 최근 6개
+    메시지 안에 이미지 답변이 있으면, 그 이미지를 만든 프롬프트를 DB에서 읽어
+    "Previous image"로 함께 본다. 그 이미지를 바꾸는 요청이면 `prompt`에 변경을
+    반영한 완결된 새 프롬프트를 돌려준다. 이전 이미지가 없을 때 돌려준 재작성은
+    버린다. 이미지 턴은 이 프롬프트로 생성하지만, 답변 문장
+    (`[Image generated] <질문>`)은 사용자가 쓴 질문 그대로다. 재작성된 프롬프트는
+    요청 body로 오지만 사용자가 워크스페이스에 직접 입력할 수 있는 텍스트와 같은
+    권한이므로 경계를 넓히지 않는다. 첨부 이미지를 참조하는 진짜 편집은 여전히
+    범위 밖이다(§1).
   - **확인 없는 과금은 운영자 결정이다**(2026-10-20). Chat의 텍스트 턴처럼
     제출 즉시 생성하며, 위 §3·§11의 "제출 전 가격 표시"와 ⑤의
     `imageHandoffAutoGenerate` 조건은 이 경로에 적용하지 않는다. 크레딧
@@ -851,6 +860,21 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     경로가 그대로 처리한다.
   - 대화 종류 경계의 예외는 이것 하나다. 공개 `POST /api/images/generations`는
     `chatTurnHost`를 받지 않으므로 채팅 대화 id를 계속 거절한다.
+  - **Auto 턴은 `/api/chat` 안에서 판정한다**(2026-10-21). Chat이 Auto(스마트 자동)이면
+    composer는 판정 호출을 미리 하지 않는다. `/api/chat`이 router 호출과 **동시에**
+    `detectChatTurnImage`를 실행하므로, 대기 시간은 두 호출의 합이 아니라 긴 쪽이다.
+    대상은 저장된 대화가 Auto(`selectionMode = auto`)인 로그인 단일 패널 Chat 턴이다.
+    router가 routed했는지와 관계없이 판정하고(fallback 턴 포함), 보내는 메시지 자체에
+    첨부·Refiner 제안·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
+    스위치). 이미지면 소유권·잠금·kind·context 검사를 모두 통과한 뒤, Refiner 소비·durable
+    attempt·context bundle 사용·크레딧/lease/usage hold가 일어나기 **전에**
+    `X-Chat-Response-Mode: image-turn`으로 끝난다. 그래서 반납할 것이 없다. 클라이언트는 같은
+    답변 id로 이미지 턴을 만든다. 이미지 턴의 router 결정 행(`AutoRouterDecision`)은 쓰지 않는다.
+    routing 학습 데이터, optimizer 표본, 세션 메모리에는 채팅 모델이 답한 턴만 남는다. 이미지
+    답변으로 쓰인 답변 id로 `/api/chat`이 다시 들어오면 provider 호출 전에 409
+    `ASSISTANT_MESSAGE_CONFLICT`로 거절한다(호출자 자신의 답변일 때만). manual 모드 대화는
+    composer 판정 경로를 그대로 쓴다. 이미지 턴은 router 호출 비용과 판정 호출 비용을 함께
+    낸다. 두 호출은 병렬이라 대기 시간은 줄지만 호출 수는 그대로다.
   - 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을 hold한 뒤
     나가며, 실패·시간 초과·거절은 모두 일반 텍스트 전송으로 떨어진다. 첨부가
     있는 제출과 override 전송(Deep Research 확장 등)은 묻지 않는다. 판정을

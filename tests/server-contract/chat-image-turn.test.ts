@@ -241,3 +241,11 @@ test("a replay starts work that never ran, and leaves started work alone", async
   existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] cat" };
   assert.deepEqual((await turn.startChatImageTurn(input)).pendingGenerationIds, []);
 });
+
+test("a follow-up makes the image from its rewrite; the answer names the question", async () => {
+  reset();
+  const { turn } = await load();
+  const result = await turn.startChatImageTurn({ ...input, prompt: "  a simple blue cat icon " });
+  assert.equal(requests[0].prompt, "a simple blue cat icon");
+  assert.equal(result.content, "[Image generated] 간단한 고양이 아이콘 그려줘");
+});

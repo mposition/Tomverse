@@ -5812,6 +5812,9 @@ export function ChatPageClient({
     if (
       options === undefined &&
       imageIntentRoutedOnSend &&
+      // An Auto turn is asked on the server, beside its router call
+      // (app/api/chat/route.ts), so it does not wait for this call first.
+      selectionModeRef.current !== "auto" &&
       !isImageDraftActiveRef.current &&
       attachments.length === 0 &&
       inputValue.trim().length > 0
@@ -5824,7 +5827,11 @@ export function ChatPageClient({
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
-        decision = await askChatImageIntent(intentText);
+        // The conversation lets a follow-up ("make it bluer") find the
+        // image it changes.
+        decision = await askChatImageIntent(intentText, {
+          conversationId: currentChatIdRef.current,
+        });
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
@@ -5865,6 +5872,7 @@ export function ChatPageClient({
               imageTurn: {
                 modelIds: decision.modelId ? [decision.modelId] : [],
                 preset: decision.preset,
+                ...(decision.prompt ? { prompt: decision.prompt } : {}),
               },
             }
           : {}),
