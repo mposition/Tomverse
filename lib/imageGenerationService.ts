@@ -1167,8 +1167,9 @@ export const reservationOutputCostMicroUsd = (
  * the snapshot predates the cap being recorded.
  *
  * A flat per-request surcharge (fal's high thinking) is owed by the request
- * itself, so it settles at the reserved cap whether or not the response
- * reports a thinking count -- fal reports none, and reading that as zero
+ * itself, so it settles at the reserved cap -- which the judge admits only at
+ * or above that surcharge -- whether or not the response reports a thinking
+ * count. fal reports none, and reading that as zero
  * settles 80,000 for an image fal bills at 82,000 (policy section 16.8),
  * releasing the difference back to the provider budget. Any other provider
  * settles zero when it reported no thinking and the reserved cap when it did:

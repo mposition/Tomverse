@@ -16,6 +16,7 @@ import { z } from "zod";
 
 import {
   imageThinkingCapEnforced,
+  imageThinkingCapMinimumMicroUsd,
   type ImageModelDisabledReason,
   type ImageModelOptionPrice,
   type ImageModelPriceVerification,
@@ -265,9 +266,15 @@ export const judgeImageModel = (
   }
   // A stated cap counts only where the request can hold it: a revision that
   // writes a number for a provider billing thinking per uncapped token has
-  // stated a cost, not bounded one.
+  // stated a cost, not bounded one, and a cap below a flat surcharge the
+  // request incurs anyway understates it.
   if (!imageThinkingCapEnforced(model)) {
     reasons.push("worst_case_cost_unbounded");
+    const cap = model.priceVerification.thinkingCapMicroUsd;
+    const minimum = imageThinkingCapMinimumMicroUsd(model.provider);
+    if (cap !== null && minimum !== null && cap < minimum) {
+      reasons.push(`thinking_cap_below_minimum:${minimum}`);
+    }
   } else {
     for (const price of model.prices) {
       const floor = deps.minimumCredits(model, price);
