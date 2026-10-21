@@ -14,8 +14,8 @@ import {
   claimChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 
-// Only identity and deployment switches are fixtures. Share writes, exports,
-// cascades and late-worker fences execute against the dedicated test database.
+// Identity and deployment switches are fixtures; a real-query extension controls
+// race timing. Share writes, exports, cascades and worker fences use the test DB.
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 let signedInUserId: string | null = null;
 let duringPreparation: (() => Promise<void>) | null = null;
@@ -309,7 +309,12 @@ test("concurrent share preparations issue one usable link and one explicit confl
   assert.equal((await refused.json()).code, "SHARE_SOURCE_CHANGED");
   const accepted = responses.find((response) => response.status === 200)!;
   const token = new URL((await accepted.json()).url).pathname.split("/").at(-1)!;
-  assert.equal((await readShare(token)).status, 200);
+  const shared = await readShare(token);
+  assert.equal(shared.status, 200);
+  assert.deepEqual(
+    (await shared.json()).snapshot.messages.map((message: { content: string }) => message.content),
+    ["The authored question", "The original answer"],
+  );
 });
 
 test("account deletion removes live Chat recovery, Auto content and shares without reviving a late worker", async () => {
