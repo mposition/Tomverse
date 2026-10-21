@@ -10,6 +10,7 @@
 // Pure and client-safe (no server-only import, no Prisma): the workspace model
 // picker renders straight from these profiles.
 
+import { FAL_HIGH_THINKING_SURCHARGE_MICRO_USD } from "@/lib/falImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
@@ -706,7 +707,9 @@ export const getImageModelPrice = (
  *     $0.002 will be charged" (re-read 2026-10-21), and `buildFalImageRequest`
  *     always sends `thinking_level: "high"`. The surcharge cannot exceed its
  *     own price, and it is incurred on every request whether or not the
- *     response reports a thinking count -- fal reports none.
+ *     response reports a thinking count -- fal reports none. So the cap is a
+ *     bound only at or above that surcharge: below it, the request still
+ *     spends the full amount.
  *   - `per_token_uncapped`: billed per thinking token with no request
  *     parameter that bounds the count. Google direct: thinking "is enabled by
  *     default and cannot be disabled in the API"; `thinking_level` is a level
@@ -731,6 +734,13 @@ const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
   google: "per_token_uncapped",
 };
 
+/** The surcharge each `flat_per_request` provider's request incurs every time. */
+const IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD: Readonly<
+  Partial<Record<ImageModelProvider, number>>
+> = {
+  fal: FAL_HIGH_THINKING_SURCHARGE_MICRO_USD,
+};
+
 /** Null for a provider this code has no adapter for. */
 export const imageThinkingBilling = (
   provider: unknown
@@ -741,17 +751,35 @@ export const imageThinkingBilling = (
     : null;
 
 /**
+ * The smallest stated cap that bounds what this provider's request spends on
+ * thinking: 0 where thinking is not billed, the pinned level's surcharge
+ * where it is flat, and null where no stated cap can bound it.
+ */
+export const imageThinkingCapMinimumMicroUsd = (
+  provider: unknown
+): number | null => {
+  const billing = imageThinkingBilling(provider);
+  if (billing === "not_billed") return 0;
+  if (billing === "flat_per_request") {
+    return IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD[provider as ImageModelProvider] ?? null;
+  }
+  return null;
+};
+
+/**
  * Whether the request this model would be sent cannot spend more on thinking
- * than its stated cap. False for an unknown cap, and false for a stated cap on
- * a provider whose thinking the request cannot bound -- an operator revision
- * can write a number for a Google model, and that number is not a bound.
+ * than its stated cap. False for an unknown cap; false for a stated cap on a
+ * provider whose thinking the request cannot bound -- an operator revision can
+ * write a number for a Google model, and that number is not a bound; and false
+ * for a cap below the flat surcharge the request incurs anyway.
  */
 export const imageThinkingCapEnforced = (
   model: Pick<ImageModelProfile, "provider" | "priceVerification">
 ): boolean => {
-  if (model.priceVerification.thinkingCapMicroUsd === null) return false;
-  const billing = imageThinkingBilling(model.provider);
-  return billing === "not_billed" || billing === "flat_per_request";
+  const cap = model.priceVerification.thinkingCapMicroUsd;
+  if (cap === null) return false;
+  const minimum = imageThinkingCapMinimumMicroUsd(model.provider);
+  return minimum !== null && cap >= minimum;
 };
 
 /**

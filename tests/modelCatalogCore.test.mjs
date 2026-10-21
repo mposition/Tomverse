@@ -131,6 +131,24 @@ test("a thinking cap stated for a provider whose request cannot hold it does not
   assert.ok(judge()(statedGoogle).reasons.includes("worst_case_cost_unbounded"));
 });
 
+test("a fal revision whose thinking cap is below the pinned surcharge does not serve", () => {
+  // Review finding 2026-10-21: the request still pays fal's $0.002 for high
+  // thinking, so a cap of 0 would reserve and settle 2,000 less than fal bills.
+  const fal = IMAGE_MODEL_REGISTRY.find((model) => model.provider === "fal");
+  const understated = {
+    modelId: fal.id,
+    pricingVersion: "fal-understated-cap",
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: fal.prices,
+    verification: { ...fal.priceVerification, thinkingCapMicroUsd: 0 },
+  };
+  const { models } = resolve([], [understated]);
+  assert.equal(models.find((m) => m.id === fal.id).disabledReason, "worst_case_cost_unbounded");
+  const reasons = judge()({ ...fal, priceVerification: understated.verification }).reasons;
+  assert.ok(reasons.includes("worst_case_cost_unbounded"));
+  assert.ok(reasons.includes("thinking_cap_below_minimum:2000"));
+});
+
 test("turning on an admitted model serves it; a missing provider budget refuses it", () => {
   const on = resolve([row(enabledSeed.id, { enabled: true })]);
   assert.equal(on.models.find((m) => m.id === enabledSeed.id).disabledReason, null);

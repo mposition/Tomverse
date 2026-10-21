@@ -17,6 +17,7 @@ import {
   imageModelOwner,
   imageThinkingBilling,
   imageThinkingCapEnforced,
+  imageThinkingCapMinimumMicroUsd,
   shouldUseCompactImageModelPicker,
   IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
 } from "../lib/imageModelRegistry.ts";
@@ -160,6 +161,30 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   assert.equal(imageThinkingBilling("ideogram"), null);
   assert.equal(imageThinkingBilling("toString"), null);
   assert.equal(imageThinkingBilling(undefined), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("ideogram"), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("google"), null);
+});
+
+test("a flat thinking surcharge is a bound only when the cap covers it", () => {
+  // Review finding 2026-10-21: fal's request always pins high thinking and
+  // pays $0.002 for it, so a revision that states a smaller cap would reserve
+  // and settle less than fal bills. Below the surcharge is not a bound.
+  const fal = getImageModel("fal-ai/nano-banana-2");
+  const price = fal.prices[0];
+  const withCap = (thinkingCapMicroUsd) => ({
+    ...fal,
+    priceVerification: { ...fal.priceVerification, thinkingCapMicroUsd },
+  });
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal"), 2_000);
+  assert.equal(imageThinkingCapMinimumMicroUsd("openai"), 0);
+  for (const understated of [0, 1, 1_999]) {
+    assert.equal(imageThinkingCapEnforced(withCap(understated)), false, String(understated));
+    assert.equal(maxImageRequestCostMicroUsd(withCap(understated), price), null, String(understated));
+  }
+  assert.equal(imageThinkingCapEnforced(withCap(2_000)), true);
+  assert.equal(maxImageRequestCostMicroUsd(withCap(2_000), price), 87_000);
+  // A wider stated margin still bounds the request; it is reserved, not owed.
+  assert.equal(imageThinkingCapEnforced(withCap(3_000)), true);
 });
 
 test("every enabled option prices at or above the policy minimum", () => {

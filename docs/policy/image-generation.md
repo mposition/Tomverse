@@ -606,9 +606,10 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 우리가 보내는 요청이 그것을 지킬 수 있어야 한다. `imageThinkingCapEnforced`
 (`lib/imageModelRegistry.ts`)가 provider별로 답한다 — OpenAI·xAI는 이미지 요청에
 thinking 과금이 없고, fal은 요청이 고정한 `thinking_level: "high"`에 대한 요청당
-고정 할증이며, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. 그래서 cap을
-적은 Google 개정도 판정·최악 원가·어댑터 dispatch에서 모두 거절된다. Google을 여는
-것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
+고정 할증(`FAL_HIGH_THINKING_SURCHARGE_MICRO_USD` = 2,000)이라 cap이 그 이상일
+때만 상한이며, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. 그래서 cap을
+적은 Google 개정과 cap이 할증보다 작은 fal 개정은 판정·최악 원가·어댑터 dispatch에서
+모두 거절된다. Google을 여는 것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
 
 2026-10-14 갱신된 thinking 가이드(`https://ai.google.dev/gemini-api/docs/thinking`)는
 `max_output_tokens`가 thought 토큰을 포함한 hard cutoff라고 적는다. 이미지 모델에 대한
