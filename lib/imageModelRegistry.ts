@@ -692,10 +692,73 @@ export const getImageModelPrice = (
 };
 
 /**
+ * How a provider bills the thinking of one image request, and so whether the
+ * request this code sends keeps it at or under `thinkingCapMicroUsd`.
+ *
+ * Code, not data. A price revision can *state* a cap; only the request the
+ * adapter builds can *hold* it, and a cap nothing enforces is a reservation
+ * the provider is free to exceed (section 12 condition 2).
+ *
+ *   - `not_billed`: no reasoning charge on an image request. OpenAI images and
+ *     xAI, both verified 2026-08-04. A stated cap is a margin, never owed.
+ *   - `flat_per_request`: a fixed surcharge for the thinking level the request
+ *     pins. fal's Nano Banana 2 page: "If high thinking is used, an additional
+ *     $0.002 will be charged" (re-read 2026-10-21), and `buildFalImageRequest`
+ *     always sends `thinking_level: "high"`. The surcharge cannot exceed its
+ *     own price, and it is incurred on every request whether or not the
+ *     response reports a thinking count -- fal reports none.
+ *   - `per_token_uncapped`: billed per thinking token with no request
+ *     parameter that bounds the count. Google direct: thinking "is enabled by
+ *     default and cannot be disabled in the API"; `thinking_level` is a level
+ *     ("relative allowances for thinking rather than strict token
+ *     guarantees"); and `max_output_tokens: 2048` billed 2,533 output+thinking
+ *     on gemini-3.1-flash-lite-image on 2026-08-14 (policy section 12.1). The
+ *     thinking guide updated 2026-10-14 now calls `max_output_tokens` a hard
+ *     cutoff including thought tokens, which is the opposite of that
+ *     measurement; until a new measurement settles it, it is not a bound.
+ */
+export type ImageThinkingBilling =
+  | "not_billed"
+  | "flat_per_request"
+  | "per_token_uncapped";
+
+const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
+  Record<ImageModelProvider, ImageThinkingBilling>
+> = {
+  openai: "not_billed",
+  xai: "not_billed",
+  fal: "flat_per_request",
+  google: "per_token_uncapped",
+};
+
+/** Null for a provider this code has no adapter for. */
+export const imageThinkingBilling = (
+  provider: unknown
+): ImageThinkingBilling | null =>
+  typeof provider === "string" &&
+  Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
+    ? IMAGE_PROVIDER_THINKING_BILLING[provider as ImageModelProvider]
+    : null;
+
+/**
+ * Whether the request this model would be sent cannot spend more on thinking
+ * than its stated cap. False for an unknown cap, and false for a stated cap on
+ * a provider whose thinking the request cannot bound -- an operator revision
+ * can write a number for a Google model, and that number is not a bound.
+ */
+export const imageThinkingCapEnforced = (
+  model: Pick<ImageModelProfile, "provider" | "priceVerification">
+): boolean => {
+  if (model.priceVerification.thinkingCapMicroUsd === null) return false;
+  const billing = imageThinkingBilling(model.provider);
+  return billing === "not_billed" || billing === "flat_per_request";
+};
+
+/**
  * Worst legitimate provider cost of one request: image output plus the full
  * prompt budget plus the model's proven thinking cap. Returns null when the
- * cap is unknown -- an unbounded worst case cannot carry a fixed price
- * (section 12 condition 1).
+ * cap is unknown, or stated but not enforceable by the request -- an unbounded
+ * worst case cannot carry a fixed price (section 12 conditions 1 and 2).
  */
 export const maxImageRequestCostMicroUsd = (
   model: ImageModelProfile,
@@ -703,6 +766,7 @@ export const maxImageRequestCostMicroUsd = (
 ): number | null => {
   const thinkingCap = model.priceVerification.thinkingCapMicroUsd;
   if (thinkingCap === null) return null;
+  if (!imageThinkingCapEnforced(model)) return null;
   return price.outputCostMicroUsd + IMAGE_PROMPT_BUDGET_MICRO_USD + thinkingCap;
 };
 

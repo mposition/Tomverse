@@ -14,11 +14,12 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-import type {
-  ImageModelDisabledReason,
-  ImageModelOptionPrice,
-  ImageModelPriceVerification,
-  ImageModelProfile,
+import {
+  imageThinkingCapEnforced,
+  type ImageModelDisabledReason,
+  type ImageModelOptionPrice,
+  type ImageModelPriceVerification,
+  type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 
 export const MODEL_CATALOG_CATEGORIES = ["chat", "image", "coding", "video"] as const;
@@ -262,7 +263,10 @@ export const judgeImageModel = (
       reasons.push(`unofficial_source:${source}`);
     }
   }
-  if (model.priceVerification.thinkingCapMicroUsd === null) {
+  // A stated cap counts only where the request can hold it: a revision that
+  // writes a number for a provider billing thinking per uncapped token has
+  // stated a cost, not bounded one.
+  if (!imageThinkingCapEnforced(model)) {
     reasons.push("worst_case_cost_unbounded");
   } else {
     for (const price of model.prices) {

@@ -125,13 +125,16 @@ export const updateCatalogEntry = async (input: {
     // runtime image model calls under that price would let a dearer model
     // serve at the old one: once priced, the request profile is fixed and a
     // different model is a new modelId with its own revision.
+    // A stored profile that no longer parses cannot be shown to be unchanged,
+    // so it counts as a change: the price was verified against whatever it
+    // was, and nothing here can say the new one calls the same thing.
     if (category === "image" && profile !== undefined && !IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId)) {
       const previous = imageFullProfileSchema.safeParse(before?.profile);
       const nextFull = imageFullProfileSchema.safeParse(next.profile);
       const changed =
-        previous.success &&
-        (!nextFull.success ||
-          canonicalJson(imageExecutionProfile(previous.data)) !== canonicalJson(imageExecutionProfile(nextFull.data)));
+        !previous.success ||
+        !nextFull.success ||
+        canonicalJson(imageExecutionProfile(previous.data)) !== canonicalJson(imageExecutionProfile(nextFull.data));
       if (changed && (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId } })) > 0) {
         throw new CatalogRefusal("execution_profile_priced", ["use_a_new_model_id"]);
       }

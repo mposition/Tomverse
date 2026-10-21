@@ -49,6 +49,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModel,
   getImageModelPrice,
+  imageThinkingBilling,
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
@@ -1174,14 +1175,25 @@ export const reservationOutputCostMicroUsd = (
 };
 
 /**
- * The thinking cost to settle: zero when the provider reported no thinking,
- * the reserved cap when it did, and null (settle the whole reservation) when
+ * The thinking cost to settle, and null (settle the whole reservation) when
  * the snapshot predates the cap being recorded.
+ *
+ * A flat per-request surcharge (fal's high thinking) is owed by the request
+ * itself, so it settles at the reserved cap whether or not the response
+ * reports a thinking count -- fal reports none, and reading that as zero
+ * settles 80,000 for an image fal bills at 82,000 (policy section 16.8),
+ * releasing the difference back to the provider budget. Any other provider
+ * settles zero when it reported no thinking and the reserved cap when it did:
+ * no image provider here has a verified per-token thinking price to settle
+ * less.
  */
 export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: number): number | null => {
+  const record = snapshot as { thinkingCapMicroUsd?: unknown; provider?: unknown } | null;
+  const cap = record?.thinkingCapMicroUsd;
+  const reservedCap = typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
+  if (imageThinkingBilling(record?.provider) === "flat_per_request") return reservedCap;
   if (!(thinkingTokens > 0)) return 0;
-  const cap = (snapshot as { thinkingCapMicroUsd?: unknown } | null)?.thinkingCapMicroUsd;
-  return typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
+  return reservedCap;
 };
 
 const parseSize = (size: string): { width: number; height: number } => {
@@ -1422,8 +1434,9 @@ export const processImageGeneration = async (
           })
         );
       }
-      // Thinking has no per-token price here, so a request that thought is
-      // settled at the thinking cap the reservation held, never at zero.
+      // Thinking has no per-token price here, so a request that thought -- or
+      // one whose pinned thinking level carries a flat surcharge -- is settled
+      // at the thinking cap the reservation held, never at zero.
       const thinkingCost = settledThinkingCostMicroUsd(reservation.pricingSnapshot, result.thinkingTokens);
       const actualCostMicroUsd =
         snapshotOutputCost === null || thinkingCost === null
