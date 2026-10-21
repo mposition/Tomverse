@@ -15,6 +15,7 @@ test('Code managed inference with migrated local schema and real shared credit l
   assert.ok(['127.0.0.1','localhost'].includes(url.hostname));assert.match(url.pathname,/test/);
   process.env.NEXTAUTH_SECRET='code-managed-local-synthetic-secret';
   process.env.CODE_MANAGED_EXECUTION_ENABLED='true';
+  Object.assign(process.env,{ADMIN_EMAILS:'owner@example.invalid',ADMIN_OWNER_EMAILS:'owner@example.invalid',ADMIN_USER_IDS:'',ADMIN_ACCESS_EXPIRY_JSON:'{}',ADMIN_RECENT_AUTH_MINUTES:'15',ADMIN_AUDIT_INTEGRITY_KEY:'synthetic-code-audit-integrity',CODE_MANAGED_RECONCILIATION_ENABLED:'true'});
   const root=resolve(import.meta.dirname,'../..'),mod=p=>pathToFileURL(resolve(root,p)).href;
   const clientModule=process.env.CODE_MANAGED_TEST_CLIENT_MODULE;
   const {PrismaClient}=await import(clientModule??'@prisma/client');
@@ -51,6 +52,9 @@ test('Code managed inference with migrated local schema and real shared credit l
   const call=(reservationId,extra={})=>({action:'complete',reservationId,callId:randomUUID(),role:'executor',modelId:'gpt-6-luna',prompt:{system:'fixture only',user:'never persist this private prompt'},schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false},maxOutputTokens:100,...extra});
   const rejectCode=(fn,code)=>assert.rejects(fn,error=>error.code===code);
   const release=(userId,reservationId)=>service.handleCodeManaged(userId,{action:'release',reservationId,terminalReason:'completed'});
+  const owner={user:{id:'synthetic-owner',email:'owner@example.invalid',authenticatedAt:new Date().toISOString()},expires:new Date(Date.now()+3600000).toISOString()};
+  const reconcile=input=>service.reconcileCodeManagedCall(owner,new Request('https://tomverse.app/api/admin/code/managed-reconciliation',{method:'POST'}),input);
+  const waitPending=async count=>{for(let i=0;i<1000;i++){if(pending.length>=count)return;await new Promise(r=>setTimeout(r,5));}throw new Error('fixture provider did not start');};
   try{
     await t.test('default-off produces no reservation or provider call',async()=>{
       const user=await newUser(),before=dispatches;process.env.CODE_MANAGED_EXECUTION_ENABLED='false';
@@ -72,6 +76,8 @@ test('Code managed inference with migrated local schema and real shared credit l
       assert.equal(JSON.stringify(task,(_k,v)=>typeof v==='bigint'?String(v):v).includes(req.prompt.user),false);
       const paid=await db.codeManagedCall.findUnique({where:{id:req.callId}});assert.ok(paid.settledCostMicroUsd>0n);
       assert.deepEqual((await release(user,held.reservationId)).billing,closed.billing);
+      const otherHeld=await reserve(other),collision={...req,reservationId:otherHeld.reservationId};
+      await assert.rejects(()=>service.handleCodeManaged(other,collision),e=>e.code==='CODE_CALL_IDEMPOTENCY_CONFLICT'&&e.dispatchState==='not_dispatched');assert.equal(dispatches,before);await release(other,otherHeld.reservationId);
     });
     await t.test('every call rechecks current model, plan, immutable catalog and credential availability',async()=>{
       const user=await newUser(),held=await reserve(user),before=dispatches;
@@ -107,10 +113,26 @@ test('Code managed inference with migrated local schema and real shared credit l
       await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_MODEL_PLAN_FORBIDDEN');
       assert.equal(dispatches,before);assert.equal(await db.codeManagedCall.count({where:{reservationId:held.reservationId}}),0);await release(user,held.reservationId);
     });
+    await t.test('a small prompt on a large-context catalog model fits one credit and then respects the true cap',async()=>{
+      const cheap={...structuredClone(originalRows[0]),modelId:'code-cheap-large-context',apiModelId:'cheap-large-fixture',capabilities:{...originalRows[0].capabilities,maxContextTokens:1000000},pricing:{...originalRows[0].pricing,inputUsdPerMTok:0.1,outputUsdPerMTok:0.5}};
+      const {modelId,...profile}=cheap;await db.modelCatalogEntry.create({data:{category:'coding',modelId,enabled:true,profile}});
+      const reviewer=structuredClone(originalRows[1]);reviewer.pricing.sources=['https://anthropic.com/fixture'];reviewer.terms.url='https://anthropic.com/fixture';reviewer.retention.url='https://anthropic.com/fixture';
+      const published=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:'small-prompt-fixture',payload:{models:[cheap,reviewer]},coverageUntil:new Date(Date.now()+3600000)}});
+      const user=await newUser();dynamicDbMode=true;
+      try{
+        const held=await service.handleCodeManaged(user,{action:'reserve',taskId:randomUUID(),catalogVersion:published.version,contentHash:published.contentHash,executorModelId:modelId,reviewerModelId:reviewer.modelId,approvedCredits:1});const req=call(held.reservationId,{modelId});
+        await service.handleCodeManaged(user,req);const row=await db.codeManagedCall.findUnique({where:{id:req.callId}});assert.ok(row.pricingSnapshot.maxInput<10000);assert.ok(row.reservedCostMicroUsd<40000n);assert.equal(row.reservedCredits,1);
+        await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId,{modelId})),'CODE_TASK_CAP_EXCEEDED');await release(user,held.reservationId);
+      }finally{dynamicDbMode=false;}
+    });
+    await t.test('catalogue field order cannot spuriously revoke an unchanged model',async()=>{
+      rows=originalRows.map(row=>Object.fromEntries(Object.entries(row).reverse()));const user=await newUser();
+      try{const held=await reserve(user);await service.handleCodeManaged(user,call(held.reservationId));await release(user,held.reservationId);}finally{rows=structuredClone(originalRows);}
+    });
     await t.test('concurrent calls never exceed task credits and share provider/operational buckets',async()=>{
       const user=await newUser(),held=await reserve(user,2);mode='pending';const first=service.handleCodeManaged(user,call(held.reservationId));
-      while(pending.length<1)await new Promise(r=>setTimeout(r,5));
-      const second=service.handleCodeManaged(user,call(held.reservationId));while(pending.length<2)await new Promise(r=>setTimeout(r,5));
+      await waitPending(1);
+      const second=service.handleCodeManaged(user,call(held.reservationId));await waitPending(2);
       await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_TASK_CAP_EXCEEDED');
       const task=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});
       const calls=await db.codeManagedCall.findMany({where:{reservationId:held.reservationId}});assert.equal(calls.reduce((s,c)=>s+c.reservedCredits,0),2);
@@ -144,6 +166,52 @@ test('Code managed inference with migrated local schema and real shared credit l
       const held=await reserve(user,100);const reservedLot=await db.creditLot.findUnique({where:{id:lot.id}});assert.ok(reservedLot.remainingCredits<400);
       await release(user,held.reservationId);const refunded=await db.creditLot.findUnique({where:{id:lot.id}});assert.equal(refunded.remainingCredits,400);assert.equal(refunded.remainingFundedCostMicroUsd,16000000n);
       assert.ok(await db.creditLedgerEntry.count({where:{reservationId:held.reservationId}})>0);
+      await db.chatUsageBucket.update({where:{key_period_periodStart:{key:getUserChatUsageKey(user),period:'month',periodStart:usagePeriodStart('month',new Date())}},data:{count:3000n}});
+      const spent=await reserve(user,20);await service.handleCodeManaged(user,call(spent.reservationId));await release(user,spent.reservationId);
+      assert.equal((await db.creditLot.findUnique({where:{id:lot.id}})).remainingCredits,399);
+      const settled=await db.creditLedgerEntry.findMany({where:{reservationId:spent.reservationId,type:'settle'}});
+      assert.equal(settled.reduce((sum,row)=>sum+Number(row.metadata.settledCredits??0),0),1);
+      assert.ok(settled.some(row=>Number(row.metadata.settledFundedCostMicroUsd)>0));
+    });
+    await t.test('insufficient purchased funding returns an entitlement error with no partial reservation',async()=>{
+      const user=await newUser();const {getUserChatUsageKey,usagePeriodStart}=await import(mod('lib/chatSecurity.ts'));
+      await db.chatUsageBucket.create({data:{key:getUserChatUsageKey(user),period:'month',periodStart:usagePeriodStart('month',new Date()),count:3000n}});
+      await db.creditLot.create({data:{userId:user,source:'synthetic',originalCredits:100,remainingCredits:100,expiresAt:new Date(Date.now()+3600000)}});
+      await rejectCode(()=>reserve(user),'ADDON_COST_ALLOWANCE_INSUFFICIENT');assert.equal(await db.codeTaskReservation.count({where:{userId:user}}),0);
+      const event=await db.chatLimitDecisionEvent.findFirst({where:{userId:user,errorCode:'ADDON_COST_ALLOWANCE_INSUFFICIENT'}});assert.equal(event.limitLayer,'entitlement');
+    });
+    await t.test('operator resolution is idempotent, keeps other unknown holds and never charges/replays a customer',async()=>{
+      const user=await newUser(),held=await reserve(user),a=call(held.reservationId),b=call(held.reservationId);mode='pending';
+      const first=service.handleCodeManaged(user,a).catch(e=>e),second=service.handleCodeManaged(user,b).catch(e=>e);await waitPending(2);mode='unknown';pending.splice(0).forEach(r=>r());await Promise.all([first,second]);mode='success';await release(user,held.reservationId);
+      const body={callId:a.callId,resolutionId:randomUUID(),evidenceRef:'ticket/code-fixture-1',mode:'no_provider_usage'},before=dispatches;
+      process.env.CODE_MANAGED_RECONCILIATION_ENABLED='false';await rejectCode(()=>reconcile(body),'CODE_RECONCILIATION_DISABLED');process.env.CODE_MANAGED_RECONCILIATION_ENABLED='true';
+      await assert.rejects(()=>service.reconcileCodeManagedCall({...owner,user:{...owner.user,email:'other@example.invalid'}},new Request('https://tomverse.app'),body),e=>e.code==='CODE_RECONCILIATION_FORBIDDEN');
+      await assert.rejects(()=>service.reconcileCodeManagedCall({...owner,user:{...owner.user,authenticatedAt:new Date(Date.now()-3600000).toISOString()}},new Request('https://tomverse.app'),body),e=>e.name==='AdminReauthenticationRequiredError');
+      const resolved=await reconcile(body);assert.deepEqual(await reconcile(body),resolved);await rejectCode(()=>reconcile({...body,evidenceRef:'ticket/changed'}),'CODE_RESOLUTION_IDEMPOTENCY_CONFLICT');await rejectCode(()=>reconcile({...body,callId:b.callId}),'CODE_RESOLUTION_IDEMPOTENCY_CONFLICT');
+      let status=await service.handleCodeManaged(user,{action:'status',reservationId:held.reservationId});assert.equal(status.billing.unknownHeldCredits,1);assert.equal(status.billing.settledCredits,0);assert.equal(status.billing.releasedCredits,19);
+      const bad={callId:b.callId,resolutionId:randomUUID(),evidenceRef:'ticket/code-fixture-2',mode:'known_usage',usage:{inputTokens:9999999,outputTokens:20}};
+      await rejectCode(()=>reconcile(bad),'CODE_RECONCILIATION_USAGE_OUT_OF_BOUNDS');assert.equal((await service.handleCodeManaged(user,{action:'status',reservationId:held.reservationId})).billing.unknownHeldCredits,1);
+      await reconcile({...bad,usage:{inputTokens:100,outputTokens:20,cachedInputTokens:20,reasoningTokens:15}});status=await service.handleCodeManaged(user,{action:'status',reservationId:held.reservationId});assert.equal(status.billing.heldCredits,0);assert.equal(status.billing.releasedCredits,20);assert.equal(status.billing.settledCredits,0);
+      const audited=await db.adminAuditLog.findUnique({where:{id:resolved.auditLogId}});assert.match(audited.entryHash,/^[0-9a-f]{64}$/);assert.equal(JSON.stringify(audited).includes('never persist this private prompt'),false);
+      assert.equal(dispatches,before);await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_TASK_NOT_ACTIVE');
+    });
+    await t.test('deleted-account resolution preserves numeric allocation evidence and only releases global provider holds',async()=>{
+      const user=await newUser();const {getUserChatUsageKey,usagePeriodStart}=await import(mod('lib/chatSecurity.ts'));
+      await db.chatUsageBucket.create({data:{key:getUserChatUsageKey(user),period:'month',periodStart:usagePeriodStart('month',new Date()),count:3000n}});
+      const lot=await db.creditLot.create({data:{userId:user,source:'synthetic',originalCredits:100,remainingCredits:100,originalFundedCostMicroUsd:4000000n,remainingFundedCostMicroUsd:4000000n,expiresAt:new Date(Date.now()+3600000)}});
+      const held=await reserve(user),req=call(held.reservationId);mode='unknown';await assert.rejects(()=>service.handleCodeManaged(user,req));mode='success';await release(user,held.reservationId);
+      const {anonymiseAccountData}=await import(mod('lib/accountDataAnonymisation.ts'));await db.$transaction(tx=>anonymiseAccountData(tx,user));await db.user.delete({where:{id:user}});
+      const snapshot=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});assert.equal(snapshot.addOnEntries.unlinked,true);assert.equal(snapshot.addOnEntries.credits,1);assert.equal(JSON.stringify(snapshot.addOnEntries).includes(lot.id),false);
+      const providerBefore=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key:'provider:openai',period:'provider-cost-day',periodStart:usagePeriodStart('day',new Date())}}});
+      const callBefore=await db.codeManagedCall.findUnique({where:{id:req.callId}});await reconcile({callId:req.callId,resolutionId:randomUUID(),evidenceRef:'ticket/deleted-fixture',mode:'no_provider_usage'});
+      const after=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});assert.equal(after.userId,null);assert.equal(after.reservedCredits-after.settledCredits-after.releasedCredits,0);assert.deepEqual(after.addOnEntries,snapshot.addOnEntries);assert.equal(await db.user.findUnique({where:{id:user}}),null);assert.equal(await db.creditLot.count({where:{userId:user}}),0);
+      const providerAfter=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key:'provider:openai',period:'provider-cost-day',periodStart:usagePeriodStart('day',new Date())}}});assert.equal(providerBefore.count-providerAfter.count,callBefore.reservedCostMicroUsd);
+    });
+    await t.test('late provider callbacks cannot overwrite a terminal operator resolution',async()=>{
+      const user=await newUser(),held=await reserve(user),req=call(held.reservationId);mode='pending';const late=service.handleCodeManaged(user,req).catch(e=>e);await waitPending(1);
+      await db.codeManagedCall.update({where:{id:req.callId},data:{createdAt:new Date(Date.now()-180000)}});await service.reconcileExpiredCodeTasks(new Date());
+      const resolved=await reconcile({callId:req.callId,resolutionId:randomUUID(),evidenceRef:'ticket/late-fixture',mode:'no_provider_usage'});mode='success';pending.splice(0).forEach(r=>r());await late;
+      const row=await db.codeManagedCall.findUnique({where:{id:req.callId}});assert.equal(row.status,'failed');assert.equal(row.resolutionAuditId,resolved.auditLogId);assert.equal(row.settledCostMicroUsd,0n);assert.equal((await service.handleCodeManaged(user,{action:'status',reservationId:held.reservationId})).billing.heldCredits,0);
     });
     await t.test('a plan with no daily ceiling never refunds somebody else’s existing day usage',async()=>{
       const user=await newUser('Max');const {getUserChatUsageKey,usagePeriodStart}=await import(mod('lib/chatSecurity.ts'));
@@ -152,6 +220,26 @@ test('Code managed inference with migrated local schema and real shared credit l
       const held=await reserve(user);assert.equal((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).planDayHeld,false);
       await release(user,held.reservationId);const bucket=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period:'day',periodStart}}});assert.equal(bucket.count,7n);
     });
+    await t.test('expired task slots recover immediately and one failed refund does not poison the rest of the sweep',async()=>{
+      const user=await newUser(),ids=[];for(let i=0;i<8;i++){const held=await reserve(user,1);ids.push(held.reservationId);await db.codeTaskReservation.update({where:{id:held.reservationId},data:{leaseExpiresAt:new Date(Date.now()-1000)}});}
+      const ninth=await reserve(user,1);failNextSettlement=true;const swept=await service.reconcileExpiredCodeTasks(new Date());assert.equal(swept.failed,1);assert.equal(swept.interrupted,7);
+      assert.equal(await db.codeTaskReservation.count({where:{id:{in:ids},status:'interrupted'}}),7);assert.equal(await db.codeTaskReservation.count({where:{id:{in:ids},status:'active'}}),1);
+      assert.equal((await service.reconcileExpiredCodeTasks(new Date())).interrupted,1);await release(user,ninth.reservationId);
+    });
+    await t.test('pruned old-period usage buckets do not trap purchased refunds or known provider settlement',async()=>{
+      const user=await newUser(),{getUserChatUsageKey,usagePeriodStart}=await import(mod('lib/chatSecurity.ts')),subject=getUserChatUsageKey(user);
+      await db.chatUsageBucket.create({data:{key:subject,period:'month',periodStart:usagePeriodStart('month',new Date()),count:3000n}});
+      const lot=await db.creditLot.create({data:{userId:user,source:'synthetic',originalCredits:100,remainingCredits:100,originalFundedCostMicroUsd:4000000n,remainingFundedCostMicroUsd:4000000n,expiresAt:new Date(Date.now()+3600000)}});
+      const held=await reserve(user);const oldDay=new Date(usagePeriodStart('day',new Date()).getTime()-86400000),oldMonth=new Date(Date.UTC(oldDay.getUTCFullYear(),oldDay.getUTCMonth()-1,1));
+      await db.codeTaskReservation.update({where:{id:held.reservationId},data:{dayStart:oldDay,monthStart:oldMonth}});await db.chatUsageBucket.deleteMany({where:{key:subject}});
+      await release(user,held.reservationId);assert.equal((await db.creditLot.findUnique({where:{id:lot.id}})).remainingCredits,100);
+      const other=await newUser(),active=await reserve(other),req=call(active.reservationId);mode='pending';const running=service.handleCodeManaged(other,req);await waitPending(1);
+      await db.chatUsageBucket.updateMany({where:{key:'provider:openai',period:'provider-cost-day'},data:{periodStart:oldDay}});await db.chatUsageBucket.deleteMany({where:{key:'provider:openai',period:'provider-cost-day'}});
+      if(usagePeriodStart('month',oldDay).getTime()!==usagePeriodStart('month',new Date()).getTime())await db.chatUsageBucket.updateMany({where:{key:'provider:openai',period:'provider-cost-month'},data:{periodStart:usagePeriodStart('month',oldDay)}});
+      await db.codeManagedCall.update({where:{id:req.callId},data:{createdAt:new Date(oldDay.getTime()+1000)}});mode='success';pending.splice(0).forEach(r=>r());assert.equal((await running).dispatchState,'dispatched');await release(other,active.reservationId);
+      const current=await newUser(),currentHeld=await reserve(current),currentReq=call(currentHeld.reservationId);mode='pending';const invalid=service.handleCodeManaged(current,currentReq).catch(e=>e);await waitPending(1);
+      await db.chatUsageBucket.updateMany({where:{key:'provider:openai',period:'provider-cost-day'},data:{count:0n}});mode='success';pending.splice(0).forEach(r=>r());assert.equal((await invalid).code,'CODE_SETTLEMENT_OUTCOME_UNKNOWN');assert.equal((await release(current,currentHeld.reservationId)).billing.heldCredits,1);
+    });
     await t.test('migration rejects product spoofing and account anonymisation clears linkage',async()=>{
       const user=await newUser(),held=await reserve(user);await release(user,held.reservationId);
       const {buildAccountDataExport}=await import(mod('lib/accountDataExport.ts'));
@@ -159,7 +247,7 @@ test('Code managed inference with migrated local schema and real shared credit l
       assert.deepEqual(Object.keys(exported.data.code_credit_usage[0]).sort(),['clientTaskId','createdAt','id','releasedCredits','reservedCredits','settledCredits','status','updatedAt']);
       const {anonymiseAccountData}=await import(mod('lib/accountDataAnonymisation.ts'));
       await db.$transaction(tx=>anonymiseAccountData(tx,user));
-      const row=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});assert.equal(row.userId,null);assert.equal(row.subjectKey,'deleted-account');assert.equal(row.requestDigest,'deleted-account');assert.deepEqual(row.addOnEntries,{});
+      const row=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});assert.equal(row.userId,null);assert.equal(row.subjectKey,'deleted-account');assert.equal(row.requestDigest,'deleted-account');assert.deepEqual(row.addOnEntries,{unlinked:true,credits:0,fundedCostMicroUsd:0});
       // Catch expected violations inside PostgreSQL subtransactions. This also
       // avoids an error-frame recovery defect in the optional local socket shim.
       await db.$executeRaw`DO $$ BEGIN

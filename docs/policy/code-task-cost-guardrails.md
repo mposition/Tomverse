@@ -170,6 +170,9 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
 - 태스크 TTL **120초**, 권장 heartbeat **30초**, provider timeout **60초**이며 SDK
   재시도는 꺼져 있습니다. 호출 UUID와 요청 HMAC으로 의미 시도를 고정하며, 전송한 UUID의
   재요청·변조는 다시 전송하지 않습니다. 상태 영수증에는 생성 텍스트가 없고 보관하지 않습니다.
+- 호출 입력 예약은 검증한 프롬프트·schema의 UTF-8 바이트 수에 framing 4096을 더한
+  보수적 tokenizer 상한입니다. 모델의 전체 context를 매번 예약하지 않습니다. 이 상한과
+  출력 상한을 호출 가격 snapshot에 고정하고, 실제 사용량이 넘으면 unknown hold를 보존합니다.
 - `CodeTaskReservation`과 `CodeManagedCall` 모두 서버가 정한 `productKey=code`를
   저장합니다. `lib/codeManagedService.ts`는 기존 구매 크레딧 ledger와 공용 운영·provider
   버킷을 사용합니다. 계정 잠금 → `code-task:<userId>` → 버킷 → provider 버킷 순서이며,
@@ -188,3 +191,19 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
 - 로컬 검증은 `npm run test:code-managed`, `npm run test:code-managed-db`입니다.
   DB 검증은 test 이름 표식이 있는 migration 완료 loopback `TEST_DATABASE_URL`을 명시하며,
   운영 추론을 활성화하지 않습니다. migration은 `20261022000000_code_managed_execution`입니다.
+
+## 11. unknown hold의 증거 기반 운영 대사
+
+- `POST /api/admin/code/managed-reconciliation`은 별도
+  `CODE_MANAGED_RECONCILIATION_ENABLED=true`가 필요한 기본 비활성 경로입니다.
+  기존 owner 권한·최근 재인증·같은 출처·rate 제한을 사용합니다.
+- `callId`, 대사 UUID, 제한된 메타데이터 `evidenceRef`, `no_provider_usage | known_usage`를
+  받고 unknown 호출 하나만 처리합니다. known 사용량은 입력·출력·캐시·reasoning 상한과
+  동결 가격을 검증합니다. 범위 밖 사용량은 거절하며 hold를 줄이지 않습니다.
+- 원래 호출이 결과를 전달하지 못했으므로 새 사용자 청구는 0입니다. 검증한 provider 비용만
+  확정하며 다른 진행 중·unknown hold는 보존합니다. 원래 태스크는 종료해 자동 재개하지 않습니다.
+- 같은 대사 UUID와 내용은 멱등이며 내용이나 대상 변경은 409입니다. 상태·환급·기존
+  hashchain 감사행을 같은 transaction으로 쓰고 늦은 provider 응답은 이를 덮어쓰지 못합니다.
+- 계정 삭제는 lot/purchase 연결을 지우고 비개인 금전 합계만 남깁니다. 삭제된 계정의 대사는
+  전역 provider hold와 보존한 금전 합계만 정리하며 wallet이나 고객 식별자를 복원하지 않습니다.
+  운영자가 provider 증거를 확인하는 절차를 자동 증명으로 대신하지 않습니다.

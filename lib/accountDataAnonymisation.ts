@@ -35,7 +35,8 @@ export type AnonymisationReplacement =
   | { kind: "null" }
   | { kind: "literal"; value: string }
   | { kind: "perRow"; prefix: string }
-  | { kind: "emptyJson" };
+  | { kind: "emptyJson" }
+  | { kind: "creditAllocationTotals" };
 
 export type AccountAnonymisation = {
   prismaModel: string;
@@ -78,20 +79,22 @@ export const ACCOUNT_ANONYMISATIONS: AccountAnonymisation[] = [
     },
   },
   {
-        prismaModel: "CodeTaskReservation",
-        table: "CodeTaskReservation",
-        userColumn: "userId",
-        columns: {
-            userId: { kind: "null" },
-            subjectKey: { kind: "literal", value: ANONYMISED_SUBJECT },
-            clientTaskId: { kind: "perRow", prefix: "anonymised:" },
-            requestDigest: { kind: "literal", value: ANONYMISED_SUBJECT },
-            addOnEntries: { kind: "emptyJson" },
-            status: { kind: "literal", value: "closed" },
-        },
+    prismaModel: "CodeTaskReservation",
+    table: "CodeTaskReservation",
+    userColumn: "userId",
+    columns: {
+      userId: { kind: "null" },
+      subjectKey: { kind: "literal", value: ANONYMISED_SUBJECT },
+      clientTaskId: { kind: "perRow", prefix: "anonymised:" },
+      requestDigest: { kind: "literal", value: ANONYMISED_SUBJECT },
+      // Lots cascade away. Keep only non-identifying monetary evidence
+      // for unresolved provider holds; strip every lot/purchase join.
+      addOnEntries: { kind: "creditAllocationTotals" },
+      status: { kind: "literal", value: "closed" },
     },
-    {
-        prismaModel: "ChatCreditReservation",
+  },
+  {
+    prismaModel: "ChatCreditReservation",
     table: "ChatCreditReservation",
     userColumn: "userId",
     columns: {
@@ -217,6 +220,9 @@ export const buildAnonymisationStatement = (
         break;
       case "emptyJson":
         assignments.push(`"${name}" = '{}'::jsonb`);
+        break;
+      case "creditAllocationTotals":
+        assignments.push(`"${name}" = (SELECT jsonb_build_object('unlinked',true,'credits',COALESCE(SUM((item->>'credits')::bigint),0),'fundedCostMicroUsd',COALESCE(SUM((item->>'fundedCostMicroUsd')::bigint),0)) FROM jsonb_array_elements(CASE WHEN jsonb_typeof("${name}")='array' THEN "${name}" ELSE '[]'::jsonb END) item)`);
         break;
     }
   }

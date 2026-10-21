@@ -18,6 +18,7 @@ test('strict action contract rejects client usage, endpoints, credits and malfor
 });
 test('schema and prompt limits reject remote references, executable patterns and excess output',()=>{
   assert.doesNotThrow(()=>codeSchemaAndPrompt(request(),model));
+  assert.doesNotThrow(()=>codeSchemaAndPrompt({...request(),schema:{type:'object',properties:{pattern:{type:'string'},format:{type:'string'},patternProperties:{type:'object'}},required:['format']}},model));
   for(const schema of [{type:'object',$ref:'https://example.test'},{type:'object',properties:{x:{type:'string',pattern:'(a+)+$'}}},{type:'array'},{type:'object',description:'x'.repeat(65536)}])assert.throws(()=>codeSchemaAndPrompt({...request(),schema},model));
   assert.throws(()=>codeSchemaAndPrompt({...request(),maxOutputTokens:1001},model));
   assert.throws(()=>codeSchemaAndPrompt({...request(),prompt:{system:'x',user:'한'.repeat(3000)}},model));

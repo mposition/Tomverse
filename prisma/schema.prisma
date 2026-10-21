@@ -11630,6 +11630,10 @@ model CodeTaskReservation {
 }
 
 model CodeManagedCall {
+  resolutionId String? @unique
+  resolutionDigest String?
+  resolutionAuditId String?
+  resolvedAt DateTime? @db.Timestamptz(6)
   productKey String @default("code")
   id String @id
   reservationId String

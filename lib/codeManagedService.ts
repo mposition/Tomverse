@@ -1,11 +1,15 @@
 import "server-only";
 import { createHmac, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import type { Session } from "next-auth";
+import { getAdminRole } from "@/lib/adminAuth";
+import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
-import { reserveAddOnCredits, settleAddOnCredits, type AddOnCreditReservationEntry } from "@/lib/creditLedger";
+import { AddOnCreditError, reserveAddOnCredits, settleAddOnCredits, type AddOnCreditReservationEntry } from "@/lib/creditLedger";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
 import { assertUserOperationalAccess, getChatCostGuardrails, getUserChatUsageKey, holdChatUsageBucket, readUsageBucketCount, usagePeriodStart } from "@/lib/chatSecurity";
@@ -16,13 +20,13 @@ import { providerBucketKey } from "@/lib/chatProviderHolds";
 import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import { loadCodingCatalog, servableCodingRows } from "@/lib/modelCatalog";
-import { codingProfileSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
+import { canonicalJson, codingProfileSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
 import { getWeightedUsageCredits, getSettledUsageCredits, type AiModel, type ModelTier } from "@/lib/models";
 import { prepareCodeProvider, codeProviderCredentialReady, type CodeProviderResult } from "@/lib/codeManagedProvider";
-import { CODE_TASK_TTL_MS, CODE_HEARTBEAT_INTERVAL_MS, CODE_PROVIDER_TIMEOUT_MS, CODE_MAX_OUTPUT_TOKENS, codeBilling, codeCallCeiling, codeConcurrentCalls, codeManagedEnabled, codeSchemaAndPrompt, codeTaskLimit, type CodeManagedRequest, type CompleteRequest, type CodeModelPair, type ReserveRequest } from "@/lib/codeManagedCore";
+import { CODE_TASK_TTL_MS, CODE_HEARTBEAT_INTERVAL_MS, CODE_PROVIDER_TIMEOUT_MS, CODE_MAX_OUTPUT_TOKENS, codeBilling, codeCallCeiling, codeConcurrentCalls, codeManagedEnabled, codeSchemaAndPrompt, codeTaskLimit, validCodeUsage, codeManagedReconciliationSchema, type CodeManagedReconciliation, type CodeManagedRequest, type CompleteRequest, type CodeModelPair, type ReserveRequest } from "@/lib/codeManagedCore";
 type Tx = Prisma.TransactionClient;
 type Task = {
     id: string;
@@ -70,7 +74,11 @@ type Call = {
         output: number;
         cached: number;
         maxInput: number;
+        cacheWrite?: number;
     };
+    resolutionId: string | null;
+    resolutionDigest: string | null;
+    resolutionAuditId: string | null;
     createdAt: Date;
 };
 export class CodeManagedError extends ApiSecurityError {
@@ -87,8 +95,12 @@ const digest = (value: unknown) => {
 };
 const tasks = (tx: Tx, id: string, userId: string) => tx.$queryRaw<Task[]> `SELECT * FROM "CodeTaskReservation" WHERE "id"=${id} AND "userId"=${userId}`;
 const calls = (tx: Tx, id: string) => tx.$queryRaw<Call[]> `SELECT * FROM "CodeManagedCall" WHERE "reservationId"=${id} ORDER BY "createdAt","id"`;
-const numeric = (value: bigint) => { const n = Number(value); if (!Number.isSafeInteger(n) || n < 0)
-    return fail(503, "CODE_ACCOUNTING_UNAVAILABLE"); return n; };
+const numeric = (value: bigint) => {
+    const n = Number(value);
+    if (!Number.isSafeInteger(n) || n < 0)
+        return fail(503, "CODE_ACCOUNTING_UNAVAILABLE");
+    return n;
+};
 async function transaction<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
     return prisma.$transaction(async (tx) => {
         await lockCreditAccount(tx, userId);
@@ -145,7 +157,7 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
             return fail(503, "CODE_CATALOG_INVALID");
         const row = { modelId: id, ...parsed.data } as CodingCatalogRow;
         const current = available.find(r => r.modelId === id);
-        if (!current || JSON.stringify(current) !== JSON.stringify(row) || row.capabilities.structuredOutput === "none")
+        if (!current || canonicalJson(current) !== canonicalJson(row) || row.capabilities.structuredOutput === "none")
             return fail(403, "CODE_MODEL_UNAVAILABLE");
         const rank = { Free: 0, Pro: 1, Max: 2 };
         if (rank[plan] < rank[row.minimumPlan])
@@ -187,9 +199,13 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
 async function decrement(tx: Tx, key: string, period: string, start: Date, amount: number) {
     if (amount <= 0)
         return;
-    const changed = await tx.$executeRaw `UPDATE "ChatUsageBucket" SET "count"="count"-${amount}::bigint,"updatedAt"=NOW()
-    WHERE "key"=${key} AND "period"=${period} AND "periodStart"=${start} AND "count">=${amount}::bigint`;
-    if (changed !== 1)
+    // Existing maintenance deletes old day/month buckets. An expired period
+    // no longer grants allowance, so missing/pruned old counters need no refund.
+    // Current-period underflow still signals a real accounting failure.
+    const retired = start < usagePeriodStart(period.includes("month") ? "month" : "day", new Date());
+    const changed = await tx.$executeRaw `UPDATE "ChatUsageBucket" SET "count"=GREATEST(0,"count"-${amount}::bigint),"updatedAt"=NOW()
+    WHERE "key"=${key} AND "period"=${period} AND "periodStart"=${start} AND (${retired} OR "count">=${amount}::bigint)`;
+    if (changed !== 1 && !retired)
         return fail(503, "CODE_ACCOUNTING_UNAVAILABLE");
 }
 async function hold(tx: Tx, key: string, period: string, start: Date, limit: number, amount: number, code: string) {
@@ -212,7 +228,7 @@ async function reserve(userId: string, request: ReserveRequest) {
         }
         const active = await tx.$queryRaw<{
             count: bigint;
-        }[]> `SELECT COUNT(*) AS count FROM "CodeTaskReservation" WHERE "userId"=${userId} AND "status"='active'`;
+        }[]> `SELECT COUNT(*) AS count FROM "CodeTaskReservation" WHERE "userId"=${userId} AND "status"='active' AND "leaseExpiresAt">${now}`;
         if (Number(active[0].count) >= codeTaskLimit())
             return fail(429, "CODE_TASK_CONCURRENCY_EXCEEDED");
         const day = await getUserDayWindow(tx, userId, now), month = usagePeriodStart("month", now);
@@ -247,15 +263,39 @@ async function reserve(userId: string, request: ReserveRequest) {
     });
 }
 /** Refund only proven-unused portions. Unknown and in-flight holds remain reserved. */
+const spentAddOnCredits = (task: Task) => Math.max(0, task.settledCredits - task.planHeldCredits);
+const spentAddOnCost = (task: Task) => numeric(task.settledCostMicroUsd) - Math.ceil(numeric(task.settledCostMicroUsd) * task.planFundingShare);
+async function settleKnownAddOn(tx: Tx, task: Task, credits: number, cost: number, outcome: "completed" | "failed") {
+    const after = { ...task, settledCredits: task.settledCredits + credits, settledCostMicroUsd: task.settledCostMicroUsd + BigInt(cost) };
+    const usedCredits = spentAddOnCredits(after) - spentAddOnCredits(task), usedCost = spentAddOnCost(after) - spentAddOnCost(task);
+    if (usedCredits === 0 && usedCost === 0)
+        return;
+    let creditsLeft = usedCredits, costLeft = usedCost;
+    const used: AddOnCreditReservationEntry[] = [], remaining: AddOnCreditReservationEntry[] = [];
+    for (const entry of task.addOnEntries) {
+        const credits = Math.min(creditsLeft, entry.credits), fundedCostMicroUsd = Math.min(costLeft, entry.fundedCostMicroUsd);
+        used.push({ ...entry, credits, fundedCostMicroUsd });
+        remaining.push({ ...entry, credits: entry.credits - credits, fundedCostMicroUsd: entry.fundedCostMicroUsd - fundedCostMicroUsd });
+        creditsLeft -= credits;
+        costLeft -= fundedCostMicroUsd;
+    }
+    if (creditsLeft > 0 || costLeft > 0)
+        return fail(503, "CODE_ACCOUNTING_UNAVAILABLE");
+    // These slices were debited at reserve. Passing exactly their consumed
+    // amount records the canonical settle audit without another debit/refund.
+    await settleAddOnCredits(tx, { userId: task.userId!, reservationId: task.id,
+        entries: used.filter(e => e.credits > 0 || e.fundedCostMicroUsd > 0), settledCredits: usedCredits, settledFundedCostMicroUsd: usedCost, outcome });
+    await tx.$executeRaw `UPDATE "CodeTaskReservation" SET "addOnEntries"=${JSON.stringify(remaining)}::jsonb WHERE "id"=${task.id}`;
+}
 async function refundUnused(tx: Tx, task: Task, records: Call[]) {
     const held = records.filter(c => c.status === "dispatched" || c.status === "outcome_unknown");
     const keepCredits = task.settledCredits + held.reduce((sum, c) => sum + c.reservedCredits, 0);
     const released = task.reservedCredits - keepCredits;
     const keepCost = numeric(task.settledCostMicroUsd) + held.reduce((sum, c) => sum + numeric(c.reservedCostMicroUsd), 0);
     const planKeep = Math.min(task.planHeldCredits, keepCredits), planRefund = task.planHeldCredits - planKeep;
-    const addOnKeep = keepCredits - planKeep;
+    const addOnKeep = keepCredits - planKeep - spentAddOnCredits(task);
     const planCostKeep = Math.min(numeric(task.planHeldCostMicroUsd), Math.ceil(keepCost * task.planFundingShare));
-    const addOnCostKeep = keepCost - planCostKeep;
+    const addOnCostKeep = keepCost - planCostKeep - spentAddOnCost(task);
     const kept: AddOnCreditReservationEntry[] = [], refunds: AddOnCreditReservationEntry[] = [];
     let creditsLeft = addOnKeep, costLeft = addOnCostKeep;
     for (const entry of task.addOnEntries) {
@@ -323,8 +363,9 @@ async function complete(userId: string, request: CompleteRequest) {
         return fail(403, "CODE_MODEL_PIN_MISMATCH");
     if (request.maxOutputTokens > selected.price.maxOutputTokens)
         return fail(400, "CODE_REQUEST_BOUNDS_INVALID");
+    let maxInput: number;
     try {
-        codeSchemaAndPrompt(request, selected.row);
+        maxInput = codeSchemaAndPrompt(request, selected.row);
     }
     catch {
         return fail(400, "CODE_REQUEST_BOUNDS_INVALID");
@@ -340,7 +381,7 @@ async function complete(userId: string, request: CompleteRequest) {
     catch {
         return fail(503, "CODE_PROVIDER_UNAVAILABLE");
     }
-    const hash = digest(request), now = new Date(), maxInput = selected.row.capabilities.maxContextTokens;
+    const hash = digest(request), now = new Date();
     const reservedCredits = getWeightedUsageCredits({ usageClass: selected.runtime.usageClass, creditWeight: selected.row.pricing.creditWeight }, maxInput);
     const price = { input: selected.price.inputUsdPerMillionTokens, output: selected.price.outputUsdPerMillionTokens, cached: selected.price.cachedInputPriceMultiplier, cacheWrite: selected.price.cacheWriteUsdPerMillionTokens, maxInput,
         costSource: selected.price.costSource, cacheWriteBoundSource: selected.price.cacheWriteBoundSource, catalogVersion: initial.catalogVersion, contentHash: initial.contentHash };
@@ -348,6 +389,7 @@ async function complete(userId: string, request: CompleteRequest) {
     const reservedCost = Math.ceil(maxInput * Math.max(price.input, price.cacheWrite ?? price.input)) +
         Math.ceil(request.maxOutputTokens * price.output) + 2;
     await transaction(userId, async (tx) => {
+        await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtext(${`code-call-id:${request.callId}`}))`;
         const { plan } = await account(userId, tx);
         assertPairPlan({ executor: pair.executor.row, reviewer: pair.reviewer.row }, plan);
         const task = (await tasks(tx, request.reservationId, userId))[0];
@@ -356,6 +398,10 @@ async function complete(userId: string, request: CompleteRequest) {
         const records = await calls(tx, task.id), prior = records.find(c => c.id === request.callId);
         if (prior)
             throw new CodeManagedError(409, prior.requestDigest === hash ? "CODE_CALL_ALREADY_DISPATCHED" : "CODE_CALL_IDEMPOTENCY_CONFLICT", "dispatched", receipt(task, records));
+        if ((await tx.$queryRaw<{
+            id: string;
+        }[]> `SELECT "id" FROM "CodeManagedCall" WHERE "id"=${request.callId}`).length)
+            return fail(409, "CODE_CALL_IDEMPOTENCY_CONFLICT");
         if (task.status !== "active" || task.leaseExpiresAt <= now)
             return fail(409, "CODE_TASK_NOT_ACTIVE");
         if (records.some(c => c.status === "outcome_unknown"))
@@ -413,6 +459,7 @@ async function complete(userId: string, request: CompleteRequest) {
             const charge = getSettledUsageCredits({ reservedCredits: Math.min(reservedCredits, getWeightedUsageCredits({ usageClass: selected.runtime.usageClass, creditWeight: selected.row.pricing.creditWeight }, usage.inputTokens)), reservedInputTokens: maxInput, reservedOutputTokens: request.maxOutputTokens, actualInputTokens: usage.inputTokens, actualOutputTokens: usage.outputTokens, outcome: result.validOutput ? "completed" : "failed" });
             for (const period of ["day", "month"] as const)
                 await decrement(tx, providerBucketKey(selected.row.provider), `provider-cost-${period}`, usagePeriodStart(period, call.createdAt), reservedCost - actualCost);
+            await settleKnownAddOn(tx, task, charge, actualCost, result.validOutput ? "completed" : "failed");
             await tx.$executeRaw `UPDATE "CodeManagedCall" SET "status"=${result.validOutput ? "completed" : "failed"},"settledCredits"=${charge},"settledCostMicroUsd"=${BigInt(actualCost)},"inputTokens"=${usage.inputTokens},"outputTokens"=${usage.outputTokens},"cachedInputTokens"=${usage.cachedInputTokens},"cacheWriteInputTokens"=${usage.cacheWriteInputTokens},"reasoningTokens"=${usage.reasoningTokens},"providerReportedModelId"=${result.providerReportedModelId ?? null},"latencyMs"=${result.latencyMs},"completedAt"=NOW() WHERE "id"=${call.id}`;
             await tx.$executeRaw `UPDATE "CodeTaskReservation" SET "settledCredits"="settledCredits"+${charge},"settledCostMicroUsd"="settledCostMicroUsd"+${BigInt(actualCost)},"updatedAt"=NOW() WHERE "id"=${task.id}`;
             task = (await tasks(tx, task.id, userId))[0];
@@ -441,11 +488,15 @@ export async function handleCodeManaged(userId: string, request: CodeManagedRequ
         return await inspect(userId, request);
     }
     catch (error) {
+        if (error instanceof AddOnCreditError)
+            error = new CodeManagedError(402, error.code);
         const limits: Record<string, [
             string,
             string
         ]> = {
             CREDIT_BALANCE_INSUFFICIENT: ["entitlement", "code_account_credits"],
+            ADDON_CREDITS_INSUFFICIENT: ["entitlement", "code_purchased_credits"],
+            ADDON_COST_ALLOWANCE_INSUFFICIENT: ["entitlement", "code_purchased_allowance"],
             PLAN_DAILY_CREDIT_LIMIT_REACHED: ["entitlement", "code_daily_plan_credits"],
             CODE_TASK_CAP_EXCEEDED: ["entitlement", "code_task_cap"],
             CODE_TASK_CALL_CEILING_REACHED: ["operational_guardrail", "code_task_calls"],
@@ -485,11 +536,86 @@ export async function reconcileExpiredCodeTasks(now = new Date()) {
             return { interrupted: 0 };
         throw error;
     }
-    let interrupted = 0;
+    let interrupted = 0, failed = 0;
     for (const row of rows)
-        await transaction(row.userId, async (tx) => { const task = (await tasks(tx, row.id, row.userId))[0]; if (task) {
-            await expireCalls(tx, task, now);
-            interrupted++;
-        } });
-    return { interrupted };
+        try {
+            interrupted += await transaction(row.userId, async (tx) => {
+                const task = (await tasks(tx, row.id, row.userId))[0];
+                if (!task)
+                    return 0;
+                const expired = task.status === "active" && task.leaseExpiresAt <= now;
+                await expireCalls(tx, task, now);
+                return expired ? 1 : 0;
+            });
+        }
+        catch {
+            failed++;
+            console.warn(JSON.stringify({ event: "code_lease_reconciliation_deferred" }));
+        }
+    return { examined: rows.length, interrupted, failed };
+}
+/** Manual provider-evidence resolution. This path never dispatches a provider
+ * or charges a customer for output the original request did not deliver. */
+export async function reconcileCodeManagedCall(session: Session, request: Request, input: CodeManagedReconciliation) {
+    if (process.env.CODE_MANAGED_RECONCILIATION_ENABLED !== "true")
+        return fail(503, "CODE_RECONCILIATION_DISABLED");
+    if (!session.user?.id || getAdminRole(session) !== "owner")
+        return fail(403, "CODE_RECONCILIATION_FORBIDDEN");
+    await assertRecentAdminAuthentication(session);
+    const body = codeManagedReconciliationSchema.parse(input), hash = digest(body);
+    const initial = (await prisma.$queryRaw<{
+        reservationId: string;
+        userId: string | null;
+    }[]> `SELECT c."reservationId",t."userId" FROM "CodeManagedCall" c
+      JOIN "CodeTaskReservation" t ON t."id"=c."reservationId" WHERE c."id"=${body.callId}`)[0];
+    if (!initial)
+        return fail(404, "CODE_CALL_NOT_FOUND");
+    return transaction(initial.userId ?? `anonymous-code:${initial.reservationId}`, async (tx) => {
+        // Credit-account/workflow advisory locks already precede this. Take the
+        // canonical chain lock before any row mutation, as its writer requires.
+        await takeAuditChainLock(tx);
+        const prior = (await tx.$queryRaw<Call[]> `SELECT * FROM "CodeManagedCall" WHERE "resolutionId"=${body.resolutionId}`)[0];
+        if (prior) {
+            if (prior.id !== body.callId || prior.resolutionDigest !== hash)
+                return fail(409, "CODE_RESOLUTION_IDEMPOTENCY_CONFLICT");
+            return { callId: prior.id, resolutionId: body.resolutionId, state: "resolved", auditLogId: prior.resolutionAuditId, customerChargeCredits: 0 };
+        }
+        let task = (await tx.$queryRaw<Task[]> `SELECT * FROM "CodeTaskReservation" WHERE "id"=${initial.reservationId}`)[0];
+        const call = (await calls(tx, task.id)).find(c => c.id === body.callId)!;
+        if (call.status !== "outcome_unknown")
+            return fail(409, "CODE_CALL_NOT_UNKNOWN");
+        const usage = body.mode === "known_usage" ? validCodeUsage(body.usage) : validCodeUsage({ inputTokens: 0, outputTokens: 0 });
+        const price = call.pricingSnapshot;
+        if (!usage || usage.inputTokens > price.maxInput || usage.outputTokens > call.maxOutputTokens)
+            return fail(409, "CODE_RECONCILIATION_USAGE_OUT_OF_BOUNDS");
+        const cost = calculateProviderUsageCost({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInputTokens: usage.cachedInputTokens,
+            cacheWriteInputTokens: usage.cacheWriteInputTokens, inputUsdPerMillionTokens: price.input, outputUsdPerMillionTokens: price.output, cachedInputPriceMultiplier: price.cached, cacheWriteUsdPerMillionTokens: price.cacheWrite });
+        if (cost.unpricedCacheWriteTokens > 0 || cost.totalCostMicroUsd > numeric(call.reservedCostMicroUsd))
+            return fail(409, "CODE_RECONCILIATION_USAGE_OUT_OF_BOUNDS");
+        for (const period of ["day", "month"] as const)
+            await decrement(tx, providerBucketKey(call.provider), `provider-cost-${period}`, usagePeriodStart(period, call.createdAt), numeric(call.reservedCostMicroUsd) - cost.totalCostMicroUsd);
+        if (task.userId)
+            await settleKnownAddOn(tx, task, 0, cost.totalCostMicroUsd, "failed");
+        await tx.$executeRaw `UPDATE "CodeManagedCall" SET "status"='failed',"settledCredits"=0,"settledCostMicroUsd"=${BigInt(cost.totalCostMicroUsd)},
+          "inputTokens"=${usage.inputTokens},"outputTokens"=${usage.outputTokens},"cachedInputTokens"=${usage.cachedInputTokens},"cacheWriteInputTokens"=${usage.cacheWriteInputTokens},"reasoningTokens"=${usage.reasoningTokens},
+          "resolutionId"=${body.resolutionId},"resolutionDigest"=${hash},"resolvedAt"=NOW(),"completedAt"=NOW() WHERE "id"=${call.id}`;
+        await tx.$executeRaw `UPDATE "CodeTaskReservation" SET "status"='closed',"settledCostMicroUsd"="settledCostMicroUsd"+${BigInt(cost.totalCostMicroUsd)},"updatedAt"=NOW() WHERE "id"=${task.id}`;
+        task = (await tx.$queryRaw<Task[]> `SELECT * FROM "CodeTaskReservation" WHERE "id"=${task.id}`)[0];
+        if (task.userId)
+            await refundUnused(tx, task, await calls(tx, task.id));
+        else {
+            // Deletion removed the wallet and account usage identity. Keep the
+            // non-personal funding snapshot; adjust only this call's global
+            // provider hold and the retained financial totals, never a new wallet.
+            const heldCost = numeric(task.heldCostMicroUsd) - numeric(call.reservedCostMicroUsd) + cost.totalCostMicroUsd;
+            await tx.$executeRaw `UPDATE "CodeTaskReservation" SET "releasedCredits"="releasedCredits"+${call.reservedCredits},"heldCostMicroUsd"=${BigInt(heldCost)},
+              "planHeldCredits"=${Math.min(task.planHeldCredits, task.reservedCredits - task.releasedCredits - call.reservedCredits)},
+              "planHeldCostMicroUsd"=${BigInt(Math.min(numeric(task.planHeldCostMicroUsd), Math.ceil(heldCost * task.planFundingShare)))} WHERE "id"=${task.id}`;
+        }
+        const auditLogId = await writeAdminAuditLog({ session, request, tx, action: "code.managed_call_reconciled", targetType: "CodeManagedCall", targetId: call.id,
+            summary: "Resolved one unknown Code provider call from operator-reviewed evidence; no customer charge.",
+            metadata: { resolutionId: body.resolutionId, mode: body.mode, evidenceRef: body.evidenceRef, customerChargeCredits: 0, actualCostMicroUsd: cost.totalCostMicroUsd } });
+        await tx.$executeRaw `UPDATE "CodeManagedCall" SET "resolutionAuditId"=${auditLogId} WHERE "id"=${call.id}`;
+        return { callId: call.id, resolutionId: body.resolutionId, state: "resolved", auditLogId, customerChargeCredits: 0 };
+    });
 }

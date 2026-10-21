@@ -32,6 +32,15 @@ export type CompleteRequest = Extract<CodeManagedRequest, {
 export type ReserveRequest = Extract<CodeManagedRequest, {
     action: "reserve";
 }>;
+const resolutionBase = { callId: uuid, resolutionId: uuid, evidenceRef: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,159}$/) };
+export const codeManagedReconciliationSchema = z.discriminatedUnion("mode", [
+    z.object({ ...resolutionBase, mode: z.literal("no_provider_usage") }).strict(),
+    z.object({ ...resolutionBase, mode: z.literal("known_usage"), usage: z.object({
+            inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(),
+            cachedInputTokens: z.number().int().nonnegative().optional(), cacheWriteInputTokens: z.number().int().nonnegative().optional(), reasoningTokens: z.number().int().nonnegative().optional(),
+        }).strict() }).strict(),
+]);
+export type CodeManagedReconciliation = z.infer<typeof codeManagedReconciliationSchema>;
 export type CodeModelPair = {
     executor: CodingCatalogRow;
     reviewer: CodingCatalogRow;
@@ -73,26 +82,31 @@ export function codeSchemaAndPrompt(request: CompleteRequest, model: CodingCatal
     if (Buffer.byteLength(serialized) > 64 * 1024 || request.schema.type !== "object")
         throw new Error("Invalid Code output schema");
     let nodes = 0;
-    const visit = (value: unknown, depth: number) => {
+    const visit = (value: unknown, depth: number, mode: "schema" | "map" | "literal" = "schema") => {
         if (depth > 32 || ++nodes > 10000)
             throw new Error("Code output schema is too complex");
         if (Array.isArray(value)) {
             for (const item of value)
-                visit(item, depth + 1);
+                visit(item, depth + 1, mode);
         }
         else if (value && typeof value === "object")
             for (const [key, item] of Object.entries(value)) {
-                if (key === "pattern" || key === "patternProperties" || key === "format")
+                if (mode === "schema" && (key === "pattern" || key === "patternProperties" || key === "format"))
                     throw new Error("Executable schema patterns are not supported");
-                if (key === "$ref" && (typeof item !== "string" || !item.startsWith("#/")))
+                if (mode === "schema" && key === "$ref" && (typeof item !== "string" || !item.startsWith("#/")))
                     throw new Error("External schema references are not allowed");
-                visit(item, depth + 1);
+                visit(item, depth + 1, mode === "literal" ? "literal" : mode === "map" ? "schema" :
+                    ["properties", "definitions", "$defs", "dependentSchemas"].includes(key) ? "map" :
+                        ["const", "enum", "default", "examples", "dependentRequired"].includes(key) ? "literal" : "schema");
             }
     };
     visit(request.schema, 0);
     const bytes = Buffer.byteLength(request.prompt.system) + Buffer.byteLength(request.prompt.user) + Buffer.byteLength(serialized) + 4096;
     if (request.maxOutputTokens > model.capabilities.maxOutputTokens || bytes + request.maxOutputTokens > model.capabilities.maxContextTokens)
         throw new Error("Code request exceeds the selected model's bounds");
+    // UTF-8 bytes upper-bound text tokenizer pieces. The framing allowance
+    // covers SDK roles/JSON-schema instructions without reserving a whole context.
+    return bytes;
 }
 export function validCodeUsage(usage: {
     inputTokens?: number;

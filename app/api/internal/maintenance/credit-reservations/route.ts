@@ -105,7 +105,7 @@ export async function POST(request: Request) {
       await reconcileUnsettledDeepResearchSettlementsQuietly();
     const result = await reconcileCreditReservationsWithRetry();
     // Code owns independent task/call leases and shares the same credit wallet.
-    const codeTasks = await reconcileExpiredCodeTasks();
+    const codeTasks = await reconcileExpiredCodeTasks().catch(() => ({ interrupted: 0, deferred: true }));
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
@@ -236,6 +236,7 @@ export async function POST(request: Request) {
       processedCount: result.examined,
       result: {
         ...result,
+        codeTasks,
         deepResearchSettlements,
         infrastructureMonitor,
         notificationDeliveries,

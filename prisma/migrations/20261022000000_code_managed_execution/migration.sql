@@ -1,7 +1,7 @@
 -- Default-off Code managed inference. Financial metadata only; no prompts,
 -- generated source, output JSON, paths, cookies or provider credentials.
 CREATE TABLE "CodeTaskReservation" (
-  "id" TEXT PRIMARY KEY, "userId" TEXT REFERENCES "User"("id") ON DELETE SET NULL,
+  "id" TEXT PRIMARY KEY, "userId" TEXT REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE,
   "subjectKey" TEXT NOT NULL, "clientTaskId" TEXT NOT NULL, "requestDigest" TEXT NOT NULL,
   "productKey" TEXT NOT NULL DEFAULT 'code', "status" TEXT NOT NULL DEFAULT 'active',
   "catalogVersion" INTEGER NOT NULL, "contentHash" TEXT NOT NULL, "modelPair" JSONB NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE "CodeTaskReservation" (
 CREATE INDEX "CodeTaskReservation_expiry" ON "CodeTaskReservation"("status","leaseExpiresAt");
 CREATE INDEX "CodeTaskReservation_user" ON "CodeTaskReservation"("userId","createdAt");
 CREATE TABLE "CodeManagedCall" (
-  "id" TEXT PRIMARY KEY, "reservationId" TEXT NOT NULL REFERENCES "CodeTaskReservation"("id") ON DELETE RESTRICT,
+  "id" TEXT PRIMARY KEY, "reservationId" TEXT NOT NULL REFERENCES "CodeTaskReservation"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
   "productKey" TEXT NOT NULL DEFAULT 'code' CHECK("productKey"='code'),
   "requestDigest" TEXT NOT NULL, "role" TEXT NOT NULL, "modelId" TEXT NOT NULL, "provider" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'dispatched', "reservedCredits" INTEGER NOT NULL, "settledCredits" INTEGER NOT NULL DEFAULT 0,
@@ -29,6 +29,7 @@ CREATE TABLE "CodeManagedCall" (
   "inputTokens" INTEGER, "outputTokens" INTEGER, "cachedInputTokens" INTEGER, "cacheWriteInputTokens" INTEGER, "reasoningTokens" INTEGER,
   "maxOutputTokens" INTEGER NOT NULL, "pricingSnapshot" JSONB NOT NULL,
   "providerReportedModelId" TEXT, "latencyMs" INTEGER, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(), "completedAt" TIMESTAMPTZ,
+  "resolutionId" TEXT UNIQUE, "resolutionDigest" TEXT, "resolutionAuditId" TEXT, "resolvedAt" TIMESTAMPTZ,
   CHECK("role" IN ('executor','reviewer')), CHECK("status" IN ('dispatched','completed','failed','outcome_unknown')),
   CHECK("reservedCredits">0 AND "settledCredits">=0 AND "settledCredits"<="reservedCredits" AND "reservedCostMicroUsd">=0),
   CHECK("inputTokens" IS NULL OR "inputTokens">=0), CHECK("outputTokens" IS NULL OR "outputTokens">=0),
