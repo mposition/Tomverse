@@ -455,7 +455,6 @@ export async function POST(request: Request) {
                     mediaType: attachment.mediaType,
                     byteSize: attachment.size,
                 })),
-                promptText: payload.prompt,
                 imageGenerationFlagEnabled,
                 planAllowsImageGeneration: planAllowsImages,
                 continuationSeed,

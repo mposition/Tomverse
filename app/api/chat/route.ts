@@ -3089,10 +3089,6 @@ async function handleChatPost(
                 nativeSearchEnabled && webSearchCapability.canForceExecution,
             appManagedSearchEnabled,
             turnAttachments: turnAttachmentDescriptors,
-            promptText:
-                typeof latestMessage?.content === "string"
-                    ? latestMessage.content
-                    : "",
             imageGenerationFlagEnabled,
             planAllowsImageGeneration: Boolean(
                 accountPlan && planAllowsImageGeneration(accountPlan.tier)
