@@ -286,8 +286,9 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 - 문서 응답은 CDP가 붙잡은 채 읽어, `cf-mitigated: challenge`나 400 이상이면 실패시킵니다. iframe·뒤늦은 navigation도
   같습니다.
 - WebSocket·service worker·다운로드·권한 요청은 막습니다. Chromium은 sandbox를 켜고 먼저 띄웁니다. 일부 Railway 호스트는
-  sandbox의 user namespace 준비를 거부하므로(2026-10-20·21 관측: `credentials` 단계 `Permission denied`), 그때만 sandbox 없이
-  한 번 더 띄웁니다(운영자 결정 2026-10-21). 요청 규칙과 컨테이너의 비권한 사용자는 그대로이고, 실행 로그가 `sandbox: on|off`를
+  sandbox의 user namespace 준비를 거부하므로(2026-10-20·21 관측: `Permission denied`), 실패가 Chromium sandbox 설정 코드
+  (credentials·namespace·zygote·setuid 파일, `SANDBOX_SETUP_SOURCES`)의 FATAL이거나 `No usable sandbox`일 때만 sandbox 없이
+  한 번 더 띄웁니다(운영자 결정 2026-10-21). timeout·crash·라이브러리 누락 같은 다른 실패는 재시도하지 않습니다. 요청 규칙과 컨테이너의 비권한 사용자는 그대로이고, 실행 로그가 `sandbox: on|off`를
   남깁니다. walker 변수 `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off`면 재시도하지 않고 page 단계를 건너뜁니다.
 - production 20개 page가 시도하는 다른 origin은 googletagmanager와 Turnstile뿐이며, 둘 다 막습니다.
 

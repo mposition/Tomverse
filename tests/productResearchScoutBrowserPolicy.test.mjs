@@ -158,18 +158,33 @@ test("a launch failure says whether the sandbox ran, without the URLs Chromium p
       "browserType.launch: Target page, context or browser has been closed\n[pid=7][err] [1021/045759.360:FATAL:credentials.cc(132)] Check failed: . : Permission denied (13)",
     ),
   );
-  assert.deepEqual(refused, { cause: "launch_failed", fatal: "Check failed: . : Permission denied (13)", source: "credentials.cc(132)" });
+  assert.deepEqual(refused, { cause: "sandbox_refused", fatal: "Check failed: . : Permission denied (13)", source: "credentials.cc(132)" });
+  // The same words from a file outside the sandbox setup are not a refused sandbox.
+  const elsewhere = launchFailure(
+    new Error("[pid=7][err] [1021/045759.360:FATAL:platform_shared_memory_region_posix.cc(212)] Check failed: . : Permission denied (13)"),
+  );
+  assert.equal(elsewhere.cause, "launch_failed");
+  assert.equal(elsewhere.source, "platform_shared_memory_region_posix.cc(212)");
+  for (const file of ["namespace_sandbox.cc", "zygote_host_impl_linux.cc", "setuid_sandbox_host.cc"]) {
+    assert.equal(launchFailure(new Error(`[err] [x:FATAL:${file}(9)] Check failed: .`)).cause, "sandbox_refused", file);
+  }
 });
 
-test("a refused sandbox is retried without it unless the operator turned that off; a missing browser is not", () => {
-  const refused = { cause: "launch_failed" };
+test("only a refused or unavailable sandbox is retried without it, and the operator can turn that off", () => {
+  const refused = { cause: "sandbox_refused" };
   assert.equal(retriesWithoutSandbox(undefined, refused), true);
   assert.equal(retriesWithoutSandbox("", refused), true);
   assert.equal(retriesWithoutSandbox("on", refused), true);
   assert.equal(retriesWithoutSandbox("off", refused), false);
   assert.equal(retriesWithoutSandbox(" OFF ", refused), false);
   assert.equal(retriesWithoutSandbox(undefined, { cause: "sandbox_unavailable" }), true);
+  // Not the sandbox's failure: a timeout, a crash, a missing library or browser.
+  assert.equal(retriesWithoutSandbox(undefined, { cause: "launch_failed" }), false);
   assert.equal(retriesWithoutSandbox(undefined, { cause: "browser_missing" }), false);
+  assert.equal(
+    retriesWithoutSandbox(undefined, launchFailure(Object.assign(new Error("browserType.launch: Timeout 180000ms exceeded."), { name: "TimeoutError" }))),
+    false,
+  );
 });
 
 test("the abort tally keeps method and origin and drops the path", () => {
