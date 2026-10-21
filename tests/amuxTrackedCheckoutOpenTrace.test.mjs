@@ -158,7 +158,7 @@ test("diagnostic reasons are fixed codes and appear only when asked for", () => 
   const cases = [
     [`123 openat(AT_FDCWD<${directory}>, "src/c.ts", O_RDONLY) = 3<${directory}/src/c.ts>\n`, "unlisted_open"],
     [`123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_WRONLY) = 3<${directory}/src/a.ts>\n`, "non_read_open"],
-    [`123 openat(AT_FDCWD<${directory}>, "../x", O_RDONLY) = 3</tmp/x>\n`, "escaped_checkout"],
+    [`123 openat(AT_FDCWD<${directory}>, "src/link", O_RDONLY) = 3</tmp/x>\n`, "escaped_checkout"],
     [`123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 3\n`, "undecoded_open"],
   ];
   for (const [text, reason] of cases) {
@@ -251,7 +251,7 @@ test("detail mode names refused opens by relative path and flags, and changes no
     `123 openat(AT_FDCWD<${directory}>, ".git/config", O_RDONLY|O_NOFOLLOW) = 4<${directory}/.git/config>\n` +
     `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_WRONLY|O_TRUNC) = 5<${directory}/src/a.ts>\n` +
     `123 openat(AT_FDCWD<${directory}>, "/home/runner/.claude/x", O_RDONLY) = 6</home/runner/.claude/x>\n` +
-    `123 openat(AT_FDCWD<${directory}>, "../x", O_RDONLY|O_CLOEXEC) = 3</tmp/x>\n` +
+    `123 openat(AT_FDCWD<${directory}>, "src/link", O_RDONLY|O_CLOEXEC) = 3</tmp/x>\n` +
     `123 openat(AT_FDCWD<${directory}>, "src/a.ts", O_RDONLY) = 4<${directory}/src/a.ts<block 8:1>>\n`;
   const quiet = make();
   quiet.observeChunk(Buffer.from(text));
@@ -272,7 +272,7 @@ test("detail mode names refused opens by relative path and flags, and changes no
     { code: "unlisted_open", path: "CLAUDE.md", flags: ["O_RDONLY", "O_CLOEXEC"] },
     { code: "unlisted_open", path: ".git/config", flags: ["O_RDONLY", "O_NOFOLLOW"] },
     { code: "non_read_open", path: "src/a.ts", flags: ["O_WRONLY", "O_TRUNC"] },
-    { code: "escaped_checkout", path: "<outside>", flags: ["O_RDONLY", "O_CLOEXEC"] },
+    { code: "escaped_checkout", path: "/tmp/x", flags: ["O_RDONLY", "O_CLOEXEC"] },
     { code: "device_open", path: "src/a.ts", flags: ["O_RDONLY"] },
   ]);
   assert.equal(JSON.stringify(result).includes("/home/runner"), false,
@@ -328,21 +328,43 @@ test("a read-only listing of a checkout directory or the checkout root passes (s
   }
 });
 
-test("a read-only open of an ancestor of the checkout passes; anything else outside still refuses", () => {
+test("opens of ancestors and of paths a request already names outside pass; a checkout path landing outside refuses", () => {
   const observer = make();
   observer.observeChunk(Buffer.from(
     `123 openat(AT_FDCWD<${directory}>, "..", O_RDONLY|O_CLOEXEC) = 3</tmp>\n` +
-    `123 openat(AT_FDCWD<${directory}>, "../..", O_RDONLY|O_CLOEXEC) = 3</>\n`));
+    `123 openat(AT_FDCWD<${directory}>, "../..", O_RDONLY|O_CLOEXEC) = 3</>\n` +
+    // Lexically outside, so the same open as the absolute path (2026-10-21).
+    `123 openat(AT_FDCWD<${directory}>, "..", O_RDWR) = 3</tmp>\n` +
+    `123 openat(AT_FDCWD<${directory}>, "../amux-v19-checkout-Ab12c", O_RDONLY) = 3</tmp/amux-v19-checkout-Ab12c>\n`));
   assert.deepEqual(observer.finish({ traceComplete: true }),
     { kind: "complete", files: [] });
   for (const [request, resolved, flags] of [
-    ["../x", "/tmp/x", "O_RDONLY"],
-    ["..", "/tmp", "O_RDWR"],
-    ["../amux-v19-checkout-Ab12c", "/tmp/amux-v19-checkout-Ab12c", "O_RDONLY"],
+    ["src/link", "/tmp/x", "O_RDONLY"],
+    ["src/link", "/tmp", "O_RDWR"],
   ]) {
     const refused = make();
     refused.observeChunk(Buffer.from(
       `123 openat(AT_FDCWD<${directory}>, "${request}", ${flags}) = 3<${resolved}>\n`));
     assert.equal(refused.finish({ traceComplete: true }).kind, "unverified", request);
+  }
+});
+
+test("a request that already names a path outside passes like the absolute open; a link out still refuses (staging 2026-10-21)", () => {
+  const observer = make();
+  observer.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "../.claude/settings.json", O_RDONLY|O_CLOEXEC) = 3</tmp/.claude/settings.json>\n` +
+    `123 openat(5<${directory}/src>, "../../x", O_RDONLY) = 3</tmp/x>\n` +
+    `123 openat(AT_FDCWD, "/tmp/x", O_RDONLY) = 3</tmp/x>\n` + line("src/a.ts")));
+  assert.deepEqual(observer.finish({ traceComplete: true }),
+    { kind: "complete", files: ["src/a.ts"] });
+  for (const escaped of [
+    `123 openat(AT_FDCWD<${directory}>, "src/link", O_RDONLY) = 3</etc/hostname>\n`,
+    `123 openat(AT_FDCWD, "${directory}/src/link", O_RDONLY) = 3</etc/hostname>\n`,
+    `123 openat(5<${directory}/src>, "link", O_RDONLY) = 3</etc/hostname>\n`,
+  ]) {
+    const refused = make();
+    refused.observeChunk(Buffer.from(escaped));
+    assert.deepEqual(refused.finish({ traceComplete: true }),
+      { kind: "unverified" }, escaped);
   }
 });
