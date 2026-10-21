@@ -1,9 +1,12 @@
 const key = "tomverse-offline-draft";
+const ownerKey = "tomverse-offline-owner";
+let owner = null;
+try { owner = sessionStorage.getItem(ownerKey); } catch { /* Storage may be unavailable. */ }
 const input = document.getElementById("draft");
 const status = document.getElementById("status");
-try { input.value = sessionStorage.getItem(key) || ""; } catch { status.textContent = "Draft storage is unavailable. Keep this page open."; }
+try { const record = JSON.parse(sessionStorage.getItem(key) || "null"); input.value = owner && record?.owner === owner ? record.text : ""; } catch { status.textContent = "Draft storage is unavailable. Keep this page open."; }
 input.addEventListener("input", () => {
-  try { sessionStorage.setItem(key, input.value); status.textContent = "Draft saved in this tab."; }
+  try { if (!owner) throw Error("An online session is required before saving offline drafts."); sessionStorage.setItem(key, JSON.stringify({ owner, text: input.value })); status.textContent = "Draft saved in this tab."; }
   catch { status.textContent = "Draft storage is unavailable. Keep this page open."; }
 });
 document.getElementById("clear").addEventListener("click", () => { input.value = ""; try { sessionStorage.removeItem(key); } catch { /* Storage may be unavailable. */ } status.textContent = "Draft discarded."; });

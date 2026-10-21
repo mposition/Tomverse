@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { signOut } from "next-auth/react";
+import { signOut } from "@/lib/signOutWithDraftCleanup";
 import { Check, ExternalLink, Languages, LogOut, SunMoon, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdminRole } from "@/lib/adminAuthCore";

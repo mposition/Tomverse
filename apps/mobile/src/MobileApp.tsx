@@ -10,6 +10,7 @@ import { Sheet } from "./Sheet";
 import { mobileErrorText } from "../../../locales/mobileErrors";
 import { EmailLogin } from "./EmailLogin";
 import { AnswerContent } from "./AnswerContent";
+import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import { AccountScreen } from "./AccountScreen";
 import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
 
@@ -111,6 +112,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     setUncertain(false); setStreaming(false); localStorage.removeItem(LAST_CHAT); setSettings(false); setModelPicker(false); setProduct("chat");
     try { await transport.signOut(); } catch { setError(copy.error); }
   }
+  async function reauthenticate() {
+    setAccountOpen(false); setLoading(true);
+    await signOut();
+    setLoading(false);
+    if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true);
+    else void signIn();
+  }
   async function open(id: string) {
     const current = ++requestEpoch.current;
     setLoading(true); setError(""); setPartial(null);
@@ -169,7 +177,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}>◐</button>
     </header>
     {demo && <div className="demo-label">{copy.demo}</div>}
-    {offline && <p role="status" className="notice">You are offline. Your draft stays on this device until you reconnect.</p>}
+    {offline && <p role="status" className="notice">{mobileCompletionCopy(language).offline}</p>}
     {emailLogin && !signedIn && <EmailLogin transport={transport} language={language} onClose={() => setEmailLogin(false)} onComplete={async () => {
       const current = ++requestEpoch.current;
       setEmailLogin(false); setLoading(true); setError("");
@@ -199,10 +207,10 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       </section>
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
       <button className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><AppIcon name="spark" />{conversation?.selectionMode === "auto" ? "Smart Adaptive" : workspaceCopy.model}<span aria-hidden="true">⌄</span></button>
-      <Composer key={conversation?.id ?? "new"} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain || offline} streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} />
+      <Composer key={conversation?.id ?? "new"} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} />
     </>}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
-    {accountOpen && <Sheet title={copy.account} closeLabel={copy.close} onClose={() => setAccountOpen(false)}><AccountScreen transport={transport} language={language} onReauthenticate={() => { epoch.current++; requestEpoch.current++; abort.current?.abort(); clearNativeDrafts(); setOwner(null); setAccountOpen(false); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); setEmailLogin(true); }} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
+    {accountOpen && <Sheet title={copy.account} closeLabel={copy.close} onClose={() => setAccountOpen(false)}><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
     {settings && <Sheet title={copy.settings} closeLabel={copy.close} onClose={() => setSettings(false)}><div className="settings-panel">
       <label>{copy.language}<select value={language} onChange={(e) => setLanguage(e.target.value as MobileLanguage)}>{mobileLanguages.map((lang) => <option key={lang} value={lang}>{({ en: "English", ko: "한국어", zh: "中文", de: "Deutsch", fr: "Français", es: "Español", pt: "Português" })[lang]}</option>)}</select></label>
       <label>{copy.theme}<select value={theme} onChange={(e) => setTheme(e.target.value)}><option value="system">{copy.system}</option><option value="light">{copy.light}</option><option value="dark">{copy.dark}</option></select></label>

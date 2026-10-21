@@ -19,6 +19,8 @@ test.beforeEach(async ({ page }) => {
       const { saveMobileResponse } = await import("/src/fileSave.ts");
       transport.downloadArtifact = async () => saveMobileResponse(await fetch("/fixture-file"), "answer.txt");
       transport.account = async () => ({ id: "synthetic-demo", email: "demo@example.invalid", actionsEnabled: true });
+      const originalSignOut = transport.signOut;
+      transport.signOut = async () => { window.signOutCount = (window.signOutCount || 0) + 1; await originalSignOut(); };
       transport.exportAccount = async () => { window.exportCount = (window.exportCount || 0) + 1; if (window.requireReauth) throw { status: 428 }; };
       transport.deleteAccount = async () => { window.deleteCount = (window.deleteCount || 0) + 1; if (window.unknownDelete) throw Error("Unknown result"); };
     `;
@@ -40,6 +42,12 @@ test("unsent native drafts survive reload and model selection without a dispatch
   await page.getByRole("button", { name: "Choose model", exact: true }).click(); await page.getByRole("radio").check(); await page.getByRole("button", { name: "Apply selection", exact: true }).click();
   await expect(page.getByRole("textbox")).toHaveValue("Keep this draft"); await expect(page.locator("article.user")).toHaveCount(0);
 });
+test("offline native typing persists without a send or upload", async ({ page, context }) => {
+  await signIn(page); await context.setOffline(true);
+  await expect(page.getByRole("textbox")).toBeEnabled(); await page.getByRole("textbox").fill("An offline draft"); await page.getByRole("textbox").press("Enter");
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled(); await expect(page.locator("article.user")).toHaveCount(0);
+  await context.setOffline(false); await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("An offline draft");
+});
 test("account deletion requires typed confirmation and a deliberate click", async ({ page }) => {
   await signIn(page); await account(page); const button = page.getByRole("button", { name: "Delete my account", exact: true }); await expect(button).toBeDisabled();
   await page.getByLabel("Type DELETE MY ACCOUNT to confirm").fill("DELETE MY ACCOUNT"); await expect(button).toBeEnabled();
@@ -49,6 +57,8 @@ test("reauthentication requires an explicit user action", async ({ page }) => {
   await signIn(page); await page.evaluate(() => { (window as unknown as { requireReauth: boolean }).requireReauth = true; }); await account(page);
   await page.getByRole("button", { name: "Export my data", exact: true }).click(); await expect(page.getByRole("button", { name: "Sign in again", exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { exportCount: number }).exportCount)).toBe(1);
+  await page.getByRole("button", { name: "Sign in again", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { signOutCount: number }).signOutCount)).toBe(1);
 });
 test("an uncertain deletion is never automatically retried", async ({ page }) => {
   await signIn(page); await account(page);

@@ -36,6 +36,7 @@ import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
 import { build } from "vite";
+import ts from "typescript";
 import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 
@@ -252,6 +253,16 @@ if (output) {
     // Nothing framework- or Node-shaped may survive into the bundle. Rollup
     // would have failed on an unresolvable import, but an import that
     // *resolves* to a stub is the case this catches.
+    // Inspect import syntax: React's vendor error strings can contain "node:".
+    let hasNodeImport = false;
+    const visit = (node) => {
+      const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+        : ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(node.expression) && node.expression.text === "require") ? node.arguments[0] : null;
+      if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith("node:")) hasNodeImport = true;
+      ts.forEachChild(node, visit);
+    };
+    visit(ts.createSourceFile("bundle.mjs", bundleSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS));
+    if (hasNodeImport) failures.push("The Vite bundle contains an executable Node builtin import.");
     for (const marker of [
       "next/",
       "require(",
