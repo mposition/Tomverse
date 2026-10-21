@@ -32,7 +32,7 @@ test("the probe runs unprivileged, with no build argument and no lifecycle scrip
   assert.deepEqual(runs, ["RUN npm ci --ignore-scripts --no-audit --no-fund"]);
 });
 
-test("neither the image, the probe nor the walker turns the Chromium sandbox off", () => {
+test("the sandbox is asked for first; only the walker's retry after a refused sandbox goes without it", () => {
   const browser = read("lib/productResearchScoutBrowser.mjs");
   const scripts = [
     ["probe", read("scripts/agents/product-research-scout-s0-probe.mjs")],
@@ -42,12 +42,23 @@ test("neither the image, the probe nor the walker turns the Chromium sandbox off
     assert.equal(/--no-sandbox|--disable-setuid-sandbox|--no-zygote/.test(text), false, name);
     assert.equal(/chromiumSandbox:\s*false/.test(text), false, name);
   }
-  // Both scripts launch through the shared module, which asks for the sandbox.
-  assert.match(browser, /chromiumSandbox:\s*true/);
+  // Both scripts launch through the shared module, which asks for the sandbox unless told otherwise.
+  assert.match(browser, /export async function launch\(args, \{ sandbox = true \} = \{\}\)/);
+  assert.match(browser, /chromiumSandbox: sandbox === false \? false : true/);
   for (const [name, text] of scripts) {
     assert.match(text, /from "\.\.\/\.\.\/lib\/productResearchScoutBrowser\.mjs"/, name);
     assert.equal(/chromium\.launch\(/.test(text), false, name);
   }
+  // The probe measures the sandbox and never goes without it. The walker goes
+  // without it once, after a sandboxed launch failed and the policy allowed the retry.
+  const [, probe] = scripts[0];
+  const [, walker] = scripts[1];
+  assert.equal(/sandbox:\s*false/.test(probe), false);
+  assert.equal((walker.match(/sandbox:\s*false/g) ?? []).length, 1);
+  const sandboxed = walker.indexOf("browser = await launch(args);");
+  const guard = walker.indexOf("if (!retriesWithoutSandbox(process.env.PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK, failure)) throw error;");
+  const retry = walker.indexOf("browser = await launch(args, { sandbox: false });");
+  assert.ok(sandboxed > 0 && sandboxed < guard && guard < retry, "sandboxed launch, then the guard, then the retry");
 });
 
 test("a failed launch reports the host's sandbox conditions as short values only", async () => {
@@ -66,7 +77,8 @@ test("a failed launch reports the host's sandbox conditions as short values only
     assert.ok(value === null || typeof value === "number" || (typeof value === "string" && value.length <= 32), key);
   }
   const walker = read("scripts/agents/product-research-scout.mjs");
-  assert.match(walker, /product_research_scout_browser_launch_failed", \.\.\.launchFailure\(error\), host: sandboxHost\(\)/);
+  assert.match(walker, /const failure = launchFailure\(error\);/);
+  assert.match(walker, /product_research_scout_browser_launch_failed", \.\.\.failure, host: sandboxHost\(\)/);
 });
 
 test("the probe is a local tool: it reads only its switch, and no Railway service runs it", async () => {
@@ -87,6 +99,7 @@ test("the walker runs daily at 18:00 UTC with its switch, URL and secret, and no
     "PRODUCT_RESEARCH_SCOUT_ENABLED",
     "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
     "PRODUCT_RESEARCH_SCOUT_INGEST_URL",
+    "PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK",
   ]);
 
   const { AGENT_RUNNER_SERVICES } = await import("../.railway/agent-runners.ts");
