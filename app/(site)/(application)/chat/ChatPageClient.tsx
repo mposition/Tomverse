@@ -10040,10 +10040,10 @@ export function ChatPageClient({
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? (text, modelId) => {
+          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
-            } else handleStartImageDraft(text, modelId);
+            } else handleStartImageDraft(text, modelId, options);
           } : undefined}
           imageWorkspace={imageWorkspaceElement}
           starterGallery={starterGalleryElement}
@@ -10210,10 +10210,10 @@ export function ChatPageClient({
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? (text, modelId) => {
+          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
-            } else handleStartImageDraft(text, modelId);
+            } else handleStartImageDraft(text, modelId, options);
           } : undefined}
           imageWorkspace={imageWorkspaceElement}
           starterGallery={starterGalleryElement}

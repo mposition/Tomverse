@@ -339,7 +339,11 @@ for (const theme of THEMES) {
         // path `tests/e2e/comparison-review.spec.ts` established, plus the
         // determinism `enterConversation` would otherwise have applied.
         await prepareGuestPage(page, lang);
-        await mockAuthenticatedApi(page, { selectedModels: [...reviewModels] });
+        const account = await mockAuthenticatedApi(page, {
+          selectedModels: [...reviewModels],
+          language: lang,
+        });
+        account.theme = theme;
         await setDeterministicTheme(page, theme);
         await suppressTransientUi(page);
         await mockConversationHistory(page);
