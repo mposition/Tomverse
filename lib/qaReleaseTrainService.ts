@@ -14,6 +14,7 @@
  * branch was pushed is never started again.
  */
 import {
+  QA_RELEASE_TRAIN_LEFT_OUT,
   QA_RELEASE_TRAIN_MAX_CARGO,
   orderQaReleaseTrainCandidates,
   parseQaReleaseTrainSlots,
@@ -153,6 +154,6 @@ export async function runQaReleaseTrainRound(
     slot: departure.slot,
     pullRequestNumber: number,
     included: picks.filter((p) => p.outcome === "included").length,
-    leftOut: picks.filter((p) => p.outcome === "conflict" || p.outcome === "over_capacity").length,
+    leftOut: picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome)).length,
   };
 }
