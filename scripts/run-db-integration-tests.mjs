@@ -868,7 +868,7 @@ run(
     "tests/integration/chat-refiner-initial-auto-release.db.test.ts"],
   "Running the Prompt Refiner Auto budget hold transaction scenarios",
 );
-// Chat's lifecycle route tests replace identity and deployment switches only.
+// Chat's lifecycle fixtures include identity, switches and real-query timing.
 // Keep their module mocks isolated from the ordinary database batch.
 run(
   ["--conditions=react-server", "--experimental-test-module-mocks",
