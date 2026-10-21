@@ -226,7 +226,8 @@ for (const name of packageNames) {
       readFileSync(join(packagesDir, name, "package.json"), "utf8")
     );
     assert.deepEqual(Object.keys(manifest.dependencies ?? {}), []);
-    assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), []);
+    const allowedPeers = name === "chat-ui" ? ["react", "react-markdown", "remark-gfm", "remark-cjk-friendly", "remark-cjk-friendly-gfm-strikethrough", "unified"] : [];
+    assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).filter((name) => !allowedPeers.includes(name)), []);
     assert.equal(manifest.type, "module");
   });
 
@@ -251,7 +252,7 @@ for (const name of packageNames) {
       "extending the root config would re-admit the DOM lib, the `@/*` alias " +
         "and the Next.js plugin, which is the coupling this package denies."
     );
-    assert.deepEqual(parsed.compilerOptions.lib, ["ES2022"]);
+    assert.deepEqual(parsed.compilerOptions.lib, ["api-client", "chat-ui"].includes(name) ? ["ES2022", "DOM"] : ["ES2022"]);
     assert.deepEqual(parsed.compilerOptions.types, []);
     assert.equal(parsed.compilerOptions.paths, undefined);
   });

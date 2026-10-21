@@ -4,6 +4,8 @@ export type ChatMessage = {
   content: string;
   modelId?: string;
   status?: string;
+  artifacts?: import("../../../lib/generatedArtifactCore").ChatStreamArtifact[];
+  searchMetadata?: { citations: Array<{ url: string; title?: string }> };
   attachments?: import("../../../components/chat/types").ChatAttachment[];
 };
 export type Conversation = {
@@ -19,6 +21,10 @@ export type ChatSummary = Pick<Conversation, "id" | "title">;
 export type MobileAttachment = { uploadId: string; name: string; key: string; mediaType: string; size: number };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: string };
 export interface ChatTransport {
+  account(): Promise<{ id: string; email?: string | null; actionsEnabled: boolean }>;
+  exportAccount(): Promise<void>;
+  deleteAccount(confirmationText: string): Promise<void>;
+  downloadArtifact(artifact: import("../../../lib/generatedArtifactCore").ChatStreamArtifact): Promise<void>;
   onSessionLost?(listener: () => void): () => void;
   session(): Promise<boolean>;
   signIn(): Promise<void>;

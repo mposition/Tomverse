@@ -48,7 +48,7 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
     {voice.state.status === "error" && <p role="alert" className="notice error">{copy.microphone}<button onClick={voice.dismissError}>×</button></p>}
     {files.length > 0 && <ul className="attachments">{files.map((file) => <li key={file.uploadId}>{file.name}<button aria-label={`${copy.remove}: ${file.name}`} onClick={() => setFiles((items) => items.filter((item) => item.uploadId !== file.uploadId))}>×</button></li>)}</ul>}
     <form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-      <textarea aria-label={copy.placeholder} placeholder={copy.placeholder} rows={2} value={draft} disabled={disabled || streaming || voiceBusy}
+      <textarea maxLength={40000} aria-label={copy.placeholder} placeholder={copy.placeholder} rows={2} value={draft} disabled={disabled || streaming || voiceBusy}
         onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); submit(); } }} />
       <div className="composer-actions"><div className="input-tools">

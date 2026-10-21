@@ -143,6 +143,10 @@ export const applyMobileIdentityHeaders = (
 /** Exact native Chat enrollment; callers supply the default-off deployment flag. */
 export function nativeChatBearerRoute(path: string, method: string, enabled = false): boolean {
   if (!enabled) return false;
+  if (path === "/api/user/account") return ["GET", "DELETE"].includes(method);
+  if (path === "/api/user/account/export") return ["GET", "POST"].includes(method);
+  if (/^\/api\/user\/account\/export\/[A-Za-z0-9_-]{32,128}$/.test(path)) return method === "GET";
+  if (/^\/api\/artifacts\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
   if (path === "/api/chat") return ["POST", "PUT", "PATCH"].includes(method);
   if (path === "/api/conversations") return method === "GET";
   if (path === "/api/products/chat/conversations") return method === "POST";

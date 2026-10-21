@@ -106,6 +106,7 @@ type PromptPayload = {
 };
 
 export type DesktopChatShellProps = {
+  workspaceNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   studioStarterCards?: readonly VisibleStarterCard[];
@@ -409,6 +410,7 @@ export type DesktopChatShellProps = {
 };
 
 export function DesktopChatShell({
+  workspaceNotice,
   review,
   chatWorkspace,
   studioStarterCards,
@@ -1104,6 +1106,7 @@ export function DesktopChatShell({
             })}
           </div>
         )}
+        {workspaceNotice}
         <div
           ref={setConversationDropSurface}
           data-testid="desktop-conversation-surface"

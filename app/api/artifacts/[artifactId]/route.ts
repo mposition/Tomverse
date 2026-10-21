@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -50,7 +48,9 @@ export async function GET(
   context: RouteContext<"/api/artifacts/[artifactId]">
 ) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     const userId = (session?.user as { id?: string } | undefined)?.id;
     if (!userId) {
       return NextResponse.json({ error: "Login required" }, { status: 401 });

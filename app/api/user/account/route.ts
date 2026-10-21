@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { after, NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession, resolveAccountRouteSession } from "@/lib/chatRouteSession";
 import { scheduleTomverseAccountDeletion } from "@/lib/accountDeletion";
 import { ACCOUNT_DELETION_SCHEDULED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
@@ -28,7 +27,9 @@ const deleteAccountSchema = z
 
 export async function DELETE(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveAccountRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Authentication required." },
@@ -104,4 +105,14 @@ export async function DELETE(req: Request) {
       { status: 500 }
     );
   }
+}
+
+export async function GET(req: Request) {
+  const authentication = await resolveChatRouteSession(req);
+  if (authentication.response) return authentication.response;
+  const user = authentication.session?.user;
+  if (!user?.id) return NextResponse.json({ code: "AUTHENTICATION_REQUIRED" }, { status: 401 });
+  return NextResponse.json({ id: user.id, email: user.email, name: user.name,
+    actionsEnabled: !req.headers.has("authorization") || process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED === "true",
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }
