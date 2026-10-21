@@ -1323,8 +1323,8 @@ export function ChatSidebar({
               floats over this row and is why it reserves pr-16) never comes to
               rest on top of a scrolled conversation row or the search field.
             */}
-            <div className={`${isMobileDrawer ? "sticky top-0 z-10 bg-zinc-50 p-3 pr-16 dark:bg-zinc-950" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
-                <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8" : "h-9 w-9"}`}>
+            <div className={`${isMobileDrawer ? "sticky top-0 z-10 flex-wrap bg-zinc-50 p-3 pr-16 dark:bg-zinc-950" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
+                <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8 shrink-0" : "h-9 w-9"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                         src="/tomverse-logo.png"
