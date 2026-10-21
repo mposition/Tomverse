@@ -272,6 +272,10 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
 12. **승인 범위.** 접수 클라이언트와 내부 route, 운영 범위 설정, checkout 준비와 CLI 읽기 도구 연결,
     무인 등록 Guard, 계획 검토 화면을 만드는 코드를 승인한다. 병합, 배포, 자격증명 발급, 스위치
     켜기는 각각 별개다.
+    - 2026-10-21 운영자 mposition: staging의 첫 무인 분석이 계획을 만든 뒤 무인 등록을 승인했다.
+      코드 래치 `AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED`를 연다. 환경마다
+      `TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION`과 기존 분석 스위치가 그대로 결정하며, production은 그
+      스위치를 켜기 전까지 꺼져 있다.
 
 **공통 기반 설계 체크리스트 중 이 개정이 바꾸는 항목.** 나머지 항목은 v4~v18의 답이 그대로다.
 

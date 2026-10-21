@@ -22,7 +22,7 @@ const serviceSource = readFileSync(
   "utf8",
 );
 
-test("system registration remains code-latched off when every env switch is enabled", () => {
+test("system registration needs the open code latch and every env switch, the dedicated one included", () => {
   const env = {
     [AMUX_V19_SYSTEM_REGISTRATION_ENV]: "enabled",
     TOMVERSE_AMUX_SESSION_INTAKE: "enabled",
@@ -34,8 +34,17 @@ test("system registration remains code-latched off when every env switch is enab
     TOMVERSE_AMUX_V4_UNIT_WRITE: "enabled",
     TOMVERSE_AMUX_V4_PORTFOLIO_WRITE: "enabled",
   };
-  assert.equal(AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED, false);
-  assert.equal(amuxV19SystemRegistrationEnabled(env), false);
+  // Owner approval in chat, 2026-10-21: the code latch is open; environments
+  // still decide with their switches (production has none set).
+  assert.equal(AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED, true);
+  assert.equal(amuxV19SystemRegistrationEnabled(env), true);
+  for (const name of Object.keys(env)) {
+    const missing = { ...env };
+    delete missing[name];
+    assert.equal(amuxV19SystemRegistrationEnabled(missing), false, name);
+    assert.equal(amuxV19SystemRegistrationEnabled({ ...env, [name]: "true" }), false, name);
+  }
+  assert.equal(amuxV19SystemRegistrationEnabled({}), false);
 });
 
 test("the ungated system registration primitive accepts only an isolated local test DB", () => {

@@ -8,12 +8,14 @@ import { AMUX_V4_IDEA_SYSTEM_ACTOR,
 import type { AmuxDigestKey } from "./ideaCrypto.ts";
 
 /**
- * Intake v19 autonomous registration stays dark until a later activation PR
- * deliberately opens both this code latch and the dedicated environment
- * switch. The existing intake, analysis and budget switches remain separate
- * prerequisites; this helper never changes them.
+ * Intake v19 autonomous registration: the owner approved it in chat on
+ * 2026-10-21, after the first unattended staging analysis produced a plan.
+ * This code latch is open; each environment still decides with the
+ * dedicated switch below (set on staging, absent in production) and the
+ * existing intake, analysis and budget switches, which this helper never
+ * changes.
  */
-export const AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED = false;
+export const AMUX_V19_SYSTEM_REGISTRATION_CODE_ENABLED = true;
 export const AMUX_V19_SYSTEM_REGISTRATION_ENV =
   "TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION";
 
