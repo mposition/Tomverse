@@ -80,6 +80,59 @@ test("turning on a model whose worst case is unbounded is refused by the judge, 
   assert.equal(models.find((m) => m.id === heldSeed.id).disabledReason, "worst_case_cost_unbounded");
 });
 
+test("a thinking cap stated for a provider whose request cannot hold it does not unbound the hold", () => {
+  // Google bills thinking per token with no request parameter that caps it.
+  // A revision may still write a number into thinkingCapMicroUsd; turning the
+  // model on with that number must not reserve less than the call can spend.
+  const googleRevision = (modelId) => ({
+    modelId,
+    pricingVersion: `${modelId}-stated-cap`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits: 10_000, outputCostMicroUsd: 67_000 }],
+    verification: {
+      verifiedAt: "2026-10-19",
+      sources: ["https://ai.google.dev/gemini-api/docs/pricing"],
+      thinkingCapMicroUsd: 2_000,
+    },
+  });
+
+  const seeded = resolve([row(heldSeed.id, { enabled: true })], [googleRevision(heldSeed.id)]);
+  assert.equal(heldSeed.provider, "google");
+  assert.equal(seeded.models.find((m) => m.id === heldSeed.id).disabledReason, "worst_case_cost_unbounded");
+
+  const profile = {
+    provider: "google",
+    apiModelId: "gemini-runtime-image",
+    name: "Runtime Gemini Image",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "balanced",
+    provenance: ["synthid"],
+    outputMimeTypes: ["image/jpeg"],
+    maxOutputTokens: 32_768,
+  };
+  const runtime = resolve(
+    [row("gemini-runtime-image", { profile, enabled: true })],
+    [googleRevision("gemini-runtime-image")]
+  );
+  assert.equal(
+    runtime.models.find((m) => m.id === "gemini-runtime-image").disabledReason,
+    "worst_case_cost_unbounded"
+  );
+
+  // The same judge admits fal's flat high-thinking surcharge as a bound.
+  const fal = IMAGE_MODEL_REGISTRY.find((model) => model.provider === "fal");
+  assert.deepEqual(judge()(fal), { admitted: true });
+  const statedGoogle = {
+    ...heldSeed,
+    disabledReason: null,
+    prices: googleRevision(heldSeed.id).prices,
+    priceVerification: googleRevision(heldSeed.id).verification,
+  };
+  assert.ok(judge()(statedGoogle).reasons.includes("worst_case_cost_unbounded"));
+});
+
 test("turning on an admitted model serves it; a missing provider budget refuses it", () => {
   const on = resolve([row(enabledSeed.id, { enabled: true })]);
   assert.equal(on.models.find((m) => m.id === enabledSeed.id).disabledReason, null);

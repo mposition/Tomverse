@@ -202,6 +202,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **provider budget은 경로별 실발생 원가로 정산한다**: 성공 = 실비,
   moderation 차단·provider 오류 = 발생한 원가를 budget에 기록(사용자는
   전액 환급, 차액은 Tomverse 부담), provider 미호출 실패 = 예약 전액 해제.
+  성공의 thinking 몫은 예약이 고정한 cap이다. 요청당 고정 할증(fal high
+  thinking)은 응답이 thinking을 보고하지 않아도 cap으로, 그 밖의 provider는
+  thinking이 보고됐을 때만 cap으로 기록한다(`settledThinkingCostMicroUsd`).
 - 사용자 응답에 원시 내부 USD를 노출하지 않고, 모든 limit 오류의
   `resetAt`은 생성 시점보다 미래여야 한다.
 
@@ -597,6 +600,20 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 세 모델은 `worst_case_cost_unbounded`를 유지한다. 재검토 조건은 Google이 thinking
 토큰 상한을 거는 요청 파라미터를 제공하거나, 공식 문서가 과금 대상의 상한을
 명시하는 경우다.
+
+**상한인지 아닌지는 데이터가 아니라 코드가 정한다 (2026-10-21).** 동적 카탈로그의
+가격 개정은 `thinkingCapMicroUsd`에 숫자를 적을 수 있지만, 그 숫자가 상한이 되려면
+우리가 보내는 요청이 그것을 지킬 수 있어야 한다. `imageThinkingCapEnforced`
+(`lib/imageModelRegistry.ts`)가 provider별로 답한다 — OpenAI·xAI는 이미지 요청에
+thinking 과금이 없고, fal은 요청이 고정한 `thinking_level: "high"`에 대한 요청당
+고정 할증이며, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. 그래서 cap을
+적은 Google 개정도 판정·최악 원가·어댑터 dispatch에서 모두 거절된다. Google을 여는
+것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
+
+2026-10-14 갱신된 thinking 가이드(`https://ai.google.dev/gemini-api/docs/thinking`)는
+`max_output_tokens`가 thought 토큰을 포함한 hard cutoff라고 적는다. 이미지 모델에 대한
+문장이 아니고 위 2026-08-14 실측과 반대다. 재검토 조건의 문서 쪽이 충족됐을 수 있지만,
+상한으로 쓰려면 새 실측(유료, §15 예산 승인 필요)이 먼저다.
 
 #### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 절차 (2026-08-14 실행 완료, 판정 부정)
 
