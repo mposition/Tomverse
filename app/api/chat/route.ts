@@ -2032,7 +2032,7 @@ async function handleChatPost(
         });
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
-        // model; any failure uses a file-capable eligible fallback when available.
+        // model; a missing decision keeps the ordinary Auto choice and recovery.
         const fileRoutingContext = {
             isAuthenticated: Boolean(session?.user?.id),
             canPersist: Boolean(session?.user?.id && conversationId && assistantMessageId),
