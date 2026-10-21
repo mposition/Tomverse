@@ -43,7 +43,6 @@ const systemBlockInput = (overrides = {}) => ({
     nativeSearchForced: false,
     appManagedSearchEnabled: false,
     turnAttachments: [],
-    promptText: "carry on",
     imageGenerationFlagEnabled: false,
     planAllowsImageGeneration: false,
     ...overrides,
