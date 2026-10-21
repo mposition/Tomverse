@@ -1190,6 +1190,7 @@ export const fr = {
         dailyCreditsUnlimitedStandard: "Aucune limite quotidienne de crédits sur les modèles Standard",
         planCreditsRemaining: "Crédits mensuels restants",
         purchasedCreditsRemaining: "Crédits achetés restants",
+        extraUsageAvailable: "Une utilisation supplémentaire est disponible",
         planCreditsCompact: "Mensuel : {count} crédits restants",
         analyticsSettings: "Paramètres d’analyse",
         analyticsCookieSettings: "Paramètres des cookies analytiques",

@@ -106,9 +106,10 @@ export function decideWebSearchBadge(input: {
     if (isDeepResearch) {
         return { shown: true, status: "deep-research" };
     }
-    if (!meta.requested) return { shown: true, status: "not-searched" };
+    if (!meta.requested) return HIDDEN;
     if (!meta.supported) return { shown: true, status: "unsupported" };
     if (meta.failureCode) return { shown: true, status: "failed" };
     if (meta.executed) return { shown: true, status: "executed" };
-    return { shown: true, status: "requested-not-executed" };
+    // Quiet no-search/refund outcomes do not add labels to the answer.
+    return HIDDEN;
 }

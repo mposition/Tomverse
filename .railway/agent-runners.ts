@@ -117,6 +117,23 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
 ] as const;
 
 /**
+ * The QA-release merge lane's variables: exactly the list
+ * lib/qaReleaseServiceEnvCore.ts accepts at start (tests/agentRunnerIac.test.mjs
+ * holds the two equal). The service refuses to start with any other name.
+ */
+const QA_RELEASE_MERGE_LANE_VARIABLES = [
+  "QA_RELEASE_MERGE_LANE_SECRET",
+  "QA_RELEASE_MERGE_LANE_APP_ID",
+  "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY",
+  "QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN",
+  "QA_RELEASE_MERGE_LANE_ENABLED",
+  "QA_RELEASE_MERGE_LANE_KILL_SWITCH",
+  "QA_RELEASE_CONTROL_REVISION",
+  "QA_RELEASE_TRAIN_ENABLED",
+  "QA_RELEASE_TRAIN_SLOTS",
+] as const;
+
+/**
  * The Scout walker's variables (docs/policy/product-research-agent.md §13):
  * its switch, the app's scout route and the shared secret. It holds no model
  * key and no database credential.
@@ -125,6 +142,8 @@ const PRODUCT_RESEARCH_SCOUT_VARIABLES = [
   "PRODUCT_RESEARCH_SCOUT_ENABLED",
   "PRODUCT_RESEARCH_SCOUT_INGEST_URL",
   "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
+  // Optional: `off` stops the unsandboxed retry (docs/policy/product-research-agent.md §12).
+  "PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK",
 ] as const;
 
 /**
@@ -270,6 +289,21 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: PRODUCT_RESEARCH_VARIABLES,
       staging: PRODUCT_RESEARCH_VARIABLES,
+    },
+  },
+  {
+    key: "qa_release_merge_lane",
+    service: "QA Release Merge Lane",
+    // Node directly, not npm run: the start check refuses any name it does
+    // not know, and npm adds npm_* variables.
+    startCommand: "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs",
+    // Every 10 minutes. Each run does the develop lane round when that is on,
+    // then the release train when QA_RELEASE_TRAIN_ENABLED is true.
+    cronSchedule: "*/10 * * * *",
+    // Production only: the lane's state (attempt, latch, operator control)
+    // lives in the production database.
+    environments: {
+      production: QA_RELEASE_MERGE_LANE_VARIABLES,
     },
   },
   {

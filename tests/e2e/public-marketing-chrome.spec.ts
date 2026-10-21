@@ -88,7 +88,10 @@ test("German pricing remains readable at 160px with enlarged text", async ({ pag
   await page.goto("/de/pricing");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
   await page.evaluate(() => document.fonts.ready);
-  await page.addStyleTag({ content: "html { font-size: 104% !important; }" });
+  // Through the CSSOM, not `addStyleTag`: an injected <style> has no nonce, and
+  // WebKit rejects it under the E2E server's report-only style-src even though
+  // nothing is enforced. An inline style set from script is not subject to it.
+  await page.evaluate(() => document.documentElement.style.setProperty("font-size", "104%", "important"));
   await expectNoHorizontalOverflow(page);
 });
 

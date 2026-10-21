@@ -1,5 +1,11 @@
 ﻿"use client";
 
+import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
+import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
+import { askReviewRoute } from "@/lib/reviewRoutingClient";
+import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import { reviewProviderPanels } from "@/lib/reviewProviderTranscript";
+import { flushSync } from "react-dom";
 import React, {
   useState,
   useEffect,
@@ -133,6 +139,9 @@ import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraf
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
+import { askChatImageIntent } from "@/lib/chatImageIntentClient";
+import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
   type ChatStarterEntry,
@@ -663,6 +672,9 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  /** The image-intent call already answered "chat" for this exact draft. */
+  imageIntentChecked?: boolean;
+  reviewRouteChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
   /**
@@ -731,6 +743,8 @@ export function ChatPageClient({
   guestDefaultModelId,
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
+  chatImageIntentEnabled = false,
+  reviewEasyAvailable = false,
   voiceInputEnabled = false,
   promptRefinerMode = "off",
   promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: false },
@@ -751,6 +765,15 @@ export function ChatPageClient({
   guestBrandTrioModelIds?: readonly string[];
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  /**
+   * Whether a chat send first asks the Auto router's model (POST
+   * /api/chat/image-intent) and hands an image request to the image
+   * workspace with the triaged model and preset. Resolved server-side; off
+   * unless Admin Console › Routing names a router model and turns image
+   * triage on.
+   */
+  chatImageIntentEnabled?: boolean;
+  reviewEasyAvailable?: boolean;
   /**
    * The voice input opt-in flag AND its kill switch AND the signed-in
    * requirement, already folded into one boolean on the server
@@ -956,9 +979,14 @@ export function ChatPageClient({
   const [imageHandoffAutoGenerate, setImageHandoffAutoGenerate] = useState(false);
   const [imageDraftAutoGenerate, setImageDraftAutoGenerate] = useState(false);
   // Set only when the user reached the draft by choosing a model in the
-  // catalogue's image tab; otherwise the workspace keeps its own default.
+  // catalogue's image tab, or the image-intent triage chose one; otherwise
+  // the workspace keeps its own default.
   const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
     string[] | undefined
+  >(undefined);
+  // The image-intent triage's preset, for the same landing only.
+  const [imageDraftSeedPreset, setImageDraftSeedPreset] = useState<
+    ImagePreset | undefined
   >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
@@ -1001,6 +1029,15 @@ export function ChatPageClient({
   const activeConversationStorageKey = isGuestMode
     ? guestActiveChatStorageKey
     : GUEST_ACTIVE_CHAT_STORAGE_KEY;
+  const reviewWorkspace = useReviewWorkspace(identityKey, reviewEasyAvailable && !isGuestMode, currentChatId);
+  const chatWorkspace = useWorkspaceAppearance("chat");
+  const reviewWorkspaceRef = useRef(reviewWorkspace);
+  useLayoutEffect(() => { reviewWorkspaceRef.current = reviewWorkspace; }, [reviewWorkspace]);
+  const reviewRoutingPendingRef = useRef(false);
+  const reviewProfessionalSelectionRef = useRef<{
+    identityKey: string | null; ticket: number; models: string[]; disabled: string[];
+  } | null>(null);
+  const reviewImageSeedRouteRef = useRef<{ text: string; modelIds: string[]; preset: ImagePreset } | null>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
 
@@ -2128,6 +2165,8 @@ export function ChatPageClient({
   const webSearchModeRef = useRef(webSearchMode);
   const pendingProfileIdRef = useRef(pendingProfileId);
   const isImageDraftActiveRef = useRef(isImageDraftActive);
+  // A second press while the image-intent call is out is the same send.
+  const imageIntentCheckPendingRef = useRef(false);
   // One serialized, coalescing PATCH queue per conversation. Never aborts an
   // in-flight write (an aborted fetch still commits server-side, which is
   // exactly the out-of-order overwrite this replaces) -- a newer change is
@@ -4419,7 +4458,14 @@ export function ChatPageClient({
     const handleStartImageDraft = (
         draftText: string,
         modelId?: string,
-        options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
+        options?: {
+            fromImageRequest?: boolean;
+            chatDraftOnReturn?: string;
+            /** The image-intent triage's preset; the workspace default otherwise. */
+            preset?: ImagePreset;
+            /** The image-intent triage's models; wins over `modelId` when non-empty. */
+            modelIds?: readonly string[];
+        }
     ) => {
         if (promptRefinerMode === "e2e_fixture") {
             // The no-cost Refiner fixture cannot hand an accepted synthetic
@@ -4446,7 +4492,14 @@ export function ChatPageClient({
             Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
         );
         setImageDraftSeedPrompt(draftText);
-        setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setImageDraftSeedModelIds(
+            options?.modelIds?.length
+                ? [...options.modelIds]
+                : modelId
+                  ? [modelId]
+                  : undefined
+        );
+        setImageDraftSeedPreset(options?.preset);
         setImageWorkspaceKey(nextImageDraftKey());
         setIsImageDraftActive(true);
         currentChatIdRef.current = null;
@@ -4489,6 +4542,7 @@ export function ChatPageClient({
         setIsImageDraftActive(false);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setChatDraftBeforeImage(null);
         if (restore) {
             currentChatIdRef.current = restore.scopeId;
@@ -4506,6 +4560,7 @@ export function ChatPageClient({
         setIsImageDraftActive(true);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setImageWorkspaceKey(nextImageDraftKey());
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
@@ -4540,6 +4595,7 @@ export function ChatPageClient({
         // paid to generate -- next to an enabled submit button.
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageDraftSeedPreset(undefined);
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = conversation.id;
         setCurrentChatId(conversation.id);
@@ -5620,6 +5676,89 @@ export function ChatPageClient({
       // marker would not survive every restore/remount path safely.
       return;
     }
+    if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy" &&
+      !options?.reviewRouteChecked && !isImageDraftActiveRef.current) {
+      if (!isModelSelectionReady || !isInitialConversationResolved) return;
+      if (!reviewEasyAvailable || isGuestMode) {
+        reviewWorkspace.setError(reviewWorkspaceCopy[lang].unavailable);
+        return;
+      }
+      if (reviewRoutingPendingRef.current) return;
+      const routeText = options?.overrideText ?? inputValue;
+      if (!routeText.trim()) return;
+      const providers = (reviewWorkspace.providers.length ? reviewWorkspace.providers :
+        [...new Set(selectedModels.filter(id => !disabledPanels.includes(id)).flatMap(id => {
+          const model = getModel(id); return model ? [model.provider] : [];
+        }))]).slice(0, Math.min(3, maxSelectableModels));
+      if (!providers.length) return;
+      const scope = composerDraftConversationId;
+      const routeRequestedKind = reviewWorkspace.imagePromptMode;
+      const ticket = conversationSelectionTicketRef.current;
+      const epoch = submitIdentityFenceRef.current.epoch;
+      const owner = identityKey;
+      const draft = readDraft(scope);
+      const attachmentIds = draft.attachments.map(attachment => attachment.id);
+      reviewRoutingPendingRef.current = true;
+      reviewWorkspace.setPending(true);
+      reviewWorkspace.setError(null);
+      let decision;
+      try {
+        const previous = latestLocalComparisonPromptRef.current
+          ? localComparisonResponsesRef.current.get(latestLocalComparisonPromptRef.current)?.values().next().value : undefined;
+        decision = await askReviewRoute({ text: routeText, providers, context: previous?.slice(0, 600),
+          requestedKind: routeRequestedKind ? "image" : undefined,
+          hasImages: draft.attachments.some(attachment => attachment.mediaType.startsWith("image/")) });
+      } finally {
+        reviewRoutingPendingRef.current = false;
+        reviewWorkspaceRef.current.setPending(false);
+      }
+      const live = readDraft(scope);
+      const liveProviders = reviewWorkspaceRef.current.providers.length ? reviewWorkspaceRef.current.providers :
+        [...new Set(latestModelSettingsRef.current.models.filter(id => !latestModelSettingsRef.current.disabled.includes(id)).flatMap(id => {
+          const model = getModel(id); return model ? [model.provider] : [];
+        }))];
+      if (!owner || owner !== identityNamespaceKey(identityNamespaceRef.current) ||
+        epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
+        live.text !== draft.text || !sameStringList(attachmentIds, live.attachments.map(a => a.id)) ||
+        reviewWorkspaceRef.current.mode !== "easy" ||
+        reviewWorkspaceRef.current.imagePromptMode !== routeRequestedKind ||
+        (liveProviders.length > 0 && !sameStringList(providers, liveProviders))) return;
+      if (!decision) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
+      if (decision.kind === "blocked") {
+        reviewWorkspace.setError(t(imageGenerationEnabled ? "chat.imageGenerationPlanGateBody" : "chat.imageGenerationDisabledNotice")); return;
+      }
+      const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
+      if (decision.kind === "image") {
+        if (chosen.length > imageGroupMaxModelsProp) {
+          reviewWorkspace.setError(t("chat.imageGenerationModelLimitNotice").replace("{max}", String(imageGroupMaxModelsProp))); return;
+        }
+        reviewImageSeedRouteRef.current = { text: routeText.trim(), modelIds: chosen, preset: decision.preset };
+        reviewWorkspace.setImageRequest(true);
+        reviewWorkspace.setUnsupportedProviders(decision.choices.filter(choice => !choice.modelId).map(choice => choice.provider));
+        if (chosen.length) handleStartImageDraft(routeText, undefined, {
+          fromImageRequest: true, modelIds: chosen, preset: decision.preset,
+        });
+        return;
+      }
+      if (!chosen.length || decision.choices.some(choice => !choice.modelId)) {
+        reviewWorkspace.setError(reviewWorkspaceCopy[lang].noText); return;
+      }
+      reviewWorkspace.setImageRequest(false);
+      reviewWorkspace.setUnsupportedProviders([]);
+      const manualSelection = reviewProfessionalSelectionRef.current;
+      if (manualSelection?.identityKey !== owner || manualSelection.ticket !== ticket) {
+        reviewProfessionalSelectionRef.current = {
+          identityKey: owner, ticket, models: [...latestModelSettingsRef.current.models],
+          disabled: [...latestModelSettingsRef.current.disabled],
+        };
+      }
+      // Commit both the panels and the submit closure before ordinary dispatch.
+      flushSync(() => mutateModelSettings(currentChatIdRef.current, chosen, []));
+      if (owner !== identityNamespaceKey(identityNamespaceRef.current) ||
+        epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
+        !sameStringList(chosen, latestModelSettingsRef.current.models)) return;
+      return handleGlobalSubmitRef.current({ ...options, reviewRouteChecked: true, imageIntentChecked: true });
+    }
     // A restored Guest `auto` value is an intent, not routing authority. The
     // background capability read will either confirm it or return the UI to
     // manual; until then every submit entry point stays closed instead of
@@ -5634,6 +5773,79 @@ export function ChatPageClient({
       }) === "awaiting_capability"
     ) {
       return;
+    }
+    /*
+      A composer send that asks for a picture goes to the image workspace
+      instead of to chat, decided by one small model call before anything is
+      saved (lib/chatImageIntent.ts). It is the image-intent chip's handoff,
+      taken on the user's behalf: no server row, the draft comes back on
+      cancel, and the workspace generates on arrival only for an account that
+      turned that on beside the price -- otherwise it waits on the price for
+      one press. Any failure or "no" falls through to the ordinary send.
+
+      In Review the models already chosen for the comparison make the image:
+      each one's maker's image model, side by side, with only the preset left
+      to the triage. Chat lets the triage pick the model as well.
+    */
+    if (
+      options === undefined &&
+      chatImageIntentEnabled &&
+      !isGuestMode &&
+      imageGenerationEnabled &&
+      planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
+      mountedSurface === "chat" &&
+      !isImageDraftActiveRef.current &&
+      attachments.length === 0 &&
+      inputValue.trim().length > 0
+    ) {
+      if (imageIntentCheckPendingRef.current) return;
+      const intentText = inputValue;
+      const intentScope = composerDraftConversationId;
+      const intentTicket = conversationSelectionTicketRef.current;
+      const intentIdentityEpoch = submitIdentityFenceRef.current.epoch;
+      imageIntentCheckPendingRef.current = true;
+      let decision: ChatImageDecision = { image: false };
+      try {
+        decision = await askChatImageIntent(intentText);
+      } finally {
+        imageIntentCheckPendingRef.current = false;
+      }
+      /*
+        The answer is about the text as it was pressed. A draft edited, given
+        an attachment, or left for another conversation during the wait is a
+        different request: neither handed off (it could start a paid
+        generation for words already withdrawn, and cancel would restore the
+        stale text over the edit) nor sent from this render's stale closure.
+        The next press decides it. The identity fence comes first: after an
+        account switch the same text in the new account's draft is not this
+        request either.
+      */
+      const liveDraft = readDraft(intentScope);
+      if (
+        !identityKey ||
+        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
+        intentIdentityEpoch !== submitIdentityFenceRef.current.epoch ||
+        !activeChatIdentityIs(identityKey, intentIdentityEpoch) ||
+        submitIdentityFenceRef.current.identityKey !== identityKey ||
+        intentTicket !== conversationSelectionTicketRef.current ||
+        isImageDraftActiveRef.current ||
+        liveDraft.text !== intentText ||
+        liveDraft.attachments.length > 0
+      ) {
+        return;
+      }
+      if (decision.image) {
+        // The triage's models and preset seed the workspace; a choice the
+        // catalogue cannot honour falls back to its defaults there.
+        handleStartImageDraft(intentText, undefined, {
+          fromImageRequest: true,
+          modelIds: decision.modelId ? [decision.modelId] : undefined,
+          preset: decision.preset ?? undefined,
+        });
+        return;
+      }
+      // Re-entered through the ref so the ordinary send runs on current state.
+      return handleGlobalSubmitRef.current({ imageIntentChecked: true });
     }
     const waitForCommittedAutoScope = async (
       expectedConversationId: string,
@@ -8337,7 +8549,7 @@ export function ChatPageClient({
   // handleGlobalSubmit itself in the dependency array, which would fire the
   // effect on every render instead of only when selectedModels changes.
   const handleGlobalSubmitRef = useRef(handleGlobalSubmit);
-  useEffect(() => {
+  useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
   const pendingDeepResearchSubmitRef = useRef<{
@@ -9537,14 +9749,38 @@ export function ChatPageClient({
   const starterGalleryElement =
     starterCards.length > 0 ? (
       <ChatStarterGallery
-        cards={starterCards}
+        cards={mountedSurface === "workspace" && reviewWorkspace.appearance === "studio"
+          ? starterCards.filter(card => !["document-questions", "compare-image-models", "sourced-answer", "debug-stack-trace", "spreadsheet-from-answer"].includes(card.entry.id)) : starterCards}
         onSeed={handleStarterSeed}
         onLocked={handleStarterLocked}
       />
     ) : null;
 
-  const imageWorkspaceElement = isImageWorkspaceActive ? (
-    <ImageGenerationWorkspace
+  const resolveReviewImageModels = async (text: string) => {
+    const seed = reviewImageSeedRouteRef.current;
+    reviewImageSeedRouteRef.current = null;
+    if (seed?.text === text) return seed;
+    const providers = reviewWorkspace.providers.length ? reviewWorkspace.providers :
+      [...new Set(selectedModels.flatMap(id => { const model = getModel(id); return model ? [model.provider] : []; }))];
+    const owner = identityKey;
+    const epoch = submitIdentityFenceRef.current.epoch;
+    const ticket = conversationSelectionTicketRef.current;
+    const decision = await askReviewRoute({ text, providers, hasImages: false, requestedKind: "image" });
+    if (!owner || owner !== identityNamespaceKey(identityNamespaceRef.current) ||
+      epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
+      reviewWorkspaceRef.current.mode !== "easy") return null;
+    if (!decision || decision.kind !== "image") return null;
+    const modelIds = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
+    if (modelIds.length > imageGroupMaxModelsProp) return null;
+    reviewWorkspace.setUnsupportedProviders(decision.choices.filter(choice => !choice.modelId).map(choice => choice.provider));
+    return { modelIds, preset: decision.preset };
+  };
+
+  const imageWorkspaceElement = !isImageWorkspaceActive && reviewWorkspace.imageRequest ? (
+    <div><ReviewUnsupportedProviders providers={reviewWorkspace.unsupportedProviders} />
+      <button type="button" className="m-4 rounded-xl border px-4 py-3 text-sm" onClick={() => reviewWorkspace.setImageRequest(false)}>{reviewWorkspaceCopy[lang].edit}</button></div>
+  ) : isImageWorkspaceActive ? (
+    <><ReviewUnsupportedProviders providers={reviewWorkspace.unsupportedProviders} /><ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
       // poll loop all belong to exactly one conversation.
       // Seed ids are deliberately NOT part of this: re-picking a model from
@@ -9554,7 +9790,11 @@ export function ChatPageClient({
       onConversationCreated={handleImageConversationCreated}
       initialPrompt={imageDraftSeedPrompt}
       initialModelIds={imageDraftSeedModelIds}
-      onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
+      modelSelectionLocked={mountedSurface === "workspace" && reviewWorkspace.mode === "easy"}
+      onResolveModels={mountedSurface === "workspace" && reviewWorkspace.mode === "easy" ? resolveReviewImageModels : undefined}
+      layout={(mountedSurface === "workspace" ? reviewWorkspace.appearance : chatWorkspace.appearance) === "studio" ? "studio" : "classic"}
+      initialPreset={imageDraftSeedPreset}
+      onCancelDraft={chatDraftBeforeImage ? () => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setUnsupportedProviders([]); handleCancelImageDraft(); } : undefined}
       flagEnabled={imageGenerationEnabled}
       maxModels={imageGroupMaxModelsProp}
       planAllowsImageGeneration={
@@ -9564,7 +9804,7 @@ export function ChatPageClient({
       onAutoGenerateArrivalConsumed={() => setImageDraftAutoGenerate(false)}
       autoGeneratePreference={imageHandoffAutoGenerate}
       onAutoGeneratePreferenceChange={handleImageAutoGeneratePreferenceChange}
-    />
+    /></>
   ) : null;
 
   /*
@@ -9702,6 +9942,26 @@ export function ChatPageClient({
     draftSyncFailed;
   const handleProductSwitch = () =>
     !productSwitchDisabled && preserveDraftsForProductSwitch();
+  const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
+    ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
+    : selectedModels;
+  const handleReviewModeChange = (mode: "easy" | "professional") => {
+    const ticket = conversationSelectionTicketRef.current;
+    if (reviewWorkspace.mode === "professional" && mode === "easy") {
+      reviewProfessionalSelectionRef.current = {
+        identityKey, ticket, models: [...latestModelSettingsRef.current.models],
+        disabled: [...latestModelSettingsRef.current.disabled],
+      };
+    } else if (reviewWorkspace.mode === "easy" && mode === "professional") {
+      const manual = reviewProfessionalSelectionRef.current;
+      if (manual?.identityKey === identityKey && manual.ticket === ticket) {
+        const models = manual.models.filter(id => Boolean(getModel(id)));
+        if (models.length) mutateModelSettings(currentChatIdRef.current, models, manual.disabled);
+      }
+      reviewProfessionalSelectionRef.current = null;
+    }
+    reviewWorkspace.setMode(mode);
+  };
 
   return (
     // Every surface that decides whether a model searches reads this: the
@@ -9737,8 +9997,16 @@ export function ChatPageClient({
       />
       {!isViewportReady ? (
         <ChatShellSkeleton label={t("auth.loading")} />
-      ) : isMobileViewport ? (
+      ) : isMobileViewport && !(mountedSurface === "workspace" && reviewWorkspace.appearance === "studio") ? (
         <MobileChatShell
+          chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
+          review={mountedSurface === "workspace" ? {
+            ...reviewWorkspace,
+            setMode: handleReviewModeChange,
+            ready: isModelSelectionReady && isInitialConversationResolved,
+            maxProviders: Math.min(3, maxSelectableModels),
+            easyAvailable: reviewEasyAvailable && !isGuestMode,
+          } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
@@ -9746,7 +10014,7 @@ export function ChatPageClient({
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
-          selectedModels={selectedModels}
+          selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
           inputValue={inputValue}
@@ -9768,11 +10036,15 @@ export function ChatPageClient({
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
-          onNewChat={handleNewChat}
+          onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
+          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
+            if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
+              reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
+            } else handleStartImageDraft(text, modelId, options);
+          } : undefined}
           imageWorkspace={imageWorkspaceElement}
           starterGallery={starterGalleryElement}
           hasImportedTranscript={hasConversationPrelude}
@@ -9888,6 +10160,23 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
+          studioStarterCards={starterCards}
+          onStudioStarter={id => {
+            const card = starterCards.find(item => item.entry.id === id);
+            if (!card) return;
+            if (card.availability.state === "locked") handleStarterLocked(card.availability.reason);
+            else if (reviewWorkspace.mode === "easy" && card.entry.seed.productKey === "studio") {
+              if (!inputValue.trim()) setInputValue(t(card.entry.seed.promptSeedKey));
+            } else handleStarterSeed(card.entry);
+          }}
+          review={mountedSurface === "workspace" ? {
+            ...reviewWorkspace,
+            setMode: handleReviewModeChange,
+            ready: isModelSelectionReady && isInitialConversationResolved,
+            maxProviders: Math.min(3, maxSelectableModels),
+            easyAvailable: reviewEasyAvailable && !isGuestMode,
+          } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
@@ -9895,7 +10184,7 @@ export function ChatPageClient({
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
-          selectedModels={selectedModels}
+          selectedModels={visibleReviewModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
           inputValue={inputValue}
@@ -9917,11 +10206,15 @@ export function ChatPageClient({
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
-          onNewChat={handleNewChat}
+          onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
+          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
+            if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
+              reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
+            } else handleStartImageDraft(text, modelId, options);
+          } : undefined}
           imageWorkspace={imageWorkspaceElement}
           starterGallery={starterGalleryElement}
           hasImportedTranscript={hasConversationPrelude}

@@ -60,7 +60,7 @@ test.describe("destructive confirmation dialog", () => {
     "traps focus, closes on Escape and restores the page",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
+      await mockAuthenticatedApi(page, { language: "en" });
       await page.setViewportSize({ width: 1366, height: 768 });
       await page.goto("/review?lang=en");
 
@@ -97,7 +97,7 @@ test.describe("first-run onboarding dialog", () => {
     "model finder takes focus, cycles Tab and closes on Escape",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
+      await mockAuthenticatedApi(page, { language: "en" });
       await page.goto("/review?lang=en");
 
       // Same entry point the model-finder suite uses.
@@ -165,7 +165,7 @@ test.describe("focus survives the page behind the dialog re-rendering", () => {
       // The static rule in tests/modalFocusEffectDeps.test.mjs pins the shape
       // that fixes it. This pins the behaviour, because a differently-wrong
       // implementation can satisfy the shape.
-      await mockAuthenticatedApi(page);
+      await mockAuthenticatedApi(page, { language: "en" });
       await page.setViewportSize({ width: 1366, height: 768 });
       await page.goto("/review?lang=en");
 
@@ -225,7 +225,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
     "a destructive account dialog traps focus without closing settings",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
+      await mockAuthenticatedApi(page, { language: "en" });
       await page.goto("/review?lang=en");
 
       const accountTrigger = page.getByTestId("account-menu-trigger");
@@ -278,7 +278,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
     "Tab pressed before the nested dialog's initial focus lands is still trapped",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
+      await mockAuthenticatedApi(page, { language: "en" });
       // Initial focus moves into a freshly opened dialog inside
       // `requestAnimationFrame`, one frame after it renders. Under CI load
       // that frame can arrive after the user's first Tab, which then starts
@@ -326,7 +326,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
     "the dialog underneath does not reclaim focus when its own frame lands late",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
+      await mockAuthenticatedApi(page, { language: "en" });
       // The other half of the race above. The Tab trap is only as good as how
       // long the focus it placed survives: the settings dialog schedules its
       // own initial focus a frame after *it* opened, and if the nested dialog
@@ -395,7 +395,7 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
     "Escape inside a popover closes the popover, not the dialog around it",
     { tag: "@ui-risk" },
     async ({ page }) => {
-      await mockAuthenticatedApi(page);
+      await mockAuthenticatedApi(page, { language: "en" });
       await page.setViewportSize({ width: 1366, height: 768 });
       await page.goto("/review?lang=en");
 
@@ -490,7 +490,7 @@ async function expectScrollLockReleased(page: Page, viaMobileDrawer: boolean) {
 
 test.describe("credit pack purchase opened from account settings", () => {
   test.beforeEach(async ({ page }) => {
-    await mockAuthenticatedApi(page);
+    await mockAuthenticatedApi(page, { language: "en" });
     // Registered after the shared fixtures so this more specific handler wins:
     // the modal will not render a single pack card without it, and a modal with
     // nothing in it cannot be hit-tested against what covers it.

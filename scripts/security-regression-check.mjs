@@ -2392,7 +2392,7 @@ const checks = [
       !source.includes("Discounts apply to the first month of Pro and Max"),
   },
   {
-    name: "Chat model picker hides internal classes and shows exact credit costs",
+    name: "Chat model picker retains catalogue pricing while the composer omits credit estimates",
     file: "components/chat/ChatInput.tsx",
     test: (source) => {
       const panel = read("components/chat/ModelPickerPanel.tsx");
@@ -2427,7 +2427,7 @@ const checks = [
         catalogue.includes('data-testid="model-filter-sheet"') &&
         catalogue.includes('data-testid="model-filter-reset-all"') &&
         catalogue.includes('data-testid="model-catalogue-result-count"') &&
-        source.includes('data-testid="request-credit-estimate"') &&
+        !source.includes('data-testid="request-credit-estimate"') &&
         !panel.includes('data-testid="show-all-models"') &&
         !catalogue.includes('option value="Research"') &&
         !catalogue.includes("usageClassFilter") &&
@@ -3609,6 +3609,41 @@ const checks = [
           'continue-on-error: "${{ github.event_name == \'schedule\' || github.event_name == \'workflow_dispatch\' }}"'
         ) &&
         !job.includes("continue-on-error: true")
+      );
+    },
+  },
+  {
+    // 2026-10-20: the scheduled audit fired at 00:09Z on release #2792's commit
+    // 33adbbbb, failed on mobile-safari E2E, and Railway SKIPPED that production
+    // deploy. Railway's Wait for CI reads the commit's check suite, so every job
+    // here fails as a red check run while the suite still concludes success.
+    // The failure must still be enforced and reported: a verdict job reads each
+    // shard job's latest conclusion from the jobs API, and the report sends and
+    // enforces that rather than `needs.e2e.result`, which job-level
+    // continue-on-error can turn into `success` (back-merge run 39365870681:
+    // run `success`, two jobs `failure`).
+    name: "The scheduled daily audit cannot skip a production deploy and still reports E2E failures",
+    file: ".github/workflows/daily-security-audit.yml",
+    test: (source) => {
+      const jobsAt = source.indexOf("\njobs:");
+      const jobs = jobsAt < 0 ? "" : source.slice(jobsAt);
+      const jobBodies = jobs.split(/\n  (?=[a-z_][a-z0-9_-]*:\n)/).slice(1);
+      const verdict = jobBodies.find((body) => body.startsWith("e2e_verdict:")) ?? "";
+      return (
+        jobBodies.length === 4 &&
+        jobBodies.every((body) => /\n    continue-on-error: true\n/.test(body)) &&
+        verdict.includes("/actions/runs/${GITHUB_RUN_ID}/jobs") &&
+        verdict.includes('startswith("Full E2E (shard ")') &&
+        verdict.includes('if [ "$conclusion" != "success" ]; then') &&
+        // `filter=all` would let an earlier attempt's pass answer for a re-run.
+        !verdict.includes("filter=all") &&
+        source.includes("name: Full E2E (shard ${{ matrix.shard }}/${{ matrix.shards }})") &&
+        source.includes("needs: [audit, e2e, e2e_verdict]") &&
+        source.includes("SECURITY_AUDIT_E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
+        source.includes("E2E_STATUS: ${{ needs.e2e_verdict.outputs.result }}") &&
+        !/needs\.e2e\.result\s*}}\s*$/m.test(source.split("\n  report:")[1] ?? "x") &&
+        // Read-only Actions access through the run's own token, no secret.
+        !verdict.includes("secrets.")
       );
     },
   },

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
+import { layoutBox } from "./support/engine-capabilities";
 
 /**
  * The landing page's content contract.
@@ -561,8 +562,9 @@ test("primary copy and CTAs survive a 200% text scale at 320px", async ({ page }
     "landing-signup-cta",
     "landing-safety-cta",
   ]) {
-    const box = await page.getByTestId(testId).boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.width).toBeLessThanOrEqual(320);
+    await expect(page.getByTestId(testId)).toBeVisible();
+    const box = await layoutBox(page.getByTestId(testId));
+    expect(box.width).toBeGreaterThan(0);
+    expect(box.width).toBeLessThanOrEqual(320);
   }
 });

@@ -97,6 +97,7 @@ const seededMessages = (models: string[]): QaConversationMessage[] => [
 ];
 
 type EnterOptions = {
+  appearance?: "classic" | "studio";
   lang?: "en" | "ko" | "de" | "fr" | "es" | "pt" | "zh";
   productKey?: "chat" | "review";
   models?: string[];
@@ -121,13 +122,15 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
     shell = "mobile",
   } = options;
 
-  await prepareGuestPage(page, "en");
-  await mockAuthenticatedApi(page, {
+  await prepareGuestPage(page, "en", options.appearance ?? "classic");
+  const account = await mockAuthenticatedApi(page, {
+    language: lang,
     productKey,
     selectedModels: models,
     messages: emptyConversation ? [] : seededMessages(models),
     webSearchMode,
   });
+  account.theme = "light";
   await setDeterministicTheme(page, "light");
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
@@ -153,9 +156,15 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
   }
 
   await page.setViewportSize(viewport);
-  await page.goto(`/${productKey ?? "review"}?lang=${lang}`);
-  await expect(page.getByTestId(`${shell}-chat-shell`)).toBeVisible();
-  if (shell === "mobile") await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
+  await page.goto(`/${productKey ?? "review"}?lang=${lang}`, { waitUntil: "domcontentloaded" });
+  const renderedShell = options.appearance === "studio" && productKey !== "chat" ? "desktop" : shell;
+  await expect(page.getByTestId(`${renderedShell}-chat-shell`)).toBeVisible({ timeout: 60_000 });
+  if (options.appearance === "studio" && productKey !== "chat") {
+    if (!emptyConversation) await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-content-state", "non-empty");
+    await page.locator(".review-view-switch button").first().click();
+    await expect(page.getByTestId("desktop-chat-shell")).toHaveAttribute("data-studio-view", "write");
+  }
+  if (renderedShell === "mobile") await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await freezeAnimations(page);
 }
@@ -368,38 +377,17 @@ async function expectComposerControlsContained(page: Page) {
         }
       }
     }
-    const credit = composer.querySelector<HTMLElement>('[data-testid="request-credit-estimate"]');
-    if (!credit) return [...failures, "credit estimate missing"];
-    const creditBox = credit.getBoundingClientRect();
-    if (credit.scrollWidth > credit.clientWidth + 1 || credit.scrollHeight > credit.clientHeight + 1) {
-      failures.push("credit estimate content clipped");
-    }
-    const walker = document.createTreeWalker(credit, NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) {
-      if (!walker.currentNode.textContent?.trim()) continue;
-      const parent = walker.currentNode.parentElement!;
-      const style = getComputedStyle(parent);
-      // Screen-reader copy is deliberately clipped; measure the visible numeric label instead.
-      if (style.position === "absolute" && parent.clientWidth <= 1 && parent.clientHeight <= 1 && style.overflow === "hidden") continue;
-      const range = document.createRange();
-      range.selectNodeContents(walker.currentNode);
-      for (const line of Array.from(range.getClientRects())) {
-        if (line.left < creditBox.left - 1 || line.right > creditBox.right + 1 ||
-            line.top < creditBox.top - 1 || line.bottom > creditBox.bottom + 1) {
-          failures.push("credit estimate label line leaves button");
-        }
-      }
-    }
+    if (composer.querySelector('[data-testid="request-credit-estimate"]')) failures.push("unexpected credit display");
     return failures;
   })).toEqual([]);
 }
 
 test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" }, () => {
-  for (const width of MOBILE_WIDTHS) {
-    test(`${width}px keeps a full-width input line beside a partial-support chip`, async ({
+  for (const appearance of ["classic", "studio"] as const) for (const width of MOBILE_WIDTHS) {
+    test(`${appearance} ${width}px keeps a full-width input line beside a partial-support chip`, async ({
       page,
     }) => {
-      await enterMobileComposer(page, { viewport: { width, height: 680 } });
+      await enterMobileComposer(page, { appearance, viewport: { width, height: 680 } });
 
       // The state under test really is the expensive one: a chip that has
       // something to say.
@@ -596,7 +584,7 @@ test.describe("Mobile composer: the textarea owns its row", { tag: "@ui-risk" },
         await expect(page.getByTestId("composer-product-mode-row")).toHaveCount(0);
         const composer = page.getByTestId("chat-input");
         const bounds = (await composer.boundingBox())!;
-        for (const id of ["composer-tools-button", "composer-model-select", "web-search-mode-chip", "request-credit-estimate", "chat-send-button"]) {
+        for (const id of ["composer-tools-button", "composer-model-select", "web-search-mode-chip", "chat-send-button"]) {
           const control = composer.getByTestId(id);
           const box = (await control.boundingBox())!;
           expect(box.x, id).toBeGreaterThanOrEqual(bounds.x);
@@ -912,7 +900,7 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
   });
 
   for (const modelCount of [1, 3]) {
-    test(`137px zoom keeps ${modelCount} model and credit numbers in 44px controls`, async ({ page }) => {
+    test(`137px zoom keeps ${modelCount} model counts in 44px controls`, async ({ page }) => {
       await enterMobileComposer(page, {
         productKey: modelCount === 1 ? "chat" : "review",
         models: ALL_SEARCH_MODELS.slice(0, modelCount),
@@ -923,12 +911,8 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
       const model = composer.getByTestId("composer-model-select");
       await expect(model.getByText(String(modelCount), { exact: true })).toBeVisible();
       await expect(model).toHaveAccessibleName(new RegExp(String(modelCount)));
-      const credit = composer.getByTestId("request-credit-estimate");
-      const accessibleLabel = (await credit.getAttribute("aria-label"))!;
-      const value = accessibleLabel.match(/\d+/)?.[0];
-      expect(value).toBeTruthy();
-      await expect(credit.getByText(value!, { exact: true })).toBeVisible();
-      for (const control of [composer.getByTestId("composer-tools-button"), model, credit, composer.getByTestId("chat-send-button")]) {
+      await expect(composer.getByTestId("request-credit-estimate")).toHaveCount(0);
+      for (const control of [composer.getByTestId("composer-tools-button"), model, composer.getByTestId("chat-send-button")]) {
         const box = (await control.boundingBox())!;
         expect(box.width).toBeGreaterThanOrEqual(44);
         expect(box.height).toBeGreaterThanOrEqual(44);
@@ -940,7 +924,7 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
 
   for (const lang of ["en", "de", "fr", "es", "pt", "ko", "zh"] as const) {
     for (const mode of ["text", "page"] as const) {
-      test(`${lang} credit estimate and three Review models reflow at 200% ${mode} scaling`, async ({ page }) => {
+      test(`${lang} three Review models reflow at 200% ${mode} scaling`, async ({ page }) => {
         await enterMobileComposer(page, {
           lang,
           models: ALL_SEARCH_MODELS,
@@ -952,7 +936,7 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
         const composer = page.getByTestId("chat-input");
         await expect(composer.getByTestId("composer-review-selected-model")).toHaveCount(3);
         await expect(composer.getByTestId("composer-model-select")).toHaveAccessibleName(/3/);
-        await expect(composer.getByTestId("request-credit-estimate")).toBeVisible();
+        await expect(composer.getByTestId("request-credit-estimate")).toHaveCount(0);
         await expectComposerControlsContained(page);
         await expectComposerContract(page, `${lang} 200% ${mode} scaling`);
         const modelsBox = (await composer.getByTestId("composer-review-models").boundingBox())!;
