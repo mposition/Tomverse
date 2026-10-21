@@ -195,7 +195,7 @@ async function walkPages() {
     try {
       browser = await launch(args, { sandbox: false });
     } catch (retryError) {
-      console.warn(JSON.stringify({ event: "product_research_scout_browser_unsandboxed_failed", ...launchFailure(retryError) }));
+      console.warn(JSON.stringify({ event: "product_research_scout_browser_unsandboxed_failed", ...launchFailure(retryError), host: sandboxHost() }));
       throw retryError;
     }
     sandbox = "off";
