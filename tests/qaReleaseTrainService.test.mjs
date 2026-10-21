@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runQaReleaseTrainRound } from "../lib/qaReleaseTrainService.ts";
+import { qaReleaseTrainReadFailure, runQaReleaseTrainRound } from "../lib/qaReleaseTrainService.ts";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -135,4 +135,24 @@ test("a failed push or pull request is reported with a code and never retried in
   const pr = ports({ prFails: true });
   assert.deepEqual(await runQaReleaseTrainRound(env(), pr.p, NOW), { exitCode: 1, train: "failed", failure: "pull_request_failed" });
   assert.equal(pr.calls.find(([n]) => n === "report")[1].branch, "release/train-20261020-1100");
+});
+
+test("a read failure names the step and the port's code, and nothing else", async () => {
+  const failing = (where, error) => {
+    const { p } = ports();
+    if (where === "cargo") p.github.labelledCargo = async () => { throw error; };
+    if (where === "open_trains") p.github.openTrains = async () => { throw error; };
+    if (where === "admit") p.app.admit = async () => { throw error; };
+    return p;
+  };
+  assert.deepEqual(await runQaReleaseTrainRound(env(), failing("cargo", new Error("github_403")), NOW), {
+    exitCode: 1,
+    train: "read_failed",
+    failure: "cargo:github_403",
+  });
+  assert.equal((await runQaReleaseTrainRound(env(), failing("open_trains", new Error("github_shape")), NOW)).failure, "open_trains:github_shape");
+  assert.equal((await runQaReleaseTrainRound(env(), failing("admit", new Error("app_503")), NOW)).failure, "admit:app_503");
+  // A network error's own text (which may carry a URL) never reaches the log.
+  assert.equal(qaReleaseTrainReadFailure("cargo", new Error("fetch failed: https://api.github.com/x?token=1")), "cargo:unknown");
+  assert.equal(qaReleaseTrainReadFailure("branch", "not an error"), "branch:unknown");
 });
