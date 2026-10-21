@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import {
@@ -15,8 +16,11 @@ import {
   stickyStateFor,
   storedSelectionMode,
 } from "../lib/conversationSelectionMode.ts";
-import { mintChatRefinerInitialAutoRouterAuthority } from
-  "../lib/chatRefinerInitialAutoRouterAuthority.ts";
+// Use the same CommonJS module instance as the TypeScript execution graph;
+// its private WeakSet must not be duplicated by the ESM test loader.
+const { mintChatRefinerInitialAutoRouterAuthority } = createRequire(import.meta.url)(
+  "../lib/chatRefinerInitialAutoRouterAuthority.ts"
+);
 
 // The seam decides which model answers. Most of what matters is what it does
 // when it declines, because every decline has to land on the same behaviour --
@@ -70,6 +74,32 @@ const initialReleaseAuthority = () =>
     runtimeCommitSha: "a".repeat(40),
     runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
   });
+
+test("file routing keeps the primary and every failover inside the capable eligible set", () => {
+  const original = selectAutoModel(input());
+  assert.equal(original.routed, true);
+  const capable = original.record.eligibleModelIds.filter(id => ["gpt-5-6-luna", "gpt-5-6-terra"].includes(id));
+  assert.ok(capable.length >= 2);
+  const routed = applyLlmModelPick(original, capable[1], { required: true, capableModelIds: capable });
+  assert.equal(routed.modelId, capable[1]);
+  assert.ok(routed.fallbackCandidateModelIds.every(id => capable.includes(id)));
+  assert.deepEqual(routed.record.eligibleModelIds, capable);
+  assert.ok(routed.record.rejections.some(r => r.reason === "file_generation_unsupported"));
+  assert.equal(original.record.eligibleModelIds.length > capable.length, true);
+});
+
+test("an unavailable semantic router uses a capable eligible fallback without claiming an LLM pick", () => {
+  const original = selectAutoModel(input());
+  const capable = ["gpt-5-6-luna"];
+  const routed = applyLlmModelPick(original, null, { required: true, capableModelIds: capable });
+  assert.equal(routed.modelId, capable[0]);
+  assert.deepEqual(routed.fallbackCandidateModelIds, []);
+  assert.equal(routed.record.selectionReason, "fallback_order");
+  // A capability flag never admits a model rejected by plan/health/context/credits.
+  assert.equal(applyLlmModelPick(original, "foreign", { required: true, capableModelIds: ["foreign"] }), original);
+  const manual = selectAutoModel(input({ conversation: autoConversation({ selectionMode: "manual" }) }));
+  assert.equal(applyLlmModelPick(manual, capable[0], { required: true, capableModelIds: capable }), manual);
+});
 
 test("an Auto conversation in an open cohort is routed by the Router", () => {
   const selection = selectAutoModel(input());
@@ -361,7 +391,7 @@ test("the exact initial release authority reaches the selection that routes", ()
     readiness: pending,
     initialReleaseAuthority: initialReleaseAuthority(),
   }));
-  assert.equal(selection.routed, true);
+  assert.equal(selection.routed, true, JSON.stringify(selection));
   assert.equal(
     selection.cohort.initialReleaseAuthority,
     "chat_refiner_initial_auto_release"

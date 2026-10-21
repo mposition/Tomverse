@@ -57,7 +57,7 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
+import { autoLlmRouterCandidates, previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -2032,7 +2032,20 @@ async function handleChatPost(
         });
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
-        // model; any failure keeps the deterministic choice.
+        // model; any failure uses a file-capable eligible fallback when available.
+        const fileRoutingContext = {
+            isAuthenticated: Boolean(session?.user?.id),
+            canPersist: Boolean(session?.user?.id && conversationId && assistantMessageId),
+            webSearchRequested: webSearchMode === "always",
+        };
+        const fileCapableModelIds = deterministicAutoSelection.routed
+            ? autoLlmRouterCandidates(
+                deterministicAutoSelection.record.eligibleModelIds,
+                routerCandidateInputs.models,
+                deterministicAutoSelection.candidateCreditsByModelId,
+                fileRoutingContext
+            ).filter(candidate => candidate.canCreateFiles).map(candidate => candidate.id)
+            : [];
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2048,11 +2061,19 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       traceId,
                       rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
+                      fileContext: fileRoutingContext,
                   })
             : null;
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
-            llmPick?.modelId ?? null
+            llmPick?.modelId ?? null,
+            {
+                // When semantic routing is off or unavailable, a tool-capable
+                // eligible fallback also handles file requests without a second call.
+                required: llmPick?.requiresFileGeneration === true ||
+                    (!llmPick && fileCapableModelIds.length > 0),
+                capableModelIds: fileCapableModelIds,
+            }
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;

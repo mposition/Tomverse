@@ -33,6 +33,8 @@ import {
     type AutoLlmRouterCandidate,
     type AutoLlmRouterPick,
     type AutoLlmRouterSession,
+    type AutoFileGenerationContext,
+    withAutoFileCapabilities,
 } from "@/lib/autoLlmRouterCore";
 
 export type AutoLlmRouterCallResult = {
@@ -62,13 +64,15 @@ type AutoLlmRouterCallInput = {
 /** What the call sends, built once so its cost bound is of the same request. */
 const routerRequest = (input: AutoLlmRouterCallInput) => {
     const rewrite = input.rewrite === true;
+    const candidates = withAutoFileCapabilities(input.candidates);
     return {
         rewrite,
+        candidates,
         system: buildAutoLlmRouterSystem(input.guidance, { rewrite }),
         prompt: autoLlmRouterUserMessage(
             input.prompt,
             input.previousAnswer,
-            input.candidates,
+            candidates,
             input.session
         ),
         maxOutputTokens: rewrite
@@ -80,7 +84,7 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
 export async function callAutoLlmRouter(
     input: AutoLlmRouterCallInput
 ): Promise<AutoLlmRouterCallResult> {
-    const { rewrite, system, prompt, maxOutputTokens } = routerRequest(input);
+    const { rewrite, system, prompt, maxOutputTokens, candidates } = routerRequest(input);
     try {
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
@@ -94,7 +98,7 @@ export async function callAutoLlmRouter(
             ),
             output: Output.object({
                 schema: jsonSchema(
-                    autoLlmRouterOutputSchema(input.candidates, { rewrite }) as unknown as JSONSchema7
+                    autoLlmRouterOutputSchema(candidates, { rewrite }) as unknown as JSONSchema7
                 ),
                 name: "auto_model_choice",
             }),
@@ -103,7 +107,7 @@ export async function callAutoLlmRouter(
         const usage = generated.usage as AutoLlmRouterCallResult["usage"];
         const pick = parseAutoLlmRouterOutput(
             generated.output,
-            input.candidates,
+            candidates,
             rewrite ? input.prompt : null
         );
         return { outcome: pick ? "picked" : "invalid", pick, usage };
@@ -254,7 +258,8 @@ export async function pickAutoModelWithLlm(input: {
      * conversation): the call then does not ask for one at all.
      */
     rewriteAllowed?: boolean;
-}): Promise<{ modelId: string; rewrite: string | null } | null> {
+    fileContext?: AutoFileGenerationContext;
+}): Promise<{ modelId: string; rewrite: string | null; requiresFileGeneration?: true } | null> {
     const routerModel = resolveAutoLlmRouterModel(
         input.models,
         (await readAutoLlmRouterModelId()) ?? undefined
@@ -263,7 +268,8 @@ export async function pickAutoModelWithLlm(input: {
     const candidates = autoLlmRouterCandidates(
         input.eligibleModelIds,
         input.models,
-        input.creditsByModelId
+        input.creditsByModelId,
+        input.fileContext
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
@@ -369,5 +375,9 @@ export async function pickAutoModelWithLlm(input: {
                 );
             });
     }
-    return pick ? { modelId: pick.modelId, rewrite: pick.rewrite } : null;
+    return pick ? {
+        modelId: pick.modelId,
+        rewrite: pick.rewrite,
+        ...(pick.requiresFileGeneration ? { requiresFileGeneration: true as const } : {}),
+    } : null;
 }

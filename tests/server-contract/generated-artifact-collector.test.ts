@@ -138,6 +138,40 @@ test("a valid call stores one file and reports it as created", async () => {
   assert.equal(subject.failed.length, 0);
 });
 
+test("Auto file intent reaches a real spreadsheet tool on the selected capable model", async () => {
+  resetWorld();
+  const { AVAILABLE_MODELS } = await import("../../lib/models");
+  const { autoLlmRouterCandidates, parseAutoLlmRouterOutput } = await import("../../lib/autoLlmRouterCore");
+  const { buildChatTurnSystemBlocks } = await import("../../lib/chatTurnSystemBlocks");
+  const candidates = autoLlmRouterCandidates(
+    ["deepseek-v4-flash", "gpt-5-6-luna"], AVAILABLE_MODELS,
+    { "deepseek-v4-flash": 1, "gpt-5-6-luna": 2 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const pick = parseAutoLlmRouterOutput({
+    modelId: "deepseek-v4-flash", requiresFileGeneration: true,
+    reason: "Deliver the quarterly revenue as a downloadable spreadsheet.",
+  }, candidates);
+  assert.equal(pick?.modelId, "gpt-5-6-luna");
+  const model = AVAILABLE_MODELS.find(candidate => candidate.id === pick?.modelId)!;
+  const blocks = buildChatTurnSystemBlocks({
+    modelId: model.id, provider: model.provider, isDeepResearchTurn: false,
+    autoRouted: true, isAuthenticated: true, canPersist: true,
+    nativeSearchEnabled: false, nativeSearchForced: false, appManagedSearchEnabled: false,
+    imageGenerationFlagEnabled: false, planAllowsImageGeneration: false, turnAttachments: [],
+  });
+  assert.equal(blocks.artifactPlan?.mode, "generate");
+  assert.equal(blocks.artifactPlan?.registerTool, true);
+  assert.ok(blocks.promptTokens > 0, "file instructions and schemas must be priced");
+  const subject = await collector({ modelId: model.id, mode: blocks.artifactPlan!.mode });
+  const report = await subject.run("spreadsheet", QUARTERLY);
+  assert.equal(report.status, "created");
+  assert.equal(subject.stored.length, 1);
+  assert.equal(world.puts[0].modelId, model.id);
+  assert.ok(world.puts[0].byteSize > 1000, "a real XLSX package was rendered before storage");
+  assert.equal(subject.failed.length, 0);
+});
+
 test("the model is never handed a key, an id or a URL", async () => {
   resetWorld();
   const subject = await collector();

@@ -16,6 +16,8 @@
 
 import { turnCarriesAttachments } from "@/lib/autoDispatchPreflight";
 import { modelSupportsImageInput, type AiModel } from "@/lib/models";
+import { getArtifactToolSupport, planGeneratedArtifactTool } from "@/lib/generatedArtifactToolPolicy";
+import { getWebSearchCapability, nativeSearchIsDispatchable } from "@/lib/webSearchCapability";
 
 export const AUTO_LLM_ROUTER_VERSION = "auto-llm-router-v1";
 
@@ -115,19 +117,45 @@ export type AutoLlmRouterCandidate = {
     reasoning: string | null;
     contextWindowTokens: number | null;
     acceptsImages: boolean;
+    /** Actual application file tools, not a model's ability to write code. */
+    canCreateFiles: boolean;
     credits: number | null;
 };
+
+export type AutoFileGenerationContext = {
+    isAuthenticated: boolean;
+    canPersist: boolean;
+    webSearchRequested: boolean;
+};
+
+/** Older optimizer samples predate the per-turn capability field. */
+export const withAutoFileCapabilities = (candidates: readonly AutoLlmRouterCandidate[]) =>
+    candidates.map(candidate => typeof candidate.canCreateFiles === "boolean" ? candidate : {
+        ...candidate,
+        canCreateFiles: candidate.tier !== "deep-research" && getArtifactToolSupport(candidate.id) === "verified",
+    });
 
 export const autoLlmRouterCandidates = (
     eligibleModelIds: readonly string[],
     models: readonly AiModel[],
-    creditsByModelId: Readonly<Record<string, number>>
+    creditsByModelId: Readonly<Record<string, number>>,
+    fileContext: AutoFileGenerationContext = {
+        isAuthenticated: true, canPersist: true, webSearchRequested: false,
+    }
 ): AutoLlmRouterCandidate[] => {
     const byId = new Map(models.map((model) => [model.id, model]));
     return eligibleModelIds.flatMap((id) => {
         const model = byId.get(id);
         if (!model) return [];
         const credits = creditsByModelId[id];
+        const search = getWebSearchCapability(model);
+        const nativeSearchEnabled = fileContext.webSearchRequested && nativeSearchIsDispatchable(search);
+        const canCreateFiles = model.usageClass !== "deep-research" && planGeneratedArtifactTool({
+            modelId: model.id, provider: model.provider,
+            isAuthenticated: fileContext.isAuthenticated, canPersist: fileContext.canPersist,
+            nativeSearchEnabled, nativeSearchForced: nativeSearchEnabled && search.canForceExecution,
+            conversationKind: "chat",
+        }).mode === "generate";
         return [
             {
                 id,
@@ -138,6 +166,7 @@ export const autoLlmRouterCandidates = (
                 reasoning: model.reasoning ?? null,
                 contextWindowTokens: model.contextWindowTokens ?? null,
                 acceptsImages: modelSupportsImageInput(model),
+                canCreateFiles,
                 credits: typeof credits === "number" ? credits : null,
             },
         ];
@@ -179,6 +208,8 @@ const AUTO_LLM_ROUTER_SYSTEM_HEAD = [
     "previousAnswer, when present, is the start of the reply the user is responding to. Use it to understand short follow-ups such as \"fix the code above\".",
     "session, when present, is your own memory of this conversation: the topic you wrote last time and the models you recently picked. Use it for continuity, but choose for this message: switch whenever it needs different work.",
     "Pick exactly one id from the candidates.",
+    "Set requiresFileGeneration to true when this message asks you to create, edit or deliver a downloadable file (spreadsheet, document, PDF, slides, text/source file or archive). Use previousAnswer for follow-ups such as 'download that as Excel'. Reading an attachment, explaining code, inline text and image generation alone do not require file generation.",
+    "When requiresFileGeneration is true, choose only a candidate with canCreateFiles=true. This capability is supplied by the application; never infer or invent it from a model name or guidance.",
     CHAT_RESEARCH_ROUTING_CRITERIA,
 ].join("\n");
 
@@ -294,6 +325,7 @@ export const autoLlmRouterOutputSchema = (
     properties: {
         reason: { type: "string" as const },
         topic: { type: "string" as const },
+        requiresFileGeneration: { type: "boolean" as const },
         modelId: {
             type: "string" as const,
             enum: candidates.map((candidate) => candidate.id),
@@ -301,8 +333,8 @@ export const autoLlmRouterOutputSchema = (
         ...(options.rewrite ? { rewrite: { type: "string" as const } } : {}),
     },
     required: options.rewrite
-        ? ["reason", "topic", "modelId", "rewrite"]
-        : ["reason", "topic", "modelId"],
+        ? ["reason", "topic", "requiresFileGeneration", "modelId", "rewrite"]
+        : ["reason", "topic", "requiresFileGeneration", "modelId"],
     additionalProperties: false,
 });
 
@@ -312,6 +344,7 @@ export type AutoLlmRouterPick = {
     topic: string | null;
     /** Admitted by admitRouterRewrite; null when none was asked for or kept. */
     rewrite: string | null;
+    requiresFileGeneration?: true;
 };
 
 const cut = (value: unknown, max: number) => {
@@ -327,19 +360,32 @@ export const parseAutoLlmRouterOutput = (
     rewriteOf: string | null = null
 ): AutoLlmRouterPick | null => {
     if (typeof output !== "object" || output === null) return null;
-    const { modelId, reason, topic, rewrite } = output as {
+    const { modelId, reason, topic, rewrite, requiresFileGeneration } = output as {
         modelId?: unknown;
         reason?: unknown;
         topic?: unknown;
         rewrite?: unknown;
+        requiresFileGeneration?: unknown;
     };
     if (typeof modelId !== "string") return null;
+    if (requiresFileGeneration !== undefined && typeof requiresFileGeneration !== "boolean") return null;
     if (!candidates.some((candidate) => candidate.id === modelId)) return null;
+    // The model reads intent; code enforces the existing tool boundary. A bad
+    // pick cannot overrule capability, plan, budget or search eligibility.
+    const fileCandidates = candidates.filter(candidate => candidate.canCreateFiles);
+    const selected = requiresFileGeneration === true
+        ? fileCandidates.find(candidate => candidate.id === modelId)
+            ?? [...fileCandidates].sort((a, b) => (a.credits ?? Infinity) - (b.credits ?? Infinity))[0]
+        : candidates.find(candidate => candidate.id === modelId);
+    if (!selected) return null;
     return {
-        modelId,
-        reason: cut(reason, AUTO_LLM_ROUTER_MAX_REASON_CHARS),
+        modelId: selected.id,
+        reason: selected.id !== modelId
+            ? "Selected a verified file-capable model for a downloadable file."
+            : cut(reason, AUTO_LLM_ROUTER_MAX_REASON_CHARS),
         topic: cut(topic, AUTO_LLM_ROUTER_MAX_TOPIC_CHARS),
         rewrite: rewriteOf === null ? null : admitRouterRewrite(rewrite, rewriteOf),
+        ...(requiresFileGeneration === true ? { requiresFileGeneration: true as const } : {}),
     };
 };
 
