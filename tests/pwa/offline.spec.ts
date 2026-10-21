@@ -19,3 +19,9 @@ test("install prompt requires a user click", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Install Tomverse" })).toBeVisible(); expect(await page.locator("body").getAttribute("data-prompted")).toBeNull();
   await page.getByRole("button", { name: "Install Tomverse" }).click(); await expect(page.locator("body")).toHaveAttribute("data-prompted", "yes");
 });
+test("another account never receives the previous account's offline draft", async ({ page }) => {
+  await page.addInitScript(() => { sessionStorage.setItem("tomverse-offline-owner", "account:a"); sessionStorage.setItem("tomverse-offline-draft", JSON.stringify({ owner: "account:a", text: "Account A only" })); });
+  await page.goto("/?owner=account%3Aa"); await expect(page.getByRole("button", { name: "Restore offline draft" })).toBeVisible();
+  await page.getByRole("button", { name: "Switch account" }).click(); await expect(page.getByRole("button", { name: "Restore offline draft" })).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem("tomverse-offline-draft"))).toBeNull(); await expect(page.getByLabel("Recovered draft")).toHaveValue("");
+});

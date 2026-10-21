@@ -28,14 +28,19 @@ does not enable the switch, send mail or delete any real account.
 
 The web PWA has an install manifest, explicit install action, and a public-only
 offline shell. Its service worker never caches account/API responses or generated
-files. A draft entered offline remains in the tab until the user chooses Restore
-offline draft in the normal Chat composer. Run `npm run test:pwa` for the browser
+files. A draft entered offline remains bound to the tab and account until the user
+chooses Restore offline draft in the normal Chat composer. Sign-out and account
+changes clear it before another identity can recover it. Run `npm run test:pwa` for the browser
 contract. Shared-package verification executes the actual React Markdown bundle
 in Chromium as well as checking standalone TypeScript and emitted tokens.
 
 Android compilation and browser contracts are local evidence. Physical phones,
 iOS compilation/signing, domain associations, live activation and store release
 remain separate steps.
+
+The file saver was also exercised in a fresh Android emulator with networking
+disabled: path refusal, user cancellation, concurrent-save refusal and saving
+the exact 29-byte synthetic fixture through the system picker all passed.
 
 ## Local development
 

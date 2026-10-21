@@ -7,11 +7,12 @@ import { NextResponse } from "next/server";
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 let session = { user: { id: "owner-a", email: "owner@example.invalid", authenticatedAt: new Date().toISOString() } };
 let scheduled = 0; let issued = 0; let redeemed = 0;
+let rateLimited = false;
 mock.module("next/server", { namedExports: { NextResponse, after: () => undefined } });
 mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => ({ session }), resolveAccountRouteSession: async () => ({ session }) } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
-  consumeApiRateLimit: async () => undefined,
-  apiSecurityResponse: (error) => error?.name === "ZodError" ? Response.json({}, { status: 400 }) : null,
+  consumeApiRateLimit: async () => { if (rateLimited) throw { status: 429 }; },
+  apiSecurityResponse: (error) => error?.status === 429 ? Response.json({}, { status: 429 }) : error?.name === "ZodError" ? Response.json({}, { status: 400 }) : null,
   readLimitedJson: async (request, _limit, schema) => schema.parse(await request.json()),
 } });
 mock.module(mod("lib/securityAudit.ts"), { namedExports: { logSecurityAuditEvent: () => undefined } });
@@ -49,6 +50,11 @@ test("native export preserves the existing scoped, single-use download contract"
   const response = await download.GET(request(body.downloadPath), { params: Promise.resolve({ token: "x".repeat(43) }) });
   assert.equal(response.status, 200); assert.match(response.headers.get("cache-control"), /no-store/); assert.match(response.headers.get("content-disposition"), /attachment/);
   assert.equal((await download.GET(request(body.downloadPath), { params: Promise.resolve({ token: "x".repeat(43) }) })).status, 410);
+});
+test("account profile is private and preserves rate-limit responses", async () => {
+  const response = await account.GET(request("/api/user/account"));
+  assert.equal(response.status, 200); assert.match(response.headers.get("cache-control"), /no-store/); assert.equal((await response.json()).id, "owner-a");
+  rateLimited = true; assert.equal((await account.GET(request("/api/user/account"))).status, 429); rateLimited = false;
 });
 test("missing identity cannot read account data, issue tickets or delete", async () => {
   session = null;

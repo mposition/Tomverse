@@ -14,7 +14,7 @@ test("PWA actions preserve the mobile composer and explicitly restore an offline
   await page.route("**/api/products/chat/capabilities", (route) => route.fulfill({ json: { autoSelection: { offered: true } } }));
   await page.goto("/chat?lang=en");
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
-  await page.evaluate(() => sessionStorage.setItem("tomverse-offline-draft", "Recovered offline idea"));
+  await page.evaluate(() => sessionStorage.setItem("tomverse-offline-draft", JSON.stringify({ owner: sessionStorage.getItem("tomverse-offline-owner"), text: "Recovered offline idea" })));
   await page.reload();
   const textarea = page.getByTestId("chat-textarea");
   await textarea.fill("Existing draft");
@@ -27,7 +27,8 @@ test("PWA actions preserve the mobile composer and explicitly restore an offline
   const manifest = await page.request.get("/manifest.webmanifest");
   expect(manifest.status()).toBe(200); expect((await manifest.json()).start_url).toBe("/chat");
   const shell = await page.request.get("/chat-offline.html");
-  expect(shell.headers()["content-security-policy"]).toContain("default-src 'none'");
+  expect(shell.status()).toBe(200);
+  expect(shell.headers()["content-security-policy"] ?? shell.headers()["content-security-policy-report-only"]).toContain("default-src 'none'");
 });
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => {

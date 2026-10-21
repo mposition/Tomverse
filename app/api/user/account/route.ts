@@ -108,11 +108,18 @@ export async function DELETE(req: Request) {
 }
 
 export async function GET(req: Request) {
-  const authentication = await resolveChatRouteSession(req);
-  if (authentication.response) return authentication.response;
-  const user = authentication.session?.user;
-  if (!user?.id) return NextResponse.json({ code: "AUTHENTICATION_REQUIRED" }, { status: 401 });
-  return NextResponse.json({ id: user.id, email: user.email, name: user.name,
-    actionsEnabled: !req.headers.has("authorization") || process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED === "true",
-  }, { headers: { "Cache-Control": "private, no-store" } });
+  try {
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const user = authentication.session?.user;
+    if (!user?.id) return NextResponse.json({ code: "AUTHENTICATION_REQUIRED" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    await consumeApiRateLimit(req, user.id, "user-account-profile", { minute: 30, day: 1000 });
+    return NextResponse.json({ id: user.id, email: user.email, name: user.name,
+      actionsEnabled: !req.headers.has("authorization") || process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED === "true",
+    }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    return NextResponse.json({ code: "ACCOUNT_UNAVAILABLE" }, { status: 500, headers: { "Cache-Control": "no-store" } });
+  }
 }

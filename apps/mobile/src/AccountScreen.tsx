@@ -28,7 +28,7 @@ export function AccountScreen({ transport, language, onReauthenticate, onDeleted
   }
   return <section className="account-data">
     <p>{account?.email}</p>
-    {account && !account.actionsEnabled && <p role="status">Account export and deletion are not available in this app yet. Use account settings on the website.</p>}
+    {account && !account.actionsEnabled && <p role="status">{copy.accountUnavailable}</p>}
     {message && <p role="status">{message}</p>}
     {uncertain && <button disabled={busy} onClick={() => {
       setBusy(true);

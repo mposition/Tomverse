@@ -4,8 +4,19 @@ import { readDeviceDraft, writeDeviceDraft, clearDeviceDrafts, deviceDraftKey } 
 import { createApiClient, ApiClientError } from "../packages/api-client/src/index.ts";
 import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { nativeChatBearerRoute } from "../lib/nativeBearerGate.ts";
+import { bindOfflineChatDraftOwner, readOfflineChatDraft, clearOfflineChatDraft, OFFLINE_DRAFT_KEY } from "../lib/chatOfflineDraft.ts";
 
-const storage = () => {
+test("offline web drafts cannot cross account identities or survive sign-out cleanup", () => {
+  const store = storage(); bindOfflineChatDraftOwner("account:a", store);
+  store.setItem(OFFLINE_DRAFT_KEY, JSON.stringify({ owner: "account:a", text: "Private draft" }));
+  assert.equal(readOfflineChatDraft("account:a", store), "Private draft");
+  assert.equal(readOfflineChatDraft("account:b", store), "");
+  assert.equal(readOfflineChatDraft(null, store), "");
+  bindOfflineChatDraftOwner("account:b", store); assert.equal(store.getItem(OFFLINE_DRAFT_KEY), null);
+  clearOfflineChatDraft(store); assert.equal(store.length, 0);
+});
+
+function storage() {
   const values = new Map();
   return { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key), key: (index) => [...values.keys()][index] ?? null, get length() { return values.size; } };
 };
