@@ -130,6 +130,8 @@ const PRODUCT_RESEARCH_SCOUT_VARIABLES = [
   "PRODUCT_RESEARCH_SCOUT_ENABLED",
   "PRODUCT_RESEARCH_SCOUT_INGEST_URL",
   "PRODUCT_RESEARCH_SCOUT_INGEST_SECRET",
+  // Optional: `off` stops the unsandboxed retry (docs/policy/product-research-agent.md §12).
+  "PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK",
 ] as const;
 
 /**
