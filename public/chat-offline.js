@@ -4,7 +4,7 @@ let owner = null;
 try { owner = sessionStorage.getItem(ownerKey); } catch { /* Storage may be unavailable. */ }
 const input = document.getElementById("draft");
 const status = document.getElementById("status");
-try { const record = JSON.parse(sessionStorage.getItem(key) || "null"); input.value = owner && record?.owner === owner ? record.text : ""; } catch { status.textContent = "Draft storage is unavailable. Keep this page open."; }
+try { let record = null; try { record = JSON.parse(sessionStorage.getItem(key) || "null"); } catch { sessionStorage.removeItem(key); } input.value = owner && record?.owner === owner && typeof record.text === "string" ? record.text : ""; } catch { status.textContent = "Draft storage is unavailable. Keep this page open."; }
 input.addEventListener("input", () => {
   try { if (!owner) throw Error("An online session is required before saving offline drafts."); sessionStorage.setItem(key, JSON.stringify({ owner, text: input.value })); status.textContent = "Draft saved in this tab."; }
   catch { status.textContent = "Draft storage is unavailable. Keep this page open."; }

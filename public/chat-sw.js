@@ -1,5 +1,5 @@
 /* Cache only the public offline shell. Account pages, API results and files stay on the network. */
-const CACHE = "tomverse-chat-shell-v1";
+const CACHE = "tomverse-chat-shell-v2";
 const SHELL = ["/chat-offline.html", "/chat-offline.js", "/chat-offline.css", "/pwa/icon-192.png"];
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

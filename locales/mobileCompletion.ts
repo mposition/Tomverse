@@ -13,6 +13,7 @@ const en = {
   checkAccount: "Check account status", accountChecked: "Your account is active. Review your choice before trying again.",
   accountUnavailable: "Account export and deletion are not available in this app yet. Use account settings on the website.",
   restoreDraft: "Restore offline draft",
+  logoutUnconfirmed: "Signed out on this device. Server sign-out could not be confirmed. Check your account on the website before trying again.",
 };
 
 // The existing app supports seven locales; new strings use its English fallback.
