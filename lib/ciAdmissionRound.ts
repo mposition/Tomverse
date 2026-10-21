@@ -14,6 +14,7 @@ import {
   type CiAdmissionState,
 } from "@/lib/ciAdmissionCore";
 import { ciAdmissionGithubConfig, createCiAdmissionGithub, type CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
+import { createCoalescedRunner } from "@/lib/ciAdmissionWebhookCore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -103,6 +104,33 @@ const scheduleRecheck = (inMs: number | null) => {
   recheck.unref?.();
 };
 
+/**
+ * A round wanted by a webhook delivery: started now when none runs, else one
+ * more after the running one, however many deliveries ask meanwhile. GitHub
+ * waits ten seconds for an answer, and a busy hour sends hundreds of
+ * workflow_run deliveries; awaiting a round per delivery queued them past
+ * that limit and dropped the pull_request deliveries among them.
+ */
+const requestRound = createCoalescedRunner(async () => {
+  await runCiAdmissionRound(null).catch((error: unknown) => {
+    console.error("CI admission round failed:", code(error));
+  });
+});
+export const requestCiAdmissionRound = (): void => requestRound();
+
+/** Records a pull request that became ready, for the next round to judge; it survives a restart. */
+export async function recordCiAdmissionArrival(number: number): Promise<void> {
+  await prisma.$transaction(
+    async (tx) => {
+      await takeLock(tx);
+      const current = await readState(tx);
+      if (current.pendingArrivals.includes(number)) return;
+      await writeState(tx, { ...current, pendingArrivals: [...current.pendingArrivals, number].slice(-100) });
+    },
+    { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
+  );
+}
+
 export type CiAdmissionRoundOutcome =
   | { outcome: "off" | "not_configured" }
   | { outcome: "read_failed"; failure: string }
@@ -137,6 +165,12 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
   if (!github) return { outcome: "not_configured" };
   const now = deps.now ?? Date.now;
 
+  // The arrivals this round judges: those recorded before it reads GitHub. One
+  // recorded while it reads (the webhook stores arrivals and answers at once)
+  // may be missing from this round's snapshot, or still shown as a draft, so
+  // it is left for the next round rather than judged on stale data and lost.
+  const taken = new Set([...(await readState(prisma)).pendingArrivals, ...(arrival === null ? [] : [arrival])]);
+
   // 1. GitHub, outside any transaction.
   let openPulls: CiAdmissionPull[];
   let running: Set<string>;
@@ -169,12 +203,22 @@ async function round(arrival: number | null, deps: RoundDeps): Promise<CiAdmissi
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, arrival, nowMs: now(), shadow: mode === "shadow" });
+      const late = state.pendingArrivals.filter((number) => !taken.has(number));
+      const judged = evaluateCiAdmission({
+        state: { ...state, pendingArrivals: state.pendingArrivals.filter((number) => taken.has(number)) },
+        openPulls,
+        running,
+        runningBases,
+        deploys,
+        arrival,
+        nowMs: now(),
+        shadow: mode === "shadow",
+      });
       await writeState(
         tx,
         mode === "shadow"
-          ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound, pendingArrivals: [] }
-          : judged.state,
+          ? { ...state, events: judged.state.events, lastRound: judged.state.lastRound, pendingArrivals: late }
+          : { ...judged.state, pendingArrivals: [...new Set([...judged.state.pendingArrivals, ...late])].slice(-100) },
       );
       return judged;
     },
