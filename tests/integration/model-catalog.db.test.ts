@@ -319,7 +319,16 @@ test("a change committed while the renewal waits for the lock is judged, not ski
   });
   await holding;
   const renewal = renewCodingSnapshotIfUnchanged({ now: new Date(latest.coverageUntil.getTime() - 3 * day) });
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  // Wait until the database reports a session blocked on the advisory lock,
+  // rather than guessing a delay: the change below must land behind the wait.
+  for (let attempt = 0; ; attempt += 1) {
+    const waiting = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT count(*) AS count FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+    `;
+    if (Number(waiting[0]?.count ?? 0) > 0) break;
+    assert.ok(attempt < 100, "the renewal never waited for the chain lock");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   await prisma.modelCatalogEntry.update({ where: key, data: { enabled: false } });
   release();
   await holder;
