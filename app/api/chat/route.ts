@@ -1,3 +1,4 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
@@ -662,7 +663,9 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = session?.user?.id;
     if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -837,7 +840,9 @@ export async function PUT(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = session?.user?.id;
     if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -1289,7 +1294,9 @@ async function handleChatPost(
     } | null = null;
     try {
         assertChatRequestSize(req);
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         const body = await readChatJsonBody(req);
         const {
             messages,

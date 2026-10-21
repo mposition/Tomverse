@@ -1,9 +1,8 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 
-import { authOptions } from "@/lib/auth";
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
@@ -43,7 +42,9 @@ import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
  * the screen and the execution cannot disagree.
  */
 export async function POST(req: Request) {
-  const session = await getServerSession(authOptions);
+  const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }

@@ -22,7 +22,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 
 import {
@@ -38,7 +38,6 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { ASSISTANT_PROFILE_MODEL_UNAVAILABLE } from "@/lib/assistantProfileVersioning";
-import { authOptions } from "@/lib/auth";
 import {
   effectivePlanModelLimit,
   getUserBillingPlan,
@@ -97,7 +96,9 @@ export const createConversationForProduct = async (
   productKey: ConversationProductKey
 ) => {
   try {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }

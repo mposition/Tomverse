@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
 
 /**
  * No plugins on purpose.
@@ -14,6 +15,7 @@ import { defineConfig } from "vite";
  * and in `vite preview`.
  */
 export default defineConfig({
+  resolve: { alias: { "@": fileURLToPath(new URL("../../", import.meta.url)) } },
   base: "./",
   build: {
     outDir: "dist",
