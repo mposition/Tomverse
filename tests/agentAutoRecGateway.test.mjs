@@ -69,7 +69,7 @@ function fakeDeps({ gitAnswers = {}, github = [], app = [], files = {}, env = EN
     },
     fetch: async (url, init) => {
       fetchCalls.push({ url, init });
-      const queue = url.startsWith("https://api.github.com") ? github : app;
+      const queue = new URL(url).host === "api.github.com" ? github : app;
       const next = queue.shift();
       if (next === undefined) throw new Error(`unexpected fetch ${init.method} ${url}`);
       if (next instanceof Error) throw next;
