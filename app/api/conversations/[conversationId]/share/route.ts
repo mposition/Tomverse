@@ -261,28 +261,46 @@ export async function POST(
   // Publish only while the ownership, lock and share generation we checked
   // still hold. A concurrent lock, revoke or replacement share wins over this
   // in-flight preparation; no new link is issued for its stale snapshot.
+  // Compare both directions of the transcript and refuse a new continuation
+  // bridge in the same statement as publication, with no check/write gap.
   const shareToken = createShareToken();
-  const updated = await prisma.conversation.updateMany({
-    where: {
-      id: conversationId,
-      userId,
-      password: accessConversation.password,
-      kind: accessConversation.kind,
-      shareToken: accessConversation.shareToken,
-      shareEnabled: accessConversation.shareEnabled,
-      shareRevokedAt: accessConversation.shareRevokedAt,
-      chatRecoveryEpoch: accessConversation.chatRecoveryEpoch,
-    },
-    data: {
-      shareToken,
-      shareEnabled: true,
-      sharedAt,
-      shareExpiresAt: expiresAt,
-      shareRevokedAt: null,
-      shareSnapshot: parsedSnapshot.data,
-    },
-  });
-  if (updated.count !== 1) {
+  const updated = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    WITH prepared_messages AS (
+      SELECT * FROM jsonb_to_recordset(${JSON.stringify(parsedSnapshot.data.messages)}::jsonb)
+        AS message("id" text, "role" text, "content" text, "modelId" text, "createdAt" timestamp(3))
+    ), current_messages AS (
+      SELECT "id", "role", "content", "modelId", "createdAt"
+      FROM "Message"
+      WHERE "conversationId" = ${conversationId} AND "role" IN ('user', 'assistant')
+    )
+    UPDATE "Conversation" AS conversation
+    SET "shareToken" = ${shareToken},
+        "shareEnabled" = true,
+        "sharedAt" = ${sharedAt.toISOString()}::timestamp(3),
+        "shareExpiresAt" = ${expiresAt.toISOString()}::timestamp(3),
+        "shareRevokedAt" = NULL,
+        "shareSnapshot" = ${JSON.stringify(parsedSnapshot.data)}::jsonb,
+        "updatedAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+    WHERE conversation."id" = ${conversationId}
+      AND conversation."userId" = ${userId}
+      AND conversation."password" IS NOT DISTINCT FROM ${accessConversation.password}::text
+      AND conversation."kind" = ${accessConversation.kind}
+      AND conversation."shareToken" IS NOT DISTINCT FROM ${accessConversation.shareToken}::text
+      AND conversation."shareEnabled" = ${accessConversation.shareEnabled}
+      AND conversation."shareRevokedAt" IS NOT DISTINCT FROM ${accessConversation.shareRevokedAt?.toISOString() ?? null}::timestamp(3)
+      AND conversation."chatRecoveryEpoch" = ${accessConversation.chatRecoveryEpoch}
+      AND NOT EXISTS (
+        SELECT 1 FROM "ConversationContinuationBridge" bridge
+        WHERE bridge."conversationId" = conversation."id"
+      )
+      AND NOT EXISTS (
+        (SELECT * FROM current_messages EXCEPT SELECT * FROM prepared_messages)
+        UNION ALL
+        (SELECT * FROM prepared_messages EXCEPT SELECT * FROM current_messages)
+      )
+    RETURNING conversation."id"
+  `);
+  if (updated.length !== 1) {
     logSecurityAuditEvent("conversation.share.create", {
       userId,
       resourceId: conversationId,

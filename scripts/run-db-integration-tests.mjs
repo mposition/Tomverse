@@ -972,16 +972,18 @@ run(
     "tests/integration/chat-refiner-initial-auto-release.db.test.ts"],
   "Running the Prompt Refiner Auto budget hold transaction scenarios",
 );
-// Runs apart from the batch above: it drives the real route handlers, which
-// needs mock.module (--experimental-test-module-mocks) to replace the session
-// seam. Module mocks are process-global, so keeping this in its own process
-// stops the next-auth stub from leaking into the suites above.
+// Chat's lifecycle route tests replace identity and deployment switches only.
+// Keep their module mocks isolated from the ordinary database batch.
 run(
   ["--conditions=react-server", "--experimental-test-module-mocks",
     "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
     "--test-concurrency=1", "tests/integration/chat-c16-lifecycle.db.test.ts"],
   "Running Chat sharing, export and deletion lifecycle scenarios"
 );
+// Runs apart from the batch above: it drives the real route handlers, which
+// needs mock.module (--experimental-test-module-mocks) to replace the session
+// seam. Module mocks are process-global, so keeping this in its own process
+// stops the next-auth stub from leaking into the suites above.
 run(
   [
     "--conditions=react-server",
