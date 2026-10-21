@@ -4,6 +4,39 @@ Locally bundled Vite + React + Capacitor application. It uses the existing
 mobile session service and Chat persistence, streaming, attachments and voice
 APIs. Production builds contain no demo transport and no remote `server.url`.
 
+## C21 implementation (2026-10-21)
+
+Web and native answers now share `@tomverse/chat-ui` (the existing GFM/CJK
+Markdown behavior), and file responses share `@tomverse/api-client`. Native
+answers display sources and generated-file cards from the canonical message
+readback. Ready files use the existing authenticated artifact endpoint, with
+ownership, lock and size checks unchanged. Android's document picker and iOS's
+document export picker require an explicit Save action; neither accepts a
+filesystem path from JavaScript. Browser tests exercise the browser fallback.
+
+Unsent text drafts are scoped by authenticated account and conversation on the
+device, expire after one day and clear on sign-out/session loss. Model selection
+preserves the pending draft. No offline message is dispatched automatically.
+
+Account export and deletion have in-app confirmation and reauthentication UI.
+They reuse the existing single-use export ticket and deletion scheduler. Native
+sensitive actions additionally require `TOMVERSE_NATIVE_ACCOUNT_ENABLED=true`
+(default off) beside the existing native Chat enrollment. Step-up freshness is
+the token family's original sign-in time; rotating a token cannot renew it.
+Unknown deletion outcomes are not automatically retried. This implementation
+does not enable the switch, send mail or delete any real account.
+
+The web PWA has an install manifest, explicit install action, and a public-only
+offline shell. Its service worker never caches account/API responses or generated
+files. A draft entered offline remains in the tab until the user chooses Restore
+offline draft in the normal Chat composer. Run `npm run test:pwa` for the browser
+contract. Shared-package verification executes the actual React Markdown bundle
+in Chromium as well as checking standalone TypeScript and emitted tokens.
+
+Android compilation and browser contracts are local evidence. Physical phones,
+iOS compilation/signing, domain associations, live activation and store release
+remain separate steps.
+
 ## Local development
 
 From the repository root, using local PowerShell, without production credentials:

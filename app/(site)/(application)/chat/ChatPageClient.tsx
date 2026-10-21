@@ -1,5 +1,7 @@
 ﻿"use client";
 
+import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
+
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
 import { askReviewRoute } from "@/lib/reviewRoutingClient";
@@ -9999,6 +10001,7 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport && !(mountedSurface === "workspace" && reviewWorkspace.appearance === "studio") ? (
         <MobileChatShell
+          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           review={mountedSurface === "workspace" ? {
             ...reviewWorkspace,
@@ -10160,6 +10163,7 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
           onStudioStarter={id => {

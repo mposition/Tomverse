@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createStaticMarketingCsp, createStrictCsp } from "@/lib/csp";
+import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import {
   isStaticMarketingPathname,
   localizedMarketingRedirect,
@@ -400,9 +400,9 @@ export function proxy(request: NextRequest) {
   const nonce = isStaticMarketingRequest
     ? null
     : Buffer.from(crypto.randomUUID()).toString("base64");
-  const csp = nonce
-    ? createStrictCsp(nonce)
-    : createStaticMarketingCsp(staticMarketingHashes || undefined);
+  const csp = request.nextUrl.pathname === "/chat-offline.html"
+    ? createOfflineChatCsp()
+    : nonce ? createStrictCsp(nonce) : createStaticMarketingCsp(staticMarketingHashes || undefined);
   const enforce = process.env.CSP_MODE === "enforce";
   const policyHeader = enforce
     ? "Content-Security-Policy"

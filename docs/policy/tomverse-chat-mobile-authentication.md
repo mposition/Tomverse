@@ -119,6 +119,21 @@ and single-use codes each remove part of the attack; the tests run on physical
 devices, because the claiming behaviour they exercise is a device-level
 registration and a simulator does not reproduce it.
 
+## C21 account and file adapters
+
+The bundled app reuses `GET /api/artifacts/{id}` and its existing ownership,
+conversation-lock and output-size checks. Native account identity is read through
+`GET /api/user/account`; sensitive export/deletion additionally remain default-off
+behind `TOMVERSE_NATIVE_ACCOUNT_ENABLED`, alongside the existing native Chat
+switch. The existing account step-up reads the original `MobileTokenFamily.createdAt`,
+not access-token issuance or refresh rotation. Account export keeps its five-minute,
+single-use, owner-bound ticket; deletion keeps its exact confirmation and scheduler.
+Cookie authentication and its CSRF checks are unchanged. Local code and tests do
+not activate these routes or perform real data exports/deletions.
+
+The native file adapter only writes through an explicit system document picker.
+It accepts bounded bytes and a filename, never an arbitrary filesystem path.
+
 ## Deliberately excluded
 
 - **No password authentication**, on any surface. Adding one to serve the app

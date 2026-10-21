@@ -4,6 +4,31 @@ import { installChatModelStub, restoreActiveConversation, setDeterministicTheme,
 import { expectAccessibleContrast, expectInsideVisibleViewport, expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.use({ hasTouch: true });
+
+test("PWA actions preserve the mobile composer and explicitly restore an offline draft", { tag: "@ui-risk" }, async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "manual", language: "en" });
+  await restoreActiveConversation(page);
+  await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" }]);
+  await page.route("**/api/products/chat/capabilities", (route) => route.fulfill({ json: { autoSelection: { offered: true } } }));
+  await page.goto("/chat?lang=en");
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await page.evaluate(() => sessionStorage.setItem("tomverse-offline-draft", "Recovered offline idea"));
+  await page.reload();
+  const textarea = page.getByTestId("chat-textarea");
+  await textarea.fill("Existing draft");
+  await page.getByRole("button", { name: "Restore offline draft" }).click();
+  await expect(textarea).toHaveValue("Existing draft\nRecovered offline idea");
+  await page.evaluate(() => { const event = new Event("beforeinstallprompt"); Object.assign(event, { prompt: async () => undefined, userChoice: Promise.resolve({ outcome: "dismissed" }) }); window.dispatchEvent(event); });
+  await expect(page.getByRole("button", { name: "Install Tomverse" })).toBeVisible();
+  await expectTappableInVisibleViewport(page, textarea, "PWA composer");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  const manifest = await page.request.get("/manifest.webmanifest");
+  expect(manifest.status()).toBe(200); expect((await manifest.json()).start_url).toBe("/chat");
+  const shell = await page.request.get("/chat-offline.html");
+  expect(shell.headers()["content-security-policy"]).toContain("default-src 'none'");
+});
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => {
   test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and mobile viewport coverage.");

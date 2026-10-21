@@ -527,17 +527,6 @@ jobs:
         timeout-minutes: 5
         run: npm run check:shared-packages
 
-      # The other half of PACKAGE-01's evidence. `next build` proves the shared
-      # packages compile inside this app and cannot prove the thing the gate is
-      # about: that they build where Next.js is not the one building. Vite
-      # externalizes a Node builtin with a warning rather than an error, so
-      # this fails on the warning and then executes the bundle -- a build that
-      # resolved everything and behaves differently outside Next.js is the
-      # failure worth catching.
-      - name: Package build matrix (Vite)
-        timeout-minutes: 10
-        run: npm run verify:package-build-matrix
-
       # The locally bundled app is a release requirement in two documents
       # (delivery plan section 2, mobile authentication policy "Deliberately
       # excluded"), and until now nothing measured it. A `server.url` added to
@@ -892,6 +881,19 @@ jobs:
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 20
         run: scripts/ci/install-playwright.sh chromium
+
+      # Shared React UI must execute in an actual browser, after Chromium is available.
+      - name: Package build matrix (Vite and Chromium)
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
+        run: npm run verify:package-build-matrix
+
+      - name: Native UI and PWA contracts
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 5
+        run: |
+          npm --workspace @tomverse/mobile run test:ui
+          npm run test:pwa
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
       # on pull requests into main via Main Chromium Regression, and nightly via Daily
