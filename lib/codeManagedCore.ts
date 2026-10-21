@@ -32,7 +32,7 @@ export type CompleteRequest = Extract<CodeManagedRequest, {
 export type ReserveRequest = Extract<CodeManagedRequest, {
     action: "reserve";
 }>;
-const resolutionBase = { callId: uuid, resolutionId: uuid, evidenceRef: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,159}$/) };
+const resolutionBase = { callId: uuid, resolutionId: uuid, evidenceRef: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{2,159}$/) };
 export const codeManagedReconciliationSchema = z.discriminatedUnion("mode", [
     z.object({ ...resolutionBase, mode: z.literal("no_provider_usage") }).strict(),
     z.object({ ...resolutionBase, mode: z.literal("known_usage"), usage: z.object({

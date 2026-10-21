@@ -28,7 +28,7 @@ test('reconciliation is separately default-off before rate or monetary work',asy
   process.env.CODE_MANAGED_RECONCILIATION_ENABLED='false';const response=await POST(request());assert.equal(response.status,503);assert.equal(serviceCalls,0);assert.equal(rateCalls,0);process.env.CODE_MANAGED_RECONCILIATION_ENABLED='true';
 });
 test('reconciliation accepts only bounded evidence/usage metadata and no claimed money or provider endpoint',async()=>{
-  for(const payload of [{...body(),actualCostMicroUsd:0},{...body(),url:'https://attacker.example'},{...body(),evidenceRef:'ticket?secret=value'},{...body(),mode:'known_usage',usage:{inputTokens:-1,outputTokens:1}}])assert.equal((await POST(request(payload))).status,400);
+  for(const payload of [{...body(),actualCostMicroUsd:0},{...body(),url:'https://attacker.example'},{...body(),evidenceRef:'ticket?secret=value'},{...body(),evidenceRef:'https://host/path'},{...body(),mode:'known_usage',usage:{inputTokens:-1,outputTokens:1}}])assert.equal((await POST(request(payload))).status,400);
   const response=await POST(request('secret fixture '.repeat(1000)));assert.equal(response.status,413);assert.equal((await response.text()).includes('secret fixture'),false);assert.equal(serviceCalls,0);
 });
 test('owner reconciliation is private, rate-limited and cannot charge a customer',async()=>{

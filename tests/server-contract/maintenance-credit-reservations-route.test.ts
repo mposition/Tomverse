@@ -357,10 +357,14 @@ test("an unauthorized caller is refused before any reconciliation runs", async (
 });
 
 test("a failed Code sweep defers without blocking later maintenance or its job receipt",async()=>{
-  resetWorld();codeSweepFailure=true;const response=await post();const body=await response.json();
-  assert.equal(response.status,200);assert.equal(world.completedRuns,1);assert.equal(world.failedRuns,0);
-  assert.equal(body.notificationDeliveries.delivered,13);assert.equal(body.infrastructureMonitor.checked,true);
-  assert.deepEqual(body.codeTasks,{interrupted:0,deferred:true});assert.deepEqual(world.completedResult?.codeTasks,body.codeTasks);
+  resetWorld();codeSweepFailure=true;const warning=mock.method(console,"warn",()=>{});
+  try{
+    const response=await post();const body=await response.json();
+    assert.equal(response.status,200);assert.equal(world.completedRuns,1);assert.equal(world.failedRuns,0);
+    assert.equal(body.notificationDeliveries.delivered,13);assert.equal(body.infrastructureMonitor.checked,true);
+    assert.deepEqual(body.codeTasks,{interrupted:0,deferred:true});assert.deepEqual(world.completedResult?.codeTasks,body.codeTasks);
+    assert.deepEqual(warning.mock.calls.map(call=>call.arguments),[['{"event":"code_lease_sweep_deferred"}']]);
+  }finally{warning.mock.restore();}
 });
 
 test("every ride-along sweep's result reaches the response body and the run row", async () => {

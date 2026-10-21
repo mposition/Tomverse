@@ -240,6 +240,46 @@ test('Code managed inference with migrated local schema and real shared credit l
       const current=await newUser(),currentHeld=await reserve(current),currentReq=call(currentHeld.reservationId);mode='pending';const invalid=service.handleCodeManaged(current,currentReq).catch(e=>e);await waitPending(1);
       await db.chatUsageBucket.updateMany({where:{key:'provider:openai',period:'provider-cost-day'},data:{count:0n}});mode='success';pending.splice(0).forEach(r=>r());assert.equal((await invalid).code,'CODE_SETTLEMENT_OUTCOME_UNKNOWN');assert.equal((await release(current,currentHeld.reservationId)).billing.heldCredits,1);
     });
+    await t.test('current user-time-zone day buckets still reject underflow',async tt=>{
+      tt.mock.timers.enable({apis:['Date'],now:new Date('2026-10-22T12:00:00Z')});
+      try{
+        await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
+        for(const period of ['day','cost-day','op-cost-day']){
+          const user=await newUser();await db.userSettings.create({data:{userId:user,timeZone:'Australia/Brisbane',defaultModel:'gpt-6-luna'}});
+          const held=await reserve(user),task=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});
+          assert.equal(task.dayStart.toISOString(),'2026-10-21T14:00:00.000Z');
+          const where={key_period_periodStart:{key:task.subjectKey,period,periodStart:task.dayStart}},bucket=await db.chatUsageBucket.findUnique({where});
+          await db.chatUsageBucket.update({where,data:{count:0n}});
+          await rejectCode(()=>release(user,held.reservationId),'CODE_ACCOUNTING_UNAVAILABLE');
+          assert.equal((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).releasedCredits,0);
+          await db.chatUsageBucket.update({where,data:{count:bucket.count}});await release(user,held.reservationId);
+        }
+      }finally{
+        tt.mock.timers.reset();await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
+      }
+    });
+    await t.test('deletion during dispatch remains recoverable without recreating a wallet',async()=>{
+      const user=await newUser(),held=await reserve(user,1),req=call(held.reservationId);mode='pending';const late=service.handleCodeManaged(user,req).catch(e=>e);await waitPending(1);
+      try{
+        const {anonymiseAccountData}=await import(mod('lib/accountDataAnonymisation.ts')),{usagePeriodStart}=await import(mod('lib/chatSecurity.ts'));
+        await db.$transaction(tx=>anonymiseAccountData(tx,user));await db.user.delete({where:{id:user}});
+        const snapshot=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}}),callBefore=await db.codeManagedCall.findUnique({where:{id:req.callId}});
+        const where={key_period_periodStart:{key:'provider:openai',period:'provider-cost-day',periodStart:usagePeriodStart('day',callBefore.createdAt)}},providerBefore=await db.chatUsageBucket.findUnique({where});
+        await db.codeManagedCall.update({where:{id:req.callId},data:{createdAt:new Date(Date.now()-180000)}});
+        await service.reconcileExpiredCodeTasks(new Date(Date.now()+180000));
+        assert.equal((await db.codeManagedCall.findUnique({where:{id:req.callId}})).status,'outcome_unknown');
+        // Account anonymisation already closes the task; expiry only recovers
+        // its pending provider receipt, without reopening or charging it.
+        assert.equal((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).status,'closed');
+        assert.equal((await db.chatUsageBucket.findUnique({where})).count,providerBefore.count);
+        const resolved=await reconcile({callId:req.callId,resolutionId:randomUUID(),evidenceRef:'ticket/deleted-dispatched',mode:'no_provider_usage'});
+        assert.equal((await db.chatUsageBucket.findUnique({where})).count,providerBefore.count-callBefore.reservedCostMicroUsd);
+        assert.equal(await db.user.findUnique({where:{id:user}}),null);assert.equal(await db.creditLot.count({where:{userId:user}}),0);
+        assert.deepEqual((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).addOnEntries,snapshot.addOnEntries);
+        mode='success';pending.splice(0).forEach(r=>r());await late;
+        assert.equal((await db.codeManagedCall.findUnique({where:{id:req.callId}})).resolutionAuditId,resolved.auditLogId);
+      }finally{mode='success';pending.splice(0).forEach(r=>r());await late;}
+    });
     await t.test('migration rejects product spoofing and account anonymisation clears linkage',async()=>{
       const user=await newUser(),held=await reserve(user);await release(user,held.reservationId);
       const {buildAccountDataExport}=await import(mod('lib/accountDataExport.ts'));

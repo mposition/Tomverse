@@ -196,13 +196,13 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
         return fail(400, "CODE_REVIEWER_PROVIDER_NOT_INDEPENDENT");
     return { executor, reviewer, plan, limits };
 }
-async function decrement(tx: Tx, key: string, period: string, start: Date, amount: number) {
+async function decrement(tx: Tx, key: string, period: string, start: Date, amount: number, currentStart?: Date) {
     if (amount <= 0)
         return;
     // Existing maintenance deletes old day/month buckets. An expired period
     // no longer grants allowance, so missing/pruned old counters need no refund.
     // Current-period underflow still signals a real accounting failure.
-    const retired = start < usagePeriodStart(period.includes("month") ? "month" : "day", new Date());
+    const retired = start < (currentStart ?? usagePeriodStart(period.includes("month") ? "month" : "day", new Date()));
     const changed = await tx.$executeRaw `UPDATE "ChatUsageBucket" SET "count"=GREATEST(0,"count"-${amount}::bigint),"updatedAt"=NOW()
     WHERE "key"=${key} AND "period"=${period} AND "periodStart"=${start} AND (${retired} OR "count">=${amount}::bigint)`;
     if (changed !== 1 && !retired)
@@ -307,12 +307,13 @@ async function refundUnused(tx: Tx, task: Task, records: Call[]) {
     }
     if (creditsLeft > 0 || costLeft > 0 || released < task.releasedCredits)
         return fail(503, "CODE_ACCOUNTING_UNAVAILABLE");
-    for (const [period, start] of [["day", task.dayStart], ["month", task.monthStart]] as const) {
+    const now = new Date(), currentDay = await getUserDayWindow(tx, task.userId!, now);
+    for (const [period, start, currentStart] of [["day", task.dayStart, currentDay.start], ["month", task.monthStart, usagePeriodStart("month", now)]] as const) {
         // A plan with no daily credit ceiling did not create a daily credit hold.
         if (period !== "day" || task.planDayHeld)
-            await decrement(tx, task.subjectKey, period, start, planRefund);
-        await decrement(tx, task.subjectKey, `cost-${period}`, start, numeric(task.planHeldCostMicroUsd) - planCostKeep);
-        await decrement(tx, task.subjectKey, `op-cost-${period}`, start, numeric(task.heldCostMicroUsd) - keepCost);
+            await decrement(tx, task.subjectKey, period, start, planRefund, currentStart);
+        await decrement(tx, task.subjectKey, `cost-${period}`, start, numeric(task.planHeldCostMicroUsd) - planCostKeep, currentStart);
+        await decrement(tx, task.subjectKey, `op-cost-${period}`, start, numeric(task.heldCostMicroUsd) - keepCost, currentStart);
     }
     await settleAddOnCredits(tx, { userId: task.userId!, reservationId: task.id, entries: refunds.filter(e => e.credits > 0 || e.fundedCostMicroUsd > 0), settledCredits: 0, settledFundedCostMicroUsd: 0, outcome: "completed" });
     await tx.$executeRaw `UPDATE "CodeTaskReservation" SET "releasedCredits"=${released},"planHeldCredits"=${planKeep},"addOnEntries"=${JSON.stringify(kept)}::jsonb,"heldCostMicroUsd"=${BigInt(keepCost)},"planHeldCostMicroUsd"=${BigInt(planCostKeep)},"updatedAt"=NOW() WHERE "id"=${task.id}`;
@@ -323,7 +324,9 @@ async function expireCalls(tx: Tx, task: Task, now: Date) {
         await tx.$executeRaw `UPDATE "CodeTaskReservation" SET "status"='interrupted',"updatedAt"=NOW() WHERE "id"=${task.id}`;
         task.status = "interrupted";
     }
-    if (task.status !== "active")
+    // Deleted accounts retain non-personal provider holds, but no wallet or lot
+    // identity to refund. Expiry must still make their calls reconcilable.
+    if (task.status !== "active" && task.userId)
         await refundUnused(tx, task, await calls(tx, task.id));
 }
 async function inspect(userId: string, request: Extract<CodeManagedRequest, {
@@ -522,13 +525,13 @@ export async function handleCodeManaged(userId: string, request: CodeManagedRequ
 export async function reconcileExpiredCodeTasks(now = new Date()) {
     let rows: {
         id: string;
-        userId: string;
+        userId: string | null;
     }[];
     try {
         rows = await prisma.$queryRaw<{
             id: string;
-            userId: string;
-        }[]> `SELECT t."id",t."userId" FROM "CodeTaskReservation" t WHERE t."userId" IS NOT NULL AND
+            userId: string | null;
+        }[]> `SELECT t."id",t."userId" FROM "CodeTaskReservation" t WHERE
     ((t."status"='active' AND t."leaseExpiresAt"<=${now}) OR EXISTS (SELECT 1 FROM "CodeManagedCall" c WHERE c."reservationId"=t."id" AND c."status"='dispatched' AND c."createdAt"<${new Date(now.getTime() - CODE_PROVIDER_TIMEOUT_MS - 30000)})) ORDER BY t."leaseExpiresAt" LIMIT 100`;
     }
     catch (error) {
@@ -539,8 +542,8 @@ export async function reconcileExpiredCodeTasks(now = new Date()) {
     let interrupted = 0, failed = 0;
     for (const row of rows)
         try {
-            interrupted += await transaction(row.userId, async (tx) => {
-                const task = (await tasks(tx, row.id, row.userId))[0];
+            interrupted += await transaction(row.userId ?? `anonymous-code:${row.id}`, async (tx) => {
+                const task = (await tx.$queryRaw<Task[]> `SELECT * FROM "CodeTaskReservation" WHERE "id"=${row.id} AND "userId" IS NOT DISTINCT FROM ${row.userId}`)[0];
                 if (!task)
                     return 0;
                 const expired = task.status === "active" && task.leaseExpiresAt <= now;
