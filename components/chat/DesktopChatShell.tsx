@@ -179,7 +179,11 @@ export type DesktopChatShellProps = {
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-  onStartImageDraft?: (draftText: string, modelId?: string) => void;
+  onStartImageDraft?: (
+    draftText: string,
+    modelId?: string,
+    options?: { fromImageRequest?: boolean }
+  ) => void;
   imageWorkspace?: React.ReactNode;
   /**
    * A read-only block above the panel row, for a conversation that has one.
