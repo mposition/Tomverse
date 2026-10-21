@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
+import { layoutBox } from "./support/engine-capabilities";
 
 /**
  * The landing page's product evidence.
@@ -88,12 +89,14 @@ test.describe("landing product evidence", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await openLanding(page);
 
-    const box = await page
-      .locator("section[aria-labelledby='landing-hero-title'] img")
-      .boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(321);
+    const capture = page.locator(
+      "section[aria-labelledby='landing-hero-title'] img"
+    );
+    await expect(capture).toBeVisible();
+    const box = await layoutBox(capture);
+    expect(box.width).toBeGreaterThan(0);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(321);
 
     const scrollWidth = await page.evaluate(
       () => document.documentElement.scrollWidth
