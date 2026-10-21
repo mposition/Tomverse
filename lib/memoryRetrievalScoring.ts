@@ -30,7 +30,7 @@
  */
 
 import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
-import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
+import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS, memoryStatementKey } from "@/lib/memoryValidatorCore";
 
 /**
  * Identifies the scoring and selection algorithm — deliberately separate from
@@ -240,14 +240,13 @@ const byScoreThenId = (left: ScoredMemory, right: ScoredMemory) => {
 };
 
 /**
- * Legacy keys identify duplicate statements. Topic keys may contain different
- * values the user explicitly chose to keep together, so only equal statements
- * in that topic are duplicates.
+ * Topic groups can contain explicitly coexisting values. Deduplicate equal
+ * assertions across both topic and legacy keys using the validator's key.
  */
-const duplicateKey = (memory: RetrievableMemory) =>
-    memory.conflictKey?.startsWith("topic:")
-        ? `${memory.conflictKey}:${memory.statement.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim()}`
-        : memory.conflictKey ?? `id:${memory.id}`;
+const duplicateKeys = (memory: RetrievableMemory) => [
+    `statement:${memory.kind}:${memoryStatementKey(memory.statement)}`,
+    ...(memory.conflictKey && !memory.conflictKey.startsWith("topic:") ? [`legacy:${memory.conflictKey}`] : []),
+];
 
 export function selectMemoryContext(input: {
     memories: readonly RetrievableMemory[];
@@ -310,8 +309,8 @@ export function selectMemoryContext(input: {
                 continue;
             }
 
-            const key = duplicateKey(candidate.memory);
-            if (seenDuplicates.has(key)) {
+            const keys = duplicateKeys(candidate.memory);
+            if (keys.some(key => seenDuplicates.has(key))) {
                 omitted.duplicate += 1;
                 continue;
             }
@@ -345,7 +344,7 @@ export function selectMemoryContext(input: {
             }
 
             selected.push(candidate);
-            seenDuplicates.add(key);
+            for (const key of keys) seenDuplicates.add(key);
             tokens += candidate.tokens;
             if (tier === "style") {
                 styleTokens += candidate.tokens;

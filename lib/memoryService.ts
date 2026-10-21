@@ -14,6 +14,7 @@ import {
 } from "@/lib/memoryRetrievalTerms";
 import {
     validateMemoryCandidate,
+    memoryStatementKey,
     type MemoryEvidenceInput,
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
@@ -145,15 +146,33 @@ const serializeMemory = (
 
 export type SerializedMemory = ReturnType<typeof serializeMemory>;
 
+type ConflictSubject = { id?: string; kind: string; statement: string; conflictKey: string | null };
+
+async function activeMemoryConflicts(
+    client: Prisma.TransactionClient | typeof prisma,
+    userId: string,
+    item: ConflictSubject,
+    otherMemoryId?: string
+) {
+    // Compare normalized assertions across legacy and topic key schemes. Do
+    // not truncate before comparing: a hidden peer would escape the snapshot.
+    const rows = await client.memoryItem.findMany({
+        where: { userId, status: "active", ...(item.id ? { id: { not: item.id } } : {}),
+            AND: [{ OR: [{ kind: item.kind }, ...(item.conflictKey ? [{ conflictKey: item.conflictKey }] : []),
+                ...(otherMemoryId ? [{ id: otherMemoryId }] : [])] },
+                { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }] },
+        select: { id: true, kind: true, statement: true, conflictKey: true, revision: true, sensitivity: true },
+        orderBy: { id: "asc" },
+    });
+    const statementKey = memoryStatementKey(item.statement);
+    return rows.filter(row => row.id === otherMemoryId ||
+        (item.conflictKey !== null && row.conflictKey === item.conflictKey) ||
+        (row.kind === item.kind && memoryStatementKey(row.statement) === statementKey));
+}
+
 export async function getMemoryConflictContext(userId: string, memoryId: string) {
     const item = await loadOwnedMemory(userId, memoryId);
-    const conflicts = item.conflictKey ? await prisma.memoryItem.findMany({
-        where: { userId, id: { not: item.id }, conflictKey: item.conflictKey, status: "active",
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-        orderBy: { id: "asc" },
-        take: 100,
-        select: { id: true, statement: true, kind: true, sensitivity: true, revision: true },
-    }) : [];
+    const conflicts = await activeMemoryConflicts(prisma, userId, item);
     return { memory: serializeMemory(item), conflicts };
 }
 
@@ -212,26 +231,15 @@ export async function listMemories(
 async function assertNoActiveConflict(
     tx: Prisma.TransactionClient,
     userId: string,
-    conflictKey: string | null,
-    excludeId: string | null,
+    item: ConflictSubject,
     resolveConflict: "supersede_existing" | undefined
 ) {
-    if (!conflictKey) return;
-    const conflicting = await tx.memoryItem.findFirst({
-        where: {
-            userId,
-            conflictKey,
-            status: "active",
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-            ...(excludeId ? { id: { not: excludeId } } : {}),
-        },
-        select: { id: true },
-    });
-    if (!conflicting) return;
+    const conflicting = await activeMemoryConflicts(tx, userId, item);
+    if (!conflicting.length) return;
     if (resolveConflict === "supersede_existing") {
         await tx.memoryItem.updateMany({
-            where: { userId, conflictKey, status: "active", ...(excludeId ? { id: { not: excludeId } } : {}) },
-            data: { status: "superseded" },
+            where: { userId, id: { in: conflicting.map(row => row.id) } },
+            data: { status: "superseded", revision: { increment: 1 } },
         });
         return;
     }
@@ -294,8 +302,7 @@ export async function createManualMemory(input: {
         await assertNoActiveConflict(
             tx,
             input.userId,
-            conflictKey,
-            null,
+            { kind: input.kind, statement, conflictKey },
             input.resolveConflict
         );
         const item = await tx.memoryItem.create({
@@ -363,8 +370,7 @@ export async function approveMemory(input: {
         await assertNoActiveConflict(
             tx,
             input.userId,
-            item.conflictKey,
-            item.id,
+            item,
             input.resolveConflict
         );
         const updated = await tx.memoryItem.updateMany({
@@ -404,13 +410,7 @@ export async function resolveMemoryConflict(input: {
         if (!(REVIEWABLE_STATUSES as readonly string[]).includes(item.status) || item.revision !== input.expectedRevision) {
             throw new ApiSecurityError(409, "MEMORY_ITEM_STATE", "The memory changed during review.");
         }
-        const peers = await tx.memoryItem.findMany({
-            where: { userId: input.userId, status: "active", id: { not: item.id },
-                AND: [input.otherMemoryId ? { OR: [{ id: input.otherMemoryId }, { conflictKey: item.conflictKey ?? "" }] }
-                    : { conflictKey: item.conflictKey ?? "" },
-                    { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }] },
-            select: { id: true, revision: true, sensitivity: true }, orderBy: { id: "asc" }, take: 101,
-        });
+        const peers = await activeMemoryConflicts(tx, input.userId, item, input.otherMemoryId);
         const snapshot = (rows: { id: string; revision: number }[]) => JSON.stringify(rows.map(row => [row.id, row.revision]).sort());
         if (!peers.length || (input.otherMemoryId && !peers.some(peer => peer.id === input.otherMemoryId)) || snapshot(peers) !== snapshot(input.expectedConflicts)) {
             throw new ApiSecurityError(409, "MEMORY_ITEM_STATE", "The conflicting memories changed during review.");
@@ -434,10 +434,16 @@ export async function resolveMemoryConflict(input: {
                 data: { status: input.resolution === "expire_existing" ? "expired" : "superseded",
                     ...(input.resolution === "expire_existing" ? { expiresAt: new Date() } : {}), revision: { increment: 1 } } });
         }
+        const conflictKey = memoryConflictKey(item.kind, statement, memoryCanonicalKey(item.conflictKey));
+        if (input.resolution === "merge") {
+            // A rewritten legacy statement may now collide with a third row.
+            // Fail the whole transaction rather than superseding an unseen peer.
+            await assertNoActiveConflict(tx, input.userId, { ...item, statement, conflictKey }, undefined);
+        }
         await tx.memoryItem.update({ where: { id: item.id }, data: {
             status: "active", approvedAt: new Date(), revision: { increment: 1 }, sensitivity: validation.sensitivity,
             ...(input.resolution === "merge" ? { statement, userEdited: true,
-                conflictKey: memoryConflictKey(item.kind, statement, memoryCanonicalKey(item.conflictKey)),
+                conflictKey,
                 searchTerms: memoryRetrievalTerms(statement), retrievalVersion: MEMORY_RETRIEVAL_VERSION } : {}),
         } });
         if (input.resolution === "merge") {
@@ -657,8 +663,7 @@ export async function bulkApproveMemories(userId: string) {
                 await assertNoActiveConflict(
                     tx,
                     userId,
-                    item.conflictKey,
-                    item.id,
+                    item,
                     undefined
                 );
                 const updated = await tx.memoryItem.updateMany({

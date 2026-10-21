@@ -156,7 +156,11 @@ test("retained source-deleted memory needs new manual grounds and a separate app
     await approveMemory({ userId: user.id, memoryId: item.id });
     assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: item.id } })).status, "active");
     const retrieved = await retrieveMemoryContext({ userId: user.id, query: "preference", approvedPairs: [] });
-    assert.ok(retrieved.selected.some(row => row.memory.id === item.id));
+    assert.ok(!retrieved.selected.some(row => row.memory.id === item.id));
+    const admitted = await retrieveMemoryContext({ userId: user.id, query: "preference", approvedPairs: [
+        { extractionModelId: item.extractionModelId!, promptVersion: item.promptVersion! },
+    ] });
+    assert.ok(admitted.selected.some(row => row.memory.id === item.id));
     const locked = await seedCandidate(user.id, { status: "suspended_by_source_lock" });
     await assert.rejects(restoreMemoryGrounds({ userId: user.id, memoryId: locked.id, groundsText: "My grounds" }), expectCode("MEMORY_ITEM_STATE"));
 });
@@ -577,4 +581,63 @@ test("the GIN index answers a term query over stored memories (§9)", async () =
         ["사용자는 커피를 좋아한다"],
         "a lexical term query must select exactly the relevant row"
     );
+});
+
+
+for (const topicFirst of [false, true]) {
+    test(`legacy and topic keys detect the same assertion in either direction (${topicFirst})`, async () => {
+        const user = await createUser();
+        const existing = await createManualMemory({ userId: user.id, kind: "preference",
+            statement: "The user prefers tea.", groundsText: "Tea", ...(topicFirst ? { canonicalKey: "user.drink" } : {}) });
+        const candidate = await seedCandidate(user.id, { statement: "The user prefers tea",
+            conflictKey: topicFirst ? "preference:the user prefers tea" : "topic:preference:user.drink" });
+        const context = await getMemoryConflictContext(user.id, candidate.id);
+        assert.deepEqual(context.conflicts.map(row => row.id), [existing]);
+        await assert.rejects(approveMemory({ userId: user.id, memoryId: candidate.id }), expectCode("MEMORY_ITEM_CONFLICT"));
+        await resolveMemoryConflict({ userId: user.id, memoryId: candidate.id, expectedRevision: 1,
+            expectedConflicts: context.conflicts, resolution: "replace_existing" });
+        assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: existing } })).status, "superseded");
+    });
+}
+
+test("a merge cannot overwrite a third memory omitted from the reviewed snapshot", async () => {
+    const user = await createUser();
+    const existing = await createManualMemory({ userId: user.id, kind: "preference", statement: "The user prefers tea", groundsText: "Tea" });
+    const third = await createManualMemory({ userId: user.id, kind: "preference", statement: "The user prefers both tea and coffee", groundsText: "Both" });
+    const candidate = await seedCandidate(user.id, { statement: "The user prefers coffee", conflictKey: "preference:coffee" });
+    await assert.rejects(resolveMemoryConflict({ userId: user.id, memoryId: candidate.id, expectedRevision: 1,
+        expectedConflicts: [{ id: existing, revision: 1 }], otherMemoryId: existing, resolution: "merge",
+        mergedStatement: "The user prefers both tea and coffee.", groundsText: "My current preference" }), expectCode("MEMORY_ITEM_CONFLICT"));
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: candidate.id } })).status, "candidate");
+    for (const id of [existing, third]) assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id } })).status, "active");
+});
+
+test("superseding a conflict leaves already expired rows and their revisions unchanged", async () => {
+    const user = await createUser();
+    const existing = await createManualMemory({ userId: user.id, kind: "preference", statement: "The user prefers tea", groundsText: "Tea", canonicalKey: "user.drink" });
+    const expired = await seedCandidate(user.id, { status: "active", statement: "The user prefers water", conflictKey: "topic:preference:user.drink" });
+    await prisma.memoryItem.update({ where: { id: expired.id }, data: { expiresAt: new Date(0) } });
+    const candidate = await seedCandidate(user.id, { statement: "The user prefers coffee", conflictKey: "topic:preference:user.drink" });
+    await approveMemory({ userId: user.id, memoryId: candidate.id, resolveConflict: "supersede_existing" });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: existing } })).status, "superseded");
+    const after = await prisma.memoryItem.findUniqueOrThrow({ where: { id: expired.id } });
+    assert.equal(after.status, "active");
+    assert.equal(after.revision, expired.revision);
+});
+
+
+test("a conflict snapshot can include more than one hundred peers without hiding any", async () => {
+    const user = await createUser();
+    const conflictKey = "topic:preference:user.drink";
+    await prisma.memoryItem.createMany({ data: Array.from({ length: 101 }, (_, index) => ({
+        userId: user.id, kind: "preference", statement: `The user prefers drink ${index}`,
+        status: "active", sensitivity: "standard", confidence: 0.9, conflictKey,
+    })) });
+    const candidate = await seedCandidate(user.id, { statement: "The user prefers coffee", conflictKey });
+    const context = await getMemoryConflictContext(user.id, candidate.id);
+    assert.equal(context.conflicts.length, 101);
+    await resolveMemoryConflict({ userId: user.id, memoryId: candidate.id, expectedRevision: 1,
+        expectedConflicts: context.conflicts, resolution: "replace_existing" });
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id, status: "superseded" } }), 101);
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id, status: "active" } }), 1);
 });

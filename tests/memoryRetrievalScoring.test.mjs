@@ -396,3 +396,15 @@ test("explicitly coexisting topic values both reach context while identical valu
     ], query: "home", now: NOW });
     assert.deepEqual(idsOf(selection).sort(), ["a", "b"]);
 });
+
+
+test("equal assertions deduplicate across topics, legacy keys and punctuation", () => {
+    const selection = selectMemoryContext({ memories: [
+        memory("a", { kind: "identity", statement: "The user lives in Seoul.", conflictKey: "topic:identity:user.residence" }),
+        memory("b", { kind: "identity", statement: "The user lives in Seoul", conflictKey: "identity:the user lives in seoul" }),
+        memory("c", { kind: "identity", statement: "The user lives in Seoul!", conflictKey: "topic:identity:user.home" }),
+        memory("d", { kind: "identity", statement: "The user lives in Brisbane", conflictKey: "topic:identity:user.residence" }),
+    ], query: "home", now: NOW });
+    assert.deepEqual(idsOf(selection).sort(), ["a", "d"]);
+    assert.equal(selection.omitted.duplicate, 2);
+});

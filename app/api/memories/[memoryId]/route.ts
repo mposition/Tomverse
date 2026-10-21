@@ -46,7 +46,8 @@ const patchSchema = z
         z.object({ action: z.literal("resolve_conflict"),
             resolution: z.enum(["keep_existing", "replace_existing", "keep_both", "expire_existing", "merge"]),
             expectedRevision: z.number().int().positive(),
-            expectedConflicts: z.array(z.object({ id: z.string().min(1).max(64), revision: z.number().int().positive() }).strict()).min(1).max(100),
+            // readLimitedJson bounds the full snapshot; do not truncate peers.
+            expectedConflicts: z.array(z.object({ id: z.string().min(1).max(64), revision: z.number().int().positive() }).strict()).min(1),
             otherMemoryId: z.string().min(1).max(64).optional(),
             mergedStatement: z.string().trim().min(1).max(1000).optional(),
             groundsText: z.string().trim().min(1).max(2000).optional(),

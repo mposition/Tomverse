@@ -38,8 +38,8 @@ const promptText = () => {
     return `${prompt.system}\n${prompt.user}`;
 };
 
-test("the shipped extraction contract has a version", () => {
-    assert.match(MEMORY_EXTRACTION_PROMPT_VERSION, /^mem-extract-v\d+$/);
+test("the shipped extraction contract is v9", () => {
+    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v9");
 });
 
 /* ------------------------------------------------- A. output language -- */
