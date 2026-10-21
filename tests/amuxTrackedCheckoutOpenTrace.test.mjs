@@ -311,3 +311,38 @@ test("detail mode caps entries, cuts long paths and records nothing without a re
   assert.deepEqual(off.finish({ traceComplete: true }),
     { kind: "unverified", reason: "unlisted_open" });
 });
+
+test("a read-only listing of a checkout directory or the checkout root passes (staging 2026-10-20)", () => {
+  const observer = make();
+  observer.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "src", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC) = 3<${directory}/src>\n` +
+    `123 openat(AT_FDCWD, "${directory}", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC) = 3<${directory}>\n` +
+    line("src/a.ts")));
+  assert.deepEqual(observer.finish({ traceComplete: true }),
+    { kind: "complete", files: ["src/a.ts"] });
+  for (const flags of ["O_RDWR", "O_RDONLY|O_CREAT", "O_WRONLY"]) {
+    const refused = make();
+    refused.observeChunk(Buffer.from(
+      `123 openat(AT_FDCWD<${directory}>, "src", ${flags}) = 3<${directory}/src>\n`));
+    assert.equal(refused.finish({ traceComplete: true }).kind, "unverified", flags);
+  }
+});
+
+test("a read-only open of an ancestor of the checkout passes; anything else outside still refuses", () => {
+  const observer = make();
+  observer.observeChunk(Buffer.from(
+    `123 openat(AT_FDCWD<${directory}>, "..", O_RDONLY|O_CLOEXEC) = 3</tmp>\n` +
+    `123 openat(AT_FDCWD<${directory}>, "../..", O_RDONLY|O_CLOEXEC) = 3</>\n`));
+  assert.deepEqual(observer.finish({ traceComplete: true }),
+    { kind: "complete", files: [] });
+  for (const [request, resolved, flags] of [
+    ["../x", "/tmp/x", "O_RDONLY"],
+    ["..", "/tmp", "O_RDWR"],
+    ["../amux-v19-checkout-Ab12c", "/tmp/amux-v19-checkout-Ab12c", "O_RDONLY"],
+  ]) {
+    const refused = make();
+    refused.observeChunk(Buffer.from(
+      `123 openat(AT_FDCWD<${directory}>, "${request}", ${flags}) = 3<${resolved}>\n`));
+    assert.equal(refused.finish({ traceComplete: true }).kind, "unverified", request);
+  }
+});
