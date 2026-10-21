@@ -1,0 +1,7 @@
+{
+  "name": "@tomverse/mobile-auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native-only Tomverse authentication. No JavaScript credential storage.",
+  "capacitor": { "android": { "src": "android" }, "ios": { "src": "ios" } }
+}

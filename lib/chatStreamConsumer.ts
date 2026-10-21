@@ -26,36 +26,12 @@
  * remaining text, so a marker cannot hide inside another marker's payload.
  */
 
+import { chatStreamDisplayText } from "@tomverse/chat-core";
 import { splitStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
 import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
 import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
 import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import type { ChatTimeoutErrorCode } from "@/lib/chatStreamLiveness";
-
-/**
- * Holds back a control marker that has only partly arrived.
- *
- * Each splitter above recognises its own marker and drops a payload it cannot
- * finish reading. None of them can do anything about a read that ends in the
- * middle of the marker *name* -- `splitStreamKeepaliveSignal` is looking for
- * the whole string, so a chunk that stops after the leading NUL and three
- * letters is simply not a keepalive yet, and the accumulation is returned
- * unchanged with those four characters in it.
- *
- * Providers do not emit NUL in normal completions -- that is the entire
- * reason these markers are led by one -- so a NUL still present after every
- * splitter has run belongs to a marker that is still arriving. Everything
- * from it onwards is held back until the read that completes it. On a stream
- * that ended there instead, it is a marker the server never finished writing,
- * and dropping it is the same decision the splitters make about a truncated
- * payload.
- */
-const NUL = String.fromCharCode(0);
-
-const withoutPendingMarker = (text: string): string => {
-  const index = text.indexOf(NUL);
-  return index === -1 ? text : text.slice(0, index);
-};
 
 export type ChatStreamProgress = {
   /** The answer as it should be rendered right now. Markers removed. */
@@ -141,9 +117,7 @@ export const consumeChatStream = async (input: {
     }
 
     const previousLength = displayText.length;
-    displayText = withoutPendingMarker(
-      splitSearchMetadataTrailer(artifactProgress.text).displayText
-    );
+    displayText = chatStreamDisplayText(rawStreamText);
 
     // Progress as the user would judge it: answer text that grew, or the card
     // saying a file is being built. An out-of-band marker on its own is not
@@ -169,13 +143,13 @@ export const consumeChatStream = async (input: {
   if (finalKeepalive.signal?.state === "stalled") {
     serverStallCode = finalKeepalive.signal.code ?? "CHAT_FIRST_RESPONSE_TIMEOUT";
   }
-  const { displayText: finalText, searchMetadataJson } =
+  const { searchMetadataJson } =
     splitSearchMetadataTrailer(
       splitArtifactProgressSignal(finalKeepalive.text).text
     );
 
   return {
-    displayText: withoutPendingMarker(finalText),
+    displayText: chatStreamDisplayText(rawStreamText),
     retryingWithModelId,
     isGeneratingArtifact,
     generatingArtifactFormat,

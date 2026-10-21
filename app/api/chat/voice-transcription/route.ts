@@ -1,10 +1,9 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 export const dynamic = "force-dynamic";
 
-import { getServerSession } from "next-auth/next";
 import { ChatAccessError, identifyChatCaller } from "@/lib/chatSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
 
-import { authOptions } from "@/lib/auth";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -242,7 +241,9 @@ export async function POST(request: Request) {
       a cookie is issued one here, so in practice this refuses only a caller
       whose cookie could not be created.
     */
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(request);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const access = identifyChatCaller(request, session?.user?.id ?? null);
 
     /*
