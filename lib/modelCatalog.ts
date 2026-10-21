@@ -9,7 +9,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   IMAGE_MODEL_REGISTRY,
@@ -19,8 +19,10 @@ import {
 } from "@/lib/imageModelRegistry";
 import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import {
+  SNAPSHOT_RENEWAL_WINDOW_MS,
   catalogContentHash,
   codingProfileSchema,
+  decideSnapshotRenewal,
   judgeCodingModel,
   judgeImageModel,
   resolveImageCatalog,
@@ -30,8 +32,10 @@ import {
   type CodingProfile,
   type ImageAdmission,
   type ResolvedImageCatalog,
+  type SnapshotRenewalDecision,
 } from "@/lib/modelCatalogCore";
 import { suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { writeModelCatalogRenewalSystemAudit } from "@/lib/modelCatalogRenewalSystemAudit";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
@@ -240,17 +244,19 @@ export const publishCodingSnapshot = async (input: {
   const models = servableCodingRows(await loadCodingCatalog());
   const contentHash = catalogContentHash(models);
   return prisma.$transaction(async (tx) => {
+    // Same lock as the scheduled renewal, taken before the newest version is
+    // read, so a person and the job cannot each add a version for one state.
+    await takeAuditChainLock(tx);
     const latest = await tx.modelCatalogSnapshot.findFirst({
       where: { category: "coding" },
       orderBy: { version: "desc" },
     });
     // Same content as the newest snapshot and more than a week of coverage
     // left: nothing to publish. Otherwise a new version renews the coverage.
-    const weekMs = 7 * 24 * 60 * 60 * 1000;
     if (
       latest &&
       latest.contentHash === contentHash &&
-      latest.coverageUntil.getTime() - now.getTime() > weekMs
+      latest.coverageUntil.getTime() - now.getTime() > SNAPSHOT_RENEWAL_WINDOW_MS
     ) {
       return { snapshot: toPublished(latest), created: false };
     }
@@ -274,6 +280,67 @@ export const publishCodingSnapshot = async (input: {
       tx,
     });
     return { snapshot: toPublished(created), created: true };
+  });
+};
+
+/**
+ * The scheduled job's renewal of the Code client's snapshot (Maintenance Cron).
+ * Publishes a new version of the same content with a fresh coverage window when
+ * the newest snapshot is within a week of its end -- or past it -- and the rows
+ * the judges admit now hash to exactly that snapshot's. Anything else is left
+ * to a person: a model enabled or held, a price or admission that moved, or no
+ * snapshot at all returns its decision and writes nothing.
+ *
+ * Concurrent runs, or a run beside a manual publish, serialise on the audit
+ * chain lock before the newest version is read; the loser sees the renewed
+ * coverage and does nothing, so one state never gets two versions.
+ */
+export const renewCodingSnapshotIfUnchanged = async (
+  input: { now?: Date } = {}
+): Promise<{
+  decision: SnapshotRenewalDecision;
+  version: number | null;
+  coverageUntil: Date | null;
+}> => {
+  const now = input.now ?? new Date();
+  const models = servableCodingRows(await loadCodingCatalog());
+  const contentHash = catalogContentHash(models);
+  return prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    const latest = await tx.modelCatalogSnapshot.findFirst({
+      where: { category: "coding" },
+      orderBy: { version: "desc" },
+    });
+    const decision = decideSnapshotRenewal(latest, contentHash, now);
+    if (decision !== "renew" || !latest) {
+      return {
+        decision,
+        version: latest?.version ?? null,
+        coverageUntil: latest?.coverageUntil ?? null,
+      };
+    }
+    const created = await tx.modelCatalogSnapshot.create({
+      data: {
+        category: "coding",
+        contentHash,
+        payload: { models } as unknown as Prisma.InputJsonValue,
+        coverageUntil: snapshotCoverageUntil(now),
+        publishedById: null,
+      },
+    });
+    await writeModelCatalogRenewalSystemAudit(tx, {
+      targetId: String(created.version),
+      summary: `Renewed coding catalogue snapshot v${latest.version} as v${created.version} (same content, ${models.length} models).`,
+      metadata: {
+        version: created.version,
+        renewedFromVersion: latest.version,
+        contentHash: created.contentHash,
+        modelCount: models.length,
+        previousCoverageUntil: latest.coverageUntil.toISOString(),
+        coverageUntil: created.coverageUntil.toISOString(),
+      },
+    });
+    return { decision, version: created.version, coverageUntil: created.coverageUntil };
   });
 };
 
