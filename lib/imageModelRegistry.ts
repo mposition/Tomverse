@@ -647,13 +647,30 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
 /** The default single selection and the v1 compatibility model. */
 export const DEFAULT_IMAGE_MODEL_ID = OPENAI_GPT_IMAGE_2.id;
 
-export const listImageModels = () => IMAGE_MODEL_REGISTRY;
+/**
+ * The catalogue the lookups below read. Starts as the code seed; the server
+ * replaces it with the resolved catalogue (code seed + ModelCatalogEntry rows +
+ * effective price revisions, lib/modelCatalog.ts), and the browser replaces it
+ * with the copy the server rendered the page with. If the database cannot be
+ * read, it stays the code seed.
+ */
+let activeImageModels: readonly ImageModelProfile[] = IMAGE_MODEL_REGISTRY;
+
+export const setActiveImageModelCatalog = (models: readonly ImageModelProfile[]) => {
+  activeImageModels = models;
+};
+
+export const resetActiveImageModelCatalog = () => {
+  activeImageModels = IMAGE_MODEL_REGISTRY;
+};
+
+export const listImageModels = () => activeImageModels;
 
 export const listEnabledImageModels = () =>
-  IMAGE_MODEL_REGISTRY.filter((model) => model.disabledReason === null);
+  activeImageModels.filter((model) => model.disabledReason === null);
 
 export const getImageModel = (modelId: string): ImageModelProfile | null =>
-  IMAGE_MODEL_REGISTRY.find((model) => model.id === modelId) ?? null;
+  activeImageModels.find((model) => model.id === modelId) ?? null;
 
 /**
  * Fail-closed price lookup. A disabled model, an unknown model, or an option

@@ -17,6 +17,7 @@
  * route segment config export has to be in the route's own file.
  */
 
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { cookies } from "next/headers";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -187,6 +188,11 @@ export async function ReviewWorkspaceShell({
   const chatImageIntentEnabled =
     imageGenerationEnabled && (await chatImageTriageModelId()) !== null;
 
+  // The image catalogue an operator may have changed at runtime, resolved
+  // once here so the composer quotes the prices admission will charge
+  // (lib/modelCatalog.ts). Code seed when the database cannot be read.
+  const imageModels = imageGenerationEnabled ? await refreshImageModelCatalog() : undefined;
+
   // Which application-managed search backends this process can reach, resolved
   // here for the same reason the image limit is: the client cannot answer it.
   // The only client-side signal would be a public environment variable, and a
@@ -346,6 +352,7 @@ export async function ReviewWorkspaceShell({
         // keep offering yesterday's limit after a deployment changed it. This
         // page is `force-dynamic`, so the value is the running process's.
         imageGroupMaxModels={maxImageModels}
+        imageModels={imageModels}
         webSearchBackendReadiness={webSearchBackendReadiness}
         chatStarterEnabled={chatStarterEnabled}
         chatStarterKnownFlagKeys={starterKnownFlagKeys}

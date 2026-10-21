@@ -230,6 +230,7 @@ export const en = {
         imageGenerationErrorBudget: "Image generation is temporarily paused for maintenance. Try again shortly.",
         imageGenerationErrorConflict: "Your credit balance changed while reserving. Try again.",
         imageGenerationErrorGeneric: "Could not start the image generation. Try again.",
+        imageGenerationErrorPriceChanged: "A price changed since this page loaded. Nothing was charged. Reload to see the current price.",
         imageGenerationRestoreExcluded: "{models} is not available right now, so it was left out of the restored selection.",
         imageGenerationSelectionCount: "{count}/{max} models",
         imageGenerationModelLimitNotice: "You can compare up to {max} models at once. Deselect one model before choosing another.",

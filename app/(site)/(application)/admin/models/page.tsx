@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { AdminModelCatalogPanel } from "@/components/admin/AdminModelCatalogPanel";
 import { AdminModelDiscoveryPanel } from "@/components/admin/AdminModelDiscoveryPanel";
 import { AdminModelRegistryPanel } from "@/components/admin/AdminModelRegistryPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
@@ -36,6 +37,8 @@ export default async function AdminModelsPage({
       />
       {tab.id === "discovery" ? (
         <AdminModelDiscoveryPanel />
+      ) : tab.id === "catalog" ? (
+        <AdminModelCatalogPanel />
       ) : (
         <AdminModelRegistryPanel />
       )}
