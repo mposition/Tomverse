@@ -19,6 +19,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } fro
 import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
+import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -641,7 +642,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500" />
           <div>
-            <div className="text-lg font-black">Tomverse</div>
+            <div><TomverseWordmark /></div>
             <div className="mt-1 h-2 w-20 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
           </div>
         </div>
@@ -654,7 +655,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-4 dark:border-zinc-800 md:hidden">
           <div className="h-9 w-9 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
-          <span className="text-lg font-black">Tomverse</span>
+          <TomverseWordmark />
         </header>
         <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
           <div className="h-11 w-56 max-w-[70vw] animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
