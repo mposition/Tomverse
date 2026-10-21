@@ -46,3 +46,42 @@ test("the signature check accepts only GitHub's sha256 HMAC of the exact body", 
   assert.equal(verifyCiAdmissionWebhookSignature(body, signature, undefined), false);
   assert.equal(verifyCiAdmissionWebhookSignature(body, signature, ""), false);
 });
+
+test("rounds asked for while one runs collapse into exactly one more", async () => {
+  const { createCoalescedRunner } = await import("../lib/ciAdmissionWebhookCore.ts");
+  let runs = 0;
+  let release;
+  const gate = () => new Promise((resolve) => (release = resolve));
+  const request = createCoalescedRunner(async () => {
+    runs += 1;
+    await gate();
+  });
+  request();
+  assert.equal(runs, 1);
+  // A burst of deliveries during the first run: one more run, not ten.
+  for (let i = 0; i < 10; i += 1) request();
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runs, 2);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runs, 2);
+  // Idle again: the next request starts a run at once.
+  request();
+  assert.equal(runs, 3);
+  release();
+});
+
+test("a failing run does not stop later requests", async () => {
+  const { createCoalescedRunner } = await import("../lib/ciAdmissionWebhookCore.ts");
+  let runs = 0;
+  const request = createCoalescedRunner(async () => {
+    runs += 1;
+    throw new Error("boom");
+  });
+  request();
+  await new Promise((resolve) => setImmediate(resolve));
+  request();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runs, 2);
+});
