@@ -59,6 +59,9 @@ test("the sandbox is asked for first; only the walker's retry after a refused sa
   const guard = walker.indexOf("if (!retriesWithoutSandbox(process.env.PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK, failure)) throw error;");
   const retry = walker.indexOf("browser = await launch(args, { sandbox: false });");
   assert.ok(sandboxed > 0 && sandboxed < guard && guard < retry, "sandboxed launch, then the guard, then the retry");
+  // A retry that fails too is logged on its own, and the run line says so.
+  assert.ok(walker.indexOf('sandbox = "off_failed";') > guard && walker.indexOf('sandbox = "off_failed";') < retry);
+  assert.match(walker, /product_research_scout_browser_unsandboxed_failed/);
 });
 
 test("a failed launch reports the host's sandbox conditions as short values only", async () => {

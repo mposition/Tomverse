@@ -172,7 +172,11 @@ async function capturePage(browser, rules, target) {
   return { subject: { kind: "page", subject: target.id, language: target.lang, images, signals } };
 }
 
-/** Whether this run's Chromium had its sandbox: on, off (the retry), or none when no browser started. */
+/**
+ * Whether this run's Chromium had its sandbox: on; off (the retry after a
+ * refused sandbox); off_failed (the retry did not start either); or none when
+ * no browser started and no retry was made.
+ */
 let sandbox = "none";
 
 async function walkPages() {
@@ -187,7 +191,13 @@ async function walkPages() {
     const failure = launchFailure(error);
     console.warn(JSON.stringify({ event: "product_research_scout_browser_launch_failed", ...failure, host: sandboxHost() }));
     if (!retriesWithoutSandbox(process.env.PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK, failure)) throw error;
-    browser = await launch(args, { sandbox: false });
+    sandbox = "off_failed";
+    try {
+      browser = await launch(args, { sandbox: false });
+    } catch (retryError) {
+      console.warn(JSON.stringify({ event: "product_research_scout_browser_unsandboxed_failed", ...launchFailure(retryError) }));
+      throw retryError;
+    }
     sandbox = "off";
     console.warn(JSON.stringify({ event: "product_research_scout_browser_unsandboxed", cause: failure.cause, source: failure.source, switch: SCOUT_SANDBOX_FALLBACK_ENV }));
   }
