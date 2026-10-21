@@ -78,7 +78,20 @@ export const ACCOUNT_ANONYMISATIONS: AccountAnonymisation[] = [
     },
   },
   {
-    prismaModel: "ChatCreditReservation",
+        prismaModel: "CodeTaskReservation",
+        table: "CodeTaskReservation",
+        userColumn: "userId",
+        columns: {
+            userId: { kind: "null" },
+            subjectKey: { kind: "literal", value: ANONYMISED_SUBJECT },
+            clientTaskId: { kind: "perRow", prefix: "anonymised:" },
+            requestDigest: { kind: "literal", value: ANONYMISED_SUBJECT },
+            addOnEntries: { kind: "emptyJson" },
+            status: { kind: "literal", value: "closed" },
+        },
+    },
+    {
+        prismaModel: "ChatCreditReservation",
     table: "ChatCreditReservation",
     userColumn: "userId",
     columns: {

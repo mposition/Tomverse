@@ -64,6 +64,7 @@ test("the scan finds the callers it is meant to guard", () => {
         "chatSecurity.ts",
         "imageGenerationService.ts",
         "memoryExtractionCredits.ts",
+        "codeManagedService.ts",
     ]) {
         assert.ok(
             names.includes(expected),

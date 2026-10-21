@@ -13,6 +13,7 @@ export const maxDuration = 300;
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import { reconcileExpiredCodeTasks } from "@/lib/codeManagedService";
 import {
   databaseErrorMetadata,
   isRetryableDatabaseError,
@@ -103,6 +104,8 @@ export async function POST(request: Request) {
     const deepResearchSettlements =
       await reconcileUnsettledDeepResearchSettlementsQuietly();
     const result = await reconcileCreditReservationsWithRetry();
+    // Code owns independent task/call leases and shares the same credit wallet.
+    const codeTasks = await reconcileExpiredCodeTasks();
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
@@ -255,6 +258,7 @@ export async function POST(request: Request) {
       {
         success: true,
         result,
+        codeTasks,
         deepResearchSettlements,
         infrastructureMonitor,
         notificationDeliveries,

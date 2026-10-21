@@ -852,6 +852,32 @@ domains:
           tests/comparisonReviewRunCore.test.mjs enforces.
     inUnifiedExport: excluded
 
+  - domain: codeTaskReservation
+    prismaModel: CodeTaskReservation
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    anonymisationFields: [userId, subjectKey, clientTaskId, requestDigest, addOnEntries, status]
+    anonymisationReplacements:
+      subjectKey: "deleted-account"
+      clientTaskId: "anonymised:{id}"
+      requestDigest: "deleted-account"
+      addOnEntries: "{}"
+      status: "closed"
+    reidentificationReview:
+      reviewedBy: "codex implementation analysis; independent contract review pending"
+      reviewedAt: "2026-10-22"
+      joinRisksConsidered:
+        - >-
+          Subject and client task identifiers and prompt HMAC are cleared, and lot
+          reservations cascade away with the account. Only financial/model metadata
+          remains. CodeManagedCall contains no independent subject identifier and
+          hangs off this anonymised financial record; prompts and output are absent.
+    inUnifiedExport: included_filtered
+
   - domain: chatCreditReservation
     prismaModel: ChatCreditReservation
     userLinkageRole: subject

@@ -91,6 +91,13 @@ let routePromise: Promise<
 
 const loadRoute = () => {
   if (!routePromise) {
+    mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
+    mock.module(mod("lib/deepResearchSettlement.ts"), { namedExports: {
+      reconcileUnsettledDeepResearchSettlementsQuietly: async () => ({ settled: 0 }),
+    } });
+    mock.module(mod("lib/codeManagedService.ts"), { namedExports: {
+      reconcileExpiredCodeTasks: async () => ({ interrupted: 0 }),
+    } });
     // The route reports incidents from `after()`, which needs a request scope
     // this harness does not have. Running the callback inline keeps the
     // assertion about *what* is reported, which is the contract under test.
