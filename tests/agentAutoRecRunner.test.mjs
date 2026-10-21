@@ -136,7 +136,7 @@ test("happy path: claim, agent, tests, lint, review, publish, report the PR", as
   assert.deepEqual(submit.args.slice(1, 6), ["submit", "--author", "claude", "--base", BASE]);
   // The worktree goes away at the end.
   assert.ok(ran(calls, / worktree remove --force /));
-  assert.ok(ran(calls, new RegExp(` branch -D ${BRANCH.replace(/[/]/g, "\\/")}$`)));
+  assert.ok(calls.some(({ signature }) => signature.endsWith(` branch -D ${BRANCH}`)));
 });
 
 test("no child process ever receives a gateway secret or a GitHub token", async () => {
