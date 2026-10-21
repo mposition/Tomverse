@@ -34,7 +34,7 @@ export type QualityBudgetPort = {
 /** Reuse the product extraction provider's adapter; other structured tasks
  * use an already configured host adapter. This module loads no SDK or keys. */
 export function existingProviderPort(input: {
-  extraction: ExtractionModelAdapter; structured: ModelAdapter;
+  extraction: (signal: AbortSignal) => ExtractionModelAdapter; structured: ModelAdapter;
 }): ModelAdapter {
   return async (request, context) => {
     if (request.task !== "extract") return input.structured(request, context);
@@ -42,7 +42,9 @@ export function existingProviderPort(input: {
       throw new QualityStop("extraction_schema_drift");
     }
     const payload = z.object({ caseId: z.string(), prompt: z.string() }).strict().parse(request.input);
-    const answer = await input.extraction({ prompt: {
+    const signal = context?.signal ?? new AbortController().signal;
+    signal.throwIfAborted();
+    const answer = await input.extraction(signal)({ prompt: {
       promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION, system: request.system,
       user: payload.prompt, allowedMessageLabels: [],
     } });
@@ -57,10 +59,10 @@ export function existingProviderPort(input: {
 export function budgetedProviderPort(input: {
   enabled?: boolean; maxRunMicroUsd: number; provider: ModelAdapter; budget: QualityBudgetPort;
 }): ModelAdapter {
-  let used = 0, latched = false, busy = false;
+  let used = 0, latched: string | null = null, busy = false;
   return async (request, context) => {
     if (input.enabled !== true) throw new QualityStop("paid_execution_disabled");
-    if (latched) throw new QualityStop("provider_outcome_unknown");
+    if (latched) throw new QualityStop(latched);
     if (busy) throw new QualityStop("concurrent_dispatch_refused");
     if (!Number.isSafeInteger(input.maxRunMicroUsd) || input.maxRunMicroUsd <= 0) {
       throw new QualityStop("invalid_run_budget");
@@ -68,11 +70,14 @@ export function budgetedProviderPort(input: {
     context?.signal.throwIfAborted();
     busy = true;
     let reservation: QualityReservation | null = null, issued = false, closingAttempted = false;
+    let reservePending = false;
     try {
       const key = digest(request);
+      reservePending = true;
       reservation = await input.budget.reserve({
         purpose: "memory-quality", requestDigest: key, request: structuredClone(request), signal: context?.signal,
       });
+      reservePending = false;
       if (!reservation) throw new QualityStop("budget_or_authority_refused");
       const grant = grantSchema.parse(reservation.grant);
       if (grant.requestDigest !== key || !decideMemoryExtractionBudget({
@@ -92,11 +97,15 @@ export function budgetedProviderPort(input: {
       await reservation.close({ outcome: "returned", retainReservation: true });
       return output;
     } catch (error) {
-      if (issued) latched = true;
+      if (reservePending) {
+        latched = "budget_outcome_unknown";
+        throw new QualityStop(latched);
+      }
+      if (issued) latched = "provider_outcome_unknown";
       if (reservation && !closingAttempted) {
         try {
           await reservation.close({ outcome: issued ? "unknown" : "undispatched", retainReservation: issued });
-        } catch { latched = true; }
+        } catch { latched = "budget_outcome_unknown"; }
       }
       if (issued) throw new QualityStop("provider_outcome_unknown");
       throw error instanceof QualityStop ? error : new QualityStop("budget_unavailable");

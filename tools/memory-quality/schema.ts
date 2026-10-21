@@ -56,6 +56,10 @@ export type Corpus = z.infer<typeof corpusSchema>;
 export type Observation = z.infer<typeof observationSchema>;
 export type Judgement = z.infer<typeof judgementSchema>;
 export type Candidate = z.infer<typeof candidateSchema>;
+export const BASELINE: Readonly<Candidate> = Object.freeze({
+  extraction: "Apply the fixed base extraction prompt.",
+  retrieval: "Select memories useful for the query. Return at most five ids.",
+});
 export type Task = "extract" | "judge" | "propose" | "select";
 export type ModelRequest = {
   task: Task; system: string; input: unknown; schema: Record<string, unknown>;

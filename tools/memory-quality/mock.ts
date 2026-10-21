@@ -1,6 +1,14 @@
 import { readFile } from "node:fs/promises";
-import { BASELINE } from "./runner";
-import { digest, proposalSchema, snapshot, type ModelAdapter, type ModelRequest } from "./schema";
+import { BASELINE, digest, proposalSchema, snapshot, type ModelAdapter, type ModelRequest } from "./schema";
+
+// tsx can load this module through both ESM and CJS graphs. Share the private
+// factory registry across those loader instances; a caller's mode label is not evidence.
+const registryKey = Symbol.for("tomverse.memory-quality.offline-factories");
+const registry = globalThis as typeof globalThis & {
+  [key: symbol]: WeakMap<ModelAdapter, "mock" | "replay"> | undefined;
+};
+const offlineAdapters = registry[registryKey] ??= new WeakMap<ModelAdapter, "mock" | "replay">();
+export const offlineAdapterMode = (adapter: ModelAdapter) => offlineAdapters.get(adapter) ?? null;
 
 export async function loadFixtures() {
   const read = async (name: string) =>
@@ -44,6 +52,8 @@ export async function createScriptedAdapters(): Promise<{ model: ModelAdapter; j
       return { index, ...snapshot(annotation) };
     }) };
   };
+  offlineAdapters.set(model, "mock");
+  offlineAdapters.set(judge, "mock");
   return { model, judge, mode: "mock" };
 }
 
@@ -54,9 +64,11 @@ export function createReplayAdapter(entries: ReplayEntry[]): ModelAdapter {
   if (map.size !== entries.length || entries.some((entry) => !/^[a-f0-9]{64}$/.test(entry.requestDigest))) {
     throw new Error("invalid_replay");
   }
-  return async (request: ModelRequest) => {
+  const adapter: ModelAdapter = async (request: ModelRequest) => {
     const key = digest(request);
     if (!map.has(key)) throw new Error("replay_request_missing");
     return snapshot(map.get(key));
   };
+  offlineAdapters.set(adapter, "replay");
+  return adapter;
 }

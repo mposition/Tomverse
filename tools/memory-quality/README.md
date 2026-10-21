@@ -106,6 +106,8 @@ the instrument ID binds both corpora, rubric, targets, schemas and base prompt
 version. A candidate must improve at least one metric, regress on no metric or
 case, and meet zero safety counts to become the development incumbent.
 
+Validation must independently improve with no regression before a human-review
+recommendation; a tie is recorded as `validation_no_improvement`.
 Validation is evaluated only after candidate selection is frozen. Its outcomes
 never return to the proposal task, and a validation rejection ends the run.
 Repeated development runs on these known fixtures cannot substitute for a fresh,
@@ -113,8 +115,8 @@ sealed independent dataset for later measured-quality claims.
 
 ## Existing provider and budget integration
 
-`existingProviderPort` accepts the adapter built by the existing
-`createExtractionProviderAdapter` for extraction and an already configured
+`existingProviderPort` accepts a per-call factory for the existing
+`createExtractionProviderAdapter`, constructed with the current abort signal, and an already configured
 structured-output host adapter for analysis, proposals, judging and selection.
 It loads no provider SDK, key or database client.
 
@@ -127,7 +129,8 @@ An approved host must supply:
    month provider and sub-budget usage. Agent spending must never use user credits.
 3. Durable mark-issued and close hooks in that existing ledger. The adapter
    reuses `decideMemoryExtractionBudget`, shares one run cap across all tasks,
-   retains the full reservation after dispatch, and latches unknown outcomes.
+   retains the full reservation after dispatch, and latches unknown reservation,
+   dispatch or settlement outcomes without repeating those writes.
 4. Provider-enforced output bounds, request cancellation/deadlines, no hidden
    retries and isolated credentials. The host owns real provider construction.
 

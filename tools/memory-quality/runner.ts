@@ -2,16 +2,14 @@ import { analyzeExtractionChunk } from "../../lib/memoryExtractionPipeline";
 import { MEMORY_EXTRACTION_OUTPUT_SCHEMA, MEMORY_EXTRACTION_PROMPT_VERSION } from "../../lib/memoryExtractionPrompt";
 import type { CaseOutcomeV3 } from "../../lib/memoryEvalScoringV3";
 import { evaluateExtraction, evaluateRetrieval, summarize, TARGETS } from "./evaluator";
+import { offlineAdapterMode } from "./mock";
 import {
-  candidateSchema, corpusSchema, digest, JUDGE_RUBRIC, judgementSchema, jsonSchema, proposalSchema,
+  BASELINE, candidateSchema, corpusSchema, digest, JUDGE_RUBRIC, judgementSchema, jsonSchema, proposalSchema,
   selectionSchema, snapshot, type Candidate, type Corpus, type ModelAdapter,
   type ModelRequest, type Observation, type QualityCase,
 } from "./schema";
 
-export const BASELINE: Readonly<Candidate> = Object.freeze({
-  extraction: "Apply the fixed base extraction prompt.",
-  retrieval: "Select memories useful for the query. Return at most five ids.",
-});
+export { BASELINE } from "./schema";
 export type Event = { type: string; [key: string]: unknown };
 export type RunStore = {
   record: (event: Event) => Promise<void>;
@@ -174,6 +172,8 @@ export async function runQualityLoop(input: {
   mode?: "mock" | "replay";
 }) {
   const { development, validation } = validateCorpora(snapshot(input.development), snapshot(input.validation));
+  const modelMode = offlineAdapterMode(input.model), judgeMode = offlineAdapterMode(input.judge);
+  const offline = modelMode !== null && judgeMode !== null;
   const maxIterations = input.maxIterations ?? 3, maxCalls = input.maxCalls ?? 1000;
   const timeoutMs = input.timeoutMs ?? 60000;
   if (![maxIterations, maxCalls, timeoutMs].every((n) => Number.isSafeInteger(n) && n > 0) ||
@@ -215,7 +215,8 @@ export async function runQualityLoop(input: {
   };
   const model = wrap(input.model), judge = wrap(input.judge);
   const record = input.store.record;
-  await record({ type: "started", instrument, mode: input.mode ?? "injected_adapter",
+  await record({ type: "started", instrument,
+    mode: offline ? modelMode === judgeMode ? modelMode : "offline_mixed" : "injected_adapter",
     publicationEnabled: false, promotionEnabled: false, maxIterations, maxCalls, timeoutMs, targets: TARGETS });
   let stopReason = "iteration_limit", recommendation = "none";
   const seen = new Set([digest(current)]);
@@ -251,7 +252,8 @@ export async function runQualityLoop(input: {
       const validationBaseline = await evaluate(validation, snapshot(BASELINE), model, judge);
       const validationCandidate = await evaluate(validation, current, model, judge);
       const comparison = compare(validationBaseline, validationCandidate);
-      recommendation = comparison.noRegression ? "human_review_candidate" : "validation_rejected";
+      recommendation = comparison.accepted ? "human_review_candidate" :
+        comparison.noRegression ? "validation_no_improvement" : "validation_rejected";
       await record({ type: "validation_evaluation", candidateId: digest(current),
         baseline: validationBaseline, evaluation: validationCandidate, comparison,
         developmentComparison: compare(baselineEvaluation, currentEvaluation) });
@@ -259,12 +261,15 @@ export async function runQualityLoop(input: {
     await check();
   } catch (error) {
     stopReason = error instanceof QualityStop ? error.code : "invalid_model_output";
-    if (error instanceof EvaluationFailure) await record({ type: "invalid_evaluation", evaluation: error.evaluation });
+    if (error instanceof EvaluationFailure) await record({
+      type: ["operator_stop", "call_limit", "deadline"].includes(error.code) ?
+        "evaluation_interrupted" : "invalid_evaluation", evaluation: error.evaluation,
+    });
     recommendation = "none";
   }
   const result = { type: "finished", instrument, stopReason, recommendation, calls,
     candidateId: digest(current), elapsedMs: Date.now() - started, measuredQualityAchieved: false,
-    paidCalls: input.mode ? 0 : null, promoted: false, decisionGrade: false };
+    paidCalls: offline ? 0 : null, promoted: false, decisionGrade: false };
   await record(result);
   return result;
 }

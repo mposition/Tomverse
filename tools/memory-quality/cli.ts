@@ -65,7 +65,9 @@ export async function main(args: string[]) {
     };
   }
   const mode = options.mode ?? "mock";
-  if (mode !== "mock" && mode !== "replay") throw new QualityStop("paid_execution_disabled");
+  if (mode !== "mock" && mode !== "replay") {
+    throw new QualityStop(mode === "live" ? "paid_execution_disabled" : "unknown_mode");
+  }
   if ((mode === "replay") !== Boolean(options.responses)) throw new QualityStop("replay_responses_required");
   const adapters = mode === "mock" ? await createScriptedAdapters() : null;
   const replay = mode === "replay" ? createReplayAdapter(z.array(z.object({

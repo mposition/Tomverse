@@ -125,3 +125,22 @@ test("non-synthetic sources, invalid gold anchors and inactive relevance gold ar
     assert.throws(() => validateCorpora(development, validation));
   }
 });
+test("a holdout tie cannot become an improved-candidate recommendation", async () => {
+  const fixtures = await loadFixtures(), adapters = await createScriptedAdapters(), log = store();
+  const validationIds = new Set(fixtures.validation.cases.map((row) => row.id));
+  const improved = (await adapters.model({ task: "propose" })).candidate;
+  const model = async (request) => {
+    if (validationIds.has(request.input.caseId)) {
+      if (request.task === "extract") request.system = request.system.replace(BASELINE.extraction, improved.extraction);
+      if (request.task === "select") request.system = request.system.replace(BASELINE.retrieval, improved.retrieval);
+    }
+    return adapters.model(request);
+  };
+  const result = await runQualityLoop({ ...fixtures, ...adapters, model, store: log });
+  assert.equal(result.recommendation, "validation_no_improvement");
+});
+test("passing an offline mode label never certifies an injected adapter as zero paid calls", async () => {
+  const adapters = await createScriptedAdapters();
+  const result = await run({ mode: "mock", model: async (request) => adapters.model(request) });
+  assert.equal(result.paidCalls, null);
+});

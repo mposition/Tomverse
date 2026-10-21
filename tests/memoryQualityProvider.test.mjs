@@ -60,14 +60,38 @@ test("unknown provider outcome retains reservation, latches and never retries", 
 });
 test("existing extraction seam preserves prompt and schema without loading an SDK", async () => {
   const calls = [];
-  const port = existingProviderPort({ extraction: async (value) => {
+  const controller = new AbortController();
+  const port = existingProviderPort({ extraction: (signal) => async (value) => {
+    assert.equal(signal, controller.signal);
+    signal.throwIfAborted();
     calls.push(value); return { output: { candidates: [] } };
   }, structured: async () => ({ analysis: "mock" }) });
   assert.deepEqual(await port({ task: "extract", system: "Candidate", input: { caseId: "a", prompt: "Synthetic" },
-    schema: MEMORY_EXTRACTION_OUTPUT_SCHEMA }), { candidates: [] });
+    schema: MEMORY_EXTRACTION_OUTPUT_SCHEMA }, { signal: controller.signal }), { candidates: [] });
   assert.equal(calls[0].prompt.system, "Candidate");
   assert.equal(calls[0].prompt.user, "Synthetic");
   await assert.rejects(port({ ...request, task: "extract" }), /extraction_schema_drift/);
+  controller.abort();
+  await assert.rejects(port({ task: "extract", system: "Candidate", input: { caseId: "a", prompt: "Synthetic" },
+    schema: MEMORY_EXTRACTION_OUTPUT_SCHEMA }, { signal: controller.signal }));
+  assert.equal(calls.length, 1);
+});
+test("an uncertain reservation commit latches without a second reservation", async () => {
+  let reservations = 0, dispatched = 0;
+  const port = budgetedProviderPort({ enabled: true, maxRunMicroUsd: 100,
+    provider: async () => { dispatched++; return {}; },
+    budget: { reserve: async () => { reservations++; throw new Error("uncertain reservation commit"); } } });
+  await assert.rejects(port(request), /budget_outcome_unknown/);
+  await assert.rejects(port(request), /budget_outcome_unknown/);
+  assert.equal(reservations, 1);
+  assert.equal(dispatched, 0);
+});
+test("a late aborted provider response remains unknown and retains its reservation", async () => {
+  const controller = new AbortController(), events = [];
+  const port = budgetedProviderPort({ enabled: true, maxRunMicroUsd: 100, budget: budget(events),
+    provider: async () => { controller.abort(); return {}; } });
+  await assert.rejects(port(request, { signal: controller.signal }), /provider_outcome_unknown/);
+  assert.deepEqual(events.at(-1), { outcome: "unknown", retainReservation: true });
 });
 test("uncertain settlement is latched without issuing a second close write", async () => {
   let closes = 0, reservations = 0;
