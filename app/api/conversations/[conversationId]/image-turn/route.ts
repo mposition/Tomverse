@@ -33,6 +33,11 @@ const imageTurnSchema = z
     modelId: z.string().trim().min(1).max(120),
     imageModelIds: z.array(z.string().trim().min(1).max(120)).max(8),
     preset: z.enum(["draft", "standard", "final"]).nullable(),
+    // A follow-up's prompt, rewritten by the image-intent call from the
+    // previous image ("make it bluer"). The user's own text either way --
+    // the image workspace takes any prompt they type -- so nothing is
+    // widened by accepting it here.
+    prompt: z.string().trim().min(1).max(4_000).optional(),
   })
   .strict();
 
@@ -50,7 +55,8 @@ export async function POST(req: Request, { params }: Params) {
       minute: 6,
       day: 500,
     });
-    const body = await readLimitedJson(req, 4 * 1024, imageTurnSchema);
+    // Room for a follow-up prompt of 4,000 characters in any script.
+    const body = await readLimitedJson(req, 16 * 1024, imageTurnSchema);
     const { conversationId } = await params;
 
     const turn = await startChatImageTurn({
@@ -61,6 +67,7 @@ export async function POST(req: Request, { params }: Params) {
       modelId: body.modelId,
       imageModelIds: body.imageModelIds,
       preset: body.preset,
+      prompt: body.prompt,
     });
 
     // Post-response execution, as in POST /api/images/generations: a process

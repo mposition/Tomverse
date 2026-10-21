@@ -99,12 +99,18 @@ test("a valid turn names the group its card polls", async () => {
       imageTurn: { groupId: "group-1", modelIds: ["gpt-image-2"] },
     },
   });
-  assert.deepEqual(turns, [{ userId: "user-1", conversationId: "conv-1", ...body }]);
+  assert.deepEqual(turns, [
+    { userId: "user-1", conversationId: "conv-1", ...body, prompt: undefined },
+  ]);
 });
 
-test("the body is strict: no prompt text, no extra fields", async () => {
+test("a follow-up's prompt passes through; the body is otherwise strict", async () => {
   reset();
-  assert.equal((await post({ ...body, prompt: "ignored" })).status, 400);
+  assert.equal((await post({ ...body, prompt: "a blue cat icon" })).status, 202);
+  assert.equal(turns[0].prompt, "a blue cat icon");
+  reset();
+  assert.equal((await post({ ...body, prompt: "x".repeat(4_001) })).status, 400);
+  assert.equal((await post({ ...body, extra: 1 })).status, 400);
   assert.equal((await post({ ...body, assistantMessageId: "bad id!" })).status, 400);
   assert.equal(turns.length, 0);
 });

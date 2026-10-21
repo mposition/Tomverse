@@ -254,6 +254,13 @@ export async function pickAutoModelWithLlm(input: {
      * conversation): the call then does not ask for one at all.
      */
     rewriteAllowed?: boolean;
+    /**
+     * Resolves false when this turn turned out not to be a chat turn at all
+     * (an Auto Chat image request, lib/chatImageIntent.ts): its decision row
+     * is then not kept, so routing data, the optimizer's samples and the
+     * session memory hold only turns a chat model answered. Absent is true.
+     */
+    recordDecision?: Promise<boolean>;
 }): Promise<{ modelId: string; rewrite: string | null } | null> {
     const routerModel = resolveAutoLlmRouterModel(
         input.models,
@@ -335,29 +342,34 @@ export async function pickAutoModelWithLlm(input: {
     );
 
     if (input.userId && input.conversationId) {
-        void prisma.autoRouterDecision
-            .create({
-                data: {
-                    version,
-                    traceId: input.traceId,
-                    userId: input.userId,
-                    conversationId: input.conversationId,
-                    routerInput: input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS),
-                    routerContext: input.previousAnswer,
-                    routerSession: session ?? undefined,
-                    candidates,
-                    taskKind: input.taskKind,
-                    ruleModelId: input.ruleModelId,
-                    routerModelId: routerModel.id,
-                    pickedModelId: pick?.modelId ?? null,
-                    reason: pick?.reason ?? null,
-                    sessionTopic: pick?.topic ?? null,
-                    rewrite: pick?.rewrite ?? null,
-                    outcome,
-                    latencyMs,
-                    inputTokens: usage?.inputTokens ?? null,
-                    outputTokens: usage?.outputTokens ?? null,
-                },
+        const userId = input.userId;
+        const conversationId = input.conversationId;
+        void Promise.resolve(input.recordDecision ?? true)
+            .then((keep) => {
+                if (!keep) return;
+                return prisma.autoRouterDecision.create({
+                    data: {
+                        version,
+                        traceId: input.traceId,
+                        userId,
+                        conversationId,
+                        routerInput: input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS),
+                        routerContext: input.previousAnswer,
+                        routerSession: session ?? undefined,
+                        candidates,
+                        taskKind: input.taskKind,
+                        ruleModelId: input.ruleModelId,
+                        routerModelId: routerModel.id,
+                        pickedModelId: pick?.modelId ?? null,
+                        reason: pick?.reason ?? null,
+                        sessionTopic: pick?.topic ?? null,
+                        rewrite: pick?.rewrite ?? null,
+                        outcome,
+                        latencyMs,
+                        inputTokens: usage?.inputTokens ?? null,
+                        outputTokens: usage?.outputTokens ?? null,
+                    },
+                });
             })
             .catch((error: unknown) => {
                 console.error(

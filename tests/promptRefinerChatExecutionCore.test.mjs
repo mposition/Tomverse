@@ -98,7 +98,9 @@ test("Router, shadow and provider formatting use the consumed view; signed conte
   assert.match(route, /executionMessages = \[\.\.\.view.executionMessages\]/);
   assert.match(route, /const autoRoutingMessages = executionMessages/);
   assert.match(route, /reservedInputTokens: preflightInputEstimate\(autoRoutingMessages\)/);
-  assert.equal((route.match(/text: profileTextFor\(autoRoutingMessages\)/g) ?? []).length, 3);
+  // Three router/shadow reads plus the Auto turn's image decision, which
+  // reads the same consumed view (app/api/chat/route.ts, detectChatTurnImage).
+  assert.equal((route.match(/text: profileTextFor\(autoRoutingMessages\)/g) ?? []).length, 4);
   assert.match(
     route,
     /const guestAutoSelection = guestAutoRun[\s\S]*?text: profileTextFor\(autoRoutingMessages\)/,
