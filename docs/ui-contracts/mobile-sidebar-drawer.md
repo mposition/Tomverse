@@ -76,7 +76,9 @@ button's box was `542..582` against a 560px viewport with a list scroll range of
   overflow would paint its rows over the footer.
 - The sidebar header is `sticky top-0` in the drawer, because the panel-anchored
   close button floats over that row; without it the button would come to rest on
-  top of scrolled conversation rows.
+  top of scrolled conversation rows. The drawer's `scroll-padding-top` tracks
+  the header's measured height, so native focus and `scrollIntoView()` keep
+  controls below it even when text zoom wraps the header onto more lines.
 - The account footer carries `mt-auto` in the drawer, so a drawer whose content
   is shorter than the panel still puts the footer at the bottom. Auto margins
   resolve to 0 when the content overflows, so this can never push the footer out
