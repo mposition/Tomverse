@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { getImageModel, IMAGE_MODEL_REGISTRY, resetActiveImageModelCatalog } from "@/lib/imageModelRegistry";
 import {
   latestCodingSnapshot,
@@ -293,6 +294,41 @@ test("the scheduled renewal extends identical content once, as the system, and l
   assert.equal(await versions(), versionsBefore + 1);
   assert.equal(await renewedAudits(), auditsBefore + 1);
   await updateCatalogEntry({ category: "coding", modelId: "gpt-catalog-test", patch: { enabled: true }, session });
+});
+
+test("a change committed while the renewal waits for the lock is judged, not skipped", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const latest = (await latestCodingSnapshot())!;
+  const versionsBefore = await prisma.modelCatalogSnapshot.count({ where: { category: "coding" } });
+  const key = { category_modelId: { category: "coding", modelId: "gpt-catalog-test" } };
+
+  // Hold the chain lock, start a due renewal behind it, commit an operator's
+  // change meanwhile, then let the renewal go: it must read after the lock.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked!: () => void;
+  const holding = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const holder = prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    locked();
+    await gate;
+  });
+  await holding;
+  const renewal = renewCodingSnapshotIfUnchanged({ now: new Date(latest.coverageUntil.getTime() - 3 * day) });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await prisma.modelCatalogEntry.update({ where: key, data: { enabled: false } });
+  release();
+  await holder;
+
+  const result = await renewal;
+  assert.equal(result.decision, "content_changed");
+  assert.equal(result.version, latest.version);
+  assert.equal(await prisma.modelCatalogSnapshot.count({ where: { category: "coding" } }), versionsBefore);
+  await prisma.modelCatalogEntry.update({ where: key, data: { enabled: true } });
 });
 
 test("a stored draft is audited, applied in one step, and cleared", async () => {
