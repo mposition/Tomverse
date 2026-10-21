@@ -13,6 +13,9 @@ import {
 import { authOptions } from "@/lib/auth";
 import {
     approveMemory,
+    getMemoryConflictContext,
+    resolveMemoryConflict,
+    restoreMemoryGrounds,
     deleteMemory,
     editMemory,
     rejectMemory,
@@ -24,8 +27,30 @@ import {
  * flag-gated; DELETE stays available through a rollback (§15).
  */
 
+export async function GET(req: Request, context: RouteContext<"/api/memories/[memoryId]">) {
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        await consumeApiRateLimit(req, session.user.id, "memory-detail", { minute: 60, day: 2000 });
+        const { memoryId } = await context.params;
+        return NextResponse.json(await getMemoryConflictContext(session.user.id, memoryId),
+            { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+        return apiSecurityResponse(error) ?? NextResponse.json({ error: "Server error" }, { status: 500 });
+    }
+}
+
 const patchSchema = z
     .discriminatedUnion("action", [
+        z.object({ action: z.literal("restore_grounds"), groundsText: z.string().trim().min(1).max(2000) }).strict(),
+        z.object({ action: z.literal("resolve_conflict"),
+            resolution: z.enum(["keep_existing", "replace_existing", "keep_both", "expire_existing", "merge"]),
+            expectedRevision: z.number().int().positive(),
+            expectedConflicts: z.array(z.object({ id: z.string().min(1).max(64), revision: z.number().int().positive() }).strict()).min(1).max(100),
+            otherMemoryId: z.string().min(1).max(64).optional(),
+            mergedStatement: z.string().trim().min(1).max(1000).optional(),
+            groundsText: z.string().trim().min(1).max(2000).optional(),
+        }).strict(),
         z
             .object({
                 action: z.literal("approve"),
@@ -65,7 +90,11 @@ export async function PATCH(
         const memoryId = params.memoryId;
         const userId = session.user.id;
 
-        if (body.action === "approve") {
+        if (body.action === "restore_grounds") {
+            await restoreMemoryGrounds({ userId, memoryId, groundsText: body.groundsText });
+        } else if (body.action === "resolve_conflict") {
+            await resolveMemoryConflict({ ...body, userId, memoryId });
+        } else if (body.action === "approve") {
             await approveMemory({
                 userId,
                 memoryId,

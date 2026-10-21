@@ -163,7 +163,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
   feedback: (userId) =>
     prisma.feedback.findMany({
       where: { userId },
-      select: { id: true, message: true, status: true, createdAt: true },
+      select: { id: true, message: true, messageId: true, answerSignal: true, status: true, createdAt: true },
       take: EXPORT_ROW_CAP,
     }),
 

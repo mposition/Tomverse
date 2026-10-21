@@ -24,6 +24,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export type FeedbackSubmitPayload = {
   type: string;
   message: string;
+  messageId?: string;
+  answerSignal?: "needs_improvement" | "helpful";
   email?: string;
   traceId?: string;
   /** Server-issued proof for the trace above; sent once, never stored. */

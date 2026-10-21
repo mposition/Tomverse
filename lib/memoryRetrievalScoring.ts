@@ -39,7 +39,7 @@ import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorC
  * invalidate a context bundle, but it does not change a single stored term,
  * so folding the two together would force a pointless re-index of every row.
  */
-export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 1;
+export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 2;
 
 /**
  * Kinds that describe who the user is rather than what they were doing.
@@ -240,13 +240,14 @@ const byScoreThenId = (left: ScoredMemory, right: ScoredMemory) => {
 };
 
 /**
- * The duplicate key. `conflictKey` is the server's own grouping of claims
- * that mean the same thing, so two rows sharing one are the same fact stated
- * twice — including it once and dropping the rest is what §9 means by
- * removing duplicates before removing relevance.
+ * Legacy keys identify duplicate statements. Topic keys may contain different
+ * values the user explicitly chose to keep together, so only equal statements
+ * in that topic are duplicates.
  */
 const duplicateKey = (memory: RetrievableMemory) =>
-    memory.conflictKey ?? `id:${memory.id}`;
+    memory.conflictKey?.startsWith("topic:")
+        ? `${memory.conflictKey}:${memory.statement.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim()}`
+        : memory.conflictKey ?? `id:${memory.id}`;
 
 export function selectMemoryContext(input: {
     memories: readonly RetrievableMemory[];

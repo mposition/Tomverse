@@ -103,6 +103,9 @@ const provenanceFilter = (
     OR: [
         // User-authored: no extraction pair, not subject to eval approval.
         { extractionModelId: null, promptVersion: null },
+        // Explicitly user-authored grounds plus individual approval replace
+        // reliance on extraction quality while preserving the original provenance.
+        { userEdited: true, evidences: { some: { sourceType: "manual" } } },
         ...approvedPairs.map((pair) => ({
             extractionModelId: pair.extractionModelId,
             promptVersion: pair.promptVersion,

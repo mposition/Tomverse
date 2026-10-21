@@ -387,3 +387,12 @@ test("an empty memory set selects nothing without throwing", () => {
     assert.deepEqual(selection.selected, []);
     assert.equal(selection.tokens, 0);
 });
+
+test("explicitly coexisting topic values both reach context while identical values deduplicate", () => {
+    const selection = selectMemoryContext({ memories: [
+        memory("a", { kind: "identity", statement: "The user lives in Seoul", conflictKey: "topic:identity:user.residence" }),
+        memory("b", { kind: "identity", statement: "The user lives in Brisbane", conflictKey: "topic:identity:user.residence" }),
+        memory("c", { kind: "identity", statement: "The user lives in Seoul", conflictKey: "topic:identity:user.residence" }),
+    ], query: "home", now: NOW });
+    assert.deepEqual(idsOf(selection).sort(), ["a", "b"]);
+});

@@ -5,6 +5,7 @@ import { getMemoryReport, recordMemoryCounter } from "@/lib/memoryMetrics";
 import type { MemoryCounterKind } from "@/lib/memoryMetricsCore";
 import { createManualMemory } from "@/lib/memoryService";
 import { prisma } from "@/lib/prisma";
+import { resolveFeedbackMessageId } from "@/lib/feedbackMessageAttribution";
 
 /**
  * §22 B memory observability against a real database.
@@ -191,15 +192,45 @@ test("rows outside the window are not counted", async () => {
 test("the unavailable list ships with the report", async () => {
     // Without it, a dashboard cannot tell an unmeasured metric from a zero.
     const report = await getMemoryReport();
-    assert.ok(report.unavailable.length > 0);
     assert.ok(
-        report.unavailable.some(
+        !report.unavailable.some(
             (entry) => entry.metric === "followup_repair_proxy_feedback_signal"
         )
     );
     // Every entry names a reason. An unexplained gap is only marginally more
     // useful than the zero it replaced.
     assert.ok(report.unavailable.every((entry) => entry.reason.length > 0));
+});
+
+test("answer-linked reports verify ownership and count each reported answer once", async () => {
+    const user = await createUser();
+    const other = await createUser();
+    const conversation = await seedThread(user.id, { memoryUsedCount: 2 });
+    const answer = await prisma.message.findFirstOrThrow({ where: { conversationId: conversation.id } });
+    const plainConversation = await seedThread(user.id, { memoryUsedCount: null });
+    const plainAnswer = await prisma.message.findFirstOrThrow({ where: { conversationId: plainConversation.id } });
+    await prisma.feedback.createMany({ data: [
+        { userId: user.id, messageId: plainAnswer.id, type: "bug", answerSignal: "helpful", message: "An explicit positive assessment", createdAt: new Date(ANSWER_AT.getTime() + 30_000) },
+        { userId: user.id, messageId: plainAnswer.id, type: "bug", message: "A generic inquiry without an answer assessment", createdAt: new Date(ANSWER_AT.getTime() + 30_000) },
+    ] });
+    const userMessage = await prisma.message.create({ data: { conversationId: conversation.id, role: "user", content: "hello" } });
+    await prisma.$transaction(async tx => {
+        assert.equal(await resolveFeedbackMessageId(tx, other.id, answer.id), null);
+        assert.equal(await resolveFeedbackMessageId(tx, null, answer.id), null);
+        assert.equal(await resolveFeedbackMessageId(tx, user.id, userMessage.id), null);
+        assert.equal(await resolveFeedbackMessageId(tx, user.id, "missing"), null);
+        const messageId = await resolveFeedbackMessageId(tx, user.id, answer.id);
+        assert.equal(messageId, answer.id);
+        for (let i = 0; i < 2; i++) await tx.feedback.create({ data: { userId: user.id, messageId,
+            type: "bug", answerSignal: "needs_improvement", message: "A report containing no memory text", createdAt: new Date(ANSWER_AT.getTime() + 30_000) } });
+    });
+    const proxy = await proxyOf();
+    assert.equal(proxy.memory.feedbacks, 1);
+    assert.equal(proxy.memory.feedbackRate, 1);
+    assert.equal(proxy.plain.feedbackRate, 0);
+    assert.equal(proxy.plain.feedbacks, 0);
+    await prisma.message.delete({ where: { id: answer.id } });
+    assert.equal(await prisma.feedback.count({ where: { messageId: null, userId: user.id } }), 2);
 });
 
 test("the injection ratio reports a denominator, not a bare zero", async () => {

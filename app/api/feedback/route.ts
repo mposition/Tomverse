@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
+import { resolveFeedbackMessageId } from "@/lib/feedbackMessageAttribution";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -44,6 +45,8 @@ const feedbackSchema = z
     type: z.enum(["bug", "feature", "billing", "support", "other"]),
     email: z.string().trim().email().max(254).optional(),
     message: z.string().trim().min(5).max(2_000),
+    messageId: z.string().trim().min(1).max(64).optional(),
+    answerSignal: z.enum(["needs_improvement", "helpful"]).optional(),
     traceId: z.string().trim().max(120).optional(),
     /**
      * Server-issued proof that the trace above belongs to a real server
@@ -249,10 +252,13 @@ export async function POST(req: Request) {
       traceId: body.traceId,
     };
     const { feedback, delivery, userDelivery } = await prisma.$transaction(async (tx) => {
+      const messageId = await resolveFeedbackMessageId(tx, session?.user?.id ?? null, body.messageId);
       const feedback = await tx.feedback.create({
         data: {
           status: initialFeedbackStatus(autoReviewInput),
           userId: session?.user?.id || null,
+          messageId,
+          answerSignal: messageId ? body.answerSignal ?? null : null,
           email,
           type: body.type,
           message: body.message,
