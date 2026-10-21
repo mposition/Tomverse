@@ -97,6 +97,10 @@ export async function POST(
       userId: true,
       password: true,
       kind: true,
+      shareToken: true,
+      shareEnabled: true,
+      shareRevokedAt: true,
+      chatRecoveryEpoch: true,
     },
   });
 
@@ -254,18 +258,43 @@ export async function POST(
     );
   }
 
-  const updated = await prisma.conversation.update({
-    where: { id: conversationId },
+  // Publish only while the ownership, lock and share generation we checked
+  // still hold. A concurrent lock, revoke or replacement share wins over this
+  // in-flight preparation; no new link is issued for its stale snapshot.
+  const shareToken = createShareToken();
+  const updated = await prisma.conversation.updateMany({
+    where: {
+      id: conversationId,
+      userId,
+      password: accessConversation.password,
+      kind: accessConversation.kind,
+      shareToken: accessConversation.shareToken,
+      shareEnabled: accessConversation.shareEnabled,
+      shareRevokedAt: accessConversation.shareRevokedAt,
+      chatRecoveryEpoch: accessConversation.chatRecoveryEpoch,
+    },
     data: {
-      shareToken: createShareToken(),
+      shareToken,
       shareEnabled: true,
       sharedAt,
       shareExpiresAt: expiresAt,
       shareRevokedAt: null,
       shareSnapshot: parsedSnapshot.data,
     },
-    select: { shareToken: true, shareExpiresAt: true },
   });
+  if (updated.count !== 1) {
+    logSecurityAuditEvent("conversation.share.create", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "denied",
+      reason: "SHARE_SOURCE_CHANGED",
+    });
+    return NextResponse.json(
+      { error: "The conversation changed while preparing its share. Try again.", code: "SHARE_SOURCE_CHANGED" },
+      { status: 409 }
+    );
+  }
 
   const baseUrl = getPublicAppOrigin(req);
   logSecurityAuditEvent("conversation.share.create", {
@@ -276,8 +305,8 @@ export async function POST(
   });
 
   return NextResponse.json({
-    url: `${baseUrl}/share/${updated.shareToken}`,
-    expiresAt: updated.shareExpiresAt?.toISOString(),
+    url: `${baseUrl}/share/${shareToken}`,
+    expiresAt: expiresAt.toISOString(),
   });
 }
 

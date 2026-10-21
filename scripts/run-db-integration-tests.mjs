@@ -873,6 +873,12 @@ run(
 // seam. Module mocks are process-global, so keeping this in its own process
 // stops the next-auth stub from leaking into the suites above.
 run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/chat-c16-lifecycle.db.test.ts"],
+  "Running Chat sharing, export and deletion lifecycle scenarios"
+);
+run(
   [
     "--conditions=react-server",
     "--experimental-test-module-mocks",
