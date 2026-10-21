@@ -8,7 +8,7 @@ test.use({ hasTouch: true });
 test("PWA actions preserve the mobile composer and explicitly restore an offline draft", { tag: "@ui-risk" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await prepareGuestPage(page, "en");
-  await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "manual", language: "en" });
+  await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "manual", language: "en", messages: [{ id: "pwa-existing-question", role: "user", content: "Saved conversation marker" }] });
   await restoreActiveConversation(page);
   await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" }]);
   await page.route("**/api/products/chat/capabilities", (route) => route.fulfill({ json: { autoSelection: { offered: true } } }));
@@ -16,6 +16,7 @@ test("PWA actions preserve the mobile composer and explicitly restore an offline
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await page.evaluate(() => sessionStorage.setItem("tomverse-offline-draft", JSON.stringify({ owner: sessionStorage.getItem("tomverse-offline-owner"), text: "Recovered offline idea" })));
   await page.reload();
+  await expect(page.getByText("Saved conversation marker", { exact: true })).toBeVisible();
   const textarea = page.getByTestId("chat-textarea");
   await textarea.fill("Existing draft");
   await page.getByRole("button", { name: "Restore offline draft" }).click();

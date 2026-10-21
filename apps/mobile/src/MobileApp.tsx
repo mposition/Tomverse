@@ -110,12 +110,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     epoch.current++; requestEpoch.current++; abort.current?.abort();
     clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null);
     setUncertain(false); setStreaming(false); localStorage.removeItem(LAST_CHAT); setSettings(false); setModelPicker(false); setProduct("chat");
-    try { await transport.signOut(); } catch { setError(copy.error); }
+    try { await transport.signOut(); return true; } catch { setError(mobileCompletionCopy(language).logoutUnconfirmed); return false; }
   }
   async function reauthenticate() {
     setAccountOpen(false); setLoading(true);
-    await signOut();
+    const revoked = await signOut();
     setLoading(false);
+    if (!revoked) return;
     if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true);
     else void signIn();
   }
