@@ -419,6 +419,8 @@ export function ChatSidebar({
     const conversationMenuPanelRef = useRef<HTMLDivElement | null>(null);
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
     const helpMenuPanelRef = useRef<HTMLSpanElement | null>(null);
+    const sidebarRef = useRef<HTMLElement | null>(null);
+    const sidebarHeaderRef = useRef<HTMLDivElement | null>(null);
     const [showHelpMenu, setShowHelpMenu] = useState(false);
     // HELP-NAV-01 guided help, opened from the help menu below.
     const [showHelpGuide, setShowHelpGuide] = useState(false);
@@ -440,6 +442,24 @@ export function ChatSidebar({
     const isSidebarCollapsed =
         sidebarCollapsePreference === "collapsed" ||
         (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
+    useEffect(() => {
+        if (!isMobileDrawer || typeof ResizeObserver === "undefined") return;
+        const sidebar = sidebarRef.current;
+        const header = sidebarHeaderRef.current;
+        if (!sidebar || !header) return;
+        // Native focus/scrollIntoView must leave controls below the sticky
+        // header, including when text zoom or wrapping changes its height.
+        const measure = () => {
+            sidebar.style.scrollPaddingTop = `${header.getBoundingClientRect().height}px`;
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(header);
+        return () => {
+            observer.disconnect();
+            sidebar.style.removeProperty("scroll-padding-top");
+        };
+    }, [isMobileDrawer]);
     // Always a sticky, explicit override of whatever "auto" currently
     // resolves to -- so reopening a sidebar the width-based logic collapsed
     // sticks even if the viewport hasn't changed.
@@ -1308,6 +1328,7 @@ export function ChatSidebar({
     return (
         <>
         <aside
+            ref={sidebarRef}
             data-testid="chat-sidebar"
             // SHORT-VIEWPORT-001: in the drawer the sidebar is also the scroll
             // owner of last resort. Its fixed chrome plus the conversation
@@ -1323,7 +1344,7 @@ export function ChatSidebar({
               floats over this row and is why it reserves pr-16) never comes to
               rest on top of a scrolled conversation row or the search field.
             */}
-            <div className={`${isMobileDrawer ? "sticky top-0 z-10 flex-wrap bg-zinc-50 p-3 pr-16 dark:bg-zinc-950" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
+            <div ref={sidebarHeaderRef} className={`${isMobileDrawer ? "sticky top-0 z-10 flex-wrap bg-zinc-50 p-3 pr-16 dark:bg-zinc-950" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
                 <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8 shrink-0" : "h-9 w-9"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
