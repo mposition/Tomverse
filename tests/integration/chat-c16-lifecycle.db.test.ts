@@ -4,7 +4,7 @@ import { after, before, beforeEach, mock, test } from "node:test";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaPoolUsage } from "@/lib/prisma";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { buildAccountDataExport } from "@/lib/accountDataExport";
 import { writeChatComposerDraft } from "@/lib/chatComposerDraftPersistence";
@@ -19,6 +19,7 @@ import {
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 let signedInUserId: string | null = null;
 let duringPreparation: (() => Promise<void>) | null = null;
+let afterMessagesRead: (() => Promise<void>) | null = null;
 mock.module("next-auth/next", {
   namedExports: {
     getServerSession: async () => signedInUserId ? { user: { id: signedInUserId } } : null,
@@ -33,6 +34,20 @@ let allExports: typeof import("@/app/api/conversations/export-all/route");
 const userIds: string[] = [];
 
 before(async () => {
+  const routeDatabase = prisma.$extends({
+    query: {
+      message: {
+        async findMany({ args, query }) {
+          const rows = await query(args);
+          if (afterMessagesRead) await afterMessagesRead();
+          return rows;
+        },
+      },
+    },
+  });
+  mock.module(mod("lib/prisma.ts"), {
+    namedExports: { prisma: routeDatabase, prismaPoolUsage },
+  });
   const settings = await import(mod("lib/appSettings.ts"));
   mock.module(mod("lib/appSettings.ts"), {
     namedExports: {
@@ -58,6 +73,7 @@ before(async () => {
 beforeEach(() => {
   signedInUserId = null;
   duringPreparation = null;
+  afterMessagesRead = null;
 });
 after(async () => {
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
@@ -193,34 +209,38 @@ test("Chat export refuses a foreign owner and a locked conversation", async () =
   assert.equal((await singleExport.GET(new Request(url), context(conversation.id))).status, 423);
 });
 
-test("a continued Chat exports its original privately with the Chat header and still refuses public sharing", async () => {
-  const { user, conversation } = await seed();
+async function attachSource(userId: string, conversationId: string) {
   const imported = await prisma.externalImport.create({
-    data: { userId: user.id, provider: "chatgpt", status: "completed", digestVersion: 1, parserVersion: "test" },
+    data: { userId, provider: "chatgpt", status: "completed", digestVersion: 1, parserVersion: "test" },
   });
   const source = await prisma.externalConversation.create({
     data: {
-      userId: user.id, importId: imported.id, provider: "chatgpt", externalStableId: randomUUID(),
+      userId, importId: imported.id, provider: "chatgpt", externalStableId: randomUUID(),
       title: "Imported original", conversationDigest: "c16-source", digestVersion: 1,
       messageCount: 1, contentBytes: BigInt(32), finalized: true,
     },
   });
   await prisma.externalMessage.create({
     data: {
-      userId: user.id, externalConversationId: source.id, externalStableId: randomUUID(),
+      userId, externalConversationId: source.id, externalStableId: randomUUID(),
       role: "user", content: "A privately imported original", contentDigest: "c16-message",
       digestVersion: 1, ordinal: 0,
     },
   });
   await prisma.conversationContinuationBridge.create({
     data: {
-      userId: user.id, conversationId: conversation.id, externalConversationId: source.id,
+      userId, conversationId, externalConversationId: source.id,
       provider: "chatgpt", sourceImportedAt: imported.createdAt, sourceConversationDigest: "c16-source",
       sourceDigestVersion: 1, sourceMessageCount: 1, seedFromOrdinal: 0, seedToOrdinal: 0,
       seedMessageCount: 1, seedTruncatedMessageCount: 0, seedOmittedMessageCount: 0,
       contextSeedVersion: "ext-seed-v1", idempotencyKey: randomUUID(),
     },
   });
+}
+
+test("a continued Chat exports its original privately with the Chat header and still refuses public sharing", async () => {
+  const { user, conversation } = await seed();
+  await attachSource(user.id, conversation.id);
   const response = await singleExport.GET(
     new Request(`https://tomverse.test/api/conversations/${conversation.id}/export?include=source`),
     context(conversation.id),
@@ -231,7 +251,65 @@ test("a continued Chat exports its original privately with the Chat header and s
   assert.match(text, /A privately imported original/);
   assert.match(text, /The original answer/);
   assert.ok(response.headers.get("X-Export-SHA256"));
-  assert.equal((await publish(conversation.id)).status, 409);
+  const sharing = await publish(conversation.id);
+  assert.equal(sharing.status, 409);
+  assert.equal((await sharing.json()).code, "CONTINUATION_SHARE_NOT_SUPPORTED");
+});
+
+for (const mutation of ["edit", "delete", "insert"] as const) {
+  test(`a message ${mutation} after snapshot reading prevents publication`, async () => {
+    const { conversation, source } = await seed();
+    afterMessagesRead = async () => {
+      afterMessagesRead = null;
+      if (mutation === "insert") {
+        await prisma.message.create({
+          data: { conversationId: conversation.id, role: "assistant", content: "A new private answer" },
+        });
+      } else if (mutation === "edit") {
+        await prisma.message.update({ where: { id: source.id }, data: { content: "New private words" } });
+      } else {
+        await prisma.message.delete({ where: { id: source.id } });
+      }
+    };
+    const response = await publish(conversation.id);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "SHARE_SOURCE_CHANGED");
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } })).shareToken, null);
+  });
+}
+
+test("a continuation bridge attached after snapshot reading prevents publication", async () => {
+  const { user, conversation } = await seed();
+  afterMessagesRead = async () => {
+    afterMessagesRead = null;
+    await attachSource(user.id, conversation.id);
+  };
+  const response = await publish(conversation.id);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "SHARE_SOURCE_CHANGED");
+  assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } })).shareToken, null);
+});
+
+test("concurrent share preparations issue one usable link and one explicit conflict", async () => {
+  const { conversation } = await seed();
+  let readers = 0;
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => { release = resolve; });
+  afterMessagesRead = async () => {
+    readers++;
+    if (readers === 2) {
+      afterMessagesRead = null;
+      release();
+    }
+    await ready;
+  };
+  const responses = await Promise.all([publish(conversation.id), publish(conversation.id)]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+  const refused = responses.find((response) => response.status === 409)!;
+  assert.equal((await refused.json()).code, "SHARE_SOURCE_CHANGED");
+  const accepted = responses.find((response) => response.status === 200)!;
+  const token = new URL((await accepted.json()).url).pathname.split("/").at(-1)!;
+  assert.equal((await readShare(token)).status, 200);
 });
 
 test("account deletion removes live Chat recovery, Auto content and shares without reviving a late worker", async () => {
