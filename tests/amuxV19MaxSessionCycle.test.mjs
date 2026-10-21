@@ -126,7 +126,7 @@ test("one recorded cycle runs every step once and releases the halt", () =>
     const result = await runAmuxV19MaxSessionCycleOnce({ origin,
       stateDirectory: "/state" }, fake.steps);
     assert.deepEqual(result, { kind: "recorded", claimId: identity.claimId,
-      haltReleased: true, planState: "plan_ready",
+      haltReleased: true, planState: "plan_ready", planReason: null,
       registrationState: "write_disabled" });
     assert.deepEqual(fake.calls, ["claim", "readIdea", "analyse", "finalize"]);
     assert.equal(fake.released(), 1);
@@ -246,6 +246,11 @@ test("the status line carries fixed words only", () => {
     registrationState: "committed" }), { line:
     "AMUX_V19_MAX_SESSION_CYCLE_recorded planState=plan_ready registrationState=committed\n",
   exitCode: 0 });
+  // A refused plan names the app's closed refusal word.
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "recorded",
+    haltReleased: true, planState: "plan_refused", planReason: "invalid_result",
+    registrationState: "not_planned" }).line,
+  "AMUX_V19_MAX_SESSION_CYCLE_recorded planState=plan_refused planReason=invalid_result registrationState=not_planned\n");
   const unknown = amuxV19MaxSessionCycleStatus({ kind: "outcome_unknown",
     stage: "result", claimId: identity.claimId });
   assert.equal(unknown.exitCode, 1);

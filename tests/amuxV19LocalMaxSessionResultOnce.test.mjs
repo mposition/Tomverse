@@ -52,7 +52,8 @@ test("one Max result write returns the exact content-free receipt", async () => 
     } });
   assert.deepEqual(result, { kind: "recorded", recovered: false,
     retryWrite: false, digest, digestKeyId: "synthetic-digest",
-    planState: "plan_refused", registrationState: "not_planned" });
+    planState: "plan_refused", planReason: "invalid_result",
+    registrationState: "not_planned" });
   assert.deepEqual(calls, ["POST"]);
 });
 
