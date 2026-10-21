@@ -63,6 +63,7 @@ function fakeDeps({ gitAnswers = {}, github = [], app = [], files = {}, env = EN
       if (answer) return answer;
       if (sub === "rev-parse") return { code: 0, stdout: `${HEAD}\n`, stderr: "" };
       if (sub === "merge-base") return { code: 0, stdout: `${FORK}\n`, stderr: "" };
+      if (sub === "rev-list") return { code: 0, stdout: `${HEAD} ${FORK}\n`, stderr: "" };
       if (sub === "diff") return { code: 0, stdout: raw("lib/chatAttemptExecution.ts") + raw("tests/chatAttemptExecution.test.mjs"), stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     },
@@ -227,6 +228,22 @@ test("publish refuses a bundle whose tip is not the reviewed head", async () => 
   const answer = await handleRequest(deps, publishHeader(), BUNDLE);
   assert.deepEqual(answer, { status: "refused", code: "setup_failed", detail: "head_mismatch" });
   assert.ok(!gitSubs(gitCalls).includes("push"));
+});
+
+test("publish pushes only a single commit on the fork point", async () => {
+  const cases = [
+    `${HEAD} ${"d".repeat(40)}\n`, // an earlier commit of its own under it
+    `${HEAD} ${FORK} ${"d".repeat(40)}\n`, // a merge
+    `${HEAD}\n`, // a root commit
+  ];
+  for (const stdout of cases) {
+    const { deps, gitCalls } = fakeDeps({ gitAnswers: { "rev-list": { code: 0, stdout, stderr: "" } } });
+    const answer = await handleRequest(deps, publishHeader(), BUNDLE);
+    assert.deepEqual(answer, { status: "refused", code: "runner_error", detail: "not_one_commit" }, stdout);
+    assert.ok(!gitSubs(gitCalls).includes("push"));
+  }
+  const unreadable = fakeDeps({ gitAnswers: { "rev-list": { code: 128, stdout: "", stderr: "" } } });
+  assert.equal((await handleRequest(unreadable.deps, publishHeader(), BUNDLE)).detail, "not_one_commit");
 });
 
 test("publish pushes create-only with the token in git's environment, then adopts Auto PR's draft", async () => {

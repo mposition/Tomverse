@@ -25,15 +25,20 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
    파일 금지, 비밀값 금지, 공개 저장소이므로 사용자 내용 복사 금지, 끝나면 commit) 뒤에 권장안의
    `instruction`을 붙입니다. 권한은 `--permission-mode dontAsk`에 읽기·편집 도구와 git·node 테스트·
    tsc·eslint 명령만 허용하고, MCP는 싣지 않습니다(`--strict-mcp-config`). 30분을 넘기면 `timeout`.
-4. **범위 검사** — commit된 것만 남기고(`reset --hard`, `clean`), 바뀐 경로를 검사합니다. 아래
-   "범위"를 벗어나면 `out_of_scope`, 바뀐 것이 없으면 `no_change`.
+4. **범위 검사** — commit된 것만 남기고(`reset --hard`, `clean`), 에이전트의 마지막 tree를 이번
+   실행이 fetch한 develop 위의 **commit 하나**로 runner가 다시 만듭니다(`commit-tree`). push는 실린
+   commit을 모두 공개하므로, 중간 commit에 넣었다 지운 내용이 이력에 남지 않게 하려는 것입니다. 그
+   commit의 바뀐 경로를 검사합니다. 아래 "범위"를 벗어나면 `out_of_scope`, 바뀐 것이 없으면 `no_change`.
 5. **테스트** — 바뀐 테스트 파일과, 바뀐 모듈을 import하는 `tests/*.test.*`·
    `tests/server-contract/`·`tests/client/` 파일을 저장소의 runner와 같은 플래그로 돌리고, 바뀐
    소스 파일에 eslint(`--max-warnings=0`)를 돌립니다. 관련 테스트가 하나도 없거나 실패하면 `tests`.
-6. **독립 검토** — 검토 서버(`tools/review-orchestrator`)에 `submit --author claude` 후 `wait`.
-   accept이고 검토한 head가 이 commit일 때만 다음으로 갑니다. reject는 `review_reject`, 그 밖은
-   `review_unknown`이며 다시 보내지 않습니다.
-7. **publish** — gateway가 브랜치를 push하고, Auto PR to Develop이 여는 draft PR을 최대 5분
+6. **독립 검토** — 검토 서버(`tools/review-orchestrator`)에 `submit --author claude --base <develop
+   commit>` 후 `wait`. accept이고 job의 head가 이 commit, base가 이번 실행의 develop commit, focus가
+   없을 때만 다음으로 갑니다. 검토 client는 worktree의 로컬 ref로도 base를 고르는데 그 ref는
+   에이전트 코드가 옮길 수 있으므로, 검토 범위를 job 결과로 확인합니다. reject는 `review_reject`,
+   그 밖은 `review_unknown`이며 다시 보내지 않습니다.
+7. **publish** — gateway는 자기가 fetch한 develop과의 fork point 위 commit 하나인지 다시 확인하고
+   (아니면 `runner_error`), 브랜치를 push하고, Auto PR to Develop이 여는 draft PR을 최대 5분
    기다렸다가 제목과 본문(권장안, cycle 링크, 검토 job id, "자동 생성, 병합은 사람")을 바꿉니다.
    5분 안에 열리지 않으면 gateway가 draft로 직접 엽니다.
 8. **result** — `POST /api/internal/auto-router/recommendations/result`로

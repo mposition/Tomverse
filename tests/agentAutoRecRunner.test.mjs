@@ -8,6 +8,7 @@ import { INSTRUCTION_PREAMBLE, branchNameFor } from "../tools/auto-rec-agent/lib
 
 const BASE = "e".repeat(40);
 const HEAD = "c".repeat(40);
+const TREE = "f".repeat(40);
 const JOB = "r-20261020-010203-abcdef";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/2900";
 const NOW = Date.parse("2026-10-20T00:00:00.000Z");
@@ -34,11 +35,12 @@ const DEFAULT_RULES = [
   [/^git .* remote get-url origin$/, ok("https://github.com/mposition/Tomverse.git\n")],
   [/^git .* rev-parse --verify refs\/remotes\/origin\/develop\^\{commit\}$/, ok(`${BASE}\n`)],
   [/^git .* rev-parse \S+:package-lock\.json/, ok("lock1\nschema1\n")],
-  [/^git .* rev-parse --verify HEAD\^\{commit\}$/, ok(`${HEAD}\n`)],
+  [/^git .* rev-parse --verify HEAD\^\{tree\}$/, ok(`${TREE}\n`)],
+  [/^git .* commit-tree /, ok(`${HEAD}\n`)],
   [/^git .* diff --raw/, ok(raw("lib/chatAttemptExecution.ts") + raw("tests/chatAttemptExecution.test.mjs"))],
   [/^claude /, ok(JSON.stringify({ subtype: "success", result: "Implemented and committed.", num_turns: 7 }))],
   [/review\.mjs submit /, exit(3, JSON.stringify({ jobId: JOB, status: "pending" }))],
-  [/review\.mjs wait /, ok(JSON.stringify({ jobId: JOB, status: "accept", head: HEAD }))],
+  [/review\.mjs wait /, ok(JSON.stringify({ jobId: JOB, status: "accept", base: BASE, head: HEAD, focus: null }))],
 ];
 
 function fakeRunner({ rules = [], gateway = {}, now = NOW, lockFree = true, files = {} } = {}) {
@@ -131,7 +133,7 @@ test("happy path: claim, agent, tests, lint, review, publish, report the PR", as
   assert.ok(lint.args.includes("--max-warnings=0"));
 
   const submit = calls.find(({ signature }) => /review\.mjs submit/.test(signature));
-  assert.deepEqual(submit.args.slice(1, 4), ["submit", "--author", "claude"]);
+  assert.deepEqual(submit.args.slice(1, 6), ["submit", "--author", "claude", "--base", BASE]);
   // The worktree goes away at the end.
   assert.ok(ran(calls, / worktree remove --force /));
   assert.ok(ran(calls, new RegExp(` branch -D ${BRANCH.replace(/[/]/g, "\\/")}$`)));
@@ -186,7 +188,14 @@ const FAILURES = [
   ["review rejects", [[/review\.mjs wait/, exit(1, "{}")]], "review_reject"],
   ["review is unknown", [[/review\.mjs wait/, exit(2, "{}")]], "review_unknown"],
   ["review cannot be submitted", [[/review\.mjs submit/, exit(64, "")]], "review_unknown"],
-  ["review accepts another head", [[/review\.mjs wait/, ok(JSON.stringify({ status: "accept", head: "d".repeat(40) }))]], "review_unknown"],
+  ["review accepts another head", [[/review\.mjs wait/, ok(JSON.stringify({ status: "accept", base: BASE, head: "d".repeat(40) }))]], "review_unknown"],
+  ["review accepts another base", [[/review\.mjs wait/, ok(JSON.stringify({ status: "accept", base: HEAD, head: HEAD }))]], "review_unknown"],
+  [
+    "review accepts only a focus range",
+    [[/review\.mjs wait/, ok(JSON.stringify({ status: "accept", base: BASE, head: HEAD, focus: "d".repeat(40) }))]],
+    "review_unknown",
+  ],
+  ["the squash commit cannot be made", [[/ commit-tree /, exit(128)]], "runner_error"],
 ];
 
 for (const [name, rules, reason, files] of FAILURES) {
@@ -214,10 +223,24 @@ test("only committed work is tested: leftovers are reset before the diff", async
   assert.ok(order(/ clean -fdxq -e \/node_modules$/) < order(/ diff --raw/));
 });
 
+test("what leaves is one runner-made commit of the agent's final tree on this run's develop", async () => {
+  const { deps, calls } = fakeRunner();
+  await runOnce(deps);
+  const order = (pattern) => calls.findIndex(({ signature }) => pattern.test(signature));
+  const squash = calls[order(/ commit-tree /)];
+  assert.deepEqual(squash.args.slice(-5), [TREE, "-p", BASE, "-F", "-"]);
+  assert.equal(squash.options.env.GIT_AUTHOR_NAME, "tomverse-auto-rec[bot]");
+  assert.ok(!("CLAUDE_CODE_OAUTH_TOKEN" in squash.options.env));
+  // The branch moves onto it before the scope check, the tests and the review.
+  assert.ok(order(new RegExp(` reset --quiet --hard ${HEAD}$`)) > order(/ commit-tree /));
+  assert.ok(order(/ commit-tree /) < order(/ diff --raw/));
+  assert.deepEqual(calls[order(/ diff --raw/)].args.slice(-2), [BASE, HEAD]);
+});
+
 test("a pending review is waited on until it decides", async () => {
   let waits = 0;
   const { deps, gatewayCalls } = fakeRunner({
-    rules: [[/review\.mjs wait/, () => (++waits < 3 ? exit(3, "{}") : ok(JSON.stringify({ status: "accept", head: HEAD })))]],
+    rules: [[/review\.mjs wait/, () => (++waits < 3 ? exit(3, "{}") : ok(JSON.stringify({ status: "accept", base: BASE, head: HEAD })))]],
   });
   assert.equal(await runOnce(deps), 0);
   assert.equal(waits, 3);
@@ -332,7 +355,7 @@ test("a `wait` call that times out is still pending, not a verdict", async () =>
     rules: [
       [
         /review\.mjs wait/,
-        () => (++waits === 1 ? { code: 137, stdout: "", stderr: "", timedOut: true } : ok(JSON.stringify({ status: "accept", head: HEAD }))),
+        () => (++waits === 1 ? { code: 137, stdout: "", stderr: "", timedOut: true } : ok(JSON.stringify({ status: "accept", base: BASE, head: HEAD }))),
       ],
     ],
   });
