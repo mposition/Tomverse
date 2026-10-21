@@ -88,7 +88,7 @@ test("file routing keeps the primary and every failover inside the capable eligi
   assert.equal(original.record.eligibleModelIds.length > capable.length, true);
 });
 
-test("an unavailable semantic router uses a capable eligible fallback without claiming an LLM pick", () => {
+test("a known file request without a usable model pick uses a capable eligible fallback", () => {
   const original = selectAutoModel(input());
   const capable = ["gpt-5-6-luna"];
   const routed = applyLlmModelPick(original, null, { required: true, capableModelIds: capable });

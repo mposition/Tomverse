@@ -2504,7 +2504,7 @@ test("a routed drill turn is recorded as overridden, exactly once", async () => 
   assert.ok(overridden[0].includes('"selectedModelId"'));
 });
 
-test("a text turn without a semantic pick applies the capable pool without misreporting its choice", async () => {
+test("a text turn without a semantic pick preserves the ordinary Auto selection and recovery", async () => {
   modelPickInputs.length = 0;
   modelPickResults.length = 0;
   await ask("answers", "claimed", 200, false);
@@ -2512,19 +2512,11 @@ test("a text turn without a semantic pick applies the capable pool without misre
   const [selection, pick, files] = modelPickInputs[0];
   const routed = modelPickResults[0];
   assert.equal(pick, null);
-  assert.equal(files?.required, true);
+  assert.equal(files?.required, false);
   assert.ok(selection.routed && routed.routed);
   if (!selection.routed || !routed.routed) return;
-  assert.ok(files!.capableModelIds.includes(routed.modelId));
-  if (routed.modelId === selection.modelId) {
-    assert.deepEqual(routed.sticky, selection.sticky);
-    assert.equal(routed.stickyMemoryModelId, selection.stickyMemoryModelId);
-    assert.equal(routed.record.selectionReason, selection.record.selectionReason);
-    assert.equal(routed.record.allocationMode, selection.record.allocationMode);
-    assert.equal(routed.record.allocationSeedGrain, selection.record.allocationSeedGrain);
-  } else {
-    assert.equal(routed.record.selectionReason, "fallback_order");
-  }
+  assert.equal(routed, selection);
+  assert.equal(attempts[0].modelId, selection.modelId);
 });
 
 test("a turn the override did not route records no override at all", async () => {

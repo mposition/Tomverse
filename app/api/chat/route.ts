@@ -2068,12 +2068,10 @@ async function handleChatPost(
             deterministicAutoSelection,
             llmPick?.modelId ?? null,
             {
-                // Without a semantic pick, prefer the file-capable eligible pool
-                // for every turn: an unclassified file request must still work
-                // without another paid call. Keep existing decision state when
-                // its chosen model already belongs to that pool.
-                required: llmPick?.requiresFileGeneration === true ||
-                    (!llmPick && fileCapableModelIds.length > 0),
+                // Restrict capabilities only for an identified file request.
+                // A missing semantic decision retains ordinary Auto recovery;
+                // offering file tools to every turn would disable that recovery.
+                required: llmPick?.requiresFileGeneration === true,
                 capableModelIds: fileCapableModelIds,
             }
         );
