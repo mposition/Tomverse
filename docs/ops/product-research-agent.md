@@ -299,8 +299,10 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
 `npm run agent:product-research-scout-s0-probe -- fixture|pages|renderers`는 browser 규칙과 렌더러를 **로컬에서** 재는
 도구입니다(2026-10-13 측정의 근거). fixture는 로컬 서버 두 개로 금지된 요청이 실제로 도달하는지 세고, pages는 production
 공개 page 20개를 GET·HEAD로만 열며, renderers는 고정 명세 파일을 만들고 검사합니다. 출력에 page 원문·경로·비밀값이 없어
-그대로 붙여도 안전합니다. Railway 서비스는 따로 두지 않습니다 — Railway 컨테이너에서 Chromium sandbox가 뜨는지는 walker의
-첫 실행이 답합니다(뜨지 않으면 `product_research_scout_step_failed`의 `pages` 단계로 로그에 남습니다).
+그대로 붙여도 안전합니다. Railway 서비스는 따로 두지 않습니다. Railway 호스트 일부는 Chromium sandbox를 거부합니다
+(`product_research_scout_browser_launch_failed`의 `source`·`fatal`). 그때 walker는 sandbox 없이 한 번 더 띄우고
+`product_research_scout_browser_unsandboxed`와 실행 줄의 `sandbox: off`를 남깁니다(정책 §12). 재시도를 끄려면 walker에
+`PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off`를 넣습니다.
 
 ## Scout walker (정책 §10, §13)
 
@@ -327,7 +329,7 @@ submission did not complete`가 있으면 요청이 route에 닿았는지 알 �
    | Region | `asia-southeast1-eqsg3a`, replica 1 |
    | Networking | 공개 domain을 만들지 않음 |
    | Build → Watch paths | `docker/product-research-scout.Dockerfile`, `scripts/agents/product-research-scout.mjs`, `scripts/report-product-consistency-core.mjs`, `lib/productResearchScout*`, `lib/generatedArtifact*`, `package-lock.json` |
-   | Variables | `PRODUCT_RESEARCH_SCOUT_ENABLED`, `PRODUCT_RESEARCH_SCOUT_INGEST_URL`(그 환경 앱의 `https://…/api/internal/product-research/scout`), `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(1과 같은 값). 이 셋 말고는 없음 |
+   | Variables | `PRODUCT_RESEARCH_SCOUT_ENABLED`, `PRODUCT_RESEARCH_SCOUT_INGEST_URL`(그 환경 앱의 `https://…/api/internal/product-research/scout`), `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET`(1과 같은 값). 선택으로 `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK`(`off`면 sandbox 없는 재시도를 끔). 이 넷 말고는 없음 |
 
 3. **Admin에서 모델과 하루 상한**: Admin › 제품 리서치 › 실행과 비용의 "모델과 하루 상한"에서 이미지를 읽는
    모델을 고르고 하루 호출 수를 정합니다(owner, 최근 로그인). 하루 약 25회면 한 번 실행을 다 판정합니다. 0이면 비용이 들지

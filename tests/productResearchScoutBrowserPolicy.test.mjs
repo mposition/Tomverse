@@ -12,6 +12,7 @@ import {
   isScoutCausedConsoleError,
   launchFailure,
   originOf,
+  retriesWithoutSandbox,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
 
 const allowedOrigins = [SCOUT_PAGE_ORIGIN];
@@ -137,13 +138,53 @@ test("a launch failure says whether the sandbox ran, without the URLs Chromium p
   assert.ok(failure.fatal.includes("<url>"));
   assert.ok(!/https?:|googlesource|tomverse/.test(failure.fatal));
   assert.ok(failure.fatal.length <= 200);
+  assert.equal(failure.source, "zygote_host_impl_linux.cc(128)");
 
   assert.deepEqual(launchFailure(new Error("browserType.launch: Executable doesn't exist at /ms-playwright/chromium-1200/chrome-linux/chrome")), {
     cause: "browser_missing",
     fatal: null,
+    source: null,
   });
-  assert.deepEqual(launchFailure(new Error("browserType.launch: Target page, context or browser has been closed")), { cause: "launch_failed", fatal: null });
-  assert.deepEqual(launchFailure("boom"), { cause: "launch_failed", fatal: null });
+  assert.deepEqual(launchFailure(new Error("browserType.launch: Target page, context or browser has been closed")), {
+    cause: "launch_failed",
+    fatal: null,
+    source: null,
+  });
+  assert.deepEqual(launchFailure("boom"), { cause: "launch_failed", fatal: null, source: null });
+
+  // What Railway hosts that refuse the sandbox's setup print (2026-10-20, 2026-10-21).
+  const refused = launchFailure(
+    new Error(
+      "browserType.launch: Target page, context or browser has been closed\n[pid=7][err] [1021/045759.360:FATAL:credentials.cc(132)] Check failed: . : Permission denied (13)",
+    ),
+  );
+  assert.deepEqual(refused, { cause: "sandbox_refused", fatal: "Check failed: . : Permission denied (13)", source: "credentials.cc(132)" });
+  // The same words from a file outside the sandbox setup are not a refused sandbox.
+  const elsewhere = launchFailure(
+    new Error("[pid=7][err] [1021/045759.360:FATAL:platform_shared_memory_region_posix.cc(212)] Check failed: . : Permission denied (13)"),
+  );
+  assert.equal(elsewhere.cause, "launch_failed");
+  assert.equal(elsewhere.source, "platform_shared_memory_region_posix.cc(212)");
+  for (const file of ["namespace_sandbox.cc", "zygote_host_impl_linux.cc", "setuid_sandbox_host.cc"]) {
+    assert.equal(launchFailure(new Error(`[err] [x:FATAL:${file}(9)] Check failed: .`)).cause, "sandbox_refused", file);
+  }
+});
+
+test("only a refused or unavailable sandbox is retried without it, and the operator can turn that off", () => {
+  const refused = { cause: "sandbox_refused" };
+  assert.equal(retriesWithoutSandbox(undefined, refused), true);
+  assert.equal(retriesWithoutSandbox("", refused), true);
+  assert.equal(retriesWithoutSandbox("on", refused), true);
+  assert.equal(retriesWithoutSandbox("off", refused), false);
+  assert.equal(retriesWithoutSandbox(" OFF ", refused), false);
+  assert.equal(retriesWithoutSandbox(undefined, { cause: "sandbox_unavailable" }), true);
+  // Not the sandbox's failure: a timeout, a crash, a missing library or browser.
+  assert.equal(retriesWithoutSandbox(undefined, { cause: "launch_failed" }), false);
+  assert.equal(retriesWithoutSandbox(undefined, { cause: "browser_missing" }), false);
+  assert.equal(
+    retriesWithoutSandbox(undefined, launchFailure(Object.assign(new Error("browserType.launch: Timeout 180000ms exceeded."), { name: "TimeoutError" }))),
+    false,
+  );
 });
 
 test("the abort tally keeps method and origin and drops the path", () => {
