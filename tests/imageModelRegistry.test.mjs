@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
   DEFAULT_IMAGE_MODEL_ID,
   IMAGE_MODEL_REGISTRY,
+  findImageModel,
+  findImageModelPrice,
   getImageModel,
   getImageModelPrice,
   listActiveImageProviders,
@@ -24,6 +27,39 @@ import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
 } from "../lib/imageGenerationPricing.ts";
+
+test("catalogue-parametrised lookups resolve against the given list, not module state", () => {
+  const seed = IMAGE_MODEL_REGISTRY;
+  const only = [seed[0]];
+  assert.equal(findImageModel(only, seed[0].id)?.id, seed[0].id);
+  // A model absent from the handed list is unknown even though the seed has it.
+  assert.equal(findImageModel([], seed[0].id), null);
+  const price = seed[0].prices[0];
+  assert.equal(findImageModelPrice([], seed[0].id, price.quality, price.size), null);
+  assert.deepEqual(
+    findImageModelPrice(only, seed[0].id, price.quality, price.size),
+    price
+  );
+});
+
+test("client components never write the module-global image catalogue", () => {
+  for (const file of [
+    "../app/(site)/(application)/chat/ChatPageClient.tsx",
+    "../components/images/ImageGenerationWorkspace.tsx",
+    "../components/chat/ImageModelTabPanel.tsx",
+    "../components/chat/ChatMessageList.tsx",
+    "../components/chat/ChatImageTurnCard.tsx",
+  ]) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /setActiveImageModelCatalog/, file);
+  }
+});
+
+test("a held model never prices through the parametrised lookup", () => {
+  const held = { ...IMAGE_MODEL_REGISTRY[0], disabledReason: "held" };
+  const price = held.prices[0];
+  assert.equal(findImageModelPrice([held], held.id, price.quality, price.size), null);
+});
 
 test("the registry ships GPT Image 2 enabled and Nano Banana 2 on a verification hold", () => {
   const openai = getImageModel("gpt-image-2");
