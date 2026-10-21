@@ -414,11 +414,12 @@ export const applyLlmModelPick = (
     ? pickedModelId
     : files?.required ? ranked.find(id => eligible.includes(id)) : null;
   if (!chosen) return selection;
+  const keepDecision = pickedModelId !== chosen && chosen === selection.modelId;
   return {
     ...selection,
     modelId: chosen,
-    sticky: { modelId: chosen, turnsFavouringChallenger: 0 },
-    stickyMemoryModelId: undefined,
+    sticky: keepDecision ? selection.sticky : { modelId: chosen, turnsFavouringChallenger: 0 },
+    stickyMemoryModelId: keepDecision ? selection.stickyMemoryModelId : undefined,
     fallbackCandidateModelIds: ranked.filter(id => id !== chosen && eligible.includes(id)),
     record: {
       ...selection.record,
@@ -429,10 +430,11 @@ export const applyLlmModelPick = (
         ...selection.record.eligibleModelIds.filter(id => !eligible.includes(id))
           .map(modelId => ({ modelId, reason: "file_generation_unsupported" as const })),
       ] : selection.record.rejections,
-      selectionReason: pickedModelId === chosen ? "llm_pick" : "fallback_order",
-      selectionDecidedBy: null,
-      allocationMode: "deterministic",
-      allocationSeedGrain: null,
+      selectionReason: keepDecision ? selection.record.selectionReason
+        : pickedModelId === chosen ? "llm_pick" : "fallback_order",
+      selectionDecidedBy: keepDecision ? selection.record.selectionDecidedBy : null,
+      allocationMode: keepDecision ? selection.record.allocationMode : "deterministic",
+      allocationSeedGrain: keepDecision ? selection.record.allocationSeedGrain : null,
     },
   };
 };

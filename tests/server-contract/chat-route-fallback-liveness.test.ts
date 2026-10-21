@@ -128,8 +128,16 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
   },
 } });
 const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as typeof import("../../lib/autoModelSelection");
+const modelPickInputs: Array<Parameters<typeof realAutoSelection.applyLlmModelPick>> = [];
+const modelPickResults: Array<ReturnType<typeof realAutoSelection.applyLlmModelPick>> = [];
 mock.module(mod("lib/autoModelSelection.ts"), { namedExports: {
   ...realAutoSelection,
+  applyLlmModelPick: (...args: Parameters<typeof realAutoSelection.applyLlmModelPick>) => {
+    const result = realAutoSelection.applyLlmModelPick(...args);
+    modelPickInputs.push(args);
+    modelPickResults.push(result);
+    return result;
+  },
   selectAutoModel: (input: Parameters<typeof realAutoSelection.selectAutoModel>[0]) => {
     routerInputs.push(input);
     return realAutoSelection.selectAutoModel(input);
@@ -2494,6 +2502,29 @@ test("a routed drill turn is recorded as overridden, exactly once", async () => 
   // It names the model that was actually chosen, so the record says what the
   // override bought rather than only that it happened.
   assert.ok(overridden[0].includes('"selectedModelId"'));
+});
+
+test("a text turn without a semantic pick applies the capable pool without misreporting its choice", async () => {
+  modelPickInputs.length = 0;
+  modelPickResults.length = 0;
+  await ask("answers", "claimed", 200, false);
+  assert.equal(modelPickInputs.length, 1);
+  const [selection, pick, files] = modelPickInputs[0];
+  const routed = modelPickResults[0];
+  assert.equal(pick, null);
+  assert.equal(files?.required, true);
+  assert.ok(selection.routed && routed.routed);
+  if (!selection.routed || !routed.routed) return;
+  assert.ok(files!.capableModelIds.includes(routed.modelId));
+  if (routed.modelId === selection.modelId) {
+    assert.deepEqual(routed.sticky, selection.sticky);
+    assert.equal(routed.stickyMemoryModelId, selection.stickyMemoryModelId);
+    assert.equal(routed.record.selectionReason, selection.record.selectionReason);
+    assert.equal(routed.record.allocationMode, selection.record.allocationMode);
+    assert.equal(routed.record.allocationSeedGrain, selection.record.allocationSeedGrain);
+  } else {
+    assert.equal(routed.record.selectionReason, "fallback_order");
+  }
 });
 
 test("a turn the override did not route records no override at all", async () => {

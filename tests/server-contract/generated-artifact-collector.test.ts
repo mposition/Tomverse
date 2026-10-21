@@ -155,6 +155,7 @@ test("Auto file intent reaches a real spreadsheet tool on the selected capable m
   assert.equal(pick?.modelId, "gpt-5-6-luna");
   const model = AVAILABLE_MODELS.find(candidate => candidate.id === pick?.modelId)!;
   const blocks = buildChatTurnSystemBlocks({
+    promptText: "Create the quarterly revenue as a downloadable spreadsheet.",
     modelId: model.id, provider: model.provider, isDeepResearchTurn: false,
     autoRouted: true, isAuthenticated: true, canPersist: true,
     nativeSearchEnabled: false, nativeSearchForced: false, appManagedSearchEnabled: false,

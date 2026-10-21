@@ -94,11 +94,31 @@ test("an unavailable semantic router uses a capable eligible fallback without cl
   const routed = applyLlmModelPick(original, null, { required: true, capableModelIds: capable });
   assert.equal(routed.modelId, capable[0]);
   assert.deepEqual(routed.fallbackCandidateModelIds, []);
-  assert.equal(routed.record.selectionReason, "fallback_order");
+  assert.equal(routed.record.selectionReason, routed.modelId === original.modelId
+    ? original.record.selectionReason : "fallback_order");
   // A capability flag never admits a model rejected by plan/health/context/credits.
   assert.equal(applyLlmModelPick(original, "foreign", { required: true, capableModelIds: ["foreign"] }), original);
   const manual = selectAutoModel(input({ conversation: autoConversation({ selectionMode: "manual" }) }));
   assert.equal(applyLlmModelPick(manual, capable[0], { required: true, capableModelIds: capable }), manual);
+});
+
+test("file-capable fallback preserves an unchanged exploration choice and sticky telemetry", () => {
+  const original = selectAutoModel(input());
+  assert.equal(original.routed, true);
+  const selection = {
+    ...original,
+    sticky: { modelId: original.modelId, turnsFavouringChallenger: 2 },
+    stickyMemoryModelId: original.modelId,
+    record: { ...original.record, allocationMode: "explore_bounded", allocationSeedGrain: "session" },
+  };
+  const routed = applyLlmModelPick(selection, null, { required: true, capableModelIds: [selection.modelId] });
+  assert.equal(routed.modelId, selection.modelId);
+  assert.deepEqual(routed.sticky, selection.sticky);
+  assert.equal(routed.stickyMemoryModelId, selection.stickyMemoryModelId);
+  for (const field of ["selectionReason", "selectionDecidedBy", "allocationMode", "allocationSeedGrain"]) {
+    assert.equal(routed.record[field], selection.record[field], field);
+  }
+  assert.deepEqual(routed.fallbackCandidateModelIds, []);
 });
 
 test("an Auto conversation in an open cohort is routed by the Router", () => {

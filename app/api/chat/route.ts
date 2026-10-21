@@ -2068,8 +2068,10 @@ async function handleChatPost(
             deterministicAutoSelection,
             llmPick?.modelId ?? null,
             {
-                // When semantic routing is off or unavailable, a tool-capable
-                // eligible fallback also handles file requests without a second call.
+                // Without a semantic pick, prefer the file-capable eligible pool
+                // for every turn: an unclassified file request must still work
+                // without another paid call. Keep existing decision state when
+                // its chosen model already belongs to that pool.
                 required: llmPick?.requiresFileGeneration === true ||
                     (!llmPick && fileCapableModelIds.length > 0),
                 capableModelIds: fileCapableModelIds,
