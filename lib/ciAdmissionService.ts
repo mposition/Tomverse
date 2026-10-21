@@ -7,6 +7,7 @@ import {
   CI_ADMISSION_MAX_CAPACITY,
   CI_ADMISSION_STATE_SETTING_KEY,
   ciAdmissionUnits,
+  moveCiAdmissionEntry,
   reorderCiAdmissionQueue,
   type CiAdmissionMode,
   type CiAdmissionState,
@@ -23,7 +24,6 @@ import { prisma } from "@/lib/prisma";
 
 export {
   ciAdmissionMode,
-  recordCiAdmissionArrival,
   requestCiAdmissionRound,
   runCiAdmissionRound,
   type CiAdmissionRoundOutcome,
@@ -48,7 +48,7 @@ export async function readCiAdmissionAdminView(): Promise<CiAdmissionAdminView> 
 export type CiAdmissionAdminChange =
   | { action: "reorder"; order: number[] }
   | { action: "move_top"; number: number }
-  | { action: "remove"; number: number }
+  | { action: "move_bottom"; number: number }
   | { action: "set_capacity"; capacity: number };
 
 /** Applies an operator's change under the admission lock and audits it; null when it no longer applies. */
@@ -68,29 +68,10 @@ async function applyCiAdmissionChange(actor: AdminActor, change: CiAdmissionAdmi
     if (change.action === "reorder") {
       after = reorderCiAdmissionQueue(before, change.order);
       summary = `Reordered the CI admission line: ${change.order.map((n) => `#${n}`).join(", ")}.`;
-    } else if (change.action === "move_top") {
-      const order = before.queue.map((entry) => entry.number);
-      after = order.includes(change.number)
-        ? reorderCiAdmissionQueue(before, [change.number, ...order.filter((n) => n !== change.number)])
-        : null;
-      summary = `Moved #${change.number} to the top of the CI admission line.`;
-    } else if (change.action === "remove") {
-      // Out of the line for good: not put back as an unconfirmed release, nor
-      // judged again as a pending arrival.
-      after = before.queue.some((entry) => entry.number === change.number)
-        ? {
-            ...before,
-            queue: before.queue.filter((entry) => entry.number !== change.number),
-            releasing: before.releasing.filter((entry) => entry.number !== change.number),
-            pendingArrivals: before.pendingArrivals.filter((number) => number !== change.number),
-            // Its "waiting in line" status is cleared by the next round (the
-            // route runs one at once), and retried until it is written.
-            owedCommits: [
-              ...new Set([...before.owedCommits, ...before.queue.filter((e) => e.number === change.number && e.headSha).map((e) => e.headSha)]),
-            ],
-          }
-        : null;
-      summary = `Removed #${change.number} from the CI admission line; it stays a draft.`;
+    } else if (change.action === "move_top" || change.action === "move_bottom") {
+      const to = change.action === "move_top" ? "top" : "bottom";
+      after = moveCiAdmissionEntry(before, change.number, to);
+      summary = `Moved #${change.number} to the ${to} of the CI admission line.`;
     } else {
       after =
         Number.isInteger(change.capacity) && change.capacity >= 1 && change.capacity <= CI_ADMISSION_MAX_CAPACITY
@@ -131,10 +112,10 @@ const failureCode = (error: unknown) => (error instanceof Error ? error.message.
 /**
  * The operator's stop for one pull request using runners it should not: back
  * to draft (when open and ready) and every queued or running pull_request run
- * of it force-cancelled, in any mode admission is configured for. It is not
- * put in the line -- a free slot would release it straight away -- so it
- * stays a draft until someone marks it ready again, which is then an arrival
- * judged like any other. Whatever happened on GitHub is audited.
+ * of it force-cancelled, in any mode admission is configured for. It moves to
+ * the bottom of the line, so a free slot does not mark it ready again at once;
+ * the operator moves it up when it should run. Whatever happened on GitHub is
+ * audited.
  */
 export function stopCiAdmissionPull(actor: AdminActor, number: number): Promise<CiAdmissionStopOutcome> {
   return serially(() => stopPull(actor, number));
@@ -179,13 +160,12 @@ async function stopPull(actor: AdminActor, number: number): Promise<CiAdmissionS
     await takeLock(tx);
     await takeAuditChainLock(tx);
     const before = await readState(tx);
-    // Admission no longer owes it anything: no grant, reservation or retry.
+    // No reservation left, and to the bottom of the line: a free slot would
+    // otherwise mark it ready again in the next round.
+    const moved = moveCiAdmissionEntry(before, number, "bottom") ?? before;
     await writeState(tx, {
-      ...before,
-      granted: before.granted.filter((grant) => grant.number !== number),
-      released: before.released.filter((entry) => entry.number !== number),
-      holding: before.holding.filter((held) => held !== number),
-      pendingArrivals: before.pendingArrivals.filter((arrival) => arrival !== number),
+      ...moved,
+      released: moved.released.filter((entry) => entry.number !== number),
       events: [
         ...before.events,
         {
