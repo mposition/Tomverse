@@ -1,6 +1,7 @@
 ﻿// components/auth/AuthButton.tsx
 "use client";
 
+import { UsagePercentGauge } from "@/components/chat/UsagePercentGauge";
 import { signIn, signOut, useSession } from "next-auth/react";
 import Link from "next/link";
 import { useCallback, useState, useEffect, useMemo, useRef } from "react";
@@ -203,12 +204,6 @@ export function AuthButton({
     const accountPlan = accountUsage?.plan || null;
     const dailyCreditsLimit = accountUsage?.limits.creditsDay || 0;
     const hasDailyCreditGuardrail = dailyCreditsLimit > 0;
-    const dailyCreditsRemaining = hasDailyCreditGuardrail
-        ? accountUsage?.balances.dailyRemainingCredits ?? Math.max(
-            0,
-            dailyCreditsLimit - (accountUsage?.usage.creditsDay || 0)
-        )
-        : null;
     const accountTimeZone =
         accountUsage?.entitlement?.timeZone || accountUsage?.timeZone || timeZone;
     const formatResetLabel = (value: string | null | undefined) =>
@@ -1211,12 +1206,11 @@ export function AuthButton({
             </span>
             <span className="block truncate text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
-              {accountUsage
-                ? ` · ${formatCopy("auth.planCreditsCompact", {
-                    count: accountUsage.balances.planRemainingCredits.toLocaleString(globalLang),
-                  })}`
-                : ""}
+
             </span>
+            {accountUsage && <UsagePercentGauge compact
+              used={accountUsage.usage.creditsMonth} limit={accountUsage.limits.creditsMonth}
+              label={t("sidebar.currentUsage")} />}
           </span>
           <ChevronDown
             className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${isAccountMenuOpen ? "rotate-180" : ""}`}
@@ -1277,58 +1271,12 @@ export function AuthButton({
                 </span>
               </div>
 
-              {accountUsage ? (
-                <div className="my-3 grid grid-cols-2 gap-2">
-                  <div
-                    className="col-span-2 rounded-xl bg-blue-50 p-2.5 dark:bg-blue-950/30"
-                    data-testid="account-daily-credits"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="block text-[11px] font-bold text-blue-700 dark:text-blue-300">
-                        {t("auth.dailyCreditsRemaining")}
-                      </span>
-                      {(hasDailyCreditGuardrail
-                        ? dailyCreditsResetLabel
-                        : planCreditsResetLabel) ? (
-                        <span
-                          data-testid="account-credits-reset"
-                          className="text-right text-[11px] leading-4 text-blue-500 dark:text-blue-400"
-                        >
-                          {formatCopy("auth.dailyCreditsResetAt", {
-                            time: (hasDailyCreditGuardrail
-                              ? dailyCreditsResetLabel
-                              : planCreditsResetLabel)!,
-                          })}
-                        </span>
-                      ) : null}
-                    </div>
-                    <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
-                      {hasDailyCreditGuardrail && dailyCreditsRemaining !== null
-                        ? `${dailyCreditsRemaining.toLocaleString(globalLang)} / ${dailyCreditsLimit.toLocaleString(globalLang)}`
-                        : t("auth.dailyCreditsUnlimitedStandard")}
-                    </strong>
-                  </div>
-                  <div
-                    className="rounded-xl bg-zinc-100 p-2.5 dark:bg-zinc-900"
-                    data-testid="account-plan-credits"
-                  >
-                    <span className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
-                      {t("auth.planCreditsRemaining")}
-                    </span>
-                    <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
-                      {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)}
-                    </strong>
-                  </div>
-                  <div className="rounded-xl bg-status-success-50 p-2.5 dark:bg-status-success-950/30">
-                    <span className="block text-[11px] font-bold text-status-success-700 dark:text-status-success-300">
-                      {t("auth.purchasedCreditsRemaining")}
-                    </span>
-                    <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
-                      {accountUsage.balances.purchasedRemainingCredits.toLocaleString(globalLang)}
-                    </strong>
-                  </div>
-                </div>
-              ) : null}
+              {accountUsage && <div className="my-3 space-y-4 rounded-xl bg-zinc-50 p-3 dark:bg-zinc-900">
+                <UsagePercentGauge used={accountUsage.usage.creditsMonth} limit={accountUsage.limits.creditsMonth} label={t("sidebar.currentUsage")} />
+                {hasDailyCreditGuardrail && <UsagePercentGauge used={accountUsage.usage.creditsDay} limit={dailyCreditsLimit} label={t("sidebar.todayUsage")} />}
+                {accountUsage.balances.purchasedRemainingCredits > 0 && <p data-testid="account-extra-usage" className="text-xs text-zinc-600 dark:text-zinc-300">{t("auth.extraUsageAvailable")}</p>}
+                {(hasDailyCreditGuardrail ? dailyCreditsResetLabel : planCreditsResetLabel) && <p data-testid="account-credits-reset" className="text-xs text-zinc-500 dark:text-zinc-400">{formatCopy("auth.dailyCreditsResetAt", { time: (hasDailyCreditGuardrail ? dailyCreditsResetLabel : planCreditsResetLabel)! })}</p>}
+              </div>}
 
               <div className="space-y-1">
                 <Link

@@ -900,6 +900,7 @@ test.describe("no-fallback provider banner with the keyboard open", () => {
     { tag: "@ui-risk" },
     async ({ page }) => {
       test.setTimeout(120_000);
+      await prepareGuestPage(page, "ko", "classic");
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto("/review?lang=ko");
       await expect(page.getByTestId("chat-textarea")).toBeVisible();

@@ -1189,6 +1189,7 @@ export const ko = {
         dailyCreditsUnlimitedStandard: "Standard 모델 일일 크레딧 제한 없음",
         planCreditsRemaining: "월간 플랜 크레딧 남음",
         purchasedCreditsRemaining: "추가 구매 크레딧 남음",
+        extraUsageAvailable: "추가 사용량을 이용할 수 있습니다",
         planCreditsCompact: "월간 {count} 크레딧 남음",
         analyticsSettings: "분석 설정",
         analyticsCookieSettings: "분석 쿠키 설정",

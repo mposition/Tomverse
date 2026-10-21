@@ -1060,11 +1060,12 @@ test.describe("Hydration", { tag: "@ui-risk" }, () => {
 // ===========================================================================
 test.describe("Neighbouring surfaces", { tag: "@ui-risk" }, () => {
   test("the sidebar trigger is named for what it does, in en and ko", async ({ page }) => {
-    await enterMobileChat(page, { lang: "en" });
+    const account = await enterMobileChat(page, { lang: "en" });
     await expect(page.getByTestId("mobile-sidebar-open")).toHaveAccessibleName(
       "Open chat menu"
     );
 
+    account.language = "ko";
     await page.goto("/review?lang=ko");
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await expect(page.getByTestId("mobile-sidebar-open")).toHaveAccessibleName(

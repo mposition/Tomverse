@@ -57,6 +57,8 @@ import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
+import { reviewEasyEnabled } from "@/lib/reviewRouting";
+import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -179,6 +181,12 @@ export async function ReviewWorkspaceShell({
   // prop exists to prevent.
   let maxImageModels = imageGroupMaxModels();
 
+  // Whether a chat send asks the Auto router's model to triage image requests
+  // first (lib/chatImageIntent.ts): on when Admin Console › Routing names a
+  // router model and turns image triage on. Never throws; unreadable is off.
+  const chatImageIntentEnabled =
+    imageGenerationEnabled && (await chatImageTriageModelId()) !== null;
+
   // Which application-managed search backends this process can reach, resolved
   // here for the same reason the image limit is: the client cannot answer it.
   // The only client-side signal would be a public environment variable, and a
@@ -194,8 +202,10 @@ export async function ReviewWorkspaceShell({
   // readiness fails outright if those vars are ever set there
   // (lib/securityEnvironment.ts e2eBypassDisabled).
   const fixtureMode = isE2EFixtureMode();
+  let reviewEasyFixtureOffered = false;
   if (fixtureMode) {
     const jar = await cookies();
+    reviewEasyFixtureOffered = jar.get("__tomverse_e2e_review_easy")?.value === "1";
     if (!imageGenerationEnabled) {
       imageGenerationEnabled =
         jar.get("__tomverse_e2e_image_generation")?.value === "1";
@@ -323,9 +333,11 @@ export async function ReviewWorkspaceShell({
         <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
       ) : null}
       <ChatPageClient
+        reviewEasyAvailable={reviewEasyEnabled() || reviewEasyFixtureOffered}
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
+        chatImageIntentEnabled={chatImageIntentEnabled}
         voiceInputEnabled={voiceInputEnabled}
         promptRefinerMode={promptRefinerMode}
         promptRefinerProductRelease={promptRefinerProductRelease}

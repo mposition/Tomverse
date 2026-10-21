@@ -1,5 +1,8 @@
 "use client";
 
+import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
+import { ChatCommandBar, ReviewCommandBar } from "./ReviewStudioChrome";
+import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import {
   useCallback,
@@ -150,6 +153,8 @@ const PROVIDER_BANNER_MIN_REM = 5;
 const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
+  review?: ReviewWorkspaceControls;
+  chatWorkspace?: WorkspaceAppearanceControls;
   /** Current product chrome; switching routes never rewrites this conversation. */
   currentProduct?: ChatWorkspaceProduct;
   productSwitchDisabled?: boolean;
@@ -219,7 +224,11 @@ type MobileChatShellProps = {
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-  onStartImageDraft?: (draftText: string, modelId?: string) => void;
+  onStartImageDraft?: (
+    draftText: string,
+    modelId?: string,
+    options?: { fromImageRequest?: boolean }
+  ) => void;
   imageWorkspace?: ReactNode;
   /**
    * A read-only block above the panel row -- see DesktopChatShell for why it
@@ -447,6 +456,8 @@ const mobileModelTabPanelId = (modelId: string) =>
   `mobile-model-tabpanel-${modelId}`;
 
 export function MobileChatShell({
+  review,
+  chatWorkspace,
   currentProduct,
   productSwitchDisabled = false,
   onProductSwitch,
@@ -1003,7 +1014,7 @@ export function MobileChatShell({
   // The expansion offer, decided from the same status map the rail reads.
   const deepResearchSuggestion = deriveDeepResearchSuggestion({
     conversationId: currentChatId,
-    turn: deepResearchSuggestionTurn,
+    turn: review?.mode === "easy" ? null : deepResearchSuggestionTurn,
     selectedModelIds: selectedModels,
     disabledModelIds: disabledPanels,
     modelStatuses,
@@ -1221,6 +1232,8 @@ export function MobileChatShell({
     // cannot quietly absorb a real sideways overflow.
     <main
       data-testid="mobile-chat-shell"
+      data-review-appearance={review?.appearance ?? chatWorkspace?.appearance}
+      data-studio-product={currentProduct}
       // Observable so a regression test can assert on the state machine itself
       // -- "unknown" must never be rendered as the welcome surface -- rather
       // than only on what happened to be painted when it looked.
@@ -1667,6 +1680,7 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  reviewProvider={review?.mode === "easy" ? AVAILABLE_MODELS.find(model => model.id === modelId)?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
@@ -1827,6 +1841,8 @@ export function MobileChatShell({
       {composerPortalHost &&
         createPortal(
           <ChatInput
+            workspaceAppearance={chatWorkspace?.appearance}
+            review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
             currentProduct={currentProduct}
             showProductSwitcher={!isCompactBottomDock}
             showReviewModelRow={!isCompactBottomDock}
@@ -1983,11 +1999,15 @@ export function MobileChatShell({
               attachmentCount={attachments.length}
               isMobileDrawer
               mobileProductSwitcher={currentProduct ? (
-                <ChatProductSwitcher
-                  currentProduct={currentProduct}
-                  disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
-                  onProductSwitch={onProductSwitch}
-                />
+                <>
+                  <ChatProductSwitcher
+                    currentProduct={currentProduct}
+                    disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
+                    onProductSwitch={onProductSwitch}
+                  />
+                  {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                  {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                </>
               ) : undefined}
             />
             <button

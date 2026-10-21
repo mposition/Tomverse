@@ -1206,6 +1206,7 @@ export const zh = {
         dailyCreditsUnlimitedStandard: "标准模型无每日积分上限",
         planCreditsRemaining: "本月方案积分剩余",
         purchasedCreditsRemaining: "额外购买积分剩余",
+        extraUsageAvailable: "可使用额外额度",
         planCreditsCompact: "本月剩余 {count} 积分",
         analyticsSettings: "分析设置",
         analyticsCookieSettings: "分析 Cookie 设置",

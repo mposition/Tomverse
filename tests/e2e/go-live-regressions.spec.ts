@@ -148,13 +148,13 @@ test("Enter during a Korean IME composition does not send the message", { tag: "
 // UX-009 - the credit badge put `aria-label` on a roleless <span> (where it is
 // ignored) and aria-hidden the only text, so every cost was absent from the
 // accessibility tree.
-test("credit costs are exposed to assistive technology", async ({ page }) => {
+test("the composer keeps its send action without a credit display", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/review");
 
   const badge = page.getByTestId("request-credit-estimate");
-  await expect(badge).toBeVisible();
-  await expect(badge).toHaveAccessibleName(/credit/i);
+  await expect(badge).toHaveCount(0);
+  await expect(page.getByTestId("chat-send-button")).toBeVisible();
 });
 
 // UX-008 - streaming, completion and failure were never announced, and the

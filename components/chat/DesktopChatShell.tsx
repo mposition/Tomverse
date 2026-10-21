@@ -1,5 +1,10 @@
 "use client";
 
+import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
+import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
+import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
+import { reviewFocusHint, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -21,7 +26,6 @@ import {
 } from "@/components/chat/ComparisonActionRail";
 import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationDesktopSlot } from "@/components/chat/GuestVerificationDesktopSlot";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import {
   deriveDeepResearchSuggestion,
@@ -52,9 +56,7 @@ import {
   type ModelRuntimeStatus,
 } from "@/lib/chatRuntimeStatus";
 import { useGuestChatContentSeed } from "@/components/chat/useGuestChatContentSeed";
-import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
-  getModelUsageProfile,
   type ChatAttachment,
   type Conversation,
   type Message,
@@ -83,6 +85,8 @@ const interpolate = (template: string, values: Record<string, string | number>) 
     template
   );
 
+const FOCUS_DRAG_TYPE = "application/x-tomverse-review-model";
+
 type PromptPayload = {
   id: string;
   text: string;
@@ -101,7 +105,11 @@ type PromptPayload = {
   promptRefinerDecision?: PromptRefinerProductChatDecision;
 };
 
-type DesktopChatShellProps = {
+export type DesktopChatShellProps = {
+  review?: ReviewWorkspaceControls;
+  chatWorkspace?: WorkspaceAppearanceControls;
+  studioStarterCards?: readonly VisibleStarterCard[];
+  onStudioStarter?: (id: string) => void;
   /** Current product chrome; switching routes never rewrites this conversation. */
   currentProduct?: ChatWorkspaceProduct;
   productSwitchDisabled?: boolean;
@@ -171,7 +179,11 @@ type DesktopChatShellProps = {
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-  onStartImageDraft?: (draftText: string, modelId?: string) => void;
+  onStartImageDraft?: (
+    draftText: string,
+    modelId?: string,
+    options?: { fromImageRequest?: boolean }
+  ) => void;
   imageWorkspace?: React.ReactNode;
   /**
    * A read-only block above the panel row, for a conversation that has one.
@@ -401,6 +413,10 @@ type DesktopChatShellProps = {
 };
 
 export function DesktopChatShell({
+  review,
+  chatWorkspace,
+  studioStarterCards,
+  onStudioStarter,
   currentProduct,
   productSwitchDisabled = false,
   onProductSwitch,
@@ -519,6 +535,11 @@ export function DesktopChatShell({
   onFollowupSent,
   onContextBundleStale,
 }: DesktopChatShellProps) {
+  const studio = (review?.appearance ?? chatWorkspace?.appearance) === "studio";
+  const [studioView, setStudioView] = useState<"write" | "results">("write");
+  const [studioComparison, setStudioComparison] = useState<"focus" | "compare">("focus");
+  const [draggingFocusModel, setDraggingFocusModel] = useState<string | null>(null);
+  useEffect(() => { if (promptPayload || imageWorkspace || review?.imageRequest) queueMicrotask(() => setStudioView("results")); }, [promptPayload, imageWorkspace, review?.imageRequest]);
   const singleTranscript = transcriptScope === "conversation";
   const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
   const statusModels = useMemo(() => singleTranscript ? ["@conversation"] : selectedModels, [singleTranscript, selectedModels]);
@@ -583,6 +604,9 @@ export function DesktopChatShell({
     contentState: conversationContentState,
     hasConversationPrelude,
   });
+  useEffect(() => {
+    if (!showsWelcomeSurface) queueMicrotask(() => setStudioView("results"));
+  }, [showsWelcomeSurface]);
   // Keyed by (conversation, model), never by model alone: a run started in one
   // conversation used to disable the composer of every other one, because a
   // model id says nothing about where it was running. See
@@ -654,7 +678,7 @@ export function DesktopChatShell({
   // The expansion offer, decided from the same status map the rail reads.
   const deepResearchSuggestion = deriveDeepResearchSuggestion({
     conversationId: currentChatId,
-    turn: deepResearchSuggestionTurn,
+    turn: review?.mode === "easy" ? null : deepResearchSuggestionTurn,
     selectedModelIds: selectedModels,
     disabledModelIds: disabledPanels,
     modelStatuses,
@@ -761,6 +785,10 @@ export function DesktopChatShell({
   // into the welcome screen and move to the dock on the first send; now the
   // welcome screen is only the greeting and the starters above the dock, and
   // the first message leaves the composer where it was.
+  useEffect(() => {
+    if (conversationContentState === "non-empty") queueMicrotask(() => setStudioView("results"));
+    if (conversationContentState === "empty" && !review?.imageRequest) queueMicrotask(() => setStudioView("write"));
+  }, [currentChatId, conversationContentState, review?.imageRequest]);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
   // STG-F003: portal into a host rather than into the slot itself, so a slot
   // that remounts never rebuilds the composer and drops a draft in progress.
@@ -822,8 +850,7 @@ export function DesktopChatShell({
     (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
   const useTabsLayout =
     !singleTranscript && selectedModels.length > 1 &&
-    perModelWidth(isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH) <
-      MIN_PANEL_WIDTH;
+    (studio ? viewportWidth < 900 : perModelWidth(isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH) < MIN_PANEL_WIDTH);
 
   const [activeModelId, setActiveModelId] = useState<string | null>(
     selectedModels[0] || null
@@ -856,6 +883,11 @@ export function DesktopChatShell({
     setActiveModelId(modelId);
     if (focus) tabRefs.current[modelId]?.focus();
   }, []);
+  const focusModel = (modelId: string) => {
+    if (!selectedModels.includes(modelId)) return;
+    activateModel(modelId, false);
+    setStudioComparison("focus");
+  };
   const switchModelByOffset = useCallback(
     (offset: number) => {
       if (selectedModels.length < 2 || activeModelIndex < 0) return;
@@ -886,15 +918,7 @@ export function DesktopChatShell({
     [activateModel, selectedModels, switchModelByOffset]
   );
 
-  return (
-    <main
-      data-testid="desktop-chat-shell"
-      // Observable so a regression test can assert on the state machine itself
-      // -- "unknown" must never be rendered as the welcome screen -- rather
-      // than only on what happened to be painted when it looked.
-      data-content-state={conversationContentState}
-      className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
-    >
+  const sidebarElement = (
       <ChatSidebar
         currentProduct={currentProduct}
         conversations={conversations}
@@ -917,9 +941,36 @@ export function DesktopChatShell({
         currentModelId={selectedModels[0]}
         attachmentCount={attachments.length}
         autoCollapseSuggested={autoCollapseSuggested}
+        isMobileDrawer={studio}
       />
+  );
 
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+  return (
+    <main
+      data-testid="desktop-chat-shell"
+      data-review-appearance={review?.appearance ?? chatWorkspace?.appearance}
+      data-studio-product={currentProduct}
+      data-studio-view={studioView}
+      data-studio-comparison={studioComparison}
+      data-studio-has-results={!showsWelcomeSurface || Boolean(review?.imageRequest)}
+      // Observable so a regression test can assert on the state machine itself
+      // -- "unknown" must never be rendered as the welcome screen -- rather
+      // than only on what happened to be painted when it looked.
+      data-content-state={conversationContentState}
+      className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+    >
+      {studio ? <ReviewNavigation sidebar={sidebarElement} onNewChat={onNewChat}
+        locked={productSwitchDisabled || isAnyModelResponding || review?.pending}
+        product={currentProduct}
+        onChat={() => onProductSwitch?.("chat") ?? false}
+        onReview={() => onProductSwitch?.("review") ?? false} /> : sidebarElement}
+
+      <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding}
+          view={studioView} setView={studio ? setStudioView : undefined} />}
+        {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+        <div className={studio ? "review-studio-body" : "contents"}>
+
         {/*
           An image conversation replaces the entire chat surface -- panels,
           welcome overlay, comparison rail and composer are all chat-only
@@ -935,6 +986,30 @@ export function DesktopChatShell({
           </div>
         ) : (
           <>
+        <div className={studio ? "review-studio-results" : "contents"}>
+        {review?.imageRequest && review.unsupportedProviders.length > 0 && <ReviewUnsupportedProviders providers={review.unsupportedProviders} />}
+        {studio && !singleTranscript && <div className="review-result-toolbar">
+          <button type="button" onClick={() => setStudioView("write")}>{reviewWorkspaceCopy[lang].edit}</button>
+          <div role="group" aria-label={reviewWorkspaceCopy[lang].results}>
+            <button type="button" aria-pressed={studioComparison === "focus"} onClick={() => setStudioComparison("focus")}>{reviewWorkspaceCopy[lang].focus}</button>
+            <button type="button" aria-pressed={studioComparison === "compare"} onClick={() => setStudioComparison("compare")}>{reviewWorkspaceCopy[lang].sideBySide}</button>
+          </div>
+        </div>}
+        {studio && !singleTranscript && !showsWelcomeSurface && selectedModels.length > 1 && <div className="review-focus-controls">
+          <div role="group" aria-label={reviewWorkspaceCopy[lang].focus} aria-describedby="review-focus-instructions">
+            {selectedModels.map(modelId => {
+              const model = AVAILABLE_MODELS.find(item => item.id === modelId);
+              return <button key={modelId} type="button" data-testid="review-focus-model" data-model-id={modelId}
+                aria-pressed={modelId === resolvedActiveModelId} draggable
+                onClick={() => focusModel(modelId)}
+                onDragStart={event => { event.dataTransfer.setData(FOCUS_DRAG_TYPE, modelId); event.dataTransfer.effectAllowed = "move"; setDraggingFocusModel(modelId); }}
+                onDragEnd={() => setDraggingFocusModel(null)}>
+                <ModelLogo model={model} size="sm" /><span>{model?.name ?? modelId}</span><span aria-hidden="true">⠿</span>
+              </button>;
+            })}
+          </div>
+          <p id="review-focus-instructions">{reviewFocusHint[lang]}</p>
+        </div>}
         <ProviderStatusBanner
           selectedModels={selectedModels}
           compact
@@ -1038,7 +1113,7 @@ export function DesktopChatShell({
           data-testid="desktop-conversation-surface"
           className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950"
         >
-          {showsWelcomeSurface && (
+          {showsWelcomeSurface && !review?.imageRequest && (
             // UI-EMPTY-001. The light overlay has always been translucent, so
             // the three comparison panels stay legible behind the welcome
             // screen and the first screen still reads as a comparison
@@ -1055,7 +1130,7 @@ export function DesktopChatShell({
             // No recent-conversation cards here: the sidebar next to this
             // screen already lists the same conversations.
             <div className="absolute inset-0 z-10 overflow-y-auto bg-zinc-100/80 dark:bg-zinc-950/80">
-              <ChatWelcomeScreen starterGallery={starterGallery} />
+              {studio && !singleTranscript ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen starterGallery={starterGallery} />}
             </div>
           )}
           {selectedModels.length === 0 && (
@@ -1068,17 +1143,27 @@ export function DesktopChatShell({
 
           {panelModels.map((modelId, panelIndex) => {
             const modelInfo = AVAILABLE_MODELS.find((model) => model.id === modelId);
-            const usageProfile = modelInfo
-              ? getModelUsageProfile(modelInfo)
-              : null;
             const isPanelDisabled = !singleTranscript && disabledPanels.includes(modelId);
-            const isPanelVisible = !useTabsLayout || modelId === resolvedActiveModelId;
+            const isPanelVisible = !review?.imageRequest && (!useTabsLayout || modelId === resolvedActiveModelId);
 
             return (
               <div
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
+                data-studio-focused={modelId === resolvedActiveModelId}
+                data-focus-drop-target={studio && !singleTranscript && studioComparison === "focus" && modelId === resolvedActiveModelId && Boolean(draggingFocusModel)}
+                onDragOver={event => {
+                  if (studio && !singleTranscript && studioComparison === "focus" && modelId === resolvedActiveModelId && draggingFocusModel && selectedModels.includes(draggingFocusModel) && event.dataTransfer.types.includes(FOCUS_DRAG_TYPE)) {
+                    event.preventDefault(); event.dataTransfer.dropEffect = "move";
+                  }
+                }}
+                onDrop={event => {
+                  if (!studio || singleTranscript || studioComparison !== "focus" || modelId !== resolvedActiveModelId || !draggingFocusModel) return;
+                  const droppedModel = event.dataTransfer.getData(FOCUS_DRAG_TYPE);
+                  if (droppedModel !== draggingFocusModel || !selectedModels.includes(droppedModel)) return;
+                  event.preventDefault(); focusModel(droppedModel); setDraggingFocusModel(null);
+                }}
                 {...(useTabsLayout
                   ? {
                       role: "tabpanel",
@@ -1121,7 +1206,14 @@ export function DesktopChatShell({
                   !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
                 }`}
               >
-                <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
+                <div data-testid="review-model-drag-handle" draggable={studio && !singleTranscript && !showsWelcomeSurface}
+                  onDragStart={event => {
+                    if (!studio || singleTranscript) return;
+                    event.dataTransfer.setData(FOCUS_DRAG_TYPE, modelId); event.dataTransfer.effectAllowed = "move"; setDraggingFocusModel(modelId);
+                  }}
+                  onDragEnd={() => setDraggingFocusModel(null)}
+                  title={studio && !singleTranscript ? reviewFocusHint[lang] : undefined}
+                  className={`flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400 ${studio && !singleTranscript ? "cursor-grab active:cursor-grabbing" : ""}`}>
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
                     {isAutoMode ? (
                       <>
@@ -1151,13 +1243,6 @@ export function DesktopChatShell({
                         <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
                         <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
-                          {usageProfile && (
-                            <CreditCostBadge
-                              credits={usageProfile.credits}
-                              size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
-                            />
-                          )}
                         </span>
                       </span>
                         ) : (
@@ -1172,6 +1257,7 @@ export function DesktopChatShell({
                           name stays stable across a selection change and the
                           three names stay unique.
                         */}
+                        {review?.mode === "easy" ? <span className="text-sm font-semibold">{modelInfo?.name ?? modelId}</span> : (
                         <select
                           value={modelId}
                           onChange={(event) => onChangePanelModel(modelId, event.target.value)}
@@ -1202,16 +1288,9 @@ export function DesktopChatShell({
                               </option>
                             );
                           })}
-                        </select>
+                        </select>) }
                         <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
-                          {usageProfile && (
-                            <CreditCostBadge
-                              credits={usageProfile.credits}
-                              size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
-                            />
-                          )}
                         </span>
                       </span>
                         )}
@@ -1279,6 +1358,7 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  reviewProvider={review?.mode === "easy" ? modelInfo?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
@@ -1418,13 +1498,18 @@ export function DesktopChatShell({
           <GuestVerificationDesktopSlot variant="fallback" />
         )}
 
+        </div>
+        <div className={studio ? "review-studio-task" : "contents"}>
+        {studio && <h2>{singleTranscript ? t("chat.inputPlaceholder") : reviewWorkspaceCopy[lang].question}</h2>}
         <div className="w-full shrink-0 px-4 md:px-6">
           <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-5xl" />
         </div>
-        <div ref={setBottomInputSlot} />
+        <div ref={setBottomInputSlot} className={studio ? "review-studio-composer-slot" : undefined} />
         {composerPortalHost &&
           createPortal(
             <ChatInput
+              workspaceAppearance={chatWorkspace?.appearance}
+              review={review ? { ...review, ready: review.ready !== false && !isAnyModelResponding && !productSwitchDisabled } : undefined}
               currentProduct={currentProduct}
               productSwitchDisabled={productSwitchDisabled}
               onProductSwitch={onProductSwitch}
@@ -1490,8 +1575,11 @@ export function DesktopChatShell({
             />,
             composerPortalHost
           )}
+        {studio && !singleTranscript && <div className="review-mobile-starters"><ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /></div>}
+        </div>
           </>
         )}
+        </div>
       </section>
     </main>
   );
