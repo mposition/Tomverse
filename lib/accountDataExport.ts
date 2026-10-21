@@ -775,6 +775,9 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       select: {
         conversationId: true,
         routerInput: true,
+        routerContext: true,
+        rewrite: true,
+        sessionTopic: true,
         pickedModelId: true,
         createdAt: true,
       },

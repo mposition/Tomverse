@@ -81,7 +81,7 @@ async function sourceIncludedExport(
             return {
                 title,
                 text: `${formatConversationHeader(
-                    { title, createdAt: conversation.createdAt },
+                    { title, createdAt: conversation.createdAt, productKey: conversation.productKey },
                     personalizationNotice,
                     [
                         ...continuationExportProvenance({
@@ -179,6 +179,7 @@ export async function GET(
                 createdAt: true,
                 password: true,
                 kind: true,
+                productKey: true,
                 // The naming columns the conversation list reads, read the
                 // same way: the file has to be named what the list calls the
                 // conversation (lib/continuationTitleContext.ts).
@@ -252,7 +253,7 @@ export async function GET(
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt }, personalizationNotice, [...continuationProvenance, ...titleHeaderLines])}\n`
+                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt, productKey: conversation.productKey }, personalizationNotice, [...continuationProvenance, ...titleHeaderLines])}\n`
                         )
                     );
                     return;
