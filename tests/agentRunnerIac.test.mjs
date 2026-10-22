@@ -407,13 +407,13 @@ test("the merge lane runs in production only, every 10 minutes, with exactly its
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs");
 });
 
-test("the release train is its own production service, every 10 minutes, with exactly its start check's variables", async () => {
+test("the release train is its own production service, every 30 minutes, with exactly its start check's variables", async () => {
   const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
   const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_train");
   assert.ok(runner);
   assert.deepEqual(Object.keys(runner.environments), ["production"]);
   assert.deepEqual([...runner.environments.production].sort(), [...QA_RELEASE_SERVICE_VARIABLES.train].sort());
-  assert.equal(runner.cronSchedule, "*/10 * * * *");
+  assert.equal(runner.cronSchedule, "*/30 * * * *");
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/qa-release-train-service.mjs");
   // The lane no longer runs it.
   const { readFileSync } = await import("node:fs");
