@@ -9,6 +9,7 @@ import {AVAILABLE_MODELS} from '../../lib/models.ts';
 import {getModelPricingProfile,resolveModelPricing} from '../../lib/modelPricing.ts';
 import {validCodeUsage} from '../../lib/codeManagedCore.ts';
 import {getSingleAccountCostCeiling,providerBudgetEnvName} from '../../lib/providerCostBudget.ts';
+import {catalogContentHash} from '../../lib/modelCatalogCore.ts';
 
 const databaseUrl=process.env.TEST_DATABASE_URL;
 test('Code managed inference with migrated local schema and real shared credit ledger',{skip:!databaseUrl},async t=>{
@@ -51,7 +52,22 @@ test('Code managed inference with migrated local schema and real shared credit l
     return {validOutput:mode!=='schema-failure',value:{ok:true},usage:mode==='unknown'?null:validCodeUsage({inputTokens:100,outputTokens:mode==='over-output'?101:20,cachedInputTokens:20,cacheWriteInputTokens:dynamicDbMode?0:10,reasoningTokens:15}),providerReportedModelId:'fixture-provider-model',latencyMs:5};
   }}}});
   const service=await import(mod('lib/codeManagedService.ts'));
-  const snapshot=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:'fixture-hash',payload:{models:rows},coverageUntil:new Date(Date.now()+3600000)}});
+  // Published snapshots are immutable. Cover the fixed DST clocks up front;
+  // expiry admission is exercised by moving the clock, never the snapshot.
+  const coverageUntil=new Date(Math.max(Date.now(),Date.parse('2026-11-02T00:00:00Z'))+86400000);
+  const snapshot=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:catalogContentHash(rows),payload:{models:rows},coverageUntil}});
+  await db.$executeRaw`DO $$ BEGIN
+    BEGIN
+      INSERT INTO "ModelCatalogSnapshot" ("category","contentHash","payload","coverageUntil") VALUES ('coding','fixture-invalid-hash','{}',NOW());
+      RAISE EXCEPTION 'Catalog hash CHECK missing';
+    EXCEPTION WHEN check_violation THEN NULL; END;
+    BEGIN
+      UPDATE "ModelCatalogSnapshot" SET "coverageUntil"=NOW() WHERE "version"=(SELECT MAX("version") FROM "ModelCatalogSnapshot");
+      RAISE EXCEPTION 'Catalog immutability trigger missing';
+    EXCEPTION WHEN raise_exception THEN
+      IF SQLERRM <> 'ModelCatalogSnapshot is immutable' THEN RAISE; END IF;
+    END;
+  END $$`;
   const newUser=async(plan='Pro')=>{const userId=randomUUID();await db.user.create({data:{id:userId,email:userId+'@example.invalid',plan}});return userId;};
   const reserve=(userId,approvedCredits=20,taskId=randomUUID())=>service.handleCodeManaged(userId,{action:'reserve',taskId,catalogVersion:snapshot.version,contentHash:snapshot.contentHash,executorModelId:'gpt-6-luna',reviewerModelId:'claude-haiku-4-5',approvedCredits});
   const call=(reservationId,extra={})=>({action:'complete',reservationId,callId:randomUUID(),role:'executor',modelId:'gpt-6-luna',prompt:{system:'fixture only',user:'never persist this private prompt'},schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false},maxOutputTokens:100,...extra});
@@ -94,11 +110,13 @@ test('Code managed inference with migrated local schema and real shared credit l
       const otherHeld=await reserve(other),collision={...req,reservationId:otherHeld.reservationId};
       await assert.rejects(()=>service.handleCodeManaged(other,collision),e=>e.code==='CODE_CALL_IDEMPOTENCY_CONFLICT'&&e.dispatchState==='not_dispatched');assert.equal(dispatches,before);await release(other,otherHeld.reservationId);
     });
-    await t.test('every call rechecks current model, plan, immutable catalog and credential availability',async()=>{
+    await t.test('every call rechecks current model, plan, immutable catalog and credential availability',async tt=>{
       const user=await newUser(),held=await reserve(user),before=dispatches;
       rows=[];await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_MODEL_UNAVAILABLE');rows=structuredClone(originalRows);
       await db.user.update({where:{id:user},data:{plan:'Free'}});await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_MODEL_PLAN_FORBIDDEN');await db.user.update({where:{id:user},data:{plan:'Pro'}});
-      await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(0)}});await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_CATALOG_STALE');await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
+      tt.mock.timers.enable({apis:['Date'],now:new Date(coverageUntil.getTime()+1)});
+      try{await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_CATALOG_STALE');}
+      finally{tt.mock.timers.reset();}
       keyReady=false;await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_PROVIDER_UNAVAILABLE');keyReady=true;
       await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId,{maxOutputTokens:1001})),'CODE_REQUEST_BOUNDS_INVALID');
       assert.equal(dispatches,before);assert.equal(await db.codeManagedCall.count({where:{reservationId:held.reservationId}}),0);await release(user,held.reservationId);
@@ -108,7 +126,7 @@ test('Code managed inference with migrated local schema and real shared credit l
       const reviewer=structuredClone(originalRows[1]);reviewer.pricing.sources=['https://anthropic.com/fixture'];reviewer.terms.url='https://anthropic.com/fixture';reviewer.retention.url='https://anthropic.com/fixture';
       for(const row of [dynamic,reviewer]){const {modelId,...profile}=row;await db.modelCatalogEntry.create({data:{category:'coding',modelId,enabled:true,profile}});}
       assert.equal(AVAILABLE_MODELS.some(m=>m.id===dynamic.modelId),false);assert.equal(getModelPricingProfile(dynamic.modelId),undefined);
-      const published=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:'catalog-only-fixture',payload:{models:[dynamic,reviewer]},coverageUntil:new Date(Date.now()+3600000)}});
+      const published=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:catalogContentHash([dynamic,reviewer]),payload:{models:[dynamic,reviewer]},coverageUntil:new Date(Date.now()+3600000)}});
       dynamicDbMode=true;const user=await newUser();
       try{
         const held=await service.handleCodeManaged(user,{action:'reserve',taskId:randomUUID(),catalogVersion:published.version,contentHash:published.contentHash,executorModelId:dynamic.modelId,reviewerModelId:reviewer.modelId,approvedCredits:20});
@@ -132,7 +150,7 @@ test('Code managed inference with migrated local schema and real shared credit l
       const cheap={...structuredClone(originalRows[0]),modelId:'code-cheap-large-context',apiModelId:'cheap-large-fixture',capabilities:{...originalRows[0].capabilities,maxContextTokens:1000000},pricing:{...originalRows[0].pricing,inputUsdPerMTok:0.1,outputUsdPerMTok:0.5}};
       const {modelId,...profile}=cheap;await db.modelCatalogEntry.create({data:{category:'coding',modelId,enabled:true,profile}});
       const reviewer=structuredClone(originalRows[1]);reviewer.pricing.sources=['https://anthropic.com/fixture'];reviewer.terms.url='https://anthropic.com/fixture';reviewer.retention.url='https://anthropic.com/fixture';
-      const published=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:'small-prompt-fixture',payload:{models:[cheap,reviewer]},coverageUntil:new Date(Date.now()+3600000)}});
+      const published=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:catalogContentHash([cheap,reviewer]),payload:{models:[cheap,reviewer]},coverageUntil:new Date(Date.now()+3600000)}});
       const user=await newUser();dynamicDbMode=true;
       try{
         const held=await service.handleCodeManaged(user,{action:'reserve',taskId:randomUUID(),catalogVersion:published.version,contentHash:published.contentHash,executorModelId:modelId,reviewerModelId:reviewer.modelId,approvedCredits:1});const req=call(held.reservationId,{modelId});
@@ -258,7 +276,6 @@ test('Code managed inference with migrated local schema and real shared credit l
     await t.test('current user-time-zone day buckets still reject underflow',async tt=>{
       tt.mock.timers.enable({apis:['Date'],now:new Date('2026-10-22T12:00:00Z')});
       try{
-        await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
         for(const period of ['day','cost-day','op-cost-day']){
           const user=await newUser();await db.userSettings.create({data:{userId:user,timeZone:'Australia/Brisbane',defaultModel:'gpt-6-luna'}});
           const held=await reserve(user),task=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});
@@ -270,7 +287,7 @@ test('Code managed inference with migrated local schema and real shared credit l
           await db.chatUsageBucket.update({where,data:{count:bucket.count}});await release(user,held.reservationId);
         }
       }finally{
-        tt.mock.timers.reset();await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
+        tt.mock.timers.reset();
       }
     });
     await t.test('deletion during dispatch remains recoverable without recreating a wallet',async()=>{
@@ -299,7 +316,6 @@ test('Code managed inference with migrated local schema and real shared credit l
       tt.mock.timers.enable({apis:['Date'],now:new Date('2026-10-22T03:00:00Z')});
       let running;
       try{
-        await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
         const {getZonedDayWindow}=await import(mod('lib/userTimeZone.ts')),{getUserChatUsageKey,usagePeriodStart}=await import(mod('lib/chatSecurity.ts'));
         const user=await newUser(),key=getUserChatUsageKey(user),old=getZonedDayWindow('Australia/Brisbane',new Date()),next=getZonedDayWindow('Asia/Seoul',new Date());
         await db.userSettings.create({data:{userId:user,timeZone:'Australia/Brisbane',defaultModel:'gpt-6-luna'}});
@@ -331,7 +347,7 @@ test('Code managed inference with migrated local schema and real shared credit l
         const restored=await db.creditLot.findUnique({where:{id:lot.id}});assert.equal(restored.remainingCredits,99);assert.equal(restored.remainingFundedCostMicroUsd,4000000n-(cost-planCost)-settledCost);
         assert.equal((await db.codeTaskReservation.findUnique({where:{id:a.reservationId}})).releasedCredits,19);assert.equal((await db.codeTaskReservation.findUnique({where:{id:b.reservationId}})).releasedCredits,9);
         const checkpoint=await bucket('day');await release(user,a.reservationId);assert.deepEqual(await bucket('day'),checkpoint);
-      }finally{mode='success';pending.splice(0).forEach(r=>r());if(running)await running.catch(()=>{});tt.mock.timers.reset();await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});}
+      }finally{mode='success';pending.splice(0).forEach(r=>r());if(running)await running.catch(()=>{});tt.mock.timers.reset();}
     });
     await t.test('time-zone migrations preserve DST windows, atomic rollback and previous-day task ownership',async tt=>{
       const {getZonedDayWindow}=await import(mod('lib/userTimeZone.ts')),{getUserChatUsageKey}=await import(mod('lib/chatSecurity.ts'));
@@ -342,7 +358,6 @@ test('Code managed inference with migrated local schema and real shared credit l
       ]){
         tt.mock.timers.enable({apis:['Date'],now:new Date(fixture.at)});
         try{
-          await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
           const user=await newUser(),key=getUserChatUsageKey(user),original=getZonedDayWindow(fixture.from,new Date());assert.equal(original.end-original.start,fixture.hours*3600000);
           await db.userSettings.create({data:{userId:user,timeZone:fixture.from,defaultModel:'gpt-6-luna'}});const held=await reserve(user,2);
           tt.mock.timers.setTime(new Date(fixture.changeAt).getTime());const next=getZonedDayWindow(fixture.to,new Date());
@@ -357,9 +372,8 @@ test('Code managed inference with migrated local schema and real shared credit l
           }
           await release(user,held.reservationId);assert.equal((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).releasedCredits,2);
           for(const period of ['day','cost-day','op-cost-day']){const row=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period,periodStart:reference}}});assert.equal(row.count,0n);}
-        }finally{tt.mock.timers.reset();await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});}
+        }finally{tt.mock.timers.reset();}
       }
-      await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
     });
     await t.test('existing settings migration works before the Code tables exist',async()=>{
       const user=await newUser(),{getUserChatUsageKey}=await import(mod('lib/chatSecurity.ts')),{getZonedDayWindow}=await import(mod('lib/userTimeZone.ts'));
