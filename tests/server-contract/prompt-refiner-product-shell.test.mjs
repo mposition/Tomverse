@@ -52,6 +52,9 @@ mock.module(mod("components/chat/GuestVerificationProvider.tsx"), { namedExports
 mock.module(mod("components/chat/HelpGuideAccess.tsx"), { namedExports: {
   HelpGuideAccessProvider: () => null,
 } });
+mock.module(mod("components/images/ImageModelCatalogProvider.tsx"), { namedExports: {
+  ImageModelCatalogProvider: () => null,
+} });
 mock.module(mod("components/chat/PromptRefinerFixtureRefreshLoader.tsx"), { namedExports: {
   PromptRefinerFixtureRefreshLoader: () => null,
 } });
