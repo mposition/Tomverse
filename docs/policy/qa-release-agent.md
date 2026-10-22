@@ -180,9 +180,11 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      있습니다), **저장소 루트의 모든 파일**(`eslint.config.mjs`, `tsconfig*.json`, `.gitleaks.toml`, `next.config.*`,
      `playwright*.config.ts` 등 검사의 실행과 설정을 정하는 파일), **경로와 관계없이 모든 `package.json`·`package-lock.json`·
      `npm-shrinkwrap.json`·`.npmrc`**(workspaces의 `packages/*`·`apps/*` 아래 것을 포함합니다 — 그 `postinstall`은 `npm ci`에서
-     실행됩니다), 정책 테스트(PR base의 `docs/policy/**`·`AGENTS.md`·`CLAUDE.md`가 경로로 이름 댄 `tests/**` 파일), `AGENTS.md`,
-     `CLAUDE.md`, `docs/policy/**`, `docs/ui-contracts/**`, `docs/release-gates/**`, `lib/adminAuth*`,
-     `lib/adminAuditSystemActors.ts`, `lib/agentAuthorityFiles.ts`.
+     실행됩니다), 정책 테스트(PR base의 `AGENTS.md`·`CLAUDE.md`·`docs/policy/qa-release-agent.md`가 경로로 이름 댄 `tests/**`
+     파일), `AGENTS.md`, `CLAUDE.md`, `docs/policy/qa-release-agent.md`, `lib/adminAuth*`,
+     `lib/adminAuditSystemActors.ts`, `lib/agentAuthorityFiles.ts`. 다른 기능의 `docs/policy/**`·`docs/ui-contracts/**`·
+     `docs/release-gates/**`와 그 문서가 이름 댄 테스트는 레인이 병합합니다(운영자 결정 2026-10-23 — 되돌릴 수 있는 문서이고,
+     거의 모든 기능 PR이 사람 몫으로 남던 범위를 좁힘). 같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
    - 변경 경로에 이 Agent 자신의 파일(부록 A, 판정은 PR base의 목록으로).
    - 이 Agent의 테이블(`AgentDigestItem`, `QaRelease`로 시작하는 테이블)을 이름 대는 migration. 판정은 변경된
      `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.
