@@ -122,3 +122,8 @@ test("no lane is large enough to put the timeout back where it was", () => {
         `the largest lane holds ${largest} of ${onDisk.length} suites; rebalance the rules`
     );
 });
+
+test("managed Code monetary scenarios run in the finance lane", () => {
+    assert.equal(dbIntegrationGroupOf(
+        "tests/integration/code-managed-execution.db.test.mjs"), "finance");
+});

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, prepareGuestPage, waitForHydration } from "./support/app-fixtures";
 import { ko } from "../../locales/ko";
 import { APP_DEFAULTS } from "../../lib/appDefaults";
 
@@ -508,6 +508,12 @@ test.describe("assistant profile settings", () => {
         );
     }
 
+    /** The form is filled straight away, so wait until React owns it. */
+    async function openCreateForm(page: Page, path = "/settings/assistants/new") {
+        await page.goto(path);
+        await waitForHydration(page, "assistant-create");
+    }
+
     let createRequests: Array<Record<string, unknown>> = [];
     test.beforeEach(() => {
         createRequests = [];
@@ -563,7 +569,7 @@ test.describe("assistant profile settings", () => {
     }) => {
         await prepareGuestPage(page);
         await mockCreate(page);
-        await page.goto("/settings/assistants/new");
+        await openCreateForm(page);
 
         await page.getByTestId("assistant-name").fill("Tax helper");
         await page
@@ -589,7 +595,7 @@ test.describe("assistant profile settings", () => {
     }) => {
         await prepareGuestPage(page);
         await mockCreate(page);
-        await page.goto("/settings/assistants/new");
+        await openCreateForm(page);
 
         await page.getByTestId("assistant-name").fill("Nameless behaviour");
         await page.getByTestId("assistant-create").click();
@@ -608,7 +614,7 @@ test.describe("assistant profile settings", () => {
     test("a chosen model reaches the request as a real id", async ({ page }) => {
         await prepareGuestPage(page);
         await mockCreate(page);
-        await page.goto("/settings/assistants/new");
+        await openCreateForm(page);
 
         await page.getByTestId("assistant-name").fill("Picky");
         await page.getByTestId("assistant-instructions").fill("Be brief.");
@@ -637,7 +643,7 @@ test.describe("assistant profile settings", () => {
         // with no field named.
         await prepareGuestPage(page);
         await mockCreate(page);
-        await page.goto("/settings/assistants/new");
+        await openCreateForm(page);
 
         await page.getByTestId("assistant-advanced-toggle").click();
         await page.getByTestId("assistant-model-mode-explicit").check();
@@ -658,7 +664,7 @@ test.describe("assistant profile settings", () => {
     }) => {
         await prepareGuestPage(page);
         await mockCreate(page);
-        await page.goto("/settings/assistants/new?from=chat");
+        await openCreateForm(page, "/settings/assistants/new?from=chat");
 
         // The button says where it goes, which the settings entry point's
         // does not promise.

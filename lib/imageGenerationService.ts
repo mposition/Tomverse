@@ -52,6 +52,8 @@ import {
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
+import { imageExecutionDrift, imageExecutionProfile, stalePricingVersions } from "@/lib/modelCatalogCore";
 import {
   generateImageWithProvider,
   ImageProviderError,
@@ -179,6 +181,13 @@ export type ImageGenerationRequestInput = {
    * group, not a separate path (policy v2 §11).
    */
   modelIds?: string[];
+  /**
+   * The pricingVersion the composer showed for each model. When the server
+   * now charges a different version the request is refused before anything
+   * is reserved, so a price never changes between the quote and the charge.
+   * Omitted (older clients) skips the check.
+   */
+  expectedPricingVersions?: Record<string, string>;
   /**
    * Server-only: the image answers a turn inside this chat conversation
    * (Tomverse Chat, lib/chatImageTurn.ts), so `conversationId` may name a
@@ -319,6 +328,9 @@ export const requestImageGeneration = async (
     );
   }
 
+  // The catalogue an operator may have changed at runtime (lib/modelCatalog.ts).
+  await refreshImageModelCatalog();
+
   // Resolve the fan-out before anything is charged. Duplicates collapse: a
   // group holds one target per model by construction, and silently billing
   // the same model twice would be the worst possible reading of a duplicate.
@@ -365,6 +377,19 @@ export const requestImageGeneration = async (
     model: plan.model!,
     price: plan.price!,
   }));
+  const stale = stalePricingVersions(
+    input.expectedPricingVersions,
+    (modelId) => getImageModel(modelId)?.pricingVersion ?? null
+  );
+  if (stale.length > 0) {
+    throw new ChatAccessError(
+      409,
+      "IMAGE_PRICE_CHANGED",
+      "The price of a selected image model changed. Reload to see the current price.",
+      undefined,
+      { changedModels: stale }
+    );
+  }
   const totalCredits = resolvedTargets.reduce(
     (sum, target) => sum + target.price.credits,
     0
@@ -797,6 +822,9 @@ export const requestImageGeneration = async (
               promptTokenLimit: IMAGE_PROMPT_MAX_TOKENS,
               provider: target.model.provider,
               modelId: target.modelId,
+              // What the provider call may send; checked again before the call.
+              executionProfile: imageExecutionProfile(target.model),
+              thinkingCapMicroUsd: target.model.priceVerification.thinkingCapMicroUsd,
             },
             // The per-lot payload belongs to the group's single add-on
             // reservation; it is stored on the first target that holds
@@ -1145,6 +1173,17 @@ export const reservationOutputCostMicroUsd = (
     : null;
 };
 
+/**
+ * The thinking cost to settle: zero when the provider reported no thinking,
+ * the reserved cap when it did, and null (settle the whole reservation) when
+ * the snapshot predates the cap being recorded.
+ */
+export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: number): number | null => {
+  if (!(thinkingTokens > 0)) return 0;
+  const cap = (snapshot as { thinkingCapMicroUsd?: unknown } | null)?.thinkingCapMicroUsd;
+  return typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
+};
+
 const parseSize = (size: string): { width: number; height: number } => {
   const [width, height] = size.split("x").map((value) => Number(value));
   return { width: width || 0, height: height || 0 };
@@ -1159,6 +1198,8 @@ const parseSize = (size: string): { width: number; height: number } => {
 export const processImageGeneration = async (
   generationId: string
 ): Promise<void> => {
+  // A model added at runtime exists only in the resolved catalogue.
+  await refreshImageModelCatalog();
   const claimed = await prisma.imageGeneration.updateMany({
     where: { id: generationId, status: "pending" },
     data: { status: "processing", startedAt: new Date() },
@@ -1169,6 +1210,24 @@ export const processImageGeneration = async (
     where: { id: generationId },
   });
   if (!generation) return;
+
+  // A runtime model edited after this reservation would be called with a
+  // request the reservation did not price: refund instead of calling it.
+  const reservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId },
+    select: { pricingSnapshot: true },
+  });
+  const drift = imageExecutionDrift(reservation?.pricingSnapshot, getImageModel(generation.modelId));
+  if (drift) {
+    await finalizeFailure({
+      generationId,
+      failurePhase: "model_profile_changed",
+      publicErrorCode: "IMAGE_GENERATION_FAILED",
+      internalErrorDetail: drift,
+      releaseProviderBudget: true,
+    });
+    return;
+  }
 
   const ttlSeconds = resolveLeaseTtlSeconds();
   const heartbeat = generation.leaseId
@@ -1363,10 +1422,13 @@ export const processImageGeneration = async (
           })
         );
       }
+      // Thinking has no per-token price here, so a request that thought is
+      // settled at the thinking cap the reservation held, never at zero.
+      const thinkingCost = settledThinkingCostMicroUsd(reservation.pricingSnapshot, result.thinkingTokens);
       const actualCostMicroUsd =
-        snapshotOutputCost === null
+        snapshotOutputCost === null || thinkingCost === null
           ? Number(reservation.reservedCostMicroUsd)
-          : snapshotOutputCost + promptCostMicroUsd(result.inputTokens);
+          : snapshotOutputCost + promptCostMicroUsd(result.inputTokens) + thinkingCost;
 
       const entries = parseReservationPayload(reservation.reservationPayload);
       if (entries.length > 0) {
@@ -1614,6 +1676,8 @@ export const retryImageGenerationTarget = async (
     throw error;
   }
 
+  await refreshImageModelCatalog();
+
   // A retry is a fresh attempt against the provider on a fresh reservation, so
   // it is gated exactly like a first request rather than inheriting the
   // permission the original request had.
@@ -1700,6 +1764,13 @@ export const retryImageGenerationTarget = async (
     };
   }
 
+  // The retry button shows what the failed attempt reserved, so the retry is
+  // bound to that attempt's price version: a price changed in between answers
+  // IMAGE_PRICE_CHANGED instead of charging an amount the user was not shown.
+  const failedReservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId: current.id },
+    select: { pricingVersion: true },
+  });
   const result = await requestImageGeneration(
     {
       userId: input.userId,
@@ -1709,6 +1780,9 @@ export const retryImageGenerationTarget = async (
       conversationId: target.group.conversationId,
       idempotencyKey: `retry-${input.retryIdempotencyKey}`.slice(0, 64),
       modelIds: [target.modelId],
+      ...(failedReservation
+        ? { expectedPricingVersions: { [target.modelId]: failedReservation.pricingVersion } }
+        : {}),
       // The retry stays in the conversation its group already lives in. A
       // chat conversation holds a group only through a Chat image turn
       // (lib/chatImageTurn.ts), so its retry keeps that host -- while the

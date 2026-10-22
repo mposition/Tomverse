@@ -64,6 +64,7 @@ test("the scan finds the callers it is meant to guard", () => {
         "chatSecurity.ts",
         "imageGenerationService.ts",
         "memoryExtractionCredits.ts",
+        "codeManagedService.ts",
     ]) {
         assert.ok(
             names.includes(expected),
@@ -100,6 +101,18 @@ test("every module that moves credit lots also locks the account", () => {
             `${ACCOUNT_LOCK}() in themselves or in any module that imports ` +
             `them: ${offenders.join(", ")}. See credit-and-cost-limits.md §9.`
     );
+});
+
+test("Code money writes and settings time-zone migration share account then usage-subject order",()=>{
+    const code=readFileSync(join(libDir,'codeManagedService.ts'),'utf8');
+    const body=code.slice(code.indexOf('async function transaction<'),code.indexOf('const receipt ='));
+    assert.ok(body.indexOf('lockCreditAccount(tx, userId)')<body.indexOf('getUserChatUsageKey(userId)'));
+    assert.ok(body.indexOf('getUserChatUsageKey(userId)')<body.indexOf('code-task:${userId}'));
+    const settings=readFileSync(join(root,'app/api/user/settings/route.ts'),'utf8');
+    const tx=settings.slice(settings.indexOf('const updatedSettings = await prisma.$transaction'),settings.indexOf('// Model fields always move together'));
+    assert.ok(tx.indexOf('lockCreditAccount(tx, userId)')>=0);
+    assert.ok(tx.indexOf('lockCreditAccount(tx, userId)')<tx.indexOf('pg_advisory_xact_lock'));
+    assert.ok(tx.indexOf('pg_advisory_xact_lock')<tx.indexOf('migrateCurrentDailyUsageBuckets(tx'));
 });
 
 test("a chunk report locks its fenced run row before any chunk row", () => {

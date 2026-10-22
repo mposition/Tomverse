@@ -4,6 +4,7 @@ import {
   mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
 import {
   clipboardWrites,
   grantClipboardAccess,
@@ -137,6 +138,11 @@ test.describe("build-info API contract (real endpoint)", () => {
 });
 
 test.describe("build-info UI", () => {
+  test.beforeEach(async ({ page }) => {
+    // Keep usage-limit sheets out of build-info layout and interaction checks.
+    await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
+  });
+
   test("staging shows a visible STAGING badge pre-login", async ({ page }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, VALID_BUILD_INFO);

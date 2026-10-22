@@ -10,6 +10,11 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
 수명주기, 운영 gate의 단일 기준이다. 코드 상수의 출처는
 `lib/imageGenerationPricing.ts`와 `lib/imageGenerationAccess.ts`이고,
 `npm run check:image-pricing`이 PR Fast Gate에서 fail-closed로 강제한다.
+운영 중 변경(2026-10-19부터): 모델의 켜기·보류와 가격은 동적 카탈로그
+(`ModelCatalogEntry`, 가격은 append-only `ModelCatalogPriceRevision`)에서 바뀌며,
+코드 registry는 기본값과 DB를 읽지 못할 때의 fallback이다. 켜기는 §12 조건을
+`judgeImageModel`(`lib/modelCatalogCore.ts`)이 다시 판정하고, 요청은 화면이 견적한
+`pricingVersion`과 다르면 `IMAGE_PRICE_CHANGED`(409)로 아무것도 예약하지 않는다.
 이 계약을 어기는 변경은 릴리스 차단 사유다.
 
 ## 1. 범위 (v2)
@@ -471,7 +476,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 ## 12. 이미지 모델 registry와 가격 검증 (v2)
 
 - 이미지 모델은 채팅 catalogue와 분리된 **이미지 모델 registry**로
-  관리한다. 모델 profile: provider, API model ID, stable/preview 상태,
+  관리한다. 코드 registry 위에 동적 카탈로그 행이 겹쳐지며(머리말 참고),
+  같은 adapter를 쓰는 provider의 새 모델은 전체 profile 행과 가격 revision으로
+  배포 없이 추가할 수 있다. 모델 profile: provider, API model ID, stable/preview 상태,
   지원 해상도·화면비, 기능(문자 렌더링 등), 크레딧 표, latency 등급,
   provenance 종류(C2PA/SynthID), MIME 처리.
 - **가격 검증은 텍스트 모델의 `PENDING_VERIFIED_PRICE_REGISTER`를

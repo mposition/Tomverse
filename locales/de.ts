@@ -229,6 +229,7 @@ export const de = {
         imageGenerationErrorBudget: "Die Bildgenerierung ist vorübergehend pausiert. Versuche es gleich erneut.",
         imageGenerationErrorConflict: "Dein Credit-Guthaben hat sich während der Reservierung geändert. Versuche es erneut.",
         imageGenerationErrorGeneric: "Die Bildgenerierung konnte nicht gestartet werden. Versuche es erneut.",
+        imageGenerationErrorPriceChanged: "Ein Preis hat sich seit dem Laden dieser Seite geändert. Es wurde nichts berechnet. Lade neu, um den aktuellen Preis zu sehen.",
         imageGenerationRestoreExcluded: "{models} ist derzeit nicht verfügbar und wurde aus der wiederhergestellten Auswahl entfernt.",
         imageGenerationSelectionCount: "{count}/{max} Modelle",
         imageGenerationModelLimitNotice: "Sie können bis zu {max} Modelle gleichzeitig vergleichen. Heben Sie die Auswahl eines Modells auf, bevor Sie ein weiteres wählen.",

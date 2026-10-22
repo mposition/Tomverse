@@ -246,6 +246,7 @@ export const zh = {
         imageGenerationErrorBudget: "图像生成暂时不可用，请稍后重试。",
         imageGenerationErrorConflict: "预留期间积分余额发生变化，请重试。",
         imageGenerationErrorGeneric: "无法开始图像生成，请重试。",
+        imageGenerationErrorPriceChanged: "此页面加载后价格已变更，未扣除任何额度。请刷新以查看当前价格。",
         imageGenerationRestoreExcluded: "{models} 当前不可用，已从恢复的选择中移除。",
         imageGenerationSelectionCount: "{count}/{max} 个模型",
         imageGenerationModelLimitNotice: "一次最多可比较 {max} 个模型。请先取消选择一个模型，再选择其他模型。",

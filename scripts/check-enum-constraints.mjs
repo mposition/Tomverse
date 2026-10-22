@@ -64,6 +64,13 @@ const REGISTRY = {
     reason:
       "An administrator's per-model web search route: off or the application-managed backend. NULL follows the code. There is no value for a provider's native tool on purpose -- its cost ceiling is verified per model in lib/webSearchCapability.ts, not chosen in a form.",
   },
+  AutoRouterOptimizerCycle_target_check: {
+    owner: "list",
+    module: "lib/autoLlmRouterCore.ts",
+    list: "AUTO_LLM_ROUTER_GUIDANCE_KINDS",
+    reason:
+      "Which guidance an optimizer cycle improves: the router's routing guidance or its rewrite guidance. Promotion writes the cycle's proposal into the guidance its target names, so a third value the code did not know would have no guidance to promote into.",
+  },
   Conversation_selectionMode_check: {
     owner: "list",
     module: "lib/conversationSelectionMode.ts",
@@ -1408,6 +1415,30 @@ const REGISTRY = {
     module: "lib/productResearchScoutCore.ts",
     list: "SCOUT_LLM_CALL_OUTCOMES",
     reason: "A Scout model call is started before it runs and settled ok or failed after; started rows count toward the daily cap.",
+  },
+  ModelCatalogEntry_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Image and coding have rows; chat is a view of ModelRegistryEntry and video has no activation policy yet.",
+  },
+  ModelCatalogEntry_draftSource_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "CATALOG_DRAFT_SOURCES",
+    reason: "A pending draft is written by one model call; nothing else writes drafts.",
+  },
+  ModelCatalogPriceRevision_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Price revisions exist for the categories that have rows.",
+  },
+  ModelCatalogSnapshot_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "SNAPSHOT_CATALOG_CATEGORIES",
+    reason: "Only the coding catalogue is published as a snapshot, for the Code client.",
   },
   ProductResearchSuggestion_kind_check: {
     owner: "list",

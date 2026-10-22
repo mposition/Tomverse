@@ -115,6 +115,11 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/reviewOrchestrator*",
   "tests/reviewOrchestrator*",
   "tests/fixtures/review-orchestrator/**",
+  // The app side of the Auto router coding agent on the Ubuntu runner: the
+  // bearer-secret check, the claim and result it may write, and its system
+  // audit writer. An agent changing them could widen its own permission.
+  "lib/autoRouterRecAgent*",
+  "tests/autoRouterRecAgent*",
   // §4-4: policy and contract documents.
   "docs/policy/**",
   "docs/ui-contracts/**",

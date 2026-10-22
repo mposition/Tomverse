@@ -739,6 +739,13 @@ run(
     // The Auto router optimizer's money and audit steps: one cycle at a time,
     // the run/day/month caps, promotion as a compare-and-set, one-step rollback.
     "tests/integration/auto-router-optimizer.db.test.ts",
+    "tests/integration/auto-router-tunables.db.test.ts",
+    // Its rewrite cycles: the shared lock and caps, the target CHECK, and
+    // promotion into the rewrite guidance only.
+    "tests/integration/auto-router-optimizer-rewrite.db.test.ts",
+    // An operator's status for a cycle's code and setting recommendations:
+    // stored in the summary with its audit entry, never losing a concurrent one.
+    "tests/integration/auto-router-optimizer-recommendations.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
     // history constraints that refuse a decision without its record.
@@ -854,6 +861,15 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// Managed Code replaces only provider/session seams while exercising the real
+// credit ledger. Keep its module mocks in a separate finance-lane process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/code-managed-execution.db.test.mjs"],
+  "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
 );
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
@@ -1132,4 +1148,17 @@ run(
     "tests/integration/message-attachment-resend.db.test.ts",
   ],
   "Running restored question attachment persistence scenarios"
+);
+// The dynamic model catalogue: a refused enable writes nothing, accepted
+// writes carry their audit row, price revisions and snapshots are immutable.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/model-catalog.db.test.ts",
+  ],
+  "Running the dynamic model catalogue scenarios"
 );

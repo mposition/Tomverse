@@ -8,9 +8,19 @@ import {
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AutoRouterTunables, type TunableAction, type TunableSettingsState } from "@/components/admin/AdminAutoRouterTunables";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
+import {
+  OpenRecommendationsInbox,
+  RecommendationControls,
+  optimizerCycleAnchor,
+} from "@/components/admin/AdminAutoRouterRecommendations";
+import {
+  actionableRecommendations,
+  type RecommendationStatus,
+} from "@/lib/autoRouterRecommendationsCore";
 
 type Summary = {
   evaluated: number;
@@ -18,8 +28,19 @@ type Summary = {
   candidateWins: number;
   incumbentWins: number;
   ties: number;
+  /** Absent on a cycle recorded before answers were judged. */
+  undecided?: number;
+  /** Judge calls that returned no verdict; absent on older cycles. */
+  judgeFailed?: number;
   incumbentCredits: number;
   candidateCredits: number;
+  /** Absent on a cycle recorded before the direct comparison and the report. */
+  report?: {
+    findings: string[];
+    recommendations: { kind: string; text: string }[];
+  } | null;
+  comparisons?: { kind: string | null; a: string | null; b: string | null; verdict: string }[];
+  gate?: { basis: "judged" | "direct"; towardWinner: number; towardLoser: number } | null;
 };
 
 type Cycle = {
@@ -32,6 +53,13 @@ type Cycle = {
   summary: Summary | null;
   spentMicroUsd: number;
   promotedAt: string | null;
+  syntheticCases?: {
+    message: string;
+    kind: "easy" | "hard" | null;
+    incumbentPick: string | null;
+    candidatePick: string | null;
+    verdict: string;
+  }[];
 };
 
 type OptimizerState = {
@@ -47,6 +75,10 @@ type OptimizerState = {
     dayCapMicroUsd: number;
     monthCapMicroUsd: number;
   };
+  /** The optimizer's own setting changes; absent from an older server. */
+  settings?: TunableSettingsState;
+  /** The coding agent on the Ubuntu runner; absent from an older server. */
+  recAgent?: { enabled: boolean };
 };
 
 type Action =
@@ -54,7 +86,10 @@ type Action =
   | { action: "run" }
   | { action: "set_automation"; daily: boolean; autoPromote: boolean }
   | { action: "promote"; cycleId: string }
-  | { action: "roll_back" };
+  | { action: "roll_back" }
+  | TunableAction
+  | { action: "set_recommendation"; cycleId: string; index: number; status: RecommendationStatus }
+  | { action: "set_rec_agent"; enabled: boolean };
 
 const OFF = "";
 const ENDPOINT = "/api/admin/auto-llm-router/optimizer";
@@ -133,9 +168,17 @@ export function AdminAutoRouterOptimizerPanel() {
     }
   };
 
+  const setRecommendation = (cycleId: string, index: number, status: RecommendationStatus) =>
+    void send({ action: "set_recommendation", cycleId, index, status });
+
   const reason = (code: string | null) =>
     code ? (m.reasons as Record<string, string>)[code] ?? code : null;
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
+  const verdict = (value: string) => (m.verdicts as Record<string, string>)[value] ?? value;
+  const comparisonVerdict = (value: string) =>
+    (m.comparisonVerdicts as Record<string, string>)[value] ?? value;
+  const recommendationKind = (value: string) =>
+    (m.recommendationKinds as Record<string, string>)[value] ?? value;
 
   return (
     <section
@@ -243,6 +286,8 @@ export function AdminAutoRouterOptimizerPanel() {
       ) : null}
       {failure ? <AdminApiFailureNotice failure={failure} onRetry={() => void load()} /> : null}
 
+      <AutoRouterTunables settings={state?.settings} busy={busy} send={(action) => void send(action)} />
+
       {state ? (
         <div className="mt-5 rounded-2xl border border-zinc-800 p-4" data-testid="admin-auto-router-optimizer-active">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -269,12 +314,37 @@ export function AdminAutoRouterOptimizerPanel() {
         </div>
       ) : null}
 
+      {state ? (
+        <label
+          className="mt-5 flex min-h-11 items-center gap-2 text-sm text-zinc-300"
+          data-testid="admin-auto-router-rec-agent"
+        >
+          <input
+            type="checkbox"
+            checked={state.recAgent?.enabled === true}
+            disabled={busy || !state.recAgent}
+            onChange={(event) => void send({ action: "set_rec_agent", enabled: event.target.checked })}
+            data-testid="admin-auto-router-rec-agent-toggle"
+            className="h-5 w-5"
+          />
+          <span>
+            <span className="font-bold">{m.recAgentLabel}</span>
+            <span className="block text-xs text-zinc-500">{m.recAgentNote}</span>
+          </span>
+        </label>
+      ) : null}
+
+      {state ? (
+        <OpenRecommendationsInbox cycles={state.cycles} busy={busy} onSetStatus={setRecommendation} />
+      ) : null}
+
       <h3 className="mt-5 text-sm font-bold text-zinc-200">{m.cyclesTitle}</h3>
       {state && state.cycles.length === 0 ? <p className="mt-2 text-sm text-zinc-500">{m.noCycles}</p> : null}
       <ul className="mt-2 space-y-3">
         {state?.cycles.map((cycle) => (
           <li
             key={cycle.id}
+            id={optimizerCycleAnchor(cycle.id)}
             data-testid="admin-auto-router-optimizer-cycle"
             className="rounded-2xl border border-zinc-800 p-4 text-sm text-zinc-300"
           >
@@ -300,9 +370,91 @@ export function AdminAutoRouterOptimizerPanel() {
               <p className="mt-1 text-xs text-zinc-400">
                 {cycle.summary.evaluated} {m.evaluated} · {cycle.summary.unchanged} {m.unchanged} ·{" "}
                 {cycle.summary.candidateWins} {m.candidateWins} · {cycle.summary.incumbentWins} {m.incumbentWins} ·{" "}
-                {cycle.summary.ties} {m.ties} · {m.credits} {cycle.summary.incumbentCredits} →{" "}
-                {cycle.summary.candidateCredits}
+                {cycle.summary.ties} {m.ties} ·{" "}
+                {cycle.summary.undecided !== undefined ? `${cycle.summary.undecided} ${m.undecided} · ` : ""}
+                {cycle.summary.judgeFailed ? `${cycle.summary.judgeFailed} ${m.judgeFailed} · ` : ""}
+                {m.credits} {cycle.summary.incumbentCredits} → {cycle.summary.candidateCredits}
               </p>
+            ) : null}
+            {cycle.summary?.gate?.basis === "direct" ? (
+              <p className="mt-1 text-xs text-zinc-400" data-testid="admin-auto-router-optimizer-gate-direct">
+                {m.gateDirect}: {cycle.summary.gate.towardWinner} {m.towardWinner} · {cycle.summary.gate.towardLoser}{" "}
+                {m.towardLoser}
+              </p>
+            ) : null}
+            {cycle.summary?.report ? (
+              <div className="mt-2 rounded-xl border border-zinc-800 p-3" data-testid="admin-auto-router-optimizer-report">
+                <p className="text-xs font-bold text-zinc-300">{m.reportTitle}</p>
+                {cycle.summary.report.findings.length > 0 ? (
+                  <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-zinc-300">
+                    {cycle.summary.report.findings.map((finding, index) => (
+                      <li key={index} className="whitespace-pre-wrap">{finding}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {cycle.summary.report.recommendations.length > 0 ? (
+                  <>
+                    <p className="mt-2 text-xs font-bold text-zinc-300">{m.recommendationsTitle}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{m.recommendationHandled}</p>
+                    <ul className="mt-1 space-y-1 text-xs text-zinc-300">
+                      {cycle.summary.report.recommendations.map((item, index) => {
+                        const actionable = actionableRecommendations(cycle.summary).find(
+                          (candidate) => candidate.index === index
+                        );
+                        return (
+                          <li key={index} className="whitespace-pre-wrap">
+                            <span className="mr-1 rounded border border-zinc-600 px-1 text-[11px] text-zinc-400">
+                              {recommendationKind(item.kind)}
+                            </span>
+                            {item.text}
+                            {actionable ? (
+                              <RecommendationControls
+                                cycle={cycle}
+                                item={actionable}
+                                busy={busy}
+                                onSetStatus={setRecommendation}
+                              />
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            {cycle.summary?.comparisons && cycle.summary.comparisons.length > 0 ? (
+              <details className="mt-2" data-testid="admin-auto-router-optimizer-comparisons">
+                <summary className="cursor-pointer text-xs font-bold text-zinc-400">
+                  {m.comparisonsTitle} ({cycle.summary.comparisons.length})
+                </summary>
+                <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+                  {cycle.summary.comparisons.map((item, index) => (
+                    <li key={index}>
+                      {item.kind ? `${(m.kinds as Record<string, string>)[item.kind] ?? item.kind} · ` : ""}
+                      {item.a ?? "-"} vs {item.b ?? "-"} · {comparisonVerdict(item.verdict)}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+            {cycle.syntheticCases && cycle.syntheticCases.length > 0 ? (
+              <details className="mt-2" data-testid="admin-auto-router-optimizer-synthetic">
+                <summary className="cursor-pointer text-xs font-bold text-zinc-400">
+                  {m.syntheticCases} ({cycle.syntheticCases.length})
+                </summary>
+                <ul className="mt-2 space-y-2">
+                  {cycle.syntheticCases.map((item, index) => (
+                    <li key={index} className="text-xs text-zinc-300">
+                      <p className="whitespace-pre-wrap">{item.message}</p>
+                      <p className="mt-0.5 text-zinc-500">
+                        {item.kind ? `${(m.kinds as Record<string, string>)[item.kind] ?? item.kind} · ` : ""}
+                        {item.incumbentPick ?? "-"} → {item.candidatePick ?? "-"} · {verdict(item.verdict)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             ) : null}
             <p className="mt-1 text-xs text-zinc-500">
               {cycle.optimizerModelId} · {m.spent} {usd(cycle.spentMicroUsd)}

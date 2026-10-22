@@ -9,6 +9,7 @@
 // direct user identifier beyond the already-hashed usage subject key.
 
 export type ChatLimitDecisionPhase =
+    | "code_reservation"
     | "comparison_preflight"
     | "chat_reservation"
     | "availability_probe";

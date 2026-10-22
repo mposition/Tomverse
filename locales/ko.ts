@@ -230,6 +230,7 @@ export const ko = {
         imageGenerationErrorBudget: "이미지 생성이 일시적으로 중단되었습니다. 잠시 후 다시 시도해 주세요.",
         imageGenerationErrorConflict: "예약 중에 크레딧 잔액이 바뀌었습니다. 다시 시도해 주세요.",
         imageGenerationErrorGeneric: "이미지 생성을 시작하지 못했습니다. 다시 시도해 주세요.",
+        imageGenerationErrorPriceChanged: "이 페이지를 연 뒤 가격이 바뀌었습니다. 차감된 크레딧은 없습니다. 새로고침하면 현재 가격을 볼 수 있습니다.",
         imageGenerationRestoreExcluded: "{models}은(는) 지금 사용할 수 없어 복원된 선택에서 제외했습니다.",
         imageGenerationSelectionCount: "모델 {count}/{max}개",
         imageGenerationModelLimitNotice: "한 번에 최대 {max}개 모델을 비교할 수 있습니다. 선택한 모델 하나를 해제한 뒤 다시 선택해 주세요.",
