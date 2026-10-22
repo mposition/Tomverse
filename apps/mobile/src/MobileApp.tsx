@@ -151,7 +151,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   return <main className="mobile-app">
     <header className="app-header">
       <button className="menu-button" aria-label={copy.chats} onClick={() => setView(view === "list" ? "chat" : "list")} disabled={streaming || !signedIn}><AppIcon name="menu" /><AppIcon name="menuDark" /></button>
-      <span className="brand-lockup"><AppIcon name="logo" /><span className="wordmark">tomverse<span className="wordmark-dot">.</span></span></span>
+      <span className="brand-lockup"><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></span>
       <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}>◐</button>
     </header>
     {demo && <div className="demo-label">{copy.demo}</div>}
