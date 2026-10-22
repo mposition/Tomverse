@@ -56,6 +56,13 @@ test("research candidates stay provider-scoped and plan-gated without inventing 
   assert.ok(!paid.text.some(model => model.provider === "openai" && model.tier === "deep-research"));
   assert.equal(parseReviewRoute({ kind: "text", preset: "standard", choices: [{ provider: "openai", modelId: deep.id }] }, ["openai"], paid), null);
 });
+
+test("Review does not advertise Chat file tools without a persisted Chat turn context", () => {
+  const result = reviewRoutingCandidates({ providers: ["openai"], models: AVAILABLE_MODELS,
+    imageModels: [], plan: "Max", hasImages: false });
+  assert.ok(result.text.length > 0);
+  assert.ok(result.text.every(model => model.canCreateFiles === false));
+});
 test("the client sends providers and attachments capability and refuses malformed or failed routing", async () => {
   const input = { text: "Create a poster", providers, hasImages: false };
   assert.deepEqual(await askReviewRoute(input, async (url, init) => {

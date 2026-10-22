@@ -397,28 +397,47 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
  * The pick only reorders the Router's own eligible set: a model the filters
  * refused -- plan, credits, context window, health, web search -- cannot be
  * chosen however the call answers. A null or unknown pick leaves the
- * deterministic selection exactly as it was.
+ * deterministic selection exactly as it was, unless a file-capable fallback
+ * pool is supplied. That pool can only narrow the already eligible set.
  */
 export const applyLlmModelPick = (
   selection: AutoSelection,
-  pickedModelId: string | null
+  pickedModelId: string | null,
+  files?: { required: boolean; capableModelIds: readonly string[] }
 ): AutoSelection => {
-  if (!selection.routed || !pickedModelId) return selection;
-  if (!selection.record.eligibleModelIds.includes(pickedModelId)) return selection;
-  const ranked = [selection.modelId, ...selection.fallbackCandidateModelIds];
+  if (!selection.routed) return selection;
+  const ranked = [...new Set([
+    selection.modelId, ...selection.fallbackCandidateModelIds,
+    ...(files?.required ? selection.record.eligibleModelIds : []),
+  ])];
+  const eligible = files?.required
+    ? selection.record.eligibleModelIds.filter(id => files.capableModelIds.includes(id))
+    : selection.record.eligibleModelIds;
+  const chosen = pickedModelId && eligible.includes(pickedModelId)
+    ? pickedModelId
+    : files?.required ? ranked.find(id => eligible.includes(id)) : null;
+  if (!chosen) return selection;
+  const keepDecision = pickedModelId !== chosen && chosen === selection.modelId;
   return {
     ...selection,
-    modelId: pickedModelId,
-    sticky: { modelId: pickedModelId, turnsFavouringChallenger: 0 },
-    stickyMemoryModelId: undefined,
-    fallbackCandidateModelIds: ranked.filter((modelId) => modelId !== pickedModelId),
+    modelId: chosen,
+    sticky: keepDecision ? selection.sticky : { modelId: chosen, turnsFavouringChallenger: 0 },
+    stickyMemoryModelId: keepDecision ? selection.stickyMemoryModelId : undefined,
+    fallbackCandidateModelIds: ranked.filter(id => id !== chosen && eligible.includes(id)),
     record: {
       ...selection.record,
-      selectedModelId: pickedModelId,
-      selectionReason: "llm_pick",
-      selectionDecidedBy: null,
-      allocationMode: "deterministic",
-      allocationSeedGrain: null,
+      selectedModelId: chosen,
+      eligibleModelIds: eligible,
+      rejections: files?.required ? [
+        ...selection.record.rejections,
+        ...selection.record.eligibleModelIds.filter(id => !eligible.includes(id))
+          .map(modelId => ({ modelId, reason: "file_generation_unsupported" as const })),
+      ] : selection.record.rejections,
+      selectionReason: keepDecision ? selection.record.selectionReason
+        : pickedModelId === chosen ? "llm_pick" : "fallback_order",
+      selectionDecidedBy: keepDecision ? selection.record.selectionDecidedBy : null,
+      allocationMode: keepDecision ? selection.record.allocationMode : "deterministic",
+      allocationSeedGrain: keepDecision ? selection.record.allocationSeedGrain : null,
     },
   };
 };

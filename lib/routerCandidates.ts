@@ -81,6 +81,8 @@ export const CANDIDATE_REJECTIONS = [
     "region_unavailable",
     /** The account cannot pay for it. */
     "insufficient_credits",
+    /** This turn needs application file tools that the model cannot use. */
+    "file_generation_unsupported",
 ] as const;
 
 export type CandidateRejection = (typeof CANDIDATE_REJECTIONS)[number];
