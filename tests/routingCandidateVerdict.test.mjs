@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
+import { readEnumConstraints } from "../scripts/check-enum-constraints-core.mjs";
 
 import { CANDIDATE_REJECTIONS } from "../lib/routerCandidates.ts";
 import {
@@ -27,13 +28,13 @@ const migration = () =>
 
 const latestReasonConstraint = () => {
     const root = new URL("../prisma/migrations/", import.meta.url);
-    for (const directory of readdirSync(root, { withFileTypes: true })
-        .filter(entry => entry.isDirectory()).map(entry => entry.name).sort().reverse()) {
-        const sql = readFileSync(new URL(`${directory}/migration.sql`, root), "utf8");
-        const constraint = sql.match(/ADD CONSTRAINT "RoutingCandidateVerdict_reason_check"[\s\S]*?;/);
-        if (constraint) return constraint[0];
-    }
-    throw new Error("Missing RoutingCandidateVerdict reason constraint");
+    const migrations = readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory()).map(entry => entry.name).sort()
+        .map(name => ({ name, sql: readFileSync(new URL(`${name}/migration.sql`, root), "utf8") }));
+    const constraint = readEnumConstraints(migrations)
+        .find(entry => entry.constraint === "RoutingCandidateVerdict_reason_check");
+    assert.ok(constraint, "Missing RoutingCandidateVerdict reason constraint");
+    return constraint.values;
 };
 
 test("a rejection names its reason and holds no rank", () => {
@@ -111,8 +112,7 @@ test("the database holds the same rules", () => {
     assert.match(sql, /RoutingCandidateVerdict_reason_matches_verdict_check/);
     assert.match(sql, /RoutingCandidateVerdict_rank_matches_verdict_check/);
     assert.match(sql, /RoutingCandidateVerdict_rank_positive_check/);
-    const reasons = [...latestReasonConstraint().matchAll(/'([^']+)'/g)].map(match => match[1]);
-    assert.deepEqual(new Set(reasons), new Set(CANDIDATE_REJECTIONS));
+    assert.deepEqual(new Set(latestReasonConstraint()), new Set(CANDIDATE_REJECTIONS));
 });
 
 test("uniqueness survives a null deployment", () => {
