@@ -83,37 +83,22 @@ test("a workflow change is listed as left out in the train's pull request", () =
   assert.match(body, /#2 CI tweak — changes \.github\/workflows/);
 });
 
-test("the main:next search is read page by page, past the first 100", async () => {
-  const urls = [];
-  const searchPage = (page) => {
-    const count = page === 1 ? 100 : page === 2 ? 3 : 0;
-    const start = (page - 1) * 100 + 1;
-    return { items: Array.from({ length: count }, (_, i) => ({ number: start + i })) };
-  };
+test("the picked numbers are read one by one; one not merged into develop, or gone, is left out", async () => {
   const http = async ({ url }) => {
-    urls.push(url);
-    if (url.startsWith("https://api.github.com/search/issues")) {
-      const page = Number(new URL(url).searchParams.get("page"));
-      return { status: 200, text: JSON.stringify(searchPage(page)) };
-    }
     const number = Number(url.split("/").pop());
+    if (number === 404) return { status: 404, text: "{}" };
     return {
       status: 200,
       text: JSON.stringify({
         number,
         title: `PR ${number}`,
-        labels: [{ name: "main:next" }],
-        base: { ref: "develop" },
-        merged_at: "2026-10-21T00:00:00Z",
+        base: { ref: number === 3 ? "main" : "develop" },
+        merged_at: number === 2 ? null : "2026-10-21T00:00:00Z",
         merge_commit_sha: String(number % 10).repeat(40),
       }),
     };
   };
   const github = createQaReleaseTrainGithubPorts({ http, token: async () => "t" });
-  const cargo = await github.labelledCargo();
-  assert.equal(cargo.length, 103);
-  assert.ok(cargo.some((c) => c.number === 103), "the newest, on page 2, is carried");
-  const searches = urls.filter((url) => url.includes("/search/issues"));
-  assert.equal(searches.length, 2, "stops at the first short page");
-  assert.ok(searches.every((url) => url.includes("sort=created") && url.includes("order=asc")));
+  const cargo = await github.cargo([1, 2, 3, 404, 1]);
+  assert.deepEqual(cargo.map((c) => c.number), [1]);
 });

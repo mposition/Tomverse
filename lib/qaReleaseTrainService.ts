@@ -4,8 +4,8 @@
  * keeps every write behind every check:
  *
  *   start decision -> departure -> this departure's branch not yet pushed ->
- *   no open train -> labelled cargo exists -> the app admits (revision,
- *   latch, audit) -> assemble on a fresh clone of main -> push the branch ->
+ *   no open train -> the operator picked cargo in Admin -> the app admits (revision,
+ *   once per departure, audit) -> assemble on a fresh clone of main -> push the branch ->
  *   open the main pull request -> report.
  *
  * GitHub writes are the branch push and the pull request, nothing else: no
@@ -33,8 +33,8 @@ export type QaReleaseTrainPorts = {
     branchExists(branch: string): Promise<boolean>;
     /** Open pull requests into main whose head is a train branch. */
     openTrains(): Promise<number>;
-    /** Merged develop pull requests labelled for the train. */
-    labelledCargo(): Promise<QaReleaseTrainCandidate[]>;
+    /** These pull requests, each one that is merged into develop; the rest are left out. */
+    cargo(numbers: readonly number[]): Promise<QaReleaseTrainCandidate[]>;
     openPullRequest(input: { head: string; title: string; body: string }): Promise<number>;
   };
   git: {
@@ -52,6 +52,8 @@ export type QaReleaseTrainPorts = {
     push(branch: string): Promise<void>;
   };
   app: {
+    /** The pull request numbers the operator picked for the next train in Admin. */
+    selection(): Promise<number[]>;
     admit(slot: string): Promise<{ admitted: boolean; reason?: string }>;
     report(report: {
       slot: string;
@@ -104,8 +106,14 @@ export async function runQaReleaseTrainRound(
     if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
     step = "open_trains";
     openTrains = await ports.github.openTrains();
-    step = "cargo";
-    cargo = openTrains > 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.labelledCargo());
+    if (openTrains > 0) {
+      cargo = [];
+    } else {
+      step = "selection";
+      const numbers = await ports.app.selection();
+      step = "cargo";
+      cargo = numbers.length === 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.cargo(numbers));
+    }
   } catch (error) {
     return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure(step, error) };
   }

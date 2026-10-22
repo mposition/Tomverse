@@ -33,7 +33,7 @@ function ports(overrides = {}) {
     github: {
       branchExists: async (branch) => note("branchExists", overrides.branchExists ?? false) && branch,
       openTrains: async () => note("openTrains", overrides.openTrains ?? 0),
-      labelledCargo: async () => note("labelledCargo", overrides.cargo ?? cargo),
+      cargo: async (numbers) => note("cargo", (overrides.cargo ?? cargo).filter((c) => numbers.includes(c.number))),
       openPullRequest: async (pr) => {
         note("openPullRequest", pr);
         if (overrides.prFails) throw new Error("github_422");
@@ -52,6 +52,7 @@ function ports(overrides = {}) {
       },
     },
     app: {
+      selection: async () => note("selection", overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number)),
       admit: async (slot) => note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot]), overrides.admit ?? { admitted: true }),
       report: async (report) => void note("report", report),
     },
@@ -86,8 +87,8 @@ test("outside a departure hour, after this departure's branch exists, with an op
 });
 
 test("a refused admission stops before git", async () => {
-  const { p, names } = ports({ admit: { admitted: false, reason: "latched" } });
-  assert.deepEqual(await runQaReleaseTrainRound(env(), p, NOW), { exitCode: 0, train: "not_admitted", reason: "latched" });
+  const { p, names } = ports({ admit: { admitted: false, reason: "revision_mismatch" } });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), p, NOW), { exitCode: 0, train: "not_admitted", reason: "revision_mismatch" });
   assert.ok(!names().includes("assemble"));
 });
 
@@ -96,7 +97,7 @@ test("cargo rides in develop merge order; a conflict is left out and named; the 
   const outcome = await runQaReleaseTrainRound(env(), p, NOW);
   assert.deepEqual(outcome, { exitCode: 0, train: "opened", slot: "20261020-1100", pullRequestNumber: 4242, included: 1, leftOut: 1 });
   const get = (name) => calls.find(([n]) => n === name)[1];
-  // Every labelled pull request goes to assembly; capacity counts riders there.
+  // Every picked pull request goes to assembly; capacity counts riders there.
   assert.deepEqual(get("assemble"), { branch: "release/train-20261020-1100", numbers: [10, 11, 12], capacity: 30 });
   assert.equal(get("push"), "release/train-20261020-1100");
   const pr = get("openPullRequest");
@@ -137,7 +138,8 @@ test("a failed push or pull request is reported with a code and never retried in
 test("a read failure names the step and the port's code, and nothing else", async () => {
   const failing = (where, error) => {
     const { p } = ports();
-    if (where === "cargo") p.github.labelledCargo = async () => { throw error; };
+    if (where === "cargo") p.github.cargo = async () => { throw error; };
+    if (where === "selection") p.app.selection = async () => { throw error; };
     if (where === "open_trains") p.github.openTrains = async () => { throw error; };
     if (where === "admit") p.app.admit = async () => { throw error; };
     return p;
@@ -149,7 +151,21 @@ test("a read failure names the step and the port's code, and nothing else", asyn
   });
   assert.equal((await runQaReleaseTrainRound(env(), failing("open_trains", new Error("github_shape")), NOW)).failure, "open_trains:github_shape");
   assert.equal((await runQaReleaseTrainRound(env(), failing("admit", new Error("app_503")), NOW)).failure, "admit:app_503");
+  assert.equal((await runQaReleaseTrainRound(env(), failing("selection", new Error("app_401")), NOW)).failure, "selection:app_401");
   // A network error's own text (which may carry a URL) never reaches the log.
   assert.equal(qaReleaseTrainReadFailure("cargo", new Error("fetch failed: https://api.github.com/x?token=1")), "cargo:unknown");
   assert.equal(qaReleaseTrainReadFailure("branch", "not an error"), "branch:unknown");
+});
+
+test("nothing picked in Admin is no cargo: no GitHub read of pull requests, no admission", async () => {
+  const { p, names } = ports({ selection: [] });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), p, NOW), { exitCode: 0, train: "no_cargo" });
+  assert.ok(!names().includes("cargo"));
+  assert.ok(!names().includes("admit"));
+});
+
+test("only the picked pull requests ride, in develop merge order", async () => {
+  const { p, calls } = ports({ selection: [12, 10] });
+  await runQaReleaseTrainRound(env(), p, NOW);
+  assert.deepEqual(calls.find(([n]) => n === "assemble")[1].numbers, [10, 12]);
 });

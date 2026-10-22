@@ -14,14 +14,12 @@ import { promisify } from "node:util";
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint } from "./qaReleaseDigestEndpointCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
-import { QA_RELEASE_TRAIN_BRANCH_PREFIX, QA_RELEASE_TRAIN_LABEL, type QaReleaseTrainCandidate, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
+import { QA_RELEASE_TRAIN_BRANCH_PREFIX, type QaReleaseTrainCandidate, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
 
 const REPOSITORY = "mposition/Tomverse";
 const API = `https://api.github.com/repos/${REPOSITORY}`;
 const SHA = /^[0-9a-f]{40}$/;
-/** The search API's own ceiling: 10 pages of 100. */
-const SEARCH_MAX_PAGES = 10;
 const PULL_READS_AT_ONCE = 8;
 const run = promisify(execFile);
 
@@ -46,14 +44,13 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
     });
     return { status: response.status, json: () => JSON.parse(response.text) as unknown };
   };
-  // The pull request itself is the authority: the search index can lag, and
-  // removing the label takes a pull request off.
+  // The pull request itself is the authority on whether it was merged into
+  // develop; one that was not is left out.
   const readCargo = async (number: number): Promise<QaReleaseTrainCandidate | null> => {
     const pull = await request("GET", `${API}/pulls/${number}`);
+    if (pull.status === 404) return null;
     if (pull.status !== 200) throw new Error(`github_${pull.status}`);
     const data = record(pull.json());
-    const labels = Array.isArray(data.labels) ? data.labels.map((label) => record(label).name) : [];
-    if (!labels.includes(QA_RELEASE_TRAIN_LABEL)) return null;
     if (record(data.base).ref !== "develop" || typeof data.merged_at !== "string" || typeof data.merge_commit_sha !== "string") return null;
     return { number, title: String(data.title ?? ""), mergeCommitSha: data.merge_commit_sha, mergedAt: data.merged_at };
   };
@@ -71,25 +68,8 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
       if (!Array.isArray(list)) throw new Error("github_shape");
       return list.filter((pull) => String(record(record(pull).head).ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX)).length;
     },
-    async labelledCargo() {
-      const q = encodeURIComponent(`repo:${REPOSITORY} is:pr is:merged base:develop label:"${QA_RELEASE_TRAIN_LABEL}"`);
-      // Every page: the label stays on a pull request after it reaches main, so
-      // the labelled set only grows, and a first page of 100 eventually missed
-      // the newest. Sorted by creation for a stable page order; the search API
-      // serves at most 1,000 results.
-      const numbers = new Set<number>();
-      for (let page = 1; page <= SEARCH_MAX_PAGES; page += 1) {
-        const search = await request("GET", `https://api.github.com/search/issues?q=${q}&sort=created&order=asc&per_page=100&page=${page}`);
-        if (search.status !== 200) throw new Error(`github_${search.status}`);
-        const items = record(search.json()).items;
-        if (!Array.isArray(items)) throw new Error("github_shape");
-        for (const item of items) {
-          const number = record(item).number;
-          if (typeof number === "number") numbers.add(number);
-        }
-        if (items.length < 100) break;
-      }
-      const ordered = [...numbers];
+    async cargo(numbers) {
+      const ordered = [...new Set(numbers)];
       const cargo: QaReleaseTrainCandidate[] = [];
       for (let index = 0; index < ordered.length; index += PULL_READS_AT_ONCE) {
         const batch = await Promise.all(ordered.slice(index, index + PULL_READS_AT_ONCE).map((number) => readCargo(number)));
@@ -218,6 +198,12 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
     return { status: response.status, body: record(JSON.parse(response.text)) };
   };
   return {
+    async selection() {
+      const answer = await call({ phase: "selection" });
+      const numbers = answer.status === 200 ? answer.body.numbers : null;
+      if (!Array.isArray(numbers) || !numbers.every((n) => Number.isInteger(n) && n > 0)) throw new Error("app_selection_shape");
+      return numbers as number[];
+    },
     async admit(slot) {
       const answer = await call({ phase: "admit", slot });
       return answer.status === 200 && answer.body.admitted === true
