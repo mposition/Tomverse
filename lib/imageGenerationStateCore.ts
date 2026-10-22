@@ -20,6 +20,9 @@ export const IMAGE_GENERATION_FAILURE_PHASES = [
   "provider_failed",
   "original_storage_failed",
   "stale_job_reconciled",
+  // The model's request profile changed after the reservation; the provider
+  // was not called and the reservation was refunded.
+  "model_profile_changed",
   // The provider succeeded and the *settlement* did not. Kept apart from
   // `provider_failed` because the two are different operational problems:
   // one says the image never arrived, this one says it arrived and the ledger

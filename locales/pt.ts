@@ -232,6 +232,7 @@ export const pt = {
         imageGenerationErrorBudget: "A geração de imagens está temporariamente pausada. Tente novamente em instantes.",
         imageGenerationErrorConflict: "Seu saldo de créditos mudou durante a reserva. Tente novamente.",
         imageGenerationErrorGeneric: "Não foi possível iniciar a geração da imagem. Tente novamente.",
+        imageGenerationErrorPriceChanged: "Um preço mudou desde que esta página foi carregada. Nada foi cobrado. Recarregue para ver o preço atual.",
         imageGenerationRestoreExcluded: "{models} não está disponível no momento, por isso ficou de fora da seleção restaurada.",
         imageGenerationSelectionCount: "{count}/{max} modelos",
         imageGenerationModelLimitNotice: "Você pode comparar até {max} modelos por vez. Desmarque um modelo antes de escolher outro.",

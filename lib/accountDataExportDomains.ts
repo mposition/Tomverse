@@ -245,6 +245,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "modelCatalogEntry",
+    publicName: "model_catalog_entry",
+    prismaModel: "ModelCatalogEntry",
+    state: "unverified",
+  },
+  {
+    domain: "modelCatalogPriceRevision",
+    publicName: "model_catalog_price_revision",
+    prismaModel: "ModelCatalogPriceRevision",
+    state: "unverified",
+  },
+  {
     domain: "providerBillingConfig",
     publicName: "provider_billing_config",
     prismaModel: "ProviderBillingConfig",

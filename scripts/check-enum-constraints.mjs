@@ -1409,6 +1409,30 @@ const REGISTRY = {
     list: "SCOUT_LLM_CALL_OUTCOMES",
     reason: "A Scout model call is started before it runs and settled ok or failed after; started rows count toward the daily cap.",
   },
+  ModelCatalogEntry_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Image and coding have rows; chat is a view of ModelRegistryEntry and video has no activation policy yet.",
+  },
+  ModelCatalogEntry_draftSource_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "CATALOG_DRAFT_SOURCES",
+    reason: "A pending draft is written by one model call; nothing else writes drafts.",
+  },
+  ModelCatalogPriceRevision_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Price revisions exist for the categories that have rows.",
+  },
+  ModelCatalogSnapshot_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "SNAPSHOT_CATALOG_CATEGORIES",
+    reason: "Only the coding catalogue is published as a snapshot, for the Code client.",
+  },
   ProductResearchSuggestion_kind_check: {
     owner: "list",
     module: "lib/productResearchScoutCore.ts",
