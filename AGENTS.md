@@ -63,9 +63,10 @@ Report implemented and tested behavior separately from documentation, review, me
   (`scripts/auto-pr-branch-policy.mjs`). 기능은 develop으로 보냅니다.
 - main으로 가는 PR은 `develop`(release), `release/**`, `hotfix/**`(체크리스트 7.9.2)와 각자
   게이트가 있는 자동화 브랜치뿐입니다(`scripts/main-pr-source-policy.mjs`).
-- dev에서 확인을 마친 develop PR에는 **`main:next` 라벨을 붙이고 release PR을 직접 열지 않습니다.**
-  QA·릴리스 에이전트의 릴리스 열차가 정해진 시각(AEST 08·11·14·17·20시)에 라벨 붙은 PR을 모아
-  `release/train-*` main PR 하나를 엽니다(`docs/policy/qa-release-agent.md` 8절 12항). 급한 수정은 `hotfix/**`입니다.
+- dev에서 확인을 마친 develop PR의 release PR은 직접 열지 않습니다. 운영자가 Admin › Agent digests ›
+  QA·릴리스의 "다음 열차"에서 실을 PR을 고르고, QA·릴리스 에이전트의 릴리스 열차가 정해진 시각(AEST
+  08·11·14·17·20시)에 그 PR들로 `release/train-*` main PR 하나를 엽니다(`docs/policy/qa-release-agent.md`
+  8절 12항). `main:next` 라벨은 더 읽지 않습니다. 급한 수정은 `hotfix/**`입니다.
 - workflow는 PR을 열기만 하고 병합하거나 auto-merge를 켜지 않습니다. 병합은 운영자의
   `npm run merge-train`이 합니다. 사람이 끈 스위치를 자동화가 다시 켜지 않습니다.
 - PR은 draft로 시작하고 끝나면 ready로 바꿉니다(draft는 CI가 돌지 않습니다). develop은 dev

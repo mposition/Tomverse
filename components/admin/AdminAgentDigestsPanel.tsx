@@ -7,6 +7,7 @@ import { Lock } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
+import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
 import { QaReleaseTrainSection, type QaReleaseTrainView } from "@/components/admin/QaReleaseTrainSection";
 import type { AgentDigestConsole, AgentDigestConsoleRow } from "@/lib/agentDigestConsoleRead";
 import { aestStamp } from "@/lib/agentOffice/time";
@@ -81,6 +82,7 @@ export function AdminAgentDigestsPanel({
         <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.lane} />
       </div>
       <LatestDigest digests={initial.digests} limit={initial.limit} />
+      <QaReleaseTrainCargoSection canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
       <QaReleaseTrainSection trains={trains} id={QA_RELEASE_SECTION_IDS.train} />
       <AgentSettings initial={initial} />
     </section>
