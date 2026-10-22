@@ -1,9 +1,8 @@
 # Code 관리형 태스크의 크레딧 예약과 비용 guardrail
 
-**상태: 설계 정책입니다. 코드는 아직 없습니다.** TomverseCode(Windows 데스크톱 코딩
-어시스턴트)에 관리형 모델 카탈로그 경로가 생기기로 했고([TomverseCode product-strategy 17절](https://github.com/mposition/TomverseCode/blob/main/docs/design/product-strategy.md) — 2026-09-30 결정), 그 과금을 맡는 **Code 제품
-서비스**를 이 저장소에 두기로 했습니다. 이 문서는 그 서비스가 구현될 때 지켜야 할
-크레딧·비용 계약을 **구현보다 먼저** 적어 둡니다.
+**구현 상태 (2026-10-22):** 단일 태스크 서버 경로를 구현했으며,
+`CODE_MANAGED_EXECUTION_ENABLED=true`를 명시하지 않으면 꺼져 있습니다. 운영 추론 활성화와
+migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절에 있고 Fleet은 비활성입니다.
 
 `docs/policy/credit-and-cost-limits.md`가 정본입니다. 이 문서는 그 규칙을 **코딩
 태스크라는 다른 모양의 사용에 어떻게 적용하는가**만 정하고, 그 문서의 어떤 계약도
@@ -48,14 +47,14 @@
 
 **[제안] 계약:**
 
-1. **태스크 예약.** 사용자가 Code에서 태스크 계획을 승인하는 순간, Code 제품 서비스가 그
+1. **태스크 예약.** 사용자가 Code에서 첫 유료 호출 전 상한 크레딧을 승인하는 순간, Code 제품 서비스가 그
    태스크의 **상한 크레딧**을 예약합니다. 상한은 사용자가 승인 카드에서 본 값입니다(Code
    쪽 `TaskBudget` 상한). 크레딧이 모자라면 **태스크가 시작하기 전에** 거절합니다 — 중간에
    멈추는 것보다 시작 전에 멈추는 것이 사용자에게 싸다.
 2. **호출별 정산.** 태스크 안의 관리형 호출은 매번 그 예약에서 실제 사용량만큼 정산합니다.
    정산은 이 저장소의 가격 profile(`lib/modelPricing.ts`)과 크레딧 환산을 그대로 씁니다.
-   **Code가 보낸 금액을 믿지 않습니다** — Code는 사용량을 보고할 수 있어도 가격을 정하지
-   않습니다.
+   **Code가 보낸 금액을 믿지 않습니다** — 서버가 직접 provider를 호출하고 응답의 검증된 사용량으로
+   정산합니다. Desktop은 사용량이나 청구액을 제출하지 않습니다.
 3. **예약 잔액이 호출 하나를 감당하지 못하면 그 호출을 보내기 전에 거절**하고, 거절 사유가
    "태스크 상한"임을 돌려줍니다. 계정 크레딧 부족과 구별합니다(사용자가 할 수 있는 일이
    다르다 — 하나는 상한을 올리고, 하나는 크레딧을 산다).
@@ -147,3 +146,67 @@
 - 정산 불명 상태를 0으로 해제하지 않습니다(§3-5).
 - 채팅의 rate·동시 실행 한도를 올려 코딩을 통과시키지 않습니다.
 - 이 문서의 **[제안]·[미결정]** 값은 구현 PR에서 정하고, 그 PR이 이 문서를 함께 고칩니다.
+
+## 10. 구현한 A1 서버 계약
+
+- `POST /api/code/managed`는 엄격한 `reserve | complete | heartbeat |
+  release | status` action을 받습니다. 세션 인증, 명시한 같은 출처 `Origin`,
+  `X-Tomverse-Code: 1`이 필요합니다. provider 주소와 자격증명 별칭은 코드가 정하며
+  클라이언트가 제출하지 않습니다.
+- 크레딧 상한 승인은 첫 유료 계획 호출보다 앞섭니다. 파일 변경 계획 승인은 뒤의 별도
+  게이트입니다. 예약은 불변 카탈로그 버전/hash와 실제 공급자가 다른 실행자·검토자를
+  고정합니다. 새 호출마다 현재 카탈로그 자격과 플랜을 다시 확인합니다.
+- coding 카탈로그 전용 동적 행은 Chat 정적 모델이나 `modelPricing.ts` 항목 없이도
+  실행됩니다. snapshot의 단가·상한·creditWeight가 정본이고, 같은 공급자/API의 기존
+  profile이 있으면 검증한 추가 상한을 사용합니다. 미검증 캐시 할인은 일반 입력 단가,
+  Anthropic 캐시 쓰기는 기존 1.25 상한을 적용합니다. 지원하지 않는 중계나 상한 없는
+  검색 비용은 전송 전에 거절합니다. 도구나 캐시 marker는 활성화하지 않습니다.
+- Code verified 루프는 `3*(2*2+1+8)+1+2+3+(3+3)=51` 의미 호출이며,
+  네 번의 provider 시도와 여유 배수 2를 곱해 **태스크당 408회**입니다.
+  `CODE_TASK_CALL_CEILING`은 이 아래로 내려가지 않습니다. 별도 계정 분당 rate는
+  `호출 천장 * 태스크 슬롯`으로 기본 **3264회**, scope는 `code_rate_minute`입니다.
+  동기 출력은 카탈로그 상한과 **16000토큰** 중 작은 값이며, SDK가 정규화한 유료
+  reasoning 토큰을 포함합니다.
+- 태스크 TTL **120초**, 권장 heartbeat **30초**, provider timeout **60초**이며 SDK
+  재시도는 꺼져 있습니다. 호출 UUID와 요청 HMAC으로 의미 시도를 고정하며, 전송한 UUID의
+  재요청·변조는 다시 전송하지 않습니다. 상태 영수증에는 생성 텍스트가 없고 보관하지 않습니다.
+- 호출 입력 예약은 검증한 프롬프트·schema의 UTF-8 바이트 수에 framing 4096을 더한
+  보수적 tokenizer 상한입니다. 모델의 전체 context를 매번 예약하지 않습니다. 이 상한과
+  출력 상한을 호출 가격 snapshot에 고정하고, 실제 사용량이 넘으면 unknown hold를 보존합니다.
+- `CodeTaskReservation`과 `CodeManagedCall` 모두 서버가 정한 `productKey=code`를
+  저장합니다. `lib/codeManagedService.ts`는 기존 구매 크레딧 ledger와 공용 운영·provider
+  버킷을 사용합니다. 계정 잠금 → 공용 usage subject → `code-task:<userId>` → 버킷 → provider 버킷 순서이며,
+  플랜·entitlement의 금전 판정은 계정 잠금 후 같은 transaction에서 재조회합니다.
+  사용자 시간대 변경은 같은 계정·subject 잠금 아래 현재 day/token/plan-cost/전체-cost 버킷과
+  그 버킷을 참조하는 Code 태스크의 `dayStart`를 함께 이동합니다. 과거 날짜·월·provider UTC
+  버킷과 카탈로그/호출 가격 snapshot은 변경하지 않습니다.
+- 과금 영수증은 원래 `reservedCredits`, 누적 `settledCredits`, `releasedCredits`, 현재
+  `heldCredits`, `unknownHeldCredits`, 즉시 사용 가능한 `availableCredits`를 구분합니다.
+  호출별 `callCredits`는 별도입니다. 사용량이 확인된 schema 실패는 provider 비용과 사용량을
+  보존하고 기존 규칙대로 사용자 크레딧은 환급합니다.
+- 해제와 기존 maintenance는 쓰지 않았음이 확인된 몫만 환급합니다. 결과를 모르는 호출은
+  hold를 유지하고, 사용량 없이 청구하거나 같은 호출을 다시 보내지 않습니다.
+  **unknown hold의 해소에는 provider 증거와 수동 운영 대사가 필요합니다. A1은 이를
+  기한만으로 환급하지 않으며 운영 대사의 자동 완료를 구현했다고 주장하지 않습니다.**
+- 한도 거절은 기존 `recordChatLimitDecision`의 `code_reservation` phase와 해시 주체를
+  사용해 entitlement·운영 guardrail·동시 실행·rate를 구분합니다. 프롬프트·생성 JSON·소스·
+  파일 경로·자격증명은 태스크/호출 행과 진단에 저장하지 않습니다.
+- 로컬 검증은 `npm run test:code-managed`, `npm run test:code-managed-db`입니다.
+  DB 검증은 test 이름 표식이 있는 migration 완료 loopback `TEST_DATABASE_URL`을 명시하며,
+  운영 추론을 활성화하지 않습니다. migration은 `20261022000000_code_managed_execution`입니다.
+
+## 11. unknown hold의 증거 기반 운영 대사
+
+- `POST /api/admin/code/managed-reconciliation`은 별도
+  `CODE_MANAGED_RECONCILIATION_ENABLED=true`가 필요한 기본 비활성 경로입니다.
+  기존 owner 권한·최근 재인증·같은 출처·rate 제한을 사용합니다.
+- `callId`, 대사 UUID, 제한된 메타데이터 `evidenceRef`, `no_provider_usage | known_usage`를
+  받고 unknown 호출 하나만 처리합니다. known 사용량은 입력·출력·캐시·reasoning 상한과
+  동결 가격을 검증합니다. 범위 밖 사용량은 거절하며 hold를 줄이지 않습니다.
+- 원래 호출이 결과를 전달하지 못했으므로 새 사용자 청구는 0입니다. 검증한 provider 비용만
+  확정하며 다른 진행 중·unknown hold는 보존합니다. 원래 태스크는 종료해 자동 재개하지 않습니다.
+- 같은 대사 UUID와 내용은 멱등이며 내용이나 대상 변경은 409입니다. 상태·환급·기존
+  hashchain 감사행을 같은 transaction으로 쓰고 늦은 provider 응답은 이를 덮어쓰지 못합니다.
+- 계정 삭제는 lot/purchase 연결을 지우고 비개인 금전 합계만 남깁니다. 삭제된 계정의 대사는
+  전역 provider hold와 보존한 금전 합계만 정리하며 wallet이나 고객 식별자를 복원하지 않습니다.
+  운영자가 provider 증거를 확인하는 절차를 자동 증명으로 대신하지 않습니다.

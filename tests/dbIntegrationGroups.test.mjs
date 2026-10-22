@@ -155,3 +155,8 @@ test("the optimizer ledger and AMUX card DB suites run with the AMUX suites", ()
     assert.equal(dbIntegrationGroupOf(
         "tests/integration/chat-unified-optimizer-amux-test-card.db.test.ts"), "amux");
 });
+
+test("managed Code monetary scenarios run in the finance lane", () => {
+    assert.equal(dbIntegrationGroupOf(
+        "tests/integration/code-managed-execution.db.test.mjs"), "finance");
+});

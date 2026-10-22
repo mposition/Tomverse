@@ -10,6 +10,7 @@ datasource db {
 // ==========================================
 
 model User {
+  codeTaskReservations CodeTaskReservation[]
   id                            String        @id @default(cuid())
   name                          String?
   email                         String?       @unique
@@ -11591,4 +11592,72 @@ model ModelCatalogSnapshot {
 
   @@index([category, contentHash])
   @@index([category, version])
+}
+
+/// Code financial metadata only. Generated text and prompts are never stored.
+model CodeTaskReservation {
+  id String @id
+  userId String?
+  user User? @relation(fields:[userId], references:[id], onDelete:SetNull)
+  subjectKey String
+  clientTaskId String
+  requestDigest String
+  productKey String @default("code")
+  status String @default("active")
+  catalogVersion Int
+  contentHash String
+  modelPair Json
+  reservedCredits Int
+  settledCredits Int @default(0)
+  releasedCredits Int @default(0)
+  planHeldCredits Int
+  planDayHeld Boolean
+  addOnEntries Json
+  reservedCostMicroUsd BigInt
+  settledCostMicroUsd BigInt @default(0)
+  heldCostMicroUsd BigInt
+  planHeldCostMicroUsd BigInt
+  planFundingShare Float
+  dayStart DateTime @db.Timestamptz(6)
+  monthStart DateTime @db.Timestamptz(6)
+  leaseExpiresAt DateTime @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @db.Timestamptz(6)
+  calls CodeManagedCall[]
+  @@unique([subjectKey,clientTaskId])
+  @@index([status,leaseExpiresAt],map:"CodeTaskReservation_expiry")
+  @@index([userId,createdAt],map:"CodeTaskReservation_user")
+}
+
+model CodeManagedCall {
+  resolutionId String? @unique
+  resolutionDigest String?
+  resolutionAuditId String?
+  resolvedAt DateTime? @db.Timestamptz(6)
+  productKey String @default("code")
+  id String @id
+  reservationId String
+  reservation CodeTaskReservation @relation(fields:[reservationId],references:[id],onDelete:Restrict)
+  requestDigest String
+  role String
+  modelId String
+  provider String
+  status String @default("dispatched")
+  reservedCredits Int
+  settledCredits Int @default(0)
+  reservedCostMicroUsd BigInt
+  settledCostMicroUsd BigInt?
+  inputTokens Int?
+  outputTokens Int?
+  cachedInputTokens Int?
+  cacheWriteInputTokens Int?
+  reasoningTokens Int?
+  maxOutputTokens Int
+  pricingSnapshot Json
+  providerReportedModelId String?
+  latencyMs Int?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  completedAt DateTime? @db.Timestamptz(6)
+  @@index([reservationId,createdAt],map:"CodeManagedCall_task")
+  @@index([status,createdAt],map:"CodeManagedCall_active")
 }

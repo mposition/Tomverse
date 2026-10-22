@@ -7,7 +7,7 @@ import { getZonedDayWindow } from "../lib/userTimeZone.ts";
 const bucketId = (key, period, periodStart) =>
   `${key}|${period}|${periodStart.toISOString()}`;
 
-const createFakeTransaction = (initialBuckets) => {
+const createFakeTransaction = (initialBuckets, codeTasks = [], codeSchemaExists = true) => {
   const buckets = new Map(
     initialBuckets.map((bucket) => [
       bucketId(bucket.key, bucket.period, bucket.periodStart),
@@ -17,6 +17,12 @@ const createFakeTransaction = (initialBuckets) => {
 
   return {
     buckets,
+    async $queryRaw() { return [{ exists: codeSchemaExists }]; },
+    async $executeRaw(_query, nextStart, _now, key, previousStart) {
+      assert.equal(codeSchemaExists,true,'an absent Code table must never be queried');
+      for(const task of codeTasks)if(task.userId!==null&&task.subjectKey===key&&task.dayStart.getTime()===previousStart.getTime())task.dayStart=nextStart;
+      return 0;
+    },
     chatUsageBucket: {
       async findUnique({ where }) {
         const identity = where.key_period_periodStart;
@@ -53,6 +59,7 @@ test("moves and merges current daily usage so a time-zone change grants no reset
     { key, period: "day", periodStart: oldWindow.start, count: 7 },
     { key, period: "tokens-day", periodStart: oldWindow.start, count: 900 },
     { key, period: "cost-day", periodStart: oldWindow.start, count: 1200 },
+    { key, period: "op-cost-day", periodStart: oldWindow.start, count: 1500 },
     { key, period: "day", periodStart: nextWindow.start, count: 2 },
   ]);
 
@@ -63,7 +70,7 @@ test("moves and merges current daily usage so a time-zone change grants no reset
     now,
   });
 
-  assert.equal(result.movedPeriods, 3);
+  assert.equal(result.movedPeriods, 4);
   assert.equal(
     transaction.buckets.get(bucketId(key, "day", nextWindow.start)).count,
     9
@@ -76,10 +83,32 @@ test("moves and merges current daily usage so a time-zone change grants no reset
     transaction.buckets.get(bucketId(key, "cost-day", nextWindow.start)).count,
     1200
   );
+  assert.equal(transaction.buckets.get(bucketId(key,"op-cost-day",nextWindow.start)).count,1500);
   assert.equal(
     transaction.buckets.has(bucketId(key, "day", oldWindow.start)),
     false
   );
+});
+
+test("moves current Code refund references with their buckets, including closed tasks, while history stays put",async()=>{
+  const now=new Date('2026-10-22T03:00:00Z'),old=getZonedDayWindow('Australia/Brisbane',now),next=getZonedDayWindow('Asia/Seoul',now),key='user:test';
+  const tasks=[
+    {userId:'u',subjectKey:key,status:'active',dayStart:old.start},
+    {userId:'u',subjectKey:key,status:'closed',dayStart:old.start},
+    {userId:'u',subjectKey:key,status:'interrupted',dayStart:new Date(old.start.getTime()-86400000)},
+    {userId:null,subjectKey:'deleted-account',dayStart:old.start},
+    {userId:'other',subjectKey:'user:other',dayStart:old.start},
+  ];
+  await migrateCurrentDailyUsageBuckets(createFakeTransaction([],tasks),{key,previousTimeZone:old.timeZone,nextTimeZone:next.timeZone,now});
+  assert.equal(tasks[0].dayStart.getTime(),next.start.getTime());assert.equal(tasks[1].dayStart.getTime(),next.start.getTime());
+  assert.equal(tasks[2].dayStart.getTime(),old.start.getTime()-86400000);assert.equal(tasks[3].dayStart.getTime(),old.start.getTime());assert.equal(tasks[4].dayStart.getTime(),old.start.getTime());
+});
+
+test("existing time-zone settings work before the default-off Code table is migrated",async()=>{
+  const now=new Date('2026-10-22T03:00:00Z'),old=getZonedDayWindow('UTC',now),next=getZonedDayWindow('Australia/Brisbane',now),key='user:test';
+  const tx=createFakeTransaction([{key,period:'day',periodStart:old.start,count:7}],[],false);
+  const result=await migrateCurrentDailyUsageBuckets(tx,{key,previousTimeZone:'UTC',nextTimeZone:'Australia/Brisbane',now});
+  assert.equal(result.movedPeriods,1);assert.equal(tx.buckets.get(bucketId(key,'day',next.start)).count,7);
 });
 
 test("does not rewrite buckets when both zones share the same midnight instant", async () => {
