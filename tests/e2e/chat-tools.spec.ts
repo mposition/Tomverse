@@ -3,6 +3,7 @@ import {
   mockAuthenticatedApi,
   openRecentConversation,
 } from "./support/app-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
 
 // The "+" trigger opens the tools/actions sheet. Target its component identity
 // so adding another popover trigger cannot silently open the wrong sheet.
@@ -187,6 +188,7 @@ test("turning web search off does not repeat across a new chat", { tag: "@ui-ris
 test("Deep Research is gated behind login for guests", { tag: "@ui-risk" }, async ({ page }) => {
   const { prepareGuestPage } = await import("./support/app-fixtures");
   await prepareGuestPage(page, "en");
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
   await page.goto("/review");
 
   await toolsMenuTrigger(page).click();
