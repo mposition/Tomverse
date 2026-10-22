@@ -104,6 +104,8 @@ const numeric = (value: bigint) => {
 async function transaction<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
     return prisma.$transaction(async (tx) => {
         await lockCreditAccount(tx, userId);
+        // Settings moves current daily buckets under this same subject lock.
+        await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtext(${getUserChatUsageKey(userId)}))`;
         await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtext(${`code-task:${userId}`}))`;
         return fn(tx);
     });

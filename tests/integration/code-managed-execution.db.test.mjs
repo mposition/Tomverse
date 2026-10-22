@@ -55,6 +55,16 @@ test('Code managed inference with migrated local schema and real shared credit l
   const owner={user:{id:'synthetic-owner',email:'owner@example.invalid',authenticatedAt:new Date().toISOString()},expires:new Date(Date.now()+3600000).toISOString()};
   const reconcile=input=>service.reconcileCodeManagedCall(owner,new Request('https://tomverse.app/api/admin/code/managed-reconciliation',{method:'POST'}),input);
   const waitPending=async count=>{for(let i=0;i<1000;i++){if(pending.length>=count)return;await new Promise(r=>setTimeout(r,5));}throw new Error('fixture provider did not start');};
+  const changeTimeZone=async(userId,nextTimeZone,abort=false)=>db.$transaction(async tx=>{
+    const {lockCreditAccount}=await import(mod('lib/creditDebt.ts')),{getUserChatUsageKey}=await import(mod('lib/chatSecurity.ts'));
+    const {migrateCurrentDailyUsageBuckets}=await import(mod('lib/userDailyUsage.ts'));
+    await lockCreditAccount(tx,userId);const key=getUserChatUsageKey(userId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    const settings=await tx.userSettings.findUnique({where:{userId}});
+    const result=await migrateCurrentDailyUsageBuckets(tx,{key,previousTimeZone:settings.timeZone,nextTimeZone,now:new Date()});
+    await tx.userSettings.update({where:{userId},data:{timeZone:nextTimeZone}});
+    if(abort)throw new Error('synthetic settings transaction rollback');return result;
+  });
   try{
     await t.test('default-off produces no reservation or provider call',async()=>{
       const user=await newUser(),before=dispatches;process.env.CODE_MANAGED_EXECUTION_ENABLED='false';
@@ -279,6 +289,87 @@ test('Code managed inference with migrated local schema and real shared credit l
         mode='success';pending.splice(0).forEach(r=>r());await late;
         assert.equal((await db.codeManagedCall.findUnique({where:{id:req.callId}})).resolutionAuditId,resolved.auditLogId);
       }finally{mode='success';pending.splice(0).forEach(r=>r());await late;}
+    });
+    await t.test('time-zone migration moves mixed-funded task holds, then release and late settlement refund the moved buckets',async tt=>{
+      tt.mock.timers.enable({apis:['Date'],now:new Date('2026-10-22T03:00:00Z')});
+      let running;
+      try{
+        await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
+        const {getZonedDayWindow}=await import(mod('lib/userTimeZone.ts')),{getUserChatUsageKey,usagePeriodStart}=await import(mod('lib/chatSecurity.ts'));
+        const user=await newUser(),key=getUserChatUsageKey(user),old=getZonedDayWindow('Australia/Brisbane',new Date()),next=getZonedDayWindow('Asia/Seoul',new Date());
+        await db.userSettings.create({data:{userId:user,timeZone:'Australia/Brisbane',defaultModel:'gpt-6-luna'}});
+        const lot=await db.creditLot.create({data:{userId:user,source:'synthetic',originalCredits:100,remainingCredits:100,originalFundedCostMicroUsd:4000000n,remainingFundedCostMicroUsd:4000000n,expiresAt:new Date(Date.now()+3600000)}});
+        await db.chatUsageBucket.create({data:{key,period:'month',periodStart:usagePeriodStart('month',new Date()),count:2990n}});
+        for(const [period,count] of [['day',7],['cost-day',11],['op-cost-day',13]]){
+          await db.chatUsageBucket.create({data:{key,period,periodStart:old.start,count:BigInt(count)}});
+          await db.chatUsageBucket.create({data:{key,period,periodStart:next.start,count:2n}});
+        }
+        const a=await reserve(user,20),b=await reserve(user,10),settledRequest=call(b.reservationId);
+        // Align the synthetic database clock with this test's Date clock.
+        mode='pending';const alreadySettled=service.handleCodeManaged(user,settledRequest);await waitPending(1);
+        await db.codeManagedCall.update({where:{id:settledRequest.callId},data:{createdAt:new Date()}});mode='success';pending.splice(0).forEach(r=>r());await alreadySettled;await release(user,b.reservationId);
+        const settledCost=(await db.codeManagedCall.findUnique({where:{id:settledRequest.callId}})).settledCostMicroUsd;
+        const req=call(a.reservationId);mode='pending';running=service.handleCodeManaged(user,req);await waitPending(1);
+        await db.codeManagedCall.update({where:{id:req.callId},data:{createdAt:new Date()}});
+        const before=await db.codeTaskReservation.findMany({where:{id:{in:[a.reservationId,b.reservationId]}}}),providerBefore=await db.chatUsageBucket.findMany({where:{key:'provider:openai'}});
+        assert.ok(old.end>new Date());assert.ok(old.start<next.start);
+        await changeTimeZone(user,'Asia/Seoul');
+        const moved=await db.codeTaskReservation.findMany({where:{id:{in:[a.reservationId,b.reservationId]}}});assert.ok(moved.every(row=>row.dayStart.getTime()===next.start.getTime()));
+        assert.deepEqual(moved.map(row=>[row.id,row.catalogVersion,row.contentHash,row.modelPair]).sort(),before.map(row=>[row.id,row.catalogVersion,row.contentHash,row.modelPair]).sort());
+        assert.deepEqual(await db.chatUsageBucket.findMany({where:{key:'provider:openai'}}),providerBefore);
+        const bucket=period=>db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period,periodStart:next.start}}});
+        assert.equal((await bucket('day')).count,19n);assert.equal((await bucket('cost-day')).count,400013n);assert.equal((await bucket('op-cost-day')).count,800015n+settledCost);
+        await release(user,a.reservationId);await release(user,b.reservationId);mode='success';pending.splice(0).forEach(r=>r());await running;running=undefined;
+        const charged=await db.codeManagedCall.findUnique({where:{id:req.callId}}),cost=charged.settledCostMicroUsd,planCost=(cost+1n)/2n;
+        assert.equal((await bucket('day')).count,10n);assert.equal((await bucket('cost-day')).count,13n+planCost);assert.equal((await bucket('op-cost-day')).count,15n+cost+settledCost);
+        assert.equal((await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period:'month',periodStart:usagePeriodStart('month',new Date())}}})).count,2991n);
+        const restored=await db.creditLot.findUnique({where:{id:lot.id}});assert.equal(restored.remainingCredits,99);assert.equal(restored.remainingFundedCostMicroUsd,4000000n-(cost-planCost)-settledCost);
+        assert.equal((await db.codeTaskReservation.findUnique({where:{id:a.reservationId}})).releasedCredits,19);assert.equal((await db.codeTaskReservation.findUnique({where:{id:b.reservationId}})).releasedCredits,9);
+        const checkpoint=await bucket('day');await release(user,a.reservationId);assert.deepEqual(await bucket('day'),checkpoint);
+      }finally{mode='success';pending.splice(0).forEach(r=>r());if(running)await running.catch(()=>{});tt.mock.timers.reset();await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});}
+    });
+    await t.test('time-zone migrations preserve DST windows, atomic rollback and previous-day task ownership',async tt=>{
+      const {getZonedDayWindow}=await import(mod('lib/userTimeZone.ts')),{getUserChatUsageKey}=await import(mod('lib/chatSecurity.ts'));
+      for(const fixture of [
+        {at:'2026-03-08T06:59:00Z',changeAt:'2026-03-08T07:01:00Z',from:'America/New_York',to:'UTC',moves:true,hours:23},
+        {at:'2026-11-01T05:59:00Z',changeAt:'2026-11-01T06:01:00Z',from:'America/New_York',to:'Australia/Brisbane',moves:true,hours:25},
+        {at:'2026-10-21T23:59:00Z',changeAt:'2026-10-22T00:01:00Z',from:'UTC',to:'Asia/Seoul',moves:false,hours:24},
+      ]){
+        tt.mock.timers.enable({apis:['Date'],now:new Date(fixture.at)});
+        try{
+          await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
+          const user=await newUser(),key=getUserChatUsageKey(user),original=getZonedDayWindow(fixture.from,new Date());assert.equal(original.end-original.start,fixture.hours*3600000);
+          await db.userSettings.create({data:{userId:user,timeZone:fixture.from,defaultModel:'gpt-6-luna'}});const held=await reserve(user,2);
+          tt.mock.timers.setTime(new Date(fixture.changeAt).getTime());const next=getZonedDayWindow(fixture.to,new Date());
+          await assert.rejects(()=>changeTimeZone(user,fixture.to,true),/synthetic settings transaction rollback/);
+          assert.equal((await db.userSettings.findUnique({where:{userId:user}})).timeZone,fixture.from);assert.equal((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).dayStart.getTime(),original.start.getTime());
+          const bucketBefore=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period:'day',periodStart:original.start}}});assert.equal(bucketBefore.count,2n);
+          await changeTimeZone(user,fixture.to);const reference=(await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).dayStart;
+          assert.equal(reference.getTime(),(fixture.moves?next.start:original.start).getTime());
+          if(fixture.moves){
+            const where={key_period_periodStart:{key,period:'day',periodStart:next.start}};await db.chatUsageBucket.update({where,data:{count:0n}});
+            await rejectCode(()=>release(user,held.reservationId),'CODE_ACCOUNTING_UNAVAILABLE');await db.chatUsageBucket.update({where,data:{count:2n}});
+          }
+          await release(user,held.reservationId);assert.equal((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).releasedCredits,2);
+          for(const period of ['day','cost-day','op-cost-day']){const row=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period,periodStart:reference}}});assert.equal(row.count,0n);}
+        }finally{tt.mock.timers.reset();await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});}
+      }
+      await db.modelCatalogSnapshot.update({where:{version:snapshot.version},data:{coverageUntil:new Date(Date.now()+3600000)}});
+    });
+    await t.test('existing settings migration works before the Code tables exist',async()=>{
+      const user=await newUser(),{getUserChatUsageKey}=await import(mod('lib/chatSecurity.ts')),{getZonedDayWindow}=await import(mod('lib/userTimeZone.ts'));
+      const old=getZonedDayWindow('UTC',new Date()),next=getZonedDayWindow('Australia/Brisbane',new Date()),key=getUserChatUsageKey(user);
+      await db.userSettings.create({data:{userId:user,timeZone:'UTC',defaultModel:'gpt-6-luna'}});
+      await db.chatUsageBucket.create({data:{key,period:'day',periodStart:old.start,count:7n}});
+      await assert.rejects(()=>db.$transaction(async tx=>{
+        await tx.$executeRaw`DROP TABLE "CodeManagedCall"`;await tx.$executeRaw`DROP TABLE "CodeTaskReservation"`;
+        const {migrateCurrentDailyUsageBuckets}=await import(mod('lib/userDailyUsage.ts'));
+        await migrateCurrentDailyUsageBuckets(tx,{key,previousTimeZone:'UTC',nextTimeZone:'Australia/Brisbane',now:new Date()});
+        assert.equal((await tx.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period:'day',periodStart:next.start}}})).count,7n);
+        throw new Error('restore synthetic pre-Code schema');
+      }),/restore synthetic pre-Code schema/);
+      assert.equal((await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period:'day',periodStart:old.start}}})).count,7n);
+      assert.ok(await db.codeTaskReservation.count()>0);
     });
     await t.test('migration rejects product spoofing and account anonymisation clears linkage',async()=>{
       const user=await newUser(),held=await reserve(user);await release(user,held.reservationId);

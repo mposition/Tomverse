@@ -103,6 +103,18 @@ test("every module that moves credit lots also locks the account", () => {
     );
 });
 
+test("Code money writes and settings time-zone migration share account then usage-subject order",()=>{
+    const code=readFileSync(join(libDir,'codeManagedService.ts'),'utf8');
+    const body=code.slice(code.indexOf('async function transaction<'),code.indexOf('const receipt ='));
+    assert.ok(body.indexOf('lockCreditAccount(tx, userId)')<body.indexOf('getUserChatUsageKey(userId)'));
+    assert.ok(body.indexOf('getUserChatUsageKey(userId)')<body.indexOf('code-task:${userId}'));
+    const settings=readFileSync(join(root,'app/api/user/settings/route.ts'),'utf8');
+    const tx=settings.slice(settings.indexOf('const updatedSettings = await prisma.$transaction'),settings.indexOf('// Model fields always move together'));
+    assert.ok(tx.indexOf('lockCreditAccount(tx, userId)')>=0);
+    assert.ok(tx.indexOf('lockCreditAccount(tx, userId)')<tx.indexOf('pg_advisory_xact_lock'));
+    assert.ok(tx.indexOf('pg_advisory_xact_lock')<tx.indexOf('migrateCurrentDailyUsageBuckets(tx'));
+});
+
 test("a chunk report locks its fenced run row before any chunk row", () => {
     // task_9d445985: a reclaim takes the run and then the dead generation's
     // chunks, so a report that took its chunk first could deadlock with it.

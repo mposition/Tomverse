@@ -175,8 +175,11 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   출력 상한을 호출 가격 snapshot에 고정하고, 실제 사용량이 넘으면 unknown hold를 보존합니다.
 - `CodeTaskReservation`과 `CodeManagedCall` 모두 서버가 정한 `productKey=code`를
   저장합니다. `lib/codeManagedService.ts`는 기존 구매 크레딧 ledger와 공용 운영·provider
-  버킷을 사용합니다. 계정 잠금 → `code-task:<userId>` → 버킷 → provider 버킷 순서이며,
+  버킷을 사용합니다. 계정 잠금 → 공용 usage subject → `code-task:<userId>` → 버킷 → provider 버킷 순서이며,
   플랜·entitlement의 금전 판정은 계정 잠금 후 같은 transaction에서 재조회합니다.
+  사용자 시간대 변경은 같은 계정·subject 잠금 아래 현재 day/token/plan-cost/전체-cost 버킷과
+  그 버킷을 참조하는 Code 태스크의 `dayStart`를 함께 이동합니다. 과거 날짜·월·provider UTC
+  버킷과 카탈로그/호출 가격 snapshot은 변경하지 않습니다.
 - 과금 영수증은 원래 `reservedCredits`, 누적 `settledCredits`, `releasedCredits`, 현재
   `heldCredits`, `unknownHeldCredits`, 즉시 사용 가능한 `availableCredits`를 구분합니다.
   호출별 `callCredits`는 별도입니다. 사용량이 확인된 schema 실패는 provider 비용과 사용량을
