@@ -26,7 +26,7 @@ const body = z.union([
       rcSha: SHA.nullable(),
       failure: z.string().regex(/^[a-z_]{1,40}$/).nullable(),
       picks: z
-        .array(z.object({ number: PR, outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity"]) }).strict())
+        .array(z.object({ number: PR, outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows"]) }).strict())
         .max(100),
     })
     .strict(),
