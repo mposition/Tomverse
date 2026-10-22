@@ -151,18 +151,26 @@ test("the merge lane runs only on a declared, empty kill switch; unset is unread
   assert.equal(decideQaReleaseServiceStart("mergeLane", noFlag), "disabled");
 });
 
-test("the release train starts on its own flag, with the lane off, and stops on the kill switch", async () => {
+test("the release train is its own service: its own names, its flag is its switch", async () => {
   const { decideQaReleaseTrainStart } = await import("../lib/qaReleaseServiceEnvCore.ts");
-  const train = (overrides = {}) => laneEnv({ QA_RELEASE_MERGE_LANE_ENABLED: "false", QA_RELEASE_TRAIN_ENABLED: "true", ...overrides });
+  const train = (overrides = {}) => ({
+    QA_RELEASE_MERGE_LANE_SECRET: "s".repeat(40),
+    QA_RELEASE_MERGE_LANE_APP_ID: "1",
+    QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY: "k",
+    QA_RELEASE_CONTROL_REVISION: "3",
+    QA_RELEASE_TRAIN_ENABLED: "true",
+    ...overrides,
+  });
   assert.equal(decideQaReleaseTrainStart(train()), "run");
   assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_TRAIN_SLOTS: "9,15" })), "run");
-  // The develop lane's own decision is unchanged: off.
-  assert.equal(decideQaReleaseServiceStart("mergeLane", train()), "disabled");
-  // The Railway token is the develop lane's, not the train's.
-  assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN: undefined })), "run");
   for (const flag of [undefined, "false", "TRUE", "1"]) assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_TRAIN_ENABLED: flag })), "disabled", String(flag));
-  for (const value of [undefined, "1", " "]) assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: value })), "disabled", String(value));
   assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY: "" })), "refuse");
   assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_CONTROL_REVISION: "0" })), "refuse");
-  assert.equal(decideQaReleaseTrainStart(train({ GITHUB_TOKEN: "x" })), "refuse");
+  // The develop lane's names are not the train's: a lane variable left on the
+  // train service stops it, as any unexpected name does.
+  for (const name of ["QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN", "QA_RELEASE_MERGE_LANE_ENABLED", "QA_RELEASE_MERGE_LANE_KILL_SWITCH", "GITHUB_TOKEN"]) {
+    assert.equal(decideQaReleaseTrainStart(train({ [name]: "x" })), "refuse", name);
+  }
+  // And the train's are not the lane's.
+  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_TRAIN_ENABLED: "true" })), "refuse");
 });
