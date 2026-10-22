@@ -106,6 +106,12 @@ const LOG = join("/state", "publishes.json");
 const MIRROR_HEAD = join("/state", "mirror.git", "HEAD");
 const BUNDLE = Buffer.from("# v2 git bundle\n");
 const gitSubs = (calls) => calls.map(({ args }) => (args[0] === "-C" ? args[2] : args[0]));
+/** The git config git reads from the environment, as key -> value. */
+const envConfig = (env = {}) =>
+  Object.fromEntries(
+    Array.from({ length: Number(env.GIT_CONFIG_COUNT ?? 0) }, (_, index) => [env[`GIT_CONFIG_KEY_${index}`], env[`GIT_CONFIG_VALUE_${index}`]]),
+  );
+const authHeaderOf = (env) => envConfig(env)["http.https://github.com/.extraheader"];
 
 test("a gateway without its settings refuses every request", async () => {
   const { deps, fetchCalls } = fakeDeps({ env: { ...ENV, AUTOREC_GITHUB_TOKEN: "" } });
@@ -219,7 +225,9 @@ test("publish re-checks the scope against its own develop and never pushes an ou
   // It judged the change against develop as fetched from GitHub, without credentials.
   const fetchDevelop = gitCalls.find(({ args }) => args[2] === "fetch" && args.includes("+refs/heads/develop:refs/remotes/origin/develop"));
   assert.ok(fetchDevelop);
-  assert.equal(fetchDevelop.options.env.GIT_CONFIG_COUNT, undefined);
+  assert.equal(authHeaderOf(fetchDevelop.options.env), undefined);
+  // HTTP/1.1: an HTTP/2 stream from the host was cut mid-pack on a large fetch.
+  assert.equal(envConfig(fetchDevelop.options.env)["http.version"], "HTTP/1.1");
   assert.equal(gitCalls[0].args[0], "init");
 });
 
@@ -259,11 +267,12 @@ test("publish pushes create-only with the token in git's environment, then adopt
   assert.ok(push.args.includes(`--force-with-lease=refs/heads/${BRANCH}:`));
   assert.ok(push.args.includes(`${HEAD}:refs/heads/${BRANCH}`));
   assert.ok(!push.args.some((arg) => arg.includes(ENV.AUTOREC_GITHUB_TOKEN)));
-  const header = Buffer.from(push.options.env.GIT_CONFIG_VALUE_0.replace("AUTHORIZATION: basic ", ""), "base64").toString();
+  const header = Buffer.from(authHeaderOf(push.options.env).replace("AUTHORIZATION: basic ", ""), "base64").toString();
   assert.equal(header, `x-access-token:${ENV.AUTOREC_GITHUB_TOKEN}`);
   assert.equal(push.options.env.GIT_CONFIG_GLOBAL, "/dev/null");
+  assert.equal(envConfig(push.options.env)["http.version"], "HTTP/1.1");
   // Only the push carries the token.
-  assert.equal(gitCalls.filter(({ options }) => options.env.GIT_CONFIG_VALUE_0).length, 1);
+  assert.equal(gitCalls.filter(({ options }) => authHeaderOf(options.env)).length, 1);
   // No init: the mirror exists. The bundle file is gone afterwards.
   assert.ok(!gitSubs(gitCalls).includes("init"));
   assert.deepEqual(Object.keys(store).filter((key) => key.endsWith(".bundle")), []);
@@ -297,7 +306,7 @@ test("an unclear push is looked up once: there, absent, or still unknown", async
   });
   assert.equal((await handleRequest(landed.deps, publishHeader(), BUNDLE)).status, "published");
   const lookup = landed.gitCalls.find(({ args }) => args[2] === "ls-remote");
-  assert.equal(lookup.options.env.GIT_CONFIG_VALUE_0, undefined);
+  assert.equal(authHeaderOf(lookup.options.env), undefined);
 
   const absent = fakeDeps({ gitAnswers: { push: failing, "ls-remote": { code: 0, stdout: "", stderr: "" } } });
   assert.deepEqual(await handleRequest(absent.deps, publishHeader(), BUNDLE), { status: "refused", code: "push_failed" });
