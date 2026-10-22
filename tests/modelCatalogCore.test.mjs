@@ -12,6 +12,7 @@ import {
 import {
   canonicalJson,
   catalogContentHash,
+  decideSnapshotRenewal,
   effectiveRevisions,
   imageExecutionDrift,
   imageExecutionProfile,
@@ -23,6 +24,7 @@ import {
   resolveImageCatalog,
   snapshotCoverageUntil,
   snapshotIsCurrent,
+  SNAPSHOT_RENEWAL_WINDOW_MS,
   stalePricingVersions,
 } from "../lib/modelCatalogCore.ts";
 import { codingDraftFromAnswer, draftPricingVersion, imageDraftFromAnswer, pageToText } from "../lib/modelCatalogDraftLlm.ts";
@@ -297,6 +299,31 @@ test("a reserved image request runs only with the profile it was priced with", (
   assert.equal(imageExecutionDrift(snapshot, null), "model_missing");
   // A reservation from before the field existed has nothing to compare.
   assert.equal(imageExecutionDrift({ outputCostMicroUsd: 1 }, null), null);
+});
+
+test("the scheduled renewal extends identical content inside the last week and nothing else", () => {
+  const day = 24 * 60 * 60 * 1000;
+  const same = "a".repeat(64);
+  const snapshot = (daysLeft, contentHash = same) => ({
+    contentHash,
+    coverageUntil: new Date(NOW.getTime() + daysLeft * day),
+  });
+  assert.equal(SNAPSHOT_RENEWAL_WINDOW_MS, 7 * day);
+  // The first snapshot is a person's to publish.
+  assert.equal(decideSnapshotRenewal(null, same, NOW), "no_snapshot");
+  // Plenty of coverage left: nothing to do.
+  assert.equal(decideSnapshotRenewal(snapshot(29), same, NOW), "not_due");
+  assert.equal(decideSnapshotRenewal(snapshot(7.5), same, NOW), "not_due");
+  // Exactly a week left is already due (the manual publish uses the same edge).
+  assert.equal(decideSnapshotRenewal(snapshot(7), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(snapshot(1), same, NOW), "renew");
+  // Past coverage with content still judged the same is renewed too.
+  assert.equal(decideSnapshotRenewal(snapshot(-3), same, NOW), "renew");
+  // Changed content is never renewed by the job, due or not, expired or not.
+  const other = "b".repeat(64);
+  assert.equal(decideSnapshotRenewal(snapshot(29), other, NOW), "content_changed");
+  assert.equal(decideSnapshotRenewal(snapshot(2), other, NOW), "content_changed");
+  assert.equal(decideSnapshotRenewal(snapshot(-3), other, NOW), "content_changed");
 });
 
 test("page text drops scripts and tags", () => {

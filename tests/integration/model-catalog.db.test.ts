@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { getImageModel, IMAGE_MODEL_REGISTRY, resetActiveImageModelCatalog } from "@/lib/imageModelRegistry";
 import {
   latestCodingSnapshot,
   publishCodingSnapshot,
   refreshImageModelCatalog,
+  renewCodingSnapshotIfUnchanged,
 } from "@/lib/modelCatalog";
 import {
   applyCatalogDraft,
@@ -243,6 +245,99 @@ test("a coding model is published in an immutable snapshot only once admitted an
     (error: unknown) =>
       error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("terms_do_not_allow")
   );
+});
+
+test("the scheduled renewal extends identical content once, as the system, and leaves a change to a person", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const renewedAudits = () => auditCount("model_catalog.snapshot_renewed");
+  const versions = () => prisma.modelCatalogSnapshot.count({ where: { category: "coding" } });
+  const latest = (await latestCodingSnapshot())!;
+  const versionsBefore = await versions();
+  const auditsBefore = await renewedAudits();
+
+  // A fresh snapshot is not due: nothing is written.
+  assert.equal((await renewCodingSnapshotIfUnchanged()).decision, "not_due");
+  assert.equal(await versions(), versionsBefore);
+
+  // Inside the last week two concurrent runs add exactly one version.
+  const near = new Date(latest.coverageUntil.getTime() - 3 * day);
+  const runs = await Promise.all([
+    renewCodingSnapshotIfUnchanged({ now: near }),
+    renewCodingSnapshotIfUnchanged({ now: near }),
+  ]);
+  assert.deepEqual(runs.map((run) => run.decision).sort(), ["not_due", "renew"]);
+  assert.equal(await versions(), versionsBefore + 1);
+  const renewed = (await latestCodingSnapshot())!;
+  assert.equal(renewed.version > latest.version, true);
+  assert.equal(renewed.contentHash, latest.contentHash);
+  assert.deepEqual(renewed.models, latest.models);
+  assert.equal(renewed.coverageUntil.getTime(), near.getTime() + 30 * day);
+
+  // One system audit entry, in the chain, naming the actor and no person.
+  assert.equal(await renewedAudits(), auditsBefore + 1);
+  const entry = await prisma.adminAuditLog.findFirst({
+    where: { action: "model_catalog.snapshot_renewed" },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.equal(entry?.actorUserId, null);
+  assert.equal(entry?.targetType, "ModelCatalogSnapshot");
+  assert.equal(entry?.targetId, String(renewed.version));
+  assert.equal((entry?.metadata as { systemActor?: string } | null)?.systemActor, "model-catalog-renewal");
+  const stored = await prisma.modelCatalogSnapshot.findUnique({ where: { version: renewed.version } });
+  assert.equal(stored?.publishedById, null);
+
+  // Content an operator changed is not renewed by the job, even when due.
+  await updateCatalogEntry({ category: "coding", modelId: "gpt-catalog-test", patch: { enabled: false }, session });
+  const changed = await renewCodingSnapshotIfUnchanged({ now: new Date(renewed.coverageUntil.getTime() - day) });
+  assert.equal(changed.decision, "content_changed");
+  assert.equal(changed.version, renewed.version);
+  assert.equal(await versions(), versionsBefore + 1);
+  assert.equal(await renewedAudits(), auditsBefore + 1);
+  await updateCatalogEntry({ category: "coding", modelId: "gpt-catalog-test", patch: { enabled: true }, session });
+});
+
+test("a change committed while the renewal waits for the lock is judged, not skipped", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const latest = (await latestCodingSnapshot())!;
+  const versionsBefore = await prisma.modelCatalogSnapshot.count({ where: { category: "coding" } });
+  const key = { category_modelId: { category: "coding", modelId: "gpt-catalog-test" } };
+
+  // Hold the chain lock, start a due renewal behind it, commit an operator's
+  // change meanwhile, then let the renewal go: it must read after the lock.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked!: () => void;
+  const holding = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const holder = prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    locked();
+    await gate;
+  });
+  await holding;
+  const renewal = renewCodingSnapshotIfUnchanged({ now: new Date(latest.coverageUntil.getTime() - 3 * day) });
+  // Wait until the database reports a session blocked on the advisory lock,
+  // rather than guessing a delay: the change below must land behind the wait.
+  for (let attempt = 0; ; attempt += 1) {
+    const waiting = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT count(*) AS count FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+    `;
+    if (Number(waiting[0]?.count ?? 0) > 0) break;
+    assert.ok(attempt < 100, "the renewal never waited for the chain lock");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await prisma.modelCatalogEntry.update({ where: key, data: { enabled: false } });
+  release();
+  await holder;
+
+  const result = await renewal;
+  assert.equal(result.decision, "content_changed");
+  assert.equal(result.version, latest.version);
+  assert.equal(await prisma.modelCatalogSnapshot.count({ where: { category: "coding" } }), versionsBefore);
+  await prisma.modelCatalogEntry.update({ where: key, data: { enabled: true } });
 });
 
 test("a stored draft is audited, applied in one step, and cleared", async () => {
