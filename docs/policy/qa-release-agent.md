@@ -284,15 +284,18 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       회차만 그 출발을 시작하며, 그 출발의 브랜치 `release/train-YYYYMMDD-HHMM`(AEST)이 GitHub에 있으면 다시 시작하지 않습니다.
     - **실을 PR**은 develop에 병합됐고 `main:next` 라벨이 붙은 PR입니다. 라벨은 사람이나 개발 세션이 붙이고 에이전트는 읽기만
       합니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 실을 PR이 없으면 열지 않습니다. 한 열차는 최대 30개를 싣고 나머지는
-      다음 열차를 탑니다.
+      다음 열차를 탑니다. 라벨은 main에 들어간 뒤에도 남으므로 검색 결과를 모든 페이지(GitHub 검색 상한 1,000건)까지 읽습니다.
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뛰고, 충돌하는 PR은 abort하고 뺍니다. 뺀 PR과
-      이유는 PR 본문과 Admin에 보이고 라벨은 그대로 둡니다. 충돌 해결은 하지 않습니다.
+      이유는 PR 본문과 Admin에 보이고 라벨은 그대로 둡니다. 충돌 해결은 하지 않습니다. `.github/workflows/**`를 바꾸는 PR도
+      되돌려 뺍니다: App에 workflows 권한이 없어 그 파일이 든 push는 GitHub이 거절하고, 열차 전체가 실패하기 때문입니다. 그런 PR은
+      `release/**`나 `hotfix/**`로 따로 냅니다.
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
       — 운영자가 `npm run merge-train`으로 합니다. label·comment·status는 쓰지 않습니다.
-    - **스위치**: `QA_RELEASE_TRAIN_ENABLED`가 정확히 `true`일 때만 돌고(기본 꺼짐), 병합 레인의 kill switch가 비어 있지 않으면
-      멈춥니다. develop 레인(`QA_RELEASE_MERGE_LANE_ENABLED`)과는 따로 켭니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
+    - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 10분마다)에서 `QA_RELEASE_TRAIN_ENABLED`가 정확히
+      `true`일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
+      레인을 함께 멈추지 않게 하기 위해서입니다. 레인의 App과 앱 secret을 같이 쓰므로 앱 쪽에 새로 둘 것은 없습니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
       revision이 최신 운영자 제어 revision과 같고 레인이 latch되지 않았을 때만이며, 승인과 결과를 병합 레인 actor의 시스템 감사
       행(`qa_release.train_admitted`, `qa_release.train_reported`)으로 남깁니다. 전용 테이블은 없습니다.
     - **ruleset**: 7항의 update ruleset은 App의 develop 밖 브랜치 생성을 막으므로, 켜기 전에 운영자가 `refs/heads/release/train-*`를

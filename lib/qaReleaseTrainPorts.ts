@@ -20,6 +20,9 @@ import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
 const REPOSITORY = "mposition/Tomverse";
 const API = `https://api.github.com/repos/${REPOSITORY}`;
 const SHA = /^[0-9a-f]{40}$/;
+/** The search API's own ceiling: 10 pages of 100. */
+const SEARCH_MAX_PAGES = 10;
+const PULL_READS_AT_ONCE = 8;
 const run = promisify(execFile);
 
 type Json = Record<string, unknown>;
@@ -43,6 +46,17 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
     });
     return { status: response.status, json: () => JSON.parse(response.text) as unknown };
   };
+  // The pull request itself is the authority: the search index can lag, and
+  // removing the label takes a pull request off.
+  const readCargo = async (number: number): Promise<QaReleaseTrainCandidate | null> => {
+    const pull = await request("GET", `${API}/pulls/${number}`);
+    if (pull.status !== 200) throw new Error(`github_${pull.status}`);
+    const data = record(pull.json());
+    const labels = Array.isArray(data.labels) ? data.labels.map((label) => record(label).name) : [];
+    if (!labels.includes(QA_RELEASE_TRAIN_LABEL)) return null;
+    if (record(data.base).ref !== "develop" || typeof data.merged_at !== "string" || typeof data.merge_commit_sha !== "string") return null;
+    return { number, title: String(data.title ?? ""), mergeCommitSha: data.merge_commit_sha, mergedAt: data.merged_at };
+  };
   return {
     async branchExists(branch) {
       const answer = await request("GET", `${API}/git/ref/heads/${branch}`);
@@ -59,23 +73,27 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
     },
     async labelledCargo() {
       const q = encodeURIComponent(`repo:${REPOSITORY} is:pr is:merged base:develop label:"${QA_RELEASE_TRAIN_LABEL}"`);
-      const search = await request("GET", `https://api.github.com/search/issues?q=${q}&per_page=100`);
-      if (search.status !== 200) throw new Error(`github_${search.status}`);
-      const items = record(search.json()).items;
-      if (!Array.isArray(items)) throw new Error("github_shape");
+      // Every page: the label stays on a pull request after it reaches main, so
+      // the labelled set only grows, and a first page of 100 eventually missed
+      // the newest. Sorted by creation for a stable page order; the search API
+      // serves at most 1,000 results.
+      const numbers = new Set<number>();
+      for (let page = 1; page <= SEARCH_MAX_PAGES; page += 1) {
+        const search = await request("GET", `https://api.github.com/search/issues?q=${q}&sort=created&order=asc&per_page=100&page=${page}`);
+        if (search.status !== 200) throw new Error(`github_${search.status}`);
+        const items = record(search.json()).items;
+        if (!Array.isArray(items)) throw new Error("github_shape");
+        for (const item of items) {
+          const number = record(item).number;
+          if (typeof number === "number") numbers.add(number);
+        }
+        if (items.length < 100) break;
+      }
+      const ordered = [...numbers];
       const cargo: QaReleaseTrainCandidate[] = [];
-      for (const item of items.slice(0, 100)) {
-        const number = record(item).number;
-        if (typeof number !== "number") continue;
-        const pull = await request("GET", `${API}/pulls/${number}`);
-        if (pull.status !== 200) throw new Error(`github_${pull.status}`);
-        const data = record(pull.json());
-        // The search index can lag: the pull request itself is the authority,
-        // its label included -- removing the label takes a pull request off.
-        const labels = Array.isArray(data.labels) ? data.labels.map((label) => record(label).name) : [];
-        if (!labels.includes(QA_RELEASE_TRAIN_LABEL)) continue;
-        if (record(data.base).ref !== "develop" || typeof data.merged_at !== "string" || typeof data.merge_commit_sha !== "string") continue;
-        cargo.push({ number, title: String(data.title ?? ""), mergeCommitSha: data.merge_commit_sha, mergedAt: data.merged_at });
+      for (let index = 0; index < ordered.length; index += PULL_READS_AT_ONCE) {
+        const batch = await Promise.all(ordered.slice(index, index + PULL_READS_AT_ONCE).map((number) => readCargo(number)));
+        for (const candidate of batch) if (candidate) cargo.push(candidate);
       }
       return cargo;
     },
@@ -133,6 +151,15 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
         const before = (await git(["rev-parse", "HEAD"])).stdout;
         const picked = await git(["cherry-pick", "-m", "1", pull.mergeCommitSha], { allowFail: true });
         if (picked.ok && (await git(["rev-parse", "HEAD"])).stdout !== before) {
+          // The App has no workflows permission, and GitHub refuses a push that
+          // adds or changes a workflow file without it: the whole train would
+          // fail. Such a pull request comes back off and is released alone.
+          const touched = (await git(["diff", "--name-only", before, "HEAD"])).stdout.split("\n");
+          if (touched.some((file) => file.startsWith(".github/workflows/"))) {
+            await git(["reset", "--quiet", "--hard", before]);
+            picks.push({ number: pull.number, outcome: "changes_workflows" });
+            continue;
+          }
           picks.push({ number: pull.number, outcome: "included" });
           continue;
         }
