@@ -10,6 +10,7 @@ datasource db {
 // ==========================================
 
 model User {
+  codeTaskReservations CodeTaskReservation[]
   id                            String        @id @default(cuid())
   name                          String?
   email                         String?       @unique
@@ -1838,7 +1839,7 @@ model ImageGeneration {
   // so the two can never settle or refund the same generation twice.
   // Transitions are defined in lib/imageGenerationStateCore.ts.
   status              String  @default("pending")
-  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled
+  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled | model_profile_changed
   publicErrorCode     String?
   internalErrorDetail String?
   providerRequestId   String?
@@ -4454,6 +4455,10 @@ model AutoRouterOptimizerCycle {
   startedBy         String    @default("person")
   spentMicroUsd     Int       @default(0)
   promotedAt        DateTime?
+  /// routing | rewrite -- which guidance the cycle improves
+  /// (AUTO_LLM_ROUTER_GUIDANCE_KINDS, held by a CHECK). Both share one running
+  /// cycle at a time and the same day and month caps.
+  target            String    @default("routing")
 
   @@index([createdAt])
   @@index([status])
@@ -10949,4 +10954,127 @@ model AmuxWorkerCapabilityEvent {
 
   @@unique([workerName, revision])
   @@index([workerName, sequence])
+}
+
+/// Runtime overrides and additions for the image and coding model catalogues.
+/// A NULL column inherits the code profile (lib/imageModelRegistry.ts); a value
+/// is an operator override. Coding rows have no code profile, so `profile`
+/// carries the whole row. Prices live in ModelCatalogPriceRevision.
+model ModelCatalogEntry {
+  category       String
+  modelId        String
+  enabled        Boolean?
+  holdReason     String?
+  sortOrder      Int?
+  profile        Json?
+  draft          Json?
+  draftSource    String?
+  draftCreatedAt DateTime?
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@id([category, modelId])
+  @@index([category, enabled])
+}
+
+/// Append-only price history. The effective price of a model is its latest
+/// revision whose effectiveFrom has passed; nothing updates or deletes a row.
+model ModelCatalogPriceRevision {
+  id             String   @id @default(cuid())
+  category       String
+  modelId        String
+  pricingVersion String
+  prices         Json
+  verification   Json
+  effectiveFrom  DateTime
+  actorId        String?
+  actorEmail     String?
+  createdAt      DateTime @default(now())
+
+  @@unique([category, modelId, pricingVersion])
+  @@index([category, modelId, effectiveFrom])
+}
+
+/// Immutable published catalogue the Code client reads (managed mode).
+model ModelCatalogSnapshot {
+  version       Int      @id @default(autoincrement())
+  category      String
+  contentHash   String
+  payload       Json
+  coverageUntil DateTime
+  publishedById String?
+  publishedAt   DateTime @default(now())
+
+  @@index([category, contentHash])
+  @@index([category, version])
+}
+
+/// Code financial metadata only. Generated text and prompts are never stored.
+model CodeTaskReservation {
+  id String @id
+  userId String?
+  user User? @relation(fields:[userId], references:[id], onDelete:SetNull)
+  subjectKey String
+  clientTaskId String
+  requestDigest String
+  productKey String @default("code")
+  status String @default("active")
+  catalogVersion Int
+  contentHash String
+  modelPair Json
+  reservedCredits Int
+  settledCredits Int @default(0)
+  releasedCredits Int @default(0)
+  planHeldCredits Int
+  planDayHeld Boolean
+  addOnEntries Json
+  reservedCostMicroUsd BigInt
+  settledCostMicroUsd BigInt @default(0)
+  heldCostMicroUsd BigInt
+  planHeldCostMicroUsd BigInt
+  planFundingShare Float
+  dayStart DateTime @db.Timestamptz(6)
+  monthStart DateTime @db.Timestamptz(6)
+  leaseExpiresAt DateTime @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @db.Timestamptz(6)
+  calls CodeManagedCall[]
+  @@unique([subjectKey,clientTaskId])
+  @@index([status,leaseExpiresAt],map:"CodeTaskReservation_expiry")
+  @@index([userId,createdAt],map:"CodeTaskReservation_user")
+}
+
+model CodeManagedCall {
+  resolutionId String? @unique
+  resolutionDigest String?
+  resolutionAuditId String?
+  resolvedAt DateTime? @db.Timestamptz(6)
+  productKey String @default("code")
+  id String @id
+  reservationId String
+  reservation CodeTaskReservation @relation(fields:[reservationId],references:[id],onDelete:Restrict)
+  requestDigest String
+  role String
+  modelId String
+  provider String
+  status String @default("dispatched")
+  reservedCredits Int
+  settledCredits Int @default(0)
+  reservedCostMicroUsd BigInt
+  settledCostMicroUsd BigInt?
+  inputTokens Int?
+  outputTokens Int?
+  cachedInputTokens Int?
+  cacheWriteInputTokens Int?
+  reasoningTokens Int?
+  maxOutputTokens Int
+  pricingSnapshot Json
+  providerReportedModelId String?
+  latencyMs Int?
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  completedAt DateTime? @db.Timestamptz(6)
+  @@index([reservationId,createdAt],map:"CodeManagedCall_task")
+  @@index([status,createdAt],map:"CodeManagedCall_active")
 }

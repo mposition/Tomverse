@@ -265,7 +265,10 @@ export const generateImageWithProvider = async (input: {
 }): Promise<ImageProviderResult> => {
   const modelId = input.modelId ?? IMAGE_GENERATION_MODEL_ID;
   const model = getImageModel(modelId);
-  if (!model || model.disabledReason !== null) {
+  // An operator hold stops new admissions (the service refuses them); a job
+  // already admitted and charged against the provider budget finishes rather
+  // than failing after its budget was spent. Price or cost refusals still stop.
+  if (!model || (model.disabledReason !== null && model.disabledReason !== "operational_hold")) {
     throw new ImageProviderError(
       "provider_failed",
       `Image model ${modelId} is not available for requests.`

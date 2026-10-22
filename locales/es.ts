@@ -232,6 +232,7 @@ export const es = {
         imageGenerationErrorBudget: "La generación de imágenes está pausada temporalmente. Inténtalo en breve.",
         imageGenerationErrorConflict: "Tu saldo de créditos cambió durante la reserva. Inténtalo de nuevo.",
         imageGenerationErrorGeneric: "No se pudo iniciar la generación de la imagen. Inténtalo de nuevo.",
+        imageGenerationErrorPriceChanged: "Un precio cambió desde que se cargó esta página. No se cobró nada. Recarga para ver el precio actual.",
         imageGenerationRestoreExcluded: "{models} no está disponible ahora mismo, así que se excluyó de la selección restaurada.",
         imageGenerationSelectionCount: "{count}/{max} modelos",
         imageGenerationModelLimitNotice: "Puedes comparar hasta {max} modelos a la vez. Deselecciona un modelo antes de elegir otro.",

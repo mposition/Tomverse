@@ -45,6 +45,8 @@ export type ExportDomainDeclaration = {
 };
 
 export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
+  {domain:"codeTaskReservation",publicName:"code_credit_usage",prismaModel:"CodeTaskReservation",state:"included_filtered",
+    withheldReason:"Provider cost basis, pricing snapshots, idempotency digests and internal lease data are withheld."},
   // --- wholly the user's own data ------------------------------------------
   { domain: "userSettings", publicName: "settings", prismaModel: "UserSettings", state: "included" },
   {
@@ -242,6 +244,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "modelRegistryEntry",
     publicName: "model_registry_entry",
     prismaModel: "ModelRegistryEntry",
+    state: "unverified",
+  },
+  {
+    domain: "modelCatalogEntry",
+    publicName: "model_catalog_entry",
+    prismaModel: "ModelCatalogEntry",
+    state: "unverified",
+  },
+  {
+    domain: "modelCatalogPriceRevision",
+    publicName: "model_catalog_price_revision",
+    prismaModel: "ModelCatalogPriceRevision",
     state: "unverified",
   },
   {

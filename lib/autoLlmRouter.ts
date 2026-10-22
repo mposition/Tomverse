@@ -7,7 +7,7 @@ import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import { readAutoLlmRouterModelId, readAutoLlmRouterRewrite } from "@/lib/autoLlmRouterSettings";
 import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
-import { autoLlmRouterVersionFor, callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
+import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import { holdChatUsageBucket } from "@/lib/chatSecurity";
 import { providerBucketKey } from "@/lib/chatProviderHolds";
 import { resolveModelPricing } from "@/lib/modelPricing";
@@ -20,8 +20,8 @@ import {
     AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS,
     AUTO_LLM_ROUTER_SESSION_PICKS,
     AUTO_LLM_ROUTER_TIMEOUT_MS,
-    AUTO_LLM_ROUTER_VERSION,
     autoLlmRouterCandidates,
+    autoLlmRouterDecisionVersion,
     autoLlmRouterOutputSchema,
     autoLlmRouterProviderOptions,
     autoLlmRouterSession,
@@ -36,6 +36,8 @@ import {
     type AutoFileGenerationContext,
     withAutoFileCapabilities,
 } from "@/lib/autoLlmRouterCore";
+import { effectiveRouterTimeoutMs, withoutExcludedModels } from "@/lib/autoRouterTunablesCore";
+import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
 
 export type AutoLlmRouterCallResult = {
     outcome: "picked" | "invalid" | "error";
@@ -57,6 +59,8 @@ type AutoLlmRouterCallInput = {
     session: AutoLlmRouterSession | null;
     /** Ask the same call for a self-contained rewrite of the message. */
     rewrite?: boolean;
+    /** The rewrite guidance in force; the code default when not given. */
+    rewriteGuidance?: string;
     /** The live turn's deadline unless given; the optimizer's replay waits longer. */
     timeoutMs?: number;
 };
@@ -68,7 +72,10 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
     return {
         rewrite,
         candidates,
-        system: buildAutoLlmRouterSystem(input.guidance, { rewrite }),
+        system: buildAutoLlmRouterSystem(input.guidance, {
+            rewrite,
+            rewriteGuidance: input.rewriteGuidance,
+        }),
         prompt: autoLlmRouterUserMessage(
             input.prompt,
             input.previousAnswer,
@@ -265,11 +272,14 @@ export async function pickAutoModelWithLlm(input: {
         (await readAutoLlmRouterModelId()) ?? undefined
     );
     if (!routerModel) return null;
-    const candidates = autoLlmRouterCandidates(
-        input.eligibleModelIds,
-        input.models,
-        input.creditsByModelId,
-        input.fileContext
+    // The optimizer's own setting changes, applied under the owner's switch
+    // (lib/autoRouterTunablesCore.ts): a tuned deadline and models left out
+    // for a while after their calls kept failing.
+    const tunables = await readAutoRouterTunables();
+    const candidates = withoutExcludedModels(
+        autoLlmRouterCandidates(input.eligibleModelIds, input.models, input.creditsByModelId, input.fileContext),
+        tunables,
+        Date.now()
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
@@ -278,14 +288,21 @@ export async function pickAutoModelWithLlm(input: {
         readActiveRouterGuidance(),
         readAutoLlmRouterRewrite(),
     ]);
+    const timeoutMs = effectiveRouterTimeoutMs(tunables, AUTO_LLM_ROUTER_TIMEOUT_MS);
     // Rewriting pays off on short, context-dependent turns; a long message is
     // routed as it is.
     const rewrite =
         rewriteOn &&
         input.rewriteAllowed === true &&
         input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
-    const version =
-        autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, active.cycleId) + (rewrite ? "+rewrite" : "");
+    // Read only when a rewrite is asked for, so a turn with rewriting off
+    // makes the same reads and sends the same prompt as before.
+    const rewriteGuidance = rewrite ? await readActiveRouterGuidance(prisma, "rewrite") : null;
+    const version = autoLlmRouterDecisionVersion({
+        routingCycleId: active.cycleId,
+        rewrite,
+        rewriteCycleId: rewriteGuidance?.cycleId ?? null,
+    });
     const call: AutoLlmRouterCallInput = {
         routerModel,
         guidance: active.guidance,
@@ -294,6 +311,9 @@ export async function pickAutoModelWithLlm(input: {
         candidates,
         session,
         rewrite,
+        rewriteGuidance: rewriteGuidance?.guidance,
+        // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
+        timeoutMs: rewrite ? Math.max(AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS, timeoutMs) : timeoutMs,
     };
     const prices = routerPrices(routerModel);
     const request = routerRequest(call);
@@ -318,7 +338,6 @@ export async function pickAutoModelWithLlm(input: {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             ...prices,
-            worstCaseMicroUsd: worstCase,
         });
         void settleRouterCost(routerModel.provider, actual - worstCase, reservedAt);
     }

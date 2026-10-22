@@ -855,6 +855,33 @@ domains:
           tests/comparisonReviewRunCore.test.mjs enforces.
     inUnifiedExport: excluded
 
+  - domain: codeTaskReservation
+    prismaModel: CodeTaskReservation
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    anonymisationFields: [userId, subjectKey, clientTaskId, requestDigest, addOnEntries, status]
+    anonymisationReplacements:
+      subjectKey: "deleted-account"
+      clientTaskId: "anonymised:{id}"
+      requestDigest: "deleted-account"
+      addOnEntries: "numeric funding totals"
+      status: "closed"
+    reidentificationReview:
+      reviewedBy: "codex implementation analysis; independent contract review pending"
+      reviewedAt: "2026-10-22"
+      joinRisksConsidered:
+        - >-
+          Subject and client task identifiers and prompt HMAC are cleared, and lot
+          reservations cascade away with the account. Lot and purchase identifiers
+          are removed; numeric funding totals remain as non-identifying allocation
+          evidence for unknown provider holds. CodeManagedCall contains no independent subject identifier and
+          hangs off this anonymised financial record; prompts and output are absent.
+    inUnifiedExport: included_filtered
+
   - domain: chatCreditReservation
     prismaModel: ChatCreditReservation
     userLinkageRole: subject
@@ -3140,6 +3167,35 @@ domains:
       Who last edited a model's registry row, by id and address. Registered on 2026-09-21 when the actor rule
       widened past one column name. Every axis is unverified: nobody has
       decided this one yet, and that is what the state means.
+
+  - domain: modelCatalogEntry
+    prismaModel: ModelCatalogEntry
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      Who last edited a dynamic catalogue row (image or coding), by id and address. Same shape as
+      modelRegistryEntry; registered with the table on 2026-10-19 and undecided on every axis.
+
+  - domain: modelCatalogPriceRevision
+    prismaModel: ModelCatalogPriceRevision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who wrote an append-only price revision, by id and address. The rows are price
+      history and a database trigger refuses UPDATE and DELETE, so an erasure decision here needs a
+      migration; undecided on every axis.
 
   - domain: providerBillingConfig
     prismaModel: ProviderBillingConfig

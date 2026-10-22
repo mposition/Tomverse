@@ -141,7 +141,6 @@ export async function detectChatImageRequest(input: {
             const actual = callCostMicroUsd({
                 inputTokens: usage.inputTokens,
                 outputTokens: usage.outputTokens,
-                worstCaseMicroUsd: worstCase,
                 ...prices,
             });
             void settleRouterCost(model.provider, actual - worstCase, reservedAt);

@@ -35,10 +35,11 @@
 /** The directory a failed restore makes unusable, relative to the repo root. */
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
-/** The build's child workers must inherit the CI type-check heap limit. */
+/** Build child workers on CI and Railway share a bound; explicit limits win. */
 export const nodeOptionsForBuild = (env) => {
   const configured = env.NODE_OPTIONS ?? "";
-  if (env.GITHUB_ACTIONS !== "true" ||
+  const railwayBuild = Boolean(env.RAILWAY_ENVIRONMENT_ID?.trim());
+  if ((env.GITHUB_ACTIONS !== "true" && !railwayBuild) ||
       /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
   return `${configured ? `${configured} ` : ""}--max-old-space-size=6144`;
 };

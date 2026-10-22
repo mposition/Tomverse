@@ -127,6 +127,9 @@ docs/ops/*-staging-verification-records/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-
 # rust build output
 /target/
 
+# Isolated local Prisma clients; never vendor generated runtime files.
+/.generated/
+
 # Independent-review briefs written for another agent. They are working notes
 # that name private paths and design documents, and belong in a scratch
 # directory outside the repository, never in a commit (this repository is

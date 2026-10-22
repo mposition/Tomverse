@@ -280,12 +280,13 @@ test("the discovery backlog keeps a way in", () => {
   assert.equal(models.badge, "modelLifecycle");
   assert.deepEqual(
     models.tabs?.map((tab) => tab.id),
-    ["registry", "discovery"]
+    ["registry", "discovery", "catalog"]
   );
   // The registry stays the default: an operator opening /admin/models is far
   // more often there for the catalogue than for the backlog.
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), undefined).id, "registry");
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "discovery").id, "discovery");
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), "catalog").id, "catalog");
 });
 
 // ---------------------------------------------------------------------------

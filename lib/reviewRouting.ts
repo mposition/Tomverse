@@ -49,7 +49,7 @@ export async function routeReviewPrompt(input: {
       providerOptions: autoLlmRouterProviderOptions(routerModel.provider) });
     const usage = result.usage;
     if (usage.inputTokens !== undefined && usage.outputTokens !== undefined) {
-      await settleRouterCost(routerModel.provider, callCostMicroUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, worstCaseMicroUsd: reserved, ...prices }) - reserved, at);
+      await settleRouterCost(routerModel.provider, callCostMicroUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, ...prices }) - reserved, at);
     }
     return parseReviewRoute(result.output, input.providers, input.candidates);
   } catch {

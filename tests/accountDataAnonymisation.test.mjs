@@ -99,6 +99,9 @@ test("the registry's replacements match what the implementation writes", () => {
             `${entry.prismaModel}.${column} should be recorded as emptied in the registry`
           );
           break;
+        case "creditAllocationTotals":
+          assert.equal(registryValue,"numeric funding totals");
+          break;
         default:
           assert.fail(`unknown replacement kind for ${entry.prismaModel}.${column}`);
       }

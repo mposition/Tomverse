@@ -4,7 +4,8 @@ import { cleanupExpiredData } from "@/lib/maintenance";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
 import { runPromotionObserver } from "@/lib/feedbackAutoFixPromotion";
-import { runScheduledAutoRouterOptimizerCycle } from "@/lib/autoRouterOptimizer";
+import { runScheduledOptimizerCycle } from "@/lib/autoRewriteOptimizer";
+import { optimizerOwnProcessOn } from "@/lib/autoRouterOptimizerCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -82,19 +83,34 @@ export async function POST(request: Request) {
         })
       );
     }
-    // The Auto router optimizer's daily cycle, when its owner turned it on
-    // (Admin › Routing). It starts the cycle and returns; a refusal or failure
-    // here never stops the cleanup below.
-    const optimizer = await runScheduledAutoRouterOptimizerCycle().catch((error) => {
-      console.warn(
+    // The Auto router optimizer's daily cycle -- routing or rewrite guidance,
+    // one a day -- when its owner turned it on (Admin › Routing). It starts the
+    // cycle and returns; a refusal or failure here never stops the cleanup below.
+    // With AUTO_ROUTER_OPTIMIZER_OWN_PROCESS on, the Auto Router Optimizer cron
+    // service runs it instead and waits for it, where a web redeploy cannot
+    // cut it off; this step only says so.
+    const ownProcess = optimizerOwnProcessOn();
+    if (ownProcess) {
+      console.info(
         JSON.stringify({
-          event: "auto_router_optimizer_daily_failed",
-          reason: error instanceof Error ? error.name : "unknown",
+          event: "auto_router_optimizer_daily_skipped",
+          reason: "own_process",
           at: new Date().toISOString(),
         })
       );
-      return null;
-    });
+    }
+    const optimizer = ownProcess
+      ? null
+      : await runScheduledOptimizerCycle().catch((error) => {
+          console.warn(
+            JSON.stringify({
+              event: "auto_router_optimizer_daily_failed",
+              reason: error instanceof Error ? error.name : "unknown",
+              at: new Date().toISOString(),
+            })
+          );
+          return null;
+        });
     if (optimizer && (optimizer.started || optimizer.reason !== "daily_off")) {
       console.info(
         JSON.stringify({
