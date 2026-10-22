@@ -1518,6 +1518,7 @@ mod tests {
     #[tokio::test]
     async fn a_restart_settles_every_unsettled_decision_before_any_delivery() {
         use crate::dm_relay::flow::tests::{answered, recorded, FakeApp, FakeBroker, FakeLocal};
+        const RECORDED_AT: i64 = 1_790_000_000;
         let unsettled = answered(
             200,
             json!({"found": true, "status": "unsettled", "delivery": {
@@ -1552,7 +1553,7 @@ mod tests {
                 answered(
                     200,
                     json!({"answers": [{"card_id": "AMUX-7", "question_revision": 1,
-                    "recorded_at": 1_790_000_000}], "truncated": false}),
+                    "recorded_at": RECORDED_AT}], "truncated": false}),
                 ),
             ),
             (
@@ -1574,6 +1575,8 @@ mod tests {
             FakeBroker::answering(|_| BrokerExchange::Lost),
             false,
         );
+        // Keep the fixture answer inside the scan window regardless of the calendar date.
+        relay.direct_cursor = DirectCursor::starting_at(RECORDED_AT);
         // Tick one: the decision is settled from the local records, and nothing else happens.
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(relay.halt(), None);
@@ -1621,7 +1624,7 @@ mod tests {
         assert_eq!(operator_reads.len(), 2);
         assert_eq!(
             operator_reads[1],
-            json!({"after": {"recorded_at": 1_790_000_000 - crate::dm_relay::direct::DM_DIRECT_ANSWER_REWIND_SECS,
+            json!({"after": {"recorded_at": RECORDED_AT - crate::dm_relay::direct::DM_DIRECT_ANSWER_REWIND_SECS,
                 "card_id": "", "question_revision": i64::MIN}})
         );
         // Nothing is ever sent again: the delivery route is never called.
