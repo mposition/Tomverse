@@ -488,6 +488,37 @@ export const snapshotCoverageUntil = (now: Date): Date =>
 export const snapshotIsCurrent = (coverageUntil: Date, now: Date): boolean =>
   coverageUntil.getTime() > now.getTime();
 
+/** With less coverage than this left, an unchanged snapshot is due a new version. */
+export const SNAPSHOT_RENEWAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type SnapshotRenewalDecision =
+  | "no_snapshot"
+  | "content_changed"
+  | "not_due"
+  | "renew";
+
+/**
+ * Whether the scheduled job may extend the newest snapshot's coverage.
+ *
+ * Only a renewal of identical content is automatic: `currentHash` is the hash
+ * of what the judges admit right now, so a model an operator turned on or off,
+ * a price or a hold that moved, or an admission that lapsed all differ from the
+ * snapshot and wait for a person to publish. The first snapshot is a person's
+ * too. An expired snapshot with unchanged content is still renewed -- the
+ * content is judged current today, which is all coverage claims.
+ */
+export const decideSnapshotRenewal = (
+  latest: { contentHash: string; coverageUntil: Date } | null,
+  currentHash: string,
+  now: Date
+): SnapshotRenewalDecision => {
+  if (!latest) return "no_snapshot";
+  if (latest.contentHash !== currentHash) return "content_changed";
+  return latest.coverageUntil.getTime() - now.getTime() > SNAPSHOT_RENEWAL_WINDOW_MS
+    ? "not_due"
+    : "renew";
+};
+
 // --- quote binding -----------------------------------------------------------
 
 /**

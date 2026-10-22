@@ -189,6 +189,9 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-decision-router",
     "amux-decision-maker-openai",
     "amux-decision-maker-anthropic",
+    // The scheduled renewal of the Code client's coding catalogue snapshot:
+    // identical content only, one action about one snapshot row.
+    "model-catalog-renewal",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
@@ -504,6 +507,19 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   assert.equal(systemAuditActionAllowed("marketing-generator", "marketing_llm.reserved", "MarketingReport"), false);
   // Other actors are unaffected by the generator's scope.
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
+});
+
+test("the coding catalogue renewal actor may only record a snapshot renewal", () => {
+  assert.equal(isSystemAuditActor("model-catalog-renewal"), true);
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.snapshot_renewed", "ModelCatalogSnapshot"), true);
+  // A person's publish, an entry change and any other target stay outside its scope.
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.snapshot_published", "ModelCatalogSnapshot"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.entry_updated", "ModelCatalogEntry"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.snapshot_renewed", "AppSettings"), false);
 });
 
 test("the Auto router coding agent may only claim a recommendation and record its result", () => {
