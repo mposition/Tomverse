@@ -110,6 +110,19 @@ export const falAssetLengthRefused = (contentLength: string | null): boolean => 
   return Number.isFinite(declared) && declared > FAL_MAX_ASSET_BYTES;
 };
 
+/**
+ * What fal bills on every request this builder sends, for the thinking level
+ * it pins: "If high thinking is used, an additional $0.002 will be charged"
+ * (fal's Nano Banana 2 page, read 2026-08-14 and again 2026-10-21; the smoke
+ * run billed 1.025 units, policy section 16.8).
+ *
+ * Next to `thinking_level` because the two are one decision. A price revision
+ * whose thinking cap is below this is refused (`imageThinkingCapEnforced`):
+ * the request would still incur the surcharge, and a smaller cap would
+ * reserve and settle less than fal bills.
+ */
+export const FAL_HIGH_THINKING_SURCHARGE_MICRO_USD = 2_000;
+
 /** The one resolution this integration is priced and approved for. */
 const RESOLUTION_BY_SIZE: Partial<Record<ImageSize, string>> = {
   "1024x1024": "1K",
