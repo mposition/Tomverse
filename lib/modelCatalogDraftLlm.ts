@@ -46,11 +46,11 @@ export class DraftRefusal extends Error {
   }
 }
 
-/** Reduce a page to text the model can read cheaply. Not a parser: tags out, whitespace folded. */
+/** Reduce a page to bounded LLM input text; this is not an HTML output sanitizer. */
 export const pageToText = (body: string): string =>
   body
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script(?:[\s/][^>]*)?>[\s\S]*?<\/script(?:[\s/][^>]*)?>/gi, " ")
+    .replace(/<style(?:[\s/][^>]*)?>[\s\S]*?<\/style(?:[\s/][^>]*)?>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
