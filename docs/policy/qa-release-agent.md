@@ -299,7 +299,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 10분마다)에서 `QA_RELEASE_TRAIN_ENABLED`가 정확히
       `true`일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
       레인을 함께 멈추지 않게 하기 위해서입니다. 레인의 App과 앱 secret을 같이 쓰므로 앱 쪽에 새로 둘 것은 없습니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
-      revision이 최신 운영자 제어 revision과 같고 레인이 latch되지 않았을 때만이며, 승인과 결과를 병합 레인 actor의 시스템 감사
+      revision이 최신 운영자 제어 revision과 같고 같은 출발을 전에 승인하지 않았을 때만이며(레인 latch는 보지 않습니다 —
+      운영자 결정 2026-10-23, train은 레인과 독립), 승인과 결과를 병합 레인 actor의 시스템 감사
       행(`qa_release.train_admitted`, `qa_release.train_reported`)으로 남깁니다. 전용 테이블은 없습니다.
     - **ruleset**: 7항의 update ruleset은 App의 develop 밖 브랜치 생성을 막으므로, 켜기 전에 운영자가 `refs/heads/release/train-*`를
       그 ruleset의 제외 목록에 더합니다. 이것은 보안 경계 변경이라 운영자의 승인 대상입니다.

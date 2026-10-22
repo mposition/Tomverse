@@ -5,7 +5,7 @@
  *
  *   start decision -> departure -> this departure's branch not yet pushed ->
  *   no open train -> the operator picked cargo in Admin -> the app admits (revision,
- *   latch, audit) -> assemble on a fresh clone of main -> push the branch ->
+ *   once per departure, audit) -> assemble on a fresh clone of main -> push the branch ->
  *   open the main pull request -> report.
  *
  * GitHub writes are the branch push and the pull request, nothing else: no

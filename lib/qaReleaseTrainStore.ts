@@ -20,14 +20,15 @@ const TARGET_TYPE = "QaReleaseTrain";
 /** Prisma's interactive-transaction limit: one lock, one read, one audit append. */
 const TRANSACTION_MS = 15_000;
 
-export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "latched" | "already_admitted";
+export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "already_admitted";
 
 /**
- * Whether this departure may run: the caller's revision is the newest, the
- * merge lane is not latched, and this departure was not admitted before. All
- * three are read after the audit chain lock, which every lane writer and
- * every latch change also takes first, so none can change between the read
- * and the admission. A refusal writes nothing.
+ * Whether this departure may run: the caller's revision is the newest and this
+ * departure was not admitted before. Both are read after the audit chain lock,
+ * so neither can change between the read and the admission. A refusal writes
+ * nothing. The develop merge lane's latch is not read (owner decision
+ * 2026-10-23): a dev deploy problem says nothing about the picked pull
+ * requests, which run main's own CI and are merged by a person.
  */
 export async function admitQaReleaseTrain(input: {
   callerRevision: number | null;
@@ -39,9 +40,6 @@ export async function admitQaReleaseTrain(input: {
       const control = await readLatestQaReleaseOperatorControl(tx);
       if (!control) return { admitted: false as const, reason: "no_control" as const };
       if (input.callerRevision !== control.revision) return { admitted: false as const, reason: "revision_mismatch" as const };
-      // The newest latch event; none yet is not latched. Read, never written, here.
-      const latch = await tx.qaReleaseMergeLaneLatch.findFirst({ orderBy: { sequence: "desc" }, select: { latched: true } });
-      if (latch?.latched === true) return { admitted: false as const, reason: "latched" as const };
       // One admission per departure: an empty or failed train is not rerun
       // by the next tick inside the same hour.
       const earlier = await tx.adminAuditLog.findFirst({

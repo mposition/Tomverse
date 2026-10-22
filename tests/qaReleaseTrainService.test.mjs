@@ -87,8 +87,8 @@ test("outside a departure hour, after this departure's branch exists, with an op
 });
 
 test("a refused admission stops before git", async () => {
-  const { p, names } = ports({ admit: { admitted: false, reason: "latched" } });
-  assert.deepEqual(await runQaReleaseTrainRound(env(), p, NOW), { exitCode: 0, train: "not_admitted", reason: "latched" });
+  const { p, names } = ports({ admit: { admitted: false, reason: "revision_mismatch" } });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), p, NOW), { exitCode: 0, train: "not_admitted", reason: "revision_mismatch" });
   assert.ok(!names().includes("assemble"));
 });
 
