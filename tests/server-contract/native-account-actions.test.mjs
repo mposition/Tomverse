@@ -33,6 +33,7 @@ const request = (path, method = "GET", body) => new Request(`https://tomverse.ap
 
 test("expired sign-in cannot issue an export or schedule deletion", async () => {
   session.user.authenticatedAt = new Date(Date.now() - 86400000).toISOString();
+  assert.equal((await ticket.GET(request("/api/user/account/export"))).status, 200);
   assert.equal((await ticket.POST(request("/api/user/account/export", "POST", {}))).status, 428);
   assert.equal((await account.DELETE(request("/api/user/account", "DELETE", { confirm: true, confirmationText: "DELETE MY ACCOUNT" }))).status, 428);
   assert.equal(issued, 0); assert.equal(scheduled, 0);
@@ -58,7 +59,11 @@ test("account profile is private and preserves rate-limit responses", async () =
 });
 test("missing identity cannot read account data, issue tickets or delete", async () => {
   session = null;
+  const before = { issued, redeemed, scheduled };
   assert.equal((await account.GET(request("/api/user/account"))).status, 401);
+  assert.equal((await ticket.GET(request("/api/user/account/export"))).status, 401);
   assert.equal((await account.DELETE(request("/api/user/account", "DELETE", {}))).status, 401);
   assert.equal((await ticket.POST(request("/api/user/account/export", "POST", {}))).status, 401);
+  assert.equal((await download.GET(request("/api/user/account/export/synthetic"), { params: Promise.resolve({ token: "x".repeat(43) }) })).status, 401);
+  assert.deepEqual({ issued, redeemed, scheduled }, before);
 });

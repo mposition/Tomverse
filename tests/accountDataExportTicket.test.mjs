@@ -202,14 +202,14 @@ const downloadRoute = readFileSync(
 );
 
 test("issuing a link requires a session, a step-up and a rate limit", () => {
-  assert.match(issueRoute, /getServerSession/);
+  assert.match(issueRoute, /resolveAccountRouteSession/);
   assert.match(issueRoute, /assertRecentAccountAuthentication/);
   assert.match(issueRoute, /consumeApiRateLimit/);
   assert.match(issueRoute, /status: 428/, "there is no re-authentication path");
 });
 
 test("redeeming a link still requires the session, so the token is not a bearer credential", () => {
-  assert.match(downloadRoute, /getServerSession/);
+  assert.match(downloadRoute, /resolveAccountRouteSession/);
   assert.match(downloadRoute, /Authentication required/);
   assert.match(downloadRoute, /redeemAccountDataExportTicket/);
 });
