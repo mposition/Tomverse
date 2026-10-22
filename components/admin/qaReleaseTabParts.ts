@@ -6,6 +6,7 @@ export const QA_RELEASE_SECTION_IDS = {
   lane: "qa-release-lane",
   digest: "qa-release-digest",
   train: "qa-release-train-section",
+  cargo: "qa-release-train-cargo",
   settings: "qa-release-settings",
 } as const;
 

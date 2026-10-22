@@ -1,8 +1,11 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
+import { qaReleaseTrainSelectionFrom, type QaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoCore";
 import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
 
 /**
@@ -111,5 +114,38 @@ export async function readQaReleaseTrainReports(limit = 5): Promise<QaReleaseTra
     const metadata = row.metadata as Partial<QaReleaseTrainReport> | null;
     if (!metadata || typeof metadata.outcome !== "string" || !Array.isArray(metadata.picks) || typeof row.targetId !== "string") return [];
     return [{ slot: row.targetId, at: row.createdAt, report: metadata as QaReleaseTrainReport }];
+  });
+}
+
+/* ------------------------------------------------------------------------- */
+/* The next train's cargo, picked in Admin (owner decision 2026-10-23)        */
+/* ------------------------------------------------------------------------- */
+
+export const QA_RELEASE_TRAIN_CARGO_ACTION = "qa_release.train_cargo_selected";
+export const QA_RELEASE_TRAIN_CARGO_TARGET_TYPE = "QaReleaseTrainCargo";
+export const QA_RELEASE_TRAIN_CARGO_TARGET_ID = "next";
+
+/**
+ * What the next train carries: the newest saved pick, unless a train was
+ * admitted after it (that train took it). Read from the audit chain the pick
+ * and the admissions are written to; nothing else stores it.
+ */
+export async function readQaReleaseTrainSelection(db: Prisma.TransactionClient = prisma): Promise<QaReleaseTrainSelection> {
+  const [pick, admission] = await Promise.all([
+    db.adminAuditLog.findFirst({
+      where: { action: QA_RELEASE_TRAIN_CARGO_ACTION, targetType: QA_RELEASE_TRAIN_CARGO_TARGET_TYPE, targetId: QA_RELEASE_TRAIN_CARGO_TARGET_ID },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, actorEmail: true, metadata: true },
+    }),
+    db.adminAuditLog.findFirst({
+      where: { action: QA_RELEASE_TRAIN_ADMITTED_ACTION, targetType: TARGET_TYPE },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, targetId: true },
+    }),
+  ]);
+  const metadata = pick?.metadata as { numbers?: unknown } | null | undefined;
+  return qaReleaseTrainSelectionFrom({
+    pick: pick ? { numbers: metadata?.numbers ?? null, at: pick.createdAt, by: pick.actorEmail } : null,
+    admission: admission && typeof admission.targetId === "string" ? { slot: admission.targetId, at: admission.createdAt } : null,
   });
 }

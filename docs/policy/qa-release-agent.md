@@ -67,7 +67,7 @@ workflow·secret·branch protection·ruleset·GitHub App·Railway 변경도 그 
    label이 아닙니다. 결정적 규칙이고 판정이 아닙니다. 근거가 없으면 `undetermined`이며 소유자 할 일을 만들지 않습니다.
 3. **재실행 권고.** 최대 2건, 7일 만료. 실행은 사람이 합니다.
 4. **병합 레인.** 8절.
-5. **릴리스 열차.** 8절 12항. 정해진 출발 시각에 `main:next` 라벨이 붙은 develop PR을 모아 main PR 하나를 엽니다.
+5. **릴리스 열차.** 8절 12항. 정해진 출발 시각에 운영자가 Admin에서 고른 develop PR을 모아 main PR 하나를 엽니다.
 
 **LLM을 쓰지 않습니다.** 모든 판정은 결정적 코드입니다. 외부 텍스트(CI 로그, issue·PR 문장)는 판정의 입력일 뿐
 명령이 아니며, **digest에 들어가지 않습니다.** digest schema는 닫혀 있고 숫자·열거값·이슈 번호·SHA만 담습니다. CI 로그,
@@ -283,9 +283,11 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     서비스가 develop 회차 뒤에 **열차 회차**를 돕니다. 판정은 `lib/qaReleaseTrainCore.ts`, 순서는 `lib/qaReleaseTrainService.ts`입니다.
     - **출발 시각**은 AEST 08·11·14·17·20시이고 `QA_RELEASE_TRAIN_SLOTS`(쉼표로 나눈 시) 하나로 바꿉니다. 출발 뒤 한 시간 안의
       회차만 그 출발을 시작하며, 그 출발의 브랜치 `release/train-YYYYMMDD-HHMM`(AEST)이 GitHub에 있으면 다시 시작하지 않습니다.
-    - **실을 PR**은 develop에 병합됐고 `main:next` 라벨이 붙은 PR입니다. 라벨은 사람이나 개발 세션이 붙이고 에이전트는 읽기만
-      합니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 실을 PR이 없으면 열지 않습니다. 한 열차는 최대 30개를 싣고 나머지는
-      다음 열차를 탑니다. 라벨은 main에 들어간 뒤에도 남으므로 검색 결과를 모든 페이지(GitHub 검색 상한 1,000건)까지 읽습니다.
+    - **실을 PR**은 운영자가 Admin › Agent digests › QA·릴리스의 "다음 열차"에서 고른 develop 병합 PR입니다(운영자 결정
+      2026-10-23, 그 전에는 `main:next` 라벨). 선택은 앱이 감사 기록(`qa_release.train_cargo_selected`, owner·ops와 최근
+      로그인)으로 남기고, 서비스는 출발 때 앱에서 읽기만 하며 GitHub에서 그 PR이 develop에 병합됐는지 확인합니다. 선택은 그 뒤
+      처음 승인된 출발이 가져가고 소진됩니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 고른 PR이 없으면 열지 않습니다. 한
+      열차는 최대 30개를 싣습니다. 서비스는 30분마다 돌고(운영자 2026-10-23) 출발 창 한 시간 안에서 두 번 기회가 있습니다.
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뛰고, 충돌하는 PR은 abort하고 뺍니다. 뺀 PR과
       이유는 PR 본문과 Admin에 보이고 라벨은 그대로 둡니다. 충돌 해결은 하지 않습니다. `.github/workflows/**`를 바꾸는 PR도
