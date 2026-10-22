@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { getAdminRole } from "@/lib/adminAuth";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { ApiSecurityError, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
         return Response.json({ error: "CODE_ORIGIN_FORBIDDEN" }, { status: 403, headers });
     try {
         const session = await getServerSession(authOptions);
-        if (!session?.user?.id || getAdminRole(session) !== "owner")
+        if (!session?.user?.id || !isAdminSession(session) || getAdminRole(session) !== "owner")
             return Response.json({ error: "Not found." }, { status: 404, headers });
         await assertRecentAdminAuthentication(session);
         if (process.env.CODE_MANAGED_RECONCILIATION_ENABLED !== "true")
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     }
     catch (error) {
         if (isAdminReauthenticationError(error))
-            return Response.json({ error: "CODE_ADMIN_REAUTH_REQUIRED" }, { status: 403, headers });
+            return Response.json({ error: "CODE_ADMIN_REAUTH_REQUIRED" }, { status: 428, headers });
         if (error instanceof CodeManagedError || error instanceof ApiSecurityError)
             return Response.json({ error: error.code, message: "The Code reconciliation request was rejected." }, { status: error.status, headers });
         return Response.json({ error: "CODE_RECONCILIATION_UNAVAILABLE" }, { status: 503, headers });

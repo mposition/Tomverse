@@ -957,6 +957,15 @@ run(
     DATABASE_URL: oneShotTestUrl.toString(),
     DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
 );
+// Managed Code replaces only provider/session seams while exercising the real
+// credit ledger. Keep its module mocks in a separate finance-lane process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/code-managed-execution.db.test.mjs"],
+  "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
+);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(

@@ -21,7 +21,7 @@ test('reconciliation route requires a same-origin authenticated owner and recent
   const before=serviceCalls;let response=await POST(request(body(),{origin:'https://attacker.example'}));assert.equal(response.status,403);
   session=null;response=await POST(request());assert.equal(response.status,404);
   session={user:{...owner().user,email:'billing@example.invalid'}};response=await POST(request());assert.equal(response.status,404);
-  session={user:{...owner().user,authenticatedAt:new Date(Date.now()-3600000).toISOString()}};response=await POST(request());assert.equal(response.status,403);assert.equal((await response.json()).error,'CODE_ADMIN_REAUTH_REQUIRED');
+  session={user:{...owner().user,authenticatedAt:new Date(Date.now()-3600000).toISOString()}};response=await POST(request());assert.equal(response.status,428);assert.equal((await response.json()).error,'CODE_ADMIN_REAUTH_REQUIRED');
   session=owner();assert.equal(serviceCalls,before);assert.equal(rateCalls,0);
 });
 test('reconciliation is separately default-off before rate or monetary work',async()=>{

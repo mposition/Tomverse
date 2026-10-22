@@ -8,6 +8,7 @@ import {PrismaPg} from '@prisma/adapter-pg';
 import {AVAILABLE_MODELS} from '../../lib/models.ts';
 import {getModelPricingProfile,resolveModelPricing} from '../../lib/modelPricing.ts';
 import {validCodeUsage} from '../../lib/codeManagedCore.ts';
+import {getSingleAccountCostCeiling,providerBudgetEnvName} from '../../lib/providerCostBudget.ts';
 
 const databaseUrl=process.env.TEST_DATABASE_URL;
 test('Code managed inference with migrated local schema and real shared credit ledger',{skip:!databaseUrl},async t=>{
@@ -15,6 +16,10 @@ test('Code managed inference with migrated local schema and real shared credit l
   assert.ok(['127.0.0.1','localhost'].includes(url.hostname));assert.match(url.pathname,/test/);
   process.env.NEXTAUTH_SECRET='code-managed-local-synthetic-secret';
   process.env.CODE_MANAGED_EXECUTION_ENABLED='true';
+  // The generic CI runner still supplies older Chat-only budget overrides.
+  // These synthetic calls use the existing derived provider floor instead.
+  const providerFloor=getSingleAccountCostCeiling();
+  for(const provider of ['openai','anthropic'])for(const period of ['day','month'])process.env[providerBudgetEnvName(provider,period)]=String(providerFloor[period]);
   Object.assign(process.env,{ADMIN_EMAILS:'owner@example.invalid',ADMIN_OWNER_EMAILS:'owner@example.invalid',ADMIN_USER_IDS:'',ADMIN_ACCESS_EXPIRY_JSON:'{}',ADMIN_RECENT_AUTH_MINUTES:'15',ADMIN_AUDIT_INTEGRITY_KEY:'synthetic-code-audit-integrity',CODE_MANAGED_RECONCILIATION_ENABLED:'true'});
   const root=resolve(import.meta.dirname,'../..'),mod=p=>pathToFileURL(resolve(root,p)).href;
   const clientModule=process.env.CODE_MANAGED_TEST_CLIENT_MODULE;
