@@ -21,7 +21,7 @@ const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "claude-opus-4-8"];
 const candidates = autoLlmRouterCandidates(ids, AVAILABLE_MODELS, {
   "gpt-5-6-luna": 1,
   "deepseek-v4-flash": 1,
-});
+}, { isAuthenticated: true, canPersist: true, webSearchRequested: false });
 
 test("candidates carry what the choice needs, in the eligible order", () => {
   assert.deepEqual(candidates.map((candidate) => candidate.id), ids);
@@ -171,15 +171,15 @@ test("rewrite is asked for only when on, and leaves the prompt unchanged when of
   assert.deepEqual(autoLlmRouterOutputSchema(candidates, { rewrite: true }).required, ["reason", "topic", "requiresFileGeneration", "modelId", "rewrite"]);
 });
 
-test("file requests cannot select an unverified candidate or escape the eligible set", () => {
-  const result = parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash", requiresFileGeneration: true }, candidates);
-  assert.equal(result.modelId, "gpt-5-6-luna");
+test("file intent preserves the actual router pick for capability enforcement and telemetry", () => {
+  const result = parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash", reason: "Download a spreadsheet.", requiresFileGeneration: true }, candidates);
+  assert.equal(result.modelId, "deepseek-v4-flash");
+  assert.equal(result.reason, "Download a spreadsheet.");
   assert.equal(result.requiresFileGeneration, true);
-  assert.equal(candidates.find(c => c.id === result.modelId).canCreateFiles, true);
   assert.equal(parseAutoLlmRouterOutput({ modelId: "outside", requiresFileGeneration: true }, candidates), null);
   assert.equal(parseAutoLlmRouterOutput({ modelId: ids[0], requiresFileGeneration: "true" }, candidates), null);
   assert.equal(parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash", requiresFileGeneration: true },
-    candidates.filter(c => !c.canCreateFiles)), null);
+    candidates.filter(c => !c.canCreateFiles)).requiresFileGeneration, true);
 });
 
 test("ordinary inline answers can still select a model without file tools", () => {
@@ -202,6 +202,8 @@ test("optimizer replay recovers legacy capabilities but preserves a recorded ref
 test("candidate file capability follows authentication, persistence and the actual search plan", () => {
   const eligible = ["gpt-5-6-luna", "gemini-3-6-flash", "deepseek-v4-flash"];
   const context = { isAuthenticated: true, canPersist: true, webSearchRequested: false };
+  assert.ok(autoLlmRouterCandidates(eligible, AVAILABLE_MODELS, {})
+    .every(c => c.canCreateFiles === false), "an unknown turn cannot advertise file tools");
   const all = autoLlmRouterCandidates(eligible, AVAILABLE_MODELS, {}, context);
   assert.deepEqual(all.map(c => c.canCreateFiles), [true, true, false]);
   for (const overrides of [{ isAuthenticated: false }, { canPersist: false }]) {

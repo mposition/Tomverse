@@ -149,7 +149,7 @@ test("Auto file intent reaches a real spreadsheet tool on the selected capable m
     { isAuthenticated: true, canPersist: true, webSearchRequested: false }
   );
   const pick = parseAutoLlmRouterOutput({
-    modelId: "deepseek-v4-flash", requiresFileGeneration: true,
+    modelId: "gpt-5-6-luna", requiresFileGeneration: true,
     reason: "Deliver the quarterly revenue as a downloadable spreadsheet.",
   }, candidates);
   assert.equal(pick?.modelId, "gpt-5-6-luna");
