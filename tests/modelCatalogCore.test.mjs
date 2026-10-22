@@ -303,6 +303,34 @@ test("page text drops scripts and tags", () => {
   assert.equal(pageToText("<p>a</p><script>x()</script><style>.b{}</style> b"), "a b");
 });
 
+test("page text omits script and style bodies with browser-accepted end tags", async (t) => {
+  for (const [name, ending] of [
+    ["space", " "],
+    ["tab", "\t"],
+    ["newline", "\n"],
+    ["carriage return", "\r"],
+    ["form feed", "\f"],
+    ["attribute", ' data-note="ignored"'],
+    ["slash", "/"],
+  ]) {
+    await t.test(name, () => {
+      const body = `<p>before</p><ScRiPt type="text/javascript">script noise</sCrIpT${ending}><STYLE media="all">style noise</sTyLe${ending}><p>after</p>`;
+      assert.equal(pageToText(body), "before after");
+    });
+  }
+});
+
+test("page text preserves bodies of tags that only start with script or style", () => {
+  for (const tag of ["scripture", "script-custom", "script_data", "script:note", "styleguide", "style-custom"]) {
+    assert.equal(pageToText(`<${tag}>keep this</${tag}><script>omit this</script>`), "keep this", tag);
+  }
+});
+
+test("page text keeps ordinary whitespace normalization and the input budget", () => {
+  assert.equal(pageToText("<p> one&nbsp; \n two </p>"), "one two");
+  assert.equal(pageToText("a".repeat(40_001)).length, 40_000);
+});
+
 test("a draft's pricing version fits the revision schema for any API model id", () => {
   const pattern = /^[A-Za-z0-9._:-]{1,80}$/;
   for (const id of ["gpt-image-2", "fal-ai/flux-pro/v1.1-ultra", "x".repeat(200), "///"]) {
