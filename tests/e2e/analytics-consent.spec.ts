@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
+
+test.beforeEach(async ({ page }) => {
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
+});
 
 test("mobile analytics consent stays compact with one-row actions", async ({
   page,
