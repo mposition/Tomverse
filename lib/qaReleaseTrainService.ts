@@ -71,6 +71,16 @@ export type QaReleaseTrainOutcome =
   | { exitCode: 0; train: "empty"; slot: string }
   | { exitCode: 1; train: "refused_to_start" | "read_failed" | "failed"; failure?: string };
 
+/**
+ * Why a call failed, as a short code for the log: the thrown message when it is
+ * one of this code's own codes (github_403, app_401, git_failed ...), never
+ * free text that could carry a header or a body.
+ */
+const failureCode = (stage: string, error: unknown) => {
+  const message = error instanceof Error ? error.message : "";
+  return `${stage}:${/^[a-z0-9_]{1,60}$/.test(message) ? message : "unknown"}`;
+};
+
 export async function runQaReleaseTrainRound(
   env: Readonly<Record<string, string | undefined>>,
   ports: QaReleaseTrainPorts,
@@ -87,12 +97,15 @@ export async function runQaReleaseTrainRound(
 
   let cargo: QaReleaseTrainCandidate[];
   let openTrains: number;
+  let stage = "branch";
   try {
     if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
+    stage = "open_trains";
     openTrains = await ports.github.openTrains();
+    stage = "cargo";
     cargo = openTrains > 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.labelledCargo());
-  } catch {
-    return { exitCode: 1, train: "read_failed" };
+  } catch (error) {
+    return { exitCode: 1, train: "read_failed", failure: failureCode(stage, error) };
   }
   const go = qaReleaseTrainShouldDepart({ departure, openTrainPullRequests: openTrains, candidates: cargo.length });
   if (!go.depart) return { exitCode: 0, train: go.reason === "no_departure" ? "no_departure" : go.reason };
@@ -100,8 +113,8 @@ export async function runQaReleaseTrainRound(
   let admission;
   try {
     admission = await ports.app.admit(departure.slot);
-  } catch {
-    return { exitCode: 1, train: "read_failed" };
+  } catch (error) {
+    return { exitCode: 1, train: "read_failed", failure: failureCode("admit", error) };
   }
   if (!admission.admitted) return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
 

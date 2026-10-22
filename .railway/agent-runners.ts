@@ -129,6 +129,14 @@ const QA_RELEASE_MERGE_LANE_VARIABLES = [
   "QA_RELEASE_MERGE_LANE_ENABLED",
   "QA_RELEASE_MERGE_LANE_KILL_SWITCH",
   "QA_RELEASE_CONTROL_REVISION",
+] as const;
+
+/** The release train: the lane's App and app secret, its own switch and slots. */
+const QA_RELEASE_TRAIN_VARIABLES = [
+  "QA_RELEASE_MERGE_LANE_SECRET",
+  "QA_RELEASE_MERGE_LANE_APP_ID",
+  "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY",
+  "QA_RELEASE_CONTROL_REVISION",
   "QA_RELEASE_TRAIN_ENABLED",
   "QA_RELEASE_TRAIN_SLOTS",
 ] as const;
@@ -297,13 +305,25 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     // Node directly, not npm run: the start check refuses any name it does
     // not know, and npm adds npm_* variables.
     startCommand: "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs",
-    // Every 10 minutes. Each run does the develop lane round when that is on,
-    // then the release train when QA_RELEASE_TRAIN_ENABLED is true.
+    // Every 10 minutes: the develop lane round, when that is on. The release
+    // train is its own service below.
     cronSchedule: "*/10 * * * *",
     // Production only: the lane's state (attempt, latch, operator control)
     // lives in the production database.
     environments: {
       production: QA_RELEASE_MERGE_LANE_VARIABLES,
+    },
+  },
+  {
+    key: "qa_release_train",
+    service: "QA Release Train",
+    startCommand: "node --experimental-strip-types scripts/qa-release-train-service.mjs",
+    // Every 10 minutes; it does work only inside a departure hour
+    // (QA_RELEASE_TRAIN_SLOTS) and once per departure.
+    cronSchedule: "*/10 * * * *",
+    // Production only, beside the lane whose app routes it calls.
+    environments: {
+      production: QA_RELEASE_TRAIN_VARIABLES,
     },
   },
   {

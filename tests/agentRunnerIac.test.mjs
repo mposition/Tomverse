@@ -360,6 +360,20 @@ test("the billing-finance-ops trigger declares exactly the variables its start c
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs");
 });
 
+test("the release train is its own production service, every 10 minutes, with exactly its start check's variables", async () => {
+  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_train");
+  assert.ok(runner);
+  assert.deepEqual(Object.keys(runner.environments), ["production"]);
+  assert.deepEqual([...runner.environments.production].sort(), [...QA_RELEASE_SERVICE_VARIABLES.train].sort());
+  assert.equal(runner.cronSchedule, "*/10 * * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/qa-release-train-service.mjs");
+  // The lane no longer runs it.
+  const { readFileSync } = await import("node:fs");
+  const lane = readFileSync(new URL("../scripts/qa-release-merge-lane-service.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(lane, /runQaReleaseTrainRound/);
+});
+
 test("the sre-ops page service declares the supervisor's page list at S1b, production only", async () => {
   // docs/policy/sre-ops.md §7, §8: the supervisor refuses a name outside its
   // page list, and the page webhook exists from S2 only. Declaring it here
