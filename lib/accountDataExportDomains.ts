@@ -45,6 +45,8 @@ export type ExportDomainDeclaration = {
 };
 
 export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
+  {domain:"codeTaskReservation",publicName:"code_credit_usage",prismaModel:"CodeTaskReservation",state:"included_filtered",
+    withheldReason:"Provider cost basis, pricing snapshots, idempotency digests and internal lease data are withheld."},
   // --- wholly the user's own data ------------------------------------------
   { domain: "userSettings", publicName: "settings", prismaModel: "UserSettings", state: "included" },
   {
