@@ -36,23 +36,20 @@
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
 /**
- * The build's child workers must inherit the CI type-check heap limit.
+ * Build child workers inherit the same bounded type-check heap on CI and Railway.
  *
- * `largeHeap` asks for that same limit off CI, which is what `npm run
- * build:local` does. A local build has died in Mark-Compact at the default heap
- * (2026-10-07), and the remedy was an environment variable the developer had to
- * know about; it does not reproduce on an otherwise idle machine at this tree,
- * so treat this as the one-command way to borrow CI's ceiling rather than as a
- * fix for a deterministic failure.
+ * Railway provides RAILWAY_ENVIRONMENT_ID during builds and deployments. Its
+ * 2026-10-22 builds compiled, then exhausted V8's roughly 2 GiB default while
+ * running TypeScript. This helper is used only by the Next build wrapper, so
+ * the application runtime and service-wide NODE_OPTIONS are unchanged.
  *
- * It is a caller's request rather than "anything that is not CI" because
- * Railway declares no build command and runs this very script, and raising the
- * ceiling there would change how a deploy build fails -- a container limit
- * reached instead of V8 refusing -- which is not a local convenience's call.
+ * `largeHeap` remains the explicit local opt-in used by `npm run build:local`.
+ * An operator's existing heap limit always wins.
  */
 export const nodeOptionsForBuild = (env, { largeHeap = false } = {}) => {
   const configured = env.NODE_OPTIONS ?? "";
-  if ((env.GITHUB_ACTIONS !== "true" && !largeHeap) ||
+  const railwayBuild = Boolean(env.RAILWAY_ENVIRONMENT_ID?.trim());
+  if ((env.GITHUB_ACTIONS !== "true" && !railwayBuild && !largeHeap) ||
       /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
   return `${configured ? `${configured} ` : ""}--max-old-space-size=6144`;
 };
