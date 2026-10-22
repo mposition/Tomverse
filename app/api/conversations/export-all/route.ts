@@ -42,6 +42,7 @@ function exportHeader(
     conversation: {
         title: string;
         createdAt: Date;
+        productKey: string | null;
         continuationBridge: (ContinuationNamingBridge & {
             sourceImportedAt: Date;
         }) | null;
@@ -58,7 +59,7 @@ function exportHeader(
         copy,
     });
     return formatConversationHeader(
-        { title, createdAt: conversation.createdAt },
+        { title, createdAt: conversation.createdAt, productKey: conversation.productKey },
         personalizationNotice,
         [
             ...(bridge
@@ -101,6 +102,7 @@ export async function GET(req: Request) {
                 id: true,
                 title: true,
                 createdAt: true,
+                productKey: true,
                 password: true,
                 // Read for the title and the §9 provenance lines, the two
                 // things the single export also writes for a continuation

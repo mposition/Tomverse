@@ -981,6 +981,14 @@ run(
     "tests/integration/chat-refiner-initial-auto-release.db.test.ts"],
   "Running the Prompt Refiner Auto budget hold transaction scenarios",
 );
+// Chat's lifecycle fixtures include identity, switches and real-query timing.
+// Keep their module mocks isolated from the ordinary database batch.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/chat-c16-lifecycle.db.test.ts"],
+  "Running Chat sharing, export and deletion lifecycle scenarios"
+);
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
 // seam. Module mocks are process-global, so keeping this in its own process
