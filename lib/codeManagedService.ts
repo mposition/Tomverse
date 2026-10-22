@@ -153,7 +153,8 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
         }).modelId === id) as Record<string, unknown> | undefined;
         if (!raw)
             return fail(403, "CODE_MODEL_UNAVAILABLE");
-        const { modelId: _, ...profile } = raw;
+        const profile = { ...raw };
+        delete profile.modelId;
         const parsed = codingProfileSchema.safeParse(profile);
         if (!parsed.success)
             return fail(503, "CODE_CATALOG_INVALID");
