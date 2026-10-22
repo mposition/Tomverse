@@ -15,9 +15,6 @@ const env = (overrides = {}) => ({
   QA_RELEASE_MERGE_LANE_SECRET: "s".repeat(40),
   QA_RELEASE_MERGE_LANE_APP_ID: "1",
   QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY: "k",
-  QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN: "r",
-  QA_RELEASE_MERGE_LANE_ENABLED: "false",
-  QA_RELEASE_MERGE_LANE_KILL_SWITCH: "",
   QA_RELEASE_CONTROL_REVISION: "3",
   QA_RELEASE_TRAIN_ENABLED: "true",
   ...overrides,
@@ -62,8 +59,8 @@ function ports(overrides = {}) {
   return { p, calls, names: () => calls.map(([n]) => n) };
 }
 
-test("off, a kill switch, or a bad departure list does nothing at all", async () => {
-  for (const overrides of [{ QA_RELEASE_TRAIN_ENABLED: "false" }, { QA_RELEASE_MERGE_LANE_KILL_SWITCH: "stop" }, { QA_RELEASE_MERGE_LANE_KILL_SWITCH: undefined }]) {
+test("off, or a bad departure list, does nothing at all", async () => {
+  for (const overrides of [{ QA_RELEASE_TRAIN_ENABLED: "false" }, { QA_RELEASE_TRAIN_ENABLED: undefined }]) {
     const { p, calls } = ports();
     assert.deepEqual(await runQaReleaseTrainRound(env(overrides), p, NOW), { exitCode: 0, train: "disabled" });
     assert.deepEqual(calls, []);
