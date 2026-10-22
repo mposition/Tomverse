@@ -304,3 +304,33 @@ test("a merge refused while the pull request cannot be re-read is unknown, which
   await runQaReleaseMergeLaneRound(ENV, unread.ports);
   assert.deepEqual(reports(unread.calls), [{ kind: "merge", result: "unknown" }]);
 });
+
+test("a skipped deployment of the merge is handed to a person at once, not waited out for two hours", async () => {
+  // #2875 on 2026-10-23: the app's dev deployment was skipped by Wait for CI
+  // while the other services deployed; the lane waited two hours, then kept
+  // reporting the same wait every round.
+  const other = { ...deployment("SUCCESS"), serviceId: "cron", serviceName: "maintenance-cron" };
+  const { ports: p, calls } = ports({ state: awaiting(), deployments: [deployment("SKIPPED"), other] });
+  await runQaReleaseMergeLaneRound(ENV, p);
+  assert.deepEqual(reports(calls).map((r) => r.outcome), ["unknown"]);
+  // Still building somewhere: wait.
+  const building = ports({ state: awaiting(), deployments: [deployment("SKIPPED"), { ...other, status: "BUILDING" }] });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, building.ports), { exitCode: 0, outcome: "waiting" });
+  // A later successful redeploy of the same commit is a success.
+  const redeployed = ports({ state: awaiting(), deployments: [deployment("SUCCESS", 1), deployment("SKIPPED", 5), other] });
+  await runQaReleaseMergeLaneRound(ENV, redeployed.ports);
+  assert.deepEqual(reports(redeployed.calls).map((r) => r.outcome), ["succeeded"]);
+});
+
+test("a latched lane does not repeat the same wait report every round, but still reports a new outcome", async () => {
+  const over = { ...awaiting({ mergeNotBeforeMs: NOW - 3 * 60 * 60 * 1000 }), latched: true };
+  const stuck = ports({ state: over, deployments: [deployment("BUILDING")] });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, stuck.ports), { exitCode: 0, outcome: "waiting" });
+  assert.deepEqual(reports(stuck.calls), []);
+  const skipped = ports({ state: { ...awaiting(), latched: true }, deployments: [deployment("SKIPPED")] });
+  await runQaReleaseMergeLaneRound(ENV, skipped.ports);
+  assert.deepEqual(reports(skipped.calls), []);
+  const done = ports({ state: over, deployments: [deployment("SUCCESS")] });
+  await runQaReleaseMergeLaneRound(ENV, done.ports);
+  assert.deepEqual(reports(done.calls).map((r) => r.outcome), ["succeeded"]);
+});
