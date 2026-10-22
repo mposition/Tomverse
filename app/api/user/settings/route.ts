@@ -18,6 +18,7 @@ import {
     NEW_CONVERSATION_MODELS_MAX,
 } from "@/lib/newConversationModels";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
+import { lockCreditAccount } from "@/lib/creditDebt";
 import { migrateCurrentDailyUsageBuckets } from "@/lib/userDailyUsage";
 import {
     DEFAULT_USER_TIME_ZONE,
@@ -277,8 +278,9 @@ export async function POST(req: Request) {
         const usageKey = getUserChatUsageKey(userId);
 
         const updatedSettings = await prisma.$transaction(async (tx) => {
-            // Chat reservations use the same lock. A time-zone change therefore
-            // cannot race a request into the old daily usage bucket.
+            // Keep the shared monetary order: account first, then the usage
+            // subject used by Chat and Code admission, settlement and refunds.
+            await lockCreditAccount(tx, userId);
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${usageKey}))`;
             const current = await tx.userSettings.findUnique({
                 where: { userId },

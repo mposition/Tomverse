@@ -1,0 +1,426 @@
+{
+  "source": "TomverseCode packages/sidecar/src/providers/prompts.ts",
+  "sourceSha256": "8ee4b5f675524c322030b9f59792c82e5022bb1f489bb2f029cc7c5d395737cf",
+  "schemas": {
+    "DRAFT_SCHEMA": {
+      "type": "object",
+      "properties": {
+        "interpretation": {
+          "type": "string",
+          "description": "Your understanding of the root cause, 1-3 sentences."
+        },
+        "patch": {
+          "type": "string",
+          "description": "Unified diff to apply. Empty string if no change is needed."
+        },
+        "plan": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepId": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "targetPaths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "stepId",
+              "description",
+              "targetPaths"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "moves": {
+          "type": "array",
+          "description": "Files to rename or move, as {from, to}. Empty array in the normal case. Do NOT express a rename as a delete plus a re-create — that resends the whole file.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "Existing workspace-relative path."
+              },
+              "to": {
+                "type": "string",
+                "description": "New workspace-relative path. Must not already exist."
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "deletions": {
+          "type": "array",
+          "description": "Workspace-relative paths to delete. Empty array in the normal case. Do NOT delete a file by emptying it with the patch — that leaves the file behind.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredTests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "doneCriteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcpCalls": {
+          "type": "array",
+          "description": "MCP tool calls you need BEFORE you can write the patch. Empty array in the normal case. If non-empty, your `patch` is discarded: the tools run (each requires the user's approval) and you are asked again with their results.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "arguments": {
+                "type": "object",
+                "description": "Named arguments matching the tool's declared schema."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Why this call is needed — shown to the user on the approval screen."
+              }
+            },
+            "required": [
+              "server",
+              "tool",
+              "arguments",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "interpretation",
+        "patch",
+        "plan",
+        "moves",
+        "deletions",
+        "risks",
+        "requiredTests",
+        "uncertainties",
+        "doneCriteria",
+        "mcpCalls"
+      ],
+      "additionalProperties": false
+    },
+    "PLAN_SCHEMA": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "One-line summary of the plan, in the request's language."
+        },
+        "steps": {
+          "type": "array",
+          "description": "Ordered steps. At least one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "intent": {
+                "type": "string",
+                "description": "What this step does."
+              },
+              "files": {
+                "type": "array",
+                "description": "Workspace-relative paths this step would touch. May be empty for investigation steps.",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "intent"
+            ]
+          }
+        },
+        "filesToChange": {
+          "type": "array",
+          "description": "Every workspace-relative path you expect the change to touch.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "risks": {
+          "type": "array",
+          "description": "What could make this plan wrong — including code you were not shown.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "openQuestions": {
+          "type": "array",
+          "description": "What the user must decide before this plan is final. Empty if nothing.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "needsContext": {
+          "type": "array",
+          "description": "Workspace-relative paths you need to see before this plan is reliable. Paths only — a description is not a path and cannot be fetched.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "doneCriteria": {
+          "type": "array",
+          "description": "Conditions under which this plan can be called done. Checkable statements, not prose.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredTests": {
+          "type": "array",
+          "description": "What must be run to judge this plan's result. Command lines or test names.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "subtasks": {
+          "type": "array",
+          "description": "Execution units. Each is one implementation call. This is NOT the same list as `steps`: `steps` is prose for the user to read, `subtasks` is what gets executed.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "subtaskId": {
+                "type": "string",
+                "description": "Stable id, e.g. \"subtask-1\"."
+              },
+              "intent": {
+                "type": "string",
+                "description": "What this unit implements."
+              },
+              "files": {
+                "type": "array",
+                "description": "Workspace-relative paths this unit is expected to touch.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "proposedGrade": {
+                "type": "string",
+                "enum": [
+                  "economy",
+                  "frontier"
+                ],
+                "description": "How hard this unit is. This is a PROPOSAL: the final grade is computed from it by rules you do not control (a user-chosen clamp and a risk floor on sensitive paths)."
+              }
+            },
+            "required": [
+              "intent",
+              "proposedGrade"
+            ]
+          }
+        }
+      },
+      "required": [
+        "summary",
+        "steps"
+      ]
+    },
+    "REVIEW_SCHEMA": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "ACCEPT",
+            "REVISE",
+            "REJECT",
+            "NEED_USER_INPUT"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "revisedPatch": {
+          "type": "string",
+          "description": "Required for REVISE: the corrected unified diff."
+        },
+        "revisedMoves": {
+          "type": "array",
+          "description": "REVISE only: replaces the draft's `moves` entirely. Omit to keep the draft's moves as they are; send an empty array to drop them all.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          }
+        },
+        "revisedDeletions": {
+          "type": "array",
+          "description": "REVISE only: replaces the draft's `deletions` entirely. Omit to keep them; send an empty array to delete nothing.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "questionsForUser": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rejectionReason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "rationale"
+      ]
+    },
+    "SINGLE_FIX_SCHEMA": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "ACCEPT",
+            "REJECT",
+            "NEED_USER_INPUT"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "patch": {
+          "type": "string",
+          "description": "Required for ACCEPT: unified diff to apply."
+        },
+        "questionsForUser": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rejectionReason": {
+          "type": "string"
+        },
+        "moves": {
+          "type": "array",
+          "description": "Files to rename or move, as {from, to}. Omit or leave empty in the normal case.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          }
+        },
+        "deletions": {
+          "type": "array",
+          "description": "Workspace-relative paths to delete. Omit or leave empty in the normal case.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcpCalls": {
+          "type": "array",
+          "description": "MCP tool calls you need before you can produce the patch. Omit or leave empty in the normal case. If non-empty, your `patch` is discarded: the tools run (each requires the user's approval) and you are asked again.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "arguments": {
+                "type": "object"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "server",
+              "tool",
+              "arguments"
+            ]
+          }
+        }
+      },
+      "required": [
+        "verdict",
+        "rationale"
+      ]
+    },
+    "QUESTION_SCHEMA": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "string",
+          "description": "The answer, in the language the question was asked in."
+        },
+        "citedFiles": {
+          "type": "array",
+          "description": "Workspace-relative paths you relied on. Empty if the answer did not depend on any file.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missingContext": {
+          "type": "array",
+          "description": "What you would need to see to answer more confidently. Empty if nothing is missing.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "answer"
+      ]
+    }
+  }
+}
