@@ -88,8 +88,16 @@ export function qaReleaseTrainShouldDepart(input: {
 /** What happened to one pull request when the train was assembled. */
 export type QaReleaseTrainPick = {
   number: number;
-  outcome: "included" | "already_in_main" | "conflict" | "over_capacity";
+  /**
+   * `changes_workflows`: it changes `.github/workflows/**`, which the merge
+   * lane's App may not push (no workflows permission, by design); it is left
+   * out and released on its own.
+   */
+  outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows";
 };
+
+/** Outcomes that leave a labelled pull request for a later release. */
+export const QA_RELEASE_TRAIN_LEFT_OUT: ReadonlySet<QaReleaseTrainPick["outcome"]> = new Set(["conflict", "over_capacity", "changes_workflows"]);
 
 export function qaReleaseTrainPullRequest(input: {
   slot: string;
@@ -100,9 +108,13 @@ export function qaReleaseTrainPullRequest(input: {
 }): { title: string; body: string } {
   const title = (n: number) => input.candidates.find((c) => c.number === n)?.title.replace(/\s+/g, " ").slice(0, 120) ?? "";
   const included = input.picks.filter((p) => p.outcome === "included");
-  const left = input.picks.filter((p) => p.outcome === "conflict" || p.outcome === "over_capacity");
+  const left = input.picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome));
   const already = input.picks.filter((p) => p.outcome === "already_in_main");
-  const reason = { conflict: "cherry-pick conflict on main; still labelled, rides a later train once resolved", over_capacity: "train full; rides the next train" } as const;
+  const reason = {
+    conflict: "cherry-pick conflict on main; still labelled, rides a later train once resolved",
+    over_capacity: "train full; rides the next train",
+    changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
+  } as const;
   const lines = [
     `Release train ${input.slot} (AEST), opened by the QA-release agent. Selective release, \`.github/RELEASE_CHECKLIST.md\` 7.9.1: each pull request below was cherry-picked onto main with \`-m 1\` in develop merge order. A person merges this pull request.`,
     "",
