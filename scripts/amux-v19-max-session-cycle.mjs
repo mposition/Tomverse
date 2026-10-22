@@ -78,7 +78,7 @@ export function amuxV19MaxSessionCycleStatus(result) {
     parts.push(`reason=${result.reason}`);
   }
   if (kind === "recorded") {
-    for (const key of ["planState", "registrationState"]) {
+    for (const key of ["planState", "planReason", "registrationState"]) {
       if (STATES.test(result?.[key] ?? "")) parts.push(`${key}=${result[key]}`);
     }
     if (result?.haltReleased === false) parts.push("haltReleased=false");

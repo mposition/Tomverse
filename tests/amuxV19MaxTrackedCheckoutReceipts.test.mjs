@@ -114,7 +114,8 @@ test("Max output is posted only after both exact source receipts", async () => {
     }), observed);
   assert.deepEqual(result, { kind: "recorded", recovered: false,
     retryWrite: false, digest, digestKeyId: "synthetic-digest",
-    planState: "plan_refused", registrationState: "not_planned" });
+    planState: "plan_refused", planReason: "invalid_result",
+    registrationState: "not_planned" });
   assert.deepEqual(calls, [
     "GET /api/internal/amux/v19/session-analysis-stop",
     "POST /api/internal/amux/v19/max-checkout-evidence",
