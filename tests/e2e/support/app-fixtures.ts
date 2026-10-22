@@ -1073,7 +1073,18 @@ export async function mockAuthenticatedApi(
     const scopeKey = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() ?? "");
     const current = drafts.get(scopeKey);
     const canonical = (draft: NonNullable<typeof current>) => ({
-      ...draft, scopeKey, attachments: [],
+      ...draft, scopeKey,
+      attachments: draft.attachmentReferences.map((value, ordinal) => {
+        const reference = value as { uploadId?: string; attachmentId?: string };
+        const upload = reference.uploadId ? finalizedUploadRegistry(page).get(reference.uploadId) : undefined;
+        return {
+          id: reference.attachmentId ?? reference.uploadId!, ordinal,
+          name: upload?.name ?? `file-${ordinal}`,
+          mediaType: upload?.mediaType ?? "application/octet-stream",
+          size: upload?.size ?? 1, kind: upload?.kind ?? "file",
+          ...reference,
+        };
+      }),
       createdAt: "2026-09-21T00:00:00.000Z",
       updatedAt: "2026-09-21T00:00:00.000Z",
     });
@@ -1456,13 +1467,13 @@ export type AttachmentUploadQaState = {
  */
 const FINALIZED_UPLOADS = new WeakMap<
   Page,
-  Map<string, { name: string; mediaType: string }>
+  Map<string, { name: string; mediaType: string; size: number; kind: "text" | "file" }>
 >();
 
 const finalizedUploadRegistry = (page: Page) => {
   const existing = FINALIZED_UPLOADS.get(page);
   if (existing) return existing;
-  const created = new Map<string, { name: string; mediaType: string }>();
+  const created = new Map<string, { name: string; mediaType: string; size: number; kind: "text" | "file" }>();
   FINALIZED_UPLOADS.set(page, created);
   return created;
 };
@@ -1529,6 +1540,8 @@ export async function mockAttachmentUpload(page: Page): Promise<AttachmentUpload
       finalizedUploadRegistry(page).set(uploadId, {
         name: body.name || "file",
         mediaType: body.mediaType || "application/octet-stream",
+        size: body.size || 1,
+        kind: TEXT_UPLOAD_TYPES.has(body.mediaType || "") ? "text" : "file",
       });
       await route.fulfill(
         json({

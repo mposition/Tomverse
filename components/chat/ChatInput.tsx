@@ -207,7 +207,7 @@ const getMobileModelMenuSnapshot = () =>
   window.matchMedia(MOBILE_MODEL_MENU_QUERY).matches;
 const getServerMobileModelMenuSnapshot = () => false;
 
-function MobileModelMenuPortal({ children }: { children: ReactNode }) {
+function ComposerMenuPortal({ children }: { children: ReactNode }) {
   const isMobile = useSyncExternalStore(
     subscribeToMobileModelMenu,
     getMobileModelMenuSnapshot,
@@ -216,7 +216,9 @@ function MobileModelMenuPortal({ children }: { children: ReactNode }) {
 
   useBodyScrollLock(isMobile);
 
-  return isMobile ? createPortal(children, document.body) : children;
+  // Both Studio side panels scroll and clip their contents. Every composer
+  // menu must escape that clip, including the desktop attachment source view.
+  return createPortal(children, document.body);
 }
 
 const interpolateCopy = (
@@ -1182,6 +1184,7 @@ export function ChatInput({
     const modelSummaryCopy = chatModelSummaryCopy[lang];
     const isAutoMode = selectionMode === "auto";
     const isReviewProduct = currentProduct === "review";
+    const isStudio = (review?.appearance ?? workspaceAppearance) === "studio";
     const showReviewContextPicker =
       isReviewProduct && showProductSwitcher && showReviewModelRow;
     const useCompactMobileReviewSpacing =
@@ -2179,6 +2182,15 @@ export function ChatInput({
   const deepResearchReason = !deepResearchModel ? null
     : isGuestMode ? t("modelStatusReasons.loginRequired")
       : deepResearchLocked ? t("modelStatusReasons.upgradeRequired") : null;
+  const openDeepResearchSetup = () => {
+    closeMenu(false);
+    if (deepResearchLocked) {
+      onToggleModel("perplexity/sonar-deep-research");
+      return;
+    }
+    trackProductEvent("deep_research_setup_opened", selectedModels.length, {});
+    onOpenDeepResearchSetup?.();
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2304,13 +2316,9 @@ export function ChatInput({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [closeMenu]);
 
-  // The desktop popover is anchored to the bottom of the toolbar row via
-  // `bottom: 3rem`, so its bottom edge never moves — only its height does.
-  // `getBoundingClientRect().bottom` therefore tells us exactly how much
-  // vertical space is actually available above it on screen (accounting for
-  // the real input-bar height, browser zoom, and short viewports), which a
-  // static `calc(100dvh - 8rem)` cap can't know. Runs before paint so an
-  // oversized first layout never flashes.
+  // Desktop tools share one viewport-anchored menu across Chat and Review.
+  // Open on whichever side of the trigger has room, and follow panel scrolls.
+  // Mobile keeps its keyboard-aware bottom sheet; models keep their dialog.
   useLayoutEffect(() => {
     if (!isMenuOpen) return;
 
@@ -2319,26 +2327,36 @@ export function ChatInput({
 
     const desktopQuery = window.matchMedia("(min-width: 768px)");
 
-    const clampPopoverHeight = () => {
-      if (!desktopQuery.matches) {
-        popover.style.maxHeight = "";
-        return;
-      }
+    const positionPopover = () => {
+      if (!desktopQuery.matches || menuView === "models") return;
 
-      const topMargin = 16;
-      const minHeight = 240;
-      const available = popover.getBoundingClientRect().bottom - topMargin;
-      popover.style.maxHeight = `${Math.max(minHeight, available)}px`;
+      const trigger = actionMenuButtonRef.current;
+      if (!trigger) return;
+      const anchor = trigger.getBoundingClientRect();
+      const margin = 16;
+      const gap = 8;
+      const above = Math.max(0, anchor.top - gap - margin);
+      const below = Math.max(0, window.innerHeight - anchor.bottom - gap - margin);
+      const openBelow = below > above;
+      // Desktop-only variables leave the mobile keyboard inset styles intact.
+      popover.style.setProperty("--composer-menu-max-height", `${openBelow ? below : above}px`);
+      const box = popover.getBoundingClientRect();
+      popover.style.setProperty("--composer-menu-left", `${Math.max(margin, Math.min(anchor.left, window.innerWidth - box.width - margin))}px`);
+      popover.style.setProperty("--composer-menu-top", `${openBelow ? anchor.bottom + gap : Math.max(margin, anchor.top - gap - box.height)}px`);
     };
 
-    clampPopoverHeight();
-    window.addEventListener("resize", clampPopoverHeight);
-    desktopQuery.addEventListener("change", clampPopoverHeight);
+    positionPopover();
+    const observer = new ResizeObserver(positionPopover);
+    observer.observe(popover);
+    window.addEventListener("resize", positionPopover);
+    window.addEventListener("scroll", positionPopover, true);
+    desktopQuery.addEventListener("change", positionPopover);
 
     return () => {
-      window.removeEventListener("resize", clampPopoverHeight);
-      desktopQuery.removeEventListener("change", clampPopoverHeight);
-      popover.style.maxHeight = "";
+      observer.disconnect();
+      window.removeEventListener("resize", positionPopover);
+      window.removeEventListener("scroll", positionPopover, true);
+      desktopQuery.removeEventListener("change", positionPopover);
     };
   }, [isMenuOpen, menuView]);
 
@@ -3242,7 +3260,7 @@ export function ChatInput({
 
   // Drives which model-picker layout renders below: the original compact,
   // single-scroll mobile sheet (filters scroll away together with the
-  // list, matching this same breakpoint's MobileModelMenuPortal decision
+  // list, matching this same breakpoint's ComposerMenuPortal decision
   // above) vs. the wider two-pane modal on desktop.
   const isMobileModelMenu = useSyncExternalStore(
     subscribeToMobileModelMenu,
@@ -3267,9 +3285,9 @@ export function ChatInput({
   const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
   // MOBILE-KB-INSET-01. The bar adds no safe-area inset of its own. It is
-  // only below md inside MobileChatShell, whose dock always ends with
-  // AiDisclaimerNotice, and that last row already pads for the inset -- adding
-  // it here too reserved the home-indicator space twice, once above the notice.
+  // only below md inside MobileChatShell, whose dock pads after its last row
+  // (the disclaimer or analytics notice). Adding the inset here too would
+  // reserve the home-indicator space twice, once above the footer notices.
   // (Above md the bar's md:py-4/md:pb-4 applies and no inset was ever added.) The
   // dock's bottom edge is the only place the inset belongs.
   return (
@@ -3982,11 +4000,20 @@ export function ChatInput({
             )}
           </button>
           {showWebSearchInFooter && webSearchChip}
-          {review?.appearance === "studio" && !webSearchState.isVisible && <button type="button" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
-          {review?.appearance === "studio" && review.mode !== "easy" && <button type="button" className="review-research-shortcut" onClick={() => {
-            if (isGuestMode) { onGuestSignInPrompt?.(); return; }
-            onOpenDeepResearchSetup?.();
-          }} disabled={isDeepResearchPending || review.pending}>{t("chat.toolsDeepResearch")}</button>}
+          {isStudio && !webSearchState.isVisible && <button type="button" data-testid="composer-web-search-shortcut" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
+          {isStudio && review?.mode !== "easy" && (
+            <button
+              type="button"
+              data-testid="composer-deep-research-shortcut"
+              className="review-research-shortcut"
+              onClick={openDeepResearchSetup}
+              disabled={!deepResearchModel || isDeepResearchPending || review?.pending}
+              aria-describedby={deepResearchReason ? "composer-deep-research-reason" : undefined}
+            >
+              {t("chat.toolsDeepResearch")}
+              {deepResearchReason && <span id="composer-deep-research-reason" className="sr-only">{deepResearchReason}</span>}
+            </button>
+          )}
           {review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || review?.appearance === "studio") && (
             <button
               ref={modelMenuButtonRef}
@@ -4158,7 +4185,7 @@ export function ChatInput({
         </div>
 
           {isMenuOpen && (
-            <MobileModelMenuPortal>
+            <ComposerMenuPortal>
             <>
             <button
               type="button"
@@ -4201,7 +4228,7 @@ export function ChatInput({
               className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:rounded-2xl ${
                 menuView === "models"
                   ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none md:inset-x-auto md:left-1/2 md:right-auto md:-translate-x-1/2 md:top-[5vh] md:bottom-[5vh] md:h-[90vh] md:max-h-[900px] md:w-[min(94vw,1000px)] md:max-w-[min(94vw,1000px)]"
-                  : "md:left-0 md:right-auto bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)] md:absolute md:inset-x-auto md:bottom-12 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)]"
+                  : "md:right-auto bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)] md:inset-x-auto md:bottom-auto md:left-[var(--composer-menu-left)] md:top-[var(--composer-menu-top)] md:max-h-[var(--composer-menu-max-height)] md:w-80 md:max-w-[calc(100vw_-_2rem)]"
               }`}
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
@@ -4247,7 +4274,7 @@ export function ChatInput({
                 </div>
               )}
               {menuView === "actions" ? (
-                <div className="space-y-1">
+                <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain">
                   {/*
                     One row, not two. Where a file comes from is a question
                     about attaching, so it is asked after the user says they
@@ -4426,22 +4453,7 @@ export function ChatInput({
                         type="button"
                         data-testid="tools-deep-research-row"
                         disabled={!deepResearchModel}
-                        onClick={() => {
-                          closeMenu(false);
-                          if (deepResearchLocked) {
-                            // Reuses the same guest-sign-in/upgrade-plan gating
-                            // toggling a locked model in the picker already
-                            // triggers, instead of inventing a second prompt.
-                            onToggleModel("perplexity/sonar-deep-research");
-                            return;
-                          }
-                          trackProductEvent(
-                            "deep_research_setup_opened",
-                            selectedModels.length,
-                            {}
-                          );
-                          onOpenDeepResearchSetup?.();
-                        }}
+                        onClick={openDeepResearchSetup}
                         className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                       >
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-deep-research-500/10 text-accent-deep-research-500">
@@ -4569,7 +4581,7 @@ export function ChatInput({
                   instead of a paragraph everybody scrolls past on their way
                   to something else.
                 */
-                <div className="space-y-1">
+                <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain">
                   <button
                     type="button"
                     onClick={() => setMenuView("actions")}
@@ -4691,13 +4703,8 @@ export function ChatInput({
                 </div>
               ) : menuView === "assistant" ? (
                 /*
-                  A collection, not a fixed set of actions, so this is the one
-                  view that scrolls by design: the account decides how many
-                  assistants there are. The root menu does not scroll for the
-                  same reason -- its length is a design decision, and a
-                  scrollbar there would be a symptom of one gone wrong.
-
-                  The back control stays put and the list scrolls under it;
+                  The account decides how many assistants there are, so the
+                  back control stays put and the list scrolls under it;
                   `min-h-0` is what lets the flex child shrink far enough for
                   `overflow-y-auto` to mean anything.
                 */
@@ -5072,7 +5079,7 @@ export function ChatInput({
               )}
             </div>
             </>
-            </MobileModelMenuPortal>
+            </ComposerMenuPortal>
           )}
         </div>
 
