@@ -10,6 +10,7 @@ import { adminCiAdmissionMessages } from "@/lib/adminMessages/ciAdmission";
 import type { CiRunnerUsage } from "@/lib/ciRunnerUsage";
 import {
   CI_ADMISSION_MAX_CAPACITY,
+  type CiAdmissionEntryStatus,
   type CiAdmissionEvent,
   type CiAdmissionMode,
   type CiAdmissionQueueEntry,
@@ -184,6 +185,18 @@ const EVENT_DOT: Record<CiAdmissionEvent["kind"], string> = {
   stopped: "bg-rose-400",
 };
 
+const STATUS_BADGE: Record<CiAdmissionEntryStatus, string> = {
+  running: "bg-emerald-400/15 text-emerald-300",
+  next: "bg-emerald-400/15 text-emerald-300",
+  done: "bg-zinc-700/60 text-zinc-300",
+  waiting: "bg-zinc-800 text-zinc-400",
+  checking: "bg-zinc-800 text-zinc-400",
+  conflict: "bg-amber-300/15 text-amber-300",
+  behind: "bg-amber-300/15 text-amber-300",
+  hold: "bg-amber-300/15 text-amber-300",
+  held: "bg-rose-400/15 text-rose-300",
+};
+
 const moved = (order: number[], number: number, to: number) => {
   const rest = order.filter((n) => n !== number);
   rest.splice(Math.max(0, Math.min(to, rest.length)), 0, number);
@@ -192,7 +205,8 @@ const moved = (order: number[], number: number, to: number) => {
 
 /**
  * Admin's CI admission line (lib/ciAdmissionCore.ts): who is using the slots,
- * the waiting drafts in release order -- rearranged by dragging the handle
+ * every open pull request into develop or main in priority order, each with
+ * where it stands -- rearranged by dragging the handle
  * (mouse, pen or touch) or from the keyboard -- the slot budget, and recent
  * decisions. A reorder is shown at once and saved; a refused save restores
  * the previous order.
@@ -463,6 +477,17 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const free = Math.max(0, state.capacity - used);
   const minutes = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
   const badgeText = (kind: Kind) => (kind === "develop" ? m.develop : kind === "hotfix" ? m.hotfix : m.main);
+  const statusText: Record<CiAdmissionEntryStatus, string> = {
+    running: m.statusRunning,
+    done: m.statusDone,
+    next: m.statusNext,
+    waiting: m.statusWaiting,
+    conflict: m.statusConflict,
+    behind: m.statusBehind,
+    hold: m.statusHold,
+    checking: m.statusChecking,
+    held: m.statusHeld,
+  };
 
   const rowBody = (entry: CiAdmissionQueueEntry, rank: number, floating: boolean) => {
     const kind = kindOf(entry);
@@ -480,9 +505,15 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             #{entry.number} {entry.title}
           </a>
           <span className="truncate font-mono text-xs text-zinc-400">
-            {entry.head} · {fill(m.waitedFor, { minutes: minutes(entry.queuedAt) })}
+            {entry.head} · {entry.draft ? m.draft : m.ready} · {fill(m.waitedFor, { minutes: minutes(entry.queuedAt) })}
           </span>
         </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[entry.status]}`}
+          data-testid={floating ? undefined : `ci-admission-status-${entry.number}`}
+        >
+          {statusText[entry.status]}
+        </span>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[kind]}`}>{badgeText(kind)}</span>
       </>
     );
@@ -633,14 +664,6 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           <p className="text-sm text-zinc-400">{m.empty}</p>
         ) : (
           <>
-            {(() => {
-              const head = byNumber.get(preview[0]);
-              return head ? (
-                <span className="self-start rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs font-medium text-emerald-400">
-                  {fill(m.nextUp, { units: unitsOf(kindOf(head)) })}
-                </span>
-              ) : null;
-            })()}
             <ol ref={listRef} className="relative flex flex-col gap-2" data-testid="ci-admission-queue">
               {preview.map((number, index) => {
                 const entry = byNumber.get(number)!;
@@ -670,7 +693,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                     className={`flex items-center gap-3 rounded-xl border bg-zinc-950 p-3 transition-shadow ${
                       isDragged
                         ? "border-blue-400 shadow-[0_12px_28px_rgba(0,0,0,0.55)] ring-1 ring-blue-400"
-                        : index === 0
+                        : entry.status === "running" || entry.status === "next"
                           ? "border-emerald-400/60"
                           : "border-zinc-800"
                     }`}
@@ -720,7 +743,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                       type="button"
                       className="min-h-8 rounded-lg px-2 text-[13px] font-medium text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
                       disabled={!canWrite || busy || drag !== null}
-                      onClick={() => void send({ action: "remove", number })}
+                      onClick={() => void send({ action: "move_bottom", number })}
                     >
                       {m.remove}
                     </button>

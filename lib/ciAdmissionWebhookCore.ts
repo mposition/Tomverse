@@ -27,6 +27,9 @@ const ROUND_PULL_REQUEST_ACTIONS = new Set([
   "closed",
   "synchronize",
   "edited",
+  // The hold label (lib/ciAdmissionCore.ts) changes what may be marked ready.
+  "labeled",
+  "unlabeled",
 ]);
 
 export type CiAdmissionWebhookDecision =

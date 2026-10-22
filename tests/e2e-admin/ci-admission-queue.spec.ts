@@ -3,7 +3,7 @@ import { adminFixtureDatabase } from "./support/database";
 
 /**
  * Admin › Agent digests: the CI admission line (lib/ciAdmissionCore.ts). The
- * operator reorders waiting pull requests by dragging the handle and from the
+ * operator reorders the pull requests in line by dragging the handle and from the
  * keyboard; each order is shown at once and saved to the stored state.
  */
 
@@ -13,13 +13,17 @@ const entry = (number: number, base: string, head: string) => ({
   title: `Pull request ${number}`,
   base,
   head,
+  headSha: "",
   queuedAt: "2026-10-20T01:00:00.000Z",
+  draft: true,
+  status: "waiting",
 });
 const seed = {
-  version: 1,
+  version: 2,
   capacity: 3,
   queue: [entry(901, "develop", "claude/to-develop/a"), entry(902, "main", "release/2026-10-20-b"), entry(903, "develop", "claude/to-develop/c")],
   released: [],
+  pendingStatus: [],
   events: [{ at: "2026-10-20T01:05:00.000Z", kind: "held", number: 903, shadow: false, detail: "no_slot" }],
   lastRound: {
     at: "2026-10-20T01:05:00.000Z",
