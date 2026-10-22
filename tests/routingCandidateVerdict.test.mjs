@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 import { CANDIDATE_REJECTIONS } from "../lib/routerCandidates.ts";
@@ -24,6 +24,17 @@ const migration = () =>
         ),
         "utf8"
     );
+
+const latestReasonConstraint = () => {
+    const root = new URL("../prisma/migrations/", import.meta.url);
+    for (const directory of readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory()).map(entry => entry.name).sort().reverse()) {
+        const sql = readFileSync(new URL(`${directory}/migration.sql`, root), "utf8");
+        const constraint = sql.match(/ADD CONSTRAINT "RoutingCandidateVerdict_reason_check"[\s\S]*?;/);
+        if (constraint) return constraint[0];
+    }
+    throw new Error("Missing RoutingCandidateVerdict reason constraint");
+};
 
 test("a rejection names its reason and holds no rank", () => {
     assert.deepEqual(
@@ -100,9 +111,8 @@ test("the database holds the same rules", () => {
     assert.match(sql, /RoutingCandidateVerdict_reason_matches_verdict_check/);
     assert.match(sql, /RoutingCandidateVerdict_rank_matches_verdict_check/);
     assert.match(sql, /RoutingCandidateVerdict_rank_positive_check/);
-    for (const reason of CANDIDATE_REJECTIONS) {
-        assert.match(sql, new RegExp(`'${reason}'`), reason);
-    }
+    const reasons = [...latestReasonConstraint().matchAll(/'([^']+)'/g)].map(match => match[1]);
+    assert.deepEqual(new Set(reasons), new Set(CANDIDATE_REJECTIONS));
 });
 
 test("uniqueness survives a null deployment", () => {

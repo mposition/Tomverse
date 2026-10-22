@@ -2097,7 +2097,7 @@ async function handleChatPost(
             : Promise.resolve({ image: false } as const);
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
-        // model; any failure uses a file-capable eligible fallback when available.
+        // model; a missing decision keeps the ordinary Auto choice and recovery.
         const fileRoutingContext = {
             isAuthenticated: Boolean(session?.user?.id),
             canPersist: Boolean(session?.user?.id && conversationId && assistantMessageId),
@@ -2142,10 +2142,10 @@ async function handleChatPost(
             deterministicAutoSelection,
             llmPick?.modelId ?? null,
             {
-                // When semantic routing is off or unavailable, a tool-capable
-                // eligible fallback also handles file requests without a second call.
-                required: llmPick?.requiresFileGeneration === true ||
-                    (!llmPick && fileCapableModelIds.length > 0),
+                // Restrict capabilities only for an identified file request.
+                // A missing semantic decision retains ordinary Auto recovery;
+                // offering file tools to every turn would disable that recovery.
+                required: llmPick?.requiresFileGeneration === true,
                 capableModelIds: fileCapableModelIds,
             }
         );
