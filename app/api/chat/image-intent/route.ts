@@ -29,7 +29,12 @@ import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 // restricted), so the call is never paid for a handoff that cannot happen.
 
 const imageIntentSchema = z
-  .object({ text: z.string().max(8_000) })
+  .object({
+    text: z.string().max(8_000),
+    // The Chat conversation the message is sent in; a follow-up such as
+    // "make it bluer" reads its previous image from there.
+    conversationId: z.string().trim().min(1).max(100).nullable().optional(),
+  })
   .strict();
 
 const notImage = () => NextResponse.json({ image: false });
@@ -66,6 +71,9 @@ export async function POST(req: Request) {
     const decision = await detectChatImageRequest({
       text: body.text,
       traceId: randomUUID(),
+      userId,
+      conversationId: body.conversationId ?? null,
+      request: req,
     });
     return NextResponse.json(decision);
   } catch (error) {

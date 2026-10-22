@@ -39,6 +39,8 @@ import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
+import { getImageModel, imageModelOwner } from "@/lib/imageModelRegistry";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
@@ -807,6 +809,18 @@ export function ChatMessageList({
             const modelInfo = !isUser && msg.modelId
               ? AVAILABLE_MODELS.find(m => m.id === msg.modelId)
               : null;
+            // An image answer is made by its image models, so the header
+            // names those rather than the panel's chat model.
+            const imageTurnModels = (msg.imageTurn?.modelIds ?? []).map((id) => {
+              const profile = getImageModel(id);
+              return {
+                name: profile?.name ?? id,
+                provider: profile ? imageModelOwner(profile) : undefined,
+              };
+            });
+            const headerName = imageTurnModels.length > 0
+              ? imageTurnModels.map((model) => model.name).join(" · ")
+              : modelInfo?.name;
 
             // Only the message this panel is actually streaming right now
             // (always the last one) gets the connecting/generating status --
@@ -929,13 +943,17 @@ export function ChatMessageList({
                     data-testid="assistant-message-header"
                     className="mb-1.5 ml-1 flex max-w-full select-none items-center gap-2"
                   >
-                    <ModelLogo model={modelInfo} size="sm" />
+                    {imageTurnModels.length > 0 ? (
+                      <ModelLogo provider={imageTurnModels[0].provider} size="sm" />
+                    ) : (
+                      <ModelLogo model={modelInfo} size="sm" />
+                    )}
                     <span
                       data-testid="assistant-message-model-name"
-                      title={modelInfo.name}
+                      title={headerName}
                       className="min-w-0 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
                     >
-                      {modelInfo.name}
+                      {headerName}
                     </span>
                     {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
                       // The badge reports web search and nothing else. Why it
@@ -1201,7 +1219,11 @@ export function ChatMessageList({
                       ))}
                     </div>
                   )}
-                  {msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
+                  {msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
+                    // An image turn's answer is the picture; its text is only
+                    // the record kept for later turns and exports.
+                    <ChatImageTurnCard groupId={msg.imageTurn.groupId} />
+                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
