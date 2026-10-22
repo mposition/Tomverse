@@ -402,3 +402,47 @@ test("a priced runtime image model cannot change what it calls", async () => {
   const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
   assert.equal((row?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-catalog-a");
 });
+
+test("a priced runtime image model whose stored profile no longer parses cannot be given a new one", async () => {
+  // Review nit 2026-10-21: the lock compared execution profiles only when the
+  // stored one parsed, so an unreadable profile let any new request profile
+  // in under the existing price. Unreadable now counts as changed.
+  const modelId = "catalog-runtime-unreadable";
+  const stored = { provider: "openai", apiModelId: "gpt-image-catalog-legacy" };
+  await prisma.modelCatalogEntry.create({ data: { category: "image", modelId, profile: stored } });
+  await prisma.modelCatalogPriceRevision.create({
+    data: {
+      category: "image",
+      modelId,
+      pricingVersion: "unreadable-v1",
+      prices: [{ quality: "low", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 }],
+      verification,
+      effectiveFrom: new Date(),
+    },
+  });
+  const auditsBefore = await auditCount("model_catalog.entry_updated");
+  await assert.rejects(
+    updateCatalogEntry({
+      category: "image",
+      modelId,
+      patch: {
+        profile: {
+          provider: "openai",
+          apiModelId: "gpt-image-catalog-dearer",
+          name: "Unreadable Runtime Image",
+          lifecycle: "preview",
+          sizes: ["1024x1024"],
+          qualities: ["low"],
+          latencyClass: "balanced",
+          provenance: [],
+          outputMimeTypes: ["image/png"],
+        },
+      },
+      session,
+    }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "execution_profile_priced"
+  );
+  const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(row?.profile, stored);
+  assert.equal(await auditCount("model_catalog.entry_updated"), auditsBefore);
+});

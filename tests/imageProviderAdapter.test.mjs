@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { test } from "node:test";
 
 import {
@@ -6,6 +7,15 @@ import {
   generateImageWithProvider,
   ImageProviderError,
 } from "../lib/imageProviderAdapter.ts";
+
+// Required, not imported: the adapter reaches the registry through tsx's
+// CommonJS loader, and an ESM import of the same file is a second instance
+// whose active catalogue the adapter never sees.
+const {
+  IMAGE_MODEL_REGISTRY,
+  resetActiveImageModelCatalog,
+  setActiveImageModelCatalog,
+} = createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
 
 test("429 is rate limited, 5xx is provider failure", () => {
   assert.equal(classifyImageProviderFailure(429, null), "provider_rate_limited");
@@ -91,6 +101,39 @@ test("having an adapter is not what makes a model callable", async () => {
         /not available for requests/.test(error.message),
       modelId
     );
+  }
+});
+
+test("a held model whose thinking the request cannot bound is never dispatched", async () => {
+  // A hold replaces the judge's reason with `operational_hold`, which the
+  // dispatch lets through so admitted jobs can finish. A Google model with a
+  // cap an operator wrote down must still not reach a provider that bills its
+  // thinking per uncapped token -- and refusing happens before any key lookup
+  // or network call.
+  const google = IMAGE_MODEL_REGISTRY.find((model) => model.provider === "google");
+  const statedCap = {
+    ...google,
+    priceVerification: { ...google.priceVerification, thinkingCapMicroUsd: 2_000 },
+  };
+  try {
+    for (const disabledReason of ["operational_hold", null]) {
+      setActiveImageModelCatalog([{ ...statedCap, disabledReason }]);
+      await assert.rejects(
+        generateImageWithProvider({
+          prompt: "a red apple",
+          size: "1024x1024",
+          quality: "medium",
+          modelId: google.id,
+        }),
+        (error) =>
+          error.name === "ImageProviderError" &&
+          error.failurePhase === "provider_failed" &&
+          /no thinking cap its request can enforce/.test(error.message),
+        String(disabledReason)
+      );
+    }
+  } finally {
+    resetActiveImageModelCatalog();
   }
 });
 
