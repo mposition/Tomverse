@@ -284,10 +284,12 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       회차만 그 출발을 시작하며, 그 출발의 브랜치 `release/train-YYYYMMDD-HHMM`(AEST)이 GitHub에 있으면 다시 시작하지 않습니다.
     - **실을 PR**은 develop에 병합됐고 `main:next` 라벨이 붙은 PR입니다. 라벨은 사람이나 개발 세션이 붙이고 에이전트는 읽기만
       합니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 실을 PR이 없으면 열지 않습니다. 한 열차는 최대 30개를 싣고 나머지는
-      다음 열차를 탑니다.
+      다음 열차를 탑니다. 라벨은 main에 들어간 뒤에도 남으므로 검색 결과를 모든 페이지(GitHub 검색 상한 1,000건)까지 읽습니다.
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뛰고, 충돌하는 PR은 abort하고 뺍니다. 뺀 PR과
-      이유는 PR 본문과 Admin에 보이고 라벨은 그대로 둡니다. 충돌 해결은 하지 않습니다.
+      이유는 PR 본문과 Admin에 보이고 라벨은 그대로 둡니다. 충돌 해결은 하지 않습니다. `.github/workflows/**`를 바꾸는 PR도
+      되돌려 뺍니다: App에 workflows 권한이 없어 그 파일이 든 push는 GitHub이 거절하고, 열차 전체가 실패하기 때문입니다. 그런 PR은
+      `release/**`나 `hotfix/**`로 따로 냅니다.
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
       — 운영자가 `npm run merge-train`으로 합니다. label·comment·status는 쓰지 않습니다.

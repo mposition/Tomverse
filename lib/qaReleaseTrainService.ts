@@ -14,6 +14,7 @@
  * branch was pushed is never started again.
  */
 import {
+  QA_RELEASE_TRAIN_LEFT_OUT,
   QA_RELEASE_TRAIN_MAX_CARGO,
   orderQaReleaseTrainCandidates,
   parseQaReleaseTrainSlots,
@@ -72,13 +73,14 @@ export type QaReleaseTrainOutcome =
   | { exitCode: 1; train: "refused_to_start" | "read_failed" | "failed"; failure?: string };
 
 /**
- * Why a call failed, as a short code for the log: the thrown message when it is
- * one of this code's own codes (github_403, app_401, git_failed ...), never
- * free text that could carry a header or a body.
+ * A read failure as `<step>:<code>`, for the round's log line. The ports
+ * throw fixed codes (`github_403`, `app_409`, `github_shape`); anything else
+ * -- a network error's own message -- is reduced to `unknown`, so no URL or
+ * text from elsewhere reaches the log.
  */
-const failureCode = (stage: string, error: unknown) => {
+export const qaReleaseTrainReadFailure = (step: string, error: unknown) => {
   const message = error instanceof Error ? error.message : "";
-  return `${stage}:${/^[a-z0-9_]{1,60}$/.test(message) ? message : "unknown"}`;
+  return `${step}:${/^[a-z0-9_]{1,40}$/.test(message) ? message : "unknown"}`;
 };
 
 export async function runQaReleaseTrainRound(
@@ -97,15 +99,15 @@ export async function runQaReleaseTrainRound(
 
   let cargo: QaReleaseTrainCandidate[];
   let openTrains: number;
-  let stage = "branch";
+  let step = "branch";
   try {
     if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
-    stage = "open_trains";
+    step = "open_trains";
     openTrains = await ports.github.openTrains();
-    stage = "cargo";
+    step = "cargo";
     cargo = openTrains > 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.labelledCargo());
   } catch (error) {
-    return { exitCode: 1, train: "read_failed", failure: failureCode(stage, error) };
+    return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure(step, error) };
   }
   const go = qaReleaseTrainShouldDepart({ departure, openTrainPullRequests: openTrains, candidates: cargo.length });
   if (!go.depart) return { exitCode: 0, train: go.reason === "no_departure" ? "no_departure" : go.reason };
@@ -114,7 +116,7 @@ export async function runQaReleaseTrainRound(
   try {
     admission = await ports.app.admit(departure.slot);
   } catch (error) {
-    return { exitCode: 1, train: "read_failed", failure: failureCode("admit", error) };
+    return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure("admit", error) };
   }
   if (!admission.admitted) return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
 
@@ -166,6 +168,6 @@ export async function runQaReleaseTrainRound(
     slot: departure.slot,
     pullRequestNumber: number,
     included: picks.filter((p) => p.outcome === "included").length,
-    leftOut: picks.filter((p) => p.outcome === "conflict" || p.outcome === "over_capacity").length,
+    leftOut: picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome)).length,
   };
 }
