@@ -5,9 +5,11 @@ import {
   type QaConversationMessage,
 } from "./support/app-fixtures";
 import {
+  GUEST_DAILY_CREDIT_LIMIT,
   freezeAnimations,
   installChatModelStub,
   mockAuthenticatedApi,
+  mockGuestUsage,
   restoreActiveConversation,
   submitComposer,
   type AuthenticatedQaState,
@@ -295,6 +297,7 @@ async function enterGuestChat(
 ) {
   const { lang = "en", viewport = DEFAULT_VIEWPORT } = options;
   await prepareGuestPage(page, "en");
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
   await page.setViewportSize(viewport);
   await page.goto(`/review?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
