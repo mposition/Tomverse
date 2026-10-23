@@ -1,3 +1,4 @@
+import { createApiClient, ApiClientError } from "@tomverse/api-client";
 import { consumeChatStream } from "../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
 import { toChatRequestMessage } from "../../../lib/chatMessageSerialization";
@@ -6,29 +7,20 @@ import { createChatLivenessWatchdog } from "../../../lib/chatStreamLiveness";
 import { isPubliclySelectableModel } from "../../../lib/models";
 import type { PublicCatalogModel } from "../../../lib/publicModelCatalog";
 import { mobileApiFetch, MobileAuth } from "./authBridge";
+import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArtifactCore";
+import { saveMobileResponse } from "./fileSave";
 import type { ChatTransport, Conversation, MobileAttachment } from "./chatTransport";
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type Attempt = { assistantMessageId: string; partialContent: string; status: string; actualModelId?: string; requestedModelId: string };
-export class MobileApiError extends Error {
-  constructor(public status: number, public code: string) { super(code); }
-}
-export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth): ChatTransport {
+export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth, saveFile = saveMobileResponse): ChatTransport {
   const listeners = new Set<() => void>();
   const notifySessionLost = () => { for (const listener of listeners) listener(); };
   const run: ApiFetch = async (path, init) => {
     try { const response = await source(path, init); if (response.status === 401) notifySessionLost(); return response; }
     catch (error) { if ((error as { code?: string }).code === "SIGN_IN_REQUIRED") notifySessionLost(); throw error; }
   };
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await run(path, { cache: "no-store", ...init });
-    const body = await response.json().catch(() => {
-      if (response.ok) throw Error("MOBILE_RESPONSE_INVALID");
-      return {};
-    });
-    if (!response.ok) throw new MobileApiError(response.status, typeof body?.code === "string" ? body.code : "MOBILE_REQUEST_FAILED");
-    return body as T;
-  }
+  const request = createApiClient(run).json;
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const pathFor = (id: string) => `/api/conversations/${encodeURIComponent(id)}`;
   async function load(id: string): Promise<Conversation> {
@@ -53,6 +45,26 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     return load(id);
   }
   return {
+    account: () => request("/api/user/account"),
+    exportAccount: async () => {
+      const ticket = await request<{ downloadPath: string }>("/api/user/account/export", json("POST", {}));
+      if (!/^\/api\/user\/account\/export\/[A-Za-z0-9_-]{32,128}$/.test(ticket.downloadPath)) throw Error("EXPORT_PATH_INVALID");
+      const response = await run(ticket.downloadPath, { cache: "no-store", redirect: "error" });
+      if (!response.ok) throw new ApiClientError(response.status, "EXPORT_DOWNLOAD_FAILED");
+      await saveFile(response, "tomverse-account-data.json");
+    },
+    deleteAccount: async (confirmationText) => {
+      if (confirmationText !== "DELETE MY ACCOUNT") throw Error("CONFIRMATION_REQUIRED");
+      await request("/api/user/account", json("DELETE", { confirm: true, confirmationText }));
+    },
+    downloadArtifact: async (artifact) => {
+      if (artifact.status !== "ready") throw Error("ARTIFACT_UNAVAILABLE");
+      const response = await run(artifactDownloadPath(artifact.id), { cache: "no-store", redirect: "error" });
+      if (!response.ok) throw new ApiClientError(response.status, "ARTIFACT_UNAVAILABLE");
+      const bytes = await response.arrayBuffer();
+      if (bytes.byteLength > ARTIFACT_LIMITS.maxOutputBytes || bytes.byteLength !== artifact.byteSize) throw Error("ARTIFACT_SIZE_MISMATCH");
+      await saveFile(new Response(bytes, { headers: response.headers }), artifact.filename);
+    },
     onSessionLost: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     session: async () => (await bridge.hasSession()).signedIn,
     signIn: async () => { await bridge.signIn(); },
@@ -99,7 +111,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       watchdog.noteHeaders();
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        throw new MobileApiError(response.status, typeof body?.code === "string" ? body.code : "CHAT_REQUEST_FAILED");
+        throw new ApiClientError(response.status, typeof body?.code === "string" ? body.code : "CHAT_REQUEST_FAILED");
       }
       if (!response.body) throw Error("CHAT_STREAM_MISSING");
       const reader = response.body.getReader();
@@ -113,7 +125,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     },
     upload: async (file) => {
       const format = resolveChatAttachmentFormat({ filename: file.name, declaredMediaType: file.type });
-      if (!format) throw new MobileApiError(400, "ATTACHMENT_UNSUPPORTED_FORMAT");
+      if (!format) throw new ApiClientError(400, "ATTACHMENT_UNSUPPORTED_FORMAT");
       const metadata = { name: file.name, size: file.size, mediaType: format.mediaType };
       const prepared = await request<{ key: string; uploadUrl: string; uploadHeaders: Record<string, string> }>("/api/chat", json("PUT", metadata));
       // Signed storage URLs receive bytes only; never the mobile bearer.

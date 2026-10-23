@@ -13,7 +13,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef, MouseEventHandler } from "react";
-import { CHAT_MARKDOWN_REMARK_PLUGINS } from "@/lib/chatMarkdownPlugins";
+import { AnswerMarkdown } from "@tomverse/chat-ui";
 import rehypeHighlight from "rehype-highlight";
 import {
   ArrowDown,
@@ -1238,8 +1238,7 @@ export function ChatMessageList({
                     )
                   ) : msg.role === "assistant" ? (
                     <>
-                    <ReactMarkdown
-                      remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
+                    <AnswerMarkdown
                       rehypePlugins={[rehypeHighlight]}
                       components={{
                         /*
@@ -1335,7 +1334,7 @@ export function ChatMessageList({
                       }}
                     >
                       {displayContent}
-                    </ReactMarkdown>
+                    </AnswerMarkdown>
                     {isActivelyGenerating && (
                       <span
                         className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-zinc-400 align-middle motion-reduce:animate-none dark:bg-zinc-500"

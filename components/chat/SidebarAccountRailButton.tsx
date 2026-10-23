@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { signIn, signOut, useSession } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
+import { signOut } from "@/lib/signOutWithDraftCleanup";
 import {
     BarChart3,
     CreditCard,

@@ -9,6 +9,10 @@ import { ModelSheet } from "./ModelSheet";
 import { Sheet } from "./Sheet";
 import { mobileErrorText } from "../../../locales/mobileErrors";
 import { EmailLogin } from "./EmailLogin";
+import { AnswerContent } from "./AnswerContent";
+import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
+import { AccountScreen } from "./AccountScreen";
+import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 export function MobileApp({ transport, demo = false }: { transport: ChatTransport; demo?: boolean }) {
@@ -32,7 +36,10 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [streaming, setStreaming] = useState(false);
   const [partial, setPartial] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [owner, setOwner] = useState<string | null>(null);
+  const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [offline, setOffline] = useState(!navigator.onLine);
   const abort = useRef<AbortController | null>(null);
   const epoch = useRef(0);
   const end = useRef<HTMLDivElement>(null);
@@ -45,8 +52,8 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [partial, conversation?.messages.length]);
   useEffect(() => transport.onSessionLost?.(() => {
     epoch.current++; requestEpoch.current++; abort.current?.abort();
-    setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setDraft("");
-    setUncertain(false); setStreaming(false); setModelPicker(false); setSettings(false); setProduct("chat");
+    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null);
+    setUncertain(false); setStreaming(false); setModelPicker(false); setSettings(false); setAccountOpen(false); setProduct("chat");
     localStorage.removeItem(LAST_CHAT); setLoading(false);
   }), [transport]);
 
@@ -60,6 +67,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         if (!isCurrent()) return;
         setSignedIn(active);
         if (!active) return;
+        const profile = await transport.account();
+        if (!isCurrent()) return;
+        setOwner(profile.id);
         const list = await transport.list();
         if (!isCurrent()) return;
         setChats(list);
@@ -75,10 +85,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }, [transport]);
 
   useEffect(() => {
+    const online = () => setOffline(!navigator.onLine); window.addEventListener("online", online); window.addEventListener("offline", online);
     const background = () => { if (document.hidden) abort.current?.abort(); };
     const offline = () => abort.current?.abort();
     document.addEventListener("visibilitychange", background); window.addEventListener("offline", offline);
-    return () => { document.removeEventListener("visibilitychange", background); window.removeEventListener("offline", offline); };
+    return () => { window.removeEventListener("online", online); window.removeEventListener("offline", online); document.removeEventListener("visibilitychange", background); window.removeEventListener("offline", offline); };
   }, []);
 
   async function signIn() {
@@ -86,7 +97,10 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     setLoading(true); setError("");
     try {
       await transport.signIn();
-      const list = await transport.list();
+      const profile = await transport.account();
+        if (current !== requestEpoch.current) return;
+        setOwner(profile.id);
+        const list = await transport.list();
       if (current !== requestEpoch.current) return;
       setSignedIn(true); setChats(list);
     } catch { if (current === requestEpoch.current) setError(demo ? copy.error : copy.native); }
@@ -94,9 +108,17 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }
   async function signOut() {
     epoch.current++; requestEpoch.current++; abort.current?.abort();
-    setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setDraft("");
+    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null);
     setUncertain(false); setStreaming(false); localStorage.removeItem(LAST_CHAT); setSettings(false); setModelPicker(false); setProduct("chat");
-    try { await transport.signOut(); } catch { setError(copy.error); }
+    try { await transport.signOut(); return true; } catch { setError(mobileCompletionCopy(language).logoutUnconfirmed); return false; }
+  }
+  async function reauthenticate() {
+    setAccountOpen(false); setLoading(true);
+    const revoked = await signOut();
+    setLoading(false);
+    if (!revoked) return;
+    if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true);
+    else void signIn();
   }
   async function open(id: string) {
     const current = ++requestEpoch.current;
@@ -112,6 +134,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     const current = ++requestEpoch.current;
     const item = conversation ?? await transport.create();
     if (current !== requestEpoch.current) return;
+    if (!conversation) preserveNativeDraft(owner, item.id, draft);
     setConversation(item); localStorage.setItem(LAST_CHAT, item.id);
     try {
       const updated = await transport.configure(item.id, modelId, auto);
@@ -155,10 +178,14 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}>◐</button>
     </header>
     {demo && <div className="demo-label">{copy.demo}</div>}
+    {offline && <p role="status" className="notice">{mobileCompletionCopy(language).offline}</p>}
     {emailLogin && !signedIn && <EmailLogin transport={transport} language={language} onClose={() => setEmailLogin(false)} onComplete={async () => {
       const current = ++requestEpoch.current;
-      setSignedIn(true); setEmailLogin(false); setLoading(true); setError("");
-      try { const list = await transport.list(); if (current === requestEpoch.current) setChats(list); }
+      setEmailLogin(false); setLoading(true); setError("");
+      try { const profile = await transport.account();
+        if (current !== requestEpoch.current) return;
+        setOwner(profile.id);
+        const list = await transport.list(); if (current === requestEpoch.current) { setSignedIn(true); setChats(list); } }
       catch { if (current === requestEpoch.current) setError(copy.error); }
       finally { if (current === requestEpoch.current) setLoading(false); }
     }} />}
@@ -169,25 +196,26 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <div className="welcome-mark"><AppIcon name="logo" /></div><h1>{copy.welcome}</h1><p>{copy.intro}</p>
       <button className="primary" onClick={() => { if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true); else void signIn(); }} disabled={loading}>{copy.signIn} <span aria-hidden="true">→</span></button>
     </section> : product === "review" ? <ReviewPreview language={language} /> : view === "list" ? <section className="conversation-list">
-      <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" onClick={() => { requestEpoch.current++; setConversation(null); setDraft(""); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); setView("chat"); }}>{copy.newChat} +</button></div>
+      <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" onClick={() => { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); setView("chat"); }}>{copy.newChat} +</button></div>
       {chats.length === 0 && <p>{copy.emptyList}</p>}
       {chats.map((chat) => <button className="conversation-row" key={chat.id} onClick={() => void open(chat.id)}>{chat.title}<span aria-hidden="true">↗</span></button>)}
     </section> : <>
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {!conversation?.messages.length && !streaming && <div className="empty-chat"><AppIcon name="logo" /><h1>{copy.empty}</h1><p>{copy.hint}</p><span className="chat-product-pill"><AppIcon name="spark" />Tomverse Chat</span><div className="starters"><button onClick={() => { setDraft(copy.starterIdea); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="idea" />{copy.starterIdea}</button><button onClick={() => { setDraft(copy.starterFile); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="file" />{copy.starterFile}</button></div></div>}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><span className="message-label">{message.role === "assistant" ? message.modelId ?? "Tomverse" : workspaceCopy.you}</span><div>{message.content}</div>{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
-        {partial !== null && <article className="message assistant"><span className="message-label">Tomverse</span><div>{partial || copy.waiting}<span className="stream-caret" aria-hidden="true" /></div></article>}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><span className="message-label">{message.role === "assistant" ? message.modelId ?? "Tomverse" : workspaceCopy.you}</span><AnswerContent content={message.content} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {partial !== null && <article className="message assistant"><span className="message-label">Tomverse</span><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         <div ref={end} />
       </section>
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
       <button className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><AppIcon name="spark" />{conversation?.selectionMode === "auto" ? "Smart Adaptive" : workspaceCopy.model}<span aria-hidden="true">⌄</span></button>
-      <Composer key={conversation?.id ?? "new"} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} />
+      <Composer key={conversation?.id ?? "new"} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} />
     </>}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
+    {accountOpen && <Sheet title={copy.account} closeLabel={copy.close} onClose={() => setAccountOpen(false)}><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
     {settings && <Sheet title={copy.settings} closeLabel={copy.close} onClose={() => setSettings(false)}><div className="settings-panel">
       <label>{copy.language}<select value={language} onChange={(e) => setLanguage(e.target.value as MobileLanguage)}>{mobileLanguages.map((lang) => <option key={lang} value={lang}>{({ en: "English", ko: "한국어", zh: "中文", de: "Deutsch", fr: "Français", es: "Español", pt: "Português" })[lang]}</option>)}</select></label>
       <label>{copy.theme}<select value={theme} onChange={(e) => setTheme(e.target.value)}><option value="system">{copy.system}</option><option value="light">{copy.light}</option><option value="dark">{copy.dark}</option></select></label>
-      <a href="https://tomverse.app/settings/account" target="_blank" rel="noreferrer">{copy.account} ↗</a><a href="https://tomverse.app/privacy" target="_blank" rel="noreferrer">{copy.privacy} ↗</a><a href="https://tomverse.app/support" target="_blank" rel="noreferrer">{copy.support} ↗</a>
+      <button onClick={() => { setSettings(false); setAccountOpen(true); }} disabled={!signedIn}>{copy.account}</button><a href="https://tomverse.app/privacy" target="_blank" rel="noreferrer">{copy.privacy} ↗</a><a href="https://tomverse.app/support" target="_blank" rel="noreferrer">{copy.support} ↗</a>
       {signedIn && <button onClick={() => void signOut()}>{copy.signOut}</button>}
     </div></Sheet>}
   </main>;

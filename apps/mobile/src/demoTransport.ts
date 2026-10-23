@@ -7,6 +7,10 @@ export function createDemoTransport(): ChatTransport {
   const read = (): Conversation[] => JSON.parse(localStorage.getItem(key) ?? "[]");
   const write = (items: Conversation[]) => localStorage.setItem(key, JSON.stringify(items));
   return {
+    account: async () => ({ id: "synthetic-demo", email: "demo@example.invalid", actionsEnabled: false }),
+    exportAccount: async () => { throw Error("Demo only"); },
+    deleteAccount: async () => { throw Error("Demo only"); },
+    downloadArtifact: async () => {},
     session: async () => signedIn,
     signIn: async () => { signedIn = true; localStorage.setItem(key + ":session", "signed-in"); },
     signOut: async () => { signedIn = false; localStorage.removeItem(key + ":session"); localStorage.removeItem(key); },

@@ -36,6 +36,9 @@ import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
 import { build } from "vite";
+import ts from "typescript";
+import { createServer } from "node:http";
+import { chromium } from "@playwright/test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packagesDir = join(root, "packages");
@@ -143,6 +146,11 @@ const buildEntry = () => {
       );
     }
   }
+  if (packageNames.includes("chat-ui")) lines.push(
+    'import { createElement } from "react";',
+    'import { createRoot } from "react-dom/client";',
+    'export function renderMatrixMarkdown() { createRoot(document.body).render(createElement(chatUiNamespace.AnswerMarkdown, { children: "**Shared**\\n\\n| A | B |\\n| - | - |\\n| 1 | 2 |" })); }'
+  );
   lines.push("export const packages = " + JSON.stringify(packageNames) + ";");
   return lines.join("\n") + "\n";
 };
@@ -175,6 +183,7 @@ let output;
 try {
   const result = await build({
     root: scratch,
+    define: { "process.env.NODE_ENV": JSON.stringify("production") },
     customLogger: collectingLogger,
     // No plugins at all. A plugin is how a framework gets to rewrite an
     // import, and the whole question here is whether the source needs one.
@@ -244,9 +253,18 @@ if (output) {
     // Nothing framework- or Node-shaped may survive into the bundle. Rollup
     // would have failed on an unresolvable import, but an import that
     // *resolves* to a stub is the case this catches.
+    // Inspect import syntax: React's vendor error strings can contain "node:".
+    let hasNodeImport = false;
+    const visit = (node) => {
+      const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+        : ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(node.expression) && node.expression.text === "require") ? node.arguments[0] : null;
+      if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith("node:")) hasNodeImport = true;
+      ts.forEachChild(node, visit);
+    };
+    visit(ts.createSourceFile("bundle.mjs", bundleSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS));
+    if (hasNodeImport) failures.push("The Vite bundle contains an executable Node builtin import.");
     for (const marker of [
       "next/",
-      "node:",
       "require(",
       "server-only",
       "@capacitor/",
@@ -263,7 +281,32 @@ if (output) {
     // behaviour, so a bundle that resolved everything and then did the wrong
     // thing still fails here.
     try {
-      const bundle = await import(pathToFileURL(bundlePath).href);
+      let browser;
+      let server;
+      let bundle;
+      if (packageNames.includes("chat-ui")) {
+        server = createServer((request, response) => {
+          response.setHeader("Content-Type", request.url === "/bundle.mjs" ? "application/javascript" : "text/html");
+          response.end(request.url === "/bundle.mjs" ? bundleSource : "<!doctype html><html><body></body></html>");
+        });
+        await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+        try {
+          browser = await chromium.launch();
+          const page = await browser.newPage();
+          await page.goto(`http://127.0.0.1:${server.address().port}`);
+          const result = await page.evaluate(async () => {
+            const packageBundle = await import("/bundle.mjs");
+            packageBundle.renderMatrixMarkdown();
+            return { outcome: packageBundle.chatCore.resolveChatCompletionOutcome({ finishReason: "length" }), invalid: packageBundle.chatCore.isChatCompletionStatus("nonsense"), names: packageBundle.packages };
+          });
+          await page.locator("strong").waitFor();
+          if (await page.locator("strong").textContent() !== "Shared" || await page.locator("table").count() !== 1) throw Error("Shared Markdown did not render in a plain browser");
+          if (result.names.length !== packageNames.length) throw Error("A shared package did not reach the browser");
+          bundle = { chatCore: { resolveChatCompletionOutcome: () => result.outcome, isChatCompletionStatus: () => result.invalid } };
+        } finally { await browser?.close(); await new Promise((resolve) => server.close(resolve)); }
+      } else {
+        bundle = await import(pathToFileURL(bundlePath).href);
+      }
       if (packageNames.includes("chat-core")) {
         const outcome = bundle.chatCore.resolveChatCompletionOutcome({
           finishReason: "length",

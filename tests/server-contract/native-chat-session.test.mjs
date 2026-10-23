@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
+let familyCreatedAt = new Date(); let familyAvailable = true;
 let cookies = 0; let bearerChecks = 0; let account = "active"; let tokenState = "valid";
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => { cookies++; return { user: { id: "cookie-owner" } }; } } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
@@ -15,8 +16,8 @@ mock.module(mod("lib/mobileAuthRoute.ts"), { namedExports: {
     return { ok: true, identity: { userId: "bearer-owner", deviceId: "device", familyId: "family" } };
   },
 } });
-mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { user: { findUnique: async ({ where }) => ({ id: where.id, name: "Synthetic", email: "synthetic@example.invalid", image: null, accountStatus: account }) } } } });
-const { resolveChatRouteSession } = await import("../../lib/chatRouteSession.ts");
+mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { mobileTokenFamily: { findFirst: async ({ where }) => { assert.equal(where.id, "family"); assert.equal(where.userId, "bearer-owner"); assert.equal(where.deviceId, "device"); assert.equal(where.revokedAt, null); return familyAvailable ? { createdAt: familyCreatedAt } : null; } }, user: { findUnique: async ({ where }) => ({ id: where.id, name: "Synthetic", email: "synthetic@example.invalid", image: null, accountStatus: account }) } } } });
+const { resolveChatRouteSession, resolveAccountRouteSession } = await import("../../lib/chatRouteSession.ts");
 const req = (headers = {}, path = "/api/chat", method = "POST") => new Request(`https://tomverse.app${path}`, { method, headers });
 
 test("cookie path is unchanged and does not consult bearer verification", async () => {
@@ -53,4 +54,25 @@ test("unregistered operations cannot borrow an enrolled credential", async () =>
     assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, path, method))).response?.status, 401);
   }
   delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
+});
+
+const { hasRecentAccountAuthentication } = await import("../../lib/adminReauthentication.ts");
+test("native sensitive account actions stay default-off without using a cookie", async () => {
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  delete process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED;
+  const before = cookies;
+  const result = await resolveAccountRouteSession(req({ authorization: "Bearer valid-owner" }, "/api/user/account", "DELETE"));
+  assert.equal(result.response.status, 503); assert.equal(cookies, before);
+});
+test("only the actual family sign-in time can satisfy account reauthentication", async () => {
+  process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED = "true";
+  familyCreatedAt = new Date(Date.now() - 3600000);
+  const request = req({ authorization: "Bearer valid-owner" }, "/api/user/account", "DELETE");
+  let result = await resolveAccountRouteSession(request);
+  assert.equal(hasRecentAccountAuthentication(result.session), false);
+  familyCreatedAt = new Date(); result = await resolveAccountRouteSession(request);
+  assert.equal(hasRecentAccountAuthentication(result.session), true);
+  familyAvailable = false; result = await resolveAccountRouteSession(request);
+  assert.equal(result.response.status, 401); familyAvailable = true;
+  delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; delete process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED;
 });

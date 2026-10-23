@@ -2,7 +2,8 @@
 "use client";
 
 import { UsagePercentGauge } from "@/components/chat/UsagePercentGauge";
-import { signIn, signOut, useSession } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
+import { signOut } from "@/lib/signOutWithDraftCleanup";
 import Link from "next/link";
 import { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
