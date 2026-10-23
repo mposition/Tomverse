@@ -115,7 +115,7 @@ for (const ending of ["loseStream", "endStream"]) {
   });
 }
 
-test("disconnect cleanup is bounded by the original session closing allowance", async t => {
+test("disconnect cleanup keeps its deadline and later trusted settlement clears the warning", async t => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 1_000_000 });
   const w = world(); w.behavior.closeOnStop = false;
   const running = w.client.start("chat-1");
@@ -132,6 +132,14 @@ test("disconnect cleanup is bounded by the original session closing allowance", 
   assert.equal(w.states.at(-1).status, "ended");
   assert.equal(w.states.at(-1).confirmed, false);
   assert.equal(w.states.at(-1).billingPending, true);
+  assert.equal(w.states.at(-1).error, "VOICE_CONNECTION_LOST");
+  w.behavior.status = { settled: true, confirmed: true, seconds: 40, credits: 24 };
+  t.mock.timers.tick(15_000);
+  await until(() => w.states.at(-1).confirmed);
+  assert.equal(w.states.at(-1).error, null);
+  assert.equal(w.states.at(-1).billingPending, false);
+  assert.equal(w.states.at(-1).credits, 24);
+  assert.equal(w.counts().peerClosed, 1);
   w.client.destroy();
 });
 

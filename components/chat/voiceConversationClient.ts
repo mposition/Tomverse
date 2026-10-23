@@ -79,7 +79,8 @@ export function createVoiceConversationClient(options: {
           const recoveredTransport = recoveringTransport;
           if (recoveredTransport) cleanup();
           patch({ billingPending: false, confirmed: status.confirmed === true, credits: status.credits,
-            ...(recoveredTransport ? { status: "ended", error: status.confirmed === true && view.error === "VOICE_CONNECTION_LOST" ? null : view.error } : {}),
+            error: status.confirmed === true && view.error === "VOICE_CONNECTION_LOST" ? null : view.error,
+            ...(recoveredTransport ? { status: "ended" } : {}),
             ...(typeof status.seconds === "number" && Number.isFinite(status.seconds) && status.seconds >= 0 ? { seconds: status.seconds } : {}) });
           return;
         }
@@ -153,10 +154,9 @@ export function createVoiceConversationClient(options: {
         }
       });
     } else if (event.type === "closed") {
-      const recoveredTransport = recoveringTransport;
       cleanup();
       patch({ status: "ended", confirmed: event.confirmed === true, billingPending: event.settled !== true && event.confirmed !== true,
-        ...(recoveredTransport && event.confirmed === true && view.error === "VOICE_CONNECTION_LOST" ? { error: null } : {}),
+        ...(event.confirmed === true && view.error === "VOICE_CONNECTION_LOST" ? { error: null } : {}),
         ...(typeof event.seconds === "number" ? { seconds: event.seconds } : {}), ...(typeof event.credits === "number" ? { credits: event.credits } : {}) });
       if (view.billingPending) void recoverBilling(owner);
     } else if (event.type === "error") {
