@@ -46,7 +46,14 @@ export async function readAmuxSessionReviewForOwner(actorUserId: string,
     throw new Error("session_review_integrity_unavailable");
   }
   const identity = { ideaId, purpose: "analysis_result" as const, subjectId: result.claimId };
-  const keys = await loadAmuxContentUnitKeys(identity);
+  let keys: Awaited<ReturnType<typeof loadAmuxContentUnitKeys>>;
+  try {
+    keys = await loadAmuxContentUnitKeys(identity);
+  } catch (error) {
+    // A key retired by the retention worker reads as no answer, not a failure.
+    if (!await ownerMayReadAnswer(actorUserId, ideaId, result.claimId)) return null;
+    throw error;
+  }
   const plain = openAmuxContent({ ciphertext: Buffer.from(result.ciphertext),
     keyId: result.keyId, keyVersion: result.keyVersion },
   "analysis_result", result.claimId, keys);

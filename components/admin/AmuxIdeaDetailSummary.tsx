@@ -67,7 +67,8 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         <p className="text-amber-200" data-testid="amux-session-review">{m.sessionReviewDetail}</p>
       ) : null}
       {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
-        <AmuxSessionReviewPanel ideaId={row.ideaId} /> : null}
+        // Keyed by idea: another idea's question never shows while the next one loads.
+        <AmuxSessionReviewPanel key={row.ideaId} ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?
