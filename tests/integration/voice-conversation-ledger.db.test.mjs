@@ -160,13 +160,14 @@ test("a killed primary process is recovered by an independent receiver with one 
   await queueVoiceTaskResult(row.id, { delegationId: "recovered-task", conversationId: "chat-1", sourceId: randomUUID(), sourceText: "Question", answer: "Saved answer after primary loss" });
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 }); await once(server, "listening");
   const children = [];
-  let appends = 0;
+  let appends = 0; let closes = 0;
   server.on("connection", socket => socket.on("message", data => {
     const event = JSON.parse(data.toString());
     if (event.type === "session.commentary.append") {
       appends++; assert.equal(event.content, "Saved answer after primary loss");
       setTimeout(() => socket.send(JSON.stringify({ type: "session.closed", usage: { seconds: 15 } })), 100);
     } else if (event.type === "session.close") {
+      closes++;
       socket.send(JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
     }
   }));
@@ -180,12 +181,16 @@ test("a killed primary process is recovered by an independent receiver with one 
     return processChild;
   }
   try {
-    const primary = await child("primary"); const exit = once(primary, "exit"); primary.kill("SIGKILL"); await exit;
+    const primary = await child("primary");
+    await prisma.chatCreditReservation.update({ where: { id: row.id }, data: { providerRequestId: "fixture-session" } });
+    await child("worker");
+    for (let attempt = 0; attempt < 80 && server.clients.size === 0; attempt++) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(server.clients.size, 1); assert.equal(closes, 0);
+    const exit = once(primary, "exit"); primary.kill("SIGKILL"); await exit;
     const durable = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
     assert.equal(durable.providerUsageSnapshot.seconds, 10);
     // Advance the persisted lease/deadline after the actual process kill.
     await prisma.chatCreditReservation.update({ where: { id: row.id }, data: { reservationPayload: { ...durable.reservationPayload, webLeaseUntil: new Date(0).toISOString(), closeAt: new Date(Date.now() + 15000).toISOString() }, providerRequestId: "fixture-session" } });
-    await child("worker");
     let settled;
     for (let attempt = 0; attempt < 80; attempt++) {
       settled = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
@@ -194,6 +199,7 @@ test("a killed primary process is recovered by an independent receiver with one 
     }
     assert.equal(settled.status, "settled"); assert.equal(settled.settledCredits, 9);
     assert.equal(appends, 0);
+    assert.equal(closes, 1);
     assert.equal(settled.reservationPayload.tasks[0].answer, undefined);
     assert.equal(settled.providerUsageSnapshot.confirmed, true);
     await finalizeVoiceReservation(row.id, 15);
