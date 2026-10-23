@@ -13,7 +13,8 @@ async function offerInstall(page: Page) {
 }
 
 for (const collapsed of [false, true]) {
-  test(`preferred-language install is in the ${collapsed ? "collapsed" : "expanded"} account menu`, async ({ page }) => {
+  test(`preferred-language install is in the ${collapsed ? "collapsed" : "expanded"} account menu`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name.startsWith("mobile"), "The desktop sidebar account menu is not rendered on the mobile shell.");
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page, { language: "ko" });
     await page.goto("/review?lang=ko");
