@@ -48,6 +48,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const epoch = useRef(0);
   const end = useRef<HTMLDivElement>(null);
   const requestEpoch = useRef(0);
+  const researchKey = conversation?.messages.filter(message => message.pendingJobId && message.status === "pending").map(message => message.id).join(",") ?? "";
+  useEffect(() => {
+    if (!researchKey || streaming || !conversation || !transport.resumeResearch) return;
+    const controller = new AbortController();
+    void transport.resumeResearch(conversation, controller.signal, item => { if (!controller.signal.aborted) { setConversation(item); setUncertain(item.activeAttempt === true); } }).catch(() => { /* Retain readback state; no model resubmission. */ });
+    return () => controller.abort();
+  }, [researchKey, streaming, transport]); // eslint-disable-line react-hooks/exhaustive-deps -- Job identity controls one restoration watcher.
   const initializationError = useRef(copy.error);
   useEffect(() => { initializationError.current = copy.error; }, [copy.error]);
 
@@ -197,6 +204,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     <header className="app-header">
       <button className="menu-button" aria-label={copy.chats} onClick={() => setView(view === "list" ? "chat" : "list")} disabled={streaming || reviewBusy || !signedIn}><AppIcon name="menu" /><AppIcon name="menuDark" /></button>
       <span className="brand-lockup"><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></span>
+      {signedIn && <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || uncertain} onChange={event => { setProduct(event.target.value as "chat" | "review"); setView("chat"); }}><option value="chat">Chat</option><option value="review">Review</option></select>}
       <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}><AppIcon name="settings" /></button>
     </header>
     {demo && <div className="demo-label">{copy.demo}</div>}
@@ -211,7 +219,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       catch { if (current === requestEpoch.current) setError(copy.error); }
       finally { if (current === requestEpoch.current) setLoading(false); }
     }} />}
-    {signedIn && <nav className="product-navigation" aria-label={workspaceCopy.product}><div className="segmented">{(["chat", "review"] as const).map((target) => <button key={target} aria-current={product === target ? "page" : undefined} disabled={streaming || reviewBusy || uncertain} onClick={() => { setProduct(target); setView("chat"); }}>{target === "chat" ? "Chat" : "Review"}</button>)}</div></nav>}
+
     {loading && <p role="status" className="notice">{copy.loading}</p>}
     {error && <div role="alert" className="notice error">{error}</div>}
     {!signedIn ? <section className="welcome">

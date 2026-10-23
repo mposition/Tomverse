@@ -37,6 +37,7 @@ export type ChatSummary = Pick<Conversation, "id" | "title"> & { kind?: string }
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
+  resumeResearch?(conversation: Conversation, signal: AbortSignal, update: (conversation: Conversation) => void): Promise<void>;
   reviewPreview?(id: string, mode?: string, synthesis?: boolean): Promise<import("../../../packages/chat-core/src/review").ReviewSetup>;
   runComparison?(id: string, input: { promptMessageId: string; assistantMessageIds: string[]; reviewMode: import("../../../packages/chat-core/src/review").ReviewMode; includeSynthesis: boolean }): Promise<import("../../../packages/chat-core/src/review").ComparisonReview>;
   reviewFeedback?(id: string, reviewId: string): Promise<{ feedback: Array<{ reviewItemId: string; verdict: string }> }>;
@@ -44,6 +45,7 @@ export interface ChatTransport {
   verifyReviewItem?(id: string, item: string): Promise<{ status: string; summary: string; usageCredits: number; disclaimer: string; reviewerModelId: string }>;
   generateImages?(input: { prompt: string; size: string; quality: string; idempotencyKey: string; modelIds: string[]; expectedPricingVersions: Record<string, string>; conversationId?: string }): Promise<{ groupId: string; conversationId: string }>;
   imageHistory?(id: string): Promise<{ generations: Array<{ groupId: string; prompt: string }> }>;
+  imageRequest?(key: string): Promise<{ groupId: string; conversationId: string }>;
   listReview?(): Promise<ChatSummary[]>;
   createReview?(models: string[]): Promise<Conversation>;
   configureReview?(id: string, models: string[]): Promise<Conversation>;

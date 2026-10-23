@@ -29,16 +29,18 @@ test("Smart Adaptive, settings and composer tools use the existing account and c
 });
 
 test("Review provider tabs never resubmit, follow-ups and reopening restore the same comparison", async ({ page }) => {
-  await signIn(page); await page.getByRole("button", { name: "Review", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Easy", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await signIn(page); await page.getByTestId("product-switcher").selectOption("review");
+  await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeVisible();
   await send(page, "여러 관점으로 비교해주세요");
   await expect(page.locator("article.user")).toHaveCount(1); await expect(page.getByRole("heading", { name: "Local demo A", exact: true })).toBeVisible();
-  await page.getByRole("navigation", { name: "모델" }).getByRole("button", { name: "Local demo B", exact: true }).click();
+  await page.getByRole("combobox", { name: "모델", exact: true }).selectOption("demo-b");
   await expect(page.getByRole("heading", { name: "Local demo B", exact: true })).toBeVisible();
   let saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]); expect(saved.messages).toHaveLength(4);
   await send(page, "다음 질문입니다"); await expect(page.locator("article.user")).toHaveCount(2);
-  await page.screenshot({ path: resolve(output, "review-results-dark.png") });
-  await page.reload(); await page.getByRole("button", { name: "Review", exact: true }).click(); await expect(page.locator("article.user")).toHaveCount(2);
+  const geometry = await page.evaluate(() => ({ height: innerHeight, conversation: document.querySelector(".review-transcript")!.getBoundingClientRect().height, composer: document.querySelector(".composer-area")!.getBoundingClientRect().height }));
+  expect(geometry.conversation / geometry.height).toBeGreaterThan(0.72); expect(geometry.composer / geometry.height).toBeLessThan(0.11);
+  await page.screenshot({ path: resolve(output, "review-conversation-dark-v2.png") });
+  await page.reload(); await page.getByTestId("product-switcher").selectOption("review"); await expect(page.locator("article.user")).toHaveCount(2);
   saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]); expect(saved.messages).toHaveLength(8);
 });
 
@@ -56,8 +58,8 @@ test("cross-review keeps per-quote grounding, reversible feedback and separate w
     `;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
-  await signIn(page); await page.getByRole("button", { name: "Review", exact: true }).click(); await send(page, "Compare");
-  await page.getByRole("button", { name: "AI 교차검토", exact: true }).click();
+  await signIn(page); await page.getByTestId("product-switcher").selectOption("review"); await send(page, "Compare");
+  await page.getByRole("button", { name: "파일 첨부", exact: true }).click(); await page.getByRole("button", { name: "AI 교차검토", exact: true }).click();
   expect(await page.evaluate(() => (window as unknown as { reviewRuns?: number }).reviewRuns ?? 0)).toBe(0);
   await page.getByRole("button", { name: "교차검토 실행", exact: true }).click();
   await expect(page.getByText("출처 인용 일치율: 50% (1/2)")).toBeVisible(); await expect(page.getByText(/B · 원문 일치가 확인되지 않은 인용/)).toBeVisible();
@@ -95,8 +97,8 @@ test("image quotes require fresh consent after a price change and never run auto
       transport.imageGroup=async()=>({status:"failed",targets:[],generations:[]});`;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
-  await signIn(page); await page.getByRole("button", { name: "Review", exact: true }).click();
-  await page.getByRole("button", { name: "이미지 스튜디오", exact: true }).click(); await page.getByLabel("이미지 설명").fill("Synthetic prompt");
+  await signIn(page); await page.getByTestId("product-switcher").selectOption("review");
+  await page.getByRole("button", { name: "파일 첨부", exact: true }).click(); await page.getByRole("button", { name: "이미지 스튜디오", exact: true }).click(); await page.getByLabel("이미지 설명").fill("Synthetic prompt");
   expect(await page.evaluate(() => (window as unknown as { imageRuns?: number }).imageRuns ?? 0)).toBe(0);
   const consent = page.getByRole("checkbox", { name: /선택한 모델과 표시된 크레딧/ }); await consent.check(); await page.evaluate(() => { (window as unknown as { priceChanged: boolean }).priceChanged = true; }); await page.getByRole("button", { name: "이미지 생성", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("모델 또는 가격이 변경되었습니다"); await expect(consent).not.toBeChecked();
@@ -127,4 +129,49 @@ test("a long file selection preserves the draft behind the lock and resumes uplo
   await page.evaluate(() => { (window as unknown as { fixtureLocked: boolean }).fixtureLocked = true; window.dispatchEvent(new Event("tomverse-device-security-changed")); });
   await page.getByRole("button", { name: "로그아웃", exact: true }).click(); await expect(page.getByRole("button", { name: "Tomverse로 계속" })).toBeVisible();
   await expect(page.locator("article")).toHaveCount(0);
+});
+
+for (const recovery of ["receipt", "same-request"] as const) test(`lost image responses recover through ${recovery} without a new request key`, async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    const injection = `transport.mobileCapabilities=async()=>({reviewEasy:true,assistants:false,maxModels:3,plan:"Max",images:{enabled:true,maxModels:1,models:[{id:"synthetic-image",name:"Synthetic image model",provider:"openai",pricingVersion:"v1",prices:[{quality:"medium",size:"1024x1024",credits:10}]}]}});
+      window.imageRequests=[];transport.generateImages=async input=>{window.imageRequests.push(input);if(window.imageRequests.length===1)throw new TypeError("Lost response");return {groupId:"saved-group",conversationId:"image-chat"};};
+      transport.imageRequest=async key=>{window.receiptKey=key;${recovery === "receipt" ? 'return {groupId:"saved-group",conversationId:"image-chat"};' : 'throw {status:404};'}};
+      transport.imageGroup=async()=>({status:"failed",targets:[],generations:[]});`;
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
+  });
+  await signIn(page); await page.getByTestId("product-switcher").selectOption("review");
+  await page.getByRole("button", { name: "파일 첨부", exact: true }).click(); await page.getByRole("button", { name: "이미지 스튜디오", exact: true }).click();
+  await page.getByLabel("이미지 설명").fill("Keep the same image request");
+  const consent = page.getByRole("checkbox", { name: /선택한 모델과 표시된 크레딧/ }); await consent.check(); await page.getByRole("button", { name: "이미지 생성", exact: true }).click();
+  await expect(page.getByLabel("이미지 설명")).toBeDisabled();
+  const first = await page.evaluate(() => (window as unknown as { imageRequests: Array<{idempotencyKey:string}> }).imageRequests[0]);
+  await page.getByRole("button", { name: "저장된 결과 조회", exact: true }).click();
+  if (recovery === "same-request") {
+    await consent.check(); await page.getByRole("button", { name: "같은 요청 확인 후 계속", exact: true }).click();
+  }
+  await expect(page.getByLabel("이미지 설명")).toBeEnabled();
+  const requests = await page.evaluate(() => (window as unknown as { imageRequests: Array<{idempotencyKey:string}> }).imageRequests);
+  expect(requests).toHaveLength(recovery === "receipt" ? 1 : 2); expect(requests.every(input => input.idempotencyKey === first.idempotencyKey)).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem("tomverse-image-pending:synthetic-demo"))).toBeNull();
+});
+
+test("microphone device failure does not tell an already permitted user to grant access again", async ({ page }) => {
+  await page.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { throw new DOMException("In use", "NotReadableError"); }; });
+  await signIn(page); await page.getByRole("button", { name: "음성 녹음", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("다른 녹음 앱을 종료하고");
+  await expect(page.getByRole("alert")).not.toContainText("권한");
+});
+
+test("voice server refusal retains its cause and never submits the draft", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", 'transport.transcribe=async()=>{throw {status:503,code:"VOICE_INPUT_DISABLED"};};createRoot(container).render(') });
+  });
+  await signIn(page); await page.getByRole("button", { name: "음성 녹음", exact: true }).click();
+  const finish = page.getByRole("button", { name: "녹음 완료", exact: true }); await expect(finish).toBeEnabled();
+  await expect(page.locator(".voice-privacy")).toContainText("Tomverse는 녹음을 저장하지 않으며");
+  await page.waitForTimeout(1200); await finish.click();
+  await expect(page.getByRole("alert")).toContainText("현재 서버에서 음성 입력을 사용할 수 없습니다");
+  await expect(page.locator("article.user")).toHaveCount(0);
 });

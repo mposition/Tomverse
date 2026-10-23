@@ -37,6 +37,12 @@ test("Korean composition Enter never dispatches; explicit Send does", async ({ p
 });
 
 test("stopping requires a server read and never silently resends", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    // Hold the synthetic stream open so a slow worker cannot click after completion.
+    const injection = `const sendBeforeStop=transport.send;transport.send=async(...args)=>{const signal=args[3];const stopped=new Promise((_,reject)=>{const stop=()=>reject(new DOMException("Stopped","AbortError"));signal.addEventListener("abort",stop,{once:true});if(signal.aborted)stop();});await Promise.race([sendBeforeStop(...args).then(()=>stopped),stopped]);};`;
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
+  });
   await signIn(page); await page.getByRole("textbox").fill("중지할 질문");
   await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
   await page.getByRole("button", { name: "답변 중지" }).click();
@@ -48,11 +54,13 @@ test("stopping requires a server read and never silently resends", async ({ page
 
 test("Chat draft stays with Chat when viewing Review modes", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Chat에만 남을 초안");
-  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page.getByTestId("product-switcher").selectOption("review");
   await expect(page.getByRole("heading", { name: "하나의 질문, 다양한 관점." })).toBeVisible();
+  await page.getByRole("button", { name: /참여 모델 선택/ }).click();
   await page.getByRole("button", { name: "Professional", exact: true }).click();
   await expect(page.getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByTestId("product-switcher").selectOption("chat");
   await expect(page.getByRole("textbox")).toHaveValue("Chat에만 남을 초안");
 });
 
@@ -86,7 +94,7 @@ test("voice returns mixed-language editable text without a chat send", async ({ 
 test("microphone refusal leaves typed input usable", async ({ page }) => {
   await page.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { throw new DOMException("Denied", "NotAllowedError"); }; });
   await signIn(page); await page.getByRole("button", { name: "음성 녹음", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("마이크를 사용할 수 없습니다");
+  await expect(page.getByRole("alert")).toContainText("마이크 접근이 거부되었습니다");
   await page.getByRole("textbox").fill("입력은 계속 가능"); await expect(page.getByRole("button", { name: "메시지 보내기", exact: true })).toBeEnabled();
 });
 

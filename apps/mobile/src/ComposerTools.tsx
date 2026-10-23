@@ -5,9 +5,11 @@ import type { MobileLanguage } from "../../../locales/mobile";
 import { mobileCopy } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
 
+export type ComposerAction = { label: string; disabled?: boolean; onSelect: () => void };
 export type ToolChange = { webSearchMode?: "off" | "always"; memoryMode?: "inherit" | "on" | "off"; assistantProfileId?: string | null };
-export function ComposerTools({ transport, language, conversation, onChange, onFiles, onPhotos, onClose }: {
+export function ComposerTools({ transport, language, conversation, onChange, onFiles, onPhotos, onClose, extraTools }: {
   transport: ChatTransport; language: MobileLanguage; conversation?: Conversation | null;
+  extraTools?: ComposerAction[];
   onChange?: (input: ToolChange) => Promise<void>; onFiles: () => void; onPhotos: () => void; onClose: () => void;
 }) {
   const c = mobileParityCopy(language);
@@ -32,6 +34,7 @@ export function ComposerTools({ transport, language, conversation, onChange, onF
       <label className="switch-field"><span>{c.search}<small>{c.searchHint}</small></span><input type="checkbox" role="switch" checked={conversation?.webSearchMode === "always"} disabled={busy || !onChange} onChange={event => void change({ webSearchMode: event.target.checked ? "always" : "off" })} /></label>
       <label>{c.memory}<select aria-label={c.memory} value={conversation?.memoryMode ?? "inherit"} disabled={busy || !onChange} onChange={event => void change({ memoryMode: event.target.value as "inherit" | "on" | "off" })}><option value="inherit">{c.inherit}</option><option value="on">{c.on}</option><option value="off">{c.off}</option></select></label>
       <label>{c.assistant}<select aria-label={c.assistant} value={conversation?.assistantProfileId ?? ""} disabled={busy || !onChange || !profiles.length} onChange={event => void change({ assistantProfileId: event.target.value || null })}><option value="">{c.noAssistant}</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+      {extraTools?.map(action => <button className="tool-action" key={action.label} disabled={busy || action.disabled} onClick={() => { onClose(); action.onSelect(); }}>{action.label}<span aria-hidden="true">↗</span></button>)}
       {error && <p role="alert">{error}</p>}
     </div>
   </Sheet>;

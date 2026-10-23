@@ -54,12 +54,25 @@ storage. The completed receipt contains an upload ID, never a storage key.
 
 ## Review and image execution
 
+The default mobile layout keeps one 52px application header and one 44px Review
+context row. The product selector lives in the header. Easy/Professional and
+participant selection open from the context row; cross-review and Studio open
+from the composer tools menu. There are no permanent Write/Results tabs or model
+chip rows. A one-line composer grows only as the user types. At 390x844 the UI
+regression requires more than 72% of the viewport for the conversation and less
+than 11% for the idle composer.
+
 One question is persisted once. Parallel answers use independent model histories;
-switching provider tabs does not submit a question. Easy routing uses the existing
+switching the displayed provider does not submit a question. Multi-model sends
+first acquire the existing aggregate preflight admission and context bundle;
+refusal starts no model request. Easy routing uses the existing
 client validator and server router, with no manual substitution for an unsupported
 provider. Professional selection uses the existing model catalogue and plan limit.
 Deep Research follows the existing durable async job and never submits a second
-research job while restoring status.
+research job while restoring status. A restored foreground conversation polls
+until a terminal status, retries transient connection/server failures, and stops
+the watcher when the view closes. Item feedback follows the existing PUT/DELETE
+contract. The cookie-only bulk DELETE /api/chat route is not enrolled.
 
 Cross-review renders reviewer provenance, per-quote matching, the source quote
 match rate, original-response links, limitations and reversible per-item feedback.
@@ -72,8 +85,24 @@ Images use the existing Studio product creation API rather than changing a Revie
 conversation's product. The mobile catalogue includes user-facing credit prices
 and pricing versions only. Current prices, selected models and consent are checked
 before generation; a changed quote requires fresh consent. Unknown submissions are
-not automatically repeated. Generated assets use short-lived signed URLs in memory
-and bounded automatic expiry recovery.
+not automatically repeated. An owner-scoped read-only receipt lookup recovers a
+lost response by its original request key. If no receipt is found, an explicit
+resume uses the same key and original options, with fresh quote consent. A found
+receipt clears the local pending marker. Generated assets use short-lived signed
+URLs in memory and bounded automatic expiry recovery.
+
+## Microphone capture
+
+Capacitor 8.5.3 requests RECORD_AUDIO and MODIFY_AUDIO_SETTINGS together for
+WebView audio capture. The Android manifest declares both; MODIFY_AUDIO_SETTINGS
+is a normal permission and adds no new runtime prompt. Without that declaration,
+the bridge rejects getUserMedia even after the user grants microphone access.
+An emulator reproduction confirmed NotAllowedError before the fix and a nonempty
+audio/webm recording with ended tracks afterwards. This checks capture, not paid
+transcription. The shared web recorder is reused. Permission, device, network and
+server transcription failures have separate messages. The existing approved voice
+privacy notice is shown during recording; converted text remains editable and is
+never automatically sent as a question.
 
 ## Validation and remaining release evidence
 
