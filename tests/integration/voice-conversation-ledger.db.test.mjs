@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { WebSocketServer } from "ws";
+import { EventEmitter } from "node:events";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 const mod = path => pathToFileURL(resolve(path)).href;
@@ -13,6 +14,7 @@ mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingP
 const { prisma } = await import(mod("lib/prisma.ts"));
 const { reserveVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
 const { recordVoiceUsage, finalizeVoiceReservation } = await import(mod("lib/voiceConversationRecovery.ts"));
+const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } = await import(mod("lib/voiceConversationTasks.ts"));
 let userId;
 beforeEach(async () => {
   await prisma.chatCreditReservation.deleteMany({}); await prisma.chatUsageBucket.deleteMany({});
@@ -23,12 +25,12 @@ const reserve = () => reserveVoiceConversationCredits({ userId, requestId: rando
 
 test("real concurrent finalizers charge and refund wallet and voice budgets once", async () => {
   const row = await reserve();
-  const budgetRows = await prisma.chatUsageBucket.findMany({ where: { period: { notIn: ["month", "day"] } } });
+  const budgetRows = await prisma.chatUsageBucket.findMany({ where: { period: { notIn: ["month", "day", "provider-cost-day", "provider-cost-month"] } } });
   assert.ok(budgetRows.length >= 3);
   await Promise.all(Array.from({ length: 6 }, () => finalizeVoiceReservation(row.id, 10)));
   const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
   assert.equal(saved.settledCredits, 6); assert.equal(saved.status, "settled");
-  const retained = await prisma.chatUsageBucket.findMany({ where: { period: { notIn: ["month", "day"] } } });
+  const retained = await prisma.chatUsageBucket.findMany({ where: { period: { notIn: ["month", "day", "provider-cost-day", "provider-cost-month"] } } });
   for (const bucket of retained) assert.equal(Number(bucket.count), 15);
   // The canonical subject key is opaque; read it back from the reservation.
   const month = await prisma.chatUsageBucket.findFirst({ where: { key: saved.subjectKey, period: "month" } });
@@ -59,7 +61,7 @@ test("an uncertain close returns unused wallet credits but retains provider expo
   await settleVoiceConversationCredits(row.id, 10, true, "observed_minimum", false);
   const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
   assert.equal(saved.settledCredits, 6); assert.equal(saved.lastError, "VOICE_PROVIDER_STOP_PENDING");
-  const providerBuckets = await prisma.chatUsageBucket.findMany({ where: { period: { notIn: ["month", "day"] } } });
+  const providerBuckets = await prisma.chatUsageBucket.findMany({ where: { period: { notIn: ["month", "day", "provider-cost-day", "provider-cost-month"] } } });
   for (const bucket of providerBuckets) assert.equal(Number(bucket.count), 60);
 });
 
@@ -69,6 +71,30 @@ test("a final receipt arriving before grace settlement retains the exact charge 
   const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
   assert.equal(saved.settledCredits, 12); assert.equal(saved.providerUsageSnapshot.seconds, 20);
   assert.equal(saved.providerUsageSnapshot.confirmed, true); assert.equal(saved.lastError, null);
+});
+
+test("durable voice tasks bind exact questions and dispatch once over the existing receiver", async () => {
+  const row = await reserve(); await registerVoiceTask(row.id, "delegation-1", "Question");
+  const input = { delegationId: "delegation-1", conversationId: "chat-1", sourceId: randomUUID(), sourceText: "Question", answer: "Verified answer" };
+  await assert.rejects(queueVoiceTaskResult(row.id, { ...input, delegationId: "forged" }), e => e.code === "VOICE_RESULT_MISMATCH");
+  await assert.rejects(queueVoiceTaskResult(row.id, { ...input, sourceText: "Different question" }), e => e.code === "VOICE_RESULT_MISMATCH");
+  await queueVoiceTaskResult(row.id, input); await queueVoiceTaskResult(row.id, input);
+  const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; let appends = 0;
+  socket.send = value => { appends++; const command = JSON.parse(value); queueMicrotask(() => socket.emit("message", JSON.stringify({ type: "session.commentary.appended", client_event_id: command.event_id }))); };
+  await dispatchVoiceTask(row.id, socket); await dispatchVoiceTask(row.id, socket);
+  assert.equal(appends, 1);
+  const stored = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(stored.reservationPayload.tasks[0].state, "sent"); assert.equal(stored.reservationPayload.conversationId, "chat-1");
+  assert.equal(stored.reservationPayload.tasks[0].textHash.length, 64);
+  assert.equal(stored.reservationPayload.tasks[0].text, undefined); assert.equal(stored.reservationPayload.tasks[0].answer, undefined);
+  assert.ok(stored.reservationPayload.budgets); assert.ok(stored.reservationPayload.providerCostHold);
+});
+
+test("the research migration allows existing jobs and links new jobs to their durable source", async () => {
+  const data = { perplexityJobId: randomUUID(), conversationId: "synthetic-chat", assistantMessageId: randomUUID(), modelId: "fixture", reservationId: randomUUID(), traceId: randomUUID() };
+  const legacy = await prisma.perplexityAsyncJob.create({ data }); assert.equal(legacy.sourceUserMessageId, null);
+  const linked = await prisma.perplexityAsyncJob.create({ data: { ...data, perplexityJobId: randomUUID(), assistantMessageId: randomUUID(), sourceUserMessageId: randomUUID() } });
+  assert.ok(linked.sourceUserMessageId);
 });
 
 test("a killed primary process is recovered by an independent receiver with one durable charge", { timeout: 25000 }, async () => {

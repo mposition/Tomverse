@@ -25,9 +25,12 @@ export async function createVoiceProviderSession(sdp: string, history: Array<{ r
   }
   const body: unknown = await response.json();
   const result = body as { session?: { id?: unknown }; transport?: { sdp?: unknown } };
-  if (typeof result.session?.id !== "string" || !/^[a-zA-Z0-9_-]{1,200}$/.test(result.session.id) ||
-      typeof result.transport?.sdp !== "string" || result.transport.sdp.length > 128_000) {
+  if (typeof result.session?.id !== "string" || !/^[a-zA-Z0-9_-]{1,200}$/.test(result.session.id)) {
     throw new Error("Invalid voice provider response.");
+  }
+  if (typeof result.transport?.sdp !== "string" || !result.transport.sdp.trim() || result.transport.sdp.length > 128_000) {
+    await hangupVoiceProviderSession(result.session.id).catch(() => {});
+    return { ok: false as const, rejected: false, sessionId: result.session.id };
   }
   return { ok: true as const, sessionId: result.session.id, sdp: result.transport.sdp };
 }
@@ -69,10 +72,8 @@ export async function closeVoiceProviderSession(sessionId: string, timeoutMs = 1
 }
 
 /** One trusted command owner. No provider key or client-supplied answer reaches the browser. */
-export async function sendVoiceProviderResult(sessionId: string, delegationId: string, content: string) {
-  const socket = attachVoiceProviderSession(sessionId);
-  try {
-    await new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
+export async function sendVoiceProviderResult(socket: WebSocket, delegationId: string, content: string) {
+    if (socket.readyState !== socket.OPEN) throw new Error("Voice session is disconnected.");
     const pieces: string[] = [];
     let part = "";
     for (const char of content.slice(0, 12_000)) {
@@ -96,5 +97,4 @@ export async function sendVoiceProviderResult(sessionId: string, delegationId: s
       socket.send(JSON.stringify({ type: "session.commentary.append", event_id: eventId, delegation_id: delegationId, content: piece }));
       await acknowledged;
     }
-  } finally { socket.close(); }
 }

@@ -31,6 +31,7 @@ export function VoiceConversationControl({ conversationId, scopeKey, maxSeconds,
   }, [conversationId, close]);
   useEffect(() => () => { clientRef.current?.destroy(); }, []);
   const start = () => {
+    if (clientRef.current) return;
     const client = createVoiceConversationClient({
       deps: { getMicrophone: () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }), createPeer: () => new RTCPeerConnection(), createAudio: () => new Audio(), fetch, monitorLevels: monitorVoiceAudioLevels },
       onChange: next => { setState(next); if (next.status === "ended" && !next.billingPending) callbacks.current.onSessionEnded?.(); },

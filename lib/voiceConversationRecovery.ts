@@ -21,7 +21,8 @@ export async function observeActiveVoiceConversations() {
   for (const row of rows) {
     if (receivers.has(row.id)) continue;
     if ((retryAfter.get(row.id) ?? 0) > Date.now()) continue;
-    const payload = readVoiceCreditPayload(row.reservationPayload);
+    let payload;
+    try { payload = readVoiceCreditPayload(row.reservationPayload); } catch { continue; }
     // A healthy web receiver owns the sideband. After its process disappears,
     // the durable lease expires and this independent receiver takes over.
     if (Date.parse(payload.webLeaseUntil ?? "") > Date.now()) {
@@ -39,7 +40,7 @@ export async function observeActiveVoiceConversations() {
     function release() { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000); socket.close(); }
     receivers.set(row.id, release);
     receiverClosers.set(row.id, close);
-    socket.once("open", () => { if (Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) close(); });
+    socket.once("open", () => { if (row.lastError || Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) close(); });
     socket.on("message", data => {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;

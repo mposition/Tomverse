@@ -29,7 +29,7 @@ mock.module(mod("lib/chatSecurity.ts"), { namedExports: {
 mock.module(mod("lib/conversationLock.ts"), { namedExports: { hasConversationUnlockGrant: () => !w.locked } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   conversation: { findFirst: async ({ where }) => where.userId === w.owner ? { id: where.id, productKey: "chat", password: null } : null },
-  message: { findMany: async () => [{ role: "assistant", content: "Existing answer" }, { role: "user", content: "Existing question" }] },
+  message: { findFirst: async () => ({ content: "Saved voice question" }), findMany: async () => [{ role: "assistant", content: "Existing answer" }, { role: "user", content: "Existing question" }] },
   chatCreditReservation: {
     findFirst: async ({ where }) => where.userId === w.owner ? { id: "reservation", providerRequestId: "live_test", status: "reserved", createdAt: new Date(0), expiresAt: new Date(Date.now() + 100_000), reservationPayload: { conversationId: "chat-1" } } : null,
     update: async args => { w.updates.push(args); if (w.linkError && args.data.providerRequestId) { w.linkError = false; throw new Error("Lost DB response"); } return {}; },
@@ -37,6 +37,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
     findMany: async () => [],
   },
   chatResponseAttempt: { findFirst: async ({ where }) => { w.answerFilter = where; return w.answer === false ? null : { partialContent: "Verified stored answer with search sources" }; } },
+  perplexityAsyncJob: { findFirst: async ({ where }) => { w.researchFilter = where; return w.researchAnswer ? { resultText: "Stored research answer" } : null; } },
 } } });
 mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
   reserveVoiceConversationCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", reservationPayload: {} }; },
@@ -50,6 +51,11 @@ mock.module(mod("lib/voiceConversationRecovery.ts"), { namedExports: {
   renewVoiceWebLease: async () => {},
 } });
 mock.module(mod("lib/voiceInputBudget.ts"), { namedExports: { VoiceBudgetError: BudgetError } });
+mock.module(mod("lib/voiceConversationTasks.ts"), { namedExports: {
+  registerVoiceTask: async (id, delegationId, text) => { (w.issued ??= []).push({ id, delegationId, text }); },
+  queueVoiceTaskResult: async (id, input) => { if (w.taskMismatch) throw new SecurityError(403, "VOICE_RESULT_MISMATCH", "Mismatch"); w.results.push([id, input.delegationId, input.answer]); },
+  dispatchVoiceTask: async () => {},
+} });
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   reserveVoiceBudgets: async input => { w.budgets.push(input); if (w.budgetError) throw new BudgetError(); return { reserved: true }; },
   releaseVoiceBudgets: async () => w.settlements.push("released"),
@@ -115,13 +121,33 @@ test("only owned saved answers are forwarded and browser-supplied content is ref
   assert.equal(w.answerFilter.sourceUserMessageId, result.sourceUserMessageId);
   assert.equal(w.answerFilter.userId, "owner");
   assert.equal(w.answerFilter.conversationId, "chat-1");
-  assert.deepEqual(w.results, [["live_test", "delegation-1", "Verified stored answer with search sources"]]);
+  assert.deepEqual(w.results, [["reservation", "delegation-1", "Verified stored answer with search sources"]]);
+  w.taskMismatch = true; assert.equal((await POST(request(result))).status, 403);
 });
 
 test("the session owner can stop after the kill switch or account block", async () => {
   process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop"; w.operationalError = true;
   assert.equal((await POST(request({ action: "stop", reservationId: "reservation" }))).status, 200);
-  assert.deepEqual(w.hangs, ["live_test"]);
+  assert.deepEqual(w.hangs, []);
+  assert.equal(w.updates.at(-1).data.lastError, "VOICE_CLOSE_REQUESTED");
+});
+
+test("voice accepts a completed research answer only through its saved source-message link", async () => {
+  w.answer = false; w.researchAnswer = true;
+  const sourceUserMessageId = start().requestId;
+  assert.equal((await POST(request({ action: "result", reservationId: "reservation", delegationId: "delegation-1", conversationId: "chat-1", sourceUserMessageId }))).status, 200);
+  assert.equal(w.researchFilter.sourceUserMessageId, sourceUserMessageId);
+  assert.equal(w.results[0][2], "Stored research answer");
+});
+
+test("a delegation arriving before transcript fragments is retained and sent after the fragments arrive", async () => {
+  const response = await POST(request(start())); const text = response.text();
+  w.socket.emit("message", JSON.stringify({ type: "session.delegation.created", event_id: "delegate-late", delegation: { id: "delegation-late" } }));
+  w.socket.emit("message", JSON.stringify({ type: "session.input_transcript.delta", event_id: "input-late", delta: "The late question", start_ms: 0, end_ms: 1000 }));
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.deepEqual(w.issued, [{ id: "reservation", delegationId: "delegation-late", text: "The late question" }]);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 1 } }));
+  assert.match(await text, /delegation-late/);
 });
 
 test("a voice budget refusal returns its actionable status and refunds the pre-dispatch credit hold", async () => {

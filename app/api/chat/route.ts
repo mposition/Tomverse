@@ -4354,6 +4354,7 @@ async function handleChatPost(
                     });
                     await tx.perplexityAsyncJob.create({
                         data: {
+                            ...(typeof sourceUserMessageId === "string" ? { sourceUserMessageId } : {}),
                             perplexityJobId,
                             conversationId,
                             assistantMessageId,

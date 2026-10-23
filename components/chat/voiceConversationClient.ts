@@ -117,10 +117,10 @@ export function createVoiceConversationClient(options: {
         if (epoch !== owner || view.status !== "listening" || !reservationId) return;
         const response = await post({ action: "result", reservationId, delegationId, ...receipt }, controller?.signal);
         await response.body?.cancel();
-      }).catch(error => {
+      }).catch(() => {
         if (owner === epoch && view.status === "listening") {
           patch({ error: "VOICE_ANSWER_FAILED" });
-          if (error instanceof Error && /CREDIT|ENTITLEMENT|PLAN_DAILY/.test(error.message)) void stop();
+          void stop();
         }
       });
     } else if (event.type === "closed") {

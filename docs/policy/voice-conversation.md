@@ -111,3 +111,13 @@ authentication and canonical Chat transport. `sendVoice` persists through that
 same transport and returns the saved source-message receipt. Web and native
 render `@tomverse/chat-ui`'s voice panel; both show persisted session usage in
 Chat after closing and reopening. The UI does not display the per-minute rate.
+
+Issued voice delegations retain an exact-question digest. A result must match
+that digest and an owned, durable source message. Ready results are claimed
+once in the reservation row and sent through the existing metering sideband;
+an indeterminate append is never replayed. Caption transcript text is not
+retained in this task record. Completed asynchronous research is linked by
+the nullable `PerplexityAsyncJob.sourceUserMessageId` field; its migration must
+be applied with the server release before that path is activated. Voice also
+reserves and settles the canonical OpenAI day/month cost buckets atomically
+with its existing credit and seconds holds.

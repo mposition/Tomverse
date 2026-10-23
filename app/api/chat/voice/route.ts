@@ -11,7 +11,8 @@ import { VoiceBudgetError } from "@/lib/voiceInputBudget";
 import { assertVoiceWatchdogReady, finalizeVoiceReservation, recordVoiceUsage, renewVoiceWebLease } from "@/lib/voiceConversationRecovery";
 import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
 import { reserveVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } from "@/lib/voiceConversationCredits";
-import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession, sendVoiceProviderResult } from "@/lib/voiceConversationProvider";
+import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession } from "@/lib/voiceConversationProvider";
+import { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } from "@/lib/voiceConversationTasks";
 
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start"), requestId: z.string().uuid(), conversationId: z.string().min(1).max(120).nullable(), sdp: z.string().min(1).max(64_000) }).strict(),
@@ -62,22 +63,26 @@ export async function POST(request: Request) {
       if (!reservation.providerRequestId) return json("VOICE_SESSION_NOT_FOUND", 404);
       if (body.action === "stop") {
         await prisma.chatCreditReservation.updateMany({ where: { id: reservation.id, status: "reserved" }, data: { lastError: "VOICE_CLOSE_REQUESTED" } });
-        await hangupVoiceProviderSession(reservation.providerRequestId);
+        // The primary receiver observes the durable request and sends session.close.
+        // Recovery handles a dead primary; hangup remains the timed fallback.
         return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
       }
       await assertUserOperationalAccess(userId);
-      if (!voiceConversationConfig(process.env) || reservation.status !== "reserved" || reservation.expiresAt <= new Date()) return json("VOICE_SESSION_ENDED", 409);
+      if (!voiceConversationConfig(process.env) || reservation.status !== "reserved" || reservation.lastError || reservation.expiresAt <= new Date()) return json("VOICE_SESSION_ENDED", 409);
       const payload = readVoiceCreditPayload(reservation.reservationPayload);
       if (payload.conversationId && payload.conversationId !== body.conversationId) return json("VOICE_CONVERSATION_FORBIDDEN", 403);
       await ownedConversation(request, userId, body.conversationId);
+      const source = await prisma.message.findFirst({ where: { id: body.sourceUserMessageId, conversationId: body.conversationId, role: "user", createdAt: { gte: reservation.createdAt } }, select: { content: true } });
+      if (!source) return json("VOICE_RESULT_MISMATCH", 403);
       // Read the saved answer rather than trusting text posted by the browser.
       const answer = await prisma.chatResponseAttempt.findFirst({
         where: { userId, conversationId: body.conversationId, sourceUserMessageId: body.sourceUserMessageId, status: "completed", createdAt: { gte: reservation.createdAt } },
         select: { partialContent: true }, orderBy: { createdAt: "desc" },
       });
-      if (!answer?.partialContent.trim()) return json("VOICE_ANSWER_NOT_READY", 409);
-      if (!payload.conversationId) await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { reservationPayload: { ...payload, conversationId: body.conversationId } } });
-      await sendVoiceProviderResult(reservation.providerRequestId, body.delegationId, answer.partialContent);
+      const research = !answer?.partialContent.trim() ? await prisma.perplexityAsyncJob.findFirst({ where: { conversationId: body.conversationId, sourceUserMessageId: body.sourceUserMessageId, status: "completed", createdAt: { gte: reservation.createdAt } }, select: { resultText: true }, orderBy: { createdAt: "desc" } }) : null;
+      const answerText = answer?.partialContent || research?.resultText;
+      if (!answerText?.trim()) return json("VOICE_ANSWER_NOT_READY", 409);
+      await queueVoiceTaskResult(reservation.id, { delegationId: body.delegationId, conversationId: body.conversationId, sourceId: body.sourceUserMessageId, sourceText: source.content, answer: answerText });
       return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
     }
     const config = voiceConversationConfig(process.env);
@@ -112,7 +117,7 @@ export async function POST(request: Request) {
       if (providerResult.rejected) {
         await settleVoiceConversationCredits(reservation.id, 0);
       } else {
-        await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
+        await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN", ...("sessionId" in providerResult && providerResult.sessionId ? { providerRequestId: providerResult.sessionId } : {}) } });
       }
       return json(providerResult.rejected ? "VOICE_PROVIDER_UNAVAILABLE" : "VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });
     }
@@ -136,6 +141,28 @@ export async function POST(request: Request) {
         let finished = false;
         let closing = false;
         let input = "";
+        let pendingDelegation: string | null = null;
+        let pendingSince = 0;
+        let delegationTimer: ReturnType<typeof setTimeout> | undefined;
+        let dispatching = false;
+        const resultTimer = setInterval(() => {
+          if (dispatching || finished || closing || socket.readyState !== socket.OPEN) return;
+          dispatching = true;
+          void dispatchVoiceTask(reservation.id, socket).catch(() => { send({ type: "error", code: "VOICE_RESULT_DELIVERY_FAILED" }); stop(); }).finally(() => { dispatching = false; });
+        }, 500);
+        const flushDelegation = () => {
+          clearTimeout(delegationTimer);
+          delegationTimer = setTimeout(() => {
+            if (!pendingDelegation || closing || finished) return;
+            if (!input.trim()) {
+              if (Date.now() - pendingSince < 2_000) flushDelegation();
+              else { send({ type: "error", code: "VOICE_TRANSCRIPT_UNAVAILABLE" }); stop(); }
+              return;
+            }
+            const delegationId = pendingDelegation; const text = input; input = ""; pendingDelegation = null;
+            void registerVoiceTask(reservation.id, delegationId, text).then(() => { if (!finished && !closing) send({ type: "delegation", delegationId, text }); }).catch(() => { send({ type: "error", code: "VOICE_TASK_RECORDING_FAILED" }); stop(); });
+          }, 350);
+        };
         const seen = new Set<string>();
         const send = (value: unknown) => { try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`)); } catch { /* Client left; the provider still needs finalization. */ } };
         const keepalive = setInterval(() => send({ type: "heartbeat" }), 15_000);
@@ -145,6 +172,7 @@ export async function POST(request: Request) {
         const finish = async (seconds: number | null) => {
           if (finished) return; finished = true;
           clearInterval(keepalive); clearInterval(killTimer); clearTimeout(durationTimer); clearTimeout(closeTimer);
+          clearInterval(resultTimer); clearTimeout(delegationTimer);
           request.signal.removeEventListener("abort", stop);
           try {
             if (seconds !== null && seconds >= latestSeconds && seconds <= reservedSeconds) {
@@ -178,12 +206,12 @@ export async function POST(request: Request) {
           if (event.type === "session.started") {
             send({ type: "started" });
           } else if (isVoiceTranscriptEvent(event)) {
-            if (event.type === "session.input_transcript.delta") input = (input + event.delta).slice(-16_000);
+            if (event.type === "session.input_transcript.delta") { input = (input + event.delta).slice(-16_000); if (pendingDelegation) flushDelegation(); }
             send({ type: "transcript", event });
           } else if (event.type === "session.delegation.created" && !closing) {
             const delegation = event.delegation as { id?: unknown } | undefined;
-            if (typeof delegation?.id === "string" && input.trim()) {
-              send({ type: "delegation", delegationId: delegation.id, text: input }); input = "";
+            if (typeof delegation?.id === "string") {
+              pendingDelegation = delegation.id; pendingSince = Date.now(); flushDelegation();
             }
           } else if (event.type === "session.usage.updated") {
             const seconds = (event.usage as { seconds?: unknown } | undefined)?.seconds;

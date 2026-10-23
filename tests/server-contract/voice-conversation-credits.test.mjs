@@ -21,11 +21,12 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { $transaction: asyn
   const snapshot = structuredClone(w); try { return await callback(tx); } catch (error) { w = snapshot; throw error; }
 } } } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ApiSecurityError: SecurityError } });
+mock.module(mod("lib/providerCostBudget.ts"), { namedExports: { getProviderCostGuardrailLimits: () => ({ day: 1000000, month: 10000000 }) } });
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: 300, dailyMessageLimit: w.dailyLimit }) } });
 mock.module(mod("lib/chatSecurity.ts"), { namedExports: {
   getUserChatUsageKey: id => `user:${id}`, usagePeriodStart: () => new Date("2026-10-01T00:00:00Z"),
   readUsageBucketCount: async (_tx, _key, period) => w.buckets[period],
-  incrementUsageBucket: async (_tx, _key, period, _start, limit, amount) => { if (w.buckets[period] + amount > limit) return false; w.buckets[period] += amount; return true; },
+  incrementUsageBucket: async (_tx, _key, period, _start, limit, amount) => { if (period.startsWith("provider-cost") && w.providerBudgetBlocked || w.buckets[period] + amount > limit) return false; w.buckets[period] += amount; return true; },
 } });
 mock.module(mod("lib/userDailyUsage.ts"), { namedExports: { getUserDayWindow: async () => ({ start: new Date("2026-10-23T00:00:00Z"), end: new Date("2026-10-24T00:00:00Z") }) } });
 mock.module(mod("lib/creditDebt.ts"), { namedExports: { lockCreditAccount: async () => {}, offsetCreditDebt: async () => ({ offsetCredits: w.debt ?? 0 }) } });
@@ -44,7 +45,7 @@ mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   settleVoiceBudgets: async input => { assert.equal(input.client, tx); (w.voiceSettlements ??= []).push(input.basis); },
 } });
 const { reserveVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
-test.beforeEach(() => { w = { buckets: { day: 0, month: 0 }, purchased: 0, dailyLimit: 300, row: null, addOnReserved: 0, addOnSettlements: [], providerCosts: [] }; });
+test.beforeEach(() => { w = { buckets: { day: 0, month: 0, "provider-cost-day": 0, "provider-cost-month": 0 }, purchased: 0, dailyLimit: 300, row: null, addOnReserved: 0, addOnSettlements: [], providerCosts: [] }; });
 const input = () => ({ userId: "owner", requestId: "request-1", conversationId: "chat-1", creditsPerMinute: 36, maxSeconds: 60 });
 
 test("voice spends the same plan wallet and refunds unused duration exactly once", async () => {
@@ -134,4 +135,14 @@ test("grace settlement uses the latest durable evidence after its atomic claim",
   await settleVoiceConversationCredits(row.id, 5, true, "observed_minimum", false);
   assert.equal(w.row.settledCredits, 12); assert.equal(w.row.providerUsageSnapshot.confirmed, true);
   assert.equal(w.row.providerUsageSnapshot.seconds, 20); assert.equal(w.row.lastError, null);
+});
+
+test("voice shares OpenAI cost buckets and a refusal rolls back the wallet", async () => {
+  w.providerBudgetBlocked = true;
+  await assert.rejects(reserveVoiceConversationCredits(input()), e => e.code === "PROVIDER_BUDGET_EXHAUSTED");
+  assert.equal(w.buckets.month, 0); assert.equal(w.row, null);
+  w.providerBudgetBlocked = false; const row = await reserveVoiceConversationCredits(input());
+  assert.equal(w.buckets["provider-cost-day"], 50000);
+  await settleVoiceConversationCredits(row.id, 10, true);
+  assert.equal(w.buckets["provider-cost-day"], 12500); assert.equal(w.buckets["provider-cost-month"], 12500);
 });
