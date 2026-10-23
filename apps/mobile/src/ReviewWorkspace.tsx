@@ -98,27 +98,27 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     catch (error) { setUncertain(true); throw error; }
   }
   async function send(text: string, files: MobileAttachment[]) {
-    if (streaming || uncertain || !capability) return;
-    if (!(mode === "easy" ? providers : selected).length) { setError(c.noParticipants); return; }
+    if (streaming || uncertain || !capability) return false;
+    if (!(mode === "easy" ? providers : selected).length) { setError(c.noParticipants); return false; }
     const current = ++request.current; const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial({});
     let item = conversation; let dispatched = false;
     try {
       if (!transport.configureReview || !transport.sendReview) throw Error("REVIEW_UNAVAILABLE");
       item = await ensureConversation(selected, current);
-      if (current !== request.current || controller.signal.aborted) return;
+      if (current !== request.current || controller.signal.aborted) return false;
       let participants = selected;
       if (mode === "easy") {
         if (!capability.reviewEasy || !transport.routeReview) throw Error("EASY_UNAVAILABLE");
         const decision = await transport.routeReview({ text, context: item.messages.filter(message => message.role === "user").at(-1)?.content.slice(0, 1200) ?? "", providers, hasImages: files.some(file => file.mediaType.startsWith("image/")) || item.messages.some(message => message.attachments?.some(file => file.mediaType.startsWith("image/"))) });
-        if (current !== request.current) return;
-        if (decision.kind === "image") { setImage({ prompt: text, modelIds: decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []), preset: decision.preset, unsupported: decision.choices.some(choice => !choice.modelId) }); setImageHistory(null); setImageOpen(true); return; }
+        if (current !== request.current) return false;
+        if (decision.kind === "image") { setImage({ prompt: text, modelIds: decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []), preset: decision.preset, unsupported: decision.choices.some(choice => !choice.modelId) }); setImageHistory(null); setImageOpen(true); return false; }
         if (decision.choices.some(choice => !choice.modelId)) throw Error("PROVIDER_UNAVAILABLE");
         participants = decision.choices.map(choice => choice.modelId!);
       }
-      if (current !== request.current || controller.signal.aborted) return;
+      if (current !== request.current || controller.signal.aborted) return false;
       item = await transport.configureReview(item.id, participants);
-      if (current !== request.current) return;
+      if (current !== request.current) return false;
       setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? "");
       setConversation({ ...item, messages: [...item.messages, { id: "pending-review-user", role: "user", content: text }] });
       dispatched = true;
@@ -126,7 +126,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
         if (current === request.current) setPartial(previous => ({ ...previous, [modelId]: value }));
       });
       const saved = await transport.load(item.id);
-      if (current !== request.current) return;
+      if (current !== request.current) return false;
       setConversation(saved); setPartial({}); setUncertain(saved.activeAttempt === true);
       if (!outcome.failedModelIds.length) setDraft(""); else setError(copy.disconnected);
       const history = await transport.listReview!();

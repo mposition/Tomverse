@@ -231,7 +231,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
             const result = await response.json().catch(() => ({}));
             if (!response.ok) {
               const seconds = Number(response.headers.get("Retry-After") ?? result?.details?.retryAfterSeconds);
-              const traceId = response.headers.get("X-Request-ID");
+              const traceId = response.headers.get("X-Request-ID") ?? (typeof result?.traceId === "string" ? result.traceId : typeof result?.requestId === "string" ? result.requestId : null);
               throw Object.assign(new ApiClientError(response.status, typeof result?.code === "string" ? result.code : "COMPARISON_PREFLIGHT_FAILED"), {
                 retryAfterSeconds: Number.isFinite(seconds) && seconds > 0 && seconds <= 86400 ? Math.ceil(seconds) : undefined,
                 traceId: traceId && /^[A-Za-z0-9_-]{1,100}$/.test(traceId) ? traceId : undefined,

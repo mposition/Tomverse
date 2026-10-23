@@ -20,15 +20,16 @@ const retry: Record<MobileLanguage, string> = {
 };
 export function mobileErrorText(error: unknown, language: MobileLanguage, fallback: string): string {
   const input = (error ?? {}) as { code?: unknown; status?: unknown; retryAfterSeconds?: unknown; traceId?: unknown };
+  const annotate = (text: string) => text + (typeof input.traceId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(input.traceId) ? ` · Trace ID: ${input.traceId}` : "");
   const code = typeof input.code === "string" ? input.code : "";
   const status = typeof input.status === "number" ? input.status : undefined;
-  if (["ATTACHMENT_UNSUPPORTED_FORMAT", "UNSUPPORTED_ATTACHMENT_TYPE"].includes(code)) return copy[language].unsupported;
-  if (code.includes("TOO_LARGE") || status === 413) return copy[language].size;
-  if (code.startsWith("ATTACHMENT_") || code.startsWith("ARCHIVE_")) return copy[language].file;
-  if (code.startsWith("PLAN_") || status === 403) return copy[language].plan;
+  if (["ATTACHMENT_UNSUPPORTED_FORMAT", "UNSUPPORTED_ATTACHMENT_TYPE"].includes(code)) return annotate(copy[language].unsupported);
+  if (code.includes("TOO_LARGE") || status === 413) return annotate(copy[language].size);
+  if (code.startsWith("ATTACHMENT_") || code.startsWith("ARCHIVE_")) return annotate(copy[language].file);
+  if (code.startsWith("PLAN_") || status === 403) return annotate(copy[language].plan);
   if (status === 429) {
     const text = typeof input.retryAfterSeconds === "number" && input.retryAfterSeconds > 0 && input.retryAfterSeconds <= 86400 ? retry[language].replace("{seconds}", String(Math.ceil(input.retryAfterSeconds))) : copy[language].limited;
-    return text + (typeof input.traceId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(input.traceId) ? ` · Trace ID: ${input.traceId}` : "");
+    return annotate(text);
   }
-  return fallback;
+  return annotate(fallback);
 }
