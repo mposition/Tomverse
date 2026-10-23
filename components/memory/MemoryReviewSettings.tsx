@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { MemoryExtractionLauncher } from "@/components/memory/MemoryExtractionLauncher";
+import { MemoryConflictReview } from "@/components/memory/MemoryConflictReview";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     FACTUAL_MEMORY_KINDS,
@@ -289,6 +290,8 @@ export function MemoryReviewSettings() {
     } | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editStatement, setEditStatement] = useState("");
+    const [restoreId, setRestoreId] = useState<string | null>(null);
+    const [restoreGrounds, setRestoreGrounds] = useState("");
     const [editParkedNotice, setEditParkedNotice] = useState(false);
     const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
     const [bulkBusy, setBulkBusy] = useState(false);
@@ -450,6 +453,7 @@ export function MemoryReviewSettings() {
             if (result.ok) {
                 setConflictId(null);
                 setEditingId(null);
+                setRestoreId(null);
                 const rows = await loadMemories();
                 if (wasActive && body.action === "edit") {
                     const updated = rows?.find((row) => row.id === memoryId);
@@ -469,6 +473,7 @@ export function MemoryReviewSettings() {
                 return;
             }
             if (result.failure.code === "MEMORY_ITEM_STATE") {
+                setConflictId(null);
                 // The row changed underneath the page; re-sync silently.
                 void loadMemories();
                 return;
@@ -642,37 +647,10 @@ export function MemoryReviewSettings() {
 
     const renderConflict = (rowId: string) =>
         conflictId === rowId && (
-            <div
-                className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 dark:border-amber-900/60 dark:bg-amber-950/20"
-                data-testid="memory-conflict"
-            >
-                <p className="text-xs leading-5 text-amber-800 dark:text-amber-200">
-                    {t("memoryReview.conflictNotice")}
-                </p>
-                <div className="mt-1.5 flex gap-2">
-                    <button
-                        type="button"
-                        className={smallButtonClass}
-                        data-testid="memory-conflict-replace"
-                        disabled={busyId !== null}
-                        onClick={() =>
-                            void patchMemory(rowId, {
-                                action: "approve",
-                                resolveConflict: "supersede_existing",
-                            })
-                        }
-                    >
-                        {t("memoryReview.conflictReplace")}
-                    </button>
-                    <button
-                        type="button"
-                        className={smallButtonClass}
-                        onClick={() => setConflictId(null)}
-                    >
-                        {t("memoryReview.cancel")}
-                    </button>
-                </div>
-            </div>
+            <MemoryConflictReview key={rowId} memoryId={rowId}
+                activeMemories={listState.kind === "ready" ? listState.rows.filter(row => row.status === "active") : []}
+                disabled={busyId !== null || featureDisabled}
+                onResolve={body => patchMemory(rowId, body)} onCancel={() => setConflictId(null)} />
         );
 
     const renderEditor = (row: MemoryRowView) =>
@@ -1000,6 +978,9 @@ export function MemoryReviewSettings() {
                                             <X className="h-3.5 w-3.5" />
                                             {t("memoryReview.reject")}
                                         </button>
+                                        <button type="button" className={smallButtonClass}
+                                            data-testid="memory-compare" disabled={featureDisabled || busyId !== null}
+                                            onClick={() => setConflictId(row.id)}>{t("memoryReview.conflictReview")}</button>
                                         {editingId !== row.id && (
                                             <button
                                                 type="button"
@@ -1136,6 +1117,26 @@ export function MemoryReviewSettings() {
                                 <p className="mt-1 break-words text-sm leading-6 text-zinc-500">
                                     {row.statement}
                                 </p>
+                                {row.status === "suspended_by_source_delete" && (
+                                    <div className="mt-2 space-y-2">
+                                        {restoreId !== row.id ? <button type="button" className={smallButtonClass}
+                                            data-testid="memory-restore" disabled={featureDisabled || busyId !== null}
+                                            onClick={() => { setRestoreId(row.id); setRestoreGrounds(""); }}>
+                                            {t("memoryReview.restoreGrounds")}</button> : <>
+                                            <label className="block text-xs">{t("memoryReview.restoreGroundsNotice")}
+                                                <textarea className="mt-1 block w-full rounded border bg-transparent p-2 text-sm"
+                                                    data-testid="memory-restore-grounds" maxLength={2000} value={restoreGrounds}
+                                                    onChange={event => setRestoreGrounds(event.target.value)} />
+                                            </label>
+                                            <button type="button" className={smallButtonClass} data-testid="memory-restore-save"
+                                                disabled={featureDisabled || busyId !== null || !restoreGrounds.trim()}
+                                                onClick={() => void patchMemory(row.id, { action: "restore_grounds", groundsText: restoreGrounds.trim() })}>
+                                                {t("memoryReview.save")}</button>
+                                            <button type="button" className={smallButtonClass} onClick={() => setRestoreId(null)}>{t("memoryReview.cancel")}</button>
+                                        </>}
+                                        {renderRowError(row.id)}
+                                    </div>
+                                )}
                                 <div className="mt-2">
                                     {renderDeleteButton(row)}
                                 </div>

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { expectTappableInVisibleViewport } from "./support/ui-audit";
 import {
   mockGuestUsage,
   mockUserUsage,
@@ -423,7 +424,16 @@ test.describe("Chat starter catalogue", () => {
         composer: composer ? rect(composer) : null,
         cards: Array.from(
           document.querySelectorAll('[data-testid="chat-starter-card"]')
-        ).map(rect),
+        ).map(node => {
+          const box = rect(node);
+          const surface = node.closest('[data-testid="mobile-conversation-surface"]');
+          const clip = surface ? rect(surface) : { x: 0, y: 0, width: innerWidth, height: innerHeight };
+          const left = Math.max(box.x, clip.x, 0);
+          const top = Math.max(box.y, clip.y, 0);
+          const right = Math.min(box.x + box.width, clip.x + clip.width, innerWidth);
+          const bottom = Math.min(box.y + box.height, clip.y + clip.height, innerHeight);
+          return { ...box, painted: { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) } };
+        }),
       };
     });
 
@@ -441,16 +451,21 @@ test.describe("Chat starter catalogue", () => {
       // 44px touch target, which has to survive text scaling rather than be
       // squeezed by it.
       expect(box.height, `card ${index} is under the touch target`).toBeGreaterThanOrEqual(44);
-      // And it may not sit on the textarea's row. Overlap is a rectangle
-      // intersection, not a y comparison: the composer contract forbids
-      // sharing the row, floating above it and overlapping it alike.
+      // Offscreen content inside the welcome scroller has layout rectangles
+      // beyond its clip. Compare painted bounds, then verify every card can
+      // actually be reached and hit after scrolling.
+      const painted = box.painted;
       const overlaps =
-        box.x < composerBox.x + composerBox.width &&
-        box.x + box.width > composerBox.x &&
-        box.y < composerBox.y + composerBox.height &&
-        box.y + box.height > composerBox.y;
+        painted.width > 0 && painted.height > 0 &&
+        painted.x < composerBox.x + composerBox.width &&
+        painted.x + painted.width > composerBox.x &&
+        painted.y < composerBox.y + composerBox.height &&
+        painted.y + painted.height > composerBox.y;
       expect(overlaps, `card ${index} overlaps the composer`).toBe(false);
     });
+    for (const [index, card] of (await cards(page).all()).entries()) {
+      await expectTappableInVisibleViewport(page, card, `Starter card ${index} at 200% text`);
+    }
   });
 
   test("the guidance sentence is on the first screen, not cut at the dock, on a 412px phone at 125% text", { tag: "@ui-risk" }, async ({

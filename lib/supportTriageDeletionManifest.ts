@@ -422,15 +422,29 @@ const PERSON_MODELS = new Set(["User", "Account", "Session"]);
 /** Scalar names that conventionally hold a person's id. A renamed one is code review's (T11). */
 const PERSON_COLUMN = /(^|[a-z])(user|owner|admin|author|actor|operator|decider|reviewer|account)Id$/i;
 
-/** Every model reachable from `Feedback` through relation fields that point at it. */
+/** Report-derived models, excluding the declared source-message lookup inverse. */
 export const feedbackRelationClosure = (models: ParsedSchema["models"]) => {
   const reached = new Set<string>();
   const queue = ["Feedback"];
+  const sourceMessageRelations = models.get("Feedback")?.fields.filter(
+    (field) => field.relation && field.type === "Message"
+  ) ?? [];
   while (queue.length > 0) {
     const target = queue.pop() as string;
     for (const model of models.values()) {
       if (model.name === target || reached.has(model.name)) continue;
-      if (model.fields.some((field) => field.relation && field.type === target)) {
+      const relations = model.fields.filter((field) => field.relation && field.type === target);
+      // Feedback.messageId points to an existing chat answer; the answer is
+      // not derived from the report. Exclude only this known, unambiguous
+      // FK-backed inverse. New report links, including a second Message link,
+      // still enter the closure and require explicit deletion classification.
+      if (target === "Feedback" && model.name === "Message" && relations.length === 1 &&
+          relations[0].name === "feedbackReports" && relations[0].list && relations[0].relationFields.length === 0 &&
+          sourceMessageRelations.length === 1 && sourceMessageRelations[0].name === "sourceMessage" &&
+          sourceMessageRelations[0].relationFields.length === 1 && sourceMessageRelations[0].relationFields[0] === "messageId") {
+        continue;
+      }
+      if (relations.length > 0) {
         reached.add(model.name);
         queue.push(model.name);
       }

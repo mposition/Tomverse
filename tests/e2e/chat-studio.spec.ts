@@ -22,7 +22,13 @@ test("PWA actions preserve the mobile composer and explicitly restore an offline
   await page.getByRole("button", { name: "Restore offline draft" }).click();
   await expect(textarea).toHaveValue("Existing draft\nRecovered offline idea");
   await page.evaluate(() => { const event = new Event("beforeinstallprompt"); Object.assign(event, { prompt: async () => undefined, userChoice: Promise.resolve({ outcome: "dismissed" }) }); window.dispatchEvent(event); });
-  await expect(page.getByRole("button", { name: "Install Tomverse" })).toBeVisible();
+  await expect(page.locator('aside[aria-label="Tomverse app"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Install Tomverse" })).toHaveCount(0);
+  await page.getByTestId("mobile-sidebar-open").click();
+  await page.getByTestId("account-menu-trigger").click();
+  await expect(page.getByTestId("account-menu").getByRole("button", { name: "Install Tomverse" })).toBeVisible();
+  await page.getByTestId("account-install-app").click();
+  await page.keyboard.press("Escape");
   await expectTappableInVisibleViewport(page, textarea, "PWA composer");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   const manifest = await page.request.get("/manifest.webmanifest");

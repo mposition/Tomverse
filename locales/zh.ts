@@ -1887,6 +1887,20 @@ export const zh = {
         dataTabOpen: "打开 AI 配置",
     },
     memoryReview: {
+        restoreGrounds: "添加新依据",
+        restoreGroundsNotice: "填写您自己的依据以恢复到审核列表。使用前需要单独批准。",
+
+        reportAnswer: "报告此回答的问题",
+        conflictReview: "检查相关记忆",
+        conflictChoose: "选择要比较的现有记忆",
+        conflictKeep: "保留现有记忆",
+        conflictBoth: "同时保留",
+        conflictExpire: "将现有记忆设为过期",
+        conflictMerge: "合并为一条记忆",
+        conflictMergedStatement: "合并后的内容",
+        conflictMergeGrounds: "请说明合并后内容正确的依据",
+        conflictLoading: "正在加载相关记忆…",
+
         sourceDeleteDerivedImport: "由此次导入生成的 {count} 条记忆也会一并删除。",
         sourceDeleteDerivedConversation: "由此对话生成的 {count} 条记忆也会一并删除。",
         sourceDeleteKeep: "保留记忆，仅停止使用",
@@ -1935,8 +1949,7 @@ export const zh = {
         sensitiveBadge: "敏感",
         pinnedBadge: "已置顶",
         expires: "到期：{date}",
-        conflictNotice:
-            "已有一条使用中的记忆涵盖相同项目。您可以保留现有记忆，或用这条内容替换它。",
+        conflictNotice: "这些记忆可能涉及同一主题。请检查并选择如何保留。",
         conflictReplace: "替换现有记忆",
         activeTitle: "使用中的记忆",
         activeEmpty: "还没有使用中的记忆。",

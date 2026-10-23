@@ -29,6 +29,7 @@ import { useAdminMessages,
 import { adminPlatformMemoryMessages } from "@/lib/adminMessages/platformMemory";
 import { adminPlatformSettingsMessages } from "@/lib/adminMessages/platformSettings";
 import { adminFetch } from "@/lib/adminFetch";
+import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
 
 /**
  * Where the reauthentication CTA brings the operator back to.
@@ -725,6 +726,7 @@ export function PlatformSettingsPanel({
         </div>
       </div>
 
+      <div className="p-5"><ReviewProviderDefaultsSettings scope="platform" /></div>
       {reauthenticationRequired ? (
         <div
           id="admin-platform-reauthentication"

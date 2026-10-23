@@ -176,13 +176,7 @@ export function creditPerChunkPercentiles(
  * so a reader is told the difference between "zero happened" and "nothing
  * measures this".
  */
-export const MEMORY_METRICS_UNAVAILABLE = [
-    {
-        metric: "followup_repair_proxy_feedback_signal",
-        reason:
-            "the follow-up, regenerate and memory-off signals are measured; Feedback still carries no link to the answer it is about, so a report cannot be attributed to a memory-shaped answer",
-    },
-] as const;
+export const MEMORY_METRICS_UNAVAILABLE: readonly { metric: string; reason: string }[] = [];
 
 export type MemoryInjectionRates = {
     /** Authenticated chat requests that reached prompt assembly. */
@@ -230,6 +224,7 @@ export type MemoryPairBreakdown = {
  * this module: the database returns two rows of counts and nothing else.
  */
 export type FollowupArmSample = {
+    feedbacks?: number;
     /** `memory` when the answer's prompt carried at least one memory. */
     arm: "memory" | "plain";
     answers: number;
@@ -256,14 +251,17 @@ export type FollowupProxySummary = {
     /** memory − plain. Positive means memory answers drew more follow-ups. */
     followupDifference: number | null;
     regenerateDifference: number | null;
+    feedbackDifference: number | null;
 };
 
 export type FollowupArmRates = {
     answers: number;
     followups: number;
     regenerates: number;
+    feedbacks: number;
     followupRate: number | null;
     regenerateRate: number | null;
+    feedbackRate: number | null;
 };
 
 export type MemorySummary = {
@@ -383,12 +381,15 @@ export function summarizeFollowupProxy(
         const answers = row?.answers ?? 0;
         const followups = row?.followups ?? 0;
         const regenerates = row?.regenerates ?? 0;
+        const feedbacks = row?.feedbacks ?? 0;
         return {
             answers,
             followups,
             regenerates,
+            feedbacks,
             followupRate: rate(followups, answers),
             regenerateRate: rate(regenerates, answers),
+            feedbackRate: rate(feedbacks, answers),
         };
     };
 
@@ -410,6 +411,7 @@ export function summarizeFollowupProxy(
             memory.regenerateRate,
             plain.regenerateRate
         ),
+        feedbackDifference: difference(memory.feedbackRate, plain.feedbackRate),
     };
 }
 

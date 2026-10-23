@@ -9,6 +9,8 @@ import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
+import { getAdminReviewProviderDefaults, updatePlatformReviewProviderDefaults } from "@/lib/reviewProviderDefaults";
+import { parseReviewProviderDefaults } from "@/lib/reviewProviderPreferencesCore";
 import {
   getMemoryExtractionRevokedPairs,
   getPublicAppSettings,
@@ -43,6 +45,7 @@ import {
 
 const updateAppSettingsSchema = z
   .object({
+    reviewEasyDefaultProviders: z.array(z.string()).min(1).max(3).refine(value => parseReviewProviderDefaults(value) !== null, "Choose distinct providers.").optional(),
     // Optional so a guest-lead save and a feature-flag save are different
     // requests. One request that carries an invalid lead used to refuse the
     // emergency switches in the same body.
@@ -114,6 +117,10 @@ const PLATFORM_FLAG_KEYS = [
 ] as const;
 
 const appSettingsWriteSchema = updateAppSettingsSchema.superRefine((value, ctx) => {
+  if (value.reviewEasyDefaultProviders !== undefined) {
+    if (Object.keys(value).length !== 1) ctx.addIssue({ code: "custom", message: "Review defaults are saved separately." });
+    return;
+  }
   const present = PLATFORM_FLAG_KEYS.filter((key) => value[key] !== undefined);
   if (present.length !== 0 && present.length !== PLATFORM_FLAG_KEYS.length) {
     ctx.addIssue({
@@ -179,6 +186,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       settings,
       guestLead,
+      ...(await getAdminReviewProviderDefaults()),
       imageGenerationEnabled: await isImageGenerationEnabled(),
       externalConversationImportEnabled: await isExternalImportEnabled(),
       externalConversationContinuationEnabled:
@@ -216,6 +224,14 @@ export async function PATCH(req: Request) {
     });
 
     const body = await readLimitedJson(req, 4 * 1024, appSettingsWriteSchema);
+    if (body.reviewEasyDefaultProviders !== undefined) {
+      const current = await getAdminReviewProviderDefaults();
+      if (body.reviewEasyDefaultProviders.some(provider => !current.reviewEasyProviderOptions.includes(provider))) {
+        return NextResponse.json({ error: "Choose providers with an available Review model." }, { status: 400 });
+      }
+      await updatePlatformReviewProviderDefaults(body.reviewEasyDefaultProviders, session, req);
+      return NextResponse.json({ ...current, reviewEasyDefaultProviders: body.reviewEasyDefaultProviders });
+    }
     const leadId = body.guestDefaultModelId;
     const lineup = body.guestBrandTrioModelIds;
     const writesFlags = typeof body.aiChatEnabled === "boolean";

@@ -81,6 +81,7 @@ const createSchema = z
         sensitivity: z.enum(["standard", "sensitive"]).optional(),
         expiresAt: z.string().datetime().nullable().optional(),
         groundsText: z.string().trim().min(1).max(2_000),
+        canonicalKey: z.string().max(96).nullable().optional(),
         resolveConflict: z.literal("supersede_existing").optional(),
     })
     .strict();
@@ -105,6 +106,7 @@ export async function POST(req: Request) {
             sensitivity: body.sensitivity,
             expiresAt: body.expiresAt ?? null,
             groundsText: body.groundsText,
+            canonicalKey: body.canonicalKey,
             resolveConflict: body.resolveConflict,
         });
         return NextResponse.json(
