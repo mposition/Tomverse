@@ -15,6 +15,8 @@ let entitled = true;
 let routes = 0;
 let catalogs = 0;
 let installed = false;
+let triage = false;
+let easy = true;
 
 async function load() {
   if (!installed) {
@@ -31,19 +33,20 @@ async function load() {
     mock.module(mod("lib/chatSecurity.ts"), { namedExports: { assertUserOperationalAccess: async () => undefined } });
     mock.module(mod("lib/modelRegistry.ts"), { namedExports: { getRuntimeModels: async () => AVAILABLE_MODELS } });
     mock.module(mod("lib/modelCatalog.ts"), { namedExports: { refreshImageModelCatalog: async () => { catalogs++; return []; } } });
+    mock.module(mod("lib/chatImageIntent.ts"), { namedExports: { chatImageTriageModelId: async () => triage ? "gpt-6-luna" : null } });
     mock.module(mod("lib/reviewRouting.ts"), { namedExports: {
-      reviewEasyEnabled: () => true,
+      reviewEasyEnabled: () => easy,
       routeReviewPrompt: async () => { routes++; return { kind: "text", preset: "standard", choices: [{ provider: "openai", modelId: "gpt-6-luna" }] }; },
     } });
   }
   return import(mod("app/api/review/route/route.ts"));
 }
 
-async function post(requestedKind?: "image") {
+async function post(requestedKind?: "image", imageOnly?: boolean) {
   const { POST } = await load();
   return POST(new Request("http://127.0.0.1:3100/api/review/route", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: "A mountain", providers: ["openai"], requestedKind }),
+    body: JSON.stringify({ text: "A mountain", providers: ["openai"], requestedKind, imageOnly }),
   }));
 }
 
@@ -62,4 +65,17 @@ test("ordinary text still uses the shared router when image generation is disabl
   const response = await post();
   assert.equal(response.status, 200); assert.equal(routes, 1);
   assert.equal((await response.json()).kind, "text");
+});
+
+test("Professional image detection needs its existing image triage switch, independently of Easy", async () => {
+  imagesEnabled = entitled = true; easy = false; triage = false; routes = 0;
+  assert.equal((await post(undefined, true)).status, 503);
+  assert.equal(routes, 0);
+  triage = true;
+  assert.equal((await post(undefined, true)).status, 200);
+  assert.equal(routes, 1);
+  assert.equal((await post()).status, 503);
+  easy = true; triage = false;
+  assert.equal((await post(undefined, true)).status, 503);
+  easy = true;
 });

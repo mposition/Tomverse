@@ -3704,7 +3704,7 @@ export function ChatInput({
             {t("chat.singleModelRequired")}
           </p>
         )}
-        {review?.mode === "easy" && review.imagePromptMode && <div className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
+        {review?.imagePromptMode && <div data-testid="review-image-mode" className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{review.imageModelLabel ?? t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
         {review && showProductSwitcher && isStudio && <ReviewModeSwitcher review={review} composer locked={productSwitchDisabled || isSending || draftLocked} />}
         {review && showReviewModelRow && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels}
           canSelectModel={id => { const model = AVAILABLE_MODELS.find(m => m.id === id); return Boolean(model && canUseModelWithPlan(currentPlan, model)); }} />}

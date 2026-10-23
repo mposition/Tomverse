@@ -39,7 +39,7 @@ const isGroupView = (value: unknown): value is GroupView =>
   Array.isArray((value as GroupView).targets) &&
   Array.isArray((value as GroupView).generations);
 
-export function ChatImageTurnCard({ groupId }: { groupId: string }) {
+export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; modelIds?: string[] }) {
   const { t } = useLanguage();
   const [group, setGroup] = useState<GroupView | null>(null);
   const [readFailed, setReadFailed] = useState(false);
@@ -118,7 +118,7 @@ export function ChatImageTurnCard({ groupId }: { groupId: string }) {
     }
   };
 
-  const current = (group?.targets ?? []).map((target) => ({
+  const current = (group?.targets ?? []).filter(target => !modelIds || modelIds.includes(target.modelId)).map((target) => ({
     target,
     generation:
       group?.generations.find(
