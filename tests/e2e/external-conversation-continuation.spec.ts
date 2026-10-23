@@ -915,7 +915,7 @@ test.describe("continuing an imported conversation", () => {
         }
     });
 
-    test("the models are chosen with the ordinary picker, not a button grid", async ({
+    test("the models are chosen with the ordinary picker, not a button grid", { tag: "@ui-risk" }, async ({
         page,
     }) => {
         /*
@@ -932,6 +932,8 @@ test.describe("continuing an imported conversation", () => {
         });
 
         await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(page.getByTestId("composer-model-select")).toHaveCount(1);
+        await expect(page.getByTestId("composer-active-model-count")).toHaveCount(1);
         await expect(page.getByTestId("composer-model-select")).toBeVisible();
         await expect(
             page.getByTestId("composer-active-model-count")
