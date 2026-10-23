@@ -641,10 +641,10 @@ export async function bulkApproveMemories(userId: string) {
                     },
                 });
                 if (!item) return "skipped" as const;
-                // An owner-launch pair has not shown zero critical bulk-safe
-                // adoptions, so its candidates are approved one by one.
-                const pair = item.extractionModelId && item.promptVersion
-                    ? { extractionModelId: item.extractionModelId, promptVersion: item.promptVersion }
+                // Only an evaluated pair has shown zero critical bulk-safe
+                // adoptions; any other pair's candidates are approved one by one.
+                const pair = item.extractionModelId || item.promptVersion
+                    ? { extractionModelId: item.extractionModelId ?? "", promptVersion: item.promptVersion ?? "" }
                     : null;
                 if (!allowsBulkApproval(pair)) return "skipped" as const;
                 // Bulk approval must not choose a winner merely because one

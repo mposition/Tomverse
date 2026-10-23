@@ -283,15 +283,17 @@ test("an approval stops resolving at its expiry, at runtime", () => {
     );
 });
 
-test("an owner-launch pair's candidates are never bulk-approved", () => {
+test("bulk approval is reserved for evaluated pairs and user-authored memories", () => {
     const launched = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" };
     const evaluated = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v1" };
     const register = [ownerLaunchEntry(), approvedEntry()];
     assert.equal(allowsBulkApproval(launched, register), false);
     assert.equal(allowsBulkApproval(evaluated, register), true);
     assert.equal(allowsBulkApproval(null, register), true);
-    // An expired launch still holds: the candidates it produced were never measured.
-    assert.equal(allowsBulkApproval(launched, [ownerLaunchEntry({ expiresAt: "2026-10-24" })]), false);
+    assert.equal(allowsBulkApproval({ extractionModelId: "unknown", promptVersion: "x" }, register), false);
+    // Revoking the launch drops `ownerLaunch`; what it stored stays unmeasured.
+    const revoked = { ...ownerLaunchEntry(), status: "revoked", ownerLaunch: null };
+    assert.equal(allowsBulkApproval(launched, [revoked]), false);
 });
 
 test("candidate pairs are never resolvable as approved", () => {

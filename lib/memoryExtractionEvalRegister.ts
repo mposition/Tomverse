@@ -972,9 +972,13 @@ export function findApprovedEvalPair(
 }
 
 /**
- * Whether candidates from this pair may be approved in bulk. A pair approved
- * on an owner launch has not measured zero critical bulk-safe adoptions, so
- * its candidates are reviewed one by one. `null` is a user-authored memory.
+ * Whether candidates from this pair may be approved in bulk. Only a pair whose
+ * evaluation measured zero critical bulk-safe adoptions qualifies; an owner
+ * launch, a revoked, candidate or unknown pair is reviewed one by one.
+ *
+ * Positive on purpose: keyed to the absence of `ownerLaunch`, revoking or
+ * renewing a launch would drop the field and make the unmeasured candidates it
+ * already stored bulk-eligible again. `null` is a user-authored memory.
  */
 export function allowsBulkApproval(
     pair: MemoryExtractionPairRef | null,
@@ -986,7 +990,7 @@ export function allowsBulkApproval(
             candidate.extractionModelId === pair.extractionModelId &&
             candidate.promptVersion === pair.promptVersion
     );
-    return !entry?.ownerLaunch;
+    return entry?.status === "approved" && Boolean(entry.evaluation);
 }
 
 /**
