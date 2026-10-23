@@ -47,6 +47,8 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
   const [query, setQuery] = useState("");
+  // What cannot ride is counted, not listed, unless asked for (owner, 2026-10-23: the list ran to hundreds).
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,8 +76,14 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
   const candidates = view?.candidates.status === "ok" ? view.candidates.candidates : [];
   const pickable = candidates.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status));
   const shown = candidates.filter(
-    (candidate) => query.trim() === "" || `#${candidate.number} ${candidate.title}`.toLowerCase().includes(query.trim().toLowerCase()),
+    (candidate) =>
+      (showAll || qaReleaseTrainCargoPickable(candidate.status)) &&
+      (query.trim() === "" || `#${candidate.number} ${candidate.title}`.toLowerCase().includes(query.trim().toLowerCase())),
   );
+  const hiddenByStatus = new Map<QaReleaseTrainCargoStatus, number>();
+  for (const candidate of candidates) {
+    if (!qaReleaseTrainCargoPickable(candidate.status)) hiddenByStatus.set(candidate.status, (hiddenByStatus.get(candidate.status) ?? 0) + 1);
+  }
 
   // "Select all" covers what can ride among the rows shown, so a search narrows it.
   const shownPickable = shown.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status)).map((candidate) => candidate.number);
@@ -164,7 +172,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
         <>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {[
-              [m.trainCargoCandidates, candidates.length],
+              [m.trainCargoCanRide, pickable.length],
               [m.trainCargoPicked, pickable.filter((candidate) => picked.has(candidate.number)).length],
               [m.trainCargoCannotRide, candidates.length - pickable.length],
             ].map(([label, value]) => (
@@ -202,7 +210,29 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
             </button>
           </div>
 
-          {candidates.length === 0 ? (
+          {hiddenByStatus.size > 0 ? (
+            <p className="mt-3 flex flex-wrap items-center gap-2 text-[13px] text-zinc-400" data-testid="qa-release-train-cargo-hidden">
+              {m.trainCargoHiddenSummary.replace(
+                "{list}",
+                (
+                  [
+                    ["on_main", m.trainCargoHiddenOnMain],
+                    ["in_main_pull_request", m.trainCargoHiddenInMainPull],
+                    ["changes_workflows", m.trainCargoHiddenWorkflows],
+                    ["back_merge", m.trainCargoHiddenBackMerge],
+                  ] as const
+                )
+                  .filter(([status]) => hiddenByStatus.has(status))
+                  .map(([status, label]) => `${label} ${hiddenByStatus.get(status)}`)
+                  .join(" · "),
+              )}
+              <button type="button" className="font-medium text-zinc-200 underline" onClick={() => setShowAll((value) => !value)}>
+                {showAll ? m.trainCargoHideHidden : m.trainCargoShowHidden}
+              </button>
+            </p>
+          ) : null}
+
+          {shown.length === 0 ? (
             <p className="mt-3 text-sm text-zinc-400">{m.trainCargoEmpty}</p>
           ) : (
             <ul className="mt-3 divide-y divide-zinc-800 rounded-lg border border-zinc-800" data-testid="qa-release-train-cargo-list">
