@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { MEMORY_KINDS } from "../../lib/memoryValidatorCore";
 
 const text = z.string().min(1).max(8000);
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);
@@ -15,19 +16,31 @@ export const goldSchema = z.object({
   id, statement: text, kind: text, polarity: z.enum(["affirmed", "negated"]),
   expectedDisposition: z.enum(["bulk_safe", "sensitive_review"]), evidence: anchorSchema,
 }).strict();
+export const poolMemorySchema = z.object({
+  id, statement: text, status: z.enum(["active", "deleted", "superseded", "expired"]),
+  forbidden: z.boolean(),
+  // Product retrieval tier; absent means an ordinary relevance-gated fact.
+  kind: z.enum(MEMORY_KINDS).optional(),
+}).strict();
+export const retrievalSchema = z.object({
+  query: text,
+  pool: z.array(poolMemorySchema).min(1).max(50),
+  relevantIds: z.array(id).max(50),
+}).strict();
 export const caseSchema = z.object({
   id, family: id, language: z.enum(["ko", "en"]),
   category: z.enum(["durable_facts", "assistant_only", "sensitive_secrets", "injection_directives"]),
   messages: z.array(messageSchema).min(1).max(20),
   expected: z.array(goldSchema).max(12),
-  retrieval: z.object({
-    query: text,
-    pool: z.array(z.object({
-      id, statement: text, status: z.enum(["active", "deleted", "superseded", "expired"]),
-      forbidden: z.boolean(),
-    }).strict()).min(1).max(50),
-    relevantIds: z.array(id).max(50),
-  }).strict(),
+  retrieval: retrievalSchema,
+}).strict();
+/** Retrieval-only cases: shared account pools queried many times. */
+export const retrievalCorpusSchema = z.object({
+  version: id, source: z.literal("synthetic"),
+  pools: z.record(id, z.array(poolMemorySchema).min(1).max(50)),
+  cases: z.array(z.object({
+    id, language: z.enum(["ko", "en"]), tag: id, pool: id, query: text, relevantIds: z.array(id).max(50),
+  }).strict()).min(1).max(5000),
 }).strict();
 export const corpusSchema = z.object({
   version: id, source: z.literal("synthetic"), split: z.enum(["development", "validation"]),
