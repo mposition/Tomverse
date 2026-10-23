@@ -8,6 +8,7 @@ const mod = path => pathToFileURL(resolve(path)).href;
 let w;
 class SecurityError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 class BudgetError extends Error { constructor() { super("Budget reached"); this.status = 429; this.code = "VOICE_OPERATIONAL_LIMIT_REACHED"; } }
+const settleCredits = async (id, seconds) => { if (w.settleError) throw new Error("Settlement unavailable"); w.refunds.push({ id, seconds }); return { credits: Math.ceil(seconds * 0.6) }; };
 const reset = () => {
   process.env.VOICE_CONVERSATION_ENABLED = "true";
   process.env.VOICE_CONVERSATION_API_KEY = "test-key-never-used";
@@ -31,13 +32,20 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatCreditReservation: {
     findFirst: async ({ where }) => where.userId === w.owner ? { id: "reservation", providerRequestId: "live_test", status: "reserved", createdAt: new Date(0), expiresAt: new Date(Date.now() + 100_000), reservationPayload: { conversationId: "chat-1" } } : null,
     update: async args => { w.updates.push(args); if (w.linkError && args.data.providerRequestId) { w.linkError = false; throw new Error("Lost DB response"); } return {}; },
+    updateMany: async args => { w.updates.push(args); return { count: 1 }; },
+    findMany: async () => [],
   },
   chatResponseAttempt: { findFirst: async ({ where }) => { w.answerFilter = where; return w.answer === false ? null : { partialContent: "Verified stored answer with search sources" }; } },
 } } });
 mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
-  reserveVoiceConversationCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); return { id: "reservation" }; },
-  settleVoiceConversationCredits: async (id, seconds) => { if (w.settleError) throw new Error("Settlement unavailable"); w.refunds.push({ id, seconds }); return { credits: Math.ceil(seconds * 0.6) }; },
+  reserveVoiceConversationCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", reservationPayload: {} }; },
+  settleVoiceConversationCredits: settleCredits,
   readVoiceCreditPayload: value => value,
+} });
+mock.module(mod("lib/voiceConversationRecovery.ts"), { namedExports: {
+  assertVoiceWatchdogReady: async () => { if (w.watchdogUnavailable) throw new SecurityError(503, "VOICE_RECOVERY_UNAVAILABLE", "Unavailable"); },
+  finalizeVoiceReservation: settleCredits,
+  recordVoiceUsage: async () => {},
 } });
 mock.module(mod("lib/voiceInputBudget.ts"), { namedExports: { VoiceBudgetError: BudgetError } });
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
@@ -71,10 +79,10 @@ test("insufficient credits prevents provider initialization", async () => {
 
 test("known refusal refunds the hold, but an unknown start does not retry or invent zero usage", async () => {
   w.provider = "rejected"; assert.equal((await POST(request(start()))).status, 502);
-  assert.deepEqual(w.refunds.map(r => r.seconds), [0]); assert.deepEqual(w.settlements, ["released"]);
+  assert.deepEqual(w.refunds.map(r => r.seconds), [0]);
   reset(); w.provider = "unknown"; assert.equal((await POST(request(start()))).status, 502);
   assert.equal(w.providerCalls.length, 1); assert.equal(w.refunds.length, 0);
-  assert.equal(w.updates[0].data.lastError, "VOICE_START_OUTCOME_UNKNOWN");
+  assert.equal(w.updates.at(-1).data.lastError, "VOICE_START_OUTCOME_UNKNOWN");
 });
 
 test("trusted provider final duration settles once and existing Chat history seeds the session", async () => {
@@ -87,7 +95,6 @@ test("trusted provider final duration settles once and existing Chat history see
   const body = await text;
   assert.match(body, /"confirmed":true/); assert.match(body, /"credits":6/);
   assert.deepEqual(w.refunds.map(r => r.seconds), [10]);
-  assert.deepEqual(w.settlements, [{ kind: "provider_seconds", seconds: 15 }]);
 });
 
 test("lost connection retains an unconfirmed reservation and requests hangup", async () => {
@@ -120,7 +127,7 @@ test("a voice budget refusal returns its actionable status and refunds the pre-d
   const response = await POST(request(start()));
   assert.equal(response.status, 429);
   assert.equal((await response.json()).code, "VOICE_OPERATIONAL_LIMIT_REACHED");
-  assert.deepEqual(w.refunds.map(r => r.seconds), [0]);
+  assert.equal(w.refunds.length, 0);
   assert.equal(w.providerCalls.length, 0);
 });
 
@@ -143,4 +150,18 @@ test("a failed final settlement leaves an explicit pending marker instead of rep
   assert.match(body, /VOICE_SETTLEMENT_PENDING/);
   assert.doesNotMatch(body, /"confirmed":true/);
   assert.equal(w.updates.at(-1).data.lastError, "VOICE_SETTLEMENT_PENDING");
+});
+
+test("new paid sessions require a fresh independent recovery worker", async () => {
+  w.watchdogUnavailable = true;
+  assert.equal((await POST(request(start()))).status, 503);
+  assert.equal(w.providerCalls.length, 0); assert.equal(w.reserved.length, 0);
+});
+
+test("usage status and history require the owning account even after new starts are disabled", async () => {
+  delete process.env.VOICE_CONVERSATION_ENABLED;
+  assert.equal((await POST(request({ action: "status", reservationId: "reservation" }))).status, 200);
+  w.user = "stranger";
+  assert.equal((await POST(request({ action: "status", reservationId: "reservation" }))).status, 404);
+  assert.equal((await POST(request({ action: "history", conversationId: "chat-1" }))).status, 403);
 });

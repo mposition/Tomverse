@@ -10,6 +10,8 @@ import { reserveAddOnCredits, settleAddOnCredits, type AddOnCreditReservationEnt
 import { getUserDayWindow } from "@/lib/userDailyUsage";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
+import { reserveVoiceBudgets, settleVoiceBudgets } from "@/lib/voiceBudgetReservation";
+import { snapshotVoiceBudgets, restoreVoiceBudgets, type VoiceBudgetSnapshot } from "@/lib/voiceConversationBudget";
 import { VOICE_CONVERSATION_INITIAL_SECONDS, VOICE_CONVERSATION_MODEL, VOICE_CONVERSATION_PRICING_VERSION, VOICE_CONVERSATION_SOURCE, voiceDurationCharge } from "@/lib/voiceConversationCore";
 
 export type VoiceCreditPayload = {
@@ -21,6 +23,9 @@ export type VoiceCreditPayload = {
   dayReserved: boolean;
   monthStart: string;
   addOnEntries: AddOnCreditReservationEntry[];
+  budgets?: VoiceBudgetSnapshot;
+  dispatchStartedAt?: string;
+  closeAt?: string;
 };
 
 export function readVoiceCreditPayload(value: unknown): VoiceCreditPayload {
@@ -36,6 +41,7 @@ export function readVoiceCreditPayload(value: unknown): VoiceCreditPayload {
 export async function reserveVoiceConversationCredits(input: {
   userId: string; requestId: string; conversationId: string | null;
   creditsPerMinute: number; maxSeconds: number;
+  sessionSeconds?: number;
 }) {
   const now = new Date();
   const plan = await getUserBillingPlan(input.userId);
@@ -90,11 +96,14 @@ export async function reserveVoiceConversationCredits(input: {
       userId: input.userId, reservationId, credits: allocation.addOnCreditsRequired,
       fundedCostMicroUsd: Math.ceil(price.costMicroUsd * allocation.addOnCreditsRequired / price.credits), now,
     }) : [];
+    const budgets = await reserveVoiceBudgets({ subjectKey, seconds: input.maxSeconds, client: tx });
     const payload: VoiceCreditPayload = {
       kind: VOICE_CONVERSATION_SOURCE, conversationId: input.conversationId,
       creditsPerMinute: input.creditsPerMinute, maxSeconds: input.maxSeconds,
       dayStart: day.start.toISOString(), dayReserved: plan.dailyMessageLimit > 0,
       monthStart: monthStart.toISOString(), addOnEntries,
+      budgets: snapshotVoiceBudgets(budgets),
+      closeAt: new Date(now.getTime() + (input.sessionSeconds ?? input.maxSeconds) * 1_000).toISOString(),
     };
     return tx.chatCreditReservation.create({ data: {
       id: reservationId, userId: input.userId, subjectKey, traceId: input.requestId,
@@ -108,8 +117,8 @@ export async function reserveVoiceConversationCredits(input: {
   });
 }
 
-/** Only trusted provider final usage (or a proven pre-dispatch refusal) can release a hold. */
-export async function settleVoiceConversationCredits(id: string, seconds: number, initialized = false) {
+/** Missing finalization can only charge the provider-observed lower bound. */
+export async function settleVoiceConversationCredits(id: string, seconds: number, initialized = false, evidence: "final" | "observed_minimum" = "final", providerStopped = true) {
   return prisma.$transaction(async tx => {
     const owner = await tx.chatCreditReservation.findUnique({ where: { id }, select: { userId: true } });
     if (owner?.userId) await lockCreditAccount(tx, owner.userId);
@@ -123,6 +132,9 @@ export async function settleVoiceConversationCredits(id: string, seconds: number
     // Provider initialization has a 15-second minimum. Keep the provider cost
     // distinct from the user's reported active seconds; never add it twice.
     price.costMicroUsd = voiceDurationCharge(initialized ? Math.max(VOICE_CONVERSATION_INITIAL_SECONDS, seconds) : seconds, payload.creditsPerMinute).costMicroUsd;
+    // Incomplete provider accounting retains the full operational exposure.
+    // The user only pays for seconds the trusted sideband actually observed.
+    if (evidence === "observed_minimum") price.costMicroUsd = Number(row.reservedCostMicroUsd);
     // Do not fabricate usage or silently debit beyond the authorized reservation.
     if (price.credits > row.reservedCredits || price.costMicroUsd > Number(row.reservedCostMicroUsd)) {
       throw new Error("Voice usage exceeded its reservation.");
@@ -153,10 +165,16 @@ export async function settleVoiceConversationCredits(id: string, seconds: number
       estimatedCostMicroUsd: price.costMicroUsd, uncachedInputCostMicroUsd: 0,
       cachedInputCostMicroUsd: 0, outputCostMicroUsd: price.costMicroUsd, date: row.createdAt,
     });
+    if (payload.budgets) await settleVoiceBudgets({
+      reservation: restoreVoiceBudgets(payload.budgets), client: tx,
+      basis: evidence === "observed_minimum" ? { kind: "reservation" } : initialized ? { kind: "provider_seconds", seconds: Math.max(VOICE_CONVERSATION_INITIAL_SECONDS, seconds) } : { kind: "not_billed" },
+    });
     await tx.chatCreditReservation.update({ where: { id }, data: {
       status: "settled", outcome: seconds > 0 ? "completed" : "empty", settledAt: new Date(),
       settledCredits: price.credits, settledCostMicroUsd: BigInt(price.costMicroUsd),
-      providerUsageSnapshot: { seconds, source: "provider", confirmed: true }, lastError: null,
+      providerUsageSnapshot: { seconds, source: "provider", confirmed: evidence === "final", settlementBasis: evidence,
+        providerCostEstimated: evidence !== "final", providerStopped },
+      lastError: !providerStopped ? "VOICE_PROVIDER_STOP_PENDING" : evidence === "final" ? null : "VOICE_USAGE_ADJUSTED_AFTER_DISCONNECT",
     } });
     return price;
   });

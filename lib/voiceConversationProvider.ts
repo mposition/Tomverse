@@ -43,7 +43,29 @@ export async function hangupVoiceProviderSession(sessionId: string) {
     method: "POST", headers: headers(), signal: AbortSignal.timeout(10_000),
   });
   await response.body?.cancel();
-  if (!response.ok) throw new Error("Voice hangup was not confirmed.");
+  if (!response.ok && response.status !== 404) throw new Error("Voice hangup was not confirmed.");
+}
+
+/** A recovery receiver is installed before closure; no new paid session is created. */
+export async function closeVoiceProviderSession(sessionId: string, timeoutMs = 12_000): Promise<number | null> {
+  const socket = attachVoiceProviderSession(sessionId);
+  try {
+    return await new Promise<number | null>(resolve => {
+      const timer = setTimeout(() => done(null), timeoutMs);
+      let complete = false;
+      function done(seconds: number | null) { if (complete) return; complete = true; clearTimeout(timer); resolve(seconds); }
+      socket.on("message", data => {
+        let event; try { event = JSON.parse(data.toString()); } catch { return; }
+        if (event.type === "session.closed") {
+          const seconds = event.usage?.seconds;
+          done(typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0 ? seconds : null);
+        }
+      });
+      socket.once("open", () => socket.send(JSON.stringify({ type: "session.close" })));
+      socket.once("error", () => done(null));
+      socket.once("close", () => done(null));
+    });
+  } finally { socket.close(); }
 }
 
 /** One trusted command owner. No provider key or client-supplied answer reaches the browser. */

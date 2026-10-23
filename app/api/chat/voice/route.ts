@@ -6,10 +6,10 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ApiSecurityError, apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
-import { assertUserOperationalAccess, getUserChatUsageKey } from "@/lib/chatSecurity";
+import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
-import { reserveVoiceBudgets, releaseVoiceBudgets, settleVoiceBudgets, type VoiceBudgetReservation } from "@/lib/voiceBudgetReservation";
 import { VoiceBudgetError } from "@/lib/voiceInputBudget";
+import { assertVoiceWatchdogReady, finalizeVoiceReservation, recordVoiceUsage } from "@/lib/voiceConversationRecovery";
 import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE } from "@/lib/voiceConversationCore";
 import { reserveVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession, sendVoiceProviderResult } from "@/lib/voiceConversationProvider";
@@ -18,9 +18,11 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start"), requestId: z.string().uuid(), conversationId: z.string().min(1).max(120).nullable(), sdp: z.string().min(1).max(64_000) }).strict(),
   z.object({ action: z.literal("result"), reservationId: z.string().min(1).max(200), delegationId: z.string().min(1).max(200), conversationId: z.string().min(1).max(120), sourceUserMessageId: z.string().uuid() }).strict(),
   z.object({ action: z.literal("stop"), reservationId: z.string().min(1).max(200) }).strict(),
+  z.object({ action: z.literal("status"), reservationId: z.string().min(1).max(200).optional(), requestId: z.string().uuid().optional() }).strict().refine(value => value.reservationId || value.requestId),
+  z.object({ action: z.literal("history"), conversationId: z.string().min(1).max(120) }).strict(),
 ]);
 
-const json = (code: string, status: number) => Response.json({ code }, { status, headers: { "Cache-Control": "private, no-store" } });
+const json = (code: string, status: number, extra: Record<string, unknown> = {}) => Response.json({ code, ...extra }, { status, headers: { "Cache-Control": "private, no-store" } });
 
 async function ownedConversation(request: Request, userId: string, conversationId: string) {
   const row = await prisma.conversation.findFirst({ where: { id: conversationId, userId }, select: { id: true, productKey: true, password: true } });
@@ -36,11 +38,29 @@ export async function POST(request: Request) {
     const userId = session.user.id;
     const body = await readLimitedJson(request, 96 * 1024, schema);
     await consumeApiRateLimit(request, userId, body.action === "start" ? "voice-conversation-start" : "voice-conversation-control", { minute: body.action === "start" ? 4 : 60, day: body.action === "start" ? 40 : 2_000 });
-    // Stop remains available after the kill switch is pulled.
+    if (body.action === "history") {
+      await ownedConversation(request, userId, body.conversationId);
+      const rows = await prisma.chatCreditReservation.findMany({
+        where: { userId, source: VOICE_CONVERSATION_SOURCE, reservationPayload: { path: ["conversationId"], equals: body.conversationId } },
+        select: { id: true, status: true, createdAt: true, settledCredits: true, providerUsageSnapshot: true }, orderBy: { createdAt: "desc" }, take: 10,
+      });
+      return Response.json({ sessions: rows.map(row => ({ id: row.id, settled: row.status === "settled", createdAt: row.createdAt,
+        credits: row.settledCredits, seconds: (row.providerUsageSnapshot as { seconds?: number } | null)?.seconds ?? 0,
+        confirmed: (row.providerUsageSnapshot as { confirmed?: boolean } | null)?.confirmed === true })) }, { headers: { "Cache-Control": "no-store" } });
+    }
+    // Stop and billing status remain available after the kill switch is pulled.
     if (body.action !== "start") {
-      const reservation = await prisma.chatCreditReservation.findFirst({ where: { id: body.reservationId, userId, source: VOICE_CONVERSATION_SOURCE } });
-      if (!reservation?.providerRequestId) return json("VOICE_SESSION_NOT_FOUND", 404);
+      const reservation = await prisma.chatCreditReservation.findFirst({ where: {
+        ...(body.action === "status" && !body.reservationId ? { idempotencyKey: `voice-conversation:${userId}:${body.requestId}` } : { id: body.reservationId }),
+        userId, source: VOICE_CONVERSATION_SOURCE,
+      } });
+      if (!reservation) return json("VOICE_SESSION_NOT_FOUND", 404);
+      if (body.action === "status") return Response.json({ settled: reservation.status === "settled", credits: reservation.settledCredits,
+        seconds: (reservation.providerUsageSnapshot as { seconds?: number } | null)?.seconds ?? 0,
+        confirmed: (reservation.providerUsageSnapshot as { confirmed?: boolean } | null)?.confirmed === true }, { headers: { "Cache-Control": "no-store" } });
+      if (!reservation.providerRequestId) return json("VOICE_SESSION_NOT_FOUND", 404);
       if (body.action === "stop") {
+        await prisma.chatCreditReservation.updateMany({ where: { id: reservation.id, status: "reserved" }, data: { lastError: "VOICE_CLOSE_REQUESTED" } });
         await hangupVoiceProviderSession(reservation.providerRequestId);
         return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
       }
@@ -62,6 +82,7 @@ export async function POST(request: Request) {
     const config = voiceConversationConfig(process.env);
     if (!config) return json("VOICE_CONVERSATION_DISABLED", 503);
     await assertUserOperationalAccess(userId);
+    await assertVoiceWatchdogReady();
     if (body.conversationId) await ownedConversation(request, userId, body.conversationId);
     const messages = body.conversationId ? await prisma.message.findMany({
       where: { conversationId: body.conversationId, status: "normal", role: { in: ["user", "assistant"] } },
@@ -76,25 +97,23 @@ export async function POST(request: Request) {
     }
     // Reserve closing headroom too. The server, not a browser timer, enforces duration.
     const reservedSeconds = config.maxSeconds + 30;
-    const reservation = await reserveVoiceConversationCredits({ userId, requestId: body.requestId, conversationId: body.conversationId, creditsPerMinute: config.creditsPerMinute, maxSeconds: reservedSeconds });
-    let providerBudget: VoiceBudgetReservation | null = null;
+    const reservation = await reserveVoiceConversationCredits({ userId, requestId: body.requestId, conversationId: body.conversationId, creditsPerMinute: config.creditsPerMinute, maxSeconds: reservedSeconds, sessionSeconds: config.maxSeconds });
     let providerResult;
-    try {
-      providerBudget = await reserveVoiceBudgets({ subjectKey: getUserChatUsageKey(userId), seconds: reservedSeconds });
-    } catch (error) { await settleVoiceConversationCredits(reservation.id, 0); throw error; }
+    await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { reservationPayload: {
+      ...readVoiceCreditPayload(reservation.reservationPayload), dispatchStartedAt: new Date().toISOString(),
+    } } });
     try { providerResult = await createVoiceProviderSession(body.sdp, history); }
     catch {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
-      return json("VOICE_START_OUTCOME_UNKNOWN", 502);
+      return json("VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });
     }
     if (!providerResult.ok) {
       if (providerResult.rejected) {
         await settleVoiceConversationCredits(reservation.id, 0);
-        await releaseVoiceBudgets(providerBudget);
       } else {
         await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
       }
-      return json(providerResult.rejected ? "VOICE_PROVIDER_UNAVAILABLE" : "VOICE_START_OUTCOME_UNKNOWN", 502);
+      return json(providerResult.rejected ? "VOICE_PROVIDER_UNAVAILABLE" : "VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });
     }
     try {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { providerRequestId: providerResult.sessionId } });
@@ -104,10 +123,9 @@ export async function POST(request: Request) {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: {
         providerRequestId: providerResult.sessionId, lastError: "VOICE_START_OUTCOME_UNKNOWN",
       } }).catch(() => {});
-      return json("VOICE_START_OUTCOME_UNKNOWN", 502);
+      return json("VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });
     }
     const providerSession = providerResult;
-    const budget = providerBudget;
     const encoder = new TextEncoder();
     let stopStream: () => void = () => {};
     const stream = new ReadableStream<Uint8Array>({
@@ -129,11 +147,10 @@ export async function POST(request: Request) {
           request.signal.removeEventListener("abort", stop);
           try {
             if (seconds !== null && seconds >= latestSeconds && seconds <= reservedSeconds) {
-              const charged = await settleVoiceConversationCredits(reservation.id, seconds, true);
-              await settleVoiceBudgets({ reservation: budget, basis: { kind: "provider_seconds", seconds: Math.max(15, seconds) } });
-              send({ type: "closed", confirmed: true, seconds, credits: charged?.credits ?? voiceDurationCharge(seconds, config.creditsPerMinute).credits });
+              const charged = await finalizeVoiceReservation(reservation.id, seconds);
+              send({ type: "closed", confirmed: true, settled: true, seconds, credits: charged.credits });
             } else {
-              await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_FINAL_USAGE_UNCONFIRMED", providerUsageSnapshot: { seconds: latestSeconds, confirmed: false } } });
+              await prisma.chatCreditReservation.updateMany({ where: { id: reservation.id, status: "reserved" }, data: { lastError: "VOICE_FINAL_USAGE_UNCONFIRMED" } });
               send({ type: "closed", confirmed: false });
             }
           } catch {
@@ -170,7 +187,9 @@ export async function POST(request: Request) {
           } else if (event.type === "session.usage.updated") {
             const seconds = (event.usage as { seconds?: unknown } | undefined)?.seconds;
             if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= latestSeconds) {
-              latestSeconds = seconds; send({ type: "usage", seconds, credits: voiceDurationCharge(seconds, config.creditsPerMinute).credits });
+              latestSeconds = seconds;
+              void recordVoiceUsage(reservation.id, seconds).catch(() => { send({ type: "error", code: "VOICE_USAGE_RECORDING_FAILED" }); stop(); });
+              send({ type: "usage", seconds, credits: voiceDurationCharge(seconds, config.creditsPerMinute).credits });
               if (seconds >= config.maxSeconds) stop();
             }
           } else if (event.type === "session.closed") {

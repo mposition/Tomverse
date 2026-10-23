@@ -28,13 +28,18 @@ export function createVoiceConversationClient(options: {
   let audio: HTMLAudioElement | null = null;
   let controller: AbortController | null = null;
   let reservationId: string | null = null;
+  let startRequestId: string | null = null;
   let epoch = 0;
   let closeTimeout: ReturnType<typeof setTimeout> | undefined;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let durationTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastEventAt = 0;
   let queue = Promise.resolve();
   const seen = new Set<string>();
   const patch = (value: Partial<VoiceConversationView>) => { view = { ...view, ...value }; options.onChange(view); };
   const cleanup = () => {
     clearTimeout(closeTimeout);
+    clearInterval(heartbeatTimer); clearTimeout(durationTimer);
     for (const track of microphone?.getTracks() ?? []) { try { track.stop(); } catch {} }
     microphone = null;
     try { peer?.close(); } catch {} peer = null;
@@ -45,11 +50,30 @@ export function createVoiceConversationClient(options: {
     const response = await options.deps.fetch("/api/chat/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
+      if (typeof data?.reservationId === "string") reservationId = data.reservationId;
       const code = typeof data?.code === "string" && /^[A-Z_]{1,80}$/.test(data.code) ? data.code : "VOICE_REQUEST_FAILED";
       if ((body as { action?: string }).action === "start" && code !== "VOICE_START_OUTCOME_UNKNOWN") patch({ billingPending: false });
       throw new Error(code);
     }
     return response;
+  }
+  async function recoverBilling(owner: number) {
+    if ((!reservationId && !startRequestId) || !view.billingPending) return;
+    for (let attempt = 0; attempt < 72; attempt++) {
+      const delay = [0, 3_000, 6_000, 12_000][attempt] ?? 15_000;
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      if (owner !== epoch) return;
+      try {
+        const response = await post({ action: "status", ...(reservationId ? { reservationId } : { requestId: startRequestId }) }, AbortSignal.timeout(8_000));
+        const status = await response.json();
+        if (owner !== epoch) return;
+        if (status.settled === true && typeof status.credits === "number" && Number.isFinite(status.credits) && status.credits >= 0) {
+          patch({ billingPending: false, confirmed: status.confirmed === true, credits: status.credits,
+            ...(typeof status.seconds === "number" && Number.isFinite(status.seconds) && status.seconds >= 0 ? { seconds: status.seconds } : {}) });
+          return;
+        }
+      } catch { /* The independent worker continues; reopening Chat reads the saved summary. */ }
+    }
   }
   async function stop() {
     if (view.status !== "connecting" && view.status !== "listening") return;
@@ -58,13 +82,16 @@ export function createVoiceConversationClient(options: {
     if (audio) audio.muted = true;
     if (reservationId) void post({ action: "stop", reservationId }).then(r => r.body?.cancel()).catch(() => { /* The streaming connection also owns closure. */ });
     else controller?.abort();
-    closeTimeout = setTimeout(() => { cleanup(); patch({ status: "ended", confirmed: false }); }, 16_000);
+    const owner = epoch;
+    closeTimeout = setTimeout(() => { cleanup(); patch({ status: "ended", confirmed: false }); void recoverBilling(owner); }, 16_000);
   }
   async function handle(event: Record<string, unknown>, owner: number) {
     if (owner !== epoch) return;
     if (event.type === "ready" && typeof event.sdp === "string" && typeof event.reservationId === "string") {
       reservationId = event.reservationId;
       await peer?.setRemoteDescription({ type: "answer", sdp: event.sdp });
+      const seconds = typeof event.maxSeconds === "number" && event.maxSeconds >= 15 && event.maxSeconds <= 900 ? event.maxSeconds : 300;
+      durationTimer = setTimeout(() => { void stop(); }, seconds * 1_000);
     } else if (event.type === "started") {
       patch({ status: "listening" });
     } else if (event.type === "transcript" && isVoiceTranscriptEvent(event.event)) {
@@ -91,14 +118,16 @@ export function createVoiceConversationClient(options: {
       });
     } else if (event.type === "closed") {
       cleanup();
-      patch({ status: "ended", confirmed: event.confirmed === true, billingPending: event.confirmed !== true, ...(typeof event.credits === "number" ? { credits: event.credits } : {}) });
+      patch({ status: "ended", confirmed: event.confirmed === true, billingPending: event.settled !== true && event.confirmed !== true,
+        ...(typeof event.seconds === "number" ? { seconds: event.seconds } : {}), ...(typeof event.credits === "number" ? { credits: event.credits } : {}) });
+      if (view.billingPending) void recoverBilling(owner);
     } else if (event.type === "error") {
       patch({ error: typeof event.code === "string" ? event.code : "VOICE_CONNECTION_LOST" });
     }
   }
   async function start(conversationId: string | null) {
     if (view.status === "connecting" || view.status === "listening" || view.status === "closing") return;
-    cleanup(); const owner = ++epoch; seen.clear(); reservationId = null; queue = Promise.resolve();
+    cleanup(); const owner = ++epoch; seen.clear(); reservationId = null; startRequestId = null; queue = Promise.resolve();
     view = initialView(); patch({ status: "connecting" });
     const abort = new AbortController(); controller = abort;
     try {
@@ -125,12 +154,20 @@ export function createVoiceConversationClient(options: {
       });
       if (!connection.localDescription?.sdp || abort.signal.aborted) throw new Error("VOICE_START_CANCELLED");
       patch({ billingPending: true });
-      const response = await post({ action: "start", requestId: crypto.randomUUID(), conversationId, sdp: connection.localDescription.sdp }, abort.signal);
+      lastEventAt = Date.now();
+      heartbeatTimer = setInterval(() => {
+        if (owner !== epoch || Date.now() - lastEventAt <= 35_000) return;
+        void stop(); cleanup(); patch({ status: "ended", confirmed: false, error: "VOICE_CONNECTION_LOST" });
+        void recoverBilling(owner);
+      }, 5_000);
+      startRequestId = crypto.randomUUID();
+      const response = await post({ action: "start", requestId: startRequestId, conversationId, sdp: connection.localDescription.sdp }, abort.signal);
       if (!response.body) throw new Error("VOICE_STREAM_MISSING");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
       try {
         for (;;) {
           const { done, value } = await reader.read(); if (done) break;
+          lastEventAt = Date.now();
           buffer += decoder.decode(value, { stream: true });
           if (buffer.length > 128_000) throw new Error("VOICE_EVENT_TOO_LARGE");
           let end;
@@ -140,11 +177,13 @@ export function createVoiceConversationClient(options: {
           }
         }
       } finally { reader.releaseLock(); }
-      if (owner === epoch && view.status !== "ended") { cleanup(); patch({ status: "ended", confirmed: false }); }
+      if (owner === epoch && view.status !== "ended") { cleanup(); patch({ status: "ended", confirmed: false }); void recoverBilling(owner); }
     } catch (error) {
       if (owner !== epoch) return;
+      if (view.status === "ended") return;
       const wasClosing = view.status === "closing";
       cleanup(); patch({ status: wasClosing ? "ended" : "error", error: wasClosing ? null : error instanceof Error ? error.message : "VOICE_CONNECTION_LOST" });
+      void recoverBilling(owner);
     }
   }
   return {

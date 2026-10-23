@@ -1,0 +1,135 @@
+import "server-only";
+import { prisma } from "@/lib/prisma";
+import { ApiSecurityError } from "@/lib/apiSecurity";
+import { readVoiceCreditPayload, settleVoiceConversationCredits } from "@/lib/voiceConversationCredits";
+import { attachVoiceProviderSession, closeVoiceProviderSession, hangupVoiceProviderSession } from "@/lib/voiceConversationProvider";
+import { VOICE_CONVERSATION_SOURCE } from "@/lib/voiceConversationCore";
+
+const heartbeatKey = "voice-conversation:watchdog";
+const heartbeatPeriod = "worker";
+const epoch = new Date(0);
+const receivers = new Map<string, () => void>();
+
+/** The independent worker receives final usage even when the web process dies. */
+export async function observeActiveVoiceConversations() {
+  const rows = await prisma.chatCreditReservation.findMany({ where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }], providerRequestId: { not: null } } });
+  for (const [id, release] of receivers) if (!rows.some(row => row.id === id)) release();
+  for (const row of rows) {
+    if (receivers.has(row.id)) continue;
+    const payload = readVoiceCreditPayload(row.reservationPayload);
+    const socket = attachVoiceProviderSession(row.providerRequestId!);
+    const close = () => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
+    const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
+    const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
+    const expiryTimer = setTimeout(() => { void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
+    function release() { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); socket.close(); }
+    receivers.set(row.id, release);
+    socket.once("open", () => { if (Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) close(); });
+    socket.on("message", data => {
+      let event; try { event = JSON.parse(data.toString()); } catch { return; }
+      const seconds = event.usage?.seconds;
+      if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return;
+      if (event.type === "session.usage.updated") {
+        void recordVoiceUsage(row.id, seconds).catch(() => close());
+      } else if (event.type === "session.closed") {
+        void finalizeVoiceReservation(row.id, seconds).catch(() => {}).finally(release);
+      }
+    });
+    socket.once("error", () => { release(); });
+    socket.once("close", () => { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); });
+  }
+}
+
+export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); }
+
+export async function touchVoiceWatchdog() {
+  await prisma.chatUsageBucket.upsert({
+    where: { key_period_periodStart: { key: heartbeatKey, period: heartbeatPeriod, periodStart: epoch } },
+    create: { key: heartbeatKey, period: heartbeatPeriod, periodStart: epoch, count: BigInt(1) },
+    update: { count: { increment: 1 }, updatedAt: new Date() },
+  });
+}
+
+export async function assertVoiceWatchdogReady() {
+  const row = await prisma.chatUsageBucket.findUnique({ where: { key_period_periodStart: { key: heartbeatKey, period: heartbeatPeriod, periodStart: epoch } }, select: { updatedAt: true } });
+  if (!row || Date.now() - row.updatedAt.getTime() > 15_000) {
+    throw new ApiSecurityError(503, "VOICE_RECOVERY_UNAVAILABLE", "Voice recovery is unavailable. Continue in Chat.");
+  }
+  if (await prisma.chatCreditReservation.findFirst({ where: { source: VOICE_CONVERSATION_SOURCE, lastError: "VOICE_PROVIDER_STOP_PENDING" }, select: { id: true } })) {
+    throw new ApiSecurityError(503, "VOICE_RECOVERY_UNAVAILABLE", "An earlier voice session is still closing.");
+  }
+}
+
+/** Monotonic, durable provider evidence. Late interim updates cannot replace a final receipt. */
+export async function recordVoiceUsage(id: string, seconds: number, confirmed = false) {
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error("Invalid provider duration.");
+  await prisma.$executeRaw`
+    UPDATE "ChatCreditReservation"
+    SET "providerUsageSnapshot" = jsonb_build_object('seconds', ${seconds}::double precision, 'confirmed', ${confirmed}::boolean, 'source', 'provider'), "updatedAt" = NOW()
+    WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND "status" = 'reserved'
+      AND COALESCE(("providerUsageSnapshot"->>'confirmed')::boolean, false) = false
+      AND COALESCE(("providerUsageSnapshot"->>'seconds')::double precision, 0) <= ${seconds}
+  `;
+}
+
+export async function finalizeVoiceReservation(id: string, seconds: number) {
+  await recordVoiceUsage(id, seconds, true);
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id }, select: { status: true, providerUsageSnapshot: true, settledCredits: true } });
+  if (saved.status === "settled") {
+    await prisma.chatCreditReservation.updateMany({ where: { id, lastError: "VOICE_PROVIDER_STOP_PENDING" }, data: { lastError: "VOICE_USAGE_ADJUSTED_AFTER_DISCONNECT" } });
+    return { credits: saved.settledCredits };
+  }
+  const evidence = saved.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
+  if (!evidence?.confirmed || evidence.seconds !== seconds) throw new Error("Final voice duration is inconsistent with observed usage.");
+  const charged = await settleVoiceConversationCredits(id, seconds, true);
+  if (charged) return charged;
+  const row = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id }, select: { settledCredits: true } });
+  return { credits: row.settledCredits ?? 0 };
+}
+
+/** Uses persisted evidence after a process restart; never retries session creation. */
+export async function reconcileVoiceConversations(now = new Date(), limit = 100) {
+  const rows = await prisma.chatCreditReservation.findMany({
+    where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }] }, orderBy: { expiresAt: "asc" }, take: limit,
+  });
+  const result = { examined: rows.length, settled: 0, deferred: 0 };
+  for (const row of rows) {
+    try {
+      const payload = readVoiceCreditPayload(row.reservationPayload);
+      const saved = row.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
+      if (saved?.confirmed && typeof saved.seconds === "number") {
+        await finalizeVoiceReservation(row.id, saved.seconds); result.settled++; continue;
+      }
+      const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
+      if (!row.lastError && now.getTime() < closeAt) continue;
+      let providerStopped = !row.providerRequestId && !payload.dispatchStartedAt;
+      if (row.providerRequestId) {
+        const seconds = await closeVoiceProviderSession(row.providerRequestId);
+        if (seconds !== null && seconds <= payload.maxSeconds) {
+          await finalizeVoiceReservation(row.id, seconds); result.settled++; continue;
+        }
+        // The same session ID is safe to hang up repeatedly. No new session or work is dispatched.
+        try { await hangupVoiceProviderSession(row.providerRequestId); providerStopped = true; } catch { providerStopped = false; }
+      }
+      if (row.status === "settled") {
+        if (providerStopped) await prisma.chatCreditReservation.updateMany({ where: { id: row.id, lastError: "VOICE_PROVIDER_STOP_PENDING" }, data: { lastError: "VOICE_USAGE_ADJUSTED_AFTER_DISCONNECT" } });
+        else result.deferred++;
+        continue;
+      }
+      if (now < row.expiresAt) { result.deferred++; continue; }
+      const seconds = Math.min(payload.maxSeconds, Math.max(0, Number(saved?.seconds) || 0));
+      // Charge only the trusted observed minimum. The operational budget and
+      // provider-cost estimate retain full exposure; unobserved seconds are waived.
+      await settleVoiceConversationCredits(row.id, seconds, Boolean(payload.dispatchStartedAt), payload.dispatchStartedAt ? "observed_minimum" : "final", providerStopped);
+      result.settled++;
+    } catch {
+      result.deferred++;
+      await prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {});
+    }
+  }
+  return result;
+}
+
+export async function reconcileVoiceConversationsQuietly() {
+  try { return await reconcileVoiceConversations(); } catch { return { examined: 0, settled: 0, deferred: 1 }; }
+}

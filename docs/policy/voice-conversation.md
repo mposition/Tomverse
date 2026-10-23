@@ -52,10 +52,22 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   Their JSON contains accounting/session references, not transcript or audio.
   The generic token-reservation expiry reconciler excludes this source: expiry
   or a missing final event is not evidence of zero voice usage.
-- Only trusted `session.closed.usage.seconds` (or a proven pre-dispatch refusal)
-  settles and refunds. Atomic claim prevents duplicate charge/refund and provider
-  cost rollup. Unknown starts/final usage retain the hold with an explicit error
-  marker; do not blindly retry them or refund on a browser report.
+- Wallet and subject/provider seconds reservations now commit and settle in the
+  same transaction. Their original bucket dates travel in the durable payload.
+- The independent `voice:watchdog` process records monotonic provider usage and
+  receives final events even if the web process dies. New paid starts require a
+  heartbeat newer than 15 seconds. Its timers close sessions at the persisted
+  deadline; the existing maintenance sweep also retries unresolved records.
+- A trusted final receipt settles the exact duration. After the closing grace
+  expires without a final receipt, charge only the provider-observed lower
+  bound and waive unobserved seconds. Return the unused wallet hold while
+  retaining the full provider seconds budget and conservative cost estimate.
+  This adjusted outcome is explicitly marked unconfirmed, never a fabricated
+  final measurement. A start whose provider outcome is unknown is not retried.
+- A failed provider hangup remains pending after wallet settlement and blocks
+  new starts until closure is confirmed. A lost session identifier therefore
+  requires operator/provider evidence to clear; the customer hold is not kept
+  indefinitely. Browser-reported seconds are never settlement evidence.
 - The server enforces duration and the kill switch; browser cancellation closes
   the session and releases device resources. A user can still request Stop after
   the kill switch or account restriction is applied.
@@ -69,15 +81,20 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 Existing voice subject/provider seconds budgets also apply. These settings are
 not changed by this implementation.
 
+Run `npm run voice:watchdog` as an independently supervised process with
+`VOICE_CONVERSATION_WATCHDOG_ENABLED=true`, the dedicated provider credential,
+and the same database and budget configuration. Running it inside the web
+process does not satisfy crash isolation. It creates no new paid session.
+
 The provider list price was read on 2026-10-23:
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing), USD 0.05/minute,
 billed per second. WebRTC initialization has a 15-second provider charge credited
 against running duration. Confirm the account's reported duration and invoice
 behavior in an explicitly approved paid canary before activation. Also verify
 provider access, real device audio/interruptions, caption timing, server-process
-loss and finalization recovery. In particular a sideband timer alone is not a
-durable watchdog across a server crash; activation needs bounded provider-side
-duration or an independently verified session-recovery mechanism.
+loss and finalization recovery. Verify the independently supervised watchdog
+deployment and its closing deadlines before activation; process-local timers
+alone cannot establish that deployment evidence.
 
 Mock coverage: core pricing/captions, device lifecycle, server authorization and
 known/unknown outcomes, wallet allocation/refunds/idempotency, and browser reuse

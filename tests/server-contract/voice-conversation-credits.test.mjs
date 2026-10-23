@@ -34,6 +34,15 @@ mock.module(mod("lib/creditLedger.ts"), { namedExports: {
   settleAddOnCredits: async (_tx, input) => { w.addOnSettlements.push(input); },
 } });
 mock.module(mod("lib/providerUsageAccounting.ts"), { namedExports: { recordInternalProviderUsage: async input => { w.providerCosts.push(input.estimatedCostMicroUsd); } } });
+mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
+  reserveVoiceBudgets: async ({ subjectKey, seconds, client }) => {
+    assert.equal(client, tx);
+    if (w.budgetError) throw new Error("Provider budget exhausted");
+    return { subject: { subjectKey, reservedSeconds: seconds, periodStart: new Date("2026-10-23T00:00:00Z"), settled: false },
+      provider: { reservedSeconds: seconds, settled: false, bookings: ["day", "month"].map(period => ({ period, seconds, periodStart: new Date("2026-10-23T00:00:00Z") })) } };
+  },
+  settleVoiceBudgets: async input => { assert.equal(input.client, tx); (w.voiceSettlements ??= []).push(input.basis); },
+} });
 const { reserveVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
 test.beforeEach(() => { w = { buckets: { day: 0, month: 0 }, purchased: 0, dailyLimit: 300, row: null, addOnReserved: 0, addOnSettlements: [], providerCosts: [] }; });
 const input = () => ({ userId: "owner", requestId: "request-1", conversationId: "chat-1", creditsPerMinute: 36, maxSeconds: 60 });
@@ -98,4 +107,22 @@ test("settlement refunds only voice's hold and preserves the existing monthly de
   await settleVoiceConversationCredits(row.id, 0);
   assert.equal(w.buckets.month, 20);
   assert.equal(w.buckets.day, 0);
+});
+
+test("budget refusal rolls the wallet reservation back in the same transaction", async () => {
+  w.budgetError = true;
+  await assert.rejects(reserveVoiceConversationCredits(input()), /budget exhausted/);
+  assert.equal(w.buckets.month, 0); assert.equal(w.row, null);
+});
+
+test("incomplete finalization bills only observed seconds and retains conservative provider exposure once", async () => {
+  const row = await reserveVoiceConversationCredits(input());
+  await settleVoiceConversationCredits(row.id, 10, true, "observed_minimum");
+  assert.equal(w.row.settledCredits, 6);
+  assert.equal(w.buckets.month, 6);
+  assert.equal(w.row.providerUsageSnapshot.confirmed, false);
+  assert.equal(w.row.providerUsageSnapshot.providerCostEstimated, true);
+  assert.deepEqual(w.voiceSettlements, [{ kind: "reservation" }]);
+  await settleVoiceConversationCredits(row.id, 10, true, "observed_minimum");
+  assert.equal(w.voiceSettlements.length, 1);
 });

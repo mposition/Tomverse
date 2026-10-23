@@ -39,6 +39,7 @@ import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactS
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
 import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
+import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
     // failed one.
     const deepResearchSettlements =
       await reconcileUnsettledDeepResearchSettlementsQuietly();
+    const voiceConversations = await reconcileVoiceConversationsQuietly();
     const result = await reconcileCreditReservationsWithRetry();
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
@@ -234,6 +236,7 @@ export async function POST(request: Request) {
       result: {
         ...result,
         deepResearchSettlements,
+        voiceConversations,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
@@ -256,6 +259,7 @@ export async function POST(request: Request) {
         success: true,
         result,
         deepResearchSettlements,
+        voiceConversations,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
