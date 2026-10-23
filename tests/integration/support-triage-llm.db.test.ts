@@ -205,3 +205,48 @@ test("the model chosen in the Admin console is saved, audited and preferred over
     await prisma.appSetting.deleteMany({ where: { key: setting.SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY } });
   }
 });
+
+test("the Admin switch decides whether the run route works, over the environment variable", async () => {
+  const setting = await import("@/lib/supportTriageLlmSetting");
+  const { handleSupportTriageRun } = await import("@/lib/supportTriageRoutes");
+  const SECRET = "s".repeat(40);
+  const post = () =>
+    new Request("https://example.invalid/api/internal/support-triage/run", {
+      method: "POST",
+      headers: { authorization: `Bearer ${SECRET}` },
+    });
+  const session = { user: { id: "admin-switch-test", email: "owner@example.invalid" }, expires: "2099-01-01T00:00:00.000Z" };
+  const request = new Request("https://example.invalid/api/admin/support-triage/llm-model", { method: "PUT" });
+  await report("a");
+  try {
+    // No saved switch: the environment variable decides, as before.
+    assert.deepEqual(await setting.resolveSupportTriageEnabled({ SUPPORT_TRIAGE_ENABLED: "true" }), {
+      enabled: true,
+      source: "environment",
+    });
+    // Off in the Admin console beats the environment's true.
+    await setting.writeSupportTriageEnabledSetting({ session: session as never, request, enabled: false });
+    const off = await handleSupportTriageRun(post(), {
+      env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET, SUPPORT_TRIAGE_ENABLED: "true" },
+    });
+    assert.deepEqual(off.body, { result: "ok", enabled: false });
+    assert.equal(await prisma.supportTriageSuggestion.count({ where: { feedbackId: { startsWith: PREFIX } } }), 0);
+    // On in the Admin console works with no environment variable at all.
+    await setting.writeSupportTriageEnabledSetting({ session: session as never, request, enabled: true });
+    const on = await handleSupportTriageRun(post(), { env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET } });
+    assert.equal(on.status, 200);
+    assert.equal(on.body.enabled, true);
+    assert.equal(on.body.ready, 1);
+    const audits = await prisma.adminAuditLog.findMany({
+      where: { action: "support_triage.enabled_updated" },
+      orderBy: { createdAt: "asc" },
+      select: { metadata: true },
+    });
+    assert.deepEqual(
+      audits.map((a) => a.metadata),
+      [{ enabled: false }, { enabled: true }]
+    );
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: setting.SUPPORT_TRIAGE_ENABLED_SETTING_KEY } });
+  }
+});
