@@ -62,6 +62,14 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   it does not acquire routine command ownership or replay delegated work.
   The existing emergency hangup remains effective when the persisted duration
   deadline passes or the worker's kill switch is set, including a healthy web lease.
+  A cold worker installs its observer before sending that hangup; failed attachment
+  still triggers the emergency stop. Hangup cooldown and attachment backoff are
+  separate, so a stop request cannot prevent final-event observation. Expired
+  holds go to grace reconciliation rather than repeated short-lived observers.
+  A synthetic provider check on 2026-10-23 kept one WebRTC primary connected
+  with two authenticated sidebands; both received the same 15-second final
+  usage. This verifies connection interoperability, not crash settlement or
+  physical-device audio.
   After that 30-second lease expires, it acquires a database lease before sending
   the close command on its existing receiver. A healthy web receiver renews
   every five seconds. The command lease excludes competing recovery and maintenance
