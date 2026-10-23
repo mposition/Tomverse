@@ -12,6 +12,7 @@ import type { Session } from "next-auth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { getEnabledRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
+import { isSupportTriageEnabled } from "@/lib/supportTriageRouteAuth";
 
 export const SUPPORT_TRIAGE_LLM_MODEL_SETTING_KEY = "supportTriage.llmModelId";
 
@@ -69,4 +70,55 @@ export const writeSupportTriageLlmModelSetting = async (input: {
     });
   });
   return { modelId: input.modelId };
+};
+
+/**
+ * Whether the support-triage worker runs, switched in the Admin console. A
+ * saved row wins; with none, SUPPORT_TRIAGE_ENABLED decides as before. Off
+ * means a run route call writes nothing.
+ */
+export const SUPPORT_TRIAGE_ENABLED_SETTING_KEY = "supportTriage.enabled";
+
+/** The saved switch, or null when the Admin console has not set one. */
+export const readSupportTriageEnabledSetting = async (): Promise<boolean | null> => {
+  const row = await prisma.appSetting.findUnique({
+    where: { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY },
+    select: { value: true },
+  });
+  return row?.value === "true" ? true : row?.value === "false" ? false : null;
+};
+
+/** The effective switch and where it came from. */
+export const resolveSupportTriageEnabled = async (
+  env: Readonly<Record<string, string | undefined>>
+): Promise<{ enabled: boolean; source: "admin" | "environment" }> => {
+  const saved = await readSupportTriageEnabledSetting();
+  return saved === null
+    ? { enabled: isSupportTriageEnabled(env), source: "environment" }
+    : { enabled: saved, source: "admin" };
+};
+
+export const writeSupportTriageEnabledSetting = async (input: {
+  session: Session;
+  request: Request;
+  enabled: boolean;
+}): Promise<{ enabled: boolean }> => {
+  await prisma.$transaction(async (tx) => {
+    await tx.appSetting.upsert({
+      where: { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY },
+      create: { key: SUPPORT_TRIAGE_ENABLED_SETTING_KEY, value: String(input.enabled) },
+      update: { value: String(input.enabled) },
+    });
+    await writeAdminAuditLog({
+      tx,
+      session: input.session,
+      request: input.request,
+      action: "support_triage.enabled_updated",
+      targetType: "AppSettings",
+      targetId: SUPPORT_TRIAGE_ENABLED_SETTING_KEY,
+      summary: input.enabled ? "Support-triage worker switched on" : "Support-triage worker switched off",
+      metadata: { enabled: input.enabled },
+    });
+  });
+  return { enabled: input.enabled };
 };
