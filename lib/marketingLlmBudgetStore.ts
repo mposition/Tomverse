@@ -56,7 +56,6 @@ import {
   type MarketingLlmReservePayload,
   type MarketingLlmTerminalState,
 } from "@/lib/marketingLlmBudgetCore";
-import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import { MARKETING_RETENTION_ACTIONS, MarketingStoreRefusedError } from "@/lib/marketingStore";
 
 export const MARKETING_LLM_SYSTEM_ACTOR = "marketing-generator";
@@ -102,6 +101,11 @@ type Tx = Prisma.TransactionClient;
 export type MarketingLlmBudgetEnvironment = {
   /** `null` when the kill switch cannot be read; that refuses like `true`. */
   readonly killSwitchOn: boolean | null;
+  /**
+   * The catalog's pins, read by the caller before its transaction: the
+   * catalog read takes another connection and may seed the registry, so it
+   * never runs while this one holds the audit chain lock. None, none pinned.
+   */
   readonly pins?: readonly MarketingLlmPricePin[];
   readonly adapterVersion?: string;
 };
@@ -228,7 +232,7 @@ export async function reserveMarketingLlmCall(
   if (settings === null || cap === null) return refused("cap_unreadable");
   if (settings.model !== input.payload.model) return refused("model_not_selected");
   const pin = resolveMarketingLlmPin(
-    env.pins ?? (await marketingLlmCatalogPins()),
+    env.pins ?? [],
     input.payload.model,
     new Date(`${reserveAt}Z`),
   );

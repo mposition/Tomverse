@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import {
   MARKETING_LLM_KEY_SCOPED_PROJECT,
   MARKETING_LLM_MAX_OUTPUT_TOKENS,
@@ -12,7 +14,7 @@ import {
   type MarketingLlmPricePin,
 } from "@/lib/marketingLlmBudgetCore";
 import { MODEL_PRICING, resolveModelPricing, type PricingCostSource } from "@/lib/modelPricing";
-import { getRuntimeModels } from "@/lib/modelRegistry";
+import { getRuntimeModels, registryRowToModel } from "@/lib/modelRegistry";
 import type { AiModel } from "@/lib/models";
 
 /**
@@ -91,6 +93,14 @@ export function marketingLlmModelOptionsFrom(
     const priced = [now.getTime(), ...future].map((at) =>
       resolveModelPricing(model, { estimatedPromptTokens: window, at }),
     );
+    // A registry or environment override replaces every tier, the long-context
+    // one included. With a profile it may raise a pin's rate, never lower it
+    // below the profile's own worst tier (every revision counts: a pin may
+    // over-reserve, never under-reserve).
+    const profileTiers =
+      profileMatches && profile
+        ? [profile.tiers, ...(profile.priceSchedule ?? []).map((revision) => revision.tiers)].flat()
+        : [];
     const current = priced[0];
     if ((!profileMatches && !explicit) || !VERIFIED_SOURCES.includes(current.costSource)) {
       options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "price_unverified" });
@@ -103,8 +113,12 @@ export function marketingLlmModelOptionsFrom(
       region: "global",
       tiers: [MARKETING_LLM_SERVICE_TIER],
       contextWindowTokens: window,
-      worstInputMicroUsdPerMillion: microPerMillion(Math.max(...priced.map((p) => p.inputUsdPerMillionTokens))),
-      worstOutputMicroUsdPerMillion: microPerMillion(Math.max(...priced.map((p) => p.outputUsdPerMillionTokens))),
+      worstInputMicroUsdPerMillion: microPerMillion(
+        Math.max(...[...priced, ...profileTiers].map((rate) => rate.inputUsdPerMillionTokens)),
+      ),
+      worstOutputMicroUsdPerMillion: microPerMillion(
+        Math.max(...[...priced, ...profileTiers].map((rate) => rate.outputUsdPerMillionTokens)),
+      ),
       maxOutputTokens: MARKETING_LLM_MAX_OUTPUT_TOKENS,
       priceVersion: pinText(current.pricingVersion),
       verifiedAt: `${current.effectiveDate}T00:00:00.000Z`,
@@ -132,9 +146,36 @@ export async function marketingLlmModelOptions(): Promise<MarketingLlmModelOptio
   return marketingLlmModelOptionsFrom(await getRuntimeModels());
 }
 
-/** The pins the ledger may reserve against: every catalog option it accepts. */
+const pinsOf = (options: readonly MarketingLlmModelOption[]): MarketingLlmPricePin[] =>
+  options.flatMap((option) => (option.unavailable === null && option.pin ? [option.pin] : []));
+
+/**
+ * The pins the ledger may reserve against: every catalog option it accepts.
+ * Reads through the shared client and may seed the registry, so a caller runs
+ * it before its transaction, never under the audit chain lock.
+ */
 export async function marketingLlmCatalogPins(): Promise<MarketingLlmPricePin[]> {
-  return (await marketingLlmModelOptions()).flatMap((option) =>
-    option.unavailable === null && option.pin ? [option.pin] : [],
-  );
+  return pinsOf(await marketingLlmModelOptions());
+}
+
+/**
+ * The same pins, read through the caller's own transaction: the registry rows
+ * as they stand, on that one connection, with no seeding. An unseeded registry
+ * pins nothing, which refuses rather than guesses.
+ */
+export async function marketingLlmCatalogPinsIn(
+  client: Pick<Prisma.TransactionClient, "modelRegistryEntry">,
+): Promise<MarketingLlmPricePin[]> {
+  const rows = await client.modelRegistryEntry.findMany({
+    where: { catalogDeleted: false },
+    orderBy: [{ sortOrder: "asc" }, { provider: "asc" }, { name: "asc" }],
+  });
+  const models = rows.flatMap((row) => {
+    try {
+      return [registryRowToModel(row)];
+    } catch {
+      return [];
+    }
+  });
+  return pinsOf(marketingLlmModelOptionsFrom(models));
 }

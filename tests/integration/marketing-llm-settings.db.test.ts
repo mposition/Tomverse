@@ -8,6 +8,7 @@ import {
   writeMarketingLlmSettings,
 } from "@/lib/marketingLlmSettingsStore";
 import { runMarketingTransaction, type MarketingTransaction } from "@/lib/marketingStore";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { clearMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 
@@ -74,4 +75,15 @@ test("an unreadable stored document reads as null and can be replaced from its v
   assert.ok(read.version);
   const saved = await write({ model: PIN.model, monthlyUsdCap: "1", expectedVersion: read.version });
   assert.deepEqual(saved.settings, { model: PIN.model, monthlyUsdCap: "1" });
+});
+
+test("without given pins the save reads the catalog through its own transaction", async () => {
+  // Seeds the registry the way the app does; the save then reads its rows.
+  await getRuntimeModels();
+  const save = (model: string, expectedVersion: string | null) =>
+    tx((client) => writeMarketingLlmSettings(client, { model, monthlyUsdCap: "5", expectedVersion }));
+  const saved = await save("gpt-6-luna", null);
+  assert.equal(saved.settings?.model, "gpt-6-luna");
+  // A catalog model the generator cannot call is refused.
+  assert.equal(await refusal(save("claude-haiku-5-5", saved.version)), "model_not_pinned");
 });

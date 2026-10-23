@@ -1455,8 +1455,10 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   store에 최상위 계산식을 두지 않습니다. 공개 버킷 이미지는 삭제 port가 생길 때입니다.
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
   `prisma/migrations/20261016120000_marketing_llm_call_ledger/migration.sql`, `tests/marketingLlmBudgetCore.test.mjs`,
-  `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **dispatch된
-  호출은 언제나 예약액으로 셉니다** — 앱은 생성기가 실제로 보낸 것을 볼 수 없으므로 보고된 토큰은 관측값입니다. 상태 전이·
+  `tests/integration/marketing-llm-call-ledger.db.test.ts`. 정책 v4의 다섯 번째 표 `MarketingLlmCall`입니다. **예약은 최대
+  비용이 상한 안에 들어갈 때만 받고, 월 합계는 정산된 호출을 보고 토큰 × pin 최악 단가 + 과금될 수 있는 검색 수(예약액
+  이하)로, 열린 호출과 unknown 호출은 예약액으로 셉니다**(운영자 결정 2026-10-23, `MARKETING_LLM_COUNTED_MICRO_USD_SQL`).
+  모델 선택지와 pin은 런타임 모델 카탈로그(Admin › Models)에서 오며, 카탈로그는 트랜잭션 밖에서 읽습니다. 상태 전이·
   증거 1회 설정·시각·사유와 관측 열의 짝·보존 삭제는 trigger와 CHECK가 직접 SQL에도 강제하고, 예약 시각은 writer가 DB
   시계에서 한 번 읽어 그 월을 잠그며 trigger는 다시 계산하지 않고 검증만 합니다. `MARKETING_LLM_PRICE_PINS`는 S3e가
   모델과 가격 근거를 가져올 때까지 비어 있으므로 모든 예약이 `model_not_pinned`입니다. writer·route·sweep은 S3c2 이후입니다.

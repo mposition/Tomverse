@@ -81,6 +81,18 @@ test("a model the catalog cannot price or size is listed but not selectable", ()
   );
 });
 
+test("a registry override below the profile cannot lower a pin's rate under the profile's worst tier", () => {
+  const base = AVAILABLE_MODELS.find((model) => model.apiModel === "gpt-6-luna");
+  const [plain] = marketingLlmModelOptionsFrom([base]);
+  const [lowered] = marketingLlmModelOptionsFrom([{ ...base, inputUsdPerMillionTokens: 0.01, outputUsdPerMillionTokens: 0.01 }]);
+  assert.equal(lowered.unavailable, null);
+  assert.equal(lowered.pin.worstInputMicroUsdPerMillion, plain.pin.worstInputMicroUsdPerMillion);
+  assert.equal(lowered.pin.worstOutputMicroUsdPerMillion, plain.pin.worstOutputMicroUsdPerMillion);
+  // A higher override is honoured.
+  const [raised] = marketingLlmModelOptionsFrom([{ ...base, inputUsdPerMillionTokens: 1_000, outputUsdPerMillionTokens: 1_000 }]);
+  assert.equal(raised.pin.worstInputMicroUsdPerMillion, 1_000_000_000);
+});
+
 test("an operator's registry price for both input and output is a verified price", () => {
   const base = AVAILABLE_MODELS.find((model) => model.apiModel === "gpt-5.4-mini");
   const [entry] = marketingLlmModelOptionsFrom([
