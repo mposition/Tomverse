@@ -53,6 +53,7 @@ const NAVIGATION = [
     href: "/admin/engineering-agent",
   },
   { group: "Operations", label: "SRE agent", href: "/admin/sre-ops" },
+  { group: "Operations", label: "QA and release", href: "/admin/qa-release" },
   { group: "Operations", label: "Agent digests", href: "/admin/agent-digests" },
   { group: "Operations", label: "Agent office", href: "/admin/office" },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },

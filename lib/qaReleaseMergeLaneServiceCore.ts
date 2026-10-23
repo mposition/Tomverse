@@ -25,7 +25,13 @@ import {
   replacementCommits,
   skippedCommits,
 } from "../scripts/merge-train-core.mjs";
-import { type QaReleaseExclusion, judgeQaReleaseMergeLaneExclusion, type QaReleaseExclusionInput } from "./qaReleaseMergeLaneExclusionCore.ts";
+import {
+  type QaReleaseExclusion,
+  judgeQaReleaseMergeLaneExclusion,
+  type QaReleaseExclusionInput,
+  qaReleaseMergeLaneExcludingFiles,
+} from "./qaReleaseMergeLaneExclusionCore.ts";
+import { type QaReleaseLaneVerdict, qaReleaseLaneVerdicts } from "./qaReleaseMergeLaneVerdictCore.ts";
 import { type QaReleaseLanePullRequest, pickQaReleaseLaneCandidate } from "./qaReleaseMergeLaneCandidateCore.ts";
 import { type QaReleaseDeployObservation, type QaReleaseMergeReport, qaReleaseDeployObservation } from "./qaReleaseMergeLaneReportCore.ts";
 import { judgeQaReleaseMergeLanding } from "./qaReleaseMergeLaneRoundCore.ts";
@@ -235,9 +241,13 @@ async function rereadAttempt(
   return sendReport(ports, attempt.id, { kind: "reread", result: "merge_commit_off_develop" }, "merge_commit_off_develop");
 }
 
+/** Receives what the round saw, for the Admin screen; never consulted by the round. */
+export type QaReleaseMergeLaneObserver = { verdicts: (verdicts: QaReleaseLaneVerdict[]) => void };
+
 export async function runQaReleaseMergeLaneRound(
   env: Readonly<Record<string, string | undefined>>,
   ports: QaReleaseMergeLanePorts,
+  observer?: QaReleaseMergeLaneObserver,
 ): Promise<QaReleaseMergeLaneRoundOutcome> {
   const start = decideQaReleaseServiceStart("mergeLane", env);
   if (start === "refuse") return { exitCode: 1, outcome: "refused_to_start" };
@@ -275,22 +285,43 @@ export async function runQaReleaseMergeLaneRound(
   if (inFlightDeployments(deployments).length > 0) return { exitCode: 0, outcome: "hold" };
 
   let pulls: QaReleaseLanePullRequest[];
+  let ordered: QaReleaseLanePullRequest[];
   const exclusions = new Map<number, QaReleaseExclusion>();
+  const excludingFiles = new Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>();
   try {
     pulls = await ports.github.listOpenDevelopPulls();
+    ordered = [...pulls].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.number - b.number);
     // Exclusion is judged only for pull requests the readiness rule passes,
     // oldest first, and the first clear one is the pick: no list is read for
     // a pull request that cannot be merged anyway.
-    for (const pull of [...pulls].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.number - b.number)) {
+    for (const pull of ordered) {
       if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-      const judged = judgeQaReleaseMergeLaneExclusion(await ports.github.exclusionInputs(pull));
+      const inputs = await ports.github.exclusionInputs(pull);
+      const judged = judgeQaReleaseMergeLaneExclusion(inputs);
       exclusions.set(pull.number, judged);
+      if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
       if (!judged.excluded) break;
     }
   } catch {
     return { exitCode: 1, outcome: "candidates_unknown" };
   }
   const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions);
+  if (observer) {
+    // For the Admin screen only, after the pick is fixed: the ready pull
+    // requests behind it are judged too, so a person's work shows before its
+    // turn. A read that fails here leaves that one unjudged, never the round.
+    const shown = new Map(exclusions);
+    for (const pull of ordered) {
+      if (shown.has(pull.number) || pull.number === pick?.number) continue;
+      if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
+      const inputs = await ports.github.exclusionInputs(pull).catch(() => null);
+      if (inputs === null) continue;
+      const judged = judgeQaReleaseMergeLaneExclusion(inputs);
+      shown.set(pull.number, judged);
+      if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
+    }
+    observer.verdicts(qaReleaseLaneVerdicts({ pulls, exclusions: shown, excludingFiles, pickNumber: pick?.number ?? null }));
+  }
   if (pick === null) return { exitCode: 0, outcome: "idle" };
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);
