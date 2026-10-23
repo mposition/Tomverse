@@ -17,6 +17,7 @@ import { storeAndApplyThemePreference } from "@/lib/theme";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 import { useKeyboardInset } from "./useVisualViewport";
+import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 
 const names: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", xai: "xAI", deepseek: "DeepSeek", meta: "Meta", mistral: "Mistral", perplexity: "Perplexity" };
@@ -26,16 +27,24 @@ function Icon({ file }: { file: string }) {
   return <Image loading="eager" unoptimized width={22} height={22} src={`/review-studio/${file}.svg`} alt="" aria-hidden="true" />;
 }
 
-export function ReviewCommandBar({ review, locked = false, view, setView }: {
-  review: ReviewWorkspaceControls; locked?: boolean; view?: "write" | "results"; setView?: (view: "write" | "results") => void;
+export function ReviewModeSwitcher({ review, locked = false, composer = false }: {
+  review: ReviewWorkspaceControls; locked?: boolean; composer?: boolean;
+}) {
+  const { lang } = useLanguage();
+  const c = reviewWorkspaceCopy[lang];
+  return <div className={`review-mode${composer ? " review-composer-mode" : ""}`} data-testid={composer ? "composer-review-mode" : undefined} role="group" aria-label={c.mode}>
+    {(["easy", "professional"] as const).map(mode => <button key={mode} type="button" aria-pressed={review.mode === mode} disabled={locked || review.pending || review.ready === false || (mode === "easy" && !review.easyAvailable)} title={mode === "easy" && !review.easyAvailable ? c.unavailable : undefined} onClick={() => review.setMode(mode)}>{mode === "easy" ? "Easy" : "Professional"}</button>)}
+  </div>;
+}
+
+export function ReviewCommandBar({ review, locked = false, view, setView, showModeSwitcher = true }: {
+  review: ReviewWorkspaceControls; locked?: boolean; view?: "write" | "results"; setView?: (view: "write" | "results") => void; showModeSwitcher?: boolean;
 }) {
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   return <header className="review-command-bar" data-testid="review-command-bar">
     <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong>Review</strong><span>/ {c.newTask}</span></div>
-    <div className="review-mode" role="group" aria-label={c.mode}>
-      {(["easy", "professional"] as const).map(mode => <button key={mode} type="button" aria-pressed={review.mode === mode} disabled={locked || review.pending || review.ready === false || (mode === "easy" && !review.easyAvailable)} title={mode === "easy" && !review.easyAvailable ? c.unavailable : undefined} onClick={() => review.setMode(mode)}>{mode === "easy" ? "Easy" : "Professional"}</button>)}
-    </div>
+    {showModeSwitcher && <ReviewModeSwitcher review={review} locked={locked} />}
     {setView && <div className="review-view-switch" role="group" aria-label={c.results}>
       <button type="button" aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button>
       <button type="button" aria-pressed={view === "results"} onClick={() => setView("results")}>{c.results}</button>
@@ -120,9 +129,9 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
   const { models } = useModelCatalog();
   const [expanded, setExpanded] = useState(initialExpanded);
   const options = [...new Set(models.filter(model => model.enabled && !model.catalogDeleted && model.publiclyListed !== false && (!canSelectModel || canSelectModel(model.id))).map(model => model.provider))];
-  const providers = review.providers.length ? review.providers : [...new Set(selectedModels.map(id => models.find(m => m.id === id)?.provider).filter((p): p is NonNullable<typeof p> => Boolean(p)))];
+  const providers = review.providersConfigured || review.providers.length ? review.providers : [...new Set(selectedModels.map(id => models.find(m => m.id === id)?.provider).filter((p): p is NonNullable<typeof p> => Boolean(p)))];
   return <div className="review-participants" data-testid="review-participants">
-    <button type="button" className="review-participants-heading" onClick={event => review.mode === "easy" ? setExpanded(!expanded) : openChatModelPicker(event.currentTarget)} aria-expanded={review.mode === "easy" ? expanded : undefined}>
+    <button type="button" data-testid={review.mode === "professional" ? "composer-model-select" : undefined} className="review-participants-heading" onClick={event => review.mode === "easy" ? setExpanded(!expanded) : openChatModelPicker(event.currentTarget)} aria-haspopup={review.mode === "professional" ? "dialog" : undefined} aria-expanded={review.mode === "easy" ? expanded : undefined}>
       <span>{review.mode === "easy" ? c.providers : c.models}</span><span>{review.mode === "easy" ? providers.length : selectedModels.length} / {review.maxProviders}<ChevronDown size={14} /></span>
     </button>
     <div className="review-participant-list">
@@ -136,6 +145,7 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
         }}><ModelLogo model={model} size="md" /><span><strong>{review.mode === "easy" ? reviewProviderName(id) : model?.name ?? id}</strong><small>{review.mode === "easy" ? c.automatic : model ? reviewProviderName(model.provider) : ""}</small></span><Check size={14} className={!selected && review.mode === "easy" ? "invisible" : ""} /></button>;
       })}
     </div>
+    {review.mode === "easy" && !providers.length && <p role="status">{reviewProviderPreferencesCopy(lang).unavailable}</p>}
     {review.mode === "easy" && !review.easyAvailable && <p role="status">{c.unavailable}</p>}
     {review.pending && <p role="status" data-testid="review-routing-pending">{c.routing}</p>}
     {review.error && <p role="alert" data-testid="review-routing-error">{review.error}</p>}

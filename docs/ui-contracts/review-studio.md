@@ -42,7 +42,8 @@ Light/Dark is independent of either appearance preference.
 
 Chat and Review share `ChatInput` for local/Drive attachments, upload status,
 paste/drop, voice, web search, memory, assistants and image/research handoffs.
-Studio search/research shortcuts use the same handlers as the tools menu;
+Studio search controls use the same handlers as the tools menu; Research is
+available through the existing gated tools menu rather than a second shortcut.
 Easy retains its existing research restriction. Product-specific model selection
 and submission stay with the workspace. All composer menus portal outside the
 scrolling panels so attachment sources remain reachable in either product.
@@ -87,9 +88,42 @@ Answers omit quiet no-search/refund labels and search surcharges. Executed
 search, research, source links, failed-search notices and normal error handling
 remain. Accounting metadata, reservations and refunds are unchanged.
 
+## Shared Composer controls and provider defaults (2026-10-23)
+
+The owner requested consistent Chat/Review controls. The editable proposal is
+[Composer and default settings](https://www.figma.com/design/FbqVoHReAan0aFSkLTorCX?node-id=2-2)
+(settings frame `2:71`). Reuse `ChatInput`, `ChatProductSwitcher` and the shared
+`ReviewModeSwitcher`; do not maintain a separate Review action rail.
+
+- Both products expose canonical Chat/Review links in the regular composer.
+  Existing navigation admission and compact mobile drawer fallbacks remain.
+- Review's Easy/Professional control and participant/model chooser precede the
+  prompt. The header does not duplicate the mode switch; the Classic mobile
+  drawer retains the shared switch as a compact fallback.
+- Voice stays immediately left of Send/Stop in the shared action group. The
+  action row reserves at least 12px above it. Both products omit the persistent
+  research shortcut; their existing gated `+` menu still offers Deep Research
+  where supported. Chat's model picker occupies its own footer row; Review's
+  Professional chooser above the prompt avoids a second footer model picker.
+- The prompt uses an inset neutral focus underline, including forced colors,
+  instead of outlining the whole composer in blue.
+- Easy defaults are separate from Professional's default model combination.
+  `UserSettings.reviewEasyDefaultProviders` is nullable: null inherits
+  `AppSetting["review.easy.defaultProviders"]`, whose absent value retains OpenAI.
+  An explicit current Review selection wins. Defaults initialize a new Review
+  only; preference saves and history navigation never rewrite existing choices.
+- The profile's AI tab owns the personal setting. Admin Console > Platform
+  settings owns the platform setting, under the existing ops-write and recent
+  authentication checks. The platform write and audit append commit together.
+  Neither setting enables Easy, changes a plan cap, sends a prompt or grants
+  execution authority. Eligible providers and the plan's count cap still apply.
+
 ## Verification
 
 - `tests/reviewRouting.test.mjs`
+- `tests/reviewProviderPreferences.test.mjs`
+- `tests/server-contract/review-provider-defaults-storage.test.ts`
+- `tests/e2e/composer-feature-parity.spec.ts`
 - `tests/server-contract/review-routing.test.ts`
 - `tests/e2e/review-studio.spec.ts`
 - `tests/e2e/chat-studio.spec.ts`

@@ -2,6 +2,7 @@
 "use client";
 
 import { UsagePercentGauge } from "@/components/chat/UsagePercentGauge";
+import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
 import { signIn, useSession } from "next-auth/react";
 import { signOut } from "@/lib/signOutWithDraftCleanup";
 import Link from "next/link";
@@ -1703,6 +1704,7 @@ export function AuthButton({
 
                                 {activeSettingsTab === "ai" && (
                                     <div className="space-y-4">
+                                        <ReviewProviderDefaultsSettings key={session.user.id} />
                                         {/*
                                           Three decisions about what the models
                                           are told, in the order they take

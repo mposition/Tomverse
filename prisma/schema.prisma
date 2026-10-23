@@ -148,6 +148,8 @@ model UserSettings {
   // lib/newConversationModels.ts is the only interpreter. See
   // docs/policy/default-model-luna-migration.md §1.2.
   newConversationModelIds Json?
+  /// NULL inherits the platform's Easy defaults; applies only to new Reviews.
+  reviewEasyDefaultProviders Json?
   preferredTasks          Json?
   preferredPriority       String?
   usesFilesFrequently     String?
