@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
@@ -134,6 +135,7 @@ export type DesktopChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  voiceConversationControl?: ReactNode;
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
@@ -437,6 +439,7 @@ export function DesktopChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  voiceConversationControl,
   promptRefinerOffered = false,
   promptRefinerState,
   promptRefinerProductMode = false,
@@ -1551,6 +1554,7 @@ export function DesktopChatShell({
               onAttachmentsChange={setAttachments}
               attachmentCapabilities={attachmentCapabilities}
               voiceInputEnabled={voiceInputEnabled}
+              voiceConversationControl={voiceConversationControl}
               onVoiceTranscript={onVoiceTranscript}
               promptRefinerOffered={promptRefinerOffered}
               promptRefinerState={promptRefinerState}

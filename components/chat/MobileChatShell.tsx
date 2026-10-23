@@ -180,6 +180,7 @@ type MobileChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  voiceConversationControl?: ReactNode;
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
@@ -479,6 +480,7 @@ export function MobileChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  voiceConversationControl,
   promptRefinerOffered = false,
   promptRefinerState,
   promptRefinerProductMode = false,
@@ -1892,6 +1894,7 @@ export function MobileChatShell({
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
             voiceInputEnabled={voiceInputEnabled}
+            voiceConversationControl={voiceConversationControl}
             onVoiceTranscript={onVoiceTranscript}
             promptRefinerOffered={promptRefinerOffered}
             promptRefinerState={promptRefinerState}

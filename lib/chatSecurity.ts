@@ -5525,6 +5525,8 @@ export const reconcileExpiredChatCreditReservations = async (
         where: {
             status: "reserved",
             clientTurnId: null,
+            // Voice has a duration meter. Missing final usage must never become a zero-usage refund.
+            source: { not: "voice_conversation" },
             expiresAt: { lte: now },
         },
         orderBy: [{ expiresAt: "asc" }, { createdAt: "asc" }],

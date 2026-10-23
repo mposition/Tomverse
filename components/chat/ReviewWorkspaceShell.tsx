@@ -59,6 +59,7 @@ import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
+import { voiceConversationConfig } from "@/lib/voiceConversationCore";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -108,6 +109,8 @@ export async function ReviewWorkspaceShell({
     pulled it. A read failure leaves it false, exactly like a missing flag row.
   */
   let voiceInputEnabled = false;
+  const voiceConfig = voiceConversationConfig(process.env);
+  let voiceConversationEnabled = Boolean(voiceConfig);
   // Availability and the final offer are deliberately separate. The stored
   // flag may authorize a rollout only after an adapter exists; until then the
   // final server-owned decision remains false and the composer renders no
@@ -205,6 +208,9 @@ export async function ReviewWorkspaceShell({
   let reviewEasyFixtureOffered = false;
   if (fixtureMode) {
     const jar = await cookies();
+    if (!process.env.VOICE_CONVERSATION_KILL_SWITCH) {
+      voiceConversationEnabled ||= jar.get("__tomverse_e2e_voice_conversation")?.value === "1";
+    }
     reviewEasyFixtureOffered = jar.get("__tomverse_e2e_review_easy")?.value === "1";
     if (!imageGenerationEnabled) {
       imageGenerationEnabled =
@@ -339,6 +345,8 @@ export async function ReviewWorkspaceShell({
         imageGenerationEnabled={imageGenerationEnabled}
         chatImageIntentEnabled={chatImageIntentEnabled}
         voiceInputEnabled={voiceInputEnabled}
+        voiceConversationEnabled={voiceConversationEnabled}
+        voiceConversationMaxSeconds={voiceConfig?.maxSeconds ?? 300}
         promptRefinerMode={promptRefinerMode}
         promptRefinerProductRelease={promptRefinerProductRelease}
         // The composer cannot read this itself: `process.env` in a Client
