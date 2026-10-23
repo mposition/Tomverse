@@ -25,6 +25,8 @@ import {
 } from "@/lib/chatProductUiCopy";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
+import { PwaInstallMenuItem } from "./PwaInstallMenuItem";
+import { usePwaInstall } from "./usePwaInstall";
 
 // Dedicated compact account entry point for the collapsed sidebar rail.
 // The full account card + settings modal (components/auth/AuthButton.tsx)
@@ -35,12 +37,15 @@ import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 export function SidebarAccountRailButton({
     accountUsage = null,
     currentProduct = "review",
+    placement = "right",
 }: {
     accountUsage?: UserUsageResponse | null;
     currentProduct?: ChatWorkspaceProduct;
+    placement?: "right" | "above";
 }) {
     const { data: session } = useSession();
     const { t, lang } = useLanguage();
+    const pwaInstall = usePwaInstall();
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -119,6 +124,10 @@ export function SidebarAccountRailButton({
             <span className="min-w-0">{t("auth.analyticsSettings")}</span>
         </button>
     );
+    const installItem = <PwaInstallMenuItem install={pwaInstall} language={lang} onPrompt={() => {
+        setIsOpen(false);
+        requestAnimationFrame(() => triggerRef.current?.focus());
+    }} />;
 
     return (
         <div ref={containerRef} className="group/account relative inline-flex">
@@ -166,7 +175,7 @@ export function SidebarAccountRailButton({
                     id={popoverId}
                     role="group"
                     aria-label={t(user ? "auth.accountMenu" : "sidebar.accountTooltipGuest")}
-                    className="absolute bottom-0 left-full z-[75] ml-2 w-64 rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+                    className={`z-[75] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 ${placement === "above" ? "fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] md:absolute md:inset-x-auto md:bottom-full md:left-0 md:mb-2 md:w-64" : "absolute bottom-0 left-full ml-2 w-64 max-w-[calc(100vw-2rem)]"}`}
                 >
                     {user ? (
                         <>
@@ -244,6 +253,7 @@ export function SidebarAccountRailButton({
                                     {t("sidebar.languageAndDisplay")}
                                 </button>
                                 {analyticsSettingsItem}
+                                {installItem}
                                 <Link
                                     href={helpCentreHref(lang)}
                                     target="_blank"
@@ -303,6 +313,7 @@ export function SidebarAccountRailButton({
                                     {t("sidebar.guestMenuViewPlans")}
                                 </Link>
                                 {analyticsSettingsItem}
+                                {installItem}
                                 <Link
                                     href={helpCentreHref(lang)}
                                     target="_blank"

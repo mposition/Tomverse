@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { bindOfflineChatDraftOwner, clearOfflineAccountDraft } from "@/lib/chatOfflineDraft";
 import type { Session } from "next-auth";
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
+import { PwaInstallListener } from "@/components/chat/usePwaInstall";
 
 function OfflineDraftIdentityBoundary({ children }: { children: React.ReactNode }) {
     const { data, status } = useSession();
@@ -32,5 +33,5 @@ export default function SessionProviderWrapper({
               ? session
               : null;
 
-    return <SessionProvider session={initialSession}><OfflineDraftIdentityBoundary>{children}</OfflineDraftIdentityBoundary></SessionProvider>;
+    return <SessionProvider session={initialSession}><PwaInstallListener /><OfflineDraftIdentityBoundary>{children}</OfflineDraftIdentityBoundary></SessionProvider>;
 }
