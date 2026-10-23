@@ -54,7 +54,7 @@ mock.module(mod("lib/voiceInputBudget.ts"), { namedExports: { VoiceBudgetError: 
 mock.module(mod("lib/voiceConversationTasks.ts"), { namedExports: {
   registerVoiceTask: async (id, delegationId, text) => { (w.issued ??= []).push({ id, delegationId, text }); },
   queueVoiceTaskResult: async (id, input) => { if (w.taskMismatch) throw new SecurityError(403, "VOICE_RESULT_MISMATCH", "Mismatch"); w.results.push([id, input.delegationId, input.answer]); },
-  dispatchVoiceTask: async () => {},
+  dispatchVoiceTask: async () => { await w.dispatch?.(); },
 } });
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   reserveVoiceBudgets: async input => { w.budgets.push(input); if (w.budgetError) throw new BudgetError(); return { reserved: true }; },
@@ -63,7 +63,7 @@ mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
 } });
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
   createVoiceProviderSession: async (sdp, history) => { w.providerCalls.push({ sdp, history }); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "malformed-sdp") return { ok: false, rejected: false, sessionId: "live_known" }; if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
-  attachVoiceProviderSession: () => { const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 0; socket.send = () => {}; socket.close = () => { socket.readyState = 3; socket.emit("close"); }; w.socket = socket; queueMicrotask(() => { socket.readyState = 1; socket.emit("open"); }); return socket; },
+  attachVoiceProviderSession: () => { const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 0; socket.send = value => (w.sent ??= []).push(JSON.parse(value)); socket.close = () => { socket.readyState = 3; socket.emit("close"); }; w.socket = socket; queueMicrotask(() => { socket.readyState = 1; socket.emit("open"); }); return socket; },
   hangupVoiceProviderSession: async id => { w.hangs.push(id); },
   closeVoiceProviderSession: async id => { assert.ok(w.updates.some(update => update.data.providerRequestId === id)); return w.closingSeconds ?? null; },
   sendVoiceProviderResult: async (...args) => w.results.push(args),
@@ -175,6 +175,48 @@ test("the session owner can stop after the kill switch or account block", async 
   assert.equal((await POST(request({ action: "stop", reservationId: "reservation" }))).status, 200);
   assert.deepEqual(w.hangs, []);
   assert.equal(w.updates.at(-1).data.lastError, "VOICE_CLOSE_REQUESTED");
+});
+
+test("a persisted stop request closes without reporting a result delivery failure", async () => {
+  const response = await POST(request(start())); const text = response.text();
+  await POST(request({ action: "stop", reservationId: "reservation" }));
+  w.dispatch = async () => {
+    assert.equal(w.updates.at(-1).data.lastError, "VOICE_CLOSE_REQUESTED");
+    throw new SecurityError(409, "VOICE_SESSION_ENDED", "This voice session ended.");
+  };
+  await new Promise(resolve => setTimeout(resolve, 650));
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 5 } }));
+  const body = await text;
+  assert.doesNotMatch(body, /VOICE_RESULT_DELIVERY_FAILED/);
+  assert.match(body, /"confirmed":true/);
+  assert.deepEqual(w.sent, [{ type: "session.close" }]);
+  assert.deepEqual(w.refunds.map(r => r.seconds), [5]);
+});
+
+test("a genuine result delivery failure still reports an error and stops the session", async () => {
+  w.dispatch = async () => { throw new Error("Provider delivery failed"); };
+  const response = await POST(request(start())); const text = response.text();
+  await new Promise(resolve => setTimeout(resolve, 650));
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 5 } }));
+  assert.match(await text, /VOICE_RESULT_DELIVERY_FAILED/);
+  assert.deepEqual(w.sent, [{ type: "session.close" }]);
+  assert.deepEqual(w.refunds.map(r => r.seconds), [5]);
+});
+
+test("an in-flight delivery rejection after closing does not overwrite normal termination", async () => {
+  let rejectDispatch; let started;
+  const dispatchStarted = new Promise(resolve => { started = resolve; });
+  w.dispatch = () => new Promise((_, reject) => { rejectDispatch = reject; started(); });
+  const controller = new AbortController();
+  const response = await POST(new Request("http://localhost/api/chat/voice", { method: "POST", body: JSON.stringify(start()), signal: controller.signal }));
+  const text = response.text();
+  await dispatchStarted;
+  controller.abort();
+  rejectDispatch(new Error("Delivery stopped"));
+  await new Promise(resolve => setImmediate(resolve));
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 5 } }));
+  assert.doesNotMatch(await text, /VOICE_RESULT_DELIVERY_FAILED/);
+  assert.deepEqual(w.sent, [{ type: "session.close" }]);
 });
 
 test("voice accepts a completed research answer only through its saved source-message link", async () => {

@@ -156,7 +156,12 @@ export async function POST(request: Request) {
         const resultTimer = setInterval(() => {
           if (dispatching || finished || closing || socket.readyState !== socket.OPEN) return;
           dispatching = true;
-          void dispatchVoiceTask(reservation.id, socket).catch(() => { send({ type: "error", code: "VOICE_RESULT_DELIVERY_FAILED" }); stop(); }).finally(() => { dispatching = false; });
+          void dispatchVoiceTask(reservation.id, socket).catch(error => {
+            if (!finished && !closing && !(error instanceof ApiSecurityError && error.code === "VOICE_SESSION_ENDED")) {
+              send({ type: "error", code: "VOICE_RESULT_DELIVERY_FAILED" });
+            }
+            stop();
+          }).finally(() => { dispatching = false; });
         }, 500);
         const flushDelegation = () => {
           clearTimeout(delegationTimer);
