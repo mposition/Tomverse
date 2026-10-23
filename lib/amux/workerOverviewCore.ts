@@ -43,6 +43,7 @@ export const AMUX_WORKER_STATUS_KINDS = [
   "bridge_not_started",
   "operator_excluded",
   "latch_open",
+  "capability_missing",
   "not_in_assignment",
   "live_unread",
   "waiting_activation",
@@ -115,6 +116,8 @@ export const amuxWorkerProviderLabel = (providerClass: AmuxWorkerProviderClass):
 function activeStatus(
   live: AgentOfficeAmuxWorkerState | null,
   registryReasons: AmuxWorkerRegistryAdminRow["reasons"],
+  /** False only when the capabilities were read and this worker has none recorded. */
+  capabilityRecorded: boolean,
 ): AmuxWorkerStatusKind {
   if (live === null) return "live_unread";
   switch (live) {
@@ -139,7 +142,10 @@ function activeStatus(
       return "operator_excluded";
     case "not_admitted":
     case "catalog_unknown":
-      return registryReasons.includes("latch_open") ? "latch_open" : "not_in_assignment";
+      // The derived catalog leaves out an active worker with no recorded
+      // capability, so say that and where to fix it, not just that it is out.
+      return registryReasons.includes("latch_open") ? "latch_open"
+        : capabilityRecorded ? "not_in_assignment" : "capability_missing";
   }
 }
 
@@ -153,6 +159,7 @@ const STATUS_GROUP: Readonly<Record<AmuxWorkerStatusKind, AmuxWorkerOverviewGrou
   bridge_not_started: "attention",
   operator_excluded: "attention",
   latch_open: "attention",
+  capability_missing: "attention",
   not_in_assignment: "attention",
   live_unread: "attention",
   waiting_activation: "waiting",
@@ -200,14 +207,15 @@ export function buildAmuxWorkerOverview(input: {
     const reading = liveByName.get(row.workerName) ?? null;
     // A worker the live read has no seat for is unread, not "stopped".
     const liveState = reading?.state ?? null;
+    const capability = capabilityByName.get(row.workerName) ?? null;
+    const recorded = capability?.current?.capability ?? null;
+    const capabilityRecorded = capabilities === null || recorded !== null;
     const status: AmuxWorkerStatusKind =
       row.desiredState === "retired" ? "retired"
       : row.desiredState === "requested" ? "waiting_activation"
       : row.desiredState === "paused" ? "paused"
-      : activeStatus(liveState, row.reasons);
+      : activeStatus(liveState, row.reasons, capabilityRecorded);
     const group = STATUS_GROUP[status];
-    const capability = capabilityByName.get(row.workerName) ?? null;
-    const recorded = capability?.current?.capability ?? null;
     const heartbeat = reading?.heartbeatAt ? Date.parse(reading.heartbeatAt) : NaN;
     return {
       workerName: row.workerName,
