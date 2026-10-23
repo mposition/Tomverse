@@ -111,7 +111,7 @@ export function qaReleaseInstallationToken(http: QaReleaseHttp, appId: string, p
 }
 
 const PULL_FIELDS = `
-  number createdAt baseRefName headRefName headRefOid isDraft mergeable state
+  number title createdAt baseRefName headRefName headRefOid isDraft mergeable state
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) {
     pageInfo { hasNextPage }
     nodes {
@@ -191,6 +191,7 @@ function pullOf(raw: unknown): QaReleaseLanePullRequest {
   if (typeof pull.isDraft !== "boolean") throw new Error("github_shape");
   return {
     number,
+    ...(typeof pull.title === "string" ? { title: pull.title } : {}),
     createdAt: str(pull.createdAt),
     baseRefName: str(pull.baseRefName),
     headRefName: str(pull.headRefName),

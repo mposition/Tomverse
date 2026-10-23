@@ -12,6 +12,7 @@
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint, type QaReleaseMergeLaneCall } from "./qaReleaseDigestEndpointCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import type { QaReleaseMergeLanePorts, QaReleaseLaneState } from "./qaReleaseMergeLaneServiceCore.ts";
+import type { QaReleaseLaneVerdict } from "./qaReleaseMergeLaneVerdictCore.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
 
 type Json = Record<string, unknown>;
@@ -110,5 +111,27 @@ export function createQaReleaseMergeLaneAppPorts(input: {
       if (answer.status === 409 && answer.body.recorded === false) return { recorded: false, reason: reason(answer.body) };
       throw new Error("app_shape");
     },
+  };
+}
+
+/**
+ * The round record for the Admin screen: the outcome code and, when the round
+ * read them, its verdicts. Display only -- the caller ignores a failure, which
+ * never changes the round's outcome or exit code.
+ */
+export function createQaReleaseLaneRoundReporter(input: {
+  http: QaReleaseHttp;
+  env: Readonly<Record<string, string | undefined>>;
+}): (round: { outcome: string; verdicts: QaReleaseLaneVerdict[] | null }) => Promise<boolean> {
+  return async (round) => {
+    const url = qaReleaseMergeLaneEndpoint({ ...input.env }, "round");
+    assertQaReleaseMergeLaneEndpoint(url, "round");
+    const response = await input.http({
+      method: "POST",
+      url,
+      headers: { "content-type": "application/json", authorization: `Bearer ${input.env.QA_RELEASE_MERGE_LANE_SECRET ?? ""}` },
+      body: JSON.stringify(round),
+    });
+    return response.status === 200;
   };
 }

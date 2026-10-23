@@ -126,7 +126,10 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 
 - 결과는 공유 `AgentDigestItem` 계약(운영자 결정, 다섯 팀 공통)을 따릅니다: `agentKey = qa-release`, payload 직렬화
   16 KiB 이하, 닫힌 schema, 단일 writer, 본문 보존 **90일**, 그 뒤 meta 행은 공통 규칙.
-- Admin은 공통 Agent digest 영역(`/admin/agent-digests`) 하나를 씁니다. 이 Agent의 쓰기 행위는 둘입니다: 운영자 제어
+- Admin은 QA·릴리스 메뉴(`/admin/qa-release`, 2026-10-23 운영자 결정으로 공통 Agent digest 영역에서 독립. 옛
+  `/admin/agent-digests?tab=qa-release`·`?tab=ci-admission`은 redirect) 하나를 씁니다. 병합 레인은 회차마다 결과 코드와
+  열린 develop PR별 판정(다음 병합·대기·사람 몫·고쳐야 함·draft, 사람 몫이면 그 이유가 된 파일)을 `round` 경로로 보내고, 앱은
+  최신 회차만 `AppSetting` 한 행에 덮어써 `병합 레인` 탭에 보입니다. 표시 전용이며 레인의 선택에 쓰이지 않고 감사 이벤트도 아닙니다. 이 Agent의 쓰기 행위는 둘입니다: 운영자 제어
   revision 기록, 병합 레인 latch 해제. 둘 다 owner·ops 권한(`ops:write`)과 최근 로그인(step-up)을 요구합니다.
   **승인 버튼은 없습니다.**
 
@@ -358,6 +361,7 @@ lib/adminMessages/agentDigests*
 app/api/internal/agents/qa-release/**
 app/api/admin/agent-digests/**
 app/(site)/(application)/admin/agent-digests/**
+app/(site)/(application)/admin/qa-release/**
 components/admin/AdminAgentDigests*
 components/admin/QaRelease*
 tests/qaRelease*
