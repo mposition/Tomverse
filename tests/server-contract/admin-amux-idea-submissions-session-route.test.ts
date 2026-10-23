@@ -97,11 +97,11 @@ test("with session intake on, an Admin idea enters the session writer as an Admi
       state: "submitted", origin: "session", hasExternalSources: true, transferReady: false });
     assert.equal(world.v4Calls, 0);
     const call = world.sessionCalls[0] as { inspected: { requestId: string;
-      source: Record<string, string> } };
+      source: Record<string, string> }; model: unknown };
     assert.equal(call.inspected.requestId, requestId);
     assert.deepEqual(call.inspected.source, { toolName: "tomverse-admin",
       modelProvider: "operator", sessionDisplay: "Admin idea input" });
-    assert.equal((call as { model: unknown }).model, null, "no choice keeps the scope's model");
+    assert.equal(call.model, null, "no choice keeps the scope's model");
   }));
 
 test("the owner's per-idea model choice reaches the session writer exactly", () =>
