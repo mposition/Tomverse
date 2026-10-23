@@ -24,6 +24,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record a question and turn it into editable text before sending.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Unlock your Tomverse conversations using Face ID after signing in.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

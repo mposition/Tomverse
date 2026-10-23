@@ -2,6 +2,7 @@ import { registerPlugin } from "@capacitor/core";
 
 import { authenticatedFetch } from "./authenticatedFetch";
 import type { MobileAuthBridge } from "./authBridgeContract";
+import { deviceAccessGrant } from "./deviceUnlock";
 
 /**
  * The refusing implementation, used in a browser and by any platform that has
@@ -13,6 +14,9 @@ import type { MobileAuthBridge } from "./authBridgeContract";
  * the moment this comment is for.
  */
 const unavailableBridge: MobileAuthBridge = {
+  getDeviceSecurity: async () => ({ available: false, enabled: false, locked: false }),
+  setDeviceLock: () => Promise.reject(new Error("Device security requires the native app.")),
+  unlockDevice: () => Promise.reject(new Error("Device security requires the native app.")),
   signIn: () => Promise.reject(new Error("Sign-in requires the native app.")),
   requestEmailCode: () => Promise.reject(new Error("Sign-in requires the native app.")),
   verifyEmailCode: () => Promise.reject(new Error("Sign-in requires the native app.")),
@@ -36,6 +40,6 @@ export const TOMVERSE_API_ORIGIN =
 
 export const mobileApiFetch = (path: string, init?: RequestInit) =>
   authenticatedFetch(path, init, {
-    bridge: MobileAuth,
+    bridge: { getAccessToken: options => deviceAccessGrant(MobileAuth, options, init?.signal) },
     apiOrigin: TOMVERSE_API_ORIGIN,
   });

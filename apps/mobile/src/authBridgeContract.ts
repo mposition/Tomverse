@@ -30,6 +30,7 @@ export type MobileAccessGrant = {
   /** Epoch milliseconds. The JS side schedules against this and nothing else. */
   expiresAt: number;
 };
+export type DeviceSecurity = { available: boolean; enabled: boolean; locked: boolean };
 
 /**
  * The whole bridge surface.
@@ -40,6 +41,9 @@ export type MobileAccessGrant = {
  * many tabs and components happen to ask at once.
  */
 export type MobileAuthBridge = {
+  getDeviceSecurity(): Promise<DeviceSecurity>;
+  setDeviceLock(options: { enabled: boolean; reason?: string }): Promise<void>;
+  unlockDevice(options?: { reason?: string }): Promise<void>;
   /** Opens system-browser PKCE sign-in. Credentials stay in the native layer. */
   signIn(): Promise<void>;
   /** Sends an existing-account email code. Returns no credential. */
@@ -62,6 +66,9 @@ export type MobileAuthBridge = {
  * is the moment to ask what it returns.
  */
 export const MOBILE_AUTH_BRIDGE_METHODS = [
+  "getDeviceSecurity",
+  "setDeviceLock",
+  "unlockDevice",
   "signIn",
   "requestEmailCode",
   "verifyEmailCode",

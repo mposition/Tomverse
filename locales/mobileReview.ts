@@ -1,0 +1,18 @@
+import type { MobileLanguage } from "./mobile";
+const en = {
+  crossReview: "AI cross-review", run: "Run cross-review", cost: "Estimated credits", synthesis: "Include a synthesis", balanced: "Balanced", evidence: "Evidence", action: "Action",
+  consensus: "Common ground", differences: "Different perspectives", contradictions: "Contradictions", missingPoints: "Missing points", verificationNeeded: "Needs external verification", modelAssessments: "Response assessments", limitations: "Limitations",
+  matched: "Quote matched to response", unmatched: "Quote not matched", original: "View original response", grounding: "Source quote match", noGrounding: "No quotes to measure", groundingHint: "This measures quote matches, not factual accuracy.",
+  helpful: "Helpful", incorrect: "Incorrect", unclear: "Unclear", missing_point: "Missing point", feedbackHint: "Your opinion on this item only. Select the same response to withdraw it.",
+  verify: "Verify on the web · separate credits", verifyConsent: "Use a paid web search to check this item. This is separate from cross-review.", verifyRun: "Confirm web verification", verification: "Web verification", uncertain: "The outcome is not confirmed. Read the saved result before running again.", refresh: "Read saved result", failed: "The request could not finish. Your saved responses are unchanged.",
+  images: "Image studio", prompt: "Image prompt", quality: "Quality", size: "Size", credits: "credits", generate: "Generate images", imageConsent: "I confirm the selected models and the quoted credit cost.", imageHint: "Images are saved in a separate image conversation. Your text comparison stays unchanged.", unsupported: "Some selected providers do not offer an eligible image model.", unavailable: "Image generation is unavailable for this account or server.", quoteChanged: "The catalogue or price changed. Check the new quote and confirm again.", pendingImages: "The generation outcome is not confirmed. Check History before creating another request.", deepResearch: "Deep Research", researchHint: "Deep Research requires its dedicated web workflow. Current mobile comparisons use the selected text models.",
+};
+const ko: typeof en = {
+  crossReview: "AI 교차검토", run: "교차검토 실행", cost: "예상 크레딧", synthesis: "종합 답변 포함", balanced: "균형", evidence: "근거 중심", action: "실행 중심",
+  consensus: "공통점", differences: "관점 차이", contradictions: "상충하는 내용", missingPoints: "빠진 내용", verificationNeeded: "외부 확인이 필요한 내용", modelAssessments: "응답별 평가", limitations: "한계",
+  matched: "응답 원문과 일치하는 인용", unmatched: "원문 일치가 확인되지 않은 인용", original: "원본 응답 보기", grounding: "출처 인용 일치율", noGrounding: "측정할 인용이 없습니다", groundingHint: "인용의 원문 일치율이며 사실 정확도를 뜻하지 않습니다.",
+  helpful: "도움 됨", incorrect: "부정확함", unclear: "불명확함", missing_point: "빠진 내용", feedbackHint: "이 항목에 대한 개인 의견입니다. 같은 항목을 다시 누르면 철회됩니다.",
+  verify: "웹에서 확인 · 별도 크레딧", verifyConsent: "유료 웹 검색으로 이 항목을 확인합니다. 교차검토와 별도 작업입니다.", verifyRun: "웹 검증 실행 확인", verification: "웹 검증", uncertain: "처리 결과를 아직 확인하지 못했습니다. 다시 실행하기 전에 저장된 결과를 조회하세요.", refresh: "저장된 결과 조회", failed: "요청을 완료하지 못했습니다. 저장된 응답은 유지됩니다.",
+  images: "이미지 스튜디오", prompt: "이미지 설명", quality: "품질", size: "크기", credits: "크레딧", generate: "이미지 생성", imageConsent: "선택한 모델과 표시된 크레딧 비용을 확인했습니다.", imageHint: "이미지는 별도 이미지 대화에 저장됩니다. 텍스트 비교 대화는 유지됩니다.", unsupported: "선택한 제공사 일부는 사용 가능한 이미지 모델을 제공하지 않습니다.", unavailable: "현재 계정 또는 서버에서 이미지 생성을 사용할 수 없습니다.", quoteChanged: "모델 또는 가격이 변경되었습니다. 새 견적을 확인하고 다시 동의해 주세요.", pendingImages: "생성 결과를 아직 확인하지 못했습니다. 새 요청 전에 기록을 확인하세요.", deepResearch: "심층 리서치", researchHint: "심층 리서치는 전용 웹 작업 흐름이 필요합니다. 현재 모바일 비교는 선택한 텍스트 모델을 사용합니다.",
+};
+export const mobileReviewCopy = (language: MobileLanguage) => language === "ko" ? ko : en;
