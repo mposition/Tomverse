@@ -65,9 +65,9 @@ export async function observeActiveVoiceConversations() {
     const close = () => { closing = true; clearInterval(taskTimer); if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
     const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
     const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
-    const expiryTimer = setTimeout(() => { void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
+    const expiryTimer = setTimeout(() => { if (finalizing) return; void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
     let released = false;
-    const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(release); }, 5_000);
+    const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(() => { if (!finalizing) release(); }); }, 5_000);
     function release() {
       if (released) return; released = true;
       clearTimeout(stopTimer); clearTimeout(expiryTimer); clearInterval(leaseTimer); clearInterval(taskTimer);
@@ -99,7 +99,7 @@ export async function observeActiveVoiceConversations() {
         void finalizeVoiceReservation(row.id, seconds).catch(() => prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {})).finally(release);
       }
     });
-    socket.once("error", () => { release(); });
+    socket.once("error", () => { if (!finalizing) release(); });
     socket.once("close", () => { if (!finalizing) release(); });
   }
 }

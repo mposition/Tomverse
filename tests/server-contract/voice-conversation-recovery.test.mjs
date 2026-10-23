@@ -30,7 +30,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatCreditReservation: {
     findMany: async () => w.rows,
     findFirst: async ({ where }) => w.rows.find(row => row.userId === where.userId && row.lastError === "VOICE_PROVIDER_STOP_PENDING") ?? null,
-    findUniqueOrThrow: async ({ where }) => w.rows.find(row => row.id === where.id),
+    findUniqueOrThrow: async ({ where }) => { if (w.finalLookupGate) await w.finalLookupGate; return w.rows.find(row => row.id === where.id); },
     updateMany: async ({ where, data }) => { const row = w.rows.find(row => row.id === where.id && (!where.status || row.status === where.status) && (!where.lastError || row.lastError === where.lastError)); if (row) Object.assign(row, data); return { count: row ? 1 : 0 }; },
   },
 } } });
@@ -143,4 +143,19 @@ test("an unknown dispatched answer closes recovery without replaying the append"
   await observeActiveVoiceConversations(); w.socket.emit("open");
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(w.commands, [{ type: "session.close" }]); assert.equal(w.dispatches, undefined);
+});
+
+test("socket errors and expiry retain ownership until an observed final receipt commits", async () => {
+  w.allowReceiver = true; w.commands = []; let releaseFinal;
+  w.finalLookupGate = new Promise(resolve => { releaseFinal = resolve; });
+  w.rows[0].expiresAt = new Date(Date.now() + 40); w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200000).toISOString();
+  await observeActiveVoiceConversations();
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+  try {
+    w.socket.emit("error", new Error("Connection closed after final receipt")); w.socket.emit("close");
+    await new Promise(resolve => setTimeout(resolve, 65));
+    assert.ok(w.rows[0].reservationPayload.recoveryLease); assert.equal(w.charges.length, 0); assert.equal(w.hangs.length, 0);
+  } finally { releaseFinal(); }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.charges.length, 1); assert.equal(w.charges[0].seconds, 15);
 });
