@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "../adminAudit.ts";
+import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
+import { amuxOperatingScopeSelection } from "./ideaOperatingScopeCore.ts";
 import type { AmuxOperatingScopeAuthority } from "./ideaOperatingScopeStore.ts";
 import {
   AMUX_SESSION_ANALYSIS_RESERVATION_AUDIT_SUMMARY,
@@ -37,6 +39,10 @@ export async function commitAmuxSessionAnalysisReservation(
     requestId: string;
     submissionAuditId: string;
     authority: AmuxOperatingScopeAuthority;
+    /** The model the submission audit recorded: the scope's or the owner's
+     * per-idea choice (absent: the scope's). The DB guard admits only those
+     * two kinds. */
+    model?: AmuxIdeaModelSelection | null;
   },
 ): Promise<CommittedAmuxSessionAnalysisReservation> {
   await takeAuditChainLock(tx);
@@ -69,6 +75,7 @@ export async function commitAmuxSessionAnalysisReservation(
   }
 
   const reservationId = randomUUID();
+  const model = input.model ?? amuxOperatingScopeSelection(input.authority.scope);
   const binding = {
     reservationId,
     ideaId: input.ideaId,
@@ -76,9 +83,9 @@ export async function commitAmuxSessionAnalysisReservation(
     submissionAuditId: input.submissionAuditId,
     operatingScopeSettingId: input.authority.settingId,
     dataOwnerUserId: input.authority.approvedByUserId,
-    modelProvider: input.authority.scope.model.provider,
-    modelId: input.authority.scope.model.modelId,
-    reasoningEffort: input.authority.scope.model.reasoningEffort,
+    modelProvider: model.provider,
+    modelId: model.modelId,
+    reasoningEffort: model.reasoningEffort,
   };
   const reservationAuditId = await writeSystemAuditLog({
     tx,
@@ -96,9 +103,9 @@ export async function commitAmuxSessionAnalysisReservation(
     actorUserId: input.authority.approvedByUserId,
     operatingScopeSettingId: input.authority.settingId,
     status: AMUX_SESSION_ANALYSIS_RESERVATION_STATUS,
-    modelProvider: input.authority.scope.model.provider,
-    modelId: input.authority.scope.model.modelId,
-    reasoningEffort: input.authority.scope.model.reasoningEffort,
+    modelProvider: model.provider,
+    modelId: model.modelId,
+    reasoningEffort: model.reasoningEffort,
     reservationAuditLogId: reservationAuditId,
   } });
   return { reservationId, ideaId: input.ideaId, requestId: input.requestId,

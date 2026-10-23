@@ -911,6 +911,27 @@ export const RAW_SQL_ALLOWLIST = [
     reason: "The replaced mode guard reads the claim, settlement and owner closure audit rows to bind a zero subscription closure to its same-transaction owner evidence. It never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261023090000_amux_v19_session_model_choice/migration.sql",
+    table: "AmuxIdeaSessionAnalysisReservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason: "The per-idea model migration (owner decision 2026-10-23) replaces the reservation guard body with the same signature and trigger; the mention is the reservation audit's targetType check. It writes no reservation row.",
+  },
+  {
+    path: "prisma/migrations/20261023090000_amux_v19_session_model_choice/migration.sql",
+    table: "AmuxIdeaOperatingScopeSetting",
+    tableMentions: 5,
+    writeVerbs: 2,
+    reason: "The new model predicate and both replaced guards only read the operating scope (its latest version and the stored model). It writes no scope row.",
+  },
+  {
+    path: "prisma/migrations/20261023090000_amux_v19_session_model_choice/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason: "The replaced submission and reservation guards read the same-transaction submission and reservation audit rows. It never writes AdminAuditLog.",
+  },
+  {
     path: "lib/amux/ideaSessionAnalysisResultOrphanRetention.ts",
     table: "AmuxIdeaSessionAnalysisBudgetClaim",
     tableMentions: 1,

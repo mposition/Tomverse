@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -136,4 +137,20 @@ test("a session answer that made no plan says so and why nothing was registered"
   for (const locale of [adminAmuxIdeaProgressMessages.en, adminAmuxIdeaProgressMessages.ko]) {
     assert.ok(locale.sessionReview && locale.sessionReviewHint && locale.sessionReviewDetail);
   }
+  // Owner decision 2026-10-23: the reason (and a model question) is read once
+  // the idea is opened; the server enforces the seven-day answer retention.
+  assert.match(markup, /data-testid="amux-session-review-reason"/);
+  const m = markup.includes(adminAmuxIdeaProgressMessages.ko.sessionReviewLoading)
+    ? adminAmuxIdeaProgressMessages.ko : adminAmuxIdeaProgressMessages.en;
+  assert.ok(markup.includes(m.sessionReviewLoading), "it starts by reading");
+  assert.doesNotMatch(renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session" } })), /amux-session-review-reason/);
+  for (const locale of [adminAmuxIdeaProgressMessages.en, adminAmuxIdeaProgressMessages.ko]) {
+    assert.ok(locale.sessionReviewQuestionTitle && locale.sessionReviewQuestionHint &&
+      locale.sessionReviewNotAPlan && locale.sessionReviewGone && locale.sessionReviewUnavailable);
+  }
+  const source = fs.readFileSync("components/admin/AmuxSessionReviewPanel.tsx", "utf8");
+  assert.ok(source.includes("/api/admin/amux/ideas/session-review?"));
+  assert.ok(source.includes("readAmuxSessionReviewReply"), "only an exact reply is shown");
+  assert.equal(/method:s*"POST"/.test(source), false, "the panel only reads");
 });
