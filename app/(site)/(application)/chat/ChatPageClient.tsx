@@ -145,6 +145,9 @@ import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageIntent } from "@/lib/chatImageIntentClient";
 import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
+import { DEFAULT_IMAGE_MODEL_ID, imageModelOwner } from "@/lib/imageModelRegistry";
 import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
@@ -680,6 +683,7 @@ type GlobalSubmitOptions = {
   imageIntentChecked?: boolean;
   /** Answer this send with an image in the conversation (lib/chatImageTurn.ts). */
   imageTurn?: ChatImageTurnRequest;
+  imageTurnsByModel?: ReviewImageTurns;
   reviewRouteChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
@@ -878,6 +882,8 @@ export function ChatPageClient({
     getModel,
     isEnabledModelId,
   } = useModelCatalog();
+  const imageCatalog = useImageModelCatalog();
+  const [reviewImageModelId, setReviewImageModelId] = useState<string | null>(null);
   const router = useRouter();
   // Which URL this mount is actually at, so a selection that already has the
   // right one does not push it again (a repeated push of the current path is
@@ -4463,6 +4469,7 @@ export function ChatPageClient({
     setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
     setIsDeepResearchPending(false);
     setIsImageDraftActive(false);
+    setReviewImageModelId(null);
     discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
@@ -4484,6 +4491,13 @@ export function ChatPageClient({
             modelIds?: readonly string[];
         }
     ) => {
+        if (mountedSurface === "workspace") {
+            setReviewImageModelId(modelId ?? options?.modelIds?.[0] ?? DEFAULT_IMAGE_MODEL_ID);
+            reviewWorkspace.setImagePromptMode(true);
+            setInputValue(draftText);
+            setFocusToken(value => value + 1);
+            return;
+        }
         if (promptRefinerMode === "e2e_fixture") {
             // The no-cost Refiner fixture cannot hand an accepted synthetic
             // Chat draft to a second provider-facing workspace either.
@@ -5693,17 +5707,35 @@ export function ChatPageClient({
       // marker would not survive every restore/remount path safely.
       return;
     }
-    if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy" &&
+    if (mountedSurface === "workspace" && reviewWorkspace.mode === "professional" &&
+      options === undefined && reviewWorkspace.imagePromptMode && reviewImageModelId) {
+      const model = imageCatalog.getModel(reviewImageModelId);
+      if (!model || model.disabledReason || isGuestMode || !imageGenerationEnabled ||
+        !planAllowsImageGeneration(accountUsage?.plan ?? "Free")) return;
+      const plan = reviewImageTurnPlan({ choices: [{ provider: imageModelOwner(model), modelId: model.id }],
+        panels: selectedModels, models: AVAILABLE_MODELS.filter(item => item.enabled && canUseModelWithPlan(currentAccessPlan, item)),
+        preset: "standard", comparisonId: crypto.randomUUID() });
+      if (!plan) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
+      flushSync(() => mutateModelSettings(currentChatIdRef.current, plan.panelIds, []));
+      return handleGlobalSubmitRef.current({ reviewRouteChecked: true,
+        imageIntentChecked: true, imageTurnsByModel: plan.turns });
+    }
+    const professionalImageRouting = mountedSurface === "workspace" &&
+      options === undefined &&
+      reviewWorkspace.mode === "professional" && chatImageIntentEnabled && imageGenerationEnabled &&
+      !isGuestMode && attachments.length === 0 && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
+    if (mountedSurface === "workspace" && (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
       !options?.reviewRouteChecked && !isImageDraftActiveRef.current) {
       if (!isModelSelectionReady || !isInitialConversationResolved) return;
-      if (!reviewEasyAvailable || isGuestMode) {
+      if ((!reviewEasyAvailable && !professionalImageRouting) || isGuestMode) {
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].unavailable);
         return;
       }
       if (reviewRoutingPendingRef.current) return;
       const routeText = options?.overrideText ?? inputValue;
       if (!routeText.trim()) return;
-      const providers = (reviewWorkspace.providers.length ? reviewWorkspace.providers :
+      const routeMode = reviewWorkspace.mode;
+      const providers = (routeMode === "easy" && reviewWorkspace.providers.length ? reviewWorkspace.providers :
         [...new Set(selectedModels.filter(id => !disabledPanels.includes(id)).flatMap(id => {
           const model = getModel(id); return model ? [model.provider] : [];
         }))]).slice(0, Math.min(3, maxSelectableModels));
@@ -5723,6 +5755,7 @@ export function ChatPageClient({
         const previous = latestLocalComparisonPromptRef.current
           ? localComparisonResponsesRef.current.get(latestLocalComparisonPromptRef.current)?.values().next().value : undefined;
         decision = await askReviewRoute({ text: routeText, providers, context: previous?.slice(0, 600),
+          ...(professionalImageRouting ? { imageOnly: true } : {}),
           requestedKind: routeRequestedKind ? "image" : undefined,
           hasImages: draft.attachments.some(attachment => attachment.mediaType.startsWith("image/")) });
       } finally {
@@ -5730,32 +5763,40 @@ export function ChatPageClient({
         reviewWorkspaceRef.current.setPending(false);
       }
       const live = readDraft(scope);
-      const liveProviders = reviewWorkspaceRef.current.providers.length ? reviewWorkspaceRef.current.providers :
+      const liveProviders = routeMode === "easy" && reviewWorkspaceRef.current.providers.length ? reviewWorkspaceRef.current.providers :
         [...new Set(latestModelSettingsRef.current.models.filter(id => !latestModelSettingsRef.current.disabled.includes(id)).flatMap(id => {
           const model = getModel(id); return model ? [model.provider] : [];
         }))];
       if (!owner || owner !== identityNamespaceKey(identityNamespaceRef.current) ||
         epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
         live.text !== draft.text || !sameStringList(attachmentIds, live.attachments.map(a => a.id)) ||
-        reviewWorkspaceRef.current.mode !== "easy" ||
+        reviewWorkspaceRef.current.mode !== routeMode ||
         reviewWorkspaceRef.current.imagePromptMode !== routeRequestedKind ||
         (liveProviders.length > 0 && !sameStringList(providers, liveProviders))) return;
-      if (!decision) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
+      if (!decision) {
+        if (professionalImageRouting) return handleGlobalSubmitRef.current({ reviewRouteChecked: true, imageIntentChecked: true });
+        reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return;
+      }
       if (decision.kind === "blocked") {
         reviewWorkspace.setError(t(imageGenerationEnabled ? "chat.imageGenerationPlanGateBody" : "chat.imageGenerationDisabledNotice")); return;
+      }
+      if (professionalImageRouting && decision.kind === "text") {
+        return handleGlobalSubmitRef.current({ reviewRouteChecked: true, imageIntentChecked: true });
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
         if (chosen.length > imageGroupMaxModelsProp) {
           reviewWorkspace.setError(t("chat.imageGenerationModelLimitNotice").replace("{max}", String(imageGroupMaxModelsProp))); return;
         }
-        reviewImageSeedRouteRef.current = { text: routeText.trim(), modelIds: chosen, preset: decision.preset };
-        reviewWorkspace.setImageRequest(true);
-        reviewWorkspace.setUnsupportedProviders(decision.choices.filter(choice => !choice.modelId).map(choice => choice.provider));
-        if (chosen.length) handleStartImageDraft(routeText, undefined, {
-          fromImageRequest: true, modelIds: chosen, preset: decision.preset,
-        });
-        return;
+        const plan = reviewImageTurnPlan({ choices: decision.choices, panels: selectedModels,
+          models: AVAILABLE_MODELS.filter(model => model.enabled && canUseModelWithPlan(currentAccessPlan, model)),
+          preset: decision.preset, comparisonId: crypto.randomUUID() });
+        if (!plan) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
+        reviewWorkspace.setImageRequest(false);
+        reviewWorkspace.setUnsupportedProviders([]);
+        flushSync(() => mutateModelSettings(currentChatIdRef.current, plan.panelIds, []));
+        return handleGlobalSubmitRef.current({ ...options, reviewRouteChecked: true,
+          imageIntentChecked: true, imageTurnsByModel: plan.turns });
       }
       if (!chosen.length || decision.choices.some(choice => !choice.modelId)) {
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].noText); return;
@@ -6681,7 +6722,8 @@ export function ChatPageClient({
         bundle would be prepared for a prompt no text model reads. The image
         reservation applies its own gates.
       */
-      const imageTurnSend = Boolean(options?.imageTurn) && activeModelIds.length === 1;
+      const imageTurnSend = (Boolean(options?.imageTurn) && activeModelIds.length === 1) ||
+        (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
       const preflight = imageTurnSend
         ? { allowed: true as const, admissionToken: null, contextBundle: null }
         : await runComparisonPreflight({
@@ -7256,6 +7298,9 @@ export function ChatPageClient({
         // a send made for more than one panel never carries one.
         ...(imageTurnSend && options?.imageTurn
           ? { imageTurn: options.imageTurn }
+          : {}),
+        ...(imageTurnSend && options?.imageTurnsByModel
+          ? { imageTurnsByModel: options.imageTurnsByModel }
           : {}),
       });
       if (skipAutoForThisTurn) setPromptRefinerSkipAutoScope(null);
@@ -10045,6 +10090,7 @@ export function ChatPageClient({
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
+            imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
@@ -10216,6 +10262,7 @@ export function ChatPageClient({
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
+            imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}

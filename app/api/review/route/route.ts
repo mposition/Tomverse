@@ -11,6 +11,7 @@ import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { reviewEasyEnabled, routeReviewPrompt } from "@/lib/reviewRouting";
 import { REVIEW_MAX_PROVIDERS, reviewRoutingCandidates } from "@/lib/reviewRoutingCore";
+import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 
 const schema = z.object({
   text: z.string().trim().min(1).max(8_000), context: z.string().max(1_200).default(""),
@@ -18,18 +19,22 @@ const schema = z.object({
     .refine(values => new Set(values).size === values.length),
   hasImages: z.boolean().default(false),
   requestedKind: z.literal("image").optional(),
+  imageOnly: z.boolean().optional(),
 }).strict();
 
 export async function POST(req: Request) {
   const headers = { "Cache-Control": "private, no-store" };
   try {
-    if (!reviewEasyEnabled()) return NextResponse.json({ error: "EASY_UNAVAILABLE" }, { status: 503, headers });
+    if (!reviewEasyEnabled() && !(await chatImageTriageModelId())) return NextResponse.json({ error: "EASY_UNAVAILABLE" }, { status: 503, headers });
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return NextResponse.json({ error: "SIGN_IN_REQUIRED" }, { status: 401, headers });
     const userId = session.user.id;
     await assertUserOperationalAccess(userId);
     await consumeApiRateLimit(req, userId, "review-routing", { minute: 20, day: 500 });
     const body = await readLimitedJson(req, 48 * 1024, schema);
+    if (body.imageOnly ? !(await chatImageTriageModelId()) : !reviewEasyEnabled()) {
+      return NextResponse.json({ error: "EASY_UNAVAILABLE" }, { status: 503, headers });
+    }
     const [plan, models] = await Promise.all([getUserBillingPlan(userId), getRuntimeModels()]);
     if (body.providers.length > effectivePlanModelLimit(plan)) {
       return NextResponse.json({ error: "MODEL_LIMIT_EXCEEDED" }, { status: 400, headers });

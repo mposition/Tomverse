@@ -210,9 +210,11 @@ export async function ReviewWorkspaceShell({
   // (lib/securityEnvironment.ts e2eBypassDisabled).
   const fixtureMode = isE2EFixtureMode();
   let reviewEasyFixtureOffered = false;
+  let imageTriageFixtureOffered = false;
   if (fixtureMode) {
     const jar = await cookies();
     reviewEasyFixtureOffered = jar.get("__tomverse_e2e_review_easy")?.value === "1";
+    imageTriageFixtureOffered = jar.get("__tomverse_e2e_chat_image_intent")?.value === "1";
     if (!imageGenerationEnabled) {
       imageGenerationEnabled =
         jar.get("__tomverse_e2e_image_generation")?.value === "1";
@@ -346,7 +348,7 @@ export async function ReviewWorkspaceShell({
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
-        chatImageIntentEnabled={chatImageIntentEnabled}
+        chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         voiceInputEnabled={voiceInputEnabled}
         promptRefinerMode={promptRefinerMode}
         promptRefinerProductRelease={promptRefinerProductRelease}

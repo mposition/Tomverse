@@ -44,7 +44,12 @@ export type ChatImageTurnRequest = {
      * instead of reserving a second one.
      */
     assistantMessageId?: string;
+    /** Review panels share one priced image group, with distinct answer ids. */
+    comparison?: { id: string; index: number; modelIds: string[] };
 };
+
+export const chatImageTurnGroupKey = (answerId: string) =>
+    /^[0-9a-f-]{36}_[0-9]+$/.test(answerId) ? answerId.slice(0, answerId.lastIndexOf("_")) : answerId;
 
 const TURN_PRESETS = ["draft", "standard", "final"] as const;
 

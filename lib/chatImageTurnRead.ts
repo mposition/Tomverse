@@ -1,6 +1,6 @@
 import "server-only";
 
-import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
+import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -25,7 +25,7 @@ export async function attachChatImageTurns<
         .map((message) => message.id);
     if (ids.length === 0) return messages;
     const groups = await prisma.imageGenerationGroup.findMany({
-        where: { userId, conversationId, groupIdempotencyKey: { in: ids } },
+        where: { userId, conversationId, groupIdempotencyKey: { in: [...new Set(ids.flatMap(id => [id, chatImageTurnGroupKey(id)]))] } },
         select: {
             id: true,
             groupIdempotencyKey: true,
@@ -39,7 +39,15 @@ export async function attachChatImageTurns<
         ])
     );
     return messages.map((message) => {
-        const imageTurn = byMessage.get(message.id);
+        const key = chatImageTurnGroupKey(message.id);
+        const direct = byMessage.get(message.id);
+        let imageTurn = direct ?? byMessage.get(key);
+        if (imageTurn && !direct && key !== message.id) {
+            // Review's suffix is the target's index in the sorted, immutable
+            // model ids. History survives catalogue changes and target retries.
+            const index = Number(message.id.slice(message.id.lastIndexOf("_") + 1));
+            imageTurn = { ...imageTurn, modelIds: [...imageTurn.modelIds].sort().slice(index, index + 1) };
+        }
         return imageTurn ? { ...message, imageTurn } : message;
     });
 }
