@@ -60,6 +60,12 @@ There are exactly four, and no standalone "New image" button:
    draft client-side.
 4. Model catalogue → **image tab** (see below).
 
+On Review (`/review`) entries 3 and 4, and the starter catalogue's image card,
+do not open this workspace: they arm the Review composer's image mode
+(`review-image-mode`) and the answer is generated inside the conversation
+(`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). The sidebar
+and drawer launcher stay explicit entries to this workspace there too.
+
 The Chat **image-request handoff chip** that used to be a fifth entry point was
 **deleted on 2026-10-20**: the LLM judgement on send (policy §13 ⑥,
 `lib/chatImageIntent.ts`) replaced the rule-based classifier behind it, and the
@@ -479,8 +485,8 @@ Verified for **both** desktop and mobile projects:
 | 9 | reload | timeline rebuilt from the server, not from client memory |
 | 10 | image tab | separate list; no chat rows, no chat selection count |
 | 11 | held models | every one listed, disabled, hold stated |
-| 12 | picked from the image tab | workspace opens seeded with that model |
-| 13 | composer draft carry-over | text carried; cancel restores it exactly |
+| 12 | picked from the image tab | workspace opens seeded with that model (Review: composer image mode names that model, no workspace) |
+| 13 | composer draft carry-over | text carried; cancel restores it exactly (Review: text stays in the composer through image mode and its cancel) |
 | 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
 | 15 | two providers in one group | both prices quoted, total is their sum, one POST carrying both ids |
 | 16 | option one selected model cannot price | submission disabled; re-enabled when the option changes back |
