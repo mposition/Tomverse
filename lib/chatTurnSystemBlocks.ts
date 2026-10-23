@@ -38,12 +38,6 @@ import {
   type ImageArtifactState,
 } from "@/lib/imageCapabilityPrompt";
 import {
-  classifyImageIntent,
-  l0ImageIntent,
-  type ImageIntentClass,
-} from "@/lib/imageIntentSignals";
-import { normalizeServerImageIntentInput } from "@/lib/imageIntentInput";
-import {
   ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
   ARTIFACT_TOOL_DEFINITION_TOKENS,
   planGeneratedArtifactTool,
@@ -97,8 +91,6 @@ export type ChatTurnSystemBlocksInput = {
    */
   appManagedSearchEnabled: boolean;
   turnAttachments: readonly TurnAttachmentDescriptor[];
-  /** The user's own text for this turn -- the classifier's only text input. */
-  promptText: string;
   /** `feature.imageGenerationEnabled`, read from the cached snapshot. */
   imageGenerationFlagEnabled: boolean;
   /** `planAllowsImageGeneration(tier)` for this caller. */
@@ -131,7 +123,6 @@ export type ChatTurnSystemBlocks = {
   artifactPlan: ArtifactToolPlan | null;
   /** Empty on a deep-research turn. */
   imageCapabilityPrompt: string;
-  imageIntentClass: ImageIntentClass;
   /**
    * Whether this turn can reach the live web, and the paragraph that follows
    * from it (`lib/webSearchCapabilityPrompt.ts`). Empty on a searching turn
@@ -178,7 +169,6 @@ export const buildChatTurnSystemBlocks = (
     return {
       artifactPlan: null,
       imageCapabilityPrompt: "",
-      imageIntentClass: "none",
       // Deep research searches by construction, so it is not a turn that has
       // to explain being unable to.
       webSearchTurnState: "searching",
@@ -201,15 +191,7 @@ export const buildChatTurnSystemBlocks = (
     turnAttachments: input.turnAttachments,
   });
 
-  const imageIntentClass = classifyImageIntent(
-    normalizeServerImageIntentInput({
-      text: input.promptText,
-      attachments: input.turnAttachments,
-    })
-  );
-
   const imageCapabilityPrompt = buildImageCapabilitySystemPrompt({
-    intent: l0ImageIntent(imageIntentClass),
     imageHandoff: resolveImageHandoffState({
       flagEnabled: input.imageGenerationFlagEnabled,
       isAuthenticated: input.isAuthenticated,
@@ -284,7 +266,6 @@ export const buildChatTurnSystemBlocks = (
   return {
     artifactPlan,
     imageCapabilityPrompt,
-    imageIntentClass,
     webSearchTurnState,
     webSearchCapabilityPrompt,
     systemMessages,

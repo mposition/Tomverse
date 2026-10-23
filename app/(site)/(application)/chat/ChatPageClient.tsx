@@ -148,6 +148,7 @@ import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageIntent } from "@/lib/chatImageIntentClient";
 import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
@@ -679,8 +680,10 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
-  /** The image-intent call already answered "chat" for this exact draft. */
+  /** The image-intent call already answered for this exact draft. */
   imageIntentChecked?: boolean;
+  /** Answer this send with an image in the conversation (lib/chatImageTurn.ts). */
+  imageTurn?: ChatImageTurnRequest;
   reviewRouteChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
@@ -2386,6 +2389,15 @@ export function ChatPageClient({
       });
   }, [isGuestMode]);
   const currentAccessPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
+  // Whether a composer send here asks the image-intent model first and hands
+  // an image request to the image workspace (lib/chatImageIntent.ts). The
+  // send gate in `handleGlobalSubmit` reads this answer.
+  const imageIntentRoutedOnSend =
+    chatImageIntentEnabled &&
+    !isGuestMode &&
+    imageGenerationEnabled &&
+    planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
+    mountedSurface === "chat";
   const planLockedModelIds = useMemo(
     () =>
       selectedModels.filter((modelId) => {
@@ -5793,25 +5805,17 @@ export function ChatPageClient({
       return;
     }
     /*
-      A composer send that asks for a picture goes to the image workspace
-      instead of to chat, decided by one small model call before anything is
-      saved (lib/chatImageIntent.ts). It is the image-intent chip's handoff,
-      taken on the user's behalf: no server row, the draft comes back on
-      cancel, and the workspace generates on arrival only for an account that
-      turned that on beside the price -- otherwise it waits on the price for
-      one press. Any failure or "no" falls through to the ordinary send.
-
-      In Review the models already chosen for the comparison make the image:
-      each one's maker's image model, side by side, with only the preset left
-      to the triage. Chat lets the triage pick the model as well.
+      A composer send that asks for a picture is answered with an image in
+      this conversation instead of text, decided by one small model call
+      before anything is saved (lib/chatImageIntent.ts). Any failure or "no"
+      falls through to the ordinary text send.
     */
     if (
       options === undefined &&
-      chatImageIntentEnabled &&
-      !isGuestMode &&
-      imageGenerationEnabled &&
-      planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
-      mountedSurface === "chat" &&
+      imageIntentRoutedOnSend &&
+      // An Auto turn is asked on the server, beside its router call
+      // (app/api/chat/route.ts), so it does not wait for this call first.
+      selectionModeRef.current !== "auto" &&
       !isImageDraftActiveRef.current &&
       attachments.length === 0 &&
       inputValue.trim().length > 0
@@ -5824,7 +5828,11 @@ export function ChatPageClient({
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
-        decision = await askChatImageIntent(intentText);
+        // The conversation lets a follow-up ("make it bluer") find the
+        // image it changes.
+        decision = await askChatImageIntent(intentText, {
+          conversationId: currentChatIdRef.current,
+        });
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
@@ -5852,18 +5860,24 @@ export function ChatPageClient({
       ) {
         return;
       }
-      if (decision.image) {
-        // The triage's models and preset seed the workspace; a choice the
-        // catalogue cannot honour falls back to its defaults there.
-        handleStartImageDraft(intentText, undefined, {
-          fromImageRequest: true,
-          modelIds: decision.modelId ? [decision.modelId] : undefined,
-          preset: decision.preset ?? undefined,
-        });
-        return;
-      }
       // Re-entered through the ref so the ordinary send runs on current state.
-      return handleGlobalSubmitRef.current({ imageIntentChecked: true });
+      // An image request is still an ordinary send -- the question is saved
+      // and the conversation created exactly as for text -- and only its
+      // answer differs: an image in the conversation, made by the triage's
+      // model and preset (owner decision 2026-10-20: Chat needs no image
+      // workspace and asks no confirmation).
+      return handleGlobalSubmitRef.current({
+        imageIntentChecked: true,
+        ...(decision.image
+          ? {
+              imageTurn: {
+                modelIds: decision.modelId ? [decision.modelId] : [],
+                preset: decision.preset,
+                ...(decision.prompt ? { prompt: decision.prompt } : {}),
+              },
+            }
+          : {}),
+      });
     }
     const waitForCommittedAutoScope = async (
       expectedConversationId: string,
@@ -6672,16 +6686,27 @@ export function ChatPageClient({
         return true;
       };
       if (!chatSendIsCurrent()) return;
-      const preflight = await runComparisonPreflight({
-        comparisonId,
-        conversationId: activeChatId,
-        prompt: authoredPrompt,
-        promptAttachments,
-        modelIds: activeModelIds,
-        ...(options?.webSearchOverride
-          ? { webSearchMode: options.webSearchOverride }
-          : {}),
-      });
+      /*
+        An image turn never reaches /api/chat (lib/chatImageTurn.ts), so it
+        takes none of the text path's preparation: the preflight would reserve
+        a Chat concurrency slot and request capacity that nothing claims or
+        returns (chat-concurrency-and-identity.md §3), and a memory context
+        bundle would be prepared for a prompt no text model reads. The image
+        reservation applies its own gates.
+      */
+      const imageTurnSend = Boolean(options?.imageTurn) && activeModelIds.length === 1;
+      const preflight = imageTurnSend
+        ? { allowed: true as const, admissionToken: null, contextBundle: null }
+        : await runComparisonPreflight({
+            comparisonId,
+            conversationId: activeChatId,
+            prompt: authoredPrompt,
+            promptAttachments,
+            modelIds: activeModelIds,
+            ...(options?.webSearchOverride
+              ? { webSearchMode: options.webSearchOverride }
+              : {}),
+          });
       if (!preflight.allowed || !chatSendIsCurrent()) return;
       // The comparison preflight prices the whole set and hands back one
       // bundle for it. A single-model send never had a preparation step, so
@@ -6692,7 +6717,9 @@ export function ChatPageClient({
           ? ("comparison" as const)
           : ("single" as const);
       const contextBundle =
-        contextLayout === "comparison"
+        imageTurnSend
+          ? null
+          : contextLayout === "comparison"
           ? preflight.contextBundle
           : await prepareChatContextBundle({
               conversationId: isGuestMode ? null : activeChatId,
@@ -7236,6 +7263,12 @@ export function ChatPageClient({
         ...(contextBundle ? { contextBundle } : {}),
         ...(promptRefinerDecisionForSend
           ? { promptRefinerDecision: promptRefinerDecisionForSend }
+          : {}),
+        // One answer per question: every panel named in modelIds consumes
+        // this payload, and each image turn reserves its own paid group, so
+        // a send made for more than one panel never carries one.
+        ...(imageTurnSend && options?.imageTurn
+          ? { imageTurn: options.imageTurn }
           : {}),
       });
       if (skipAutoForThisTurn) setPromptRefinerSkipAutoScope(null);

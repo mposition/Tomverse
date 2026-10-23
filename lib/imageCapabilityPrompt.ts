@@ -15,15 +15,14 @@
  *
  *   the app never regresses silently to text.
  *
- * ## Assembly is exclusion, not correction
+ * ## Assembly
  *
- * A turn carrying an attached image gets the editing paragraph *instead of*
- * the handoff and SVG paragraphs, not after them. Loading all three and
- * relying on the last to win hands the model contradictory instructions and
- * hopes for an ordering effect.
+ * The block does not depend on what the user typed. The rule-based intent
+ * classifier that used to pick an editing or an imperative-SVG paragraph was
+ * removed 2026-10-20: the LLM judgement (`lib/chatImageIntent.ts`) decides
+ * routing, and this prompt is the same for every turn in a given state.
  *
- *   edit_or_reference:  CORE + EDIT_LIMITATION
- *   otherwise:          CORE + HANDOFF[state] + ARTIFACT[state]
+ *   CORE + HANDOFF[state] + ARTIFACT[state]
  *
  * ## What CORE may and may not deny
  *
@@ -39,8 +38,6 @@
  * testing across every combination, and a decision reachable only through a
  * provider call is a decision nobody tests.
  */
-
-import type { L0ImageIntent } from "@/lib/imageIntentSignals";
 
 /**
  * Whether this viewer can reach image generation at all, and if not, why.
@@ -69,7 +66,6 @@ export const IMAGE_ARTIFACT_STATES = ["unavailable", "sign_in", "available"] as 
 export type ImageArtifactState = (typeof IMAGE_ARTIFACT_STATES)[number];
 
 export type ImageCapabilityPromptInput = {
-  intent: L0ImageIntent;
   imageHandoff: ImageHandoffState;
   artifact: ImageArtifactState;
 };
@@ -139,8 +135,8 @@ export const IMAGE_CAPABILITY_CORE = [
  * without inventing another path" is the whole answer.
  */
 const HANDOFF_EXISTS = [
-  "Image generation exists in this app, and the app itself offers it beside",
-  "this answer when it applies. Do not describe it, do not explain how to",
+  "Image generation exists in this app, outside this answer. Do not",
+  "describe it, do not explain how to",
   "reach it, and never present it as an option for the user to pick from a",
   "list -- you cannot navigate there, so a user who chooses it from your list",
   "has been sent nowhere.",
@@ -168,57 +164,6 @@ export const IMAGE_ARTIFACT_FRAGMENT = [
   "it.",
 ].join("\n");
 
-/**
- * The same alternative, on a turn that already asked for one.
- *
- * The paragraph above offers; this one instructs, and the difference is a
- * wasted turn. A request for an infographic reached a model that held the file
- * tool, and the answer was a numbered list of three formats ending in "which
- * would you like?" -- so the person who had already said "draw it" had to
- * choose again and pay for a second turn to get what the first one could have
- * produced.
- *
- * Offering was not a rule violation: the artifact prompt says to call the tool
- * when a *file* is asked for, and nobody asking for an infographic says the
- * word "file". This paragraph closes that gap for the one class where the
- * answer is unambiguous -- a chart, a diagram, an infographic is a picture
- * made of text, which is exactly what this app can render exactly and a
- * text-to-image model cannot.
- *
- * It does not reach a raster request. Someone asking for a photograph or an
- * illustration wants neither an SVG nor a lecture about one.
- *
- * "Call the tool before you speak" is deliberately not repeated here. The
- * artifact block in the same request already says it, and a second copy is
- * priced input that adds nothing -- "after the file exists" carries the same
- * ordering in four words.
- */
-export const IMAGE_ARTIFACT_MAKE_FRAGMENT = [
-  "The user has asked for a chart, a diagram or an infographic. Make it now,",
-  "with the file tool, as an SVG -- do not ask which format they would prefer",
-  "and do not offer a list of options, because they have already said what",
-  "they want and asking costs them another turn.",
-  "",
-  "It arrives as a file the user downloads rather than a picture drawn inside",
-  "the message. Say that once, after the file exists.",
-].join("\n");
-
-/**
- * The attachment branch.
- *
- * Scoped to the workspace, which is what the policy actually settles: the
- * workspace is text-to-image only. It is not scoped to "this app", because
- * chat models do read attached images, and the last sentence keeps that door
- * open -- it is what stops a question *about* a picture from being answered
- * with a refusal.
- */
-export const IMAGE_EDIT_LIMITATION_FRAGMENT = [
-  "This turn carries an image the user attached. The image-generation",
-  "workspace cannot edit an attached image or use one as a reference; it",
-  "starts from text only. Say that plainly rather than sending the user",
-  "there. You may still look at the attachment and answer questions about it.",
-].join("\n");
-
 /* ------------------------------------------------------------------------ */
 /* Assembly                                                                   */
 /* ------------------------------------------------------------------------ */
@@ -232,19 +177,11 @@ export const IMAGE_EDIT_LIMITATION_FRAGMENT = [
 export const buildImageCapabilitySystemPrompt = (
   input: ImageCapabilityPromptInput
 ): string => {
-  if (input.intent === "edit_or_reference") {
-    return [IMAGE_CAPABILITY_CORE, IMAGE_EDIT_LIMITATION_FRAGMENT].join("\n\n");
-  }
-  // The imperative paragraph only where it is both right and possible: the
-  // request is a text-dense visual *and* the file tool is really registered.
-  // With no tool there is nothing to instruct, and CORE's "state the
+  // The file paragraph only where it is possible: the file tool is really
+  // registered. With no tool there is nothing to offer, and CORE's "state the
   // limitation without inventing another path" is the whole answer.
   const artifactFragment =
-    input.artifact !== "available"
-      ? ""
-      : input.intent === "text_heavy_visual"
-        ? IMAGE_ARTIFACT_MAKE_FRAGMENT
-        : IMAGE_ARTIFACT_FRAGMENT;
+    input.artifact === "available" ? IMAGE_ARTIFACT_FRAGMENT : "";
   return [
     IMAGE_CAPABILITY_CORE,
     IMAGE_HANDOFF_FRAGMENTS[input.imageHandoff],

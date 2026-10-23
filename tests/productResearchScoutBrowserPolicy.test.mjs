@@ -144,21 +144,49 @@ test("a launch failure says whether the sandbox ran, without the URLs Chromium p
     cause: "browser_missing",
     fatal: null,
     source: null,
+    fatalPrefix: null,
   });
   assert.deepEqual(launchFailure(new Error("browserType.launch: Target page, context or browser has been closed")), {
     cause: "launch_failed",
     fatal: null,
     source: null,
+    fatalPrefix: null,
   });
-  assert.deepEqual(launchFailure("boom"), { cause: "launch_failed", fatal: null, source: null });
+  assert.deepEqual(launchFailure("boom"), { cause: "launch_failed", fatal: null, source: null, fatalPrefix: null });
 
-  // What Railway hosts that refuse the sandbox's setup print (2026-10-20, 2026-10-21).
+  // A refused sandbox in the older location format, file.cc(123).
   const refused = launchFailure(
     new Error(
       "browserType.launch: Target page, context or browser has been closed\n[pid=7][err] [1021/045759.360:FATAL:credentials.cc(132)] Check failed: . : Permission denied (13)",
     ),
   );
-  assert.deepEqual(refused, { cause: "sandbox_refused", fatal: "Check failed: . : Permission denied (13)", source: "credentials.cc(132)" });
+  assert.deepEqual(refused, {
+    cause: "sandbox_refused",
+    fatal: "Check failed: . : Permission denied (13)",
+    source: "credentials.cc(132)",
+    fatalPrefix: null,
+  });
+  // And in the newer one, path/to/file.cc:123, which Chromium 156 prints.
+  const newer = launchFailure(
+    new Error("[pid=7][err] [1021/102815.405:FATAL:sandbox/linux/services/credentials.cc:132] Check failed: . : Permission denied (13)"),
+  );
+  assert.deepEqual(newer, {
+    cause: "sandbox_refused",
+    fatal: "Check failed: . : Permission denied (13)",
+    source: "credentials.cc(132)",
+    fatalPrefix: null,
+  });
+  // The location exactly as a local Chromium 156 printed one (2026-10-21), on Windows separators.
+  assert.equal(
+    launchFailure(new Error(String.raw`[1021/203045.654:FATAL:base\allocator\scheduler_loop_quarantine_config.cc:199] Check failed: .`)).source,
+    "scheduler_loop_quarantine_config.cc(199)",
+  );
+  // A location that cannot be read is kept, as path characters only, for the next run's diagnosis.
+  const unread = launchFailure(new Error("[pid=7][err] [1021/102815.405:FATAL:<somewhere odd>] Check failed: . : Permission denied (13)"));
+  assert.equal(unread.cause, "launch_failed");
+  assert.equal(unread.source, null);
+  assert.equal(unread.fatalPrefix, "somewhereodd");
+  assert.equal(launchFailure(new Error("[x:FATAL:] Check failed: .")).fatalPrefix, null);
   // The same words from a file outside the sandbox setup are not a refused sandbox.
   const elsewhere = launchFailure(
     new Error("[pid=7][err] [1021/045759.360:FATAL:platform_shared_memory_region_posix.cc(212)] Check failed: . : Permission denied (13)"),
