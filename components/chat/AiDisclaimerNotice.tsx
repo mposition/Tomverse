@@ -46,11 +46,10 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
 
   return (
     <>
-      {/* The mobile dock's last row, so the one place the bottom safe-area
-          inset is paid (MOBILE-KB-INSET-01; ChatInput's bar adds none). */}
+      {/* The dock reserves the safe area after the last visible footer row. */}
       <p
         data-testid={testId}
-        className="flex shrink-0 flex-wrap items-center justify-center gap-x-1.5 px-2 pb-[calc(0.4rem+env(safe-area-inset-bottom))] pt-1 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
+        className="flex shrink-0 flex-wrap items-center justify-center gap-x-1.5 px-2 pb-[0.4rem] pt-1 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
       >
         {/* COMPOSER-REFLOW-01. Wrapped, never truncated. What a narrow line
             cut off was the end of the sentence -- "do not enter sensitive
