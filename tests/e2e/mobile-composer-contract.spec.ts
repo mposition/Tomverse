@@ -952,7 +952,7 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
         await expectComposerContract(page, `${lang} 200% ${mode} scaling`);
         const modelsBox = (await composer.getByTestId("composer-review-models").boundingBox())!;
         const textareaBox = (await composer.getByTestId("chat-textarea").boundingBox())!;
-        expect(modelsBox.y + modelsBox.height).toBeLessThanOrEqual(textareaBox.y + 0.5);
+        expect(modelsBox.y).toBeGreaterThanOrEqual(textareaBox.y + textareaBox.height - 0.5);
         // Normal-height docks retain the canonical product navigation even at narrow zoom.
         await expect(composer.getByTestId("chat-product-switcher")).toBeVisible();
       });

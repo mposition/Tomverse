@@ -4843,7 +4843,7 @@ export function ChatPageClient({
         // Cross-surface navigation unmounts this workspace and the identity
         // cleanup clears the pending create; in-place selection clears it here.
         localComparisonResponsesRef.current.clear();
-        reviewWorkspace.clearProviders();
+        if (id !== currentChatIdRef.current) reviewWorkspace.clearProviders();
         pendingCreatedChatRef.current = null;
         setPendingCreatedDraftScope(null);
         latestLocalComparisonPromptRef.current = null;

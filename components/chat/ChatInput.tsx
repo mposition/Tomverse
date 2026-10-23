@@ -3040,7 +3040,7 @@ export function ChatInput({
   const keyboardInset = useKeyboardInset();
   const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
-  const footerModelPicker = review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker) && (
+  const footerModelPicker = review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || !isStudio) && (
             <button
               ref={modelMenuButtonRef}
               type="button"
@@ -3178,7 +3178,8 @@ export function ChatInput({
                   }}
                 />
               )}
-              {showReviewContextPicker && review?.mode !== "easy" && !isStudio && (
+              {review && !isStudio && <ReviewModeSwitcher review={review} compact locked={productSwitchDisabled || isSending || draftLocked} />}
+              {showReviewContextPicker && review?.mode !== "easy" && !isStudio && !review && (
                 <div
                   data-testid="composer-review-models"
                   className="flex h-11 min-w-0 items-center md:[@media(pointer:fine)]:h-8"
@@ -3704,7 +3705,7 @@ export function ChatInput({
           </p>
         )}
         {review?.mode === "easy" && review.imagePromptMode && <div className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
-        {review && showProductSwitcher && <ReviewModeSwitcher review={review} composer locked={productSwitchDisabled || isSending || draftLocked} />}
+        {review && showProductSwitcher && isStudio && <ReviewModeSwitcher review={review} composer locked={productSwitchDisabled || isSending || draftLocked} />}
         {review && showReviewModelRow && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels}
           canSelectModel={id => { const model = AVAILABLE_MODELS.find(m => m.id === id); return Boolean(model && canUseModelWithPlan(currentPlan, model)); }} />}
         <div data-testid="composer-textarea-row" className="composer-prompt-surface flex w-full min-w-0">
@@ -3790,7 +3791,10 @@ export function ChatInput({
           </button>
           {showWebSearchInFooter && webSearchChip}
           {isStudio && !webSearchState.isVisible && <button type="button" data-testid="composer-web-search-shortcut" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
-          {!isStudio && footerModelPicker}
+          {!isStudio && (review && footerModelPicker ? <div data-testid="composer-review-models" className="flex min-w-0">
+            {footerModelPicker}
+            <span className="sr-only">{activeSelectedModelObjects.map(model => <span key={model.id} data-testid="composer-review-selected-model" data-model-id={model.id}>{model.name}</span>)}</span>
+          </div> : footerModelPicker)}
         </div>
 
         {/*

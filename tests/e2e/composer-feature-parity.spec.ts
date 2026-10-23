@@ -166,6 +166,53 @@ test("Review mode controls preserve the draft and the product switch returns to 
   await expect(page).toHaveURL(/\/chat\?lang=en/);
 });
 
+for (const width of [1440, 390]) test(`Classic ${width}px mode selector keeps the draft and configured providers`, { tag: "@ui-risk" }, async ({ page }) => {
+  await prepareReviewDefaults(page, width);
+  await page.getByTestId("chat-textarea").fill("Keep the Classic Review draft.");
+  await page.getByTestId("review-appearance").selectOption("classic");
+  const mode = page.getByTestId("composer-review-mode");
+  await mode.selectOption("professional");
+  await expect(page.getByTestId("chat-input").getByTestId("composer-model-select")).toBeVisible();
+  await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep the Classic Review draft.");
+  await mode.selectOption("easy");
+  await expect(page.locator(".review-participant-list>button")).toContainText(["Anthropic"]);
+  await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep the Classic Review draft.");
+});
+
+test("selecting the current history row preserves an unsent Easy provider choice", { tag: "@ui-risk" }, async ({ page }) => {
+  await prepareReviewDefaults(page);
+  const selectCurrent = async () => {
+    await page.locator(".review-navigation-history").click();
+    const history = page.getByRole("dialog", { name: "History", exact: true });
+    await history.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="qa-conversation"]').click();
+    await page.keyboard.press("Escape");
+  };
+  await selectCurrent();
+  await expect(page.locator(".review-participant-list>button")).toContainText(["OpenAI"]);
+  await page.locator(".review-participants-heading").click();
+  await page.locator(".review-participant-list>button").filter({ hasText: "Google" }).click();
+  await page.locator(".review-participant-list>button").filter({ hasText: "OpenAI" }).click();
+  await page.locator(".review-participants-heading").click();
+  await page.getByTestId("chat-textarea").fill("Keep this provider and draft.");
+  await selectCurrent();
+  await expect(page.locator(".review-participant-list>button")).toContainText(["Google"]);
+  await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep this provider and draft.");
+});
+
+test("an account limited to one provider can replace its Easy selection", { tag: "@ui-risk" }, async ({ page }) => {
+  await prepareReviewDefaults(page);
+  await mockUserUsage(page, { plan: "Max", limits: { maxModels: 1, creditsMonth: 10000 } });
+  await page.reload();
+  await expect(page.locator(".review-participants-heading")).toContainText("1 / 1");
+  await page.locator(".review-participants-heading").click();
+  const google = page.locator(".review-participant-list>button").filter({ hasText: "Google" });
+  await expect(google).toBeEnabled();
+  await google.click();
+  await expect(google).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".review-participants-heading").click();
+  await expect(page.locator(".review-participant-list>button")).toContainText(["Google"]);
+});
+
 test("personal Easy defaults apply to the next Review and survive reload", { tag: "@ui-risk" }, async ({ page }, info) => {
   const state = await prepareReviewDefaults(page);
   const card = await choosePersonalGoogle(page);

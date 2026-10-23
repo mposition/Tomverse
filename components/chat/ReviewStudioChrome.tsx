@@ -27,11 +27,12 @@ function Icon({ file }: { file: string }) {
   return <Image loading="eager" unoptimized width={22} height={22} src={`/review-studio/${file}.svg`} alt="" aria-hidden="true" />;
 }
 
-export function ReviewModeSwitcher({ review, locked = false, composer = false }: {
-  review: ReviewWorkspaceControls; locked?: boolean; composer?: boolean;
+export function ReviewModeSwitcher({ review, locked = false, composer = false, compact = false }: {
+  review: ReviewWorkspaceControls; locked?: boolean; composer?: boolean; compact?: boolean;
 }) {
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
+  if (compact) return <select data-testid="composer-review-mode" aria-label={c.mode} value={review.mode} disabled={locked || review.pending || review.ready === false} onChange={event => review.setMode(event.target.value === "easy" ? "easy" : "professional")} className="h-11 w-32 min-w-0 max-w-full cursor-pointer rounded-lg border-0 bg-zinc-100 px-2 text-xs font-medium text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-100 md:[@media(pointer:fine)]:h-8"><option value="easy" disabled={!review.easyAvailable}>Easy</option><option value="professional">Professional</option></select>;
   return <div className={`review-mode${composer ? " review-composer-mode" : ""}`} data-testid={composer ? "composer-review-mode" : undefined} role="group" aria-label={c.mode}>
     {(["easy", "professional"] as const).map(mode => <button key={mode} type="button" aria-pressed={review.mode === mode} disabled={locked || review.pending || review.ready === false || (mode === "easy" && !review.easyAvailable)} title={mode === "easy" && !review.easyAvailable ? c.unavailable : undefined} onClick={() => review.setMode(mode)}>{mode === "easy" ? "Easy" : "Professional"}</button>)}
   </div>;
@@ -138,10 +139,10 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
       {(review.mode === "easy" ? expanded ? options : providers : selectedModels).map(id => {
         const model = review.mode === "easy" ? models.find(m => m.provider === id) : models.find(m => m.id === id);
         const selected = providers.includes(id);
-        return <button type="button" key={id} aria-pressed={review.mode === "easy" ? selected : undefined} disabled={review.pending || review.ready === false || (review.mode === "easy" && !selected && providers.length >= review.maxProviders)} onClick={event => {
+        return <button type="button" key={id} aria-pressed={review.mode === "easy" ? selected : undefined} disabled={review.pending || review.ready === false || (review.mode === "easy" && !selected && review.maxProviders > 1 && providers.length >= review.maxProviders)} onClick={event => {
           if (review.mode === "professional") { openChatModelPicker(event.currentTarget); return; }
           if (selected && providers.length <= 1) return;
-          review.setProviders(selected ? providers.filter(p => p !== id) : [...providers, id]);
+          review.setProviders(selected ? providers.filter(p => p !== id) : review.maxProviders === 1 ? [id] : [...providers, id]);
         }}><ModelLogo model={model} size="md" /><span><strong>{review.mode === "easy" ? reviewProviderName(id) : model?.name ?? id}</strong><small>{review.mode === "easy" ? c.automatic : model ? reviewProviderName(model.provider) : ""}</small></span><Check size={14} className={!selected && review.mode === "easy" ? "invisible" : ""} /></button>;
       })}
     </div>

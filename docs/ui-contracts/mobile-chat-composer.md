@@ -52,9 +52,15 @@ size: a `4rem` minimum input row inside a normal-state card no taller than
 its normal-state card is no taller than `10.25rem`. These minima remain
 rem-scaled so browser text scaling preserves the complete visible lines.
 
+Classic Review keeps its Composer-local Easy/Professional selector in the
+existing product context row and its model picker in the tools row. It must
+preserve the density budgets above and the answer canvas. Studio uses the
+segmented mode selector above the prompt in its separate Composer panel.
+
 The normal compact context row keeps canonical Chat/Review navigation and its
 mode control outside the input: Smart Adaptive ON/OFF for Chat when offered,
-or the real selected-model count and existing picker action for Review. When
+or the Easy/Professional selector for Review, with the real selected-model
+count and existing picker action in its tools row. When
 the measured visible viewport reports the on-screen keyboard or landscape
 compaction, that context row may fold; the footer model picker and the picker's
 Smart Adaptive switch remain the accessible return path. In that folded state,
@@ -65,7 +71,7 @@ the base input card is no taller than `7.5rem` before exceptional status rows.
 The mobile composer must preserve this vertical structure:
 
 1. Optional compact context row: product navigation plus Smart Adaptive or
-   Review's selected-model count
+   Review's Easy/Professional selector
 2. Optional exception/status rows
 3. Dedicated full-width textarea row
 4. Tools/model and credit/submit groups
@@ -76,7 +82,7 @@ Optional rows may be compacted or conditionally hidden. The textarea row may not
 The normal mobile state keeps its compact context row at supported portrait
 heights, including a 680px viewport. Keyboard-open and landscape compaction may
 fold that row as described above; a merely shorter portrait viewport does not.
-Review discloses the actual selected count in the compact context action rather
+Review discloses the actual selected count in its compact tools action rather
 than repeating every model chip above the textarea. The shell's model strip
 continues to identify each selected model, and the same canonical picker owns
 selection changes.

@@ -97,14 +97,16 @@ The owner requested consistent Chat/Review controls. The editable proposal is
 
 - Both products expose canonical Chat/Review links in the regular composer.
   Existing navigation admission and compact mobile drawer fallbacks remain.
-- Review's Easy/Professional control and participant/model chooser precede the
-  prompt. The header does not duplicate the mode switch; the Classic mobile
+- Studio Review's Easy/Professional control and participant/model chooser precede
+  the prompt. Classic uses an inline mode select in the existing product row and
+  the model picker in its tools row ([Figma compact variant](https://www.figma.com/design/FbqVoHReAan0aFSkLTorCX?node-id=8-2)),
+  preserving the answer canvas. The header does not duplicate the mode switch; the Classic mobile
   drawer retains the shared switch as a compact fallback.
 - Voice stays immediately left of Send/Stop in the shared action group. The
   action row reserves at least 12px above it. Both products omit the persistent
   research shortcut; their existing gated `+` menu still offers Deep Research
   where supported. Chat's model picker occupies its own footer row; Review's
-  Professional chooser above the prompt avoids a second footer model picker.
+  Studio Professional chooser above the prompt avoids a second footer model picker.
 - The prompt uses an inset neutral focus underline, including forced colors,
   instead of outlining the whole composer in blue.
 - Easy defaults are separate from Professional's default model combination.
