@@ -1,0 +1,36 @@
+[Unit]
+Description=CI auto-fix: dispatch queued patches to the PR CI Auto-Fix workflow
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Its own transient account, never the review account: the model runs as
+# review and could be asked by a CI log or a branch to print a file or a
+# process environment that account can read. This one holds the token.
+DynamicUser=yes
+# Read by systemd as root (keep the file root-owned, mode 600):
+# PR_CI_AUTO_FIX_DISPATCH_TOKEN, a token with Actions read and write only.
+EnvironmentFile=/etc/pr-ci-auto-fix/dispatch.env
+Environment=PR_CI_AUTO_FIX_REPO=mposition/Tomverse
+Environment=PR_CI_AUTO_FIX_OUTBOX=/var/lib/pr-ci-auto-fix/outbox
+# The sent ledger; systemd sets STATE_DIRECTORY.
+StateDirectory=pr-ci-auto-fix-sender
+# A root-owned copy fetched from GitHub, never the review account's checkout:
+# code that account can edit must not run with this token. The file imports
+# only Node built-ins, so nothing else is loaded from anywhere.
+ExecStart=/usr/bin/node /usr/local/lib/pr-ci-auto-fix-sender/pr-ci-auto-fix-sender.mjs
+Restart=on-failure
+RestartSec=30
+# 64 = the settings cannot run; restarting would not change them.
+RestartPreventExitStatus=64
+NoNewPrivileges=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

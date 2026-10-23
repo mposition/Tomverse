@@ -1,0 +1,10 @@
+[Unit]
+Description=CI auto-fix pass every five minutes
+
+[Timer]
+OnBootSec=5min
+# Counted from the end of the last pass, so passes never overlap.
+OnUnitInactiveSec=5min
+
+[Install]
+WantedBy=timers.target

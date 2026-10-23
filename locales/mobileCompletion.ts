@@ -4,7 +4,6 @@ const en = {
   sources: "Sources", download: "Save file", saving: "Saving…", downloadFailed: "The file could not be saved. Check your connection and try again.",
   fileFailed: "This file could not be created. Ask for it again.", signIn: "Sign in to create files.",
   offline: "You are offline. Your draft stays on this device until you reconnect.",
-  install: "Install Tomverse", installIos: "To install, open Share in Safari and choose Add to Home Screen.",
   account: "Account and data", export: "Export my data", delete: "Delete my account", confirmation: "Type DELETE MY ACCOUNT to confirm",
   deleteDetail: "Your account will be scheduled for deletion using the existing account deletion process. This signs you out on every device.",
   reauthenticate: "Sign in again before exporting data or deleting your account.", reauthenticateAction: "Sign in again", cancel: "Cancel",

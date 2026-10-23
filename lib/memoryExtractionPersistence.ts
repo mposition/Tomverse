@@ -1,4 +1,5 @@
 import "server-only";
+import { memoryConflictKey } from "@/lib/memoryConflictCore";
 
 import type { Prisma } from "@prisma/client";
 import { verifyExternalMessageEvidence } from "@/lib/memoryEvidenceValidation";
@@ -7,7 +8,6 @@ import {
     MEMORY_RETRIEVAL_VERSION,
     memoryRetrievalTerms,
 } from "@/lib/memoryRetrievalTerms";
-import { memoryStatementKey } from "@/lib/memoryValidatorCore";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 
 /**
@@ -181,7 +181,7 @@ export async function persistExtractionChunkDecisions(
                 // must not be able to opt itself out of individual review.
                 sensitivity: decision.validation.sensitivity,
                 confidence: decision.candidate.confidence,
-                conflictKey: `${decision.candidate.kind}:${memoryStatementKey(statement)}`,
+                conflictKey: memoryConflictKey(decision.candidate.kind, statement, decision.candidate.canonicalKey),
                 userEdited: false,
                 expiresAt: decision.candidate.expiresAt
                     ? new Date(decision.candidate.expiresAt)

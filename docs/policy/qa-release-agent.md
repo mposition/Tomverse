@@ -168,8 +168,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 ## 8. 병합 레인
 
 1. **범위.** develop(→ Railway `dev`)만 병합합니다. develop은 2026-10-13부터 `dev` 환경이 배포하고 staging(Test)은
-   `test` 브랜치를 배포합니다(`docs/ops/dev-test-lanes.md`). 한 번에 하나씩 병합하고, dev에 배포가 둘 이상 쌓이지 않게
-   합니다. **main(→ `production`)은 사람이 GitHub에서 병합합니다**(`.github/RELEASE_CHECKLIST.md`의 7.9절, `docs/policy/trace-feedback-automation.md`
+   `test` 브랜치를 배포합니다(`docs/ops/dev-test-lanes.md`). 한 번에 하나씩 병합하고, CI를 기다리는 dev 배포가 둘 이상 쌓이지
+   않게 합니다(이미 빌드 중인 배포 위에는 병합할 수 있음, 4항). **main(→ `production`)은 사람이 GitHub에서 병합합니다**(`.github/RELEASE_CHECKLIST.md`의 7.9절, `docs/policy/trace-feedback-automation.md`
    §9.3, `docs/policy/engineering-agent.md`의 승인 증거와 같음). 레인은 "main으로 향하는 열린 PR"(`mainPullRequestDecision()`이
    허용한 head)과 production 상태를 Admin에 표시만 합니다. **이 목록은 병합 준비 판정이 아닙니다** — hotfix의 7.9.2 항목이나
    각 자동화의 자기 게이트는 사람이 봅니다. 이 Agent는 auto-merge를 켜지 않습니다.
@@ -200,14 +200,20 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    병합 직전 상태로 되돌리는 절차, **적용되지 않고 실패로 남은** migration 행에만 `prisma migrate resolve --rolled-back`을
    쓰는 조건(이미 적용된 migration은 resolve로 되돌릴 수 없으므로 DB 복원이 답입니다), 복구 뒤 schema 비교(drift 0) 확인. 그
    runbook이 없으면 S-M2에 들어가지 않습니다.
-4. **hold와 추적.** dev 환경의 모든 Railway 서비스 중 하나라도 `WAITING`·`NEEDS_APPROVAL`·`QUEUED`·`INITIALIZING`·
-   `BUILDING`·`DEPLOYING`이면 병합하지 않습니다. 병합 직전에 다시 읽고 head를 고정해 병합합니다(3절의 `sha` 인자). develop을
-   배포하는 서비스 **전부**가 merge commit을 배포해야 완료이고, `FAILED`·`CRASHED`·`SKIPPED`는 실패입니다. **(버전 4) 완료와 실패는
-   merge train과 같은 `deploymentOutcome`의 `succeeded`·`failed`이고, 그 밖의 상태는 5항이 다룹니다.** 이 판정에 대해서는 앞 문장이
-   아니라 그 함수가 규범입니다.
+4. **hold와 추적.** dev 환경의 모든 Railway 서비스 중 하나라도 `WAITING`·`NEEDS_APPROVAL`·`QUEUED`·`INITIALIZING`이면
+   병합하지 않습니다(이미 `BUILDING`·`DEPLOYING`인 배포는 CI를 통과한 것이라 막지 않습니다). 병합 직전에 다시 읽고 head를 고정해
+   병합합니다(3절의 `sha` 인자). develop을 배포하는 서비스 **전부**가 merge commit을 배포해야 완료이고, `FAILED`·`CRASHED`·`SKIPPED`는
+   실패입니다. **(버전 4) 완료와 실패는 merge train과 같은 `deploymentOutcome`의 `succeeded`·`failed`이고, 그 밖의 상태는 5항이
+   다룹니다.** 이 판정에 대해서는 앞 문장이 아니라 그 함수가 규범입니다. **CI 통과로 다음 병합(운영자 결정 2026-10-23):** Railway는
+   commit의 check가 모두 통과해야 "Wait for CI" 배포를 빌드하므로, merge commit의 배포가 모든 서비스에서 `BUILDING`·`DEPLOYING`
+   이후로 넘어가면 레인은 시도를 성공으로 닫고(`ci_passed`) 빌드·배포를 기다리지 않고 다음 PR로 넘어갑니다(병합당 약 50분 → 약
+   35~40분). 그 뒤의 빌드·pre-deploy(migration) 실패는 develop을 배포하는 서비스 중 하나라도 최신 배포가 `FAILED`·`CRASHED`이면
+   레인이 새 병합을 하지 않고 `dev_deploy_failed`(종료 코드 1)로 멈추는 것으로 잡습니다. 다음 develop 배포가 성공하면 풀립니다.
+   판정은 develop을 배포하는 서비스 **전부**(`servicesDeployingBranch`)가 merge commit이나 그것을 담은 뒤의 commit을 CI 이후 단계로
+   배포 중이어야 하며, 아직 그 commit의 배포가 없는 서비스가 있으면 기다립니다(독립 검토 반영).
 5. **결과 불명.** 병합 전에 "시도 중"을 기록하고, 결과를 모르거나 배포가 실패하면 레인을 latch합니다. latch는 사람이 Admin에서
    풉니다(10절의 "사람의 latch 해제" 트랜잭션, Admin 행위로 같은 트랜잭션에 사람 감사). **레인당 시도는 하나입니다** — "시도 중" 행은 레인당 하나만 존재할 수 있게 DB가 강제하고(조건부 단일 점유), 두 회차가
-   겹쳐 둘 다 유휴를 읽어도 두 번째는 점유에 실패해 병합하지 않습니다. **(버전 4) 시도는 배포 결과가 나올 때까지 열려 있습니다.**
+   겹쳐 둘 다 유휴를 읽어도 두 번째는 점유에 실패해 병합하지 않습니다. **(버전 4) 시도는 배포 결과가 나올 때까지 열려 있습니다** — 2026-10-23부터 "결과"는 4항의 CI 통과(`ci_passed`)를 포함합니다.
    "레인당 하나"는 닫히지 않은 시도 전체(지시 발급됨, 소비됨, 병합됨·배포 대기)에 대한 DB 제약입니다. 시도는 다음처럼만 닫히거나 옮깁니다.
    - **병합 결과 성공**이면 GitHub가 돌려준 **merge commit SHA를 시도에 기록하고** "병합됨, 배포 대기"로 옮깁니다. 레인은 다음 PR을
      고르지 않습니다.

@@ -1,4 +1,4 @@
-import { readAmuxOperatingScopeReply } from "./ideaOperatingScopeCore.ts";
+import { readAmuxOperatingScopeReply, type AmuxOperatingScope } from "./ideaOperatingScopeCore.ts";
 
 /**
  * The Admin idea input, while session intake is on, offers the operating
@@ -9,7 +9,7 @@ import { readAmuxOperatingScopeReply } from "./ideaOperatingScopeCore.ts";
  */
 export type ScopeRepositoryRead =
   | { kind: "loading" }
-  | { kind: "ready"; repositories: string[] }
+  | { kind: "ready"; repositories: string[]; model?: AmuxOperatingScope["model"] }
   | { kind: "none" }
   | { kind: "error"; reauth: boolean };
 
@@ -19,7 +19,8 @@ export type ScopeRepositoryBlock = "loading" | "none" | "unavailable" | "empty";
 export function classifyScopeRepositoryRead(status: number, body: unknown): ScopeRepositoryRead {
   const reply = status >= 200 && status < 300 ? readAmuxOperatingScopeReply(body) : null;
   if (!reply) return { kind: "error", reauth: status === 428 };
-  return reply.state === "none" ? { kind: "none" } : { kind: "ready", repositories: reply.scope.repositories };
+  return reply.state === "none" ? { kind: "none" }
+    : { kind: "ready", repositories: reply.scope.repositories, model: reply.scope.model };
 }
 
 /** Everything is selected by default: the picked list is the scope minus what the operator unchecked. */

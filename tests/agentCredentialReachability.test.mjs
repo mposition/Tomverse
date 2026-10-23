@@ -826,7 +826,11 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // chained-event reason and two credentialed jobs. Both are owner-reviewed
 // exact-blob exclusions in lib/agentCredentialReviewedExclusions.ts, so the
 // excluded analysis still does not forbid everything.
-const POSTURE_DIGEST = "f17f6f634878";
+// 2026-10-23: the auto-fix moved its model to the AMUX server's subscription
+// CLI and became workflow_dispatch only. The propose job and the chained-event
+// reason left the baseline (publish stays, reached by no agent event), so its
+// two exclusions were removed rather than re-pinned. Nothing was added.
+const POSTURE_DIGEST = "81a4d32c337f";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();

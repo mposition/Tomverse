@@ -31,6 +31,30 @@ import {
 
 const [MODEL_A, MODEL_B, MODEL_C] = THREE_MODELS;
 
+test("answer feedback keeps its exact answer link and explicit assessment", async ({ page }) => {
+  let reported: Record<string, unknown> | null = null;
+  const readReport = (): Record<string, unknown> | null => reported;
+  await mockContextPreparation(page);
+  await page.route(url => url.pathname === "/api/feedback", async route => {
+    reported = route.request().postDataJSON();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ feedbackId: "qa-memory-report" }) });
+  });
+  const viewport = page.viewportSize() ?? DESKTOP_VIEWPORT;
+  await enterConversation(page, { theme: "light", lang: "en", viewport, selectedModels: [MODEL_A],
+    modelStub: { [MODEL_A]: { kind: "success", chunks: ["A remembered preference"], intervalMs: 5, memoryUsedCount: 1 } } });
+  await submitComposer(page, "Describe my preference", viewport.width);
+  const trigger = page.getByTestId("memory-answer-feedback");
+  await expect(trigger).toBeVisible();
+  const messageId = await trigger.locator("xpath=ancestor::*[@data-message-id][1]").getAttribute("data-message-id");
+  await page.evaluate(() => localStorage.setItem("tomverse_last_error_trace_id", "unrelated-previous-error"));
+  await trigger.click();
+  await page.getByTestId("feedback-message").fill("This answer remembered an incorrect preference.");
+  await page.getByTestId("feedback-submit").click();
+  await expect.poll(() => readReport()?.answerSignal).toBe("needs_improvement");
+  expect(readReport()?.messageId).toBe(messageId);
+  expect(readReport()?.traceId).toBeUndefined();
+});
+
 const ANSWER = "The answer that used memories.";
 const RETRIED_ANSWER = "The answer after the context was prepared again.";
 /** Only reachable through a retry: the first attempt is always refused. */

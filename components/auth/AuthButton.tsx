@@ -2,6 +2,10 @@
 "use client";
 
 import { UsagePercentGauge } from "@/components/chat/UsagePercentGauge";
+import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
+import { PwaInstallMenuItem } from "@/components/chat/PwaInstallMenuItem";
+import { usePwaInstall } from "@/components/chat/usePwaInstall";
+import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { signIn, useSession } from "next-auth/react";
 import { signOut } from "@/lib/signOutWithDraftCleanup";
 import Link from "next/link";
@@ -140,6 +144,7 @@ export function AuthButton({
     const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
+    const pwaInstall = usePwaInstall();
     const accountCallbackUrl = withChatLanguage(
         PRODUCT_SURFACE_PATH[currentProduct],
         globalLang
@@ -1332,6 +1337,10 @@ export function AuthButton({
                   <BarChart3 className="h-4 w-4 text-blue-500" />
                   {t("auth.analyticsSettings")}
                 </button>
+                <PwaInstallMenuItem install={pwaInstall} language={globalLang} onPrompt={() => {
+                  setIsAccountMenuOpen(false);
+                  requestAnimationFrame(() => accountMenuButtonRef.current?.focus());
+                }} />
                 {mobileUpgradePlan && accountUsage ? (
                   <UpgradeCtaLink
                     targetPlan={mobileUpgradePlan}
@@ -1703,6 +1712,7 @@ export function AuthButton({
 
                                 {activeSettingsTab === "ai" && (
                                     <div className="space-y-4">
+                                        <ReviewProviderDefaultsSettings key={session.user.id} />
                                         {/*
                                           Three decisions about what the models
                                           are told, in the order they take
@@ -2518,7 +2528,9 @@ export function AuthButton({
         so nothing is hidden or demoted to buy the height.
       */}
       <div className="flex flex-wrap gap-2">
+        <SidebarAccountRailButton currentProduct={currentProduct} placement="above" />
         <button
+          data-testid="guest-account-login"
           onClick={() => {
             trackProductEvent("cta_start_click", 0, {
               cta_location: "account_login",

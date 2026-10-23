@@ -287,6 +287,9 @@ async function mockMemoryApi(
         );
         return route.fulfill(json({ outcome: "deleted" }));
       }
+      if (route.request().method() === "GET") {
+        return route.fulfill(json({ memory: row, conflicts: state.rows.filter(peer => peer.id !== memoryId && peer.status === "active" && peer.conflictKey === row?.conflictKey) }));
+      }
       if (options.mutationsDisabled) return route.fulfill(disabledResponse);
       const body = route.request().postDataJSON() as Record<string, unknown>;
       state.patches.push({ memoryId, body });
@@ -307,9 +310,18 @@ async function mockMemoryApi(
         });
       }
       if (row) {
-        if (body.action === "approve") {
+        if (body.action === "resolve_conflict") {
+          const selected = body.expectedConflicts as Array<{ id: string }>;
+          for (const peer of state.rows.filter(peer => selected.some(value => value.id === peer.id))) {
+            if (body.resolution !== "keep_both" && body.resolution !== "keep_existing") peer.status = body.resolution === "expire_existing" ? "expired" : "superseded";
+          }
+          row.status = body.resolution === "keep_existing" ? "rejected" : "active";
+          if (body.resolution === "merge") row.statement = String(body.mergedStatement);
+        } else if (body.action === "approve") {
           row.status = "active";
           row.approvedAt = "2026-08-03T00:00:00.000Z";
+        } else if (body.action === "restore_grounds") {
+          row.status = "manual_review_required";
         } else if (body.action === "reject") {
           row.status = "rejected";
         } else if (body.action === "edit") {
@@ -423,7 +435,7 @@ test.describe("memory review settings", () => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
-      rows: [memoryRow("cand-1")],
+      rows: [memoryRow("cand-1", { conflictKey: "topic:preference:user.theme" }), memoryRow("old-1", { status: "active", conflictKey: "topic:preference:user.theme" })],
       conflictOnFirstApprove: true,
     });
     await openMemoryPage(page);
@@ -436,7 +448,7 @@ test.describe("memory review settings", () => {
     await expect(page.getByTestId("memory-review-empty")).toBeVisible();
     expect(api.patches[1]).toEqual({
       memoryId: "cand-1",
-      body: { action: "approve", resolveConflict: "supersede_existing" },
+      body: { action: "resolve_conflict", resolution: "replace_existing", expectedRevision: 1, expectedConflicts: [{ id: "old-1", revision: 1 }] },
     });
   });
 
@@ -712,4 +724,55 @@ test.describe("memory review settings", () => {
     await expect(page).toHaveURL(/\/settings\/memory$/);
     await expect(page.getByTestId("memory-settings-card")).toBeVisible();
   });
+});
+
+for (const [choice, resolution] of [["keep", "keep_existing"], ["both", "keep_both"], ["expire", "expire_existing"], ["merge", "merge"]] as const) {
+  test(`the conflict review supports ${resolution}`, async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    const api = await mockMemoryApi(page, { rows: [memoryRow("candidate", { conflictKey: "topic:preference:user.drink" }),
+      memoryRow("existing", { status: "active", conflictKey: "topic:preference:user.drink" })] });
+    await openMemoryPage(page);
+    await page.getByTestId("memory-compare").click();
+    await expect(page.getByTestId("memory-conflict-peers")).toContainText("QA memory statement existing");
+    await page.getByTestId(`memory-conflict-${choice}`).click();
+    if (choice === "merge") {
+      await expect(page.getByTestId("memory-conflict-merge-save")).toBeDisabled();
+      await page.getByTestId("memory-conflict-merged-statement").fill("The user prefers tea at home and coffee at work");
+      await page.getByTestId("memory-conflict-grounds").fill("These preferences apply in different places");
+      await page.getByTestId("memory-conflict-merge-save").click();
+    }
+    await expect(page.getByTestId("memory-conflict")).toHaveCount(0);
+    expect(api.patches[0].body.resolution).toBe(resolution);
+    if (choice === "both") await expect(page.getByTestId("memory-active-row")).toHaveCount(2);
+  });
+}
+
+test("a retained source-deleted memory returns to review only after new grounds", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page);
+  const api = await mockMemoryApi(page, { rows: [memoryRow("retained", { status: "suspended_by_source_delete" })] });
+  await openMemoryPage(page);
+  await page.getByTestId("memory-restore").click();
+  await expect(page.getByTestId("memory-restore-save")).toBeDisabled();
+  await page.getByTestId("memory-restore-grounds").fill("I confirm this preference myself");
+  await page.getByTestId("memory-restore-save").click();
+  await expect(page.getByTestId("memory-review-row")).toHaveCount(1);
+  await expect(page.getByTestId("memory-active-row")).toHaveCount(0);
+  expect(api.patches[0].body).toEqual({ action: "restore_grounds", groundsText: "I confirm this preference myself" });
+  await page.getByTestId("memory-approve").click();
+  await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
+});
+
+test("legacy memory comparison lets the user choose the related existing memory", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page);
+  const api = await mockMemoryApi(page, { rows: [memoryRow("candidate", { conflictKey: "preference:coffee" }),
+    memoryRow("existing", { status: "active", conflictKey: "preference:tea" })] });
+  await openMemoryPage(page);
+  await page.getByTestId("memory-compare").click();
+  await page.getByTestId("memory-conflict-other").selectOption("existing");
+  await page.getByTestId("memory-conflict-both").click();
+  await expect(page.getByTestId("memory-active-row")).toHaveCount(2);
+  expect(api.patches[0].body.otherMemoryId).toBe("existing");
 });
