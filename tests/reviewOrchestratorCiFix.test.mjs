@@ -1,7 +1,9 @@
-// The CI auto-fix's two server halves: the proposing pass (lib/ci-fix.mjs,
-// bin/pr-ci-auto-fix.mjs) as the review account, and the dispatch sender
-// (bin/pr-ci-auto-fix-sender.mjs) under its own account with the only token
-// that can dispatch .github/workflows/pr-ci-auto-fix.yml.
+// The CI auto-fix's two server halves: the proposing pass
+// (tools/review-orchestrator/lib/ci-fix.mjs,
+// tools/review-orchestrator/bin/pr-ci-auto-fix.mjs) as the review account, and
+// the dispatch sender (tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs)
+// under its own account with the only token that can dispatch
+// .github/workflows/pr-ci-auto-fix.yml.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
