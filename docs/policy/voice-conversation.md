@@ -79,6 +79,8 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   share the conservative provider budget. A lost session identifier therefore
   requires operator/provider evidence to clear; the customer hold is not kept
   indefinitely. Browser-reported seconds are never settlement evidence.
+  A timed-out finalizer resuming after settlement cannot clear this block or
+  increase the charge; reconciliation confirms hangup before clearing it.
 - The server enforces duration and the kill switch; browser cancellation closes
   the session and releases device resources. A user can still request Stop after
   the kill switch or account restriction is applied.

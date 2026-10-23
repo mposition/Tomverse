@@ -159,7 +159,8 @@ export async function finalizeVoiceReservation(id: string, seconds: number) {
   await recordVoiceUsage(id, seconds, true);
   const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id }, select: { status: true, providerUsageSnapshot: true, settledCredits: true } });
   if (saved.status === "settled") {
-    await prisma.chatCreditReservation.updateMany({ where: { id, lastError: "VOICE_PROVIDER_STOP_PENDING" }, data: { lastError: "VOICE_USAGE_ADJUSTED_AFTER_DISCONNECT" } });
+    // A timed-out finalizer can resume after grace settlement. It has not
+    // persisted new evidence and cannot clear an unresolved provider stop.
     return { credits: saved.settledCredits };
   }
   const evidence = saved.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
@@ -185,7 +186,7 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 10) 
       if (Date.parse(payload.webLeaseUntil ?? "") > now.getTime()) return;
       if (Date.parse(payload.recoveryLease?.until ?? "") > now.getTime()) return;
       const saved = row.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
-      if (saved?.confirmed && typeof saved.seconds === "number" && saved.seconds >= 0 && saved.seconds <= payload.maxSeconds) {
+      if (row.status === "reserved" && saved?.confirmed && typeof saved.seconds === "number" && saved.seconds >= 0 && saved.seconds <= payload.maxSeconds) {
         await finalizeVoiceReservation(row.id, saved.seconds); result.settled++; return;
       }
       const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
@@ -196,10 +197,12 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 10) 
       leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, token).catch(() => {}); }, 5_000);
       let providerStopped = !row.providerRequestId && !payload.dispatchStartedAt;
       if (row.providerRequestId) {
-        const seconds = await closeVoiceProviderSession(row.providerRequestId);
-        if (seconds !== null && seconds <= payload.maxSeconds) {
-          const settled = await finalizeVoiceReservation(row.id, seconds).catch(() => null);
-          if (settled) { result.settled++; return; }
+        if (row.status === "reserved") {
+          const seconds = await closeVoiceProviderSession(row.providerRequestId);
+          if (seconds !== null && seconds <= payload.maxSeconds) {
+            const settled = await finalizeVoiceReservation(row.id, seconds).catch(() => null);
+            if (settled) { result.settled++; return; }
+          }
         }
         // The same session ID is safe to hang up repeatedly. No new session or work is dispatched.
         try { await hangupVoiceProviderSession(row.providerRequestId); providerStopped = true; } catch { providerStopped = false; }

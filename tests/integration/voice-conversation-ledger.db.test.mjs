@@ -67,6 +67,17 @@ test("an uncertain close returns unused wallet credits but retains provider expo
   for (const bucket of providerBuckets) assert.equal(Number(bucket.count), 60);
 });
 
+test("a late finalizer cannot clear a settled stop-pending row or increase its charge", async () => {
+  const row = await reserve(); await recordVoiceUsage(row.id, 10);
+  await settleVoiceConversationCredits(row.id, 10, true, "observed_minimum", false);
+  const before = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  await Promise.all(Array.from({ length: 6 }, () => finalizeVoiceReservation(row.id, 20)));
+  const after = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(after.settledCredits, 6); assert.equal(after.settledCostMicroUsd, before.settledCostMicroUsd);
+  assert.deepEqual(after.providerUsageSnapshot, before.providerUsageSnapshot);
+  assert.equal(after.lastError, "VOICE_PROVIDER_STOP_PENDING");
+});
+
 test("a final receipt arriving before grace settlement retains the exact charge and evidence", async () => {
   const row = await reserve(); await recordVoiceUsage(row.id, 20, true);
   await settleVoiceConversationCredits(row.id, 5, true, "observed_minimum", false);

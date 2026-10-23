@@ -177,3 +177,28 @@ test("a finalization that never returns releases ownership so grace settlement c
     assert.equal(w.charges[0].evidence, "observed_minimum"); assert.equal(w.charges[0].seconds, 10);
   } finally { mock.timers.reset(); }
 });
+
+test("a timed-out finalizer resuming after grace cannot clear a failed provider stop or charge twice", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  w.allowReceiver = true; w.commands = []; w.hangFailure = true; let releaseFinal;
+  w.finalLookupGate = new Promise(resolve => { releaseFinal = resolve; });
+  w.rows[0].expiresAt = new Date(Date.now() + 40); w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200000).toISOString();
+  try {
+    await touchVoiceWatchdog(); await observeActiveVoiceConversations();
+    w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+    mock.timers.tick(15001); await new Promise(resolve => setImmediate(resolve));
+    w.rows[0].expiresAt = new Date(Date.now() - 1);
+    await reconcileVoiceConversations();
+    assert.equal(w.rows[0].lastError, "VOICE_PROVIDER_STOP_PENDING");
+    releaseFinal(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(w.charges.length, 1); assert.equal(w.charges[0].seconds, 10);
+    assert.equal(w.rows[0].settledCredits, 6);
+    assert.equal(w.rows[0].lastError, "VOICE_PROVIDER_STOP_PENDING");
+    await assert.rejects(assertVoiceWatchdogReady("owner"), e => e.code === "VOICE_RECOVERY_UNAVAILABLE");
+    // Even a later close receipt must not bypass the explicit hangup retry.
+    w.finalSeconds = 15; await reconcileVoiceConversations();
+    assert.equal(w.rows[0].lastError, "VOICE_PROVIDER_STOP_PENDING");
+    w.hangFailure = false; await reconcileVoiceConversations();
+    await assertVoiceWatchdogReady("owner"); assert.equal(w.charges.length, 1);
+  } finally { releaseFinal(); mock.timers.reset(); }
+});
