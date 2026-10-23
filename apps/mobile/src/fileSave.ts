@@ -1,7 +1,7 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { saveBlobAsFile, filenameFromContentDisposition } from "../../../lib/browserDownload";
 
-const NativeFiles = registerPlugin<{ saveFile(input: { filename: string; mediaType: string; data: string }): Promise<void> }>("MobileFiles");
+export const NativeFiles = registerPlugin<{ saveFile(input: { filename: string; mediaType: string; data: string }): Promise<void>; uploadFile(input: { url: string; headers: Record<string, string>; data: string }): Promise<void> }>("MobileFiles");
 
 export async function saveMobileResponse(response: Response, fallback: string) {
   const filename = filenameFromContentDisposition(response.headers.get("content-disposition"), fallback).replace(/[\\/\x00-\x1f]/g, "_").slice(0, 160);

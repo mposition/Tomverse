@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
   COMPARISON_REVIEW_PROMPT_VERSION,
@@ -163,7 +162,9 @@ export async function GET(
   context: { params: Promise<{ conversationId: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401);
     }
@@ -193,6 +194,16 @@ export async function GET(
       );
     }
     validateComparisonReviewInputSize(turn.prompt.content, turn.responses);
+    // Read-only recovery never dispatches a reviewer or reserves credits.
+    const query = new URL(request.url).searchParams;
+    const requestedMode = comparisonReviewModeSchema.safeParse(query.get("reviewMode"));
+    if (requestedMode.success) {
+      const inputHash = createComparisonReviewHash({ promptMessageId: turn.prompt.id, question: turn.prompt.content, responses: turn.responses, reviewMode: requestedMode.data, includeSynthesis: query.get("includeSynthesis") === "true" });
+      const stored = await prisma.comparisonReview.findUnique({ where: { userId_inputHash: { userId: session.user.id, inputHash } } });
+      const parsed = stored && !stored.isStale ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
+      const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
+      if (stored && parsed?.success && responseMap) return Response.json({ available: true, storedReview: { id: stored.id, result: parsed.data, reviewItems: reviewItemIds(parsed.data), responseMap, reviewerModelId: stored.reviewerModelId, usageCredits: 0, originalUsageCredits: stored.usageCredits, cached: true, disclaimer: "This AI review compares supplied answers and is not external fact verification." } }, { headers: { "Cache-Control": "no-store" } });
+    }
     const billingPlan = await getUserBillingPlan(session.user.id);
     const access = identifyChatCaller(request, session.user.id, billingPlan.tier, {
       dailyMessageLimit: billingPlan.dailyMessageLimit,
@@ -273,7 +284,9 @@ export async function POST(
   let freeQuota: ComparisonReviewQuotaReservation | null = null;
   let completed = false;
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401, traceId);
     }

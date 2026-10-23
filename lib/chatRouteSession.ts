@@ -4,7 +4,7 @@ import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireMobileBearer, mobileAuthRefusal } from "@/lib/mobileAuthRoute";
 import { MOBILE_AUTH_ERROR_CODES } from "@/lib/mobileAuthContract";
-import { nativeChatBearerRoute } from "@/lib/nativeBearerGate";
+import { nativeChatBearerRoute, nativeParityBearerRoute } from "@/lib/nativeBearerGate";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import { prisma } from "@/lib/prisma";
 
@@ -14,7 +14,14 @@ export async function resolveChatRouteSession(request: Request): Promise<
 > {
   if (!request.headers.has("authorization")) return { session: (await getServerSession(authOptions)) ?? null };
   const origin = request.headers.get("origin");
-  if (!nativeChatBearerRoute(new URL(request.url).pathname, request.method, process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true") || (origin && !isNativeAppOrigin(origin))) {
+  const path = new URL(request.url).pathname;
+  const parityEnabled = process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true";
+  if (nativeParityBearerRoute(path, request.method, true) && !parityEnabled) {
+    return { response: Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }) };
+  }
+  const enrolled = nativeChatBearerRoute(path, request.method, process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true") ||
+    (process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" && nativeParityBearerRoute(path, request.method, parityEnabled));
+  if (!enrolled || (origin && !isNativeAppOrigin(origin))) {
     return { response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.tokenInvalid) };
   }
   const result = await requireMobileBearer(request);

@@ -2849,7 +2849,11 @@ const checks = [
     name: "AI comparison review is authenticated, ownership-checked, locked, and rate-limited",
     file: "app/api/conversations/[conversationId]/comparison-reviews/route.ts",
     test: (source) =>
-      source.includes("getServerSession(authOptions)") &&
+      source.includes('from "@/lib/chatRouteSession"') &&
+      source.includes("resolveChatRouteSession(request)") &&
+      source.includes("if (authentication.response) return authentication.response") &&
+      source.includes("const session = authentication.session") &&
+      source.includes("!session?.user?.id") &&
       source.includes("conversation.userId !== userId") &&
       source.includes("hasConversationUnlockGrant") &&
       source.includes('"comparison-review-create"') &&
