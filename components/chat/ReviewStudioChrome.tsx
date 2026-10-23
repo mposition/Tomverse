@@ -139,7 +139,7 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
       {(review.mode === "easy" ? expanded ? options : providers : selectedModels).map(id => {
         const model = review.mode === "easy" ? models.find(m => m.provider === id) : models.find(m => m.id === id);
         const selected = providers.includes(id);
-        return <button type="button" key={id} aria-pressed={review.mode === "easy" ? selected : undefined} disabled={review.pending || review.ready === false || (review.mode === "easy" && !selected && review.maxProviders > 1 && providers.length >= review.maxProviders)} onClick={event => {
+        return <button type="button" key={id} aria-pressed={review.mode === "easy" ? selected : undefined} disabled={review.pending || review.ready === false || (review.mode === "easy" && !selected && review.maxProviders !== 1 && providers.length >= review.maxProviders)} onClick={event => {
           if (review.mode === "professional") { openChatModelPicker(event.currentTarget); return; }
           if (selected && providers.length <= 1) return;
           review.setProviders(selected ? providers.filter(p => p !== id) : review.maxProviders === 1 ? [id] : [...providers, id]);

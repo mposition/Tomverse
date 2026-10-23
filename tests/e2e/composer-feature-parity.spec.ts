@@ -60,6 +60,9 @@ test.describe("Shared Chat and Review composer", () => {
           const prompt = (await page.getByTestId("composer-textarea-row").boundingBox())!;
           const search = (await page.getByTestId("web-search-mode-chip").boundingBox())!;
           expect(search.y - prompt.y - prompt.height).toBeGreaterThanOrEqual(12);
+          const actions = (await page.getByTestId("composer-actions-row").boundingBox())!;
+          const submit = (await page.getByTestId("composer-submit-actions").boundingBox())!;
+          expect(Math.abs(actions.x + actions.width - submit.x - submit.width)).toBeLessThan(1);
           if (appearance === "studio" && width >= 390) {
             const tools = (await page.getByTestId("composer-tools-button").boundingBox())!;
             const voice = (await page.getByTestId("composer-voice-button").boundingBox())!;
@@ -166,7 +169,7 @@ test("Review mode controls preserve the draft and the product switch returns to 
   await expect(page).toHaveURL(/\/chat\?lang=en/);
 });
 
-for (const width of [1440, 390]) test(`Classic ${width}px mode selector keeps the draft and configured providers`, { tag: "@ui-risk" }, async ({ page }) => {
+for (const width of [1440, 390]) test(`Classic ${width}px mode selector keeps the draft and configured providers`, { tag: "@ui-risk" }, async ({ page }, info) => {
   await prepareReviewDefaults(page, width);
   await page.getByTestId("chat-textarea").fill("Keep the Classic Review draft.");
   await page.getByTestId("review-appearance").selectOption("classic");
@@ -174,6 +177,7 @@ for (const width of [1440, 390]) test(`Classic ${width}px mode selector keeps th
   await mode.selectOption("professional");
   await expect(page.getByTestId("chat-input").getByTestId("composer-model-select")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep the Classic Review draft.");
+  await page.getByTestId("chat-input").screenshot({ path: info.outputPath(`classic-review-${width}-mode.png`) });
   await mode.selectOption("easy");
   await expect(page.locator(".review-participant-list>button")).toContainText(["Anthropic"]);
   await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep the Classic Review draft.");
@@ -243,6 +247,43 @@ test("inherited Easy defaults display the providers eligible within the account 
   await expect(card.getByTestId("review-defaults-source")).toHaveValue("platform");
   await expect(card.locator('[data-provider][aria-pressed="true"]')).toHaveCount(2);
   await expect(card.locator('[data-provider="google"]')).toHaveAttribute("aria-pressed", "false");
+});
+
+test("switching personal defaults to inheritance previews the platform selection before saving", { tag: "@ui-risk" }, async ({ page }) => {
+  const state = await prepareReviewDefaults(page);
+  const card = await choosePersonalGoogle(page);
+  await expect(card.getByText("Easy defaults saved.", { exact: true })).toBeVisible();
+  await card.getByTestId("review-defaults-source").selectOption("platform");
+  await expect(card.locator('[data-provider="anthropic"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator('[data-provider="google"]')).toHaveAttribute("aria-pressed", "false");
+  await card.getByTestId("review-defaults-save").click();
+  await expect(card.getByText("Easy defaults saved.", { exact: true })).toBeVisible();
+  expect(state.personal).toBeNull();
+  expect(state.writes).toBe(2);
+});
+
+test("a saved provider that became unavailable can be replaced within the plan cap", { tag: "@ui-risk" }, async ({ page }) => {
+  await prepareReviewDefaults(page);
+  let selected = ["retired"];
+  await page.route("**/api/user/settings**", route => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON();
+      if (body.reviewEasyDefaultProviders) selected = body.reviewEasyDefaultProviders;
+      return route.fulfill({ json: { success: true } });
+    }
+    return route.fulfill({ json: { reviewEasyDefaultProviders: selected,
+      reviewEasyPlatformProviders: ["openai"], reviewEasyEffectiveProviders: selected.filter(provider => provider === "google"),
+      reviewEasyProviderOptions: ["google"], reviewEasyMaxProviders: 1 } });
+  });
+  await page.locator(".review-avatar").click();
+  await page.getByTestId("settings-tab-ai").click();
+  const card = page.getByTestId("review-defaults-personal");
+  const google = card.locator('[data-provider="google"]');
+  await expect(google).toBeEnabled();
+  await google.click();
+  await card.getByTestId("review-defaults-save").click();
+  await expect(card.getByText("Easy defaults saved.", { exact: true })).toBeVisible();
+  expect(selected).toEqual(["google"]);
 });
 
 test("an uncertain default save requires read-back before another write", { tag: "@ui-risk" }, async ({ page }) => {

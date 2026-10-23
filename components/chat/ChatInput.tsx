@@ -3808,7 +3808,7 @@ export function ChatInput({
         */}
         <div
           data-testid="composer-submit-actions"
-          className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-[360px]:gap-x-0.5 max-[240px]:contents"
+          className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-[360px]:gap-x-0.5 max-[240px]:contents"
         >
 
           <ChatInputAutoCapabilityPendingNotice

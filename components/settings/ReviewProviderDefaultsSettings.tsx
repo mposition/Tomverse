@@ -12,6 +12,8 @@ import { parseReviewProviderDefaults, REVIEW_PROVIDER_PREFERENCES_UPDATED } from
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
 
 type Defaults = { selected: string[] | null; platform: string[]; available: string[]; max: number; effective: string[] };
+const editableSelection = (defaults: Defaults) => defaults.selected === null ? null
+  : defaults.selected.filter(provider => defaults.available.includes(provider)).slice(0, defaults.max);
 
 export function ReviewProviderDefaultsSettings({ scope = "personal" }: { scope?: "personal" | "platform" }) {
   const { lang } = useLanguage();
@@ -49,13 +51,14 @@ export function ReviewProviderDefaultsSettings({ scope = "personal" }: { scope?:
     const controller = new AbortController();
     void readRef.current(controller.signal).then(defaults => {
       if (controller.signal.aborted) return;
-      setSnapshot({ owner, defaults }); setDraft(defaults.selected); setError(null);
+      setSnapshot({ owner, defaults }); setDraft(editableSelection(defaults)); setError(null);
       setReadbackRequired(false); setFailure(null);
     }).catch(() => { if (!controller.signal.aborted) setError(c.loadFailed); });
     return () => controller.abort();
   }, [owner, revision, url, c.loadFailed]);
   const defaults = snapshot?.owner === owner ? snapshot.defaults : null;
-  const selected = draft ?? (platformScope ? defaults?.platform : defaults?.effective) ?? [];
+  const inherited = defaults ? defaults.platform.filter(provider => defaults.available.includes(provider)).slice(0, defaults.max) : [];
+  const selected = draft ?? inherited;
   const writeBlocked = busy || readbackRequired || Boolean(failure?.requiresReauthentication);
   const save = async () => {
     if (writeBlocked || !defaults) return;
@@ -76,7 +79,7 @@ export function ReviewProviderDefaultsSettings({ scope = "personal" }: { scope?:
       setReadbackRequired(true);
       const canonical = await readRef.current();
       if (ownerRef.current !== owner) return;
-      setSnapshot({ owner, defaults: canonical }); setDraft(canonical.selected);
+      setSnapshot({ owner, defaults: canonical }); setDraft(editableSelection(canonical));
       setReadbackRequired(false); setSaved(true);
       if (!platformScope) window.dispatchEvent(new CustomEvent(REVIEW_PROVIDER_PREFERENCES_UPDATED, { detail: { userId: owner, providers: canonical.effective } }));
     } catch {
@@ -89,7 +92,7 @@ export function ReviewProviderDefaultsSettings({ scope = "personal" }: { scope?:
     <p className="text-xs leading-5 text-zinc-600 dark:text-zinc-300">{c.description}</p>
     {!defaults && !error && <p role="status">{c.loading}</p>}
     {defaults && <>
-      {!platformScope && <label className="block text-sm">{c.source}<select data-testid="review-defaults-source" value={draft === null ? "platform" : "personal"} disabled={writeBlocked} onChange={event => { setDraft(event.target.value === "platform" ? null : defaults.platform.filter(provider => defaults.available.includes(provider)).slice(0, defaults.max)); setSaved(false); }} className="mt-2 min-h-11 w-full cursor-pointer rounded-xl border border-zinc-200 bg-zinc-50 px-3 dark:border-zinc-700 dark:bg-zinc-950"><option value="platform">{c.inherit}</option><option value="personal">{c.personal}</option></select></label>}
+      {!platformScope && <label className="block text-sm">{c.source}<select data-testid="review-defaults-source" value={draft === null ? "platform" : "personal"} disabled={writeBlocked} onChange={event => { setDraft(event.target.value === "platform" ? null : inherited); setSaved(false); }} className="mt-2 min-h-11 w-full cursor-pointer rounded-xl border border-zinc-200 bg-zinc-50 px-3 dark:border-zinc-700 dark:bg-zinc-950"><option value="platform">{c.inherit}</option><option value="personal">{c.personal}</option></select></label>}
       <fieldset className="min-w-0"><legend className="mb-2 text-sm font-medium">{c.providers}</legend><div className="flex flex-wrap gap-2">{defaults.available.map(provider => <button key={provider} type="button" data-provider={provider} aria-pressed={selected.includes(provider)} disabled={writeBlocked || (!platformScope && draft === null) || (!selected.includes(provider) && selected.length >= defaults.max)} onClick={() => { setDraft(selected.includes(provider) ? selected.filter(item => item !== provider) : [...selected, provider]); setSaved(false); }} className={`${controlClass} inline-flex items-center gap-2 ${selected.includes(provider) ? "border-blue-300 bg-blue-50 dark:border-blue-600 dark:bg-blue-950" : "border-zinc-200 dark:border-zinc-700"}`}>{reviewProviderName(provider)}{selected.includes(provider) && <Check size={14} aria-hidden="true" />}</button>)}</div></fieldset>
       <p className="text-xs text-zinc-600 dark:text-zinc-300">{defaults.available.length ? platformScope ? c.platformLimit : c.limit.replace("{count}", String(defaults.max)) : c.unavailable}</p>
       <button type="button" data-testid="review-defaults-save" disabled={writeBlocked || (draft !== null && !draft.length) || !defaults.available.length} onClick={() => void save()} className={`${controlClass} w-full border-blue-200 bg-blue-50 font-medium dark:border-blue-800 dark:bg-blue-950`}>{busy ? c.saving : c.save}</button>
