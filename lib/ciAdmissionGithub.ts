@@ -201,7 +201,14 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     const answer = await call("POST", `${API}/graphql`, await installationToken(), { query: mutation, variables: { id } });
     if (answer.status !== 200) throw new Error(`github_graphql_${answer.status}`);
     const body = record(answer.json());
-    if (body.errors !== undefined) throw new Error("github_graphql_errors");
+    if (body.errors !== undefined) {
+      // GitHub's error type (FORBIDDEN, NOT_FOUND ...) says what to fix; its
+      // message is free text and is not kept. 2026-10-23: every release failed
+      // as a bare "github_graphql_errors" and nobody could tell why.
+      const first = Array.isArray(body.errors) && body.errors.length > 0 ? record(body.errors[0]) : {};
+      const type = typeof first.type === "string" && /^[A-Z_]{1,40}$/.test(first.type) ? first.type : "UNKNOWN";
+      throw new Error(`github_graphql_errors:${type}`);
+    }
     return record(body.data);
   };
   return {
