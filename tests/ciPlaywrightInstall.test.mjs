@@ -221,6 +221,23 @@ test("a retry clears the lock the attempt it retries is still holding", () => {
     );
 });
 
+test("an abandoned apt run that finished is confirmed, not reported as out of budget", () => {
+    // Waiting for the abandoned run spends the apt half's budget, and that run
+    // may spend it finishing the install. On 2026-10-23 (#2928) apt set up its
+    // last package five seconds before the wrapper reported "out of budget".
+    const script = read(SCRIPT_PATH);
+    assert.match(script, /APT_FINISHED_ALONE=1/, "release_dpkg_lock must say when apt exited on its own");
+    assert.match(script, /terminated=1/, "an apt run we killed is not one that finished");
+    assert.match(
+        script,
+        /if \[ "\$budget" -lt 30 \]; then[\s\S]*?APT_FINISHED_ALONE" -eq 1[\s\S]*?timeout --signal=TERM --kill-after=10s "\$CONFIRM_WINDOW"[\s\S]*?ran out of the install budget/,
+        "the out-of-budget branch must confirm a finished run before reporting"
+    );
+    const reserve = Number(/^DEADLINE_LIGHT_DEFAULT=(\d+)$/m.exec(script)[1]) / 4;
+    const confirm = Number(/^CONFIRM_WINDOW=(\d+)$/m.exec(script)[1]);
+    assert.ok(confirm + 10 < reserve, "the confirming attempt must leave the browser download part of its reserve");
+});
+
 test("the wrapper is executable", () => {
     // A workflow `run:` of a non-executable path fails with "Permission
     // denied" on every job at once, which is a worse outage than the flake.
