@@ -9,6 +9,7 @@ import { ApiSecurityError, apiSecurityResponse, consumeApiRateLimit, readLimited
 import { assertUserOperationalAccess, getUserChatUsageKey } from "@/lib/chatSecurity";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { reserveVoiceBudgets, releaseVoiceBudgets, settleVoiceBudgets, type VoiceBudgetReservation } from "@/lib/voiceBudgetReservation";
+import { VoiceBudgetError } from "@/lib/voiceInputBudget";
 import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE } from "@/lib/voiceConversationCore";
 import { reserveVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession, sendVoiceProviderResult } from "@/lib/voiceConversationProvider";
@@ -90,6 +91,8 @@ export async function POST(request: Request) {
       if (providerResult.rejected) {
         await settleVoiceConversationCredits(reservation.id, 0);
         await releaseVoiceBudgets(providerBudget);
+      } else {
+        await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
       }
       return json(providerResult.rejected ? "VOICE_PROVIDER_UNAVAILABLE" : "VOICE_START_OUTCOME_UNKNOWN", 502);
     }
@@ -97,6 +100,10 @@ export async function POST(request: Request) {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { providerRequestId: providerResult.sessionId } });
     } catch {
       await hangupVoiceProviderSession(providerResult.sessionId).catch(() => {});
+      // Retrying an idempotent link is safe even if the first DB response was lost.
+      await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: {
+        providerRequestId: providerResult.sessionId, lastError: "VOICE_START_OUTCOME_UNKNOWN",
+      } }).catch(() => {});
       return json("VOICE_START_OUTCOME_UNKNOWN", 502);
     }
     const providerSession = providerResult;
@@ -129,7 +136,10 @@ export async function POST(request: Request) {
               await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_FINAL_USAGE_UNCONFIRMED", providerUsageSnapshot: { seconds: latestSeconds, confirmed: false } } });
               send({ type: "closed", confirmed: false });
             }
-          } catch { send({ type: "error", code: "VOICE_SETTLEMENT_PENDING" }); }
+          } catch {
+            await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_SETTLEMENT_PENDING" } }).catch(() => {});
+            send({ type: "error", code: "VOICE_SETTLEMENT_PENDING" });
+          }
           finally { socket.close(); try { controller.close(); } catch {} }
         };
         function stop() {
@@ -174,5 +184,8 @@ export async function POST(request: Request) {
       cancel() { stopStream(); },
     });
     return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "private, no-store", "X-Accel-Buffering": "no" } });
-  } catch (error) { return apiSecurityResponse(error) ?? json("VOICE_CONVERSATION_FAILED", 500); }
+  } catch (error) {
+    if (error instanceof VoiceBudgetError) return json(error.code, error.status);
+    return apiSecurityResponse(error) ?? json("VOICE_CONVERSATION_FAILED", 500);
+  }
 }

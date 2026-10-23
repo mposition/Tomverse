@@ -7458,7 +7458,7 @@ export function ChatPageClient({
 
   const handleTurnError = useCallback(
     (promptId: string | null, modelId: string, errorCode: string) => {
-      if (voiceTurnRef.current?.promptId === promptId) {
+      if (promptId && voiceTurnRef.current?.promptId === promptId) {
         voiceTurnRef.current.reject(new Error(errorCode));
       }
       const retry = webSearchRetryOutcomeRef.current;

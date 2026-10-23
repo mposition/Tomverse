@@ -18,6 +18,9 @@ const english = {
   mute: "Mute microphone", unmute: "Unmute microphone", audio: "Play assistant audio", error: "Voice could not complete this request. Your chat remains available.",
   estimated: "Estimated voice credits", charged: "Voice credits", user: "You", assistant: "Tomverse", back: "Back to chat",
   reserve: "Up to {credits} credits are temporarily reserved; unused credits are returned after confirmed settlement.",
+  searchOn: "Web search on", searchOff: "Web search off",
+  insufficient: "There are not enough available credits to start voice. Your existing chat is saved.",
+  limited: "Voice has reached its current usage limit. You can continue in this chat.",
 };
 const korean: typeof english = {
   title: "음성 대화", start: "음성 대화 시작", close: "닫기", stop: "대화 종료",
@@ -29,6 +32,9 @@ const korean: typeof english = {
   mute: "마이크 끄기", unmute: "마이크 켜기", audio: "음성 답변 재생", error: "음성 요청을 완료하지 못했어요. 기존 채팅에서 이어갈 수 있습니다.",
   estimated: "음성 예상 크레딧", charged: "음성 크레딧", user: "나", assistant: "Tomverse", back: "채팅으로 돌아가기",
   reserve: "최대 {credits}크레딧을 임시 예약하고, 정산이 확인되면 사용하지 않은 크레딧을 돌려드려요.",
+  searchOn: "웹 검색 켜짐", searchOff: "웹 검색 꺼짐",
+  insufficient: "음성을 시작할 수 있는 크레딧이 부족해요. 기존 대화는 이 채팅에 남아 있어요.",
+  limited: "현재 음성 사용 한도에 도달했어요. 이 채팅에서 계속 대화할 수 있습니다.",
 };
 
 export function VoiceConversationControl({ conversationId, scopeKey, maxSeconds, disabled, selectionLabel, searchEnabled, onRequest }: {
@@ -71,7 +77,7 @@ export function VoiceConversationControl({ conversationId, scopeKey, maxSeconds,
     {open && createPortal(<div className="voice-conversation-overlay">
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="voice-conversation-title" className="voice-conversation-panel" data-testid="voice-conversation-panel">
         <header><h2 id="voice-conversation-title">{c.title}</h2><button type="button" onClick={close} aria-label={c.close}><X size={22} /></button></header>
-        <div className="voice-conversation-settings"><span>{selectionLabel}</span><span>{searchEnabled ? "Web search on" : "Web search off"}</span></div>
+        <div className="voice-conversation-settings"><span>{selectionLabel}</span><span>{searchEnabled ? c.searchOn : c.searchOff}</span></div>
         <div className="voice-conversation-content">
           {!state ? <div className="voice-conversation-ready"><AudioLines size={64} aria-hidden="true" /><h3>{c.ready}</h3><p>{c.hint}</p></div> : <>
             <p role="status">{state.status === "connecting" ? c.connecting : state.status === "closing" ? c.finishing : finished ? c.ended : c.listening}</p>
@@ -79,7 +85,7 @@ export function VoiceConversationControl({ conversationId, scopeKey, maxSeconds,
               {state.captions.map(caption => <div className={`voice-conversation-caption voice-conversation-caption-${caption.role}`} key={caption.id}><span>{caption.role === "user" ? c.user : c.assistant}</span><p>{caption.text}</p></div>)}
             </div>
             {state.audioBlocked && <button type="button" onClick={() => void clientRef.current?.resumeAudio()}>{c.audio}</button>}
-            {state.error && <p role="alert">{c.error}</p>}
+            {state.error && <p role="alert">{state.error === "CREDIT_BALANCE_INSUFFICIENT" ? c.insufficient : /VOICE_OPERATIONAL_LIMIT_REACHED|PLAN_DAILY_CREDIT_LIMIT_REACHED/.test(state.error) ? c.limited : c.error}</p>}
             {finished && (state.confirmed || state.billingPending) && <p>{state.confirmed ? c.saved : c.unknown}</p>}
           </>}
           <div className="voice-conversation-price-details">

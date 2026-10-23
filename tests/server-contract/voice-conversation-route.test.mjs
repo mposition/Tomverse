@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 const mod = path => pathToFileURL(resolve(path)).href;
 let w;
 class SecurityError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
+class BudgetError extends Error { constructor() { super("Budget reached"); this.status = 429; this.code = "VOICE_OPERATIONAL_LIMIT_REACHED"; } }
 const reset = () => {
   process.env.VOICE_CONVERSATION_ENABLED = "true";
   process.env.VOICE_CONVERSATION_API_KEY = "test-key-never-used";
@@ -29,22 +30,23 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   message: { findMany: async () => [{ role: "assistant", content: "Existing answer" }, { role: "user", content: "Existing question" }] },
   chatCreditReservation: {
     findFirst: async ({ where }) => where.userId === w.owner ? { id: "reservation", providerRequestId: "live_test", status: "reserved", createdAt: new Date(0), expiresAt: new Date(Date.now() + 100_000), reservationPayload: { conversationId: "chat-1" } } : null,
-    update: async args => { w.updates.push(args); return {}; },
+    update: async args => { w.updates.push(args); if (w.linkError && args.data.providerRequestId) { w.linkError = false; throw new Error("Lost DB response"); } return {}; },
   },
   chatResponseAttempt: { findFirst: async ({ where }) => { w.answerFilter = where; return w.answer === false ? null : { partialContent: "Verified stored answer with search sources" }; } },
 } } });
 mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
   reserveVoiceConversationCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); return { id: "reservation" }; },
-  settleVoiceConversationCredits: async (id, seconds) => { w.refunds.push({ id, seconds }); return { credits: Math.ceil(seconds * 0.6) }; },
+  settleVoiceConversationCredits: async (id, seconds) => { if (w.settleError) throw new Error("Settlement unavailable"); w.refunds.push({ id, seconds }); return { credits: Math.ceil(seconds * 0.6) }; },
   readVoiceCreditPayload: value => value,
 } });
+mock.module(mod("lib/voiceInputBudget.ts"), { namedExports: { VoiceBudgetError: BudgetError } });
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
-  reserveVoiceBudgets: async input => { w.budgets.push(input); return { reserved: true }; },
+  reserveVoiceBudgets: async input => { w.budgets.push(input); if (w.budgetError) throw new BudgetError(); return { reserved: true }; },
   releaseVoiceBudgets: async () => w.settlements.push("released"),
   settleVoiceBudgets: async input => w.settlements.push(input.basis),
 } });
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
-  createVoiceProviderSession: async (sdp, history) => { w.providerCalls.push({ sdp, history }); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "rejected") return { ok: false, rejected: true }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
+  createVoiceProviderSession: async (sdp, history) => { w.providerCalls.push({ sdp, history }); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
   attachVoiceProviderSession: () => { const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 0; socket.send = () => {}; socket.close = () => { socket.readyState = 3; socket.emit("close"); }; w.socket = socket; queueMicrotask(() => { socket.readyState = 1; socket.emit("open"); }); return socket; },
   hangupVoiceProviderSession: async id => { w.hangs.push(id); },
   sendVoiceProviderResult: async (...args) => w.results.push(args),
@@ -111,4 +113,34 @@ test("the session owner can stop after the kill switch or account block", async 
   process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop"; w.operationalError = true;
   assert.equal((await POST(request({ action: "stop", reservationId: "reservation" }))).status, 200);
   assert.deepEqual(w.hangs, ["live_test"]);
+});
+
+test("a voice budget refusal returns its actionable status and refunds the pre-dispatch credit hold", async () => {
+  w.budgetError = true;
+  const response = await POST(request(start()));
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).code, "VOICE_OPERATIONAL_LIMIT_REACHED");
+  assert.deepEqual(w.refunds.map(r => r.seconds), [0]);
+  assert.equal(w.providerCalls.length, 0);
+});
+
+test("indeterminate provider starts and transient link failures retain an explicit reconciliation marker", async () => {
+  w.provider = "server-error";
+  assert.equal((await POST(request(start()))).status, 502);
+  assert.equal(w.updates.at(-1).data.lastError, "VOICE_START_OUTCOME_UNKNOWN");
+  assert.equal(w.refunds.length, 0);
+  reset(); w.linkError = true;
+  assert.equal((await POST(request(start()))).status, 502);
+  assert.deepEqual(w.updates.at(-1).data, { providerRequestId: "live_test", lastError: "VOICE_START_OUTCOME_UNKNOWN" });
+  assert.deepEqual(w.hangs, ["live_test"]);
+});
+
+test("a failed final settlement leaves an explicit pending marker instead of reporting success", async () => {
+  const response = await POST(request(start())); const text = response.text();
+  w.settleError = true;
+  w.socket.emit("message", Buffer.from(JSON.stringify({ type: "session.closed", event_id: "end-1", usage: { seconds: 10 } })));
+  const body = await text;
+  assert.match(body, /VOICE_SETTLEMENT_PENDING/);
+  assert.doesNotMatch(body, /"confirmed":true/);
+  assert.equal(w.updates.at(-1).data.lastError, "VOICE_SETTLEMENT_PENDING");
 });
