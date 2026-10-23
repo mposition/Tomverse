@@ -78,3 +78,18 @@ test("a final duration below durable observed usage is refused", async () => {
   await assert.rejects(finalizeVoiceReservation("voice-1", 5), /inconsistent/);
   assert.equal(w.charges.length, 0);
 });
+
+test("an excessive final never poisons durable evidence or prevents expired-hold recovery", async () => {
+  await assert.rejects(finalizeVoiceReservation("voice-1", 331), /authorized reservation/);
+  assert.deepEqual(w.rows[0].providerUsageSnapshot, { seconds: 10, confirmed: false });
+  await reconcileVoiceConversations();
+  assert.equal(w.charges[0].seconds, 10);
+  assert.equal(w.rows[0].status, "settled");
+});
+
+test("a previously persisted invalid final cannot retain a customer hold indefinitely", async () => {
+  w.rows[0].providerUsageSnapshot = { seconds: 400, confirmed: true };
+  await reconcileVoiceConversations();
+  assert.equal(w.rows[0].status, "settled");
+  assert.equal(w.charges[0].seconds, 0);
+});

@@ -32,7 +32,7 @@ export async function observeActiveVoiceConversations() {
       if (event.type === "session.usage.updated") {
         void recordVoiceUsage(row.id, seconds).catch(() => close());
       } else if (event.type === "session.closed") {
-        void finalizeVoiceReservation(row.id, seconds).catch(() => {}).finally(release);
+        void finalizeVoiceReservation(row.id, seconds).catch(() => prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } })).finally(release);
       }
     });
     socket.once("error", () => { release(); });
@@ -73,6 +73,11 @@ export async function recordVoiceUsage(id: string, seconds: number, confirmed = 
 }
 
 export async function finalizeVoiceReservation(id: string, seconds: number) {
+  const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id }, select: { reservationPayload: true } });
+  const payload = readVoiceCreditPayload(reservation.reservationPayload);
+  // Reject before persisting a final receipt. Otherwise an invalid final can
+  // permanently preempt the bounded observed-minimum recovery path.
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > payload.maxSeconds) throw new Error("Final voice duration exceeds the authorized reservation.");
   await recordVoiceUsage(id, seconds, true);
   const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id }, select: { status: true, providerUsageSnapshot: true, settledCredits: true } });
   if (saved.status === "settled") {
@@ -97,7 +102,7 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 100)
     try {
       const payload = readVoiceCreditPayload(row.reservationPayload);
       const saved = row.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
-      if (saved?.confirmed && typeof saved.seconds === "number") {
+      if (saved?.confirmed && typeof saved.seconds === "number" && saved.seconds >= 0 && saved.seconds <= payload.maxSeconds) {
         await finalizeVoiceReservation(row.id, saved.seconds); result.settled++; continue;
       }
       const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
@@ -117,7 +122,7 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 100)
         continue;
       }
       if (now < row.expiresAt) { result.deferred++; continue; }
-      const seconds = Math.min(payload.maxSeconds, Math.max(0, Number(saved?.seconds) || 0));
+      const seconds = saved?.confirmed ? 0 : Math.min(payload.maxSeconds, Math.max(0, Number(saved?.seconds) || 0));
       // Charge only the trusted observed minimum. The operational budget and
       // provider-cost estimate retain full exposure; unobserved seconds are waived.
       await settleVoiceConversationCredits(row.id, seconds, Boolean(payload.dispatchStartedAt), payload.dispatchStartedAt ? "observed_minimum" : "final", providerStopped);
