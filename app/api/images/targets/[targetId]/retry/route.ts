@@ -61,6 +61,7 @@ export async function POST(req: Request, { params }: Params) {
       userId,
       targetId,
       retryIdempotencyKey: body.retryIdempotencyKey,
+      request: req,
       // A Chat image's retry is a paid Chat image attempt: only while the
       // operator's Chat image switch is on (lib/chatImageIntent.ts).
       chatTurnHostAllowed: (await chatImageTriageModelId()) !== null,

@@ -1102,12 +1102,10 @@ test("the catalogue's image tab is its own list and seeds the picked model", { t
     .first()
     .click();
 
-  // The workspace opens on the model that was picked.
-  await expect(page.getByTestId("image-generation-prompt")).toBeVisible();
-  await expect(page.getByTestId("image-model-gpt-image-2")).toHaveAttribute(
-    "aria-pressed",
-    "true"
-  );
+  // Review keeps the picked model in its own composer and answers inline
+  // (docs/ui-contracts/review-studio.md); no workspace opens.
+  await expect(page.getByTestId("review-image-mode")).toContainText("GPT Image 2");
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 
 test("a Free plan sees the image tab locked, not hidden", { tag: "@ui-risk" }, async ({ page }) => {
@@ -1145,13 +1143,17 @@ test("the composer entry carries the chat draft and restores it on cancel", { ta
   await page.getByTestId("composer-tools-button").click();
   await page.getByTestId("tools-image-generation-row").click();
 
-  // The typed text becomes the image prompt rather than being lost.
-  await expect(page.getByTestId("image-generation-prompt")).toHaveValue(
+  // Review turns the same composer into the image prompt
+  // (docs/ui-contracts/review-studio.md): the typed text stays where it was.
+  await expect(page.getByTestId("review-image-mode")).toBeVisible();
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("chat-textarea")).toHaveValue(
     "a lighthouse at dusk"
   );
 
-  // Going back restores the chat draft exactly.
-  await page.getByTestId("image-generation-cancel-draft").click();
+  // Leaving image mode keeps the draft exactly.
+  await page.getByTestId("review-image-mode").getByRole("button").click();
+  await expect(page.getByTestId("review-image-mode")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toHaveValue(
     "a lighthouse at dusk"
   );

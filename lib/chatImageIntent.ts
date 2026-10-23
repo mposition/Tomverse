@@ -31,7 +31,7 @@ import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { planAllowsFeature } from "@/lib/billingEntitlements";
 import type { BillingPlanConfig } from "@/lib/billingPlanDefaults";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
-import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
+import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { prisma } from "@/lib/prisma";
@@ -107,7 +107,7 @@ export async function readPreviousImagePrompt(
         );
         if (!answer) return null;
         const group = await prisma.imageGenerationGroup.findFirst({
-            where: { userId, conversationId, groupIdempotencyKey: answer.id },
+            where: { userId, conversationId, groupIdempotencyKey: chatImageTurnGroupKey(answer.id) },
             select: { id: true },
         });
         if (!group) return null;

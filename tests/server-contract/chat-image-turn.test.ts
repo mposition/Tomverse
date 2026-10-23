@@ -166,7 +166,7 @@ test("switched off, nothing is reserved", async () => {
   assert.equal(requests.length, 0);
 });
 
-test("someone else's, an image, a Review or a continued conversation, or no question: nothing is reserved", async () => {
+test("someone else's, an image or a continued conversation, or no question: nothing is reserved", async () => {
   const { turn } = await load();
   reset();
   conversation = null;
@@ -175,7 +175,7 @@ test("someone else's, an image, a Review or a continued conversation, or no ques
   conversation = { kind: "image" };
   await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_KIND_NOT_SUPPORTED");
   reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  conversation = { kind: "chat", productKey: "studio", continuationBridge: null };
   await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_KIND_NOT_SUPPORTED");
   reset();
   conversation = { kind: "chat", productKey: "chat", continuationBridge: { id: "bridge" } };
@@ -184,6 +184,29 @@ test("someone else's, an image, a Review or a continued conversation, or no ques
   source = null;
   await rejects(() => turn.startChatImageTurn(input), "SOURCE_MESSAGE_NOT_FOUND");
   assert.equal(requests.length, 0);
+});
+
+test("Explicit Review image answers keep the original conversation and shared reservation", async () => {
+  const { turn } = await load();
+  for (const productKey of ["review"]) {
+    reset(); triageOn = false;
+    conversation = { kind: "chat", productKey, continuationBridge: null };
+    await turn.startChatImageTurn(input);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].conversationId, input.conversationId);
+    assert.equal(requests[0].chatTurnHost, true);
+    assert.equal(created[0].modelId, input.modelId);
+  }
+});
+
+test("locked Review conversations refuse before any image reservation", async () => {
+  const { turn } = await load();
+  for (const extra of [{ password: "locked-password" }]) {
+    reset();
+    conversation = { kind: "chat", productKey: "review", continuationBridge: null, ...extra };
+    await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_LOCKED");
+    assert.equal(requests.length, 0);
+  }
 });
 
 test("a replay reuses the answer and its group key; a foreign answer id is refused", async () => {
@@ -248,4 +271,24 @@ test("a follow-up makes the image from its rewrite; the answer names the questio
   const result = await turn.startChatImageTurn({ ...input, prompt: "  a simple blue cat icon " });
   assert.equal(requests[0].prompt, "a simple blue cat icon");
   assert.equal(result.content, "[Image generated] 간단한 고양이 아이콘 그려줘");
+});
+
+
+test("unclassified conversations cannot gain Review image authority with the Chat switch off", async () => {
+  const { turn } = await load();
+  reset(); triageOn = false;
+  conversation = { kind: "chat", productKey: null, continuationBridge: null };
+  await rejects(() => turn.startChatImageTurn(input), "CONVERSATION_KIND_NOT_SUPPORTED");
+  assert.equal(requests.length, 0);
+});
+
+test("invalid comparison suffixes refuse before reserving images", async () => {
+  const { turn } = await load();
+  for (const suffix of ["999", "no-index", "-1"]) {
+    reset();
+    conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+    await rejects(() => turn.startChatImageTurn({ ...input, assistantMessageId: `${input.assistantMessageId}_${suffix}`,
+      imageGroupModelIds: input.imageModelIds }), "IMAGE_MODEL_SELECTION_INVALID");
+    assert.equal(requests.length, 0);
+  }
 });

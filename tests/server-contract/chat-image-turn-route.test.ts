@@ -99,7 +99,8 @@ test("a valid turn names the group its card polls", async () => {
       imageTurn: { groupId: "group-1", modelIds: ["gpt-image-2"] },
     },
   });
-  assert.deepEqual(turns, [
+  assert.ok(turns[0].request instanceof Request);
+  assert.deepEqual(turns.map(turn => { const copy = { ...turn }; delete copy.request; return copy; }), [
     { userId: "user-1", conversationId: "conv-1", ...body, prompt: undefined },
   ]);
 });

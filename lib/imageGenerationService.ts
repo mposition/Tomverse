@@ -33,6 +33,7 @@ import {
   usagePeriodStart,
 } from "@/lib/chatSecurity";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
   CONVERSATION_KIND_NOT_SUPPORTED,
   isChatConversationKind,
@@ -482,6 +483,13 @@ export const requestImageGeneration = async (
     const created = await prisma.$transaction(async (tx) => {
       await lockCreditAccount(tx, input.userId);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${scope.key}))`;
+      // A peer panel may have committed this same group while we waited for
+      // the account lock. Reuse it before checking leases or charging budgets.
+      const committed = await tx.imageGenerationGroup.findUnique({
+        where: { userId_groupIdempotencyKey: { userId: input.userId, groupIdempotencyKey: input.idempotencyKey } },
+        select: { id: true },
+      });
+      if (committed) return null;
       await sweepExpiredLeasesForScopes(tx, { subjectKey: scope.key });
 
       const activeLeases = await countActiveLeases(tx, scope);
@@ -869,6 +877,11 @@ export const requestImageGeneration = async (
       return generation;
     });
 
+    if (!created) {
+      const winner = await readGroupByIdempotencyKey(input.userId, input.idempotencyKey);
+      if (winner) return winner;
+      throw new ChatAccessError(409, "IMAGE_REQUEST_CONFLICT", "The image request changed. Try again.");
+    }
     return {
       generationId: created.id,
       groupId: created.groupId,
@@ -1658,6 +1671,7 @@ export type ImageRetryInput = {
   userId: string;
   targetId: string;
   retryIdempotencyKey: string;
+  request?: Request;
   /**
    * Whether a group living in a Tomverse Chat conversation may be retried:
    * the caller's answer to the Chat image switch (Admin › Routing), which a
@@ -1704,7 +1718,7 @@ export const retryImageGenerationTarget = async (
       groupId: true,
       provider: true,
       modelId: true,
-      group: { select: { userId: true, conversationId: true } },
+      group: { select: { userId: true, conversationId: true, conversation: { select: { productKey: true, password: true, continuationBridge: { select: { id: true } } } } } },
       currentGeneration: {
         select: {
           id: true,
@@ -1726,6 +1740,11 @@ export const retryImageGenerationTarget = async (
     );
   }
   const current = target.currentGeneration;
+  const host = target.group.conversation;
+  if (host?.password &&
+      (!input.request || !hasConversationUnlockGrant(input.request, input.userId, target.group.conversationId!, host.password))) {
+    throw new ChatAccessError(403, "CONVERSATION_LOCKED", "Unlock this conversation before retrying images.");
+  }
   if (!current) {
     throw new ChatAccessError(
       404,
@@ -1802,7 +1821,10 @@ export const retryImageGenerationTarget = async (
       // (lib/chatImageTurn.ts), so its retry keeps that host -- while the
       // Chat image switch is on. For an image conversation this changes
       // nothing.
-      chatTurnHost: input.chatTurnHostAllowed === true,
+      chatTurnHost: input.chatTurnHostAllowed === true ||
+        (target.group.conversation != null &&
+          target.group.conversation.productKey === "review" &&
+          target.group.conversation.continuationBridge === null),
     },
     now
   );

@@ -24,6 +24,7 @@ export type ReviewWorkspaceControls = {
   unsupportedProviders: string[];
   imageRequest: boolean;
   imagePromptMode: boolean;
+  imageModelLabel?: string;
   setImagePromptMode: (value: boolean) => void;
 };
 
