@@ -191,8 +191,11 @@ export const GATE_EVIDENCE = {
 
     "MEMORY-01": {
         capability: ["lib/memoryRetrievalService.ts"],
-        measurement: [],
-        note: "Retrieval exists. A Korean-first recall set with NFC normalization and bigram ranking is not in the tree.",
+        measurement: [
+            "tools/memory-quality/productRetrieval.ts",
+            "tools/memory-quality/fixtures/retrieval-ko.json",
+        ],
+        note: "A synthetic Korean Recall@5 set runs on the product scorer; the 2026-10-23 baseline is 69% against the 85% target. Non-blocking by owner decision.",
     },
     "MEMORY-02": {
         capability: ["lib/memoryRetrievalService.ts"],
