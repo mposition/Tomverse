@@ -297,7 +297,7 @@ for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
     test(`Review inline images ${mode} ${appearance} ${width}px ${theme}`, { tag: "@ui-risk" }, async ({ page }) => {
       const calls = await installInlineImageAnswers(page);
       await prepare(page, width, theme, THREE_MODELS, 3, [], true);
-      if (mode === "Professional") await page.getByTestId("review-command-bar").getByRole("button", { name: mode, exact: true }).click();
+      if (mode === "Professional") await page.getByTestId("composer-review-mode").getByRole("button", { name: mode, exact: true }).click();
       if (appearance === "classic") await page.evaluate(() => {
         localStorage.setItem("tomverse_review_appearance", "classic");
         window.dispatchEvent(new Event("tomverse:review-preferences"));
@@ -325,7 +325,7 @@ for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
 test("Professional image selection stages the composer, then answers inline without automatic routing", async ({ page }) => {
   const calls = await installInlineImageAnswers(page);
   await prepare(page, 1440);
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
   const picker = await openModelPickerCatalogue(page);
   await picker.getByTestId("model-picker-tab-image").click();
   await picker.locator('[data-testid="image-model-option"][data-model-id="gpt-image-2"]').click();
