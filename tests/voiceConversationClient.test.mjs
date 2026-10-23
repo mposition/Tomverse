@@ -7,6 +7,7 @@ async function until(fn) { for (let n = 0; n < 50; n++) { if (fn()) return; awai
 
 function world() {
   const states = [], requests = [], backend = [];
+  const behavior = { closeOnStop: true, status: { settled: false } };
   let output;
   let stopped = 0, peerClosed = 0;
   const track = { stop() { stopped++; }, enabled: true };
@@ -26,14 +27,15 @@ function world() {
       fetch: async (_url, init) => {
         const body = JSON.parse(init.body); requests.push(body);
         if (body.action === "start") return new Response(new ReadableStream({ start(c) { output = c; } }));
-        if (body.action === "stop") { send({ type: "closed", confirmed: true, credits: 6 }); output.close(); }
+        if (body.action === "stop" && behavior.closeOnStop) { send({ type: "closed", confirmed: true, credits: 6 }); output.close(); }
+        if (body.action === "status") return Response.json(behavior.status);
         return Response.json({ ok: true });
       },
     },
     onChange: state => states.push(state),
     onRequest: async text => { backend.push(text); return { sourceUserMessageId: "91a27fea-6ceb-4c92-92e4-4fd77ac5a901", conversationId: "chat-1" }; },
   });
-  return { client, states, requests, backend, peer, send, track, counts: () => ({ stopped, peerClosed }) };
+  return { client, states, requests, backend, peer, audio, send, track, behavior, loseStream: () => output.error(new Error("Connection lost")), endStream: () => output.close(), counts: () => ({ stopped, peerClosed }) };
 }
 
 test("real transport protocol delegates once through ordinary Chat and sends only its saved receipt", async () => {
@@ -79,4 +81,72 @@ test("a late microphone grant after unmount is immediately released", async () =
   const running = client.start(null); client.destroy();
   grant({ getTracks: () => [{ stop() { stopped++; } }] }); await running;
   assert.equal(stopped, 1); assert.equal(calls, 0);
+});
+
+for (const ending of ["loseStream", "endStream"]) {
+  test(`${ending} retains a silent primary through worker takeover and trusts only saved billing`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 1_000_000 });
+    const w = world(); w.behavior.closeOnStop = false;
+    const running = w.client.start("chat-1");
+    await until(() => w.requests.length === 1);
+    w.send({ type: "ready", reservationId: "voice-1", sdp: "answer", maxSeconds: 300 });
+    w.send({ type: "started" });
+    await until(() => w.states.at(-1).status === "listening");
+    w[ending](); await running;
+    assert.equal(w.states.at(-1).status, "closing");
+    assert.equal(w.states.at(-1).billingPending, true);
+    assert.ok(w.counts().stopped > 0); assert.equal(w.audio.muted, true);
+    assert.equal(w.counts().peerClosed, 0);
+    t.mock.timers.tick(31_000); await tick();
+    assert.equal(w.counts().peerClosed, 0);
+    assert.equal(w.requests.filter(r => r.action === "start").length, 1);
+    assert.equal(w.requests.filter(r => r.action === "stop").length, 1);
+    assert.deepEqual(w.backend, []);
+    assert.equal(w.states.at(-1).confirmed, false);
+    w.behavior.status = { settled: true, confirmed: true, credits: 24, seconds: 40 };
+    t.mock.timers.tick(15_000);
+    await until(() => w.states.at(-1).status === "ended");
+    assert.equal(w.states.at(-1).billingPending, false);
+    assert.equal(w.states.at(-1).confirmed, true);
+    assert.equal(w.states.at(-1).credits, 24);
+    assert.equal(w.counts().peerClosed, 1);
+    w.client.destroy();
+  });
+}
+
+test("disconnect cleanup is bounded by the original session closing allowance", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 1_000_000 });
+  const w = world(); w.behavior.closeOnStop = false;
+  const running = w.client.start("chat-1");
+  await until(() => w.requests.length === 1);
+  w.send({ type: "ready", reservationId: "voice-1", sdp: "answer", maxSeconds: 15 });
+  w.send({ type: "started" });
+  await until(() => w.states.at(-1).status === "listening");
+  t.mock.timers.tick(14_000);
+  w.loseStream(); await running;
+  t.mock.timers.tick(30_000); await tick();
+  assert.equal(w.counts().peerClosed, 0);
+  t.mock.timers.tick(1_000); await tick();
+  assert.equal(w.counts().peerClosed, 1);
+  assert.equal(w.states.at(-1).status, "ended");
+  assert.equal(w.states.at(-1).confirmed, false);
+  assert.equal(w.states.at(-1).billingPending, true);
+  w.client.destroy();
+});
+
+test("unmount releases a disconnected primary immediately and never dispatches another session", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 1_000_000 });
+  const w = world(); w.behavior.closeOnStop = false;
+  const running = w.client.start("chat-1");
+  await until(() => w.requests.length === 1);
+  w.send({ type: "ready", reservationId: "voice-1", sdp: "answer", maxSeconds: 300 });
+  w.send({ type: "started" });
+  await until(() => w.states.at(-1).status === "listening");
+  w.loseStream(); await running;
+  w.client.destroy();
+  assert.equal(w.counts().peerClosed, 1);
+  const previousStates = w.states.length;
+  t.mock.timers.tick(90_000); await tick();
+  assert.equal(w.states.length, previousStates);
+  assert.equal(w.requests.filter(r => r.action === "start").length, 1);
 });

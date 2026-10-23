@@ -7,7 +7,7 @@ const mod = path => pathToFileURL(resolve(path)).href;
 let w;
 class SecurityError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ApiSecurityError: SecurityError } });
-mock.module(mod("lib/voiceConversationTasks.ts"), { namedExports: { abandonVoiceDispatch: async () => Boolean(w.unknownDispatch), dispatchVoiceTask: async () => { w.dispatches = (w.dispatches ?? 0) + 1; } } });
+mock.module(mod("lib/voiceConversationTasks.ts"), { namedExports: { dispatchVoiceTask: async () => { w.dispatches = (w.dispatches ?? 0) + 1; } } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatUsageBucket: { findUnique: async () => w.heartbeat ? { updatedAt: new Date(w.heartbeat) } : null, upsert: async () => { w.heartbeat = Date.now(); } },
   $executeRaw: async (parts, ...values) => {
@@ -15,7 +15,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
     if (sql.includes("jsonb_build_object('token'")) {
       const [token, until, id] = values; const row = w.rows.find(row => row.id === id);
       if (!row || Date.parse(row.reservationPayload.webLeaseUntil ?? "") > Date.now() || Date.parse(row.reservationPayload.recoveryLease?.until ?? "") > Date.now()) return 0;
-      row.reservationPayload.recoveryLease = { token, until }; return 1;
+      row.reservationPayload.recoveryLease = { token, until }; row.lastError ??= "VOICE_CLOSE_REQUESTED"; return 1;
     }
     if (sql.includes("- 'recoveryLease'")) {
       const [id, token] = values; const row = w.rows.find(row => row.id === id);
@@ -128,6 +128,21 @@ test("the watchdog never opens a competing sideband while the web receiver lease
   assert.equal(w.closes.length, 0); assert.equal(w.charges.length, 0);
 });
 
+test("an orphaned primary is durably marked for immediate closure without dispatching queued work", async () => {
+  w.allowReceiver = true; w.commands = [];
+  w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  await observeActiveVoiceConversations();
+  assert.equal(w.rows[0].lastError, "VOICE_CLOSE_REQUESTED");
+  w.socket.emit("open");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(w.commands, [{ type: "session.close" }]);
+  assert.equal(w.dispatches, undefined);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 35 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.rows[0].status, "settled"); assert.equal(w.charges[0].seconds, 35);
+});
+
 test("a kill switch closes an already attached independent receiver on the next cycle", async () => {
   w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
   w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
@@ -135,14 +150,6 @@ test("a kill switch closes an already attached independent receiver on the next 
   process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
   await observeActiveVoiceConversations();
   assert.deepEqual(w.commands, [{ type: "session.close" }]);
-});
-
-test("an unknown dispatched answer closes recovery without replaying the append", async () => {
-  w.allowReceiver = true; w.unknownDispatch = true; w.commands = [];
-  w.rows[0].expiresAt = new Date(Date.now() + 300000); w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200000).toISOString();
-  await observeActiveVoiceConversations(); w.socket.emit("open");
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(w.commands, [{ type: "session.close" }]); assert.equal(w.dispatches, undefined);
 });
 
 test("socket errors and expiry retain ownership until an observed final receipt commits", async () => {

@@ -5,7 +5,6 @@ import { ApiSecurityError } from "@/lib/apiSecurity";
 import { readVoiceCreditPayload, settleVoiceConversationCredits } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, closeVoiceProviderSession, hangupVoiceProviderSession } from "@/lib/voiceConversationProvider";
 import { VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
-import { abandonVoiceDispatch, dispatchVoiceTask } from "@/lib/voiceConversationTasks";
 
 const heartbeatKey = "voice-conversation:watchdog";
 const heartbeatPeriod = "worker";
@@ -17,7 +16,7 @@ const retryAfter = new Map<string, number>();
 /** A database lease also excludes receivers in other worker/maintenance processes. */
 export async function claimVoiceRecoveryLease(id: string) {
   const token = randomUUID(); const until = new Date(Date.now() + 30_000).toISOString();
-  const changed = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{recoveryLease}', jsonb_build_object('token', ${token}::text, 'until', ${until}::text)), "updatedAt" = NOW()
+  const changed = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{recoveryLease}', jsonb_build_object('token', ${token}::text, 'until', ${until}::text)), "lastError" = COALESCE("lastError", 'VOICE_CLOSE_REQUESTED'), "updatedAt" = NOW()
     WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND ("status" = 'reserved' OR "lastError" = 'VOICE_PROVIDER_STOP_PENDING')
     AND COALESCE(("reservationPayload"->>'webLeaseUntil')::timestamptz, 'epoch'::timestamptz) <= NOW()
     AND COALESCE(("reservationPayload"->'recoveryLease'->>'until')::timestamptz, 'epoch'::timestamptz) <= NOW()`;
@@ -59,35 +58,22 @@ export async function observeActiveVoiceConversations() {
     if (!lease) continue;
     const socket = attachVoiceProviderSession(row.providerRequestId!);
     let finalizing = false;
-    let dispatching = false;
-    let taskTimer: ReturnType<typeof setInterval> | undefined;
     let finalizationTimer: ReturnType<typeof setTimeout> | undefined;
-    let closing = false;
-    const close = () => { closing = true; clearInterval(taskTimer); if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
-    const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
-    const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
+    const close = () => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
     const expiryTimer = setTimeout(() => { if (finalizing) return; void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
     let released = false;
     const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(() => { if (!finalizing) release(); }); }, 5_000);
     function release() {
       if (released) return; released = true;
-      clearTimeout(stopTimer); clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer); clearInterval(taskTimer);
+      clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer);
       receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
       socket.close(); void releaseVoiceRecoveryLease(row.id, lease!).catch(() => {});
     }
     receivers.set(row.id, release);
     receiverClosers.set(row.id, close);
-    socket.once("open", () => {
-      if (row.lastError || Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) { close(); return; }
-      void abandonVoiceDispatch(row.id).then(unknown => {
-        if (unknown) { close(); return; }
-        taskTimer = setInterval(() => {
-          if (dispatching || finalizing || closing || released || socket.readyState !== socket.OPEN) return;
-          dispatching = true;
-          void dispatchVoiceTask(row.id, socket).catch(close).finally(() => { dispatching = false; });
-        }, 500);
-      }).catch(close);
-    });
+    // The web receiver is gone. End the existing call rather than leaving a
+    // silent primary billable until its original maximum duration.
+    socket.once("open", close);
     socket.on("message", data => {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;
