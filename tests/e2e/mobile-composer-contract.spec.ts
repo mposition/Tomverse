@@ -350,7 +350,7 @@ async function expectComposerContract(page: Page, label: string) {
 async function expectComposerControlsContained(page: Page) {
   await expect.poll(() => page.getByTestId("chat-input").evaluate((composer) => {
     const boundary = composer.getBoundingClientRect();
-    const controls = Array.from(composer.querySelectorAll<HTMLElement>("button, nav a"))
+    const controls = Array.from(composer.querySelectorAll<HTMLElement>("button, nav a, select"))
       .map((node) => ({ node, rect: node.getBoundingClientRect() }))
       .filter(({ rect }) => rect.width > 0 && rect.height > 0);
     const failures: string[] = [];

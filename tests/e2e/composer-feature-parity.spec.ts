@@ -34,6 +34,7 @@ test.describe("Shared Chat and Review composer", () => {
             await expect(page.getByTestId("composer-review-mode")).toBeVisible();
             const mode = (await page.getByTestId("composer-review-mode").boundingBox())!;
             expect(mode.y + mode.height).toBeLessThanOrEqual((await page.getByTestId("composer-textarea-row").boundingBox())!.y);
+            if (appearance === "classic") await expect(page.getByTestId("composer-review-mode")).toHaveAccessibleDescription(/Easy/);
           }
           const mic = (await page.getByTestId("composer-voice-button").boundingBox())!;
           const send = (await page.getByTestId("chat-send-button").boundingBox())!;

@@ -106,10 +106,11 @@ the optional analytics notice stays inside the dock's safe area.
 ## Non-negotiable invariants
 
 - The textarea owns a dedicated row.
-- Product navigation and the Chat mode or Review model-count action share one
+- Product navigation and the Chat mode or Review Easy/Professional action share one
   compact context row outside the textarea. They may only open the existing
   canonical navigation, mode or model-picker paths; none may write a product or
-  model selection directly.
+  model selection directly. Review's model count and canonical picker live in
+  the tools row.
 - The empty textarea provides at least one complete visible line.
 - The textarea uses the available inner width of the composer.
 - A status chip may not reduce the textarea to remaining horizontal space.

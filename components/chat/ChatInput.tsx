@@ -3040,7 +3040,7 @@ export function ChatInput({
   const keyboardInset = useKeyboardInset();
   const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
-  const footerModelPicker = review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || !isStudio) && (
+  const footerModelPicker = review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || (!isStudio && Boolean(review))) && (
             <button
               ref={modelMenuButtonRef}
               type="button"
