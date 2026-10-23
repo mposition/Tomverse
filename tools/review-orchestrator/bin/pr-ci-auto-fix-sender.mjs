@@ -23,7 +23,7 @@
  *
  * Exit 64 when the settings cannot run; otherwise it runs until stopped.
  */
-import { closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -108,9 +108,14 @@ export function senderSettings(env = process.env) {
   return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox: env.PR_CI_AUTO_FIX_OUTBOX, stateDir: env.STATE_DIRECTORY };
 }
 
-/** One open file and at most one byte past the cap, so a larger file is refused without loading it. */
+/**
+ * One open file and at most one byte past the cap, so a larger file is
+ * refused without loading it. Opened non-blocking and without following a
+ * link: the review account could leave a FIFO under a request's name, and a
+ * blocking open would wait for a writer forever.
+ */
 export function readRequestFile(path) {
-  const fd = openSync(path, "r");
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0));
   try {
     if (!fstatSync(fd).isFile()) return null;
     const buffer = Buffer.alloc(REQUEST_MAX_BYTES + 1);

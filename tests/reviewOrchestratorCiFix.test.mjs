@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -572,5 +572,20 @@ test("an expired request is logged once and not sent", async () => {
     assert.equal(h.lines.filter((line) => /expired/.test(line)).length, 1);
   } finally {
     rmSync(h.stateDir, { recursive: true, force: true });
+  }
+});
+
+test("an outbox entry is opened without blocking or following a link", { skip: process.platform === "win32" }, async () => {
+  const { readRequestFile } = await import("../tools/review-orchestrator/bin/pr-ci-auto-fix-sender.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "ci-fix-fifo-"));
+  try {
+    const fifo = join(dir, `${SHA_A}.json`);
+    assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+    assert.equal(readRequestFile(fifo), null, "a FIFO is not a request, and opening it does not wait");
+    writeFileSync(join(dir, "real.json"), "{}");
+    symlinkSync(join(dir, "real.json"), join(dir, `${SHA_B}.json`));
+    assert.throws(() => readRequestFile(join(dir, `${SHA_B}.json`)), /ELOOP/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
