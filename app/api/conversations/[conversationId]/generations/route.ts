@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
 import {
   conversationKindNotSupportedResponse,
   isImageConversationKind,
@@ -25,7 +24,9 @@ type Params = { params: Promise<{ conversationId: string }> };
 
 export async function GET(req: Request, { params }: Params) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Authentication required." },

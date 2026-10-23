@@ -1,9 +1,8 @@
-﻿export const dynamic = "force-dynamic";
+﻿import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
@@ -96,7 +95,9 @@ const timeZonePayload = (settings: {
 
 export async function GET(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
@@ -210,7 +211,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }

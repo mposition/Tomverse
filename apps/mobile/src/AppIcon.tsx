@@ -8,8 +8,9 @@ import attach from "./assets/attach.svg";
 import mic from "./assets/mic.svg";
 import send from "./assets/send.svg";
 import newChat from "./assets/new.svg";
+import settings from "./assets/settings.svg";
 
-const assets = { menu, menuDark, logo, spark, idea, file, attach, mic, send, newChat };
+const assets = { menu, menuDark, logo, spark, idea, file, attach, mic, send, newChat, settings };
 export function AppIcon({ name }: { name: keyof typeof assets }) {
   // eslint-disable-next-line @next/next/no-img-element -- Native Vite assets never pass through Next.js.
   return <img className={`app-icon icon-${name}`} src={assets[name]} alt="" aria-hidden="true" />;
