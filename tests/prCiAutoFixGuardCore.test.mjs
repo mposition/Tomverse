@@ -18,6 +18,8 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
     ["M\t.github/workflows/x.yml", "1\t1\t.github/workflows/x.yml", "gate_path"],
     ["M\tscripts/merge-train.mjs", "1\t1\tscripts/merge-train.mjs", "gate_path"],
     ["M\tdocs/policy/a.md", "1\t1\tdocs/policy/a.md", "gate_path"],
+    ["M\tdocs/ui-contracts/a.md", "1\t1\tdocs/ui-contracts/a.md", "gate_path"],
+    ["M\tdocs/release-gates/a.yaml", "1\t1\tdocs/release-gates/a.yaml", "gate_path"],
     ["M\tAGENTS.md", "1\t1\tAGENTS.md", "gate_path"],
     ["M\tlib/adminAuth.ts", "1\t1\tlib/adminAuth.ts", "gate_path"],
     ["M\tpackages/x/package.json", "1\t1\tpackages/x/package.json", "gate_path"],

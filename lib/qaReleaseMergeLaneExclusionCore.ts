@@ -9,15 +9,18 @@
  */
 import { compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
 
-/** Gate paths: the checks, their runners and the documents that define them. */
+/**
+ * Gate paths: the checks, their runners, the lane's own contract and the
+ * repository-wide instructions. Owner decision 2026-10-23: other features'
+ * policy documents, UI contracts and release-gate registries are reversible
+ * text the lane may merge; only the lane's own policy stays with a person.
+ */
 export const QA_RELEASE_MERGE_LANE_GATE_PATTERNS: readonly string[] = [
   ".github/**",
   "scripts/**",
   "AGENTS.md",
   "CLAUDE.md",
-  "docs/policy/**",
-  "docs/ui-contracts/**",
-  "docs/release-gates/**",
+  "docs/policy/qa-release-agent.md",
   "lib/adminAuth*",
   "lib/adminAuditSystemActors.ts",
   "lib/agentAuthorityFiles.ts",

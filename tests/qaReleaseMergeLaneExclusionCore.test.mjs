@@ -58,8 +58,6 @@ test("each gate path excludes", () => {
     "AGENTS.md",
     "CLAUDE.md",
     "docs/policy/qa-release-agent.md",
-    "docs/ui-contracts/mobile-chat-composer.md",
-    "docs/release-gates/tomverse-chat-v1.yaml",
     "lib/adminAuth.ts",
     "lib/adminAuthCore.ts",
     "lib/adminAuditSystemActors.ts",
@@ -71,6 +69,17 @@ test("each gate path excludes", () => {
 
 test("near-miss paths are not gates", () => {
   for (const path of ["docs/ops/railway-restore-drill.md", "lib/adminAudit.ts", "components/package.json.md", "docs/AGENTS.md.bak"]) {
+    assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
+  }
+});
+
+test("other features' policy documents, UI contracts and release gates are not gates (owner 2026-10-23)", () => {
+  for (const path of [
+    "docs/policy/image-generation.md",
+    "docs/policy/tomverse-chat-data-domain-registry.yaml",
+    "docs/ui-contracts/mobile-chat-composer.md",
+    "docs/release-gates/tomverse-chat-v1.yaml",
+  ]) {
     assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
   }
 });
