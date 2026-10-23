@@ -10,7 +10,8 @@
  *     run made no progress while rows were overdue or a row is past its grace,
  *     so the cron run itself fails as a second signal beside the heartbeat.
  *   * heartbeat: `{ stale }` from the newest run rows, for the team 3 watcher.
- *   * run: one worker pass while SUPPORT_TRIAGE_ENABLED is exactly "true";
+ *   * run: one worker pass while triage is on (the Admin console switch, or
+ *     with none saved, SUPPORT_TRIAGE_ENABLED exactly "true");
  *     otherwise `{ result: "ok", enabled: false }` and nothing is written, not
  *     even a run row.
  */
@@ -24,9 +25,9 @@ import {
   SUPPORT_TRIAGE_HEARTBEAT_SECRET_ENV,
   SUPPORT_TRIAGE_RETENTION_SECRET_ENV,
   SUPPORT_TRIAGE_RUN_SECRET_ENV,
-  isSupportTriageEnabled,
   isSupportTriageRouteAuthorized,
 } from "@/lib/supportTriageRouteAuth";
+import { resolveSupportTriageEnabled } from "@/lib/supportTriageLlmSetting";
 import { SupportTriageTransactionRefused } from "@/lib/supportTriageTransaction";
 
 export type SupportTriageRouteResponse = {
@@ -111,7 +112,7 @@ export const handleSupportTriageHeartbeat = async (
   ]);
   const stale = supportTriageHeartbeatStale({
     now: clock[0].now,
-    enabled: isSupportTriageEnabled(env),
+    enabled: (await resolveSupportTriageEnabled(env)).enabled,
     retention: {
       latestSuccessAt: retentionSuccess?.finishedAt ?? null,
       latestFinished:
@@ -139,7 +140,7 @@ export const handleSupportTriageRun = async (
   if (!isSupportTriageRouteAuthorized(request.headers.get("authorization"), SUPPORT_TRIAGE_RUN_SECRET_ENV, env)) {
     return unauthorized;
   }
-  if (!isSupportTriageEnabled(env)) return { status: 200, body: { result: "ok", enabled: false } };
+  if (!(await resolveSupportTriageEnabled(env)).enabled) return { status: 200, body: { result: "ok", enabled: false } };
   let result;
   try {
     result = await runSupportTriageWorker();
