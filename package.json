@@ -367,7 +367,7 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@prisma/config": "^7.10.0",
-    "@sentry/nextjs": "^10.75.0",
+    "@sentry/nextjs": "^10.75.2",
     "ai": "^7.0.114",
     "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
