@@ -4,20 +4,22 @@ import { visibleGeneratedArtifacts, formatArtifactSize, type ChatStreamArtifact 
 import type { ChatTransport } from "./chatTransport";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import type { MobileLanguage } from "../../../locales/mobile";
+import { ImageTurn } from "./ImageTurn";
 
-export function AnswerContent({ content, artifacts, citations, transport, language }: {
+export function AnswerContent({ content, artifacts, citations, transport, language, imageTurn }: {
   content: string; artifacts?: ChatStreamArtifact[];
   citations?: Array<{ url: string; title?: string }>;
   transport: ChatTransport; language: MobileLanguage;
+  imageTurn?: { groupId: string; modelIds: string[] };
 }) {
   const copy = mobileCompletionCopy(language);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
   return <div className="answer-content">
-    <AnswerMarkdown components={{
+    {imageTurn ? <ImageTurn groupId={imageTurn.groupId} transport={transport} language={language} /> : <AnswerMarkdown components={{
       a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
       img: ({ alt }) => <span>{alt}</span>,
-    }}>{content}</AnswerMarkdown>
+    }}>{content}</AnswerMarkdown>}
     {!!citations?.length && <ol className="answer-sources" aria-label={copy.sources}>{citations.map((source, index) => {
       let safe = false; try { safe = ["https:", "http:"].includes(new URL(source.url).protocol); } catch { /* Invalid sources are not links. */ }
       return <li key={`${source.url}-${index}`}>{safe ? <a href={source.url} target="_blank" rel="noopener noreferrer">{source.title || source.url}</a> : source.title}</li>;

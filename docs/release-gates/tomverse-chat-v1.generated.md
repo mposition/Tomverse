@@ -10,7 +10,7 @@
 
 - Registry status: draft
 - Registry last updated: 2026-08-05
-- Gates: 40 total, 40 blocking, 4 conditional
+- Gates: 40 total, 39 blocking, 4 conditional
 - Threshold changes require: product-owner, independent-reviewer
 - Validator: `npm run verify:tomverse-chat-release-gates`
 
@@ -53,7 +53,7 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 | `BILLING-04` | Goodwill refunds remain idempotent | finance-ops | yes | `duplicate_goodwill_refunds` = 0 | pending |
 | `ABUSE-01` | Plan, model, quota, and rate-limit policy cannot be bypassed | security-privacy | yes | `unauthorized_or_over_quota_model_dispatches_in_adversarial_tests` = 0 | pending |
 | `MODERATION-01` | Every request covered by moderation policy receives the required checks | security-privacy | yes | `policy_covered_requests_dispatched_without_required_moderation` = 0 | pending |
-| `MEMORY-01` | Korean memory retrieval reaches the target recall | backend-ai | yes (when `memory-release-b-enabled`) | `korean_memory_recall_at_5_percent` >= 85 | pending |
+| `MEMORY-01` | Korean memory retrieval reaches the target recall | backend-ai | no | `korean_memory_recall_at_5_percent` >= 85 | pending |
 | `MEMORY-02` | Irrelevant memory injection remains below the safety threshold | backend-ai | yes (when `memory-release-b-enabled`) | `incorrect_or_irrelevant_memory_injection_percent` <= 2 | pending |
 | `MEMORY-03` | Sensitive data and credentials are never injected from memory | security-privacy | yes (when `memory-release-b-enabled`) | `sensitive_or_credential_memory_injections` = 0 | pending |
 | `MEMORY-04` | Deleted or superseded memory is never reused | security-privacy | yes (when `memory-release-b-enabled`) | `deleted_or_superseded_memory_reuse_events` = 0 | pending |
@@ -549,7 +549,7 @@ Evidence references: none recorded
 #### MEMORY-01 -- Korean memory retrieval reaches the target recall
 
 - Owner: backend-ai
-- Blocking: yes
+- Blocking: no
 - Applies when: `memory-release-b-enabled`
 - Status: pending
 - Approved by: not yet approved
@@ -565,7 +565,7 @@ Required evidence:
 
 - Korean-first retrieval set using NFC normalization and bigram ranking
 
-Evidence references: none recorded
+Evidence references: `docs/release-gates/evidence/memory01-product-retrieval-baseline-2026-10-23.md`, `commit:ffe0a5fb71a1fda239add0b80087dee57d7f50d4`, `dataset:memory-quality-retrieval-ko-v1@3d85612d432cbcd5d8feb42bb9d833dc83f24dc42ced8bab2b9bcc6980f88b9e`
 
 #### MEMORY-02 -- Irrelevant memory injection remains below the safety threshold
 

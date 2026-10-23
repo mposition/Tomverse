@@ -1,8 +1,7 @@
 export const dynamic = "force-dynamic";
 
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import { dualComparisonReviewResultSchema } from "@/lib/comparisonReview";
 import {
   COMPARISON_REVIEW_ITEM_VERDICTS,
@@ -113,7 +112,9 @@ export async function GET(
   context: { params: Promise<{ conversationId: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401);
     }
@@ -165,7 +166,9 @@ export async function PUT(
   context: { params: Promise<{ conversationId: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401);
     }
@@ -271,7 +274,9 @@ export async function DELETE(
   context: { params: Promise<{ conversationId: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401);
     }

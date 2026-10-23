@@ -46,6 +46,7 @@ import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
   nativeChatBearerRoute,
+  nativeParityBearerRoute,
   stripInternalAuthHeaders,
 } from "@/lib/nativeBearerGate";
 
@@ -276,7 +277,9 @@ export function proxy(request: NextRequest) {
   // The original N1b list remains empty. The default-off native Chat switch
   // enrolls only the exact method/path pairs whose handlers resolve bearers
   // and verify live session state. Operational activation is a separate step.
-  const nativeChat = nativeChatBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true");
+  const nativeChat = process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" &&
+    (nativeChatBearerRoute(request.nextUrl.pathname, request.method, true) ||
+      nativeParityBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true"));
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),

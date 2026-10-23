@@ -89,6 +89,9 @@ export const RAILWAY_NAMES = Object.freeze([
   "RAILWAY_GIT_REPO_NAME",
   "RAILWAY_GIT_REPO_OWNER",
   "RAILWAY_GIT_COMMIT_MESSAGE",
+  // Set by Railway on its V2 runtime; the page service refused to start on it
+  // when S1b was switched on (2026-10-23).
+  "RAILWAY_BETA_ENABLE_RUNTIME_V2",
 ]);
 
 /** Substrings that mark a credential, matched case-insensitively (policy §3 rule 5 (b)). */

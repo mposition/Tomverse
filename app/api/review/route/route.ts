@@ -1,8 +1,7 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { effectivePlanModelLimit, getUserBillingPlan, planAllowsFeature } from "@/lib/billingEntitlements";
@@ -26,7 +25,9 @@ export async function POST(req: Request) {
   const headers = { "Cache-Control": "private, no-store" };
   try {
     if (!reviewEasyEnabled() && !(await chatImageTriageModelId())) return NextResponse.json({ error: "EASY_UNAVAILABLE" }, { status: 503, headers });
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
     if (!session?.user?.id) return NextResponse.json({ error: "SIGN_IN_REQUIRED" }, { status: 401, headers });
     const userId = session.user.id;
     await assertUserOperationalAccess(userId);

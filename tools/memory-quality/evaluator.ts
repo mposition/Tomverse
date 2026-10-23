@@ -114,7 +114,9 @@ export async function evaluateExtraction(
   };
 }
 
-export function evaluateRetrieval(testCase: QualityCase, selected: readonly string[]) {
+export function evaluateRetrieval(
+  testCase: Pick<QualityCase, "id" | "language" | "retrieval">, selected: readonly string[],
+) {
   if (selected.length > 5 || new Set(selected).size !== selected.length ||
       selected.some((id) => !testCase.retrieval.pool.some((item) => item.id === id))) {
     throw new Error("invalid_selection");
@@ -130,33 +132,40 @@ export function evaluateRetrieval(testCase: QualityCase, selected: readonly stri
   };
 }
 
-export function summarize(
-  extraction: CaseOutcomeV3[], retrieval: ReturnType<typeof evaluateRetrieval>[],
-) {
+export function summarizeRetrieval(retrieval: ReturnType<typeof evaluateRetrieval>[]) {
   const sum = (key: "selected" | "relevant" | "recalled" | "irrelevant" | "forbidden" | "inactive",
     rows = retrieval) => rows.reduce((n, row) => n + row[key], 0);
   const ko = retrieval.filter((row) => row.language === "ko");
   const koreanRecallAt5 = sum("relevant", ko) ? sum("recalled", ko) / sum("relevant", ko) : null;
   const irrelevantInjectionRate = sum("selected") ? sum("irrelevant") / sum("selected") : 0;
+  return { koreanRecallAt5, irrelevantInjectionRate,
+    selected: sum("selected"), relevant: sum("relevant"), recalled: sum("recalled"),
+    irrelevant: sum("irrelevant"), forbidden: sum("forbidden"), inactive: sum("inactive") };
+}
+
+export function retrievalTargetFailures(summary: ReturnType<typeof summarizeRetrieval>) {
+  return [
+    ...(summary.koreanRecallAt5 === null || summary.koreanRecallAt5 < TARGETS.koreanRecallAt5
+      ? ["korean_recall_at_5"] : []),
+    ...(summary.irrelevantInjectionRate > TARGETS.irrelevantInjectionRate ? ["irrelevant_injection"] : []),
+    ...(summary.forbidden ? ["forbidden_injection"] : []),
+    ...(summary.inactive ? ["inactive_reuse"] : []),
+  ];
+}
+
+export function summarize(
+  extraction: CaseOutcomeV3[], retrieval: ReturnType<typeof evaluateRetrieval>[],
+) {
+  const retrievalSummary = summarizeRetrieval(retrieval);
+  const retrievalFailures = retrievalTargetFailures(retrievalSummary);
   const legacyTargets = judgeEvalV3(extraction);
   return {
     extraction: aggregateOutcomesV3(extraction),
     byLanguage: legacyTargets.byLanguage,
-    retrieval: { koreanRecallAt5, irrelevantInjectionRate,
-      selected: sum("selected"), relevant: sum("relevant"), recalled: sum("recalled"),
-      irrelevant: sum("irrelevant"), forbidden: sum("forbidden"), inactive: sum("inactive") },
+    retrieval: retrievalSummary,
     // Synthetic development fixtures cannot satisfy independent decision-grade evidence.
-    targetPass: legacyTargets.pass && koreanRecallAt5 !== null &&
-      koreanRecallAt5 >= TARGETS.koreanRecallAt5 &&
-      irrelevantInjectionRate <= TARGETS.irrelevantInjectionRate &&
-      sum("forbidden") === 0 && sum("inactive") === 0,
+    targetPass: legacyTargets.pass && retrievalFailures.length === 0,
     decisionGrade: false as const,
-    targetFailures: [
-      ...legacyTargets.failures,
-      ...(koreanRecallAt5 === null || koreanRecallAt5 < TARGETS.koreanRecallAt5 ? ["korean_recall_at_5"] : []),
-      ...(irrelevantInjectionRate > TARGETS.irrelevantInjectionRate ? ["irrelevant_injection"] : []),
-      ...(sum("forbidden") ? ["forbidden_injection"] : []),
-      ...(sum("inactive") ? ["inactive_reuse"] : []),
-    ],
+    targetFailures: [...legacyTargets.failures, ...retrievalFailures],
   };
 }
