@@ -6,6 +6,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
 import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
 import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
+import { AmuxSessionReviewPanel } from "@/components/admin/AmuxSessionReviewPanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { AMUX_IDEA_PROGRESS_STAGES, amuxIdeaProgressStep } from "@/lib/amux/ideaProgressCore";
@@ -65,6 +66,8 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
       {row.waitingFor === "session_review" ? (
         <p className="text-amber-200" data-testid="amux-session-review">{m.sessionReviewDetail}</p>
       ) : null}
+      {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
+        <AmuxSessionReviewPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?
