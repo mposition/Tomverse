@@ -172,8 +172,9 @@ apt_progress() {
 }
 
 release_dpkg_lock() {
-  local waited=0 stalled=0
+  local waited=0 stalled=0 terminated=0
   local last current
+  APT_FINISHED_ALONE=0
   last="$(apt_progress)"
   while pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1; do
     if [ "$waited" -eq 0 ]; then
@@ -191,16 +192,31 @@ release_dpkg_lock() {
     if [ "$stalled" -ge "$DPKG_LOCK_WAIT" ]; then
       echo "::warning::apt has made no progress for ${stalled}s and still holds the lock; terminating it so the retry can proceed."
       terminate_apt
+      terminated=1
       break
     fi
     if [ "$(remaining_budget)" -le 0 ]; then
       echo "::warning::the install budget ran out after waiting ${waited}s for apt; terminating it so this step reports rather than being killed."
       terminate_apt
+      terminated=1
       break
     fi
   done
   sudo dpkg --configure -a >/dev/null 2>&1 || true
+  if [ "$waited" -gt 0 ] && [ "$terminated" -eq 0 ]; then
+    APT_FINISHED_ALONE=1
+  fi
 }
+
+# Set by release_dpkg_lock when the abandoned apt run exited by itself rather
+# than being terminated -- usually because it finished the very install the
+# retry was waiting to make.
+APT_FINISHED_ALONE=0
+
+# How long the one confirming attempt below may take. It reruns install-deps
+# against packages that are already installed, which is an apt update and
+# nothing else, so a minute is generous. It comes out of DOWNLOAD_RESERVE.
+CONFIRM_WINDOW=60
 
 # Backoff, not a tight loop: the failure being retried is a mirror or CDN
 # having a bad minute, and asking again immediately mostly asks the same bad
@@ -225,6 +241,18 @@ retry() {
     # left cannot fetch anything and would report a mirror failure for a budget
     # that ran out.
     if [ "$budget" -lt 30 ]; then
+      # Waiting for the abandoned run is what spent the budget, and that run may
+      # have used it to finish the job. On 2026-10-23 (#2928) apt was setting up
+      # xvfb, the last package, five seconds before this reported "out of
+      # budget" for an install that had in fact completed. So when it exited on
+      # its own, confirm its result once instead of reporting a mirror failure.
+      if [ -n "$recover" ] && [ "$APT_FINISHED_ALONE" -eq 1 ] && [ $((ENDS_AT - $(date +%s))) -gt "$CONFIRM_WINDOW" ]; then
+        APT_FINISHED_ALONE=0
+        echo "The abandoned apt run finished on its own; confirming its result with up to ${CONFIRM_WINDOW}s from the download reserve."
+        if timeout --signal=TERM --kill-after=10s "$CONFIRM_WINDOW" "$@"; then
+          return 0
+        fi
+      fi
       echo "::error::${label} ran out of the install budget (${DEADLINE}s for this run) after $((attempt - 1)) attempt(s)."
       return 1
     fi

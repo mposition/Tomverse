@@ -164,7 +164,6 @@ const PAGE_PATH = "/admin/qa-release?tab=ci-admission";
 type Kind = "develop" | "main" | "hotfix";
 const kindOf = (entry: Pick<CiAdmissionQueueEntry, "base" | "head">): Kind =>
   entry.base !== "main" ? "develop" : entry.head.startsWith("hotfix/") ? "hotfix" : "main";
-const unitsOf = (kind: Kind) => (kind === "develop" ? 1 : 2);
 const BADGE: Record<Kind, string> = {
   develop: "bg-blue-400/15 text-blue-300",
   main: "bg-violet-400/15 text-violet-300",
@@ -476,7 +475,10 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const used = state.lastRound?.used ?? 0;
   const free = Math.max(0, state.capacity - used);
   const minutes = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
-  const badgeText = (kind: Kind) => (kind === "develop" ? m.develop : kind === "hotfix" ? m.hotfix : m.main);
+  // Runners each kind of CI needs (lib/ciAdmissionCore.ts), from the stored state.
+  const unitsOf = (kind: Kind) => (kind === "develop" ? state.needs.develop : state.needs.main);
+  const deployUnits = (branch: string) => (branch === "main" ? state.needs.mainPush : state.needs.developPush);
+  const badgeText = (kind: Kind) => fill(kind === "develop" ? m.develop : kind === "hotfix" ? m.hotfix : m.main, { n: unitsOf(kind) });
   const statusText: Record<CiAdmissionEntryStatus, string> = {
     running: m.statusRunning,
     done: m.statusDone,
@@ -552,7 +554,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             >
               −
             </button>
-            <span className="w-8 text-center font-mono text-sm text-zinc-100" data-testid="ci-admission-capacity">
+            <span className="w-10 text-center font-mono text-sm text-zinc-100" data-testid="ci-admission-capacity">
               {state.capacity}
             </span>
             <button
@@ -572,7 +574,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           <div className="flex flex-wrap gap-2">
             {deploys.map((deploy) => {
               const kind: Kind = deploy.branch === "main" ? "main" : "develop";
-              const units = unitsOf(kind);
+              const units = deployUnits(deploy.branch);
               return (
                 <a
                   key={`${deploy.branch}@${deploy.sha}`}
@@ -580,7 +582,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                   target="_blank"
                   rel="noreferrer"
                   className={`flex min-w-[10rem] flex-col gap-0.5 rounded-lg border border-dashed px-3 py-2.5 ${SLOT[kind]}`}
-                  style={{ flexGrow: units, flexBasis: `${units * 8}rem` }}
+                  style={{ flexGrow: units, flexBasis: `${Math.max(8, units / 2)}rem` }}
                   data-testid={`ci-admission-deploy-${deploy.sha.slice(0, 7)}`}
                 >
                   <span className="truncate text-[13px] font-medium text-zinc-100">
@@ -598,7 +600,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                 <div
                   key={pull.number}
                   className={`flex min-w-[10rem] items-start gap-2 rounded-lg border px-3 py-2.5 ${SLOT[kind]}`}
-                  style={{ flexGrow: unitsOf(kind), flexBasis: `${unitsOf(kind) * 8}rem` }}
+                  style={{ flexGrow: unitsOf(kind), flexBasis: `${Math.max(8, unitsOf(kind) / 2)}rem` }}
                   data-testid={`ci-admission-running-${pull.number}`}
                 >
                   <a href={`${PULL_URL}${pull.number}`} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -629,7 +631,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             {free > 0 ? (
               <div
                 className="flex min-w-[8rem] flex-col gap-0.5 rounded-lg border border-dashed border-zinc-700 px-3 py-2.5"
-                style={{ flexGrow: free, flexBasis: `${free * 8}rem` }}
+                style={{ flexGrow: free, flexBasis: `${Math.max(8, free / 2)}rem` }}
               >
                 <span className="text-[13px] font-medium text-zinc-500">{m.emptySlot}</span>
                 <span className="text-[11px] text-zinc-500">{fill(m.emptySlotNote, { count: free })}</span>

@@ -155,6 +155,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
   let runningBases: Map<number, string>;
   let deploys: CiAdmissionDeploy[];
   const checks = new Map<number, CiAdmissionCheck>();
+  let liveRunners: number | null = null;
   try {
     openPulls = await github.openPulls();
     ({ keys: running, bases: runningBases, deploys } = await github.runningPulls());
@@ -162,6 +163,11 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     for (const pull of toCheck) {
       checks.set(pull.number, await github.check(pull));
     }
+    // Runners other workflows hold count against the budget too; unread, only the known CI counts.
+    liveRunners = await github
+      .runnerUsage()
+      .then((usage) => usage.githubRunning + usage.githubQueued)
+      .catch(() => null);
   } catch (error) {
     scheduleRecheck(RETRY_AFTER_FAILURE_MS);
     return { outcome: "read_failed", failure: code(error) };
@@ -173,7 +179,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, nowMs: now(), shadow: mode === "shadow" });
+      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, liveRunners, nowMs: now(), shadow: mode === "shadow" });
       // Shadow keeps what it would have done out of the reservations and statuses.
       await writeState(tx, mode === "shadow" ? { ...judged.state, released: state.released, pendingStatus: state.pendingStatus } : judged.state);
       return judged;
