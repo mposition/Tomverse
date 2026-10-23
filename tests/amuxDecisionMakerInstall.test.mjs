@@ -203,6 +203,22 @@ test("a file is installed when absent, left only when already right, and kept in
   assert.match(installer, /replace\|repair\)\n[\s\S]*?\/usr\/bin\/install -d [^\n]*\$backup[\s\S]*?\/usr\/bin\/cp -a -- "\$\{DM_PLAN_DEST\[\$index\]\}" "\$backup/);
 });
 
+test("a CLI's vendor-home source is read only when its destination is not already §5a's file", () => {
+  // 2026-10-23: a re-login updated codex in amux-dm-openai's home, and the
+  // check on that source refused a broker-only reinstall whose codex copy was
+  // already right.
+  const needed = (state) => bash('dm_cli_source_needed "$1" "$2" && echo needed || echo skipped', state, SHA).stdout;
+  assert.equal(needed(`file 0 0 555 1 ${SHA}`), "skipped\n");
+  assert.equal(needed("absent"), "needed\n");
+  assert.equal(needed(`file 0 0 555 1 ${OTHER_SHA}`), "needed\n");
+  assert.equal(needed(`file 992 992 555 1 ${SHA}`), "needed\n");
+  assert.equal(needed(`file 0 0 755 1 ${SHA}`), "needed\n");
+  assert.equal(needed(`file 0 0 555 2 ${SHA}`), "needed\n");
+  for (const state of ["link", "other", "unreadable"]) assert.equal(needed(state), "needed\n", state);
+  assert.match(installer, /dm_cli_fits "\$DM_CODEX_DEST" "\$DM_CODEX_SOURCE" "\$DM_CODEX_SHA256"/);
+  assert.match(installer, /dm_cli_fits "\$DM_CLAUDE_DEST" "\$DM_CLAUDE_SOURCE" "\$DM_CLAUDE_SHA256"/);
+});
+
 test("the manifest names exactly the release's files, each once, in sha256sum's format", () => {
   const fits = (line) => bash('dm_manifest_line_fits "$1"', line).status === 0;
   for (const name of ["broker.mjs", "launcher.mjs", "dm-output-schema-v1.json", "install-amux-decision-maker.sh", "systemd/amux-dm-launcher-openai@.service"]) {
