@@ -140,7 +140,7 @@ export function SidebarAccountRailButton({
                 aria-expanded={isOpen}
                 aria-controls={isOpen ? popoverId : undefined}
                 onClick={() => setIsOpen((current) => !current)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-account-700 text-sm font-bold text-white ring-1 ring-accent-account-400/50 transition hover:ring-2 hover:ring-accent-account-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-accent-account-700 dark:ring-accent-account-400/40"
+                className={`flex ${placement === "above" ? "h-11 w-11" : "h-9 w-9"} shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-account-700 text-sm font-bold text-white ring-1 ring-accent-account-400/50 transition hover:ring-2 hover:ring-accent-account-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-accent-account-700 dark:ring-accent-account-400/40`}
             >
                 {user ? (
                     user.image ? (

@@ -2528,6 +2528,7 @@ export function AuthButton({
       <div className="flex flex-wrap gap-2">
         <SidebarAccountRailButton currentProduct={currentProduct} placement="above" />
         <button
+          data-testid="guest-account-login"
           onClick={() => {
             trackProductEvent("cta_start_click", 0, {
               cta_location: "account_login",
