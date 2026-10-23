@@ -1,4 +1,4 @@
--- baseline-check: present-if-function "amux_v19_session_model_admitted(text,text,text,text)"
+-- baseline-check: present-if-function "amux_v19_session_model_admitted"
 -- AMUX intake v19 (owner decision 2026-10-23): the owner may pick the analysis
 -- model per unattended idea. A session submission and its reservation may name
 -- the operating scope model, as before, or any model the owner has approved in
