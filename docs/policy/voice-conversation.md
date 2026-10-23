@@ -62,6 +62,9 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   uses a database lease to exclude competing recovery and maintenance
   receivers, enforces the deadline and observes the kill
   switch on every cycle. It receives final events after a web process dies.
+  Processing a final receipt has a 15-second deadline. A stalled database
+  operation stops renewing receiver ownership so another sweep can recover;
+  an unresolved final is still treated as unconfirmed, not invented usage.
   New paid starts require a
   heartbeat newer than 15 seconds. Its timers close sessions at the persisted
   deadline; the existing maintenance sweep also retries unresolved records.

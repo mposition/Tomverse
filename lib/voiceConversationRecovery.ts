@@ -61,6 +61,7 @@ export async function observeActiveVoiceConversations() {
     let finalizing = false;
     let dispatching = false;
     let taskTimer: ReturnType<typeof setInterval> | undefined;
+    let finalizationTimer: ReturnType<typeof setTimeout> | undefined;
     let closing = false;
     const close = () => { closing = true; clearInterval(taskTimer); if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
     const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
@@ -70,7 +71,7 @@ export async function observeActiveVoiceConversations() {
     const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(() => { if (!finalizing) release(); }); }, 5_000);
     function release() {
       if (released) return; released = true;
-      clearTimeout(stopTimer); clearTimeout(expiryTimer); clearInterval(leaseTimer); clearInterval(taskTimer);
+      clearTimeout(stopTimer); clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer); clearInterval(taskTimer);
       receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
       socket.close(); void releaseVoiceRecoveryLease(row.id, lease!).catch(() => {});
     }
@@ -96,7 +97,12 @@ export async function observeActiveVoiceConversations() {
         void recordVoiceUsage(row.id, seconds).catch(() => close());
       } else if (event.type === "session.closed") {
         finalizing = true;
-        void finalizeVoiceReservation(row.id, seconds).catch(() => prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {})).finally(release);
+        const deadline = new Promise<never>((_, reject) => { finalizationTimer = setTimeout(() => reject(new Error("Voice finalization deadline exceeded.")), 15_000); });
+        void Promise.race([finalizeVoiceReservation(row.id, seconds), deadline]).catch(() => {
+          // A stalled database operation must not renew ownership forever.
+          // This marker is best effort; lease expiry still permits another sweep.
+          void prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {});
+        }).finally(release);
       }
     });
     socket.once("error", () => { if (!finalizing) release(); });

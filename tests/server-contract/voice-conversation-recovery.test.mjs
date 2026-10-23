@@ -159,3 +159,21 @@ test("socket errors and expiry retain ownership until an observed final receipt 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(w.charges.length, 1); assert.equal(w.charges[0].seconds, 15);
 });
+
+test("a finalization that never returns releases ownership so grace settlement can finish without restarting", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  w.allowReceiver = true; w.commands = []; w.finalLookupGate = new Promise(() => {});
+  w.rows[0].expiresAt = new Date(Date.now() + 40); w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200000).toISOString();
+  try {
+    await observeActiveVoiceConversations();
+    w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+    mock.timers.tick(10000); await new Promise(resolve => setImmediate(resolve));
+    assert.ok(w.rows[0].reservationPayload.recoveryLease); assert.equal(w.charges.length, 0);
+    mock.timers.tick(5001); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
+    w.rows[0].expiresAt = new Date(Date.now() - 1);
+    await reconcileVoiceConversations();
+    assert.equal(w.rows[0].status, "settled"); assert.equal(w.charges.length, 1);
+    assert.equal(w.charges[0].evidence, "observed_minimum"); assert.equal(w.charges[0].seconds, 10);
+  } finally { mock.timers.reset(); }
+});
