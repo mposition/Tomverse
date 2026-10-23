@@ -456,9 +456,6 @@ const chatComposerLocators = (page: Page) => {
   return {
     moreActions: page.getByTestId("composer-tools-button"),
     modelSelect: page.getByTestId("composer-model-select"),
-    estimatedCredits: page.getByRole("button", {
-      name: /Estimated .* credits, view breakdown/,
-    }),
     sendButton: page.getByTestId("chat-send-button"),
     textarea: page.getByTestId("chat-textarea"),
   };

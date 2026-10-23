@@ -203,6 +203,41 @@ test("unsupported image providers show a local notice and never start a text or 
   expect(images).toBe(0); expect(text).toBe(0);
 });
 
+for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const) {
+  test(`Easy new image ${width}px ${theme} resolves before quoting and generating`, { tag: "@ui-risk" }, async ({ page }) => {
+    await prepare(page, width, theme);
+    const imageCalls: string[][] = [];
+    let routingCalls = 0;
+    await page.route("**/api/images/generations", route => {
+      if (route.request().method() !== "POST") return route.fulfill({ json: { generations: [] } });
+      imageCalls.push(route.request().postDataJSON().modelIds);
+      return route.fulfill({ status: 500, json: { error: "QA_PROVIDER_FAILURE" } });
+    });
+    await page.route("**/api/review/route", route => {
+      routingCalls++;
+      const body = route.request().postDataJSON();
+      expect(body.requestedKind).toBe("image");
+      return route.fulfill({ json: { kind: "image", preset: "draft", choices: body.providers.map((provider: string) => ({ provider, modelId: provider === "openai" ? "gpt-image-2" : null })) } });
+    });
+    await page.locator(".review-navigation-history").click();
+    await page.getByTestId("sidebar-new-launcher-more").click();
+    await page.getByTestId("new-conversation-menu-image").click();
+    await page.keyboard.press("Escape");
+    const submit = page.getByTestId("image-generation-submit");
+    await expect(submit).toBeDisabled();
+    await page.getByTestId("image-generation-prompt").fill("A mountain illustration.");
+    await page.getByTestId("image-generation-prompt").blur();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect.poll(() => routingCalls).toBe(1);
+    await expect(submit.getByRole("img")).toBeVisible();
+    expect(imageCalls).toEqual([]);
+    await submit.click();
+    await expect.poll(() => imageCalls).toEqual([["gpt-image-2"]]);
+    expect(routingCalls).toBe(1);
+  });
+}
+
 test("a supported image provider still executes while unsupported peers keep their notices", async ({ page }) => {
   await prepare(page, 1600);
   const imageCalls: string[][] = [];

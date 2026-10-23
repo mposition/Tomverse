@@ -627,7 +627,7 @@ export function ImageGenerationWorkspace({
     !hasActiveGeneration &&
     !promptTooLong &&
     prompt.trim().length > 0 &&
-    selectedModelIds.length > 0 &&
+    (selectedModelIds.length > 0 || (modelSelectionLocked && Boolean(onResolveModels))) &&
     !hasUnpricedSelection;
 
   // Seed ids that did not fit are announced the same way a restore's are: the
@@ -739,7 +739,8 @@ export function ImageGenerationWorkspace({
     setDownloadError(null);
     const requestPrompt = prompt.trim();
     try {
-      if (modelSelectionLocked && onResolveModels && preparedPromptRef.current !== requestPrompt) {
+      if (modelSelectionLocked && onResolveModels &&
+          (selectedModelIds.length === 0 || preparedPromptRef.current !== requestPrompt)) {
         const routed = await onResolveModels(requestPrompt);
         if (!routed || routed.modelIds.length === 0) {
           setSubmitError(t("chat.imageGenerationErrorGeneric"));
