@@ -7,7 +7,7 @@ import {
   MARKETING_LLM_CLOSE_REASONS_BY_STATE,
   MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD,
   MARKETING_LLM_OBSERVED_CLOSE_REASONS,
-  MARKETING_LLM_PRICE_PINS,
+  marketingLlmReportedModelMatches,
   canonicalMarketingLlmJson,
   marketingLlmAdapterConfigDigest,
   marketingLlmBudgetSignature,
@@ -17,12 +17,16 @@ import {
   marketingLlmDispatchDigest,
   marketingLlmMonthKey,
   marketingLlmPinProblems,
+  marketingLlmPinAllows,
   marketingLlmPricePinDigest,
   marketingLlmRequestDigest,
   marketingLlmReservation,
   marketingLlmReservePayloadDigest,
   marketingLlmSettleOutcome,
+  MARKETING_LLM_SETTINGS_UNSET,
+  marketingLlmSettingsValue,
   parseMarketingLlmMonthlyCap,
+  parseMarketingLlmSettings,
   resolveMarketingLlmPin,
 } from "../lib/marketingLlmBudgetCore.ts";
 
@@ -45,12 +49,16 @@ const pin = (overrides = {}) => ({
 
 const sha = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
-test("no model is pinned until S3e brings one with its price evidence", () => {
-  assert.deepEqual(MARKETING_LLM_PRICE_PINS, []);
-  assert.deepEqual(resolveMarketingLlmPin(MARKETING_LLM_PRICE_PINS, "anything", new Date()), {
-    ok: false,
-    code: "model_not_pinned",
-  });
+test("with no pin for a model nothing can be reserved against it", () => {
+  assert.deepEqual(resolveMarketingLlmPin([], "anything", new Date()), { ok: false, code: "model_not_pinned" });
+});
+
+test("a reported model is the pinned one when it is the same id or a dated snapshot of it", () => {
+  assert.equal(marketingLlmReportedModelMatches("gpt-5.4-mini", "gpt-5.4-mini"), true);
+  assert.equal(marketingLlmReportedModelMatches("gpt-5.4-mini", "gpt-5.4-mini-2026-03-17"), true);
+  for (const reported of ["gpt-5.4-mini-high", "gpt-5.4", "gpt-5.4-mini-2026-03", "gpt-5.4-mini-2026-03-17x", "gpt-6-luna"]) {
+    assert.equal(marketingLlmReportedModelMatches("gpt-5.4-mini", reported), false, reported);
+  }
 });
 
 test("canonical JSON sorts keys, omits absent values and refuses null and fractions", () => {
@@ -177,7 +185,7 @@ test("a pin is usable only when every field is well formed and inside the row li
   assert.deepEqual(marketingLlmPinProblems(pin()), []);
   assert.ok(marketingLlmPinProblems(pin({ tiers: ["flex", "default"] })).includes("tiers_format"));
   assert.ok(marketingLlmPinProblems(pin({ tiers: ["flex"] })).includes("default_tier_missing"));
-  assert.ok(marketingLlmPinProblems(pin({ expiresAt: "2026-12-31T00:00:00.000Z" })).includes("expiry_not_ninety_days"));
+  assert.ok(marketingLlmPinProblems(pin({ expiresAt: pin().verifiedAt })).includes("expiry_not_after_verified"));
   assert.ok(marketingLlmPinProblems(pin({ source: "http://example.invalid" })).includes("source_format"));
   assert.ok(marketingLlmPinProblems(pin({ contextWindowTokens: 2_000_001 })).includes("context_window_over_row_limit"));
   assert.ok(marketingLlmPinProblems(pin({ maxOutputTokens: 100_001 })).includes("output_cap_over_row_limit"));
@@ -246,4 +254,82 @@ test("close reasons are paired to states and to whether an observation is kept",
 
 test("the month key is the UTC year and month", () => {
   assert.equal(marketingLlmMonthKey(new Date("2026-10-01T00:00:00.000Z")), "2026-10");
+});
+
+test("a web-search reservation reads the window once per model pass and adds every search, and a text reservation is unchanged", () => {
+  const searchPin = pin({ webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 });
+  assert.equal(marketingLlmReservation(searchPin).reservedMicroUsd, 115_508);
+  // Three searches requested, four billable (OpenAI's observed overshoot):
+  // five passes of 128,000 x 0.8, the output cap once, and four searches --
+  // 512,000 + 13,107.2 + 40,000.
+  assert.deepEqual(marketingLlmReservation(searchPin, "web-search-v1"), {
+    reservedInputTokens: 640_000,
+    reservedOutputTokens: 4_096,
+    reservedMicroUsd: 565_108,
+  });
+  // A pin without search fields prices no search, and is not allowed the profile.
+  assert.equal(marketingLlmReservation(pin(), "web-search-v1").reservedMicroUsd, 115_508);
+  assert.equal(marketingLlmPinAllows(pin(), "web-search-v1"), false);
+  assert.equal(marketingLlmPinAllows(searchPin, "web-search-v1"), true);
+  assert.equal(marketingLlmPinAllows(searchPin, "text-only-v1"), true);
+  assert.equal(marketingLlmPinAllows(searchPin, "other"), false);
+});
+
+test("search fields come as a pair, positive and within the cap", () => {
+  assert.deepEqual(marketingLlmPinProblems(pin({ webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 })), []);
+  for (const fields of [
+    { webSearchMicroUsdPerCall: 10_000 },
+    { maxWebSearchCalls: 3 },
+    { webSearchMicroUsdPerCall: 0, maxWebSearchCalls: 3 },
+    { webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 11 },
+    { webSearchMicroUsdPerCall: 1.5, maxWebSearchCalls: 3 },
+  ]) {
+    assert.ok(marketingLlmPinProblems(pin(fields)).includes("web_search_fields"), JSON.stringify(fields));
+  }
+  // The row limit is judged at the most expensive profile the pin allows.
+  assert.ok(
+    marketingLlmPinProblems(pin({ webSearchMicroUsdPerCall: 1_000_000, maxWebSearchCalls: 10 })).includes("reservation_over_row_limit"),
+  );
+});
+
+test("the web-search profile's adapter digest names its search cap; the text profile's does not move", () => {
+  const searchPin = pin({ webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 });
+  const text = marketingLlmAdapterConfigDigest(marketingLlmConfigSnapshot({ pin: searchPin, adapterVersion: "1.0.0" }));
+  const search = marketingLlmAdapterConfigDigest(
+    marketingLlmConfigSnapshot({ pin: searchPin, adapterVersion: "1.0.0", adapterProfile: "web-search-v1" }),
+  );
+  assert.notEqual(text, search);
+  assert.notEqual(
+    search,
+    marketingLlmAdapterConfigDigest(
+      marketingLlmConfigSnapshot({ pin: { ...searchPin, maxWebSearchCalls: 4 }, adapterVersion: "1.0.0", adapterProfile: "web-search-v1" }),
+    ),
+  );
+});
+
+test("the operator's settings document is read strictly, and anything else is unreadable", () => {
+  assert.deepEqual(parseMarketingLlmSettings(undefined), MARKETING_LLM_SETTINGS_UNSET);
+  assert.deepEqual(parseMarketingLlmSettings(null), MARKETING_LLM_SETTINGS_UNSET);
+  const set = { model: "fixture-model-2026-10-01", monthlyUsdCap: "12.5" };
+  assert.deepEqual(parseMarketingLlmSettings(marketingLlmSettingsValue(set)), set);
+  assert.deepEqual(parseMarketingLlmSettings('{"monthlyUsdCap":null,"model":null}'), MARKETING_LLM_SETTINGS_UNSET);
+  for (const value of [
+    "{",
+    "[]",
+    '"x"',
+    '{"model":null}',
+    '{"model":null,"monthlyUsdCap":null,"extra":1}',
+    '{"model":"has space","monthlyUsdCap":null}',
+    '{"model":7,"monthlyUsdCap":null}',
+    '{"model":null,"monthlyUsdCap":"101"}',
+    '{"model":null,"monthlyUsdCap":"0"}',
+    '{"model":null,"monthlyUsdCap":5}',
+  ]) {
+    assert.equal(parseMarketingLlmSettings(value), null, value);
+  }
+  // One spelling per settings, so equal settings compare equal as stored text.
+  assert.equal(
+    marketingLlmSettingsValue({ monthlyUsdCap: "1", model: "m" }),
+    marketingLlmSettingsValue({ model: "m", monthlyUsdCap: "1" }),
+  );
 });

@@ -3,7 +3,6 @@ import { notFound, redirect } from "next/navigation";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
-import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { SEO_LOCALES, createPageMetadata, isSeoLocale, localizedPath, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
 
 const localeAliases: Record<string, Language> = { kr: "ko", cn: "zh" };
@@ -39,7 +38,7 @@ export default async function LocalizedReviewProductPage({ params }: LocalizedRe
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-        <LandingPageContent guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE} />
+        <LandingPageContent />
       </LanguageProvider>
     </div>
   );

@@ -16,11 +16,20 @@ export const AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH = false;
 export const AMUX_V22_TASK_RESULT_RETENTION_ENV =
   "TOMVERSE_AMUX_V22_TASK_RESULT_RETENTION";
 
+/** v19 path and key cleanup uses the existing isolated retention trigger, but
+ * has a separate default-off operational switch from v4 raw-body cleanup. */
+export const AMUX_V19_READ_MANIFEST_RETENTION_ENV =
+  "TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION";
+export const AMUX_V19_READ_MANIFEST_RETENTION_CODE_LATCH = true;
+
 export const amuxV4ContentRetentionEnabled = (value: string | undefined) =>
   AMUX_V4_CONTENT_RETENTION_CODE_LATCH && value === "enabled";
 
 export const amuxV22TaskResultRetentionEnabled = (value: string | undefined) =>
   AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH && value === "enabled";
+
+export const amuxV19ReadManifestRetentionEnabled = (value: string | undefined) =>
+  AMUX_V19_READ_MANIFEST_RETENTION_CODE_LATCH && value === "enabled";
 
 export const amuxV4ContentRetentionRequestSchema = z.object({
   schemaVersion: z.literal(1),

@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -15,6 +15,7 @@ import test from "node:test";
 
 import {
   buildObservationPayload,
+  observationPayloadDigest,
   summariseObservation,
 } from "../lib/productResearchObservationCore.mjs";
 import {
@@ -193,7 +194,17 @@ test("the runs below cannot find git", () => {
   assert.equal(git.status, null, `git was still reachable: ${git.stdout}`);
 });
 
-/** A stand-in for the ingest route that records what reached it. */
+/**
+ * A stand-in for the ingest route that records what reached it.
+ *
+ * It answers the way the route does -- the slot and outcome it stored, and
+ * the digest it computed from the payload -- because the run now checks that
+ * receipt. A stub that answered `{ recorded: true }` and nothing else would
+ * make every test here exercise a path the real route never produces.
+ *
+ * `reply.digest` substitutes a different one, which is the disagreement the
+ * whole comparison exists to catch.
+ */
 const ingestServer = async (reply = { status: 200 }) => {
   const received = [];
   const server = createServer((request, response) => {
@@ -209,10 +220,26 @@ const ingestServer = async (reply = { status: 200 }) => {
         body,
       });
       response.writeHead(reply.status, { "content-type": "application/json" });
+      let sent;
+      try {
+        sent = JSON.parse(body);
+      } catch {
+        sent = {};
+      }
       response.end(
         JSON.stringify(
           reply.status === 200
-            ? { recorded: true, observationId: "obs-2026-10-07-abcdef12" }
+            ? {
+                recorded: true,
+                observationId: "obs-2026-10-07-abcdef12",
+                slot: sent.slot,
+                outcome: sent.outcome,
+                payloadDigest:
+                  reply.digest ??
+                  (sent.payload === undefined
+                    ? null
+                    : observationPayloadDigest(sent.payload)),
+              }
             : { refused: "unauthorized" },
         ),
       );
@@ -475,5 +502,92 @@ test("the report's own output is what the payload builder accepts", () => {
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "a child that ignores SIGTERM is killed, and its slot is answered as a timeout",
+  { skip: process.platform === "win32" },
+  async () => {
+    // The defect both reviewers of the main release found. Under `spawnSync`
+    // the process cannot run a timer while a child runs, so the fifteen-minute
+    // deadline -- the one that exists precisely for a child that hangs -- could
+    // not fire; and `spawnSync`'s own timeout sends SIGTERM and then waits, so
+    // a child that ignores SIGTERM is waited for forever. Railway skips the
+    // next scheduled run while one is still going, so that is not one lost slot
+    // but every slot after it.
+    //
+    // The shim is both halves at once: it blocks, and it refuses to leave when
+    // asked. It fakes the clone so the hang lands on a call with a 30-second
+    // deadline rather than the clone's five minutes -- what is being measured
+    // is the kill, not the length of a constant.
+    const shim = mkdtempSync(join(tmpdir(), "product-research-git-hang-"));
+    const marker = join(shim, "hung");
+    writeFileSync(
+      join(shim, "git"),
+      [
+        "#!/bin/sh",
+        "case \"$1\" in",
+        "  clone) mkdir -p \"$6\" && exit 0 ;;",
+        "esac",
+        "trap '' TERM",
+        `touch ${JSON.stringify(marker)}`,
+        "sleep 600",
+      ].join("\n") + "\n",
+      { mode: 0o755 },
+    );
+    const ingest = await ingestServer();
+    try {
+      const started = Date.now();
+      const { status, output } = await runThroughNpmToEnd({
+        PATH: `${shim}${delimiter}${process.env.PATH}`,
+        HOME: process.env.HOME,
+        ...SERVICE_ENV,
+        PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+      });
+      const elapsed = Date.now() - started;
+
+      assert.ok(existsSync(marker), "the shim never hung, so nothing was exercised");
+      // It ended on its own, nowhere near the ten minutes the shim wanted and
+      // inside the harness deadline that would otherwise have killed it.
+      assert.ok(elapsed < 110_000, `the run took ${elapsed}ms`);
+      assert.equal(status, 1, output);
+      assert.match(output, /timeout/, output);
+
+      // And the slot is answered. A hung run that wrote nothing would be
+      // indistinguishable from a night nobody ran.
+      assert.equal(ingest.received.length, 1, "the slot got one answer");
+      const sent = JSON.parse(ingest.received[0].body);
+      assert.equal(sent.outcome, "failed");
+      assert.equal(sent.failureStage, "timeout");
+      assert.equal("payload" in sent, false);
+    } finally {
+      await ingest.close();
+      rmSync(shim, { recursive: true, force: true });
+    }
+  },
+);
+
+test("a row whose digest disagrees is reported, not retried", async () => {
+  // The route computes the digest from what it stored and answers with it for
+  // exactly this comparison. A disagreement means the row does not hold what
+  // the run observed -- and nothing was checking, so nobody could have found
+  // out. It is not retried: the row exists, and a second answer for one slot is
+  // worse than none.
+  const ingest = await ingestServer({ status: 200, digest: "f".repeat(64) });
+  try {
+    const result = await runAsync({
+      ...SERVICE_ENV,
+      PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+      PATH: PATH_WITHOUT_GIT,
+    });
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /does not match what was sent/, result.stdout);
+    // One attempt only.
+    assert.equal(ingest.received.length, 1);
+    // And it does not claim the row is good.
+    assert.equal(/recorded obs-[^:]+: failed at clone_failed/.test(result.stdout), false);
+  } finally {
+    await ingest.close();
   }
 });

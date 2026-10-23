@@ -23,8 +23,8 @@
  *   - **browser API** -- `PushManager`, `applicationServerKey`,
  *     `Notification.requestPermission`, `showNotification` are the Web Push
  *     surface. Nothing else in this product has a reason to name them.
- *   - **service worker** -- Web Push cannot be received without one, so a
- *     registered worker is the receiving half arriving early.
+ *   - **service worker** -- push event handlers are the receiving half.
+ *     Registration alone also serves offline caches and is not Web Push.
  *   - **credential** -- a VAPID or FCM server key in the environment is
  *     infrastructure whether or not code reads it yet.
  *   - **schema** -- a device-token or push-subscription table is the stored
@@ -69,7 +69,10 @@ export const PUSH_IDENTIFIERS = [
     "PushSubscription",
     "applicationServerKey",
     "showNotification",
-    "serviceWorker",
+    "PushEvent",
+    "PushSubscriptionChangeEvent",
+    "onpush",
+    "onpushsubscriptionchange",
     "gcm_sender_id",
 ];
 
@@ -85,6 +88,7 @@ export const PUSH_IDENTIFIERS = [
  * `registration.pushManager.getSubscription()`, so nothing is lost.
  */
 export const PUSH_PHRASES = ["Notification.requestPermission"];
+const PUSH_EVENT_LISTENER = /\baddEventListener\s*\(\s*["'](?:push|pushsubscriptionchange|notificationclick|notificationclose)["']/;
 
 /** Server credentials. Infrastructure whether or not code reads them yet. */
 export const PUSH_CREDENTIALS = [
@@ -145,6 +149,9 @@ export const findPushInfrastructure = ({
             if (text.includes(phrase)) {
                 findings.push({ kind: "browser-api", detail: phrase, where: path });
             }
+        }
+        if (PUSH_EVENT_LISTENER.test(text)) {
+            findings.push({ kind: "browser-api", detail: "push event listener", where: path });
         }
     }
 

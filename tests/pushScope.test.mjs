@@ -55,6 +55,27 @@ test("the Web Push browser surface is caught wherever it is named", () => {
     );
 });
 
+test("offline service-worker registration and public shell caching are not push infrastructure", () => {
+    assert.deepEqual(find({ sources: [
+        { path: "components/OfflineApp.tsx", text: 'navigator.serviceWorker.register("/chat-sw.js");' },
+        { path: "public/chat-sw.js", text: 'self.addEventListener("fetch", event => event.respondWith(caches.match(event.request)));' },
+    ], paths: ["public/chat-sw.js"] }), []);
+    // Exercise the actual C21 implementation as well as the minimal example.
+    assert.deepEqual(find({ sources: ["components/chat/ChatPwaControls.tsx", "public/chat-sw.js"]
+        .map(path => ({ path, text: readFileSync(join(root, path), "utf8") })) }), []);
+});
+
+test("push receipt remains blocked in a worker with an arbitrary filename", () => {
+    for (const event of ["push", "pushsubscriptionchange", "notificationclick", "notificationclose"]) {
+        for (const quote of ['"', "'"]) {
+            const findings = find({ sources: [{ path: "public/chat-sw.js",
+                text: `self.addEventListener ( ${quote}${event}${quote}, handler);` }] });
+            assert.ok(findings.some(finding => finding.detail === "push event listener"), event);
+        }
+    }
+    assert.ok(find({ sources: [{ path: "public/worker.js", text: "self.onpush = handler;" }] }).length > 0);
+});
+
 test("a device-registration table is caught by its model name", () => {
     const findings = find({
         prismaSchema: "model PushSubscription {\n  id String @id\n}\n",

@@ -23,7 +23,8 @@
 
 ### One family per locale, not per glyph
 
-Every `font-family` in the app resolves through `--font-ui` (or `--font-code`).
+Body and control `font-family` values resolve through `--font-ui` (or
+`--font-code`). The brand-only wordmark exception is described below.
 `:lang()` rules re-point those variables, so a mixed string such as
 `AI Review 결과` or `월 1,000 credits` is drawn by a single family. Patching only
 the CJK glyphs through a fallback would leave the Latin run in a different face,
@@ -212,9 +213,13 @@ emitted only where used and inherit the locale family automatically.
 The workspace sidebars, mobile new-conversation header and loading shell share
 `components/chat/TomverseWordmark.tsx`: lowercase `tomverse.` at 24px, weight
 650, letter-spacing -1px and line-height 1.6, with a 1px gap before the period.
-The wordmark inherits the existing locale UI family; it does not load a brand
-font or change body typography. An open conversation keeps its existing mobile
-header title. These values match the mobile app's owner-approved wordmark.
+The mobile app and both web workspaces load the same locally bundled Roboto
+variable WOFF2 through `@tomverse/ui-tokens/wordmark.css`. Its dedicated
+`Tomverse Wordmark` family applies only to `.tomverse-wordmark`, independently
+of locale; the font is bundled for offline native use and self-hosted on web.
+Body, control and code typography retain their existing locale UI families.
+An open conversation keeps its existing mobile header title. These values and
+the Roboto 650 face match the owner's approved app-based preview.
 At extreme zoom, the new-conversation wordmark yields space to the header's
 navigation controls; the accessible page heading remains available.
 
@@ -262,6 +267,10 @@ No template introduces webfont loading.
   a marketing route, 320px/200%-scaling reflow in en/ko/zh, light vs. dark
   parity, the 11px floor as rendered, and the 16px composer input.
 - `tests/e2e/korean-typography.spec.ts` — Korean and Chinese wrapping.
+- `tests/e2e/workspace-wordmark.spec.ts` — actual bundled Roboto rendering in
+  Chat/Review sidebars and mobile headers, with body typography unchanged.
+- `tests/native-mobile/wordmark.spec.ts` — the same brand face and metrics in
+  the native shell while its locale UI family is preserved.
 - `tests/e2e/mobile-composer-contract.spec.ts` — the composer geometry contract
   in `mobile-chat-composer.md`, which a global font change can move.
 
@@ -270,8 +279,8 @@ settled state rather than mid-swap.
 
 ## Change checklist
 
-- [ ] Every family still resolves through `--font-ui` / `--font-code`
-- [ ] No new hard-coded `font-family`
+- [ ] Body and control families still resolve through `--font-ui` / `--font-code`
+- [ ] Only the wordmark uses the shared brand family
 - [ ] Preload count did not grow (`scripts/report-font-preload.mjs`)
 - [ ] No customer text below 11px
 - [ ] No `font-black` on ≤16px text

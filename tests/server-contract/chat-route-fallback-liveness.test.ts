@@ -128,8 +128,16 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
   },
 } });
 const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as typeof import("../../lib/autoModelSelection");
+const modelPickInputs: Array<Parameters<typeof realAutoSelection.applyLlmModelPick>> = [];
+const modelPickResults: Array<ReturnType<typeof realAutoSelection.applyLlmModelPick>> = [];
 mock.module(mod("lib/autoModelSelection.ts"), { namedExports: {
   ...realAutoSelection,
+  applyLlmModelPick: (...args: Parameters<typeof realAutoSelection.applyLlmModelPick>) => {
+    const result = realAutoSelection.applyLlmModelPick(...args);
+    modelPickInputs.push(args);
+    modelPickResults.push(result);
+    return result;
+  },
   selectAutoModel: (input: Parameters<typeof realAutoSelection.selectAutoModel>[0]) => {
     routerInputs.push(input);
     return realAutoSelection.selectAutoModel(input);
@@ -499,6 +507,7 @@ let abortActiveRequest: () => void = () => {};
 let recordDispatchedCalls = 0;
 let recordDispatchStartedCalls = 0;
 let failDispatchStart = false;
+let throwAfterFallbackDispatchRecord = false;
 let throwBeforeFallbackStreamReturn = false;
 let throwGuestProviderUnknown = false;
 
@@ -1164,6 +1173,8 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
 const ledger = {
   accessAcquisitions: 0,
   settlements: [] as Array<{ outcome: string; attempts: number | null }>,
+  settledAttempts: [] as Array<{ attemptIndex: number; modelId: string }>,
+  attemptBudgetReleasesAtSettlement: [] as number[],
   releases: [] as Array<{ leaseId: string }>,
   attemptBudgetReservations: 0,
   attemptBudgetReleases: 0,
@@ -1201,13 +1212,18 @@ mock.module(mod("lib/chatSecurity.ts"), {
     settleChatUsage: async (
       _reservation: unknown,
       usage: { outcome?: string },
-      extra?: { attempts?: unknown[] }
+      extra?: { attempts?: Array<{ attemptIndex: number; price: { modelId: string } }> }
     ) => {
       if (activeSession === null) guestLifecycle.push("settlement");
       ledger.settlements.push({
         outcome: usage?.outcome ?? "unknown",
         attempts: extra?.attempts ? extra.attempts.length : null,
       });
+      ledger.settledAttempts = (extra?.attempts ?? []).map((attempt) => ({
+        attemptIndex: attempt.attemptIndex,
+        modelId: attempt.price.modelId,
+      }));
+      ledger.attemptBudgetReleasesAtSettlement.push(ledger.attemptBudgetReleases);
     },
     linkChatReservationProviderRequest: async () => undefined,
     reserveAttemptProviderBudget: async (input: { provider?: string }) => {
@@ -1380,6 +1396,10 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       assert.equal(row.modelId, instrumentation.modelId);
       assert.equal(row.state, "dispatch_started");
       row.state = "dispatched";
+      if (recordDispatchedCalls === 2 && throwAfterFallbackDispatchRecord) {
+        assert.equal(attempts.length, 2, "the fallback provider boundary must precede its dispatch record");
+        throw new Error("DISPATCH_RECORD_TEST_FAILURE");
+      }
       if (
         recordDispatchedCalls === 2 &&
         fallbackTransitionAbortAt === "during_record_dispatched"
@@ -1561,6 +1581,8 @@ const ask = async (
   world.messages = [];
   world.terminals = [];
   ledger.settlements = [];
+  ledger.settledAttempts = [];
+  ledger.attemptBudgetReleasesAtSettlement = [];
   ledger.releases = [];
   ledger.attemptBudgetReservations = 0;
   ledger.attemptBudgetReleases = 0;
@@ -2211,6 +2233,44 @@ test("a fallback settles once, releases once, and holds once more", async () => 
   assert.ok(attempts[0].cancelledWith);
 });
 
+test("a post-invocation dispatch record failure keeps the fallback hold and settlement", async () => {
+  throwAfterFallbackDispatchRecord = true;
+  try {
+    const { body, streamError } = await ask("answers");
+
+    assert.equal(streamError, null);
+    assert.ok(body.includes(ANSWER));
+    assert.equal(attempts.length, 2, "the recording failure triggered another dispatch");
+    assert.equal(recordDispatchedCalls, 2);
+    assert.equal(ledger.attemptBudgetReservations, 1);
+    assert.equal(
+      ledger.attemptBudgetReleases,
+      0,
+      "a provider invocation was misclassified as an abandoned hold"
+    );
+    assert.deepEqual(ledger.settlements, [{ outcome: "completed", attempts: 2 }]);
+    assert.deepEqual(ledger.settledAttempts, [
+      { attemptIndex: 0, modelId: attempts[0].modelId },
+      { attemptIndex: 1, modelId: attempts[1].modelId },
+    ]);
+    assert.deepEqual(ledger.attemptBudgetReleasesAtSettlement, [0]);
+    assert.deepEqual(ledger.releases, [{ leaseId: "lease-fallback-1" }]);
+    assert.deepEqual(
+      closedInstrumentationAttempts.map(({ attemptIndex, modelId, outcome }) => ({
+        attemptIndex,
+        modelId,
+        outcome,
+      })),
+      [
+        { attemptIndex: 0, modelId: attempts[0].modelId, outcome: "failed_pre_token" },
+        { attemptIndex: 1, modelId: attempts[1].modelId, outcome: "succeeded" },
+      ]
+    );
+  } finally {
+    throwAfterFallbackDispatchRecord = false;
+  }
+});
+
 test("a fallback constructor failure releases its unspent hold without a third dispatch", async () => {
   throwBeforeFallbackStreamReturn = true;
   try {
@@ -2496,6 +2556,21 @@ test("a routed drill turn is recorded as overridden, exactly once", async () => 
   assert.ok(overridden[0].includes('"selectedModelId"'));
 });
 
+test("a text turn without a semantic pick preserves the ordinary Auto selection and recovery", async () => {
+  modelPickInputs.length = 0;
+  modelPickResults.length = 0;
+  await ask("answers", "claimed", 200, false);
+  assert.equal(modelPickInputs.length, 1);
+  const [selection, pick, files] = modelPickInputs[0];
+  const routed = modelPickResults[0];
+  assert.equal(pick, null);
+  assert.equal(files?.required, false);
+  assert.ok(selection.routed && routed.routed);
+  if (!selection.routed || !routed.routed) return;
+  assert.equal(routed, selection);
+  assert.equal(attempts[0].modelId, selection.modelId);
+});
+
 test("a turn the override did not route records no override at all", async () => {
   // The same credential, the same account, the same outstanding gate -- and a
   // manual conversation, which the override does not and must not carry past.
@@ -2647,6 +2722,7 @@ const resetGuestHarness = (preserveClaims = false) => {
   injectPrimaryFault = false;
   fallbackBehaviour = "answers";
   failDispatchStart = false;
+  throwAfterFallbackDispatchRecord = false;
   throwBeforeFallbackStreamReturn = false;
   attempts.length = 0;
   attemptLifecycle.length = 0;
@@ -2674,6 +2750,8 @@ const resetGuestHarness = (preserveClaims = false) => {
   world.messages = [];
   world.terminals = [];
   ledger.settlements = [];
+  ledger.settledAttempts = [];
+  ledger.attemptBudgetReleasesAtSettlement = [];
   ledger.releases = [];
   ledger.attemptBudgetReservations = 0;
   ledger.attemptBudgetReleases = 0;

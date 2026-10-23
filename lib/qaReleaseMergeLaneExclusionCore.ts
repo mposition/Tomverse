@@ -9,38 +9,26 @@
  */
 import { compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
 
-/** Gate paths: the checks, their runners and the documents that define them. */
+/**
+ * Gate paths: only what a revert cannot undo or what would let an agent widen
+ * its own gate (owner, 2026-10-23: "keep only the minimum"). The workflows
+ * and actions hold the secrets CI runs with; the instructions and the lane's
+ * own policy say what agents may do; admin auth, the system audit actors and
+ * the authority manifest are the security and audit boundary. Everything else
+ * -- scripts, root config, package manifests, audit records, other policies --
+ * is reversible code the lane merges like any feature; CI has already run it
+ * on the pull request.
+ */
 export const QA_RELEASE_MERGE_LANE_GATE_PATTERNS: readonly string[] = [
-  ".github/**",
-  "scripts/**",
+  ".github/workflows/**",
+  ".github/actions/**",
   "AGENTS.md",
   "CLAUDE.md",
-  "docs/policy/**",
-  "docs/ui-contracts/**",
-  "docs/release-gates/**",
+  "docs/policy/qa-release-agent.md",
   "lib/adminAuth*",
   "lib/adminAuditSystemActors.ts",
   "lib/agentAuthorityFiles.ts",
 ];
-
-/**
- * File names that are gate files wherever they sit (policy version 3): npm
- * reads every workspace's manifest and runs its install scripts during
- * `npm ci`, and an `.npmrc` anywhere in the tree can change what is fetched.
- * Compared without case, because a case-insensitive checkout reads
- * `Package.json` as the same file.
- */
-export const QA_RELEASE_MERGE_LANE_GATE_FILE_NAMES: readonly string[] = [
-  "package.json",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  ".npmrc",
-];
-
-const GATE_FILE_NAMES = new Set(QA_RELEASE_MERGE_LANE_GATE_FILE_NAMES);
-
-const isGateFileName = (path: string): boolean =>
-  GATE_FILE_NAMES.has(path.slice(path.lastIndexOf("/") + 1).toLowerCase());
 
 /** Head branches whose own contract requires a human merge or a required review. */
 export const QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES: readonly string[] = [
@@ -137,10 +125,18 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
     return { excluded: true, reasons: [...reasons].sort() };
   }
 
-  const policyTests = new Set(input.policyTestPaths);
-  const ownMatchers = input.agentOwnPatterns.map(compileManifestPattern);
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns);
+  for (const file of changedFiles) for (const reason of judgeFile(file)) reasons.add(reason);
 
-  for (const file of changedFiles) {
+  return reasons.size === 0 ? { excluded: false } : { excluded: true, reasons: [...reasons].sort() };
+}
+
+/** The per-file half of the judgement: what one changed file excludes for. */
+function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[]) {
+  const policyTests = new Set(policyTestPaths);
+  const ownMatchers = agentOwnPatterns.map(compileManifestPattern);
+  return (file: QaReleaseChangedFile): Set<QaReleaseExclusionReason> => {
+    const reasons = new Set<QaReleaseExclusionReason>();
     const paths = [file.path];
     if (file.previousPath !== undefined && file.previousPath !== null) paths.push(file.previousPath);
     for (const path of paths) {
@@ -148,8 +144,7 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
         reasons.add("unreadable_path");
         continue;
       }
-      // Every file at the repository root sets how checks run or are configured.
-      if (!path.includes("/") || isGateFileName(path) || GATE_MATCHERS.some((matcher) => matcher.test(path))) {
+      if (GATE_MATCHERS.some((matcher) => matcher.test(path))) {
         reasons.add("gate_path");
       }
       if (policyTests.has(path)) reasons.add("policy_test");
@@ -160,7 +155,26 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
         reasons.add("protected_table_migration");
       }
     }
-  }
+    return reasons;
+  };
+}
 
-  return reasons.size === 0 ? { excluded: false } : { excluded: true, reasons: [...reasons].sort() };
+/**
+ * The changed files that leave a pull request to a person, with why, for the
+ * Admin screen: the same per-file rule as the judgement, so the screen names
+ * exactly the files the lane stopped on. Empty when the inputs were not read.
+ */
+export function qaReleaseMergeLaneExcludingFiles(
+  input: QaReleaseExclusionInput,
+  limit = 20,
+): { path: string; reasons: QaReleaseExclusionReason[] }[] {
+  if (!Array.isArray(input.changedFiles) || !Array.isArray(input.policyTestPaths) || !Array.isArray(input.agentOwnPatterns)) return [];
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns);
+  const out: { path: string; reasons: QaReleaseExclusionReason[] }[] = [];
+  for (const file of input.changedFiles) {
+    const reasons = judgeFile(file);
+    if (reasons.size > 0) out.push({ path: String(file.path).slice(0, 200), reasons: [...reasons].sort() });
+    if (out.length >= limit) break;
+  }
+  return out;
 }

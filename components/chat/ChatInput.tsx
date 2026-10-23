@@ -130,15 +130,6 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import {
-  allowsImageHandoffReshow,
-  classifyImageIntent,
-  imageIntentDraftKey,
-  offersImageHandoffChip,
-  type ImageIntentClass,
-} from "@/lib/imageIntentSignals";
-import { normalizeComposerImageIntentInput } from "@/lib/imageIntentInput";
-import { ImageIntentHandoffChip } from "@/components/chat/ImageIntentHandoffChip";
-import {
   deriveWebSearchComposerState,
   type WebSearchComposerState,
 } from "@/lib/webSearchComposerState";
@@ -170,14 +161,6 @@ import {
   type PromptRefinerResolution,
   type PromptRefinerUiState,
 } from "@/lib/promptRefinerSuggestion";
-
-/**
- * A stable empty list for the image-intent classifier.
- *
- * A fresh `[]` per render would make the memo below re-classify on every
- * keystroke of an unrelated field, and the classifier runs between them.
- */
-const EMPTY_IMAGE_INTENT_ATTACHMENTS: never[] = [];
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -879,18 +862,8 @@ type ChatInputProps = {
    * starting prompt. Absent when the image feature flag is off. `modelId` is
    * set when the user arrived from the catalogue's image tab and therefore
    * already chose which model to start from.
-   *
-   * `fromImageRequest` marks the one entry point that began with the user
-   * asking for a picture in words. Only that one may generate on the press
-   * for an account that has chosen to stop being asked -- the tools menu and
-   * the launcher are someone opening the workspace, not someone submitting a
-   * request they already wrote.
    */
-  onStartImageDraft?: (
-    draftText: string,
-    modelId?: string,
-    options?: { fromImageRequest?: boolean }
-  ) => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   /**
    * Whether this viewer may record voice input (docs/policy/voice-input.md §3).
    *
@@ -1162,23 +1135,11 @@ export function ChatInput({
   const [isWebSearchExceptionOpen, setIsWebSearchExceptionOpen] = useState(false);
   const [dismissedComplementaryModelId, setDismissedComplementaryModelId] = useState<string | null>(null);
   /*
-    The image-request handoff chip's own state (entry point 5 of
-    docs/ui-contracts/image-generation-workspace.md).
-
-    `isComposingDraft` exists because this chip changes the composer's height.
-    The web-search suggestion above can afford to appear mid-composition; a row
-    that grows while a Korean syllable is being assembled moves the input under
-    the cursor, which the mobile composer contract treats as an input accident.
-    So classification is suspended between compositionstart and compositionend
-    and resumes one debounce later.
+    `isComposingDraft` is true between compositionstart and compositionend. The
+    prompt-refiner panel reads it so that a row appearing mid-syllable cannot
+    move the input under the cursor (docs/ui-contracts/mobile-chat-composer.md).
   */
   const [isComposingDraft, setIsComposingDraft] = useState(false);
-  const [settledDraft, setSettledDraft] = useState("");
-  const [dismissedImageIntent, setDismissedImageIntent] = useState<{
-    key: string;
-    intentClass: ImageIntentClass;
-  } | null>(null);
-  const [imageIntentReshownOnce, setImageIntentReshownOnce] = useState(false);
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
@@ -1690,212 +1651,6 @@ export function ChatInput({
   // flipping the switch is itself the consent to search and to the surcharge,
   // and the switch's own description says the search is conditional.
 
-  /*
-    The image-request handoff.
-
-    Offered for a request that wants a picture -- raster generation and, since
-    2026-08-25, a text-dense chart or infographic. An edit of an attached image
-    and a question about one are classified here too and deliberately get
-    nothing: the workspace starts from text, so it cannot do what either of
-    them asked. See docs/policy/image-generation.md §13.
-
-    The classifier is shared with the server's image-capability system block
-    (lib/imageIntentSignals.ts). Two dictionaries would let the offer appear on
-    turns the block says nothing about.
-
-    ## It outlives the send
-
-    Two moments ask the same question, so one control answers both:
-
-      composer      the draft is an image request -- offer before a chat turn
-                    is spent on it;
-      after_answer  the draft is empty and the last question asked in this
-                    conversation was an image request -- offer beside the
-                    answer they just read.
-
-    The second exists because the first is not where people decide. A person
-    asks for an infographic, reads what the chat could produce, and only then
-    wants the picture -- and until this existed, the only thing waiting for
-    them was a sentence the model wrote about a workspace it cannot open. On
-    2026-08-25 that produced a numbered list whose fourth option was the image
-    tool; the user picked it, and the model had to answer that it could not go
-    there. The model is now forbidden to mention the destination at all
-    (lib/imageCapabilityPrompt.ts), which is only safe because this offer is
-    real.
-
-    One control, not two: a person offered the workspace while typing and
-    refused it after reading would have learned only that the offer is
-    arbitrary. The dismissal is keyed to the text, so dismissing before the
-    send stays dismissed after it -- the same question, already answered.
-  */
-  useEffect(() => {
-    if (isComposingDraft) return;
-    // Same debounce shape as the rest of this composer's derived state: the
-    // verdict follows the settled draft, not every keystroke.
-    const timer = setTimeout(() => setSettledDraft(value), 150);
-    return () => clearTimeout(timer);
-  }, [value, isComposingDraft]);
-
-  /*
-    What the offer is about: the draft while there is one, the last question
-    asked in this conversation once the composer is empty again.
-
-    Scoped by conversation rather than cleared on a timer, and derived rather
-    than reset in an effect -- an effect that calls setState whenever the
-    conversation changes is a cascading render, and the stale value is
-    unreachable while the ids disagree anyway.
-  */
-  const [lastSentImageIntentPrompt, setLastSentImageIntentPrompt] = useState<{
-    chatId: string | null;
-    text: string;
-  } | null>(null);
-  /*
-    The first send in a new conversation creates it, so `currentChatId` goes
-    from null to a real id one render after the question was remembered. That
-    is not the user moving anywhere -- it is the conversation they are looking
-    at acquiring a name -- so the memory is adopted into it rather than
-    discarded. Every other change of id is a move, and ends the offer.
-
-    Adjusted during render rather than in an effect: this is React's own
-    "derive state from props" idiom, and an effect here would render the chip
-    once against the old conversation before removing it.
-  */
-  const [imageIntentChatId, setImageIntentChatId] = useState(currentChatId);
-  if (imageIntentChatId !== currentChatId) {
-    // Adoption and a move look identical from the id alone. What separates
-    // them is whether a question is waiting that was asked before the id
-    // existed -- and on adoption the dismissal must survive too, or "not now"
-    // typed into a new conversation would be forgotten by the send itself.
-    const isAdoptingTheConversationThisSendCreated =
-      lastSentImageIntentPrompt?.chatId === null;
-    setImageIntentChatId(currentChatId);
-    setLastSentImageIntentPrompt((remembered) =>
-      remembered && remembered.chatId === null
-        ? { chatId: currentChatId, text: remembered.text }
-        : null
-    );
-    if (!isAdoptingTheConversationThisSendCreated) {
-      setDismissedImageIntent(null);
-      setImageIntentReshownOnce(false);
-    }
-  }
-  const rememberedPrompt =
-    lastSentImageIntentPrompt &&
-    lastSentImageIntentPrompt.chatId === currentChatId
-      ? lastSentImageIntentPrompt.text
-      : "";
-  const draftIsBeingComposed = settledDraft.trim().length > 0;
-  const imageIntentSurface: "composer" | "after_answer" = draftIsBeingComposed
-    ? "composer"
-    : "after_answer";
-  const imageIntentSourceText = draftIsBeingComposed
-    ? settledDraft
-    : rememberedPrompt;
-  /*
-    A remembered question carries no attachments. They were consumed by the
-    send, and reusing this composer's current ones would classify last
-    question's text against next question's files -- which is how a request to
-    describe a photograph would come back as an offer to redraw it.
-  */
-  const imageIntentSourceAttachments = draftIsBeingComposed
-    ? attachments
-    : EMPTY_IMAGE_INTENT_ATTACHMENTS;
-  const imageIntentClass = useMemo(
-    () =>
-      classifyImageIntent(
-        normalizeComposerImageIntentInput({
-          text: imageIntentSourceText,
-          attachments: imageIntentSourceAttachments,
-        })
-      ),
-    [imageIntentSourceText, imageIntentSourceAttachments]
-  );
-  const imageIntentKey = imageIntentDraftKey(imageIntentSourceText);
-  const imageIntentOffered =
-    Boolean(onStartImageDraft || imageGenerationLock) &&
-    !isComposingDraft &&
-    imageIntentSourceText.trim().length > 0 &&
-    offersImageHandoffChip(imageIntentClass);
-  /*
-    A dismissal belongs to the question it was made on, not to the draft box.
-    It used to lapse the moment the composer emptied, which was right while the
-    offer only existed before the send -- and is wrong now that the same
-    question is still being offered after it. Keyed by text, so "no thanks"
-    typed into the composer is still "no thanks" once the answer arrives.
-  */
-  const activeImageIntentDismissal = dismissedImageIntent;
-  const imageIntentDismissed = Boolean(
-    activeImageIntentDismissal &&
-      !(
-        !imageIntentReshownOnce &&
-        allowsImageHandoffReshow({
-          dismissedKey: activeImageIntentDismissal.key,
-          currentKey: imageIntentKey,
-          dismissedIntent: activeImageIntentDismissal.intentClass,
-          currentIntent: imageIntentClass,
-        })
-      )
-  );
-  const showImageIntentSuggestion = imageIntentOffered && !imageIntentDismissed;
-  const trackedImageIntentKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!showImageIntentSuggestion) {
-      // Nothing is on offer, so the next one is a new offer rather than a
-      // repeat. A ref, not state: this is bookkeeping for an external call,
-      // not something the render reads.
-      trackedImageIntentKeyRef.current = null;
-      return;
-    }
-    // The key alone, not the key and the surface: the same question offered
-    // before and after the send is one offer seen twice, and counting it twice
-    // would make the take-up rate of both surfaces look half as good as it is.
-    if (trackedImageIntentKeyRef.current === imageIntentKey) return;
-    trackedImageIntentKeyRef.current = imageIntentKey;
-    trackProductEvent("image_intent_suggestion_shown", selectedModels.length, {
-      image_intent_class: imageIntentClass,
-      image_intent_lock: imageGenerationLock ?? "none",
-      image_intent_surface: imageIntentSurface,
-    });
-  }, [
-    showImageIntentSuggestion,
-    imageIntentKey,
-    imageIntentClass,
-    imageIntentSurface,
-    imageGenerationLock,
-    selectedModels.length,
-  ]);
-  /*
-    Called at the moment of sending, while `value` still holds the question.
-
-    The composer does not own the text -- the shell does, and clears it -- so
-    this is the only point at which the question and the conversation it
-    belongs to are both known here. Stored even when the question is not an
-    image request: classifying it here and remembering only the matches would
-    duplicate a decision that is already made, once, below.
-  */
-  const rememberImageIntentPrompt = () => {
-    const sent = value.trim();
-    setLastSentImageIntentPrompt(
-      sent.length > 0 ? { chatId: currentChatId, text: value } : null
-    );
-  };
-
-  const dismissImageIntentSuggestion = (accepted: boolean) => {
-    if (activeImageIntentDismissal) setImageIntentReshownOnce(true);
-    else if (imageIntentReshownOnce) setImageIntentReshownOnce(false);
-    setDismissedImageIntent({ key: imageIntentKey, intentClass: imageIntentClass });
-    trackProductEvent(
-      accepted
-        ? "image_intent_suggestion_accepted"
-        : "image_intent_suggestion_dismissed",
-      selectedModels.length,
-      {
-        image_intent_class: imageIntentClass,
-        image_intent_lock: imageGenerationLock ?? "none",
-        image_intent_surface: imageIntentSurface,
-      }
-    );
-  };
   // Model-picker-only counterpart to the message-content-driven
   // contextualSuggestion above: nudges toward one complementary model based
   // on what kind of thinking the *currently selected* models are missing,
@@ -2607,7 +2362,6 @@ export function ChatInput({
     // still active. The visible branch below presents Stop instead of Send.
     if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending) {
       dismissGuestQuickStart();
-      rememberImageIntentPrompt();
       onSubmit();
     }
   };
@@ -3546,26 +3300,6 @@ export function ChatInput({
                 </div>
               </div>
             )}
-          {showImageIntentSuggestion && (
-            <ImageIntentHandoffChip
-              lock={imageGenerationLock}
-              onAccept={() => {
-                dismissImageIntentSuggestion(true);
-                if (imageGenerationLock) {
-                  onLockedImageGenerationClick?.(imageGenerationLock);
-                  return;
-                }
-                // The same handoff the tools menu performs: no server row is
-                // created and cancelling restores this draft. The prompt is
-                // the question the offer is about -- which after the send is
-                // the one already answered, not the empty composer.
-                onStartImageDraft?.(imageIntentSourceText, undefined, {
-                  fromImageRequest: true,
-                });
-              }}
-              onDismiss={() => dismissImageIntentSuggestion(false)}
-            />
-          )}
           {/*
             The chips own a row of their own in *both* shells. They used to ride
             the mobile textarea's first line, which left the input whatever
@@ -3935,13 +3669,7 @@ export function ChatInput({
           }}
           onKeyDown={handleKeyDown}
           onCompositionStart={() => setIsComposingDraft(true)}
-          onCompositionEnd={(e) => {
-            setIsComposingDraft(false);
-            // The committed syllable is in the element, not yet in `value` on
-            // every engine, so the settled draft is taken from the event's own
-            // target rather than waiting a render.
-            setSettledDraft(e.currentTarget.value);
-          }}
+          onCompositionEnd={() => setIsComposingDraft(false)}
           onPaste={handlePaste}
           aria-label={placeholderText}
           placeholder={placeholderText}
@@ -4149,7 +3877,6 @@ export function ChatInput({
               onClick={() => {
                 if (isVoiceSubmissionBlocked) return;
                 dismissGuestQuickStart();
-                rememberImageIntentPrompt();
                 onSubmit();
               }}
               disabled={

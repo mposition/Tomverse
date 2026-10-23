@@ -10,6 +10,8 @@ export const AMUX_IDEA_PROGRESS_LIMIT = 20;
 
 export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   ideaId: string;
+  /** A session idea has no per-idea execution approval. */
+  submissionOrigin?: "owner" | "session";
   requestId: string;
   submittedAt: string;
   /** The first registered card's display key, the only plaintext label an idea has. */
@@ -18,6 +20,19 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
   reviewPullRequests: Array<{ number: number; displayKey: string | null }>;
   /** The idea's Task cards in registration order, for its detail view. */
   taskRows: Array<{ displayKey: string | null; status: string; reviewPrNumber: number | null; merged: boolean }>;
+  /** Session reference SHAs fixed at intake, before a checkout exists. */
+  referencePins: Array<{ referenceOrdinal: number; pinnedCommitSha: string }> | null;
+  /** Valid pre-pinning audit, distinct from a damaged or unavailable pin. */
+  referencePinsLegacy?: boolean;
+  /** Content-free proof for each prepared v19 reference, in source order. */
+  checkoutEvidence: Array<{
+    referenceOrdinal: number;
+    pinnedCommitSha: string;
+    excludedCount: number;
+    excludedReasons: { secretPath: number; secretContent: number;
+      nonRegular: number; unscannableContent: number };
+    readManifest: { fileCount: number; digest: string; bodyPurged: boolean } | null;
+  }>;
 };
 
 /**
@@ -60,10 +75,23 @@ type SqlCard = {
   id: string; cardType: string | null; status: string; reviewPrNumber: number | null;
   terminal: boolean; displayKey: string | null;
 };
-type SqlIdea = {
-  id: string; requestId: string; state: string; submittedAtMs: number; cancelled: boolean;
-  proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
+type SqlCheckoutEvidence = {
+  referenceOrdinal: number; pinnedCommitSha: string; excludedCount: number;
+  secretPath: number; secretContent: number; nonRegular: number;
+  unscannableContent: number;
+  readFileCount: number | null; readDigest: string | null;
+  readBodyPurged: boolean;
 };
+type SqlIdea = {
+  id: string; requestId: string; state: string; submissionOrigin: "owner" | "session";
+  submittedAtMs: number; cancelled: boolean;
+  proposedUnits: number; chunks: SqlChunk[] | null; cards: SqlCard[] | null;
+  referencePins: unknown;
+  referencePinAuditStatus: "declared" | "legacy" | null;
+  checkoutEvidence: SqlCheckoutEvidence[] | null;
+};
+
+const PIN_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   actorUserId: string, now: Date): Promise<AmuxIdeaProgressRow[]> {
@@ -74,7 +102,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
   // nobody. Chunks keep their index order and cards their registration order.
   const ideas = await tx.$queryRaw<SqlIdea[]>`
     WITH newest AS (
-      SELECT "id", "requestId", "state", "submittedAt", "cancelledAt"
+      SELECT "id", "requestId", "state", "submissionOrigin", "submittedAt", "cancelledAt",
+        "submissionAuditLogId"
       FROM "AmuxIdeaSubmission"
       WHERE "actorUserId" = ${actorUserId}
       ORDER BY "submittedAt" DESC, "id" ASC
@@ -84,6 +113,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       n."id" AS "id",
       n."requestId"::text AS "requestId",
       n."state" AS "state",
+      n."submissionOrigin" AS "submissionOrigin",
       (extract(epoch FROM n."submittedAt") * 1000)::double precision AS "submittedAtMs",
       (n."cancelledAt" IS NOT NULL) AS "cancelled",
       (SELECT count(*)::int FROM "AmuxIdeaDraftUnit" u
@@ -102,15 +132,46 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           'displayKey', w."displayKey") ORDER BY w."createdAt" ASC, w."id" ASC)
         FROM "AmuxIdeaUnitDecision" d
         JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
-        WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards"
+        WHERE d."ideaId" = n."id" AND d."action" = 'register_card' AND d."state" = 'consumed') AS "cards",
+      (SELECT a."metadata"->'pinnedCommitShas' FROM "AdminAuditLog" a
+        WHERE a."id" = n."submissionAuditLogId"
+          AND a."action" = 'amux.idea.session_submitted'
+          AND a."targetType" = 'AmuxIdeaSubmission'
+          AND a."targetId" = n."id"
+          AND a."entryHash" IS NOT NULL) AS "referencePins",
+      (SELECT CASE WHEN jsonb_typeof(a."metadata") = 'object'
+          AND NOT (a."metadata" ? 'pinnedCommitShas') THEN 'legacy'
+          ELSE 'declared' END FROM "AdminAuditLog" a
+        WHERE a."id" = n."submissionAuditLogId"
+          AND a."action" = 'amux.idea.session_submitted'
+          AND a."targetType" = 'AmuxIdeaSubmission'
+          AND a."targetId" = n."id"
+          AND a."entryHash" IS NOT NULL) AS "referencePinAuditStatus",
+      (SELECT json_agg(json_build_object(
+          'referenceOrdinal', e."referenceOrdinal",
+          'pinnedCommitSha', e."pinnedCommitSha",
+          'excludedCount', e."excludedCount",
+          'secretPath', e."excludedSecretPathCount",
+          'secretContent', e."excludedSecretContentCount",
+          'nonRegular', e."excludedNonRegularCount",
+          'unscannableContent', e."excludedUnscannableCount",
+          'readFileCount', m."fileCount", 'readDigest', m."digest",
+          'readBodyPurged', m."bodyPurgedAt" IS NOT NULL)
+          ORDER BY e."referenceOrdinal")
+        FROM "AmuxIdeaTrackedCheckoutEvidence" e
+        LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m
+          ON m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"
+        WHERE e."ideaId" = n."id") AS "checkoutEvidence"
     FROM newest n
     ORDER BY n."submittedAt" DESC, n."id" ASC
   `;
 
   return ideas.map((idea) => {
     const own = idea.cards ?? [];
+    const pins = idea.referencePins;
     const progress = amuxIdeaProgress({
       state: idea.state,
+      submissionOrigin: idea.submissionOrigin,
       cancelled: idea.cancelled,
       chunks: (idea.chunks ?? []).map((chunk) => ({ ...chunk })),
       proposedUnits: idea.proposedUnits,
@@ -120,6 +181,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
     return {
       ...progress,
       ideaId: idea.id,
+      submissionOrigin: idea.submissionOrigin,
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,
@@ -128,6 +190,22 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         .map((card) => ({ number: card.reviewPrNumber as number, displayKey: card.displayKey })),
       taskRows: own.filter((card) => card.cardType !== "story").map((card) => ({ displayKey: card.displayKey,
         status: card.status, reviewPrNumber: card.reviewPrNumber, merged: card.terminal })),
+      referencePins: Array.isArray(pins) && pins.every((sha) =>
+        typeof sha === "string" && PIN_SHA.test(sha))
+        ? pins.map((sha, referenceOrdinal) => ({ referenceOrdinal,
+          pinnedCommitSha: sha as string })) : null,
+      referencePinsLegacy: idea.referencePinAuditStatus === "legacy",
+      checkoutEvidence: (idea.checkoutEvidence ?? []).map((evidence) => ({
+        referenceOrdinal: evidence.referenceOrdinal,
+        pinnedCommitSha: evidence.pinnedCommitSha,
+        excludedCount: evidence.excludedCount,
+        excludedReasons: { secretPath: evidence.secretPath,
+          secretContent: evidence.secretContent, nonRegular: evidence.nonRegular,
+          unscannableContent: evidence.unscannableContent },
+        readManifest: evidence.readFileCount !== null && evidence.readDigest !== null
+          ? { fileCount: evidence.readFileCount, digest: evidence.readDigest,
+            bodyPurged: evidence.readBodyPurged } : null,
+      })),
     };
   });
 }

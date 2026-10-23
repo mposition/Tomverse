@@ -4,7 +4,10 @@ import { cleanupExpiredData } from "@/lib/maintenance";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
 import { runPromotionObserver } from "@/lib/feedbackAutoFixPromotion";
-import { runScheduledAutoRouterOptimizerCycle } from "@/lib/autoRouterOptimizer";
+import { runScheduledOptimizerCycle } from "@/lib/autoRewriteOptimizer";
+import { optimizerOwnProcessOn } from "@/lib/autoRouterOptimizerCore";
+import { renewCodingSnapshotIfUnchanged } from "@/lib/modelCatalog";
+import { SNAPSHOT_RENEWAL_WINDOW_MS } from "@/lib/modelCatalogCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -82,19 +85,34 @@ export async function POST(request: Request) {
         })
       );
     }
-    // The Auto router optimizer's daily cycle, when its owner turned it on
-    // (Admin › Routing). It starts the cycle and returns; a refusal or failure
-    // here never stops the cleanup below.
-    const optimizer = await runScheduledAutoRouterOptimizerCycle().catch((error) => {
-      console.warn(
+    // The Auto router optimizer's daily cycle -- routing or rewrite guidance,
+    // one a day -- when its owner turned it on (Admin › Routing). It starts the
+    // cycle and returns; a refusal or failure here never stops the cleanup below.
+    // With AUTO_ROUTER_OPTIMIZER_OWN_PROCESS on, the Auto Router Optimizer cron
+    // service runs it instead and waits for it, where a web redeploy cannot
+    // cut it off; this step only says so.
+    const ownProcess = optimizerOwnProcessOn();
+    if (ownProcess) {
+      console.info(
         JSON.stringify({
-          event: "auto_router_optimizer_daily_failed",
-          reason: error instanceof Error ? error.name : "unknown",
+          event: "auto_router_optimizer_daily_skipped",
+          reason: "own_process",
           at: new Date().toISOString(),
         })
       );
-      return null;
-    });
+    }
+    const optimizer = ownProcess
+      ? null
+      : await runScheduledOptimizerCycle().catch((error) => {
+          console.warn(
+            JSON.stringify({
+              event: "auto_router_optimizer_daily_failed",
+              reason: error instanceof Error ? error.name : "unknown",
+              at: new Date().toISOString(),
+            })
+          );
+          return null;
+        });
     if (optimizer && (optimizer.started || optimizer.reason !== "daily_off")) {
       console.info(
         JSON.stringify({
@@ -103,6 +121,57 @@ export async function POST(request: Request) {
           at: new Date().toISOString(),
         })
       );
+    }
+    // The Code client's coding catalogue snapshot covers 30 days and the Code
+    // endpoint refuses once it lapses. Inside the last week, identical content
+    // gets a new version here; changed content waits for a person to publish
+    // (Admin › Model catalogue) and is reported when that is getting late. Like
+    // the steps above, a failure here is reported and never stops the cleanup.
+    const catalogRenewal = await renewCodingSnapshotIfUnchanged().catch(async (error) => {
+      console.warn(
+        JSON.stringify({
+          event: "coding_snapshot_renewal_failed",
+          reason: error instanceof Error ? error.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+      await reportOperationalIncident({
+        code: "CODING_CATALOG_SNAPSHOT_RENEWAL_FAILED",
+        title: "Coding catalogue snapshot renewal failed",
+        error,
+        severity: "error",
+        cooldownMs: 12 * 60 * 60 * 1_000,
+        context: { component: "model-catalog", route: "/api/internal/maintenance/cleanup" },
+      }).catch(() => undefined);
+      return null;
+    });
+    if (catalogRenewal && catalogRenewal.decision !== "not_due") {
+      console.info(
+        JSON.stringify({
+          event: "coding_snapshot_renewal",
+          decision: catalogRenewal.decision,
+          version: catalogRenewal.version,
+          coverageUntil: catalogRenewal.coverageUntil?.toISOString() ?? null,
+          at: new Date().toISOString(),
+        })
+      );
+      if (
+        catalogRenewal.decision === "content_changed" &&
+        catalogRenewal.coverageUntil &&
+        catalogRenewal.coverageUntil.getTime() - Date.now() <= SNAPSHOT_RENEWAL_WINDOW_MS
+      ) {
+        await reportOperationalIncident({
+          code: "CODING_CATALOG_SNAPSHOT_NEEDS_PUBLISH",
+          title: "Coding catalogue changed and its snapshot is within a week of expiring",
+          severity: "warning",
+          cooldownMs: 24 * 60 * 60 * 1_000,
+          context: {
+            component: "model-catalog",
+            version: catalogRenewal.version,
+            coverageUntil: catalogRenewal.coverageUntil.toISOString(),
+          },
+        }).catch(() => undefined);
+      }
     }
     const deleted = await cleanupExpiredData();
     const processedCount = Object.values(deleted).reduce<number>(

@@ -1,9 +1,8 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
 import {
   IMAGE_GROUP_READ_SELECT,
   serializeImageGroup,
@@ -23,7 +22,9 @@ type Params = { params: Promise<{ groupId: string }> };
 
 export async function GET(req: Request, { params }: Params) {
   try {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
     if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Authentication required." },

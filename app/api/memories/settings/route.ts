@@ -1,12 +1,11 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
     readLimitedJson,
 } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
 import { getMemorySettings, putMemorySettings } from "@/lib/memoryService";
 
 /**
@@ -17,7 +16,9 @@ import { getMemorySettings, putMemorySettings } from "@/lib/memoryService";
 
 export async function GET(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
@@ -46,7 +47,9 @@ const putSchema = z
 
 export async function PUT(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }

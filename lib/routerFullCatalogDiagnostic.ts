@@ -73,10 +73,12 @@ import {
 import { selectRouterModel, type SelectionReason } from "@/lib/routerSelection";
 import { decideFallback, MAX_MODEL_FALLBACKS, type FallbackDecision } from "@/lib/routingFallbackPolicy";
 import type { TaskKind, TaskProfile } from "@/lib/taskProfileCore";
+import { TASK_KINDS } from "@/lib/taskProfileCore";
+import { webSearchCapabilityFromCode, type WebSearchSupport } from "@/lib/webSearchCapability";
 import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 
 /** Bump with any change to the shape of the report or how a row is derived. */
-export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v4";
+export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v5";
 
 /** One request to diagnose. The shape `EvalSetItem` already has, and no more. */
 export type DiagnosticItem = {
@@ -129,6 +131,23 @@ export type QualityEvidenceStatus =
     | "no_evidence"
     /** An approved record moved this cell off neutral. */
     | "approved_evidence";
+
+export type DeclaredInputSupport = "supported" | "unsupported" | "not_declared";
+
+/** Catalogue declarations and approved quality evidence are separate facts. */
+export type CatalogModelCoverage = {
+    modelId: string;
+    enabledInSuppliedCatalogue: boolean;
+    publiclyListedInSuppliedCatalogue: boolean;
+    declaredInput: { image: DeclaredInputSupport; nativePdf: DeclaredInputSupport };
+    /** Code's declared search path, not backend readiness or dispatchability. */
+    declaredWebSearch: WebSearchSupport;
+    /** Every task kind, including kinds absent from the diagnosed item set. */
+    qualityEvidenceByKind: Readonly<Record<TaskKind, {
+        status: QualityEvidenceStatus;
+        evidenceRef: string | null;
+    }>>;
+};
 
 /**
  * The failure the fallback question is asked about. `decideFallback` decides
@@ -390,6 +409,8 @@ export type DiagnosticReport = {
         fallbackFlagAsDeployed: "on" | "off";
     };
     items: readonly ItemDiagnostic[];
+    /** Offline supplied-catalogue view, never a runtime registry or product approval. */
+    catalogueCoverage: readonly CatalogModelCoverage[];
     summary: {
         primaryCounts: Readonly<Record<string, number>>;
         primaryCountsByKind: Readonly<Record<TaskKind, Readonly<Record<string, number>>>>;
@@ -425,6 +446,9 @@ const qualityFor = (modelId: string, kind: TaskKind) => {
         status: (cell.evidenceRef === null ? "no_evidence" : "approved_evidence") as QualityEvidenceStatus,
     };
 };
+
+const declaredInputSupport = (value: boolean | undefined): DeclaredInputSupport =>
+    value === true ? "supported" : value === false ? "unsupported" : "not_declared";
 
 const sameList = (left: readonly string[], right: readonly string[]) =>
     left.length === right.length && left.every((value, index) => value === right[index]);
@@ -761,6 +785,22 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
     const requestOutputCapTokens = resolveModelPricing(requestedModel).maxOutputTokens;
 
     const items = input.items.map((item) => diagnoseItem(item, input, requestOutputCapTokens));
+    const catalogueCoverage: CatalogModelCoverage[] = input.models.map((model) => ({
+        modelId: model.id,
+        enabledInSuppliedCatalogue: model.enabled,
+        publiclyListedInSuppliedCatalogue: model.publiclyListed !== false,
+        declaredInput: {
+            image: declaredInputSupport(model.inputCapabilities?.image),
+            nativePdf: declaredInputSupport(model.inputCapabilities?.nativePdf),
+        },
+        declaredWebSearch: webSearchCapabilityFromCode(model).support,
+        qualityEvidenceByKind: Object.fromEntries(
+            TASK_KINDS.map((kind) => {
+                const quality = qualityFor(model.id, kind);
+                return [kind, { status: quality.status, evidenceRef: quality.evidenceRef }];
+            })
+        ) as CatalogModelCoverage["qualityEvidenceByKind"],
+    }));
 
     const primaryIds = items.flatMap((item) => (item.decision.primaryModelId ? [item.decision.primaryModelId] : []));
     const primaryCounts = count(primaryIds);
@@ -999,6 +1039,7 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
                 (input.fallbackEnvironment ?? {}).AUTO_ROUTER_FALLBACK_ENABLED === "on" ? "on" : "off",
         },
         items,
+        catalogueCoverage,
         summary: {
             primaryCounts,
             primaryCountsByKind,

@@ -111,12 +111,12 @@ export function qaReleaseInstallationToken(http: QaReleaseHttp, appId: string, p
 }
 
 const PULL_FIELDS = `
-  number createdAt baseRefName headRefName headRefOid isDraft mergeable state
+  number title createdAt baseRefName headRefName headRefOid isDraft mergeable state
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) {
     pageInfo { hasNextPage }
     nodes {
       __typename
-      ... on CheckRun { name status conclusion checkSuite { workflowRun { workflow { name } } } }
+      ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { workflow { name } } } }
       ... on StatusContext { context state }
     }
   } } } } }`;
@@ -127,6 +127,36 @@ const PULL_FIELDS = `
  * is not read past its first page: it becomes one failing context, so the
  * pull request is skipped rather than judged on part of its checks.
  */
+/**
+ * One entry per check: a check re-run on the same head appears once per run,
+ * and only its newest run is its result (2026-10-23: #2878 kept a cancelled
+ * Rust run beside the newer one, and the lane read the pull request as failed).
+ * Status contexts are already one per context.
+ */
+function latestCheckRuns(nodes: unknown[]): unknown[] {
+  const newest = new Map<string, { at: number; index: number }>();
+  nodes.forEach((raw, index) => {
+    const node = record(raw);
+    if (node.__typename !== "CheckRun") return;
+    const run = node.checkSuite === null ? null : record(node.checkSuite).workflowRun;
+    const workflow = run === null || run === undefined ? null : record(run).workflow;
+    const key = `${workflow === null || workflow === undefined ? "" : str(record(workflow).name)}\u0000${str(node.name)}`;
+    const at = typeof node.startedAt === "string" ? Date.parse(node.startedAt) : Number.NaN;
+    const seen = newest.get(key);
+    // An unreadable start time keeps every run: older or not, it cannot be dropped.
+    if (Number.isNaN(at)) return;
+    if (!seen || at >= seen.at) newest.set(key, { at, index });
+  });
+  return nodes.filter((raw, index) => {
+    const node = record(raw);
+    if (node.__typename !== "CheckRun" || typeof node.startedAt !== "string" || Number.isNaN(Date.parse(node.startedAt))) return true;
+    const run = node.checkSuite === null ? null : record(node.checkSuite).workflowRun;
+    const workflow = run === null || run === undefined ? null : record(run).workflow;
+    const key = `${workflow === null || workflow === undefined ? "" : str(record(workflow).name)}\u0000${str(node.name)}`;
+    return newest.get(key)?.index === index;
+  });
+}
+
 function rollupOf(pull: Record<string, unknown>): unknown[] {
   const commits = record(pull.commits).nodes;
   if (!Array.isArray(commits)) throw new Error("github_shape");
@@ -136,7 +166,7 @@ function rollupOf(pull: Record<string, unknown>): unknown[] {
   const contexts = record(record(rollup).contexts);
   if (record(contexts.pageInfo).hasNextPage !== false) return [{ __typename: "StatusContext", context: "unread", state: "ERROR" }];
   if (!Array.isArray(contexts.nodes)) throw new Error("github_shape");
-  return contexts.nodes.map((raw) => {
+  return latestCheckRuns(contexts.nodes).map((raw) => {
     const node = record(raw);
     if (node.__typename === "CheckRun") {
       const run = node.checkSuite === null ? null : record(node.checkSuite).workflowRun;
@@ -161,6 +191,7 @@ function pullOf(raw: unknown): QaReleaseLanePullRequest {
   if (typeof pull.isDraft !== "boolean") throw new Error("github_shape");
   return {
     number,
+    ...(typeof pull.title === "string" ? { title: pull.title } : {}),
     createdAt: str(pull.createdAt),
     baseRefName: str(pull.baseRefName),
     headRefName: str(pull.headRefName),

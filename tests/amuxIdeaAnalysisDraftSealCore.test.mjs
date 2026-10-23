@@ -40,6 +40,7 @@ const seal = (value, overrides = {}) => sealAmuxAnalysisDraft({
   expectedRevisionChunkIndex: 0, previousContinuationKind: null,
   permittedSourceRefIds: [sourceRef],
   permittedTargetRefs: [{ ref: featureRef, kind: "node", level: "feature" }],
+  requiredSchemaVersion: 2,
   ...overrides,
 });
 

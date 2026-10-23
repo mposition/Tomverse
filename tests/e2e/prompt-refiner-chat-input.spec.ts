@@ -188,7 +188,7 @@ async function expectRefinerInsideViewport(page: Page) {
   const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
   expect(box!.x).toBeGreaterThanOrEqual(-1);
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth + 1);
-  for (const id of ["prompt-refiner-keep-original", "prompt-refiner-use"]) {
+  for (const id of ["prompt-refiner-dismiss-ready", "prompt-refiner-keep-original", "prompt-refiner-use"]) {
     const actionBox = await page.getByTestId(id).boundingBox();
     expect(actionBox, `${id} has no layout box`).not.toBeNull();
     expect(actionBox!.height, `${id} lost its 44px target`).toBeGreaterThanOrEqual(44);
@@ -818,6 +818,88 @@ async function blockAndCountChatPosts(page: Page, durable: Awaited<ReturnType<ty
     unexpectedCreateMethods: () => [...unexpectedCreateMethods],
   };
 }
+
+test.describe("Prompt Refiner C02 pre-send comparison", { tag: "@ui-risk" }, () => {
+  test.setTimeout(60_000);
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(
+      !["desktop-chromium", "mobile-chromium"].includes(testInfo.project.name),
+      "C02 fixture behavior is measured with desktop and mobile Chromium."
+    );
+  });
+
+  for (const scenario of [
+    { name: "390px", viewport: { width: 390, height: 680 }, font: 16 },
+    { name: "320px at 200% text", viewport: { width: 320, height: 640 }, font: 32 },
+    { name: "200% zoom equivalent", viewport: { width: 195, height: 340 }, font: 16 },
+  ] as const) {
+    test(`closing and cancelling preserve exact authored bytes at ${scenario.name}`, async ({ page }) => {
+      const durable = await mockDurableDrafts(page);
+      await enterChat(page, { offered: true, durableChat: true, viewport: scenario.viewport });
+      await setRootFontSize(page, scenario.font);
+      let proposals = 0;
+      const original = "  계획 👩🏽‍💻 e\u0301:\n기존 설명\n마지막 줄  ";
+      const proposal = "  계획 👩🏽‍💻 e\u0301:\n새로운 설명과 출력 형식\n마지막 줄  ";
+      await page.route("**/e2e/prompt-refiner-adapter", async (route) => {
+        proposals += 1;
+        const request = route.request().postDataJSON() as { requestId: string; prompt: string };
+        expect(request.prompt).toBe(original);
+        await route.fulfill({ json: {
+          requestId: request.requestId,
+          suggestionId: `fixture_c02_${proposals}`,
+          refinedPrompt: proposal,
+          refinerVersion: "suggest-v1",
+          inputScope: "current_user_turn_text_only",
+        } });
+      });
+      // Every Chat POST is intercepted even if a regression starts a send.
+      const chatProbe = await blockAndCountChatPosts(page, durable);
+      const textarea = page.getByTestId("chat-textarea");
+      await textarea.fill(original);
+      await expect.poll(() => durable.writes.includes(original)).toBe(true);
+
+      for (const action of ["close", "keep", "preview-close"] as const) {
+        await page.getByTestId("prompt-refiner-request").click();
+        await expect(page.getByTestId("prompt-refiner-ready")).toBeVisible();
+        expect(await page.getByTestId("prompt-refiner-original").textContent()).toBe(original);
+        expect(await page.getByTestId("prompt-refiner-proposal").textContent()).toBe(proposal);
+        await expect(page.getByTestId("prompt-refiner-original").locator("del")).not.toBeEmpty();
+        await expect(page.getByTestId("prompt-refiner-proposal").locator("ins")).not.toBeEmpty();
+        await expect(textarea).toHaveValue(original);
+        await expectRefinerInsideViewport(page);
+        expect(chatProbe.posts(), "preview sent a Chat turn before a decision").toBe(0);
+
+        if (action === "preview-close") {
+          await page.getByTestId("prompt-refiner-use").click();
+          await expect(page.getByTestId("prompt-refiner-accepted-preview")).toBeVisible();
+          expect(await page.getByTestId("prompt-refiner-accepted-preview-original").textContent()).toBe(original);
+          expect(await page.getByTestId("prompt-refiner-accepted-preview-proposal").textContent()).toBe(proposal);
+          await page.getByTestId("prompt-refiner-dismiss-preview").click();
+        } else {
+          await page.getByTestId(action === "close"
+            ? "prompt-refiner-dismiss-ready"
+            : "prompt-refiner-keep-original").click();
+        }
+        await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(0);
+        await expect(page.getByTestId("prompt-refiner-accepted-preview")).toHaveCount(0);
+        await expect(page.getByTestId("prompt-refiner-idle")).toBeVisible();
+        await expect(textarea).toBeFocused();
+        await expect(textarea).toHaveValue(original);
+      }
+
+      expect(proposals).toBe(3);
+      expect(chatProbe.posts(), "a close or cancellation sent a Chat turn").toBe(0);
+      expect(durable.writes.every((text) => text === original)).toBe(true);
+      expect([...durable.drafts.values()].every((draft) => draft.text === original)).toBe(true);
+      await page.reload();
+      await expect(textarea).toHaveValue(original);
+      await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(0);
+      await expect(page.getByTestId("prompt-refiner-accepted-preview")).toHaveCount(0);
+      expect(proposals, "reloading requested another proposal").toBe(3);
+      expect(chatProbe.posts(), "reloading submitted the draft").toBe(0);
+    });
+  }
+});
 
 test.describe("Prompt Refiner same-instance fixture mode transitions", { tag: "@ui-risk" }, () => {
   test.setTimeout(60_000); // cold loopback RSC compilation may outlast the default 30s test budget

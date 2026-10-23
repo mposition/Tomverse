@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import test from "node:test";
+import mobileConfig from "../apps/mobile/capacitor.config.ts";
 
 import {
   MOBILE_AUTH_BRIDGE_METHODS,
@@ -24,13 +25,25 @@ const SOURCE = readFileSync(
   "utf8"
 );
 
+test("native bridge result logging is disabled even in debug builds", () => {
+  assert.equal(mobileConfig.loggingBehavior, "none");
+  assert.equal(mobileConfig.android?.loggingBehavior ?? mobileConfig.loggingBehavior, "none");
+  assert.equal(mobileConfig.ios?.loggingBehavior ?? mobileConfig.loggingBehavior, "none");
+});
+
 const withoutComments = SOURCE.replace(/\/\*[\s\S]*?\*\//g, "").replace(
   /(^|[^:])\/\/.*$/gm,
   "$1"
 );
 
-test("the bridge exposes exactly three methods, and they are the approved three", () => {
+test("the bridge exposes sign-in and the existing credential-safe session methods", () => {
   assert.deepEqual([...MOBILE_AUTH_BRIDGE_METHODS], [
+    "getDeviceSecurity",
+    "setDeviceLock",
+    "unlockDevice",
+    "signIn",
+    "requestEmailCode",
+    "verifyEmailCode",
     "getAccessToken",
     "hasSession",
     "signOut",

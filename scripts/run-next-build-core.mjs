@@ -35,17 +35,41 @@
 /** The directory a failed restore makes unusable, relative to the repo root. */
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
-/** The build's child workers must inherit the CI type-check heap limit. */
-export const nodeOptionsForBuild = (env) => {
+/**
+ * Build child workers inherit the same bounded type-check heap on CI and Railway.
+ *
+ * Railway provides RAILWAY_ENVIRONMENT_ID during builds and deployments. Its
+ * 2026-10-22 builds compiled, then exhausted V8's roughly 2 GiB default while
+ * running TypeScript. This helper is used only by the Next build wrapper, so
+ * the application runtime and service-wide NODE_OPTIONS are unchanged.
+ *
+ * `largeHeap` remains the explicit local opt-in used by `npm run build:local`.
+ * An operator's existing heap limit always wins.
+ */
+export const nodeOptionsForBuild = (env, { largeHeap = false } = {}) => {
   const configured = env.NODE_OPTIONS ?? "";
-  if (env.GITHUB_ACTIONS !== "true" ||
+  const railwayBuild = Boolean(env.RAILWAY_ENVIRONMENT_ID?.trim());
+  if ((env.GITHUB_ACTIONS !== "true" && !railwayBuild && !largeHeap) ||
       /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
   return `${configured ? `${configured} ` : ""}--max-old-space-size=6144`;
 };
 
+/**
+ * Taken out of the arguments before the rest are forwarded: everything else
+ * goes to `next build`, which would reject a flag of ours.
+ */
+export const LARGE_HEAP_FLAG = "--large-heap";
+
 const INTERNAL_ERROR_MARKERS = [
   "TurbopackInternalError",
   "An unexpected Turbopack error occurred",
+  // 2026-10-07 (staging, develop 1c02353): the same corrupt cache surfaced as a
+  // panic in Turbopack's task backend, reported only as "Panic in async
+  // function", with neither marker above. The panic site is the persisted task
+  // store, which is what a cold cache replaces.
+  "panicked at turbopack/crates/turbo-tasks-backend/",
+  // 2026-10-11 (staging d9efa670): Next.js 16.3.8 aborted outside the
+  // per-task panic boundary, with this line and the cache-restore lines below.
   "This is a bug in turbo-tasks/Turbopack",
 ];
 
@@ -54,6 +78,7 @@ const CACHE_RESTORE_MARKERS = [
   "Failed to restore Data for TaskId",
   "Looking up task storage for TaskId",
   "Unable to open static sorted file referenced from",
+  "Unable to read next free task id from database",
   // 2026-10-12 (production, Railway deployment 40fda894, main f08502b3e): the
   // restore failed in one worker thread and every other thread panicked with
   // only this line, at the backend's restore operation. None of the lines

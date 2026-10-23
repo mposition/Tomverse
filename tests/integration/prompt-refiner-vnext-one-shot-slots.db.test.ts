@@ -479,7 +479,6 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
     await assert.rejects(client.query(`
       TRUNCATE TABLE "PromptRefinerVnextOneShotStage" CASCADE
     `), /stage and slots cannot be truncated/);
-    await client.query(`TRUNCATE TABLE "AdminAuditLog"`);
   } finally {
     await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     await client.end();

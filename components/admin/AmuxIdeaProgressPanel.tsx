@@ -65,6 +65,7 @@ export function AmuxIdeaInbox({ rows }: { rows: AmuxIdeaProgressRows }) {
     continuation: [m.continuationApproval, m.continuationHint],
     owner_input: [m.ownerInput, m.ownerInputHint],
     plan_approval: [m.planApproval, m.planApprovalHint],
+    session_review: [m.sessionReview, m.sessionReviewHint],
   };
   const reviews = rows.flatMap((row) => row.reviewPullRequests.map((pr) => ({ row, pr })));
   const waiting = decisions.length + reviews.length;

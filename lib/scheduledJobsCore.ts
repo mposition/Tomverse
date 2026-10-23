@@ -73,6 +73,14 @@ export const CRON_TRIGGERS = {
     railwayService: "Marketing Publisher",
     trigger: { kind: "everyMinutes", minutes: 5 },
   },
+  // The optimizer's own process. No job in the catalogue below rides it: the
+  // cycle records itself (AutoRouterOptimizerCycle), and the service does
+  // nothing until its switch is on, so a delay judgement would only report a
+  // switch nobody has turned on.
+  autoRouterOptimizer: {
+    railwayService: "Auto Router Optimizer",
+    trigger: { kind: "dailyUtc", hour: 3, minute: 30 },
+  },
 } as const satisfies Record<
   string,
   { railwayService: string; trigger: CronTrigger }

@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ADMIN_AGENT_DIGESTS_LEGACY_TABS,
   ADMIN_AMUX_EXECUTION_LEGACY_TABS,
   ADMIN_DETAIL_ROUTES,
   ADMIN_ENGINEERING_AGENT_LEGACY_TABS,
@@ -162,6 +163,14 @@ test("detail routes keep their parent breadcrumb and their parent nav entry", ()
   const refiner = resolveAdminPageMeta("/admin/prompt-refiner-shadow");
   assert.equal(refiner.label, "Prompt Refiner shadow run");
   assert.equal(refiner.parentHref, "/admin/models");
+
+  const amuxTestCard = resolveAdminPageMeta("/admin/amux-u21-test-card");
+  assert.equal(amuxTestCard.label, "AMUX U21 test card");
+  assert.equal(amuxTestCard.parentHref, "/admin/amux-execution");
+  assert.equal(resolveAdminPageMeta(
+    "/admin/amux-u21-test-card", "support").isKnown, false);
+  assert.equal(ADMIN_SEARCHABLE_PAGES.some(
+    (page) => page.href === "/admin/amux-u21-test-card"), false);
 });
 
 test("the palette can reach every page, including the unlisted ones", () => {
@@ -280,12 +289,13 @@ test("the discovery backlog keeps a way in", () => {
   assert.equal(models.badge, "modelLifecycle");
   assert.deepEqual(
     models.tabs?.map((tab) => tab.id),
-    ["registry", "discovery"]
+    ["registry", "discovery", "catalog"]
   );
   // The registry stays the default: an operator opening /admin/models is far
   // more often there for the catalogue than for the backlog.
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), undefined).id, "registry");
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "discovery").id, "discovery");
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), "catalog").id, "catalog");
 });
 
 // ---------------------------------------------------------------------------
@@ -707,6 +717,23 @@ test("product research is its own workspace and the engineering agent's old tab 
   );
   const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/engineering-agent/page.tsx"), "utf8");
   assert.ok(page.includes("ADMIN_ENGINEERING_AGENT_LEGACY_TABS[query.tab]"));
+  assert.ok(page.includes("redirect(adminRedirectTarget(legacy, query))"));
+});
+
+test("QA and release left Agent digests; its old tab links land on the same section", () => {
+  assert.deepEqual(ADMIN_AGENT_DIGESTS_LEGACY_TABS, {
+    "qa-release": "/admin/qa-release?tab=overview",
+    "ci-admission": "/admin/qa-release?tab=ci-admission",
+  });
+  // Operator emails and GitHub commit statuses carry these, with their own query.
+  assert.equal(
+    adminRedirectTarget(ADMIN_AGENT_DIGESTS_LEGACY_TABS["ci-admission"], { tab: "ci-admission", pr: "2890" }),
+    "/admin/qa-release?tab=ci-admission&pr=2890"
+  );
+  assert.deepEqual(adminNavItemTabs("qa-release").map((tab) => tab.id), ["overview", "lane", "ci-admission"]);
+  assert.deepEqual(adminNavItemTabs("agent-digests").map((tab) => tab.id), ["billing-finance-ops"]);
+  const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/agent-digests/page.tsx"), "utf8");
+  assert.ok(page.includes("ADMIN_AGENT_DIGESTS_LEGACY_TABS[query.tab]"));
   assert.ok(page.includes("redirect(adminRedirectTarget(legacy, query))"));
 });
 

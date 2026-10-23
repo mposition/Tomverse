@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import {
     databaseErrorMetadata,
     isRetryableDatabaseError,
@@ -135,7 +134,9 @@ export async function POST(request: Request) {
         plan: string | null;
     } | null = null;
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(request);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         // Guests reach this route too, and must: a three-model comparison is
         // three POST /api/chat requests for them exactly as it is for an
         // account, so its concurrency has to be admitted as a whole here or the
@@ -455,7 +456,6 @@ export async function POST(request: Request) {
                     mediaType: attachment.mediaType,
                     byteSize: attachment.size,
                 })),
-                promptText: payload.prompt,
                 imageGenerationFlagEnabled,
                 planAllowsImageGeneration: planAllowsImages,
                 continuationSeed,

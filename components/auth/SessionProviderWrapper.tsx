@@ -1,9 +1,18 @@
 // components/auth/SessionProviderWrapper.tsx
 "use client";
 
-import { SessionProvider } from "next-auth/react";
+import { SessionProvider, useSession } from "next-auth/react";
+import { useEffect } from "react";
+import { bindOfflineChatDraftOwner, clearOfflineAccountDraft } from "@/lib/chatOfflineDraft";
 import type { Session } from "next-auth";
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
+
+function OfflineDraftIdentityBoundary({ children }: { children: React.ReactNode }) {
+    const { data, status } = useSession();
+    const owner = status === "loading" ? undefined : data?.user?.id ? `account:${data.user.id}` : null;
+    useEffect(() => { if (owner === undefined) return; if (owner) bindOfflineChatDraftOwner(owner); else clearOfflineAccountDraft(); }, [owner]);
+    return children;
+}
 
 export default function SessionProviderWrapper({
     children,
@@ -23,5 +32,5 @@ export default function SessionProviderWrapper({
               ? session
               : null;
 
-    return <SessionProvider session={initialSession}>{children}</SessionProvider>;
+    return <SessionProvider session={initialSession}><OfflineDraftIdentityBoundary>{children}</OfflineDraftIdentityBoundary></SessionProvider>;
 }

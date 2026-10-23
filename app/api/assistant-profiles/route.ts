@@ -12,7 +12,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -42,7 +42,6 @@ import {
     clampSelectedModelsAgainstRuntime,
     getRuntimeModels,
 } from "@/lib/modelRegistry";
-import { authOptions } from "@/lib/auth";
 
 const createSchema = z
     .object({
@@ -90,8 +89,10 @@ const createSchema = z
         message: "instructions is required when modelIds is supplied",
     });
 
-const requireOwner = async () => {
-    const session = await getServerSession(authOptions);
+const requireOwner = async (req: Request) => {
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     const userId = session?.user?.id;
     if (!userId) return null;
     // Guests are excluded outright (§8.1's shape, applied to profiles): a
@@ -105,7 +106,8 @@ const requireOwner = async () => {
 
 export async function GET(req: Request) {
     try {
-        const userId = await requireOwner();
+        const userId = await requireOwner(req);
+        if (userId instanceof Response) return userId;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
@@ -192,7 +194,8 @@ const resolveCreateModelIds = async (
 
 export async function POST(req: Request) {
     try {
-        const userId = await requireOwner();
+        const userId = await requireOwner(req);
+        if (userId instanceof Response) return userId;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }

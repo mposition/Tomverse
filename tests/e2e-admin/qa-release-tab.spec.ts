@@ -76,7 +76,9 @@ test("the QA and release tab leads with what needs the operator, and CI admissio
   });
 
   await signInAs("owner");
-  await page.goto("/admin/agent-digests");
+  // The old address still lands here (ADMIN_AGENT_DIGESTS_LEGACY_TABS).
+  await page.goto("/admin/agent-digests?tab=qa-release");
+  await expect(page).toHaveURL(/\/admin\/qa-release\?tab=overview$/);
   await page.getByRole("button", { name: "Decline", exact: true }).click();
 
   const tab = page.getByTestId("qa-release-tab");

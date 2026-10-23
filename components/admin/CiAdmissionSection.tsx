@@ -10,6 +10,7 @@ import { adminCiAdmissionMessages } from "@/lib/adminMessages/ciAdmission";
 import type { CiRunnerUsage } from "@/lib/ciRunnerUsage";
 import {
   CI_ADMISSION_MAX_CAPACITY,
+  type CiAdmissionEntryStatus,
   type CiAdmissionEvent,
   type CiAdmissionMode,
   type CiAdmissionQueueEntry,
@@ -158,12 +159,11 @@ const clock = (iso: string) => {
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
 const COMMIT_URL = "https://github.com/mposition/Tomverse/commit/";
-const PAGE_PATH = "/admin/agent-digests?tab=ci-admission";
+const PAGE_PATH = "/admin/qa-release?tab=ci-admission";
 
 type Kind = "develop" | "main" | "hotfix";
 const kindOf = (entry: Pick<CiAdmissionQueueEntry, "base" | "head">): Kind =>
   entry.base !== "main" ? "develop" : entry.head.startsWith("hotfix/") ? "hotfix" : "main";
-const unitsOf = (kind: Kind) => (kind === "develop" ? 1 : 2);
 const BADGE: Record<Kind, string> = {
   develop: "bg-blue-400/15 text-blue-300",
   main: "bg-violet-400/15 text-violet-300",
@@ -184,6 +184,18 @@ const EVENT_DOT: Record<CiAdmissionEvent["kind"], string> = {
   stopped: "bg-rose-400",
 };
 
+const STATUS_BADGE: Record<CiAdmissionEntryStatus, string> = {
+  running: "bg-emerald-400/15 text-emerald-300",
+  next: "bg-emerald-400/15 text-emerald-300",
+  done: "bg-zinc-700/60 text-zinc-300",
+  waiting: "bg-zinc-800 text-zinc-400",
+  checking: "bg-zinc-800 text-zinc-400",
+  conflict: "bg-amber-300/15 text-amber-300",
+  behind: "bg-amber-300/15 text-amber-300",
+  hold: "bg-amber-300/15 text-amber-300",
+  held: "bg-rose-400/15 text-rose-300",
+};
+
 const moved = (order: number[], number: number, to: number) => {
   const rest = order.filter((n) => n !== number);
   rest.splice(Math.max(0, Math.min(to, rest.length)), 0, number);
@@ -192,7 +204,8 @@ const moved = (order: number[], number: number, to: number) => {
 
 /**
  * Admin's CI admission line (lib/ciAdmissionCore.ts): who is using the slots,
- * the waiting drafts in release order -- rearranged by dragging the handle
+ * every open pull request into develop or main in priority order, each with
+ * where it stands -- rearranged by dragging the handle
  * (mouse, pen or touch) or from the keyboard -- the slot budget, and recent
  * decisions. A reorder is shown at once and saved; a refused save restores
  * the previous order.
@@ -462,7 +475,21 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const used = state.lastRound?.used ?? 0;
   const free = Math.max(0, state.capacity - used);
   const minutes = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
-  const badgeText = (kind: Kind) => (kind === "develop" ? m.develop : kind === "hotfix" ? m.hotfix : m.main);
+  // Runners each kind of CI needs (lib/ciAdmissionCore.ts), from the stored state.
+  const unitsOf = (kind: Kind) => (kind === "develop" ? state.needs.develop : state.needs.main);
+  const deployUnits = (branch: string) => (branch === "main" ? state.needs.mainPush : state.needs.developPush);
+  const badgeText = (kind: Kind) => fill(kind === "develop" ? m.develop : kind === "hotfix" ? m.hotfix : m.main, { n: unitsOf(kind) });
+  const statusText: Record<CiAdmissionEntryStatus, string> = {
+    running: m.statusRunning,
+    done: m.statusDone,
+    next: m.statusNext,
+    waiting: m.statusWaiting,
+    conflict: m.statusConflict,
+    behind: m.statusBehind,
+    hold: m.statusHold,
+    checking: m.statusChecking,
+    held: m.statusHeld,
+  };
 
   const rowBody = (entry: CiAdmissionQueueEntry, rank: number, floating: boolean) => {
     const kind = kindOf(entry);
@@ -480,9 +507,15 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             #{entry.number} {entry.title}
           </a>
           <span className="truncate font-mono text-xs text-zinc-400">
-            {entry.head} · {fill(m.waitedFor, { minutes: minutes(entry.queuedAt) })}
+            {entry.head} · {entry.draft ? m.draft : m.ready} · {fill(m.waitedFor, { minutes: minutes(entry.queuedAt) })}
           </span>
         </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[entry.status]}`}
+          data-testid={floating ? undefined : `ci-admission-status-${entry.number}`}
+        >
+          {statusText[entry.status]}
+        </span>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[kind]}`}>{badgeText(kind)}</span>
       </>
     );
@@ -521,7 +554,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             >
               −
             </button>
-            <span className="w-8 text-center font-mono text-sm text-zinc-100" data-testid="ci-admission-capacity">
+            <span className="w-10 text-center font-mono text-sm text-zinc-100" data-testid="ci-admission-capacity">
               {state.capacity}
             </span>
             <button
@@ -541,7 +574,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           <div className="flex flex-wrap gap-2">
             {deploys.map((deploy) => {
               const kind: Kind = deploy.branch === "main" ? "main" : "develop";
-              const units = unitsOf(kind);
+              const units = deployUnits(deploy.branch);
               return (
                 <a
                   key={`${deploy.branch}@${deploy.sha}`}
@@ -549,7 +582,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                   target="_blank"
                   rel="noreferrer"
                   className={`flex min-w-[10rem] flex-col gap-0.5 rounded-lg border border-dashed px-3 py-2.5 ${SLOT[kind]}`}
-                  style={{ flexGrow: units, flexBasis: `${units * 8}rem` }}
+                  style={{ flexGrow: units, flexBasis: `${Math.max(8, units / 2)}rem` }}
                   data-testid={`ci-admission-deploy-${deploy.sha.slice(0, 7)}`}
                 >
                   <span className="truncate text-[13px] font-medium text-zinc-100">
@@ -567,7 +600,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                 <div
                   key={pull.number}
                   className={`flex min-w-[10rem] items-start gap-2 rounded-lg border px-3 py-2.5 ${SLOT[kind]}`}
-                  style={{ flexGrow: unitsOf(kind), flexBasis: `${unitsOf(kind) * 8}rem` }}
+                  style={{ flexGrow: unitsOf(kind), flexBasis: `${Math.max(8, unitsOf(kind) / 2)}rem` }}
                   data-testid={`ci-admission-running-${pull.number}`}
                 >
                   <a href={`${PULL_URL}${pull.number}`} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -598,7 +631,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             {free > 0 ? (
               <div
                 className="flex min-w-[8rem] flex-col gap-0.5 rounded-lg border border-dashed border-zinc-700 px-3 py-2.5"
-                style={{ flexGrow: free, flexBasis: `${free * 8}rem` }}
+                style={{ flexGrow: free, flexBasis: `${Math.max(8, free / 2)}rem` }}
               >
                 <span className="text-[13px] font-medium text-zinc-500">{m.emptySlot}</span>
                 <span className="text-[11px] text-zinc-500">{fill(m.emptySlotNote, { count: free })}</span>
@@ -633,14 +666,6 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           <p className="text-sm text-zinc-400">{m.empty}</p>
         ) : (
           <>
-            {(() => {
-              const head = byNumber.get(preview[0]);
-              return head ? (
-                <span className="self-start rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs font-medium text-emerald-400">
-                  {fill(m.nextUp, { units: unitsOf(kindOf(head)) })}
-                </span>
-              ) : null;
-            })()}
             <ol ref={listRef} className="relative flex flex-col gap-2" data-testid="ci-admission-queue">
               {preview.map((number, index) => {
                 const entry = byNumber.get(number)!;
@@ -670,7 +695,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                     className={`flex items-center gap-3 rounded-xl border bg-zinc-950 p-3 transition-shadow ${
                       isDragged
                         ? "border-blue-400 shadow-[0_12px_28px_rgba(0,0,0,0.55)] ring-1 ring-blue-400"
-                        : index === 0
+                        : entry.status === "running" || entry.status === "next"
                           ? "border-emerald-400/60"
                           : "border-zinc-800"
                     }`}
@@ -720,7 +745,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                       type="button"
                       className="min-h-8 rounded-lg px-2 text-[13px] font-medium text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
                       disabled={!canWrite || busy || drag !== null}
-                      onClick={() => void send({ action: "remove", number })}
+                      onClick={() => void send({ action: "move_bottom", number })}
                     >
                       {m.remove}
                     </button>

@@ -56,7 +56,8 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   const ideaId = "idea-01";
   const result = { state: "ready", ideaId, previewId: "preview-01",
     completedAt: "2026-10-03T00:00:00.000Z", outcome: "propose",
-    coveredScope: null, units: [{ id: "unit-01", localRef: "c0:card-0",
+    coveredScope: null, registrationRefusal: null,
+    units: [{ id: "unit-01", localRef: "c0:card-0",
       bodyDigest: "a".repeat(64), bodyDigestKeyId: "key-01",
       decisionState: "proposed", proposal: { kind: "card", localId: "c0:card-0",
         title: "Review a proposed card", problem: "The owner needs a review.",
@@ -88,4 +89,23 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   assert.equal(parseAmuxIdeaAnalysisResultView(200, {
     ...result, units: [{ ...result.units[0], bodyDigest: "invalid" }],
   }, ideaId), null);
+  const refusal = { state: "awaiting_operator",
+    requestId: "11111111-2222-4333-8444-555555555555",
+    attemptKind: "whole_plan", refusalCode: "task_expected_paths_mixed",
+    draftUnitId: "unit-01", analysisPreviewId: "preview-01",
+    sourcePlanRevisionId: "plan-01", proposedExecutionGrade: "routine",
+    finalExecutionGrade: null, attemptedAt: "2026-10-16T06:00:00.000Z" };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, {
+    ...result, registrationRefusal: refusal,
+  }, ideaId)?.registrationRefusal, refusal);
+  for (const changed of [
+    { ...refusal, refusalCode: "reconfirm" },
+    { ...refusal, attemptKind: "retry" },
+    { ...refusal, expectedPaths: ["lib/amux/private.ts"] },
+    { ...refusal, proposedExecutionGrade: "unknown" },
+  ]) {
+    assert.equal(parseAmuxIdeaAnalysisResultView(200, {
+      ...result, registrationRefusal: changed,
+    }, ideaId), null);
+  }
 });

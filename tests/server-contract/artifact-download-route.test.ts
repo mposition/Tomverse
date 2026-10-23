@@ -86,6 +86,7 @@ const loadRoute = async () => {
       unknown
     >;
 
+    mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => ({ session: world.session }) } });
     mock.module("next-auth/next", {
       namedExports: { getServerSession: async () => world.session },
     });

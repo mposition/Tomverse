@@ -153,6 +153,13 @@ test("only a deployment explicitly named dev waives readiness", () => {
   // exception); tests/server-contract/chat-route-fallback-liveness relies on it.
   assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging" }), false);
   assert.equal(waives({ APP_ENV: "staging" }), false);
+  // ...unless the operator names the waiver on staging itself.
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), true);
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "staging", AUTO_ROUTER_STAGING_READINESS_WAIVED: "true" }), false);
+  // The staging switch never reaches production or an unnamed build.
+  assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "production", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), false);
+  assert.equal(waives({ APP_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "staging", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), false);
+  assert.equal(waives({ NODE_ENV: "production", AUTO_ROUTER_STAGING_READINESS_WAIVED: "on" }), false);
   // Production keeps the gate, however it is named.
   assert.equal(waives({ RAILWAY_ENVIRONMENT_NAME: "production" }), false);
   assert.equal(waives({ APP_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "dev" }), false);

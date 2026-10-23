@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
 
-import { ciRunKey, type CiAdmissionDeploy, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
+import { ciRunKey, type CiAdmissionCheck, type CiAdmissionDeploy, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
@@ -102,6 +102,9 @@ const toPull = (item: unknown): CiAdmissionPull | null => {
     headSha: String(head.sha ?? ""),
     draft: pull.draft === true,
     fork: headRepo === null || headRepo.full_name !== CI_ADMISSION_REPOSITORY,
+    labels: (Array.isArray(pull.labels) ? pull.labels : []).flatMap((label) =>
+      typeof label === "object" && label !== null && typeof (label as Json).name === "string" ? [String((label as Json).name)] : [],
+    ),
   };
 };
 
@@ -115,6 +118,12 @@ export type CiAdmissionGithub = {
   runningPulls(): Promise<{ keys: Set<string>; bases: Map<number, string>; deploys: CiAdmissionDeploy[] }>;
   /** One pull request as GitHub shows it now, with whether it is open; null when there is none. */
   pull(number: number): Promise<{ pull: CiAdmissionPull; open: boolean } | null>;
+  /**
+   * Whether a draft conflicts with its base (GitHub's `mergeable`, which may
+   * still be computing: null) and whether its base has commits it lacks
+   * (null when the comparison cannot be read).
+   */
+  check(pull: CiAdmissionPull): Promise<CiAdmissionCheck>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
   /**
@@ -153,26 +162,34 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     return { status: response.status, json: () => JSON.parse(text) as unknown };
   };
 
-  let token: Promise<string> | null = null;
-  const installationToken = () =>
-    (token ??= (async () => {
+  const tokens = new Map<string, Promise<string>>();
+  let compareAvailable = true;
+  const ADMISSION_PERMISSIONS = { pull_requests: "write", actions: "write", statuses: "write", metadata: "read" };
+  const installationToken = (permissions: Record<string, string> = ADMISSION_PERMISSIONS): Promise<string> => {
+    const key = JSON.stringify(permissions);
+    const existing = tokens.get(key);
+    if (existing) return existing;
+    const created = (async () => {
       const jwt = appJwt(config, now());
       const installation = await call("GET", `${REPO}/installation`, jwt);
       if (installation.status !== 200) throw new Error(`github_installation_${installation.status}`);
       const id = record(installation.json()).id;
       if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) throw new Error("github_shape");
-      const created = await call("POST", `${API}/app/installations/${id}/access_tokens`, jwt, {
+      const answer = await call("POST", `${API}/app/installations/${id}/access_tokens`, jwt, {
         repositories: [CI_ADMISSION_REPOSITORY.split("/")[1]],
-        permissions: { pull_requests: "write", actions: "write", statuses: "write", metadata: "read" },
+        permissions,
       });
-      if (created.status !== 201) throw new Error(`github_token_${created.status}`);
-      const value = record(created.json()).token;
+      if (answer.status !== 201) throw new Error(`github_token_${answer.status}`);
+      const value = record(answer.json()).token;
       if (typeof value !== "string" || value === "") throw new Error("github_shape");
       return value;
     })().catch((error) => {
-      token = null;
+      tokens.delete(key);
       throw error;
-    }));
+    });
+    tokens.set(key, created);
+    return created;
+  };
 
   const get = async (url: string) => {
     const answer = await call("GET", url, await installationToken());
@@ -184,7 +201,14 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     const answer = await call("POST", `${API}/graphql`, await installationToken(), { query: mutation, variables: { id } });
     if (answer.status !== 200) throw new Error(`github_graphql_${answer.status}`);
     const body = record(answer.json());
-    if (body.errors !== undefined) throw new Error("github_graphql_errors");
+    if (body.errors !== undefined) {
+      // GitHub's error type (FORBIDDEN, NOT_FOUND ...) says what to fix; its
+      // message is free text and is not kept. 2026-10-23: every release failed
+      // as a bare "github_graphql_errors" and nobody could tell why.
+      const first = Array.isArray(body.errors) && body.errors.length > 0 ? record(body.errors[0]) : {};
+      const type = typeof first.type === "string" && /^[A-Z_]{1,40}$/.test(first.type) ? first.type : "UNKNOWN";
+      throw new Error(`github_graphql_errors:${type}`);
+    }
     return record(body.data);
   };
   return {
@@ -195,7 +219,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         state,
         context: CI_ADMISSION_STATUS_CONTEXT,
         description: description.slice(0, 140),
-        ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/agent-digests?tab=ci-admission` } : {}),
+        ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/qa-release?tab=ci-admission` } : {}),
       });
       if (answer.status !== 201) throw new Error(`github_status_${answer.status}`);
     },
@@ -249,6 +273,31 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       const body = answer.json();
       const pull = toPull(body);
       return pull ? { pull, open: record(body).state === "open" } : null;
+    },
+    async check(pull) {
+      const detail = await call("GET", `${REPO}/pulls/${pull.number}`, await installationToken());
+      if (detail.status !== 200) throw new Error(`github_${detail.status}`);
+      const mergeable = record(detail.json()).mergeable;
+      const conflict = mergeable === false ? true : mergeable === true ? false : null;
+      let behind: boolean | null = null;
+      if (compareAvailable && SHA.test(pull.headSha) && /^[A-Za-z0-9._/-]{1,100}$/.test(pull.base)) {
+        try {
+          const compare = await call(
+            "GET",
+            `${REPO}/compare/${encodeURIComponent(pull.base)}...${pull.headSha}`,
+            await installationToken({ contents: "read", metadata: "read" }),
+          );
+          if (compare.status === 200) {
+            const behindBy = record(compare.json()).behind_by;
+            if (typeof behindBy === "number") behind = behindBy > 0;
+          }
+        } catch {
+          // No contents permission (the token is refused) or the read failed:
+          // behind stays unknown, and this client stops asking.
+          compareAvailable = false;
+        }
+      }
+      return { conflict, behind };
     },
     async convertToDraft(pull) {
       const data = await graphql(

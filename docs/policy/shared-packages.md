@@ -28,6 +28,8 @@ happens to live in a different directory.
 packages/
   chat-core/       framework-neutral chat semantics, state machines, stream events
   ui-tokens/       design tokens as plain CSS custom properties
+  chat-ui/         React Markdown renderer shared by web and native
+  api-client/      injected HTTP transport, response errors and filenames
 ```
 
 The plan's eventual set is `chat-core`, `chat-ui`, `api-client`, `ui-tokens`,
@@ -52,7 +54,11 @@ state machines move.
 | `node:*` and bare Node builtins (`fs`, `path`, `crypto`, …) | Does not load in a browser bundle. Use Web Crypto/Streams, or take the capability as a port. |
 | `@capacitor/*`, `react-native` | Pins the code to the native shell. |
 
-A package also declares **no `dependencies` and no `peerDependencies`**. A
+Headless packages declare **no `dependencies` and no `peerDependencies`**.
+`chat-ui` has a narrow exception for React, react-markdown, unified and the
+three existing remark parser peers; it still cannot import Next.js, server
+modules or native bridges. `chat-ui` and `api-client` use DOM types in their
+standalone TypeScript checks; `chat-core` remains free of DOM globals. A
 dependency block is how a framework returns without any source file naming it.
 `"type": "module"` is required — the mobile shell bundles ESM only.
 
@@ -93,7 +99,7 @@ Three independent nets, because each one misses something the others catch.
 1. **ESLint `no-restricted-imports`**, scoped to `packages/*/src/**` in
    `eslint.config.mjs`. This is the rule PACKAGE-01 is measured on.
 2. **Each package's own `tsconfig.json`** — no `extends`, `"lib": ["ES2022"]`
-   with no `dom`, `"types": []`, no `paths`. So `window`, `document`,
+   with no `dom` for headless code, `"types": []`, no `paths`. So `window`, `document`,
    `process` and `Buffer` are unresolved identifiers. ESLint catches a
    forbidden *import*; this catches a forbidden *global*, which no import rule
    can see.
@@ -187,10 +193,10 @@ than strict. The separation that remains is that the approver did not produce
 the evidence — automation did.
 
 **Read the scope before treating the gate as settled.** It covers the two
-packages that existed at that commit. `chat-ui` and `api-client` are named in
-the delivery plan and are not in the tree; the criterion is measured over
-`packages/*` as it stands, so the gate is worth re-reading when they arrive
-rather than inherited.
+packages that existed at that commit. `chat-ui` and `api-client` were added incrementally for native completion;
+the historical approval does not establish their current verification. The
+criterion is measured over `packages/*` as it stands. Current local evidence
+includes all four packages and browser execution of the shared Markdown UI.
 
 ## 7. Adding a package
 

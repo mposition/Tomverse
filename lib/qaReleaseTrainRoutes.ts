@@ -3,11 +3,12 @@ import "server-only";
 import { z } from "zod";
 
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
-import { admitQaReleaseTrain, reportQaReleaseTrain } from "@/lib/qaReleaseTrainStore";
+import { admitQaReleaseTrain, readQaReleaseTrainSelection, reportQaReleaseTrain } from "@/lib/qaReleaseTrainStore";
 
 /**
  * The release train's app call (docs/policy/qa-release-agent.md section 8 item
- * 12): admit a departure, or report what it did. Authenticated by the merge
+ * 12): read the cargo the operator picked, admit a departure, or report what
+ * it did. Authenticated by the merge
  * lane's own secret, with the revision the service carries.
  */
 const SLOT = z.string().regex(/^\d{8}-\d{4}$/);
@@ -15,6 +16,7 @@ const SHA = z.string().regex(/^[0-9a-f]{40}$/);
 const PR = z.number().int().positive().max(1_000_000_000);
 
 const body = z.union([
+  z.object({ phase: z.literal("selection") }).strict(),
   z.object({ phase: z.literal("admit"), slot: SLOT }).strict(),
   z
     .object({
@@ -26,7 +28,7 @@ const body = z.union([
       rcSha: SHA.nullable(),
       failure: z.string().regex(/^[a-z_]{1,40}$/).nullable(),
       picks: z
-        .array(z.object({ number: PR, outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity"]) }).strict())
+        .array(z.object({ number: PR, outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows"]) }).strict())
         .max(100),
     })
     .strict(),
@@ -53,6 +55,10 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   if (!parsed.success) return { status: 400, body: { error: "invalid_request" } };
   const input = parsed.data;
   try {
+    if (input.phase === "selection") {
+      // Read only: the numbers the next train carries, picked in Admin.
+      return { status: 200, body: { numbers: (await readQaReleaseTrainSelection()).numbers } };
+    }
     if (input.phase === "admit") {
       const result = await admitQaReleaseTrain({ callerRevision, slot: input.slot });
       return result.admitted ? { status: 200, body: result } : { status: 409, body: result };

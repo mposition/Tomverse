@@ -7,6 +7,7 @@ import {
   marketingLlmAdapterConfigDigest,
   marketingLlmConfigSnapshot,
   MARKETING_LLM_ADAPTER_VERSION,
+  MARKETING_LLM_SETTINGS_KEY,
   type MarketingLlmPricePin,
 } from "@/lib/marketingLlmBudgetCore";
 import {
@@ -24,9 +25,22 @@ import { resetTestFixture } from "./resetTestFixture";
 const reset = () =>
   resetTestFixture(prisma, `TRUNCATE TABLE "MarketingLlmCall", "AdminAuditLog" RESTART IDENTITY CASCADE`);
 
-beforeEach(reset);
+/** The operator's Admin settings, written as the console's writer stores them. */
+const settings = (model: string | null, monthlyUsdCap: string | null) =>
+  prisma.appSetting.upsert({
+    where: { key: MARKETING_LLM_SETTINGS_KEY },
+    update: { value: JSON.stringify({ model, monthlyUsdCap }) },
+    create: { key: MARKETING_LLM_SETTINGS_KEY, value: JSON.stringify({ model, monthlyUsdCap }) },
+  });
+const cap = (monthlyUsdCap: string) => settings(PIN.model, monthlyUsdCap);
+
+beforeEach(async () => {
+  await reset();
+  await cap("1");
+});
 after(async () => {
   await reset();
+  await prisma.appSetting.deleteMany({ where: { key: MARKETING_LLM_SETTINGS_KEY } });
   await prisma.$disconnect();
 });
 
@@ -55,7 +69,7 @@ const ADAPTER = marketingLlmAdapterConfigDigest(
   marketingLlmConfigSnapshot({ pin: PIN, adapterVersion: MARKETING_LLM_ADAPTER_VERSION }),
 );
 
-const OPEN: MarketingLlmBudgetEnvironment = { killSwitchOn: false, monthlyCapRaw: "1", pins: [PIN] };
+const OPEN: MarketingLlmBudgetEnvironment = { killSwitchOn: false, pins: [PIN] };
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const deadline = (ms = 60_000) => new Date(Date.now() + ms);
@@ -116,8 +130,9 @@ test("a reservation is the pin's maximum, audited by the generator actor, and re
   assert.equal((audit.metadata as Record<string, unknown>).systemActor, "marketing-generator");
 
   // The same body reads its answer back -- even with the kill switch on, no
-  // pin and no cap, because a replay reads nothing current.
-  const replay = await reserve(1, { killSwitchOn: true, monthlyCapRaw: undefined, pins: [] });
+  // pin, no cap and no model selected, because a replay reads nothing current.
+  await settings(null, null);
+  const replay = await reserve(1, { killSwitchOn: true, pins: [] });
   assert.deepEqual(replay, { status: "ok", replay: true, value: first.value });
   // The same key with another body is a conflict, and writes nothing.
   assert.deepEqual(await reserve(1, OPEN, { purpose: "brief" }), { status: "conflict" });
@@ -125,11 +140,61 @@ test("a reservation is the pin's maximum, audited by the generator actor, and re
   assert.equal(await prisma.adminAuditLog.count(), 1);
 });
 
+test("a web-search reservation adds every search the pin allows, and a pin without a search price refuses it", async () => {
+  const webPin: MarketingLlmPricePin = { ...PIN, webSearchMicroUsdPerCall: 10_000, maxWebSearchCalls: 3 };
+  const webPayload = { ...payload(1), adapterProfile: "web-search-v1" };
+  const web = await tx((client) =>
+    reserveMarketingLlmCall(client, { payload: webPayload, deadlineAt: deadline() }, { ...OPEN, pins: [webPin] }),
+  );
+  assert.equal(web.status, "ok");
+  if (web.status !== "ok") return;
+  // Five passes over the window (three searches plus OpenAI's overshoot), the
+  // output cap once and four billable searches.
+  assert.equal(web.value.reservedMicroUsd, 565_108);
+  const stored = await row(web.value.callId);
+  assert.equal((stored.configSnapshot as Record<string, unknown>).adapterProfile, "web-search-v1");
+  assert.equal(stored.reservedInputTokens, 5 * 128_000);
+  // Dispatch binds to the web-search config, search cap included.
+  const webAdapter = marketingLlmAdapterConfigDigest(
+    marketingLlmConfigSnapshot({ pin: webPin, adapterVersion: MARKETING_LLM_ADAPTER_VERSION, adapterProfile: "web-search-v1" }),
+  );
+  assert.equal(
+    marketingLlmAdapterConfigDigest(stored.configSnapshot as Parameters<typeof marketingLlmAdapterConfigDigest>[0]),
+    webAdapter,
+  );
+  // Input read over several passes -- more than one window -- still settles.
+  const webEnv = { ...OPEN, pins: [webPin] };
+  assert.equal((await dispatch(web.value.callId, 1, 1, webEnv, webAdapter)).status, "ok");
+  const settled = await settle(web.value.callId, 1, observation(1, { reportedInputTokens: 400_000 }), webEnv);
+  assert.equal(settled.status, "ok");
+  assert.equal((await row(web.value.callId)).state, "settled");
+
+  // The text-only pin has no search price: no web search, and nothing written.
+  const refused = await tx((client) =>
+    reserveMarketingLlmCall(client, { payload: { ...webPayload, requestKey: uuid(2) }, deadlineAt: deadline() }, OPEN),
+  );
+  assert.deepEqual(refused, { status: "refused", code: "adapter_profile_unknown" });
+  assert.equal(await prisma.marketingLlmCall.count(), 1);
+});
+
 test("new reservations are refused without a switch, cap, pin or time, and leave nothing behind", async () => {
   assert.deepEqual(await reserve(1, { ...OPEN, killSwitchOn: true }), { status: "refused", code: "kill_switch" });
   assert.deepEqual(await reserve(1, { ...OPEN, killSwitchOn: null }), { status: "refused", code: "kill_switch" });
-  assert.deepEqual(await reserve(1, { ...OPEN, monthlyCapRaw: "101" }), { status: "refused", code: "cap_unreadable" });
-  assert.deepEqual(await reserve(1, { ...OPEN, monthlyCapRaw: undefined }), { status: "refused", code: "cap_unreadable" });
+  // A cap above the ceiling, no cap, no settings and an unreadable document all refuse.
+  await cap("101");
+  assert.deepEqual(await reserve(1), { status: "refused", code: "cap_unreadable" });
+  await settings(PIN.model, null);
+  assert.deepEqual(await reserve(1), { status: "refused", code: "cap_unreadable" });
+  await prisma.appSetting.delete({ where: { key: MARKETING_LLM_SETTINGS_KEY } });
+  assert.deepEqual(await reserve(1), { status: "refused", code: "cap_unreadable" });
+  await prisma.appSetting.create({ data: { key: MARKETING_LLM_SETTINGS_KEY, value: "{" } });
+  assert.deepEqual(await reserve(1), { status: "refused", code: "cap_unreadable" });
+  // Only the model the operator selected may spend, and none when none is.
+  await settings("other-model-2026-10-01", "1");
+  assert.deepEqual(await reserve(1), { status: "refused", code: "model_not_selected" });
+  await settings(null, "1");
+  assert.deepEqual(await reserve(1), { status: "refused", code: "model_not_selected" });
+  await cap("1");
   assert.deepEqual(await reserve(1, { ...OPEN, pins: [] }), { status: "refused", code: "model_not_pinned" });
   assert.deepEqual(
     await reserve(1, { ...OPEN, pins: [{ ...PIN, verifiedAt: iso(verifiedAt - 100 * day), expiresAt: iso(verifiedAt - 10 * day) }] }),
@@ -141,24 +206,30 @@ test("new reservations are refused without a switch, cap, pin or time, and leave
 });
 
 test("the monthly cap admits exactly up to the cap and counts every reservation but released ones", async () => {
-  const exact = { ...OPEN, monthlyCapRaw: "0.231016" }; // two reservations exactly
+  await cap("0.231016"); // two reservations exactly
+  const exact = OPEN;
   await reservedId(1, exact);
   const second = await reservedId(2, exact);
   assert.deepEqual(await reserve(3, exact), { status: "refused", code: "budget_exhausted" });
-  assert.deepEqual(await reserve(3, { ...OPEN, monthlyCapRaw: "0.231015" }), { status: "refused", code: "budget_exhausted" });
+  await cap("0.231015");
+  assert.deepEqual(await reserve(3), { status: "refused", code: "budget_exhausted" });
+  await cap("0.231016");
 
   // A dispatched call still counts at its reservation; a released one does not.
   assert.equal((await dispatch(second, 2, 2, exact)).status, "ok");
   assert.deepEqual(await reserve(3, exact), { status: "refused", code: "budget_exhausted" });
-  const third = await reservedId(4, { ...OPEN, monthlyCapRaw: "1" });
+  await cap("1");
+  const third = await reservedId(4);
   assert.equal((await tx((client) => releaseMarketingLlmCall(client, { callId: third, deadlineAt: deadline() }, OPEN))).status, "ok");
   const first = (await prisma.marketingLlmCall.findFirstOrThrow({ where: { requestKey: uuid(1) } })).id;
   assert.equal((await tx((client) => releaseMarketingLlmCall(client, { callId: first, deadlineAt: deadline() }, OPEN))).status, "ok");
+  await cap("0.231016");
   assert.equal((await reserve(5, exact)).status, "ok");
 });
 
 test("two connections reserving the last slot of a month admit exactly one", async () => {
-  const env = { ...OPEN, monthlyCapRaw: "0.2" }; // room for one
+  await cap("0.2"); // room for one
+  const env = OPEN;
   const outcomes = await Promise.all([reserve(1, env), reserve(2, env)]);
   assert.deepEqual(outcomes.map((outcome) => outcome.status).sort(), ["ok", "refused"]);
   assert.equal(await prisma.marketingLlmCall.count(), 1);
@@ -304,7 +375,8 @@ test("every action stays inside its statement ceiling", async () => {
   for (const measured of [dispatched, settled, unknown, released]) assert.equal(measured.outcome.status, "ok");
   assert.deepEqual(
     { reserve: reserved.calls, dispatch: dispatched.calls, settle: settled.calls, unknown: unknown.calls, release: released.calls },
-    { reserve: 10, dispatch: 9, settle: 9, unknown: 9, release: 9 },
+    // reserve reads the operator's settings row: one statement more than the others.
+    { reserve: 11, dispatch: 9, settle: 9, unknown: 9, release: 9 },
   );
 });
 

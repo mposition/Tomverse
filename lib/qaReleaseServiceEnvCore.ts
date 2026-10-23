@@ -28,9 +28,21 @@ export const QA_RELEASE_SERVICE_VARIABLES = Object.freeze({
     "QA_RELEASE_MERGE_LANE_ENABLED",
     "QA_RELEASE_MERGE_LANE_KILL_SWITCH",
     "QA_RELEASE_CONTROL_REVISION",
-    // The release train (section 8 item 12) runs in the same service.
+  ]),
+  // The release train (section 8 item 12), its own service since 2026-10-22
+  // (owner decision): a train failure no longer takes the develop lane down.
+  // It uses the lane's App and app secret, so the app side needs nothing new.
+  train: Object.freeze([
+    "QA_RELEASE_MERGE_LANE_SECRET",
+    "QA_RELEASE_MERGE_LANE_APP_ID",
+    "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY",
+    "QA_RELEASE_CONTROL_REVISION",
     "QA_RELEASE_TRAIN_ENABLED",
     "QA_RELEASE_TRAIN_SLOTS",
+    // The train clones and cherry-picks; Railpack's deploy image has no git
+    // unless this names it (2026-10-23: the first admitted departure failed
+    // assemble for want of it). Read by the build, not by the service.
+    "RAILPACK_DEPLOY_APT_PACKAGES",
   ]),
 } as const);
 
@@ -151,6 +163,7 @@ const REQUIRED: Record<QaReleaseService, readonly string[]> = {
     "QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN",
     "QA_RELEASE_CONTROL_REVISION",
   ],
+  train: ["QA_RELEASE_MERGE_LANE_SECRET", "QA_RELEASE_MERGE_LANE_APP_ID", "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY", "QA_RELEASE_CONTROL_REVISION"],
 };
 
 export type QaReleaseStartDecision =
@@ -175,6 +188,7 @@ export function decideQaReleaseServiceStart(
 
   const value = (name: string) => (env[name] ?? "").trim();
   if (service === "digest" && value("QA_RELEASE_DIGEST_ENABLED") !== "true") return "disabled";
+  if (service === "train" && value("QA_RELEASE_TRAIN_ENABLED") !== "true") return "disabled";
   if (service === "mergeLane") {
     // Policy section 8 item 6: the lane runs only while the kill switch is
     // empty, stops on any value, and stops when the switch cannot be read.
@@ -191,20 +205,7 @@ export function decideQaReleaseServiceStart(
   return "run";
 }
 
-/**
- * The release train's own start decision (section 8 item 12), so the train
- * can run while the develop lane is off. Same name check and kill switch as
- * the lane; its own enable flag; it needs the lane's secret, App and revision
- * but not the Railway token, which only the develop lane reads.
- */
+/** The release train service's start decision: its own names, and `QA_RELEASE_TRAIN_ENABLED` is its switch. */
 export function decideQaReleaseTrainStart(env: Readonly<Record<string, string | undefined>>): QaReleaseStartDecision {
-  const names = Object.keys(env).filter((name) => env[name] !== undefined);
-  if (!checkQaReleaseServiceEnv("mergeLane", names).ok) return "refuse";
-  const value = (name: string) => (env[name] ?? "").trim();
-  if (env.QA_RELEASE_MERGE_LANE_KILL_SWITCH !== "") return "disabled";
-  if (value("QA_RELEASE_TRAIN_ENABLED") !== "true") return "disabled";
-  const required = ["QA_RELEASE_MERGE_LANE_SECRET", "QA_RELEASE_MERGE_LANE_APP_ID", "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY", "QA_RELEASE_CONTROL_REVISION"];
-  if (required.some((name) => value(name) === "")) return "refuse";
-  if (!/^[1-9][0-9]{0,8}$/.test(value("QA_RELEASE_CONTROL_REVISION"))) return "refuse";
-  return "run";
+  return decideQaReleaseServiceStart("train", env);
 }

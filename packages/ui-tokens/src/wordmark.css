@@ -1,0 +1,22 @@
+/* Shared brand face only. Locale-aware body and code fonts stay app-owned. */
+@font-face {
+  font-family: "Tomverse Wordmark";
+  src: url("./fonts/roboto-latin-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+.tomverse-wordmark {
+  font-family: "Tomverse Wordmark", sans-serif;
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.6;
+  letter-spacing: -1px;
+  white-space: nowrap;
+  font-synthesis: none;
+}
+
+.tomverse-wordmark-dot {
+  margin-left: 1px;
+}

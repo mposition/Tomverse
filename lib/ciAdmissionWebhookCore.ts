@@ -27,6 +27,9 @@ const ROUND_PULL_REQUEST_ACTIONS = new Set([
   "closed",
   "synchronize",
   "edited",
+  // The hold label (lib/ciAdmissionCore.ts) changes what may be marked ready.
+  "labeled",
+  "unlabeled",
 ]);
 
 export type CiAdmissionWebhookDecision =
@@ -58,4 +61,31 @@ export function ciAdmissionArrival(event: string, payload: unknown, repository: 
     action === "ready_for_review" ||
     ((action === "opened" || action === "reopened" || action === "synchronize") && pull.draft === false);
   return { kind: "round", arrival: arrives ? pull.number : null };
+}
+
+/**
+ * Runs `work` once now, and when asked again while it runs, exactly once more
+ * after it ends -- never a queue of one run per request.
+ */
+export function createCoalescedRunner(work: () => Promise<void>): () => void {
+  let running = false;
+  let again = false;
+  const loop = async () => {
+    running = true;
+    try {
+      do {
+        again = false;
+        await work().catch(() => undefined);
+      } while (again);
+    } finally {
+      running = false;
+    }
+  };
+  return () => {
+    if (running) {
+      again = true;
+      return;
+    }
+    void loop();
+  };
 }

@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 
@@ -116,6 +117,12 @@ export default async function AdminAmuxExecutionPage({
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         {drawer}
+        {process.env.TOMVERSE_CHAT_UNIFIED_OPTIMIZER_AMUX_TEST_CARD_INTAKE_UI === "enabled" ? (
+          <Link href="/admin/amux-u21-test-card" prefetch={false}
+            className="w-fit text-sm font-medium underline text-blue-300">
+            {m.testCardIntake}
+          </Link>
+        ) : null}
         <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>

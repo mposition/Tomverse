@@ -164,6 +164,12 @@ async function openProCheckout(page: Page, query: string) {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await page.getByTestId("pricing-cta-pro").getByRole("button").first().click();
   await expect(page.getByTestId("checkout-due-today")).toBeVisible();
+  // The dialog moves focus to its first control a frame after it opens
+  // (components/useModalDialog.ts). A fill that starts before that frame can
+  // lose its text to the close button: mobile-safari did, run 39345904342.
+  await expect
+    .poll(() => page.evaluate(() => !!document.activeElement?.closest("[role='dialog']")))
+    .toBe(true);
 }
 
 const applyCode = async (page: Page, code: string) => {

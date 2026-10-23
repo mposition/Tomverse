@@ -669,6 +669,22 @@ const scopeViolations = (task: CrossReviewTask, files: readonly string[]): reado
 /** How many times a concluded exchange may be continued by a new task. */
 export const MAX_SUPERSESSIONS = 2;
 
+/**
+ * CHAT-01 owner mposition's 2026-10-02 decision is recorded in
+ * docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v4.authorization.md.
+ * Keep this single-use branch until the v4 exchange concludes; it is not a
+ * change to the general cap.
+ */
+const approvedChat01Continuation = (task: CrossReviewTask, prior: SupersededExchange): boolean =>
+    task.taskId === "chat01-refiner-vnext-one-shot-durable-slots-v4" &&
+    task.supersedes?.exchange ===
+        "artifacts/cross-review/chat01-refiner-vnext-one-shot-durable-slots-v3/exchange.json" &&
+    prior.taskId === "chat01-refiner-vnext-one-shot-durable-slots-v3" &&
+    prior.status === "on_hold" &&
+    prior.lineage?.length === 2 &&
+    prior.lineage[0] === "chat01-refiner-vnext-one-shot-durable-slots-v1" &&
+    prior.lineage[1] === "chat01-refiner-vnext-one-shot-durable-slots-v2";
+
 const underPath = (file: string, path: string): boolean =>
     path === "" || path === "." || file === path || file.startsWith(path.endsWith("/") ? path : `${path}/`);
 
@@ -812,9 +828,10 @@ export const supersessionProblems = (task: CrossReviewTask, prior: SupersededExc
         problems.push(`the exchange ${prior.taskId} is ${prior.status}; only an exchange on hold or failed can be continued`);
     }
     const priorDepth = prior.lineage?.length ?? 0;
-    if (priorDepth + 1 > MAX_SUPERSESSIONS) {
+    const cap = approvedChat01Continuation(task, prior) ? MAX_SUPERSESSIONS + 1 : MAX_SUPERSESSIONS;
+    if (priorDepth + 1 > cap) {
         problems.push(
-            `${prior.taskId} is already ${priorDepth} continuation(s) deep; the cap is ${MAX_SUPERSESSIONS}, and a person decides what happens to the change`
+            `${prior.taskId} is already ${priorDepth} continuation(s) deep; the cap is ${cap}, and a person decides what happens to the change`
         );
     }
     return problems;

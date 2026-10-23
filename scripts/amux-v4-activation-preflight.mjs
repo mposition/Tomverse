@@ -3,16 +3,19 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { Client } from "pg";
-import { ListObjectVersionsCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetBucketVersioningCommand, ListObjectVersionsCommand, S3Client } from "@aws-sdk/client-s3";
 import { loadCurrentAmuxContentKeys } from "../lib/amux/ideaKeyConfig.ts";
 
 export const CONTENT_COLUMNS = Object.freeze([
   ["AmuxIdeaSubmission", "rawCiphertext", "rawKeyId"],
+  ["AmuxIdeaSubmission", "sourceProvenanceCiphertext", "sourceProvenanceKeyId"],
   ["AmuxIdeaSourceScopeApproval", "scopeCiphertext", "scopeKeyId"],
   ["AmuxIdeaTransferPreview", "payloadCiphertext", "payloadKeyId"],
   ["AmuxIdeaAnalysisChunk", "draftCiphertext", "draftKeyId"],
   ["AmuxIdeaAnalysisChunk", "freeformCiphertext", "freeformKeyId"],
   ["AmuxIdeaDraftUnit", "bodyCiphertext", "bodyKeyId"],
+  ["AmuxIdeaTrackedCheckoutReadManifest", "ciphertext", "keyId"],
+  ["AmuxIdeaSessionAnalysisResult", "ciphertext", "keyId"],
   ["AmuxPortfolioNode", "titleCiphertext", "contentKeyId"],
   ["AmuxPortfolioNode", "descriptionCiphertext", "contentKeyId"],
   ["AmuxWorkItem", "v4TitleCiphertext", "v4TitleKeyId"],
@@ -98,8 +101,28 @@ export async function probeVersionListing(env) {
   } finally { client.destroy(); }
 }
 
+export async function probeVersioningStatus(env) {
+  const bucket = env.AMUX_V4_KEY_STORE_BUCKET;
+  const endpoint = env.AMUX_V4_KEY_STORE_ENDPOINT;
+  const region = env.AMUX_V4_KEY_STORE_REGION;
+  const accessKeyId = env.AMUX_V4_KEY_STORE_ACCESS_KEY_ID;
+  const secretAccessKey = env.AMUX_V4_KEY_STORE_SECRET_ACCESS_KEY;
+  if (!bucket || !region || !accessKeyId || !secretAccessKey ||
+      !endpoint || !/^https:\/\/[^/?#]+\/?$/.test(endpoint)) {
+    throw new Error("key_store_unavailable");
+  }
+  const client = new S3Client({ endpoint, region,
+    forcePathStyle: env.AMUX_V4_KEY_STORE_URL_STYLE === "path",
+    credentials: { accessKeyId, secretAccessKey }, maxAttempts: 1 });
+  try {
+    return await client.send(new GetBucketVersioningCommand({ Bucket: bucket }),
+      { abortSignal: AbortSignal.timeout(10000) });
+  } finally { client.destroy(); }
+}
+
 export async function activationPreflight({ env = process.env,
-  readCounts = readLegacyKeyCounts, listVersions = probeVersionListing } = {}) {
+  readCounts = readLegacyKeyCounts, listVersions = probeVersionListing,
+  getVersioning = probeVersioningStatus } = {}) {
   let appContentKeysConfigured = false;
   try { loadCurrentAmuxContentKeys(env); appContentKeysConfigured = true; }
   catch { /* Never expose configuration values or underlying errors. */ }
@@ -108,6 +131,12 @@ export async function activationPreflight({ env = process.env,
   let keyStoreVersionListingAvailable = false;
   try { keyStoreVersionListingAvailable = completeVersionListing(await listVersions(env)); }
   catch { /* Redact endpoint, object and credentials. */ }
+  let keyStoreVersioningStatusAvailable = false;
+  try {
+    const { Status } = await getVersioning(env);
+    keyStoreVersioningStatusAvailable = Status === undefined ||
+      Status === "Enabled" || Status === "Suspended";
+  } catch { /* Redact endpoint, bucket and credentials. */ }
   return {
     readOnly: true,
     appContentKeysConfigured,
@@ -116,6 +145,9 @@ export async function activationPreflight({ env = process.env,
     encryptedBodies: counts?.encryptedBodies ?? null,
     legacyOrInvalidKeyBodies: counts?.legacyOrInvalidKeyBodies ?? null,
     keyStoreVersionListingAvailable,
+    // The v19 orphan-key retry path must distinguish unversioned buckets from
+    // buckets where a bare DeleteObject would create a delete marker.
+    keyStoreVersioningStatusAvailable,
     // A separate bounded create/delete/restore-canary verification is required.
     cryptographicDeletionVerified: false,
     runtimeActivated: false,
@@ -126,7 +158,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const report = await activationPreflight();
   process.stdout.write(`${JSON.stringify(report)}\n`);
   if (!report.appContentKeysConfigured || !report.databaseCountsAvailable ||
-      report.legacyOrInvalidKeyBodies !== 0 || !report.keyStoreVersionListingAvailable) {
+      report.legacyOrInvalidKeyBodies !== 0 || !report.keyStoreVersionListingAvailable ||
+      !report.keyStoreVersioningStatusAvailable) {
     process.exitCode = 2;
   }
 }

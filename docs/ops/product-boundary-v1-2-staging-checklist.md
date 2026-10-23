@@ -186,14 +186,15 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
       확인하고, 제약 상태를 조회한다.
 
   **적용은 손으로 하지 않습니다. 이미 되어 있습니다.** staging 서비스는
-  `develop`에서 배포되고 `preDeployCommand`가
+  `test`에서 배포되고(2026-10-07 전에는 `develop`) `preDeployCommand`가
   `npm run check:encoding:strict && npm run db:migrate`이며, `db:migrate`의
-  끝이 `prisma migrate deploy`입니다(`package.json`). 즉 **develop에 머지되는
-  순간 다음 배포가 적용합니다.** 이 항목은 그 일이 일어났는지를 확인하는
-  것이지 일어나게 하는 것이 아닙니다.
+  끝이 `prisma migrate deploy`입니다(`package.json`). 즉 **마이그레이션을 담은
+  commit으로 `test`를 옮기는 순간(`npm run promote:test`) 다음 배포가
+  적용합니다.** 이 항목은 그 일이 일어났는지를 확인하는 것이지 일어나게 하는
+  것이 아닙니다.
 
-  Railway에서 environment를 **staging**으로 두고, 마이그레이션이 develop에 들어온
-  **직후의 배포**를 열어 deploy 로그를 `migrat`로 거릅니다. 찾는 것은 이
+  Railway에서 environment를 **staging**으로 두고, 마이그레이션을 담은 commit이
+  `test`에 들어온 **직후의 배포**를 열어 deploy 로그를 `migrat`로 거릅니다. 찾는 것은 이
   네 줄입니다.
 
   ```
@@ -269,11 +270,12 @@ dry-run 보고서가 필요합니다(`docs/ops/product-key-transition.md` §3).
   사라지는 대신 `null`로 보이게** 하려는 것이고, 이것이 A-2 전체를 관통하는
   규칙입니다 — **없는 것은 없다고 보여야 하지, 짧은 출력으로 보이면 안 됩니다.**
 
-  ### 다음 항목으로 넘어가기 전에 — develop을 멈추십시오
+  ### 다음 항목으로 넘어가기 전에 — `test`를 움직이지 마십시오
 
-  **staging은 develop에 머지될 때마다 재배포됩니다.** 기록 파일 이름은 deploy
-  SHA **하나**인데, B와 C를 하는 동안 머지가 들어오면 항목마다 다른 SHA에서
-  관측하게 되고 그 기록은 어느 커밋을 덮는지 말할 수 없게 됩니다 — 이 체크리스트
+  **staging은 `test`가 움직일 때마다 재배포됩니다**(2026-10-07 전에는 develop의
+  모든 머지). 기록 파일 이름은 deploy SHA **하나**인데, B와 C를 하는 동안
+  `npm run promote:test`가 실행되면 항목마다 다른 SHA에서 관측하게 되고 그
+  기록은 어느 커밋을 덮는지 말할 수 없게 됩니다 — 이 체크리스트
   구조가 존재하는 이유 그대로입니다(기록 README).
 
   A-2에서 SHA를 확정하고, **B-1부터 C까지를 그 배포 하나의 수명 안에서**

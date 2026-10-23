@@ -11,7 +11,7 @@ export type QaReleaseTrainView = {
   outcome: "opened" | "empty" | "failed";
   pullRequestNumber: number | null;
   failure: string | null;
-  picks: { number: number; outcome: "included" | "already_in_main" | "conflict" | "over_capacity" }[];
+  picks: { number: number; outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows" }[];
 };
 
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
@@ -26,7 +26,7 @@ const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 export function QaReleaseTrainSection({ trains, id }: { trains: QaReleaseTrainView[]; id?: string }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
   const pick = (outcome: QaReleaseTrainView["picks"][number]["outcome"]) =>
-    ({ included: m.trainIncluded, already_in_main: m.trainAlready, conflict: m.trainConflict, over_capacity: m.trainOverCapacity })[outcome];
+    ({ included: m.trainIncluded, already_in_main: m.trainAlready, conflict: m.trainConflict, over_capacity: m.trainOverCapacity, changes_workflows: m.trainWorkflows })[outcome];
   const latest = trains[0];
   return (
     <details className={card} id={id} data-testid="qa-release-train">
@@ -68,7 +68,7 @@ export function QaReleaseTrainSection({ trains, id }: { trains: QaReleaseTrainVi
                 {train.picks.length > 0 ? (
                   <ul className="flex flex-col text-xs">
                     {train.picks.map((p) => (
-                      <li key={p.number} className={p.outcome === "conflict" ? "text-amber-300" : "text-zinc-400"}>
+                      <li key={p.number} className={p.outcome === "conflict" || p.outcome === "changes_workflows" ? "text-amber-300" : "text-zinc-400"}>
                         <a className="underline" href={`${PR_URL}${p.number}`} target="_blank" rel="noreferrer">
                           #{p.number}
                         </a>{" "}

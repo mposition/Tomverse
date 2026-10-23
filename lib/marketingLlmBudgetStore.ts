@@ -6,7 +6,8 @@
  * month, the call row -- then answers a replay from what is stored before it
  * reads any current setting, so a pin rotation, an adapter release or the kill
  * switch never changes the answer to a request already recorded. Only a new
- * write reads the deadline, the kill switch, the cap and the pins; the audit
+ * write reads the deadline, the kill switch, the operator's settings (model and
+ * cap, from the Admin Console) and the pins; the audit
  * row is written first and the ledger row names it.
  *
  * Each action expects a transaction of its own. The statement, idle and
@@ -29,20 +30,22 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { MARKETING_RETENTION_SETTING } from "@/lib/marketingAutomationSchema";
 import { verifyMarketingAuditEvidence } from "@/lib/marketingAuditEvidence";
 import {
-  MARKETING_LLM_ADAPTER_PROFILE,
+  MARKETING_LLM_ADAPTER_PROFILES,
   MARKETING_LLM_ADAPTER_VERSION,
-  MARKETING_LLM_PRICE_PINS,
   MARKETING_LLM_PROVIDER,
   marketingLlmAdapterConfigDigest,
   marketingLlmCloseDigest,
   marketingLlmConfigSnapshot,
+  marketingLlmPinAllows,
   marketingLlmConsumerDigest,
   marketingLlmDispatchDigest,
   marketingLlmRequestDigest,
   marketingLlmReservation,
   marketingLlmReservePayloadDigest,
   marketingLlmSettleOutcome,
+  MARKETING_LLM_SETTINGS_KEY,
   parseMarketingLlmMonthlyCap,
+  parseMarketingLlmSettings,
   resolveMarketingLlmPin,
   type MarketingLlmClose,
   type MarketingLlmConfigSnapshot,
@@ -51,6 +54,7 @@ import {
   type MarketingLlmReservePayload,
   type MarketingLlmTerminalState,
 } from "@/lib/marketingLlmBudgetCore";
+import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import { MARKETING_RETENTION_ACTIONS, MarketingStoreRefusedError } from "@/lib/marketingStore";
 
 export const MARKETING_LLM_SYSTEM_ACTOR = "marketing-generator";
@@ -74,7 +78,6 @@ type Tx = Prisma.TransactionClient;
 export type MarketingLlmBudgetEnvironment = {
   /** `null` when the kill switch cannot be read; that refuses like `true`. */
   readonly killSwitchOn: boolean | null;
-  readonly monthlyCapRaw: string | undefined;
   readonly pins?: readonly MarketingLlmPricePin[];
   readonly adapterVersion?: string;
 };
@@ -85,6 +88,7 @@ export type MarketingLlmRefusal =
   | "deadline_too_close"
   | "kill_switch"
   | "cap_unreadable"
+  | "model_not_selected"
   | "model_not_pinned"
   | "pin_expired"
   | "adapter_profile_unknown"
@@ -187,17 +191,28 @@ export async function reserveMarketingLlmCall(
 
   if (bounds.late) return refused("deadline_too_close");
   if (env.killSwitchOn !== false) return refused("kill_switch");
-  if (input.payload.adapterProfile !== MARKETING_LLM_ADAPTER_PROFILE) return refused("adapter_profile_unknown");
-  const cap = parseMarketingLlmMonthlyCap(env.monthlyCapRaw);
-  if (cap === null) return refused("cap_unreadable");
+  const profile = MARKETING_LLM_ADAPTER_PROFILES.find((known) => known === input.payload.adapterProfile);
+  if (profile === undefined) return refused("adapter_profile_unknown");
+  // The operator's settings, read after the audit chain lock that every
+  // settings change also takes, so a reservation sees a change either wholly
+  // before it or wholly after. Only the selected model may spend.
+  const stored = await tx.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+    SELECT "value" FROM "AppSetting" WHERE "key" = ${MARKETING_LLM_SETTINGS_KEY}
+  `);
+  const settings = parseMarketingLlmSettings(stored[0]?.value);
+  const cap = parseMarketingLlmMonthlyCap(settings?.monthlyUsdCap ?? undefined);
+  if (settings === null || cap === null) return refused("cap_unreadable");
+  if (settings.model !== input.payload.model) return refused("model_not_selected");
   const pin = resolveMarketingLlmPin(
-    env.pins ?? MARKETING_LLM_PRICE_PINS,
+    env.pins ?? marketingLlmCatalogPins(),
     input.payload.model,
     new Date(`${reserveAt}Z`),
   );
   if (!pin.ok) return refused(pin.code);
+  // A web-search call needs a pin that prices its searches and caps them.
+  if (!marketingLlmPinAllows(pin.pin, profile)) return refused("adapter_profile_unknown");
 
-  const reservation = marketingLlmReservation(pin.pin);
+  const reservation = marketingLlmReservation(pin.pin, profile);
   // The month's committed sum, and -- the last reading of the database clock
   // before the audit row -- whether the deadline has passed.
   const sum = await tx.$queryRaw<Array<{ total: bigint; inTime: boolean }>>(Prisma.sql`
@@ -212,6 +227,7 @@ export async function reserveMarketingLlmCall(
   const configSnapshot = marketingLlmConfigSnapshot({
     pin: pin.pin,
     adapterVersion: env.adapterVersion ?? MARKETING_LLM_ADAPTER_VERSION,
+    adapterProfile: profile,
   });
   const requestDigest = marketingLlmRequestDigest({ reservePayloadDigest: payloadDigest, configSnapshot });
   const callId = newCallId();

@@ -266,6 +266,8 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       password: null,
       selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID, "mistral-small-4"]),
       kind: "chat",
+      productKey: "chat",
+      selectionMode: forcedAutoRoute ? "auto" : "manual",
     }),
   },
   message: {
@@ -407,12 +409,39 @@ const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
 };
 
 let forcedAutoRoute: string | null = null;
+let forcedRouterOutput: Record<string, unknown> | null = null;
+let forcedImageIntent = false;
+let imageIntentCalls = 0;
+let routerDecisionKept: boolean | null = null;
+const routerCore = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore");
+const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
+mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
+  ...realLlmRouter,
+  pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
+    if (!forcedRouterOutput) return null;
+    const candidates = routerCore.autoLlmRouterCandidates(input.eligibleModelIds, input.models,
+      input.creditsByModelId, input.fileContext);
+    const pick = routerCore.parseAutoLlmRouterOutput(forcedRouterOutput, candidates);
+    if (typeof input.recordDecision === "function") routerDecisionKept = await input.recordDecision(pick);
+    return pick;
+  },
+} });
+const realImageIntent = require(resolve(ROOT, "lib/chatImageIntent.ts")) as typeof import("../../lib/chatImageIntent");
+mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
+  ...realImageIntent,
+  detectChatTurnImage: async () => {
+    imageIntentCalls += 1;
+    return forcedImageIntent ? { image: true, prompt: "Synthetic image request.", preset: "standard", modelIds: [] }
+      : { image: false };
+  },
+} });
 
 const routedSelection = (modelId: string) => ({
   routed: true,
   modelId,
   sticky: { modelId, turnsFavouringChallenger: 0 },
   fallbackCandidateModelIds: [],
+  candidateCreditsByModelId: { [modelId]: 1 },
   versions: ROUTER_VERSIONS,
   cohort: { eligible: true, bucket: 0, version: "test", salt: "test" },
   record: {
@@ -549,9 +578,15 @@ const ask = async (
   {
     modelId = MODEL_ID,
     autoRoutedTo = null,
-  }: { modelId?: string; autoRoutedTo?: string | null } = {}
+    routerOutput = null,
+    imageIntent = false,
+  }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean } = {}
 ) => {
   forcedAutoRoute = autoRoutedTo;
+  forcedRouterOutput = routerOutput;
+  forcedImageIntent = imageIntent;
+  imageIntentCalls = 0;
+  routerDecisionKept = null;
   script = {
     begins: [],
     executes: [],
@@ -990,6 +1025,18 @@ test("Auto routing to an unverified model registers no file tool and says Auto c
   // The remedy names what the user can actually change: Auto made this
   // choice, so "choose a different model" alone would point at a picker the
   // user did not use.
+  assert.match(promptText(), /instead of Auto/);
+  assert.deepEqual(world.artifactRows, []);
+});
+
+test("file intent with no capable candidate keeps the refusal in Chat despite a positive image classification", async () => {
+  await ask({}, { modelId: UNVERIFIED_MODEL_ID, autoRoutedTo: UNVERIFIED_MODEL_ID,
+    routerOutput: { modelId: UNVERIFIED_MODEL_ID, requiresFileGeneration: true, reason: "Deliver a document about images." },
+    imageIntent: true });
+  assert.equal(imageIntentCalls, 1, "the parallel image classification must actually run");
+  assert.equal(routerDecisionKept, true, "a file request remains a Chat routing decision");
+  assert.ok(lastStreamTextOptions, "the turn was incorrectly handed off to the image workspace");
+  assert.equal((lastStreamTextOptions.tools as Record<string, unknown> | undefined)?.create_text_file, undefined);
   assert.match(promptText(), /instead of Auto/);
   assert.deepEqual(world.artifactRows, []);
 });

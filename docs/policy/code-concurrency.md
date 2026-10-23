@@ -1,8 +1,13 @@
 # Code 관리형 경로의 동시 실행 scope
 
-**상태: 설계 정책입니다. 코드는 아직 없습니다.** TomverseCode의 관리형 모델 카탈로그
-경로([TomverseCode product-strategy 17절](https://github.com/mposition/TomverseCode/blob/main/docs/design/product-strategy.md))를 맡는 Code 제품 서비스가 이
-저장소에 생길 때 지킬 동시 실행 계약입니다.
+**구현 상태 (2026-10-22):** 단일 관리형 태스크 실행을 구현했고 기본값은 꺼짐입니다.
+`lib/codeManagedService.ts`가 살아 있는 태스크와 전송 중 호출을 별도로 세며,
+기본값은 **계정당 태스크 8개 / 호출 16개**입니다. Code의 Fleet 최대 8개 구성원과
+병렬 계획자 2개에서 유도했으며, `CODE_USER_CONCURRENT_TASKS`와
+`CODE_USER_CONCURRENT_CALLS` override는 이 아래로 내려가지 않습니다.
+관리형 Fleet 시작은 비활성이며 아래 Fleet 전체 admission을 구현했다고 주장하지 않습니다.
+태스크 TTL은 **120초**, heartbeat는 **30초**입니다. 오래된 호출은 reconciliation 후
+전송 중 슬롯에서는 빠지되 금전 hold를 보존합니다. 운영 활성화는 별도입니다.
 
 `docs/policy/chat-concurrency-and-identity.md`가 정본입니다 — **동시 실행은 entitlement도
 guardrail도 아닌 세 번째 층**이라는 규칙을 그대로 따르고, 이 문서는 코딩에 필요한

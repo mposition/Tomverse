@@ -4,8 +4,8 @@
  * keeps every write behind every check:
  *
  *   start decision -> departure -> this departure's branch not yet pushed ->
- *   no open train -> labelled cargo exists -> the app admits (revision,
- *   latch, audit) -> assemble on a fresh clone of main -> push the branch ->
+ *   no open train -> the operator picked cargo in Admin -> the app admits (revision,
+ *   once per departure, audit) -> assemble on a fresh clone of main -> push the branch ->
  *   open the main pull request -> report.
  *
  * GitHub writes are the branch push and the pull request, nothing else: no
@@ -14,6 +14,7 @@
  * branch was pushed is never started again.
  */
 import {
+  QA_RELEASE_TRAIN_LEFT_OUT,
   QA_RELEASE_TRAIN_MAX_CARGO,
   orderQaReleaseTrainCandidates,
   parseQaReleaseTrainSlots,
@@ -32,8 +33,8 @@ export type QaReleaseTrainPorts = {
     branchExists(branch: string): Promise<boolean>;
     /** Open pull requests into main whose head is a train branch. */
     openTrains(): Promise<number>;
-    /** Merged develop pull requests labelled for the train. */
-    labelledCargo(): Promise<QaReleaseTrainCandidate[]>;
+    /** These pull requests, each one that is merged into develop; the rest are left out. */
+    cargo(numbers: readonly number[]): Promise<QaReleaseTrainCandidate[]>;
     openPullRequest(input: { head: string; title: string; body: string }): Promise<number>;
   };
   git: {
@@ -51,6 +52,8 @@ export type QaReleaseTrainPorts = {
     push(branch: string): Promise<void>;
   };
   app: {
+    /** The pull request numbers the operator picked for the next train in Admin. */
+    selection(): Promise<number[]>;
     admit(slot: string): Promise<{ admitted: boolean; reason?: string }>;
     report(report: {
       slot: string;
@@ -71,6 +74,17 @@ export type QaReleaseTrainOutcome =
   | { exitCode: 0; train: "empty"; slot: string }
   | { exitCode: 1; train: "refused_to_start" | "read_failed" | "failed"; failure?: string };
 
+/**
+ * A read failure as `<step>:<code>`, for the round's log line. The ports
+ * throw fixed codes (`github_403`, `app_409`, `github_shape`); anything else
+ * -- a network error's own message -- is reduced to `unknown`, so no URL or
+ * text from elsewhere reaches the log.
+ */
+export const qaReleaseTrainReadFailure = (step: string, error: unknown) => {
+  const message = error instanceof Error ? error.message : "";
+  return `${step}:${/^[a-z0-9_]{1,40}$/.test(message) ? message : "unknown"}`;
+};
+
 export async function runQaReleaseTrainRound(
   env: Readonly<Record<string, string | undefined>>,
   ports: QaReleaseTrainPorts,
@@ -87,12 +101,21 @@ export async function runQaReleaseTrainRound(
 
   let cargo: QaReleaseTrainCandidate[];
   let openTrains: number;
+  let step = "branch";
   try {
     if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
+    step = "open_trains";
     openTrains = await ports.github.openTrains();
-    cargo = openTrains > 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.labelledCargo());
-  } catch {
-    return { exitCode: 1, train: "read_failed" };
+    if (openTrains > 0) {
+      cargo = [];
+    } else {
+      step = "selection";
+      const numbers = await ports.app.selection();
+      step = "cargo";
+      cargo = numbers.length === 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.cargo(numbers));
+    }
+  } catch (error) {
+    return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure(step, error) };
   }
   const go = qaReleaseTrainShouldDepart({ departure, openTrainPullRequests: openTrains, candidates: cargo.length });
   if (!go.depart) return { exitCode: 0, train: go.reason === "no_departure" ? "no_departure" : go.reason };
@@ -100,8 +123,8 @@ export async function runQaReleaseTrainRound(
   let admission;
   try {
     admission = await ports.app.admit(departure.slot);
-  } catch {
-    return { exitCode: 1, train: "read_failed" };
+  } catch (error) {
+    return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure("admit", error) };
   }
   if (!admission.admitted) return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
 
@@ -117,8 +140,10 @@ export async function runQaReleaseTrainRound(
   let assembled;
   try {
     assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO);
-  } catch {
-    return fail("assemble_failed");
+  } catch (error) {
+    // The port's own code (git_missing, git_clone ...) says what to fix.
+    const message = error instanceof Error ? error.message : "";
+    return fail(/^git_[a-z]{1,20}$/.test(message) ? `assemble_${message}` : "assemble_failed");
   }
   const picks = assembled.picks;
   if (!picks.some((p) => p.outcome === "included")) {
@@ -153,6 +178,6 @@ export async function runQaReleaseTrainRound(
     slot: departure.slot,
     pullRequestNumber: number,
     included: picks.filter((p) => p.outcome === "included").length,
-    leftOut: picks.filter((p) => p.outcome === "conflict" || p.outcome === "over_capacity").length,
+    leftOut: picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome)).length,
   };
 }

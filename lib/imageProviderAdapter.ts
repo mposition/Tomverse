@@ -8,6 +8,7 @@ import {
 import {
   getImageModel,
   imageDeliveryMimeType,
+  imageThinkingCapEnforced,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
@@ -265,10 +266,22 @@ export const generateImageWithProvider = async (input: {
 }): Promise<ImageProviderResult> => {
   const modelId = input.modelId ?? IMAGE_GENERATION_MODEL_ID;
   const model = getImageModel(modelId);
-  if (!model || model.disabledReason !== null) {
+  // An operator hold stops new admissions (the service refuses them); a job
+  // already admitted and charged against the provider budget finishes rather
+  // than failing after its budget was spent. Price or cost refusals still stop.
+  if (!model || (model.disabledReason !== null && model.disabledReason !== "operational_hold")) {
     throw new ImageProviderError(
       "provider_failed",
       `Image model ${modelId} is not available for requests.`
+    );
+  }
+  // The thinking cap the reservation priced has to be one this request can
+  // hold. Checked here as well as by the judge because a hold replaces the
+  // judge's reason with `operational_hold`, which the check above lets through.
+  if (!imageThinkingCapEnforced(model)) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image model ${modelId} has no thinking cap its request can enforce.`
     );
   }
   if (model.provider === "xai") {
@@ -400,8 +413,11 @@ export const generateImageWithProvider = async (input: {
  *
  * Unreachable today and deliberately so: generateImageWithProvider refuses any
  * model carrying a disabledReason before it dispatches, and all three Google
- * image models are `worst_case_cost_unbounded` because the documentation does
- * not state that `max_output_tokens` bounds hidden thinking. The adapter exists
+ * image models are `worst_case_cost_unbounded` because `max_output_tokens` was
+ * measured not to bound hidden thinking. It also refuses any model whose
+ * provider bills thinking per uncapped token (`imageThinkingCapEnforced`), so
+ * a cap an operator writes into a price revision does not open this path
+ * either -- only a code change to that table can. The adapter exists
  * ahead of that answer because implementing it is not the same decision as
  * shipping it, and because the staging measurement that would settle the
  * question needs this code to make the call.

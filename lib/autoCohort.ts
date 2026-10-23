@@ -136,7 +136,12 @@ const readinessWaivedOutsideProduction = (
   const named =
     validateEnvironment(env.APP_ENV) ??
     validateEnvironment(env.RAILWAY_ENVIRONMENT_NAME);
-  return named === "dev";
+  if (named === "dev") return true;
+  // Staging keeps the gate unless the operator names the waiver on staging
+  // itself, for a bounded test on the stable release lane (operator decision
+  // 2026-10-19: dev redeploys on every merge and cut off a running optimizer
+  // cycle). Off by default, so staging still answers as production will.
+  return named === "staging" && env.AUTO_ROUTER_STAGING_READINESS_WAIVED?.trim() === "on";
 };
 
 const parsePercent = (raw: string | undefined): number => {

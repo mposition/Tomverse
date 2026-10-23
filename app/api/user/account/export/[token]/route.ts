@@ -1,10 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
+import { resolveAccountRouteSession } from "@/lib/chatRouteSession";
 
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
 import { buildAccountDataExport } from "@/lib/accountDataExport";
 import {
     exportDownloadFilename,
@@ -36,7 +35,9 @@ export async function GET(
     context: { params: Promise<{ token: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveAccountRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user?.id) {
             return NextResponse.json(
                 { error: "Authentication required." },

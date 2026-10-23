@@ -22,9 +22,27 @@ let imageTriageOn = true;
 let budgetHeld = true;
 let modelOutput: unknown = { image: true, modelId: "gpt-image-2", preset: "draft" };
 let callThrows = false;
-const calls: Array<{ prompt: string }> = [];
+const calls: Array<{ prompt: string; maxOutputTokens?: number }> = [];
 const reserved: number[] = [];
 let mocksInstalled = false;
+// The conversation's recent messages, newest first, and the image prompt.
+let recentMessages: Array<{ id: string; role: string; content: string }> = [];
+let previousGenerationPrompt: string | null = null;
+let imageFlagOn = true;
+let accessRefused = false;
+let conversationPassword: string | null = null;
+const prismaMock = {
+  conversation: { findFirst: async () => ({ password: conversationPassword }) },
+  message: { findMany: async () => recentMessages },
+  imageGenerationGroup: {
+    findFirst: async ({ where }: { where: { groupIdempotencyKey: string } }) =>
+      previousGenerationPrompt ? { id: `group-${where.groupIdempotencyKey}` } : null,
+  },
+  imageGeneration: {
+    findFirst: async () =>
+      previousGenerationPrompt ? { prompt: previousGenerationPrompt } : null,
+  },
+};
 
 async function load() {
   if (!mocksInstalled) {
@@ -39,9 +57,9 @@ async function load() {
     mock.module("ai", {
       namedExports: {
         ...realAi,
-        generateText: async (options: { prompt: string }) => {
+        generateText: async (options: { prompt: string; maxOutputTokens?: number }) => {
           if (callThrows) throw new Error("timeout");
-          calls.push({ prompt: options.prompt });
+          calls.push({ prompt: options.prompt, maxOutputTokens: options.maxOutputTokens });
           return { output: modelOutput, usage: { inputTokens: 100, outputTokens: 10 } };
         },
       },
@@ -67,6 +85,17 @@ async function load() {
     mock.module(mod("lib/modelCatalog.ts"), {
       namedExports: { refreshImageModelCatalog: async () => IMAGE_MODEL_REGISTRY },
     });
+    mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaMock } });
+    mock.module(mod("lib/appSettings.ts"), {
+      namedExports: { isImageGenerationEnabledCached: async () => imageFlagOn },
+    });
+    mock.module(mod("lib/chatSecurity.ts"), {
+      namedExports: {
+        assertUserOperationalAccess: async () => {
+          if (accessRefused) throw new Error("restricted");
+        },
+      },
+    });
     mock.module(mod("lib/activeAiModel.ts"), {
       namedExports: { getActiveAiModel: () => ({}) },
     });
@@ -82,6 +111,11 @@ const reset = () => {
   callThrows = false;
   calls.length = 0;
   reserved.length = 0;
+  recentMessages = [];
+  previousGenerationPrompt = null;
+  imageFlagOn = true;
+  accessRefused = false;
+  conversationPassword = null;
 };
 
 const detect = async (text = "간단한 고양이 아이콘 그려줘") => {
@@ -91,7 +125,12 @@ const detect = async (text = "간단한 고양이 아이콘 그려줘") => {
 
 test("the router model triages: model and preset come back", async () => {
   reset();
-  assert.deepEqual(await detect(), { image: true, modelId: "gpt-image-2", preset: "draft" });
+  assert.deepEqual(await detect(), {
+    image: true,
+    modelId: "gpt-image-2",
+    preset: "draft",
+    prompt: null,
+  });
   assert.equal(calls.length, 1);
   assert.equal(reserved.length, 1);
   assert.ok(reserved[0] > 0);
@@ -146,5 +185,108 @@ test("a failed call or a 'no' goes to chat", async () => {
 test("a model outside the catalogue is not passed on", async () => {
   reset();
   modelOutput = { image: true, modelId: "made-up-image-model", preset: "final" };
-  assert.deepEqual(await detect(), { image: true, modelId: null, preset: null });
+  assert.deepEqual(await detect(), { image: true, modelId: null, preset: null, prompt: null });
+});
+
+test("a follow-up sees the previous image and comes back with its rewrite", async () => {
+  reset();
+  recentMessages = [
+    { id: "a1", role: "assistant", content: "[Image generated] 간단한 고양이 아이콘 그려줘" },
+    { id: "u1", role: "user", content: "간단한 고양이 아이콘 그려줘" },
+  ];
+  previousGenerationPrompt = "간단한 고양이 아이콘 그려줘";
+  modelOutput = {
+    image: true,
+    modelId: "gpt-image-2",
+    preset: "draft",
+    prompt: "파란색의 간단한 고양이 아이콘",
+  };
+  const { detectChatImageRequest } = await load();
+  const decision = await detectChatImageRequest({
+    text: "더 파랗게 해줘",
+    traceId: "trace-2",
+    userId: "user-1",
+    conversationId: "conv-1",
+    request: new Request("http://127.0.0.1:3100/api/chat/image-intent"),
+  });
+  assert.deepEqual(decision, {
+    image: true,
+    modelId: "gpt-image-2",
+    preset: "draft",
+    prompt: "파란색의 간단한 고양이 아이콘",
+  });
+  // Room to write the whole new prompt, and the budget hold sized to it.
+  assert.equal(calls[0].maxOutputTokens, 2_500);
+  assert.match(calls[0].prompt, /Previous image:\n간단한 고양이 아이콘 그려줘\n\nMessage:\n더 파랗게 해줘$/);
+});
+
+test("without a recent image answer, no rewrite is taken", async () => {
+  reset();
+  recentMessages = [{ id: "a1", role: "assistant", content: "a text answer" }];
+  modelOutput = { image: true, modelId: "gpt-image-2", preset: "draft", prompt: "made up" };
+  const { detectChatImageRequest } = await load();
+  const decision = await detectChatImageRequest({
+    text: "고양이 그려줘",
+    traceId: "trace-3",
+    userId: "user-1",
+    conversationId: "conv-1",
+    request: new Request("http://127.0.0.1:3100/api/chat/image-intent"),
+  });
+  assert.equal(decision.image && decision.prompt, null);
+  assert.doesNotMatch(calls[0].prompt, /Previous image/);
+  assert.equal(calls[0].maxOutputTokens, 400);
+});
+
+const turnImage = async (plan: { tier: string } | null) => {
+  const { detectChatTurnImage } = await load();
+  return detectChatTurnImage({
+    userId: "user-1",
+    conversationId: "conv-1",
+    text: "간단한 고양이 아이콘 그려줘",
+    plan: plan as never,
+    traceId: "trace-turn",
+    request: new Request("http://127.0.0.1:3100/api/chat"),
+  });
+};
+
+test("an Auto turn's image decision is made for an eligible account", async () => {
+  reset();
+  const decision = await turnImage({ tier: "Pro" });
+  assert.equal(decision.image, true);
+  assert.equal(calls.length, 1);
+});
+
+for (const [name, arrange, plan] of [
+  ["the plan has no image generation", () => {}, { tier: "Free" }],
+  ["the plan is unknown", () => {}, null],
+  ["image generation is off", () => (imageFlagOn = false), { tier: "Pro" }],
+  ["the account is restricted", () => (accessRefused = true), { tier: "Pro" }],
+  ["the Admin switch is off", () => (imageTriageOn = false), { tier: "Pro" }],
+] as const) {
+  test(`no paid call for an Auto turn when ${name}`, async () => {
+    reset();
+    arrange();
+    assert.deepEqual(await turnImage(plan as { tier: string } | null), { image: false });
+    assert.equal(calls.length + reserved.length, 0);
+  });
+}
+
+test("a locked conversation's previous image is not read without its unlock grant", async () => {
+  reset();
+  recentMessages = [
+    { id: "a1", role: "assistant", content: "[Image generated] a secret design" },
+  ];
+  previousGenerationPrompt = "a secret design";
+  conversationPassword = "stored-hash";
+  modelOutput = { image: true, modelId: "gpt-image-2", preset: "draft", prompt: "a secret design, blue" };
+  const { detectChatImageRequest } = await load();
+  const decision = await detectChatImageRequest({
+    text: "더 파랗게 해줘",
+    traceId: "trace-lock",
+    userId: "user-1",
+    conversationId: "conv-1",
+    request: new Request("http://127.0.0.1:3100/api/chat/image-intent"),
+  });
+  assert.doesNotMatch(calls[0].prompt, /secret design/);
+  assert.equal(decision.image && decision.prompt, null);
 });

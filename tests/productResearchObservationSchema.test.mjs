@@ -8,7 +8,7 @@
 // that can be stored and has no label.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -103,13 +103,45 @@ test("the table is insert-only, kept for its retention, and one row per slot", (
   assert.match(sql, /clock_timestamp\(\) AT TIME ZONE 'UTC'/);
 });
 
+/**
+ * The shape check as the database ends up with it.
+ *
+ * Read from the **last** migration that defines it rather than from the one
+ * that defined it first: a later migration can redefine a constraint, and a
+ * test pinned to the original file would keep asserting a definition the
+ * database no longer has. That is what happened here -- the first definition
+ * left `developSha` and `mainSha` open on the failed branch.
+ */
+const effectiveShapeCheck = () => {
+  const root = new URL("../prisma/migrations/", import.meta.url);
+  const marker = 'ADD CONSTRAINT "ProductResearchObservation_outcome_shape_check"';
+  // Directories, not "everything that is not the lock file": a README added
+  // here later would otherwise be opened as a migration and throw.
+  const defining = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .map((name) => ({
+      name,
+      body: readFileSync(new URL(`${name}/migration.sql`, root), "utf8").replace(/\r\n/g, "\n"),
+    }))
+    .filter(({ body }) => body.includes(marker));
+  assert.ok(defining.length > 0, "no migration defines the shape check");
+  const last = defining[defining.length - 1];
+  return last.body.slice(last.body.lastIndexOf(marker));
+};
+
 test("a failed slot has nowhere to put a success's content", () => {
-  const shape = sql.slice(
-    sql.indexOf('ADD CONSTRAINT "ProductResearchObservation_outcome_shape_check"')
-  );
+  const shape = effectiveShapeCheck();
   for (const required of [
     '"outcome" = \'failed\'',
     '"failureStage" IS NOT NULL',
+    // The two the first definition forgot. A failed row holding the commits of
+    // a successful observation is exactly the "a failure showing an earlier
+    // success’s content" this constraint exists to prevent, through the only
+    // two columns it left open.
+    '"developSha" IS NULL',
+    '"mainSha" IS NULL',
     '"issueCount" IS NULL',
     '"payload" IS NULL',
     '"payloadDigest" IS NULL',

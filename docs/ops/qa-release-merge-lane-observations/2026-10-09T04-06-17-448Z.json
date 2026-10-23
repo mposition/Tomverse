@@ -1,0 +1,210 @@
+{
+  "recordVersion": 2,
+  "observedAt": "2026-10-09T04:06:17.448Z",
+  "repository": "mposition/Tomverse",
+  "observationAppId": 5225093,
+  "bypassAppIds": [
+    29110
+  ],
+  "protection": {
+    "develop": {
+      "branch": "develop",
+      "classic": {
+        "present": true,
+        "pullRequestRequired": true,
+        "requiredApprovals": 0,
+        "dismissStaleReviews": false,
+        "requireCodeOwnerReviews": false,
+        "requireLastPushApproval": false,
+        "dismissalRestrictions": null,
+        "reviewBypass": null,
+        "requiredChecks": [
+          {
+            "context": "Admin Console E2E (PostgreSQL)",
+            "appId": 15368
+          },
+          {
+            "context": "Build and test the Rust workspace",
+            "appId": 15368
+          },
+          {
+            "context": "Security, unit, build, and Chromium smoke tests",
+            "appId": 15368
+          }
+        ],
+        "strict": false,
+        "restrictions": null,
+        "enforceAdmins": false,
+        "allowForcePushes": false,
+        "allowDeletions": false,
+        "requiredLinearHistory": false,
+        "requiredConversationResolution": false,
+        "requiredSignatures": false,
+        "lockBranch": false,
+        "blockCreations": false,
+        "allowForkSyncing": false,
+        "unrecognized": {}
+      },
+      "rules": []
+    },
+    "main": {
+      "branch": "main",
+      "classic": {
+        "present": true,
+        "pullRequestRequired": true,
+        "requiredApprovals": 1,
+        "dismissStaleReviews": false,
+        "requireCodeOwnerReviews": false,
+        "requireLastPushApproval": false,
+        "dismissalRestrictions": null,
+        "reviewBypass": null,
+        "requiredChecks": [
+          {
+            "context": "Admin Console E2E (PostgreSQL)",
+            "appId": 15368
+          },
+          {
+            "context": "Build and test the Rust workspace",
+            "appId": 15368
+          },
+          {
+            "context": "Chromium desktop and mobile regression",
+            "appId": 15368
+          },
+          {
+            "context": "Security, unit, build, and Chromium smoke tests",
+            "appId": 15368
+          }
+        ],
+        "strict": true,
+        "restrictions": null,
+        "enforceAdmins": false,
+        "allowForcePushes": false,
+        "allowDeletions": false,
+        "requiredLinearHistory": false,
+        "requiredConversationResolution": false,
+        "requiredSignatures": false,
+        "lockBranch": false,
+        "blockCreations": false,
+        "allowForkSyncing": false,
+        "unrecognized": {}
+      },
+      "rules": []
+    }
+  },
+  "results": [
+    {
+      "id": "app_merge_unreviewed_main",
+      "status": 405,
+      "message": "Repository rule violations found\n\nCannot update this protected ref.\n\nAt least 1 approving review is required by reviewers with write access.\n\n"
+    },
+    {
+      "id": "app_merge_reviewed_main",
+      "status": 405,
+      "message": "Repository rule violations found\n\nCannot update this protected ref.\n\n3 of 4 required status checks are expected.\n\n"
+    },
+    {
+      "id": "app_push_main",
+      "status": 422,
+      "message": "Repository rule violations found\n\nCannot update this protected ref.\n\nChanges must be made through a pull request.\n\n4 of 4 required status checks are expected.\n\n"
+    },
+    {
+      "id": "app_merge_other_base",
+      "status": 405,
+      "message": "Repository rule violations found\n\nCannot update this protected ref.\n\n"
+    },
+    {
+      "id": "operator_merge_main",
+      "status": 200,
+      "message": "Pull Request successfully merged"
+    },
+    {
+      "id": "app_push_green_develop",
+      "status": 422,
+      "message": "Repository rule violations found\n\nChanges must be made through a pull request.\n\n"
+    },
+    {
+      "id": "app_merge_develop",
+      "status": 200,
+      "message": "Pull Request successfully merged"
+    },
+    {
+      "id": "operator_push_develop",
+      "status": 200,
+      "message": null
+    }
+  ],
+  "verdict": {
+    "passed": true,
+    "verdicts": [
+      {
+        "id": "app_merge_unreviewed_main",
+        "expect": "refused",
+        "observed": "refused",
+        "ok": true,
+        "namesRule": true
+      },
+      {
+        "id": "app_merge_reviewed_main",
+        "expect": "refused",
+        "observed": "refused",
+        "ok": true,
+        "namesRule": true
+      },
+      {
+        "id": "app_push_main",
+        "expect": "refused",
+        "observed": "refused",
+        "ok": true,
+        "namesRule": true
+      },
+      {
+        "id": "app_merge_other_base",
+        "expect": "refused",
+        "observed": "refused",
+        "ok": true,
+        "namesRule": true
+      },
+      {
+        "id": "operator_merge_main",
+        "expect": "succeeded",
+        "observed": "succeeded",
+        "ok": true,
+        "namesRule": false
+      },
+      {
+        "id": "app_push_green_develop",
+        "expect": "refused",
+        "observed": "refused",
+        "ok": true,
+        "namesRule": true
+      },
+      {
+        "id": "app_merge_develop",
+        "expect": "succeeded",
+        "observed": "succeeded",
+        "ok": true,
+        "namesRule": false
+      },
+      {
+        "id": "operator_push_develop",
+        "expect": "succeeded",
+        "observed": "succeeded",
+        "ok": true,
+        "namesRule": false
+      }
+    ]
+  },
+  "automation": {
+    "since": "2026-10-09T14:00:58.588+10:00",
+    "updates": [
+      {
+        "appId": 29110,
+        "ref": "refs/heads/dependabot/npm_and_yarn/develop/infrastructure-and-observability-f0037eaeb6",
+        "activityType": "force_push",
+        "at": "2026-10-09T04:03:16Z"
+      }
+    ],
+    "missingAppIds": []
+  }
+}

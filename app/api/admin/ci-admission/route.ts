@@ -23,7 +23,7 @@ const prNumber = z.number().int().positive().max(9_999_999);
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reorder"), order: z.array(prNumber).max(100) }).strict(),
   z.object({ action: z.literal("move_top"), number: prNumber }).strict(),
-  z.object({ action: z.literal("remove"), number: prNumber }).strict(),
+  z.object({ action: z.literal("move_bottom"), number: prNumber }).strict(),
   z.object({ action: z.literal("set_capacity"), capacity: z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY) }).strict(),
   z.object({ action: z.literal("evaluate") }).strict(),
   // The operator's stop: back to draft and every run force-cancelled.
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
     }
     // A round after every change: a pull request moved to the top, or a larger
     // budget, may release one now. A round that cannot run is not an error here.
-    const round = await runCiAdmissionRound(null).catch((error: unknown) => ({
+    const round = await runCiAdmissionRound().catch((error: unknown) => ({
       outcome: "read_failed" as const,
       failure: error instanceof Error ? error.message.slice(0, 80) : "unknown",
     }));

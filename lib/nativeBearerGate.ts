@@ -139,3 +139,40 @@ export const applyMobileIdentityHeaders = (
   headers.set(MOBILE_IDENTITY_HEADERS.device, identity.device);
   headers.set(MOBILE_IDENTITY_HEADERS.family, identity.family);
 };
+
+/** Exact native Chat enrollment; callers supply the default-off deployment flag. */
+export function nativeChatBearerRoute(path: string, method: string, enabled = false): boolean {
+  if (!enabled) return false;
+  if (path === "/api/user/account") return ["GET", "DELETE"].includes(method);
+  if (path === "/api/user/account/export") return ["GET", "POST"].includes(method);
+  if (/^\/api\/user\/account\/export\/[A-Za-z0-9_-]{32,128}$/.test(path)) return method === "GET";
+  if (/^\/api\/artifacts\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
+  if (path === "/api/chat") return ["POST", "PUT", "PATCH"].includes(method);
+  if (path === "/api/conversations") return method === "GET";
+  if (path === "/api/products/chat/conversations") return method === "POST";
+  if (path === "/api/products/chat/capabilities") return method === "GET";
+  if (path === "/api/chat/voice-transcription") return method === "POST";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}$/.test(path)) return ["GET", "PATCH"].includes(method);
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/messages$/.test(path)) return method === "POST";
+  if (/^\/api\/products\/chat\/attempts\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
+  return false;
+}
+
+/** Native web-parity additions require their own reviewed operational activation. */
+export function nativeParityBearerRoute(path: string, method: string, enabled = false): boolean {
+  if (!enabled) return false;
+  if (path === "/api/chat/preflight") return method === "POST";
+  if (path === "/api/chat/deep-research/status") return method === "POST";
+  if (path === "/api/products/mobile/capabilities") return method === "GET";
+  if (path === "/api/user/settings") return ["GET", "POST"].includes(method);
+  if (path === "/api/memories/settings") return ["GET", "PUT"].includes(method);
+  if (path === "/api/assistant-profiles") return method === "GET";
+  if (path === "/api/products/review/conversations" || path === "/api/review/route") return method === "POST";
+  if (path === "/api/images/generations") return ["GET", "POST"].includes(method);
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path)) return method === "GET";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews$/.test(path)) return ["GET", "POST"].includes(method);
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews\/verify-item$/.test(path)) return method === "POST";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews\/item-feedback$/.test(path)) return ["GET", "PUT", "DELETE"].includes(method);
+  if (/^\/api\/images\/groups\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
+  return false;
+}

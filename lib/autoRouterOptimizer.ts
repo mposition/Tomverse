@@ -9,76 +9,132 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSystemAudit";
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
-    AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
-    autoLlmRouterUserMessage,
-    buildAutoLlmRouterSystem,
+    AUTO_LLM_ROUTER_TIMEOUT_MS,
+    autoLlmRouterCandidates,
     resolveAutoLlmRouterModel,
     type AutoLlmRouterCandidate,
     type AutoLlmRouterSession,
 } from "@/lib/autoLlmRouterCore";
+import { autoCohortConfig } from "@/lib/autoCohort";
+import { preflightInputEstimate } from "@/lib/autoDispatchPreflight";
+import { decideRouterModel } from "@/lib/routerDecision";
+import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
+import { estimateRequestCredits } from "@/lib/webSearchCredits";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import {
     DEFAULT_ROUTER_GUIDANCE,
     readActiveRouterGuidance,
     writeActiveRouterGuidance,
+    type RouterGuidanceKind,
 } from "@/lib/autoLlmRouterGuidance";
 import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 import {
     AUTO_ROUTER_GENERATOR_SYSTEM,
-    AUTO_ROUTER_GUIDANCE_MAX_CHARS,
     AUTO_ROUTER_JUDGE_SYSTEM,
     AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
-    AUTO_ROUTER_OPTIMIZER_MIN_EVAL,
     AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
     AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS,
+    AUTO_ROUTER_SYNTHESIZER_SYSTEM,
     optimizerCycleView,
-    admitOptimizerReservation,
-    autoRouterGeneratorMessage,
+    admitOptimizerCycle,
     autoRouterGeneratorSchema,
-    autoRouterJudgeMessage,
     autoRouterJudgeSchema,
+    autoRouterSynthesizerSchema,
     callCostMicroUsd,
     parseJudgeWinner,
     promotedRouterGuidance,
     rolledBackRouterGuidance,
     runOptimizerCycle,
-    splitOptimizerDecisions,
     guidanceRejection,
+    optimizerAnswerOptions,
     optimizerCallFailureDetail,
-    worstCaseCallMicroUsd,
+    summarizeRouterDecisions,
+    unreliableAnswerModels,
+    syntheticCaseViews,
+    type OptimizerCallKind,
     type OptimizerDecision,
+    type OptimizerRunOutcome,
+    type RouterStats,
+    type SyntheticCaseView,
 } from "@/lib/autoRouterOptimizerCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
-import { getProviderCostBudget } from "@/lib/providerCostBudget";
 import { resolveModelPricing } from "@/lib/modelPricing";
-import type { AiModel } from "@/lib/models";
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
+import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizerLock";
+import { applyCycleTunableChanges, revertTunedTimeoutIfWorse } from "@/lib/autoRouterTunables";
+import { effectiveRouterTimeoutMs } from "@/lib/autoRouterTunablesCore";
+import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
 import { prisma } from "@/lib/prisma";
 
 /**
  * Runs, promotes and rolls back Auto router guidance cycles (Admin › Routing).
  *
  * The optimizer model setting is the switch. No row is off, and turning it on
- * in Admin is the owner's approval for the calls a cycle makes: every call is
- * paid from the provider budget, bounded by the CHAT-01 caps in
- * lib/autoRouterOptimizerCore.ts. A cycle only proposes; a person promotes.
+ * in Admin is the owner's approval for the calls a cycle makes -- including
+ * the synthetic messages and the picked models' answers (owner, 2026-10-20):
+ * every call is recorded in its provider's budget and bounded by the CHAT-01
+ * caps in lib/autoRouterOptimizerCore.ts, judged on actual spend (owner,
+ * 2026-10-19: no worst-case reservation). A cycle only proposes; a person, or
+ * the owner-enabled automatic promotion, promotes.
  */
 export const AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY = "auto.llmRouterOptimizerModelId";
 
 /**
  * Room for the longest admitted guidance in any script plus its JSON wrapper:
  * 3 000 characters of Korean can take more than 4 000 tokens. At 1 200 the
- * first Test cycle (2026-10-19, Claude Opus 4.8) threw before admission and was
- * charged the generate call's worst case.
+ * first Test cycle (2026-10-19, Claude Opus 4.8) threw before admission.
  */
-const GENERATOR_MAX_OUTPUT_TOKENS = 6_000;
-const GENERATOR_TIMEOUT_MS = 90_000;
-const JUDGE_MAX_OUTPUT_TOKENS = 40;
+/** The guidance plus the report written before it, in Korean. */
+const GENERATOR_MAX_OUTPUT_TOKENS = 10_000;
+const GENERATOR_TIMEOUT_MS = 150_000;
+/** Room for up to 24 messages of a few hundred characters each. */
+const SYNTHESIZER_MAX_OUTPUT_TOKENS = 8_000;
+const SYNTHESIZER_TIMEOUT_MS = 150_000;
+/** The router's recent decisions the generator's statistics are read from. */
+const ROUTER_STATS_DAYS = 14;
+const ROUTER_STATS_MAX_ROWS = 2_000;
+
+
+/**
+ * Room for a model that writes anything before the one-word object. On Test
+ * (2026-10-20, cycle cmvgc2vrb) eight judge calls to claude-opus-5 ended at
+ * 400 tokens with no object (finishReason length): the request carried no
+ * thinking setting, and the tokens went before the object. The judge and the
+ * synthesizer now ask for no reasoning (`reasoning: "none"`, which the
+ * Anthropic provider sends as thinking disabled, or its lowest effort on a
+ * model that refuses that) and the judge keeps this much room besides.
+ */
+const JUDGE_MAX_OUTPUT_TOKENS = 2_000;
 const JUDGE_TIMEOUT_MS = 30_000;
+
+/**
+ * The one judge call of every optimizer cycle, routing and rewrite alike, so
+ * their limits cannot drift apart again: no reasoning, room for the object,
+ * one structured verdict. The caller's system prompt ends with
+ * AUTO_ROUTER_JUDGE_OUTPUT_RULE.
+ */
+export const optimizerJudgeCall = (input: { model: AiModel; system: string; prompt: string; name: string }) =>
+    generateText({
+        model: getActiveAiModel(input.model),
+        system: input.system,
+        prompt: input.prompt,
+        maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
+        reasoning: "none",
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
+        output: Output.object({
+            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
+            name: input.name,
+        }),
+        providerOptions: { openai: { strictJsonSchema: true } },
+    });
+
 /** A cycle still `running` after this was cut off by a restart. */
 const STALE_RUNNING_MS = AUTO_ROUTER_OPTIMIZER_STALE_RUNNING_MS;
-const OPTIMIZER_LOCK = "auto-router-optimizer";
+export { OPTIMIZER_LOCK };
 
 export async function readOptimizerModelId(): Promise<string | null> {
     try {
@@ -148,23 +204,26 @@ async function writeOptimizerAutomation(
 }
 
 /**
- * The daily maintenance run's step: one cycle when the daily switch is on.
- * Off, or any refusal, starts nothing and costs nothing.
+ * The daily run's step: one cycle when the daily switch is on. Off, or any
+ * refusal, starts nothing and costs nothing. `waitForCompletion` runs the
+ * cycle to its end before returning, with its outcome (the own-process
+ * optimizer service); without it the cycle runs on in the background.
  */
-export async function runScheduledAutoRouterOptimizerCycle(): Promise<
-    { started: false; reason: "daily_off" | OptimizerStartRefusal } | { started: true; cycleId: string }
+export async function runScheduledAutoRouterOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
+    | { started: false; reason: "daily_off" | OptimizerStartRefusal }
+    | { started: true; cycleId: string; outcome?: OptimizerRunOutcome }
 > {
     if (!(await readOptimizerAutomation()).daily) return { started: false, reason: "daily_off" };
-    const result = await startAutoRouterOptimizerCycle("system");
+    const result = await startAutoRouterOptimizerCycle("system", options);
     return "refused" in result
         ? { started: false, reason: result.refused }
-        : { started: true, cycleId: result.cycleId };
+        : { started: true, cycleId: result.cycleId, ...(result.outcome ? { outcome: result.outcome } : {}) };
 }
 
-type Prices = { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
+export type Prices = { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
 
 /** Null when the price cannot be resolved; a cycle then does not start. */
-const pricesOf = (model: AiModel): Prices | null => {
+export const pricesOf = (model: AiModel): Prices | null => {
     try {
         const pricing = resolveModelPricing(model);
         const prices = {
@@ -182,7 +241,7 @@ const pricesOf = (model: AiModel): Prices | null => {
     }
 };
 
-const isCandidate = (value: unknown): value is AutoLlmRouterCandidate => {
+export const isCandidate = (value: unknown): value is AutoLlmRouterCandidate => {
     const candidate = value as Partial<AutoLlmRouterCandidate> | null;
     return (
         typeof candidate?.id === "string" &&
@@ -192,7 +251,7 @@ const isCandidate = (value: unknown): value is AutoLlmRouterCandidate => {
     );
 };
 
-const asSession = (value: unknown): AutoLlmRouterSession | null => {
+export const asSession = (value: unknown): AutoLlmRouterSession | null => {
     const session = value as Partial<AutoLlmRouterSession> | null;
     return session && Array.isArray(session.recentPicks)
         ? { topic: typeof session.topic === "string" ? session.topic : null, recentPicks: session.recentPicks }
@@ -212,6 +271,7 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
             candidates: true,
             pickedModelId: true,
             reason: true,
+            taskKind: true,
         },
     });
     return rows.flatMap((row) => {
@@ -219,6 +279,7 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
         if (candidates.length < 2) return [];
         return [{
             id: row.id,
+            taskKind: row.taskKind,
             routerInput: row.routerInput,
             routerContext: row.routerContext,
             routerSession: asSession(row.routerSession),
@@ -229,119 +290,120 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
     });
 }
 
-/** What cycles since `from` have used: running ones count their reservation. */
-const usedSince = (
-    cycles: readonly { createdAt: Date; status: string; reservedMicroUsd: number; spentMicroUsd: number }[],
-    from: Date
-) =>
+/**
+ * The router's recent behaviour for the generator: outcomes, fallbacks and
+ * pick shares from the last two weeks of decisions. Counts only; null when
+ * the read fails, and the cycle goes on without it.
+ */
+/**
+ * Every model id the catalogue knows -- registry rows deleted from the
+ * catalogue and the static catalogue included -- for the guidance naming
+ * check: a name the menu no longer offers is caught however it is shaped.
+ */
+export async function optimizerCatalogueIds(): Promise<string[]> {
+    const registered = await getRuntimeModels({ includeCatalogDeleted: true });
+    return [...new Set([...registered, ...AVAILABLE_MODELS].map((model) => model.id))];
+}
+
+/**
+ * Models whose answers all failed in the last finished cycle that recorded
+ * answers, never drawn as the next cycle's direct challenger. Empty when
+ * there is no such cycle or it cannot be read.
+ */
+export async function readUnreliableAnswerModels(): Promise<string[]> {
+    try {
+        // Searched in the database rather than among the last few rows: any
+        // number of cycles that record no answers (rewrite cycles, older
+        // routing ones) may have finished since.
+        const rows = await prisma.$queryRaw<Array<{ answerStats: unknown }>>`
+            SELECT "summary"->'answerStats' AS "answerStats"
+            FROM "AutoRouterOptimizerCycle"
+            WHERE "status" IN ('passed', 'failed', 'error')
+              AND jsonb_typeof("summary"->'answerStats') = 'object'
+            ORDER BY "createdAt" DESC
+            LIMIT 1
+        `;
+        return rows[0] ? unreliableAnswerModels(rows[0].answerStats) : [];
+    } catch {
+        return [];
+    }
+}
+
+async function readRouterStats(now: Date): Promise<RouterStats | null> {
+    try {
+        const rows = await prisma.autoRouterDecision.findMany({
+            where: { createdAt: { gte: new Date(now.getTime() - ROUTER_STATS_DAYS * 24 * 60 * 60_000) } },
+            orderBy: { createdAt: "desc" },
+            take: ROUTER_STATS_MAX_ROWS,
+            select: { outcome: true, pickedModelId: true, ruleModelId: true, latencyMs: true },
+        });
+        // Timeouts are counted against the deadline in force, tuned or not.
+        const timeoutMs = effectiveRouterTimeoutMs(await readAutoRouterTunables(), AUTO_LLM_ROUTER_TIMEOUT_MS);
+        return summarizeRouterDecisions(rows, timeoutMs);
+    } catch {
+        return null;
+    }
+}
+
+/** What cycles since `from` have actually spent. */
+const spentSince = (cycles: readonly { createdAt: Date; spentMicroUsd: number }[], from: Date) =>
     cycles
         .filter((cycle) => cycle.createdAt >= from)
-        .reduce(
-            (sum, cycle) =>
-                sum + (cycle.status === "running"
-                    ? Math.max(cycle.reservedMicroUsd, cycle.spentMicroUsd)
-                    : cycle.spentMicroUsd),
-            0
-        );
+        .reduce((sum, cycle) => sum + cycle.spentMicroUsd, 0);
 
 const utcDayStart = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 const utcMonthStart = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-/** Closes cycles cut off by a restart: their spend is unknown, so it is the reservation. */
+/**
+ * Closes cycles cut off by a restart. What they spent is unknown, so they
+ * keep the spend they had recorded. Conditional as well as locked: only a
+ * row still running is closed.
+ */
 async function closeStaleCycles(tx: Prisma.TransactionClient, now: Date) {
-    const stale = await tx.autoRouterOptimizerCycle.findMany({
+    await tx.autoRouterOptimizerCycle.updateMany({
         where: { status: "running", createdAt: { lt: new Date(now.getTime() - STALE_RUNNING_MS) } },
-        select: { id: true, reservedMicroUsd: true },
+        data: { status: "error", failure: "interrupted", finishedAt: now },
     });
-    for (const cycle of stale) {
-        // Conditional as well as locked: only a row still running is closed.
-        await tx.autoRouterOptimizerCycle.updateMany({
-            where: { id: cycle.id, status: "running" },
-            data: {
-                status: "error",
-                failure: "interrupted",
-                spentMicroUsd: cycle.reservedMicroUsd,
-                finishedAt: now,
-            },
-        });
-    }
 }
 
 // The provider's own operational budget, shared with chat and memory
 // extraction (docs/policy/credit-and-cost-limits.md): the same ChatUsageBucket
-// keys, so an optimizer cycle can never spend what the provider budget no
-// longer has, and what it spends shows up there.
+// keys, so what an optimizer cycle spends shows up there.
 const PROVIDER_DAY = "provider-cost-day";
 const PROVIDER_MONTH = "provider-cost-month";
 
-/** One provider's share of a cycle's reservation, and the buckets it went into. */
-export type ProviderReservation = {
-    provider: string;
-    microUsd: number;
-    dayStart: string;
-    monthStart: string;
-};
-
 /**
- * Adds `amount` to a provider bucket. A positive amount with a limit is one
- * guarded statement (as lib/memoryExtractionProviderCost.ts does it): it
- * either fits under the limit or changes nothing. A negative amount gives
- * budget back, never below zero. A positive amount with no limit records an
- * overrun that has already happened, which the budget must see regardless.
+ * Adds spend that has already happened to a provider bucket. No limit: the
+ * money is gone, and the budget must see it regardless.
  */
-async function adjustProviderBucket(
+async function addProviderSpend(
     tx: Prisma.TransactionClient,
     provider: string,
     period: string,
     start: Date,
-    limit: number | null,
     amount: number
-): Promise<boolean> {
-    const key = `provider:${provider}`;
-    if (amount === 0) return true;
-    if (amount < 0) {
-        await tx.$executeRaw`
-            UPDATE "ChatUsageBucket"
-            SET "count" = GREATEST(0, "count" + ${amount}), "updatedAt" = NOW()
-            WHERE "key" = ${key} AND "period" = ${period} AND "periodStart" = ${start}
-        `;
-        return true;
-    }
-    if (!Number.isSafeInteger(amount)) return false;
-    if (limit === null) {
-        await tx.$executeRaw`
-            INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-            VALUES (${key}, ${period}, ${start}, ${amount}, NOW())
-            ON CONFLICT ("key", "period", "periodStart")
-            DO UPDATE SET "count" = "ChatUsageBucket"."count" + ${amount}, "updatedAt" = NOW()
-        `;
-        return true;
-    }
-    if (amount > limit) return false;
-    const rows = await tx.$queryRaw<Array<{ count: number }>>`
+) {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const microUsd = Math.ceil(amount);
+    await tx.$executeRaw`
         INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-        VALUES (${key}, ${period}, ${start}, ${amount}, NOW())
+        VALUES (${`provider:${provider}`}, ${period}, ${start}, ${microUsd}, NOW())
         ON CONFLICT ("key", "period", "periodStart")
-        DO UPDATE SET "count" = "ChatUsageBucket"."count" + ${amount}, "updatedAt" = NOW()
-        WHERE "ChatUsageBucket"."count" <= ${limit - amount}
-        RETURNING "count"
+        DO UPDATE SET "count" = "ChatUsageBucket"."count" + ${microUsd}, "updatedAt" = NOW()
     `;
-    return rows.length > 0;
 }
 
-class ProviderBudgetExhausted extends Error {}
-
 type Reserved =
-    | { refused: "already_running" | "daily_done" | "run_cap" | "day_cap" | "month_cap" | "provider_budget" }
-    | { cycle: { id: string; reservedMicroUsd: number } };
+    | { refused: "already_running" | "daily_done" | "day_cap" | "month_cap" }
+    | { cycle: { id: string; budgetMicroUsd: number } };
 
 /**
- * The money step of starting a cycle: one at a time, within the optimizer's
- * run, day and month caps AND each provider's own day and month budget, and
- * the audit row commits with the cycle row -- a cycle never spends without a
- * record of who started it. A refusal by any provider bucket rolls the whole
- * transaction back. Exported for the database test; the route goes through
+ * The money step of starting a cycle: one at a time, refused once the
+ * optimizer's day or month cap is reached by actual spend, and the audit row
+ * commits with the cycle row -- a cycle never spends without a record of who
+ * started it. Nothing is reserved: the cycle's budget is the room left under
+ * the caps. Exported for the database test; the route goes through
  * startAutoRouterOptimizerCycle.
  */
 export async function reserveOptimizerCycle(input: {
@@ -349,101 +411,67 @@ export async function reserveOptimizerCycle(input: {
     optimizerModelId: string;
     routerModelId: string;
     incumbentGuidance: string;
-    /** The cycle's worst case, split by the provider each call goes to. */
-    providers: readonly { provider: string; microUsd: number }[];
+    /** Which guidance the cycle improves; the lock and caps are shared by both. */
+    target?: RouterGuidanceKind;
     now?: Date;
-    environment?: Record<string, string | undefined>;
 }): Promise<Reserved> {
     const now = input.now ?? new Date();
     const dayStart = utcDayStart(now);
     const monthStart = utcMonthStart(now);
-    const byProvider = new Map<string, number>();
-    for (const share of input.providers) {
-        byProvider.set(share.provider, (byProvider.get(share.provider) ?? 0) + Math.ceil(share.microUsd));
-    }
-    const worstCaseMicroUsd = [...byProvider.values()].reduce((sum, value) => sum + value, 0);
-    try {
-        return await prisma.$transaction(async (tx): Promise<Reserved> => {
-            await takeAuditChainLock(tx);
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
-            await closeStaleCycles(tx, now);
-            const running = await tx.autoRouterOptimizerCycle.count({ where: { status: "running" } });
-            if (running > 0) return { refused: "already_running" };
-            // "One cycle a day" is a count, not only a spend cap: under the
-            // same lock, the system may start at most one cycle per UTC day,
-            // however often the maintenance run is retried.
-            if (input.actor === "system") {
-                const startedToday = await tx.autoRouterOptimizerCycle.count({
-                    where: { startedBy: "system", createdAt: { gte: dayStart } },
-                });
-                if (startedToday > 0) return { refused: "daily_done" };
-            }
-            const recent = await tx.autoRouterOptimizerCycle.findMany({
-                where: { createdAt: { gte: monthStart } },
-                select: { createdAt: true, status: true, reservedMicroUsd: true, spentMicroUsd: true },
+    return prisma.$transaction(async (tx): Promise<Reserved> => {
+        await takeAuditChainLock(tx);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
+        await closeStaleCycles(tx, now);
+        const running = await tx.autoRouterOptimizerCycle.count({ where: { status: "running" } });
+        if (running > 0) return { refused: "already_running" };
+        // "One cycle a day" is a count, not only a spend cap: under the
+        // same lock, the system may start at most one cycle per UTC day,
+        // however often the maintenance run is retried.
+        if (input.actor === "system") {
+            const startedToday = await tx.autoRouterOptimizerCycle.count({
+                where: { startedBy: "system", createdAt: { gte: dayStart } },
             });
-            const admitted = admitOptimizerReservation({
-                worstCaseMicroUsd,
-                spentTodayMicroUsd: usedSince(recent, dayStart),
-                spentThisMonthMicroUsd: usedSince(recent, monthStart),
-            });
-            if ("refused" in admitted) return admitted;
-
-            const reservations: ProviderReservation[] = [];
-            for (const [provider, microUsd] of byProvider) {
-                const budget = getProviderCostBudget(provider, input.environment ?? process.env);
-                const fits =
-                    (await adjustProviderBucket(tx, provider, PROVIDER_DAY, dayStart, budget.day, microUsd)) &&
-                    (await adjustProviderBucket(tx, provider, PROVIDER_MONTH, monthStart, budget.month, microUsd));
-                if (!fits) throw new ProviderBudgetExhausted();
-                reservations.push({
-                    provider,
-                    microUsd,
-                    dayStart: dayStart.toISOString(),
-                    monthStart: monthStart.toISOString(),
-                });
-            }
-
-            const cycle = await tx.autoRouterOptimizerCycle.create({
-                data: {
-                    status: "running",
-                    optimizerModelId: input.optimizerModelId,
-                    routerModelId: input.routerModelId,
-                    incumbentGuidance: input.incumbentGuidance,
-                    reservedMicroUsd: admitted.reservedMicroUsd,
-                    providerReservations: reservations,
-                    startedBy: input.actor === "system" ? "system" : "person",
-                },
-                select: { id: true, reservedMicroUsd: true },
-            });
-            await writeOptimizerAudit(tx, input.actor, {
-                action: "auto.llm_router_optimizer.cycle_started",
-                targetId: cycle.id,
-                summary: "Started an Auto router optimizer cycle.",
-                metadata: { reservedMicroUsd: cycle.reservedMicroUsd },
-            });
-            return { cycle };
+            if (startedToday > 0) return { refused: "daily_done" };
+        }
+        const recent = await tx.autoRouterOptimizerCycle.findMany({
+            where: { createdAt: { gte: monthStart } },
+            select: { createdAt: true, spentMicroUsd: true },
         });
-    } catch (error) {
-        if (error instanceof ProviderBudgetExhausted) return { refused: "provider_budget" };
-        throw error;
-    }
+        const admitted = admitOptimizerCycle({
+            spentTodayMicroUsd: spentSince(recent, dayStart),
+            spentThisMonthMicroUsd: spentSince(recent, monthStart),
+        });
+        if ("refused" in admitted) return admitted;
+
+        // reservedMicroUsd and providerReservations stay in the table for
+        // older rows; a cycle reserves nothing now.
+        const cycle = await tx.autoRouterOptimizerCycle.create({
+            data: {
+                status: "running",
+                optimizerModelId: input.optimizerModelId,
+                routerModelId: input.routerModelId,
+                incumbentGuidance: input.incumbentGuidance,
+                reservedMicroUsd: 0,
+                startedBy: input.actor === "system" ? "system" : "person",
+                target: input.target ?? "routing",
+            },
+            select: { id: true },
+        });
+        await writeOptimizerAudit(tx, input.actor, {
+            action: "auto.llm_router_optimizer.cycle_started",
+            targetId: cycle.id,
+            summary: "Started an Auto router optimizer cycle.",
+            metadata: { budgetMicroUsd: admitted.budgetMicroUsd, target: input.target ?? "routing" },
+        });
+        return { cycle: { id: cycle.id, budgetMicroUsd: admitted.budgetMicroUsd } };
+    });
 }
 
-const parseReservations = (value: unknown): ProviderReservation[] =>
-    Array.isArray(value)
-        ? value.filter((item): item is ProviderReservation =>
-              typeof item?.provider === "string" &&
-              Number.isSafeInteger(item?.microUsd) &&
-              typeof item?.dayStart === "string" &&
-              typeof item?.monthStart === "string")
-        : [];
-
 /**
- * Records a finished cycle and settles each provider's buckets from what was
- * reserved to what was spent, in one transaction. Only a cycle still
- * `running` is settled: one already closed as interrupted keeps its full
- * reservation, because by then nobody knows what it spent.
+ * Records a finished cycle and adds what each provider was actually paid to
+ * that provider's day and month buckets, in one transaction. Only a cycle
+ * still `running` is recorded: one already closed as interrupted is left as
+ * it is, and a second finish changes nothing.
  */
 export async function finishOptimizerCycle(input: {
     cycleId: string;
@@ -456,7 +484,7 @@ export async function finishOptimizerCycle(input: {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
         const cycle = await tx.autoRouterOptimizerCycle.findUnique({
             where: { id: input.cycleId },
-            select: { status: true, providerReservations: true },
+            select: { status: true, createdAt: true },
         });
         if (cycle?.status !== "running") return false;
         const closed = await tx.autoRouterOptimizerCycle.updateMany({
@@ -464,10 +492,12 @@ export async function finishOptimizerCycle(input: {
             data: input.data,
         });
         if (closed.count !== 1) return false;
-        for (const reservation of parseReservations(cycle.providerReservations)) {
-            const delta = (input.spentByProvider.get(reservation.provider) ?? 0) - reservation.microUsd;
-            await adjustProviderBucket(tx, reservation.provider, PROVIDER_DAY, new Date(reservation.dayStart), null, delta);
-            await adjustProviderBucket(tx, reservation.provider, PROVIDER_MONTH, new Date(reservation.monthStart), null, delta);
+        // Booked to the periods the cycle started in, as its caps count it.
+        const dayStart = utcDayStart(cycle.createdAt);
+        const monthStart = utcMonthStart(cycle.createdAt);
+        for (const [provider, microUsd] of input.spentByProvider) {
+            await addProviderSpend(tx, provider, PROVIDER_DAY, dayStart, microUsd);
+            await addProviderSpend(tx, provider, PROVIDER_MONTH, monthStart, microUsd);
         }
         return true;
     });
@@ -476,22 +506,75 @@ export async function finishOptimizerCycle(input: {
 export type OptimizerStartRefusal =
     | "optimizer_off"
     | "router_off"
-    | "not_enough_decisions"
     | "pricing_unavailable"
     | "already_running"
     | "daily_done"
-    | "run_cap"
     | "day_cap"
-    | "month_cap"
-    | "provider_budget";
+    | "month_cap";
+
+const AUTO_PLANS_WIDEST_FIRST: readonly ModelTier[] = ["Max", "Pro", "Free"];
 
 /**
- * Starts one cycle and returns at once; the calls run in the background and
- * the row is updated when they finish. Refusals cost nothing.
+ * The Auto candidates a signed-in account's turn would get for a message: the
+ * same Router decision and credit estimate selectAutoModel
+ * (lib/autoModelSelection.ts) makes for the chat route once the cohort, the
+ * conversation's mode and attachments have let a turn through -- runtime
+ * models, health and tie-break signals, no web search, the default model's
+ * output cap. The plan is the widest the Auto cohort admits (Max when none is
+ * configured), so the menu is the fullest one Auto offers.
  */
-export async function startAutoRouterOptimizerCycle(actor: OptimizerActor): Promise<
-    { cycleId: string } | { refused: OptimizerStartRefusal }
-> {
+export async function autoCandidateMenu(runtimeModels: readonly AiModel[]) {
+    const models = runtimeModels.filter((model) => model.enabled && !model.catalogDeleted);
+    const signals = await getRouterRuntimeSignals();
+    const eligiblePlans = autoCohortConfig().eligiblePlans;
+    const plan = AUTO_PLANS_WIDEST_FIRST.find((tier) => eligiblePlans.includes(tier)) ?? "Max";
+    const requested = models.find((model) => model.id === DEFAULT_MODEL_ID) ?? models[0];
+    const requestOutputCapTokens = requested ? resolveModelPricing(requested).maxOutputTokens : 0;
+    const searchBackendReadiness = resolveWebSearchBackendReadiness();
+    return (text: string): AutoLlmRouterCandidate[] => {
+        const reservedInputTokens = preflightInputEstimate([{ role: "user", content: text }])
+            .estimatedInputTokens;
+        const decision = decideRouterModel({
+            text,
+            attachments: [],
+            webSearchRequested: false,
+            searchBackendReadiness,
+            models,
+            plan,
+            reservedInputTokens,
+            requestOutputCapTokens,
+            unhealthyModelIds: signals.unhealthyModelIds,
+            signals: signals.signals,
+            sticky: null,
+        });
+        const estimate = estimateRequestCredits({
+            models,
+            estimatedInputTokens: reservedInputTokens,
+            webSearchMode: "off",
+            backendReadiness: searchBackendReadiness,
+        });
+        return autoLlmRouterCandidates(
+            decision.record.eligibleModelIds,
+            models,
+            Object.fromEntries(estimate.models.map((model) => [model.modelId, model.totalCredits])),
+            // Synthetic menus represent saved, signed-in Chat turns without search.
+            { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+        );
+    };
+}
+
+/**
+ * Starts one cycle. By default it returns at once; the calls run in the
+ * background and the row is updated when they finish (Admin's button). With
+ * `waitForCompletion` it returns only when the cycle has finished and been
+ * recorded, with the outcome -- the own-process optimizer service, which a
+ * web redeploy cannot cut off. Refusals cost nothing. Too few recent
+ * decisions is no longer a refusal: the cycle writes synthetic messages.
+ */
+export async function startAutoRouterOptimizerCycle(
+    actor: OptimizerActor,
+    options: { waitForCompletion?: boolean } = {}
+): Promise<{ cycleId: string; outcome?: OptimizerRunOutcome } | { refused: OptimizerStartRefusal }> {
     const models = await getRuntimeModels();
     const optimizerModel = resolveAutoLlmRouterModel(models, (await readOptimizerModelId()) ?? undefined);
     if (!optimizerModel) return { refused: "optimizer_off" };
@@ -499,93 +582,58 @@ export async function startAutoRouterOptimizerCycle(actor: OptimizerActor): Prom
     if (!routerModel) return { refused: "router_off" };
 
     const decisions = await loadDecisions();
-    const { train, evaluate } = splitOptimizerDecisions(decisions);
-    if (evaluate.length < AUTO_ROUTER_OPTIMIZER_MIN_EVAL) return { refused: "not_enough_decisions" };
 
+    // Actual cost is priced from reported usage, so a cycle needs both prices.
     const optimizerPrices = pricesOf(optimizerModel);
     const routerPrices = pricesOf(routerModel);
     if (!optimizerPrices || !routerPrices) return { refused: "pricing_unavailable" };
 
     const active = await readActiveRouterGuidance();
-    // The longest proposal in bytes: admitted guidance is capped in
-    // characters, and a three-byte character is the widest a single UTF-16
-    // unit can be.
-    const longestGuidance = "가".repeat(AUTO_ROUTER_GUIDANCE_MAX_CHARS);
-    const longestId = (decision: OptimizerDecision) =>
-        decision.candidates.reduce((id, candidate) => (candidate.id.length > id.length ? candidate.id : id), "");
-    const worstCaseMicroUsd = {
-        generate: worstCaseCallMicroUsd({
-            inputText: AUTO_ROUTER_GENERATOR_SYSTEM + autoRouterGeneratorMessage(active.guidance, train),
-            maxOutputTokens: GENERATOR_MAX_OUTPUT_TOKENS,
-            ...optimizerPrices,
-        }),
-        route: Math.max(...evaluate.map((decision) =>
-            worstCaseCallMicroUsd({
-                inputText:
-                    buildAutoLlmRouterSystem(longestGuidance) +
-                    autoLlmRouterUserMessage(
-                        decision.routerInput,
-                        decision.routerContext,
-                        decision.candidates,
-                        decision.routerSession
-                    ),
-                maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
-                ...routerPrices,
-            }))),
-        judge: Math.max(...evaluate.map((decision) =>
-            worstCaseCallMicroUsd({
-                inputText:
-                    AUTO_ROUTER_JUDGE_SYSTEM +
-                    autoRouterJudgeMessage(decision, longestId(decision), longestId(decision)),
-                maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
-                ...optimizerPrices,
-            }))),
-    };
-    const calls = evaluate.length * 2;
-
     const started = await reserveOptimizerCycle({
         actor,
         optimizerModelId: optimizerModel.id,
         routerModelId: routerModel.id,
         incumbentGuidance: active.guidance,
-        providers: [
-            {
-                provider: optimizerModel.provider,
-                microUsd: worstCaseMicroUsd.generate + calls * worstCaseMicroUsd.judge,
-            },
-            { provider: routerModel.provider, microUsd: calls * worstCaseMicroUsd.route },
-        ],
     });
     if ("refused" in started) return started;
 
-    void runInBackground({
+    const run = runInBackground({
         cycleId: started.cycle.id,
-        budgetMicroUsd: started.cycle.reservedMicroUsd,
+        budgetMicroUsd: started.cycle.budgetMicroUsd,
         decisions,
         incumbentGuidance: active.guidance,
+        models,
         optimizerModel,
         routerModel,
         optimizerPrices,
         routerPrices,
-        worstCaseMicroUsd,
     });
-    return { cycleId: started.cycle.id };
+    if (!options.waitForCompletion) {
+        void run;
+        return { cycleId: started.cycle.id };
+    }
+    return { cycleId: started.cycle.id, outcome: await run };
 }
 
+/**
+ * Runs a reserved cycle's calls and records the result. Never throws: a
+ * failure is recorded as run_error and reported in the outcome.
+ */
 async function runInBackground(input: {
     cycleId: string;
     budgetMicroUsd: number;
     decisions: OptimizerDecision[];
     incumbentGuidance: string;
+    models: readonly AiModel[];
     optimizerModel: AiModel;
     routerModel: AiModel;
     optimizerPrices: Prices;
     routerPrices: Prices;
-    worstCaseMicroUsd: { generate: number; route: number; judge: number };
-}) {
-    // A failed call is charged its worst case and otherwise leaves no trace;
-    // its shape is logged so a failed cycle names its cause.
-    const traced = async <T>(kind: "generate" | "judge", run: () => Promise<T>) => {
+}): Promise<OptimizerRunOutcome> {
+    // A failed call costs nothing in the cycle's count and otherwise leaves no
+    // trace; its shape is logged so a failed cycle names its cause. Never the
+    // content: synthetic messages and answers appear in logs by length only.
+    const traced = async <T>(kind: OptimizerCallKind, run: () => Promise<T>) => {
         try {
             return await run();
         } catch (error) {
@@ -598,19 +646,107 @@ async function runInBackground(input: {
             throw error;
         }
     };
-    const cost = (prices: Prices, worstCase: number, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
+    // `generated.output` throws when the text does not parse as the schema --
+    // after the call was paid. Read here, outside `traced`, it used to make
+    // the call count as failed with no log and no cost; now the cost stays
+    // counted and the cause is logged (shape only, never the text).
+    const outputOf = (
+        kind: "synthesize" | "generate" | "judge",
+        generated: { readonly output: unknown; finishReason: string; usage?: { outputTokens?: number } }
+    ): unknown => {
+        try {
+            return generated.output;
+        } catch (error) {
+            console.warn(JSON.stringify({
+                event: "auto_router_optimizer_output_unparsed",
+                cycleId: input.cycleId,
+                kind,
+                finishReason: generated.finishReason,
+                outputTokens: generated.usage?.outputTokens ?? null,
+                ...optimizerCallFailureDetail(error),
+            }));
+            return null;
+        }
+    };
+    const cost = (prices: Prices, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
         callCostMicroUsd({
             inputTokens: usage?.inputTokens,
             outputTokens: usage?.outputTokens,
-            worstCaseMicroUsd: worstCase,
             ...prices,
         });
+    // Answering models are looked up among the enabled ones only.
+    const answerModels = new Map(
+        input.models
+            .filter((model) => model.enabled && !model.catalogDeleted)
+            .map((model) => [model.id, model])
+    );
+    // What the cycle is known to have spent, for the recovery if recording fails.
+    let known: { spentMicroUsd: number; spentByProvider: ReadonlyMap<string, number> } = {
+        spentMicroUsd: 0,
+        spentByProvider: new Map(),
+    };
+    // The settings this optimizer changed on its own, undone first when one
+    // made routing worse since (lib/autoRouterTunablesCore.ts).
+    await revertTunedTimeoutIfWorse().catch(() => "kept" as const);
+    // What the analysis call proposed for the settings, applied after the
+    // cycle is recorded and only when it passes its range and evidence.
+    let proposedSettingChanges: unknown[] = [];
     try {
+        const [candidatesFor, routerStats, catalogueIds, unreliableModels] = await Promise.all([
+            autoCandidateMenu(input.models),
+            readRouterStats(new Date()),
+            optimizerCatalogueIds(),
+            readUnreliableAnswerModels(),
+        ]);
         const result = await runOptimizerCycle(
-            { decisions: input.decisions, incumbentGuidance: input.incumbentGuidance },
+            {
+                decisions: input.decisions,
+                incumbentGuidance: input.incumbentGuidance,
+                routerStats,
+                catalogueIds,
+                unreliableModels,
+            },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
-                worstCaseMicroUsd: input.worstCaseMicroUsd,
+                candidatesFor,
+                // A proposal naming a model off the menu or without evidence;
+                // model ids only, never guidance text.
+                guidanceRejected: (rejection) =>
+                    console.warn(JSON.stringify({
+                        event: "auto_router_optimizer_guidance_rejected",
+                        cycleId: input.cycleId,
+                        reason: rejection.reason,
+                        ids: rejection.ids,
+                    })),
+                synthesize: async (message) => {
+                    const generated = await traced("synthesize", () => generateText({
+                        model: getActiveAiModel(input.optimizerModel),
+                        system: AUTO_ROUTER_SYNTHESIZER_SYSTEM,
+                        prompt: message,
+                        maxOutputTokens: SYNTHESIZER_MAX_OUTPUT_TOKENS,
+                        reasoning: "none",
+                        maxRetries: 0,
+                        abortSignal: AbortSignal.timeout(SYNTHESIZER_TIMEOUT_MS),
+                        output: Output.object({
+                            schema: jsonSchema(autoRouterSynthesizerSchema() as unknown as JSONSchema7),
+                            name: "router_test_messages",
+                        }),
+                        providerOptions: { openai: { strictJsonSchema: true } },
+                    }));
+                    const output = outputOf("synthesize", generated);
+                    const messages = (output as { messages?: unknown } | null)?.messages;
+                    console.info(JSON.stringify({
+                        event: "auto_router_optimizer_synthesized",
+                        cycleId: input.cycleId,
+                        finishReason: generated.finishReason,
+                        messages: Array.isArray(messages) ? messages.length : null,
+                    }));
+                    return {
+                        value: output,
+                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        provider: input.optimizerModel.provider,
+                    };
+                },
                 generate: async (message) => {
                     const generated = await traced("generate", () => generateText({
                         model: getActiveAiModel(input.optimizerModel),
@@ -625,7 +761,11 @@ async function runInBackground(input: {
                         }),
                         providerOptions: { openai: { strictJsonSchema: true } },
                     }));
-                    const guidance = (generated.output as { guidance?: unknown } | null)?.guidance;
+                    // The report and the proposal together; the cycle admits each.
+                    const output = outputOf("generate", generated);
+                    const settingChanges = (output as { settingChanges?: unknown } | null)?.settingChanges;
+                    proposedSettingChanges = Array.isArray(settingChanges) ? settingChanges : [];
+                    const guidance = (output as { guidance?: unknown } | null)?.guidance;
                     const rejection = guidanceRejection(guidance);
                     if (rejection) {
                         console.warn(JSON.stringify({
@@ -636,8 +776,9 @@ async function runInBackground(input: {
                         }));
                     }
                     return {
-                        value: typeof guidance === "string" ? guidance : null,
-                        costMicroUsd: cost(input.optimizerPrices, input.worstCaseMicroUsd.generate, generated.usage),
+                        value: output,
+                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        provider: input.optimizerModel.provider,
                     };
                 },
                 route: async (guidance, decision) => {
@@ -652,35 +793,63 @@ async function runInBackground(input: {
                     });
                     return {
                         value: routed.pick?.modelId ?? null,
-                        costMicroUsd: cost(input.routerPrices, input.worstCaseMicroUsd.route, routed.usage),
+                        costMicroUsd: cost(input.routerPrices, routed.usage),
+                        provider: input.routerModel.provider,
+                    };
+                },
+                // The picked model answers as itself: its own provider, its
+                // own price, no tools, and the reasoning and provider options
+                // a chat turn gives it (getModelGenerationSettings, as the
+                // chat route calls it, inside optimizerAnswerOptions). Paid to
+                // that provider, which may be
+                // neither the optimizer's nor the router's.
+                answer: async (modelId, turn) => {
+                    const model = answerModels.get(modelId);
+                    const prices = model ? pricesOf(model) : null;
+                    // No call without a price: its spend could not be recorded.
+                    if (!model || !prices) {
+                        return { value: null, costMicroUsd: 0, provider: model?.provider ?? "unknown" };
+                    }
+                    // Shared with the rewrite cycle (lib/autoRewriteOptimizer.ts).
+                    const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
+                    const generated = await traced("answer", () => generateText({
+                        model: getActiveAiModel(model),
+                        abortSignal: AbortSignal.timeout(timeoutMs),
+                        ...options,
+                    }));
+                    if (!generated.text.trim()) {
+                        console.warn(JSON.stringify({
+                            event: "auto_router_optimizer_answer_empty",
+                            cycleId: input.cycleId,
+                            modelId,
+                            finishReason: generated.finishReason,
+                            outputTokens: generated.usage?.outputTokens ?? null,
+                        }));
+                    }
+                    return {
+                        value: generated.text,
+                        costMicroUsd: cost(prices, generated.usage),
+                        provider: model.provider,
                     };
                 },
                 judge: async (message) => {
-                    const generated = await traced("judge", () => generateText({
-                        model: getActiveAiModel(input.optimizerModel),
+                    const generated = await traced("judge", () => optimizerJudgeCall({
+                        model: input.optimizerModel,
                         system: AUTO_ROUTER_JUDGE_SYSTEM,
                         prompt: message,
-                        maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
-                        maxRetries: 0,
-                        abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
-                        output: Output.object({
-                            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
-                            name: "router_judgement",
-                        }),
-                        providerOptions: { openai: { strictJsonSchema: true } },
+                        name: "router_judgement",
                     }));
                     return {
-                        value: parseJudgeWinner(generated.output),
-                        costMicroUsd: cost(input.optimizerPrices, input.worstCaseMicroUsd.judge, generated.usage),
+                        value: parseJudgeWinner(outputOf("judge", generated)),
+                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        provider: input.optimizerModel.provider,
                     };
                 },
             }
         );
-        const spentByProvider = new Map<string, number>();
-        const add = (provider: string, microUsd: number) =>
-            spentByProvider.set(provider, (spentByProvider.get(provider) ?? 0) + microUsd);
-        add(input.optimizerModel.provider, result.spentByKind.generate + result.spentByKind.judge);
-        add(input.routerModel.provider, result.spentByKind.route);
+        // Summed by the cycle from each call's own provider, answering models included.
+        const spentByProvider = result.spentByProvider;
+        known = { spentMicroUsd: result.spentMicroUsd, spentByProvider };
         const recorded = await finishOptimizerCycle({
             cycleId: input.cycleId,
             data: {
@@ -688,12 +857,47 @@ async function runInBackground(input: {
                 failure: result.failure,
                 candidateGuidance: result.candidateGuidance,
                 cases: result.cases,
-                summary: { ...result.summary, overrunCalls: result.overrunCalls },
+                // No migration: the report, the direct comparisons and the
+                // gate's basis ride in the summary JSON.
+                summary: {
+                    ...result.summary,
+                    failedCalls: result.failedCalls,
+                    failedByKind: result.failedByKind,
+                    report: result.report,
+                    comparisons: result.comparisons,
+                    gate: result.gate,
+                    judgeFailed: result.judgeFailed,
+                    answerStats: result.answerStats,
+                    unreliableModels,
+                },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
             },
             spentByProvider,
         });
+        // Setting changes only for a cycle it recorded; never fails the cycle.
+        const appliedSettings = recorded
+            ? await applyCycleTunableChanges({
+                  cycleId: input.cycleId,
+                  proposed: proposedSettingChanges,
+                  evidence: {
+                      routerStats,
+                      answerStats: result.answerStats,
+                      // A candidate with no known price cannot stand in for
+                      // another at the same credits, so it is left out.
+                      candidates: candidatesFor("hello").flatMap((candidate) =>
+                          candidate.credits === null ? [] : [{ id: candidate.id, credits: candidate.credits }]
+                      ),
+                  },
+              }).catch((error) => {
+                  console.error(JSON.stringify({
+                      event: "auto_router_tunable_apply_failed",
+                      cycleId: input.cycleId,
+                      error: error instanceof Error ? error.name : "unknown",
+                  }));
+                  return [];
+              })
+            : [];
         // Automatic promotion only of a result this cycle itself recorded, and
         // only through the same compare-and-set a person's click uses.
         let promotion:
@@ -715,29 +919,50 @@ async function runInBackground(input: {
             status: result.status,
             failure: result.failure,
             spentMicroUsd: result.spentMicroUsd,
-            overrunCalls: result.overrunCalls,
+            spentByKind: result.spentByKind,
+            spentByProvider: Object.fromEntries(result.spentByProvider),
+            failedCalls: result.failedCalls,
+            syntheticCases: result.cases.filter((item) => item.source === "synthetic").length,
             decided: result.summary.decided,
+            undecided: result.summary.undecided,
+            comparisons: result.comparisons.reduce<Record<string, number>>(
+                (counts, item) => ({ ...counts, [item.verdict]: (counts[item.verdict] ?? 0) + 1 }),
+                {}
+            ),
+            gate: result.gate,
+            judgeFailed: result.judgeFailed,
+            unreliableModels,
+            settingsProposed: proposedSettingChanges.length,
+            settingsApplied: appliedSettings.length,
+            reportItems: result.report
+                ? result.report.findings.length + result.report.recommendations.length
+                : 0,
         }));
+        return { recorded, status: result.status, failure: result.failure };
     } catch (error) {
-        // Spend is unknown once the cycle cannot record its own result, so it
-        // is booked as the full reservation and the provider buckets keep it;
-        // nothing is retried.
+        // The cycle could not record its own result. Nothing was reserved, so
+        // the spend known by then goes to the row and the provider buckets
+        // together, through the same compare-and-set as a normal finish: if
+        // the first recording did commit, the cycle is no longer running and
+        // this changes nothing. If this fails too, the amounts are in the log.
         console.error(JSON.stringify({
             event: "auto_router_optimizer_cycle_failed",
             cycleId: input.cycleId,
             error: error instanceof Error ? error.name : "unknown",
+            knownSpentMicroUsd: known.spentMicroUsd,
+            knownSpentByProvider: Object.fromEntries(known.spentByProvider),
         }));
-        await prisma.autoRouterOptimizerCycle
-            .updateMany({
-                where: { id: input.cycleId, status: "running" },
-                data: {
-                    status: "error",
-                    failure: "run_error",
-                    spentMicroUsd: input.budgetMicroUsd,
-                    finishedAt: new Date(),
-                },
-            })
-            .catch(() => undefined);
+        await finishOptimizerCycle({
+            cycleId: input.cycleId,
+            data: {
+                status: "error",
+                failure: "run_error",
+                spentMicroUsd: known.spentMicroUsd,
+                finishedAt: new Date(),
+            },
+            spentByProvider: known.spentByProvider,
+        }).catch(() => undefined);
+        return { recorded: false, status: "error", failure: "run_error" };
     }
 }
 
@@ -769,9 +994,11 @@ export async function promoteAutoRouterOptimizerCycle(
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
         const cycle = await tx.autoRouterOptimizerCycle.findUnique({
             where: { id: cycleId },
-            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true },
+            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true, target: true },
         });
-        if (!cycle) return { refused: "not_found" as const };
+        // A rewrite cycle's proposal is rewrite guidance: lib/autoRewriteOptimizer.ts
+        // promotes it, and never into the routing guidance.
+        if (!cycle || cycle.target !== "routing") return { refused: "not_found" as const };
         if (cycle.promotedAt) return { refused: "already_promoted" as const };
         if (cycle.status !== "passed" || !cycle.candidateGuidance) return { refused: "not_passed" as const };
         const active = await readActiveRouterGuidance(tx);
@@ -830,12 +1057,17 @@ export type OptimizerCycleView = {
     routerModelId: string;
     candidateGuidance: string | null;
     summary: unknown;
-    reservedMicroUsd: number;
     spentMicroUsd: number;
     promotedAt: string | null;
+    /** Messages the optimizer model wrote, with their picks and verdicts. */
+    syntheticCases: SyntheticCaseView[];
 };
 
-/** Everything Admin shows. No decision content: verdicts are counts. */
+/**
+ * Everything Admin shows. No real decision content: a real decision is a
+ * user's message, so its verdict is a count. Synthetic messages, which no user
+ * wrote, are shown in full.
+ */
 export async function readAutoRouterOptimizerState() {
     const now = new Date();
     const [optimizerModelId, automation, active, cycles, monthCycles] = await Promise.all([
@@ -843,17 +1075,20 @@ export async function readAutoRouterOptimizerState() {
         readOptimizerAutomation(),
         readActiveRouterGuidance(),
         prisma.autoRouterOptimizerCycle.findMany({
+            // Rewrite cycles are listed by lib/autoRewriteOptimizer.ts; the
+            // spend below counts both, as the shared caps do.
+            where: { target: "routing" },
             orderBy: { createdAt: "desc" },
             take: 10,
             select: {
                 id: true, createdAt: true, finishedAt: true, status: true, failure: true,
                 optimizerModelId: true, routerModelId: true, candidateGuidance: true,
-                summary: true, reservedMicroUsd: true, spentMicroUsd: true, promotedAt: true,
+                summary: true, spentMicroUsd: true, promotedAt: true, cases: true,
             },
         }),
         prisma.autoRouterOptimizerCycle.findMany({
             where: { createdAt: { gte: utcMonthStart(now) } },
-            select: { createdAt: true, status: true, reservedMicroUsd: true, spentMicroUsd: true },
+            select: { createdAt: true, spentMicroUsd: true },
         }),
     ]);
     return {
@@ -864,16 +1099,17 @@ export async function readAutoRouterOptimizerState() {
             guidance: active.guidance,
             canRollBack: active.cycleId !== null,
         },
-        cycles: cycles.map((cycle): OptimizerCycleView => ({
+        cycles: cycles.map(({ cases, ...cycle }): OptimizerCycleView => ({
             ...cycle,
             ...optimizerCycleView(cycle, now),
+            syntheticCases: syntheticCaseViews(cases),
             createdAt: cycle.createdAt.toISOString(),
             finishedAt: cycle.finishedAt?.toISOString() ?? null,
             promotedAt: cycle.promotedAt?.toISOString() ?? null,
         })),
         spend: {
-            todayMicroUsd: usedSince(monthCycles, utcDayStart(now)),
-            monthMicroUsd: usedSince(monthCycles, utcMonthStart(now)),
+            todayMicroUsd: spentSince(monthCycles, utcDayStart(now)),
+            monthMicroUsd: spentSince(monthCycles, utcMonthStart(now)),
             runCapMicroUsd: AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
             dayCapMicroUsd: AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
             monthCapMicroUsd: AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,

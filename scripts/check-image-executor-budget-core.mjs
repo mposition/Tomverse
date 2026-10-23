@@ -20,6 +20,7 @@
 export const IMAGE_EXECUTOR_ROUTES = [
     "app/api/images/generations/route.ts",
     "app/api/images/targets/[targetId]/retry/route.ts",
+    "app/api/conversations/[conversationId]/image-turn/route.ts",
 ];
 
 const MAX_DURATION_PATTERN = /^export const maxDuration = (\d+);$/m;

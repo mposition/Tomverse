@@ -1,6 +1,6 @@
 "use client";
 
-import { signOut } from "next-auth/react";
+import { signOut } from "@/lib/signOutWithDraftCleanup";
 import { Loader2, LogOut } from "lucide-react";
 import { useState } from "react";
 

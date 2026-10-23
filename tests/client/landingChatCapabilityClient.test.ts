@@ -47,7 +47,7 @@ test("a resolved account reads the existing private endpoint with GET and no-sto
 test("only a strict server offered boolean admits the account link", async () => {
   for (const body of [null, {}, { autoSelection: { offered: true } }, { flagEnabled: true },
     { offered: false }, { offered: "true" },
-    { offered: 1 }, [{ offered: true }]]) {
+    { offered: 1 }, { autoSelection: [] }]) {
     const results: boolean[] = [];
     const stop = startLandingChatCapabilityRead({
       accountUserId: "account-a",

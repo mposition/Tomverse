@@ -204,27 +204,22 @@ export const marketingGeneratorReportProvenanceDigest = (provenance: string): st
   sha256(`marketing-generator-report-provenance-v1:${provenance}`);
 
 /**
- * Whether a market fact cites one of the pages a person approved for its
- * competitor, on one of that competitor's approved official hosts
- * (`holdApprovedMarketingCompetitorSources` in a writing transaction, which
- * holds both until it commits). Facts come only from approved fixed pages
- * (docs/policy/marketing-automation.md §4.1): an approved host is necessary
- * and not enough, so another page on the same host, or a page withdrawn
- * before this record, is not a source. There is no default: a caller that has
- * not read the registry has nothing to allow.
+ * Whether a market fact cites a page on one of the official hosts a person
+ * approved for its competitor (`holdApprovedMarketingCompetitorHosts` in a
+ * writing transaction, which holds them until it commits). A3 finds the page
+ * by a web search limited to those hosts; this is the app's own check of what
+ * it was told. There is no default: a caller that has not read the registry
+ * has no hosts to allow.
  *
- * The page is matched exactly, as stored at approval and as A3 read it. Hosts
- * are matched exactly, lower case, with no subdomain wildcard: a page on
+ * Hosts are matched exactly, lower case, with no subdomain wildcard: a page on
  * `blog.example.com` is a different host from `example.com`, and an approval
  * that means both names both.
  */
 export function marketIntelSourceAllowed(
   fact: Pick<MarketIntelFact, "competitorId" | "sourceUrl">,
   hosts: MarketingCompetitorSourceHosts,
-  pages: MarketingCompetitorSourceHosts,
 ): boolean {
-  if (!Object.hasOwn(hosts, fact.competitorId) || !Object.hasOwn(pages, fact.competitorId)) return false;
-  if (!pages[fact.competitorId].includes(fact.sourceUrl)) return false;
+  if (!Object.hasOwn(hosts, fact.competitorId)) return false;
   let host: string;
   try {
     const url = new URL(fact.sourceUrl);
@@ -243,10 +238,10 @@ export function marketIntelSourceAllowed(
  */
 export function marketingGeneratorReportStoredPayload(
   report: MarketingGeneratorReport,
-  sources: { readonly hosts: MarketingCompetitorSourceHosts; readonly pages: MarketingCompetitorSourceHosts },
+  hosts: MarketingCompetitorSourceHosts,
 ): { readonly payload: MarketingGeneratorReport["payload"]; readonly droppedFactCount: number } {
   if (report.kind === "brief") return { payload: report.payload, droppedFactCount: 0 };
-  const kept = report.payload.facts.filter((fact) => marketIntelSourceAllowed(fact, sources.hosts, sources.pages));
+  const kept = report.payload.facts.filter((fact) => marketIntelSourceAllowed(fact, hosts));
   const dropped = report.payload.facts.length - kept.length;
   return {
     payload: {

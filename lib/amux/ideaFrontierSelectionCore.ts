@@ -6,7 +6,11 @@
  * No model name is hardcoded here and an unavailable selection never falls
  * back to a different model or provider.
  */
-export type AmuxIdeaFrontierProvider = "openai" | "anthropic";
+import { AMUX_IDEA_ANALYSIS_PROVIDERS, type AmuxIdeaAnalysisProvider } from
+  "./ideaAnalysisChannelCore.ts";
+
+/** The CLI channel (owner decision 2026-10-20), see ideaAnalysisChannelCore. */
+export type AmuxIdeaFrontierProvider = AmuxIdeaAnalysisProvider;
 export type AmuxIdeaReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type AmuxIdeaFrontierApproval = {
@@ -32,7 +36,7 @@ export type AmuxIdeaFrontierSelectionDecision =
   | { decision: "selection_current"; approvalId: string; approvalVersion: number }
   | { decision: "reject" | "hold"; reason: string };
 
-const PROVIDERS = new Set<string>(["openai", "anthropic"]);
+const PROVIDERS = new Set<string>(AMUX_IDEA_ANALYSIS_PROVIDERS);
 const EFFORTS = new Set<string>(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const ID = /^[A-Za-z0-9_-]{8,100}$/;
@@ -53,20 +57,19 @@ export function validAmuxIdeaFrontierApproval(row: AmuxIdeaFrontierApproval): bo
     (row.status === "approved" ? row.revokedAt === null : row.revokedAt !== null));
 }
 
-export function checkAmuxIdeaFrontierSelection(
-  selected: AmuxIdeaModelSelection,
+const catalogVerified = (approvals: readonly AmuxIdeaFrontierApproval[],
+  databaseNow: Date): boolean =>
+  validDate(databaseNow) && Array.isArray(approvals) && approvals.length <= 256 &&
+  approvals.every((row) => validAmuxIdeaFrontierApproval(row)) &&
+  new Set(approvals.map((row) => row.id)).size === approvals.length;
+
+/** The latest approval for one exact provider/model, when it is in force. */
+function currentModelApproval(
+  selected: { provider: string; modelId: string },
   approvals: readonly AmuxIdeaFrontierApproval[],
   databaseNow: Date,
-): AmuxIdeaFrontierSelectionDecision {
-  if (!validDate(databaseNow) || !Array.isArray(approvals) || approvals.length > 256 ||
-      approvals.some((row) => !validAmuxIdeaFrontierApproval(row)) ||
-      new Set(approvals.map((row) => row.id)).size !== approvals.length) {
-    return { decision: "hold", reason: "model_catalog_unverified" };
-  }
-  if (!selected || !PROVIDERS.has(selected.provider) ||
-      !MODEL_ID.test(selected.modelId) || !EFFORTS.has(selected.reasoningEffort)) {
-    return { decision: "reject", reason: "model_selection_unsupported" };
-  }
+): { decision: "current"; approval: AmuxIdeaFrontierApproval } |
+   { decision: "reject" | "hold"; reason: string } {
   const matches = approvals.filter((row) => row.provider === selected.provider &&
     row.modelId === selected.modelId);
   if (matches.length === 0) return { decision: "reject", reason: "model_not_approved" };
@@ -83,8 +86,28 @@ export function checkAmuxIdeaFrontierSelection(
     }
   }
   const approval = ordered.at(-1)!;
-  if (approval.status !== "approved" || approval.approvedAt > databaseNow ||
-      !approval.allowedEfforts.includes(selected.reasoningEffort as AmuxIdeaReasoningEffort)) {
+  if (approval.status !== "approved" || approval.approvedAt > databaseNow) {
+    return { decision: "reject", reason: "model_not_approved" };
+  }
+  return { decision: "current", approval };
+}
+
+export function checkAmuxIdeaFrontierSelection(
+  selected: AmuxIdeaModelSelection,
+  approvals: readonly AmuxIdeaFrontierApproval[],
+  databaseNow: Date,
+): AmuxIdeaFrontierSelectionDecision {
+  if (!catalogVerified(approvals, databaseNow)) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  if (!selected || !PROVIDERS.has(selected.provider) ||
+      !MODEL_ID.test(selected.modelId) || !EFFORTS.has(selected.reasoningEffort)) {
+    return { decision: "reject", reason: "model_selection_unsupported" };
+  }
+  const current = currentModelApproval(selected, approvals, databaseNow);
+  if (current.decision !== "current") return current;
+  const { approval } = current;
+  if (!approval.allowedEfforts.includes(selected.reasoningEffort as AmuxIdeaReasoningEffort)) {
     return { decision: "reject", reason: "model_not_approved" };
   }
   return {
@@ -92,6 +115,27 @@ export function checkAmuxIdeaFrontierSelection(
     approvalId: approval.id,
     approvalVersion: approval.version,
   };
+}
+
+/** Whether one exact provider/model is currently approved, for any effort.
+ * A subscription price is per model, not per effort (amux-intake v19). */
+export function checkAmuxIdeaFrontierModel(
+  selected: { provider: string; modelId: string },
+  approvals: readonly AmuxIdeaFrontierApproval[],
+  databaseNow: Date,
+): { decision: "model_current"; approvalId: string; approvalVersion: number } |
+   { decision: "reject" | "hold"; reason: string } {
+  if (!catalogVerified(approvals, databaseNow)) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  if (!selected || !PROVIDERS.has(selected.provider) || typeof selected.modelId !== "string" ||
+      !MODEL_ID.test(selected.modelId)) {
+    return { decision: "reject", reason: "model_selection_unsupported" };
+  }
+  const current = currentModelApproval(selected, approvals, databaseNow);
+  if (current.decision !== "current") return current;
+  return { decision: "model_current", approvalId: current.approval.id,
+    approvalVersion: current.approval.version };
 }
 
 /** The observed CLI model and effort must match the exact approved selection. */

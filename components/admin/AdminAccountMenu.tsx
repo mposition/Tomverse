@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { signOut } from "next-auth/react";
+import { signOut } from "@/lib/signOutWithDraftCleanup";
 import { Check, ExternalLink, Languages, LogOut, SunMoon, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdminRole } from "@/lib/adminAuthCore";
@@ -39,7 +39,7 @@ type Props = {
  * ("sign out completely, then sign in again") named an action the console did
  * not have.
  *
- * Signing out here is exactly NextAuth's `signOut()` and nothing more. It ends
+ * Signing out clears the tab's offline draft before calling NextAuth's `signOut()`. It ends
  * the session; it does not renew, extend or satisfy either administrator
  * window. The step-up clock is `authenticatedAt` on a freshly minted JWT, so
  * the only thing that moves it is a real sign-in.

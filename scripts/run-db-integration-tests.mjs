@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
+  POSTGRES16_COMPAT_GROUP,
+  POSTGRES16_COMPAT_SUITES,
   dbIntegrationGroupOf,
 } from "./db-integration-groups.mjs";
 import { isSamePostgresDatabaseTarget } from "../lib/postgresConnectionConfigCore.mjs";
@@ -90,9 +92,9 @@ const testEnvironment = {
  * wants one answer rather than seven.
  */
 const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
-if (group && !DB_INTEGRATION_GROUPS.includes(group)) {
+if (group && group !== POSTGRES16_COMPAT_GROUP && !DB_INTEGRATION_GROUPS.includes(group)) {
   fail(
-    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+    `DB_INTEGRATION_GROUP must be one of ${[...DB_INTEGRATION_GROUPS, POSTGRES16_COMPAT_GROUP].join(", ")}; received "${group}".`
   );
 }
 if (group) {
@@ -113,7 +115,11 @@ const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
-    const mine = suites.filter((suite) => dbIntegrationGroupOf(suite) === group);
+    const mine = suites.filter((suite) =>
+      group === POSTGRES16_COMPAT_GROUP
+        ? POSTGRES16_COMPAT_SUITES.includes(suite)
+        : dbIntegrationGroupOf(suite) === group
+    );
     if (mine.length === 0) return;
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
@@ -219,6 +225,7 @@ run(
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
+    "tests/integration/migration-baseline-check-sidecars.db.test.mjs",
     "tests/integration/chat-concurrency.db.test.ts",
     "tests/integration/chat-rate-limit.db.test.ts",
     "tests/integration/chat-token-quota.db.test.ts",
@@ -329,10 +336,6 @@ run(
     // the closed tag and v22 lists, every tag and role within the worker's
     // current ceiling and class, the owner's audit, nothing changed.
     "tests/integration/amux-worker-capability.db.test.ts",
-    // The Ideas tab's progress list: one statement inside its three-call read
-    // boundary (the seven-read version failed the 100 ms idle-in-transaction
-    // timeout), newest first, bounded and owner scoped.
-    "tests/integration/amux-idea-progress.db.test.ts",
     // AMUX card display numbers (docs/policy/amux-card-display-key.md §3):
     // the format, uniqueness and immutability of a card's number and a
     // Feature's prefix, and a per-prefix counter that only advances by one
@@ -342,6 +345,10 @@ run(
     // the previewed plan is written exactly, under the owner's audit, with
     // updatedAt untouched; a stale digest writes nothing.
     "tests/integration/amux-card-display-key-backfill.db.test.ts",
+    // The Ideas tab's progress list: one statement inside its three-call read
+    // boundary (the seven-read version failed the 100 ms idle-in-transaction
+    // timeout), newest first, bounded and owner scoped.
+    "tests/integration/amux-idea-progress.db.test.ts",
     // AMUX assignment catalog (orchestration policy version 35, section 3):
     // the registry, stop latches and capabilities read in one statement and
     // the catalog derived from them.
@@ -381,10 +388,64 @@ run(
     // under the right actor, and results go where the core says. It closes
     // what it opens, so it passes whichever engineering file runs first.
     "tests/integration/engineering-agent-store.db.test.ts",
+    // Support-triage run record: the database owns the deadline, caps runs
+    // at 52 per kind per UTC day under concurrency, downgrades a late success
+    // and refuses deleting a row younger than 30 days.
+    "tests/integration/support-triage-run.db.test.ts",
+    // Support-triage timeouts: one call arms the lane timeouts, they survive
+    // the call, a slow statement is cancelled, and on 17 a short inherited
+    // transaction_timeout refuses the transaction before any write.
+    "tests/integration/support-triage-timeouts.db.test.ts",
+    // Support-triage run writer: a run row and its system audit entry commit
+    // or roll back together, and a late finish is recorded as such.
+    "tests/integration/support-triage-run-store.db.test.ts",
+    // Support-triage retention: rows past their boundary go in audited
+    // batches, a cancelling row is skipped and counted, and no progress is
+    // reported as such.
+    "tests/integration/support-triage-retention.db.test.ts",
+    // Support-triage suggestions: the state machine, the lease and the
+    // display stamp are the guard trigger's, and a report's deletion takes them.
+    "tests/integration/support-triage-suggestion.db.test.ts",
+    // Support-triage groups: one kind per group, members tied to its digest,
+    // members then signals then the group when it ends, and the tombstone.
+    "tests/integration/support-triage-group.db.test.ts",
+    // Support-triage decision records: twelve months by CHECK, never updated,
+    // at least one link at commit, and no record outlives any of its links.
+    "tests/integration/support-triage-decision-record.db.test.ts",
+    // Support-triage retention and heartbeat routes: own secrets, counts only,
+    // non-2xx when retention makes no progress, a fail-closed heartbeat.
+    "tests/integration/support-triage-routes.db.test.ts",
+    // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
+    // supersede on a changed input, nothing for a closed or deleted report.
+    "tests/integration/support-triage-worker.db.test.ts",
+    // Support-triage LLM step: the model answer written with the ready row, the
+    // human-lane floor, and the keyword lane when there is no answer.
+    "tests/integration/support-triage-llm.db.test.ts",
+    // Support-triage new groups: one kind per group, the higher kind first, a
+    // tombstoned key stops a second group, a member lost to a concurrent pass
+    // empties and invalidates the group, and the pass membership budget.
+    "tests/integration/support-triage-group-formation.db.test.ts",
+    // Support-triage data in a real account deletion: the derived rows go in
+    // that transaction, the reports stay anonymised, nothing is derived again.
+    "tests/integration/support-triage-account-deletion.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
     "tests/integration/engineering-agent-schema.db.test.ts",
+    // sre-ops transaction bounds: the arming function refuses a short budget,
+    // sets the statement and idle timers, and on PostgreSQL 17 replaces an
+    // inherited transaction_timeout so the session ends at ours.
+    "tests/integration/ops-observer-transaction-bounds.db.test.ts",
+    // sre-ops genesis chain and state: chain shape, compare-and-set generation,
+    // checkpoint order, trigger stamps, immutability, and no late COMMIT.
+    "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
+    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
+    "tests/integration/ops-observer-transaction.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
     // AMUX v4 inert schema still has privacy ownership, hierarchy and source
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
@@ -411,29 +472,38 @@ run(
     // Owner-managed monthly ceilings preserve usage and bind one canonical
     // audit/version without permitting unaudited or duplicate changes.
     "tests/integration/amux-v4-analysis-monthly-setting.db.test.ts",
+    // The v19 operating scope is append-only and bound to one owner audit per
+    // version; the database refuses a row without that evidence or any change.
+    "tests/integration/amux-intake-operating-scope.db.test.ts",
+    // v19 session intake stores encrypted source provenance under the latest
+    // owner scope while its canonical audit remains a dedicated system actor.
+    "tests/integration/amux-v19-session-submission.db.test.ts",
+    // Subscription claims run on all four CLI channels, each bound to its own
+    // sign-in profile and to the reservation's channel and model.
+    "tests/integration/amux-v19-subscription-channels.db.test.ts",
+    // An unproven subscription closure returns its headroom instead of filling
+    // the month, and the runner reads a pre-write 409 as that refusal.
+    "tests/integration/amux-v19-shadow-unknown-headroom.db.test.ts",
+    // Each prepared v19 direct-read reference records only its pinned SHA and
+    // aggregate exclusion proof under same-transaction system evidence.
+    "tests/integration/amux-v19-tracked-checkout-evidence.db.test.ts",
+    // v20 final Guard refusals are append-only, audit-bound, request-id
+    // idempotent and readable without retaining expected path values.
+    "tests/integration/amux-v20-registration-refusal.db.test.ts",
+    // v19 unattended registration turns one completed session analysis into
+    // nodes, cards, assessments and scores under exact system evidence, or
+    // leaves the backlog untouched and records one durable refusal.
+    "tests/integration/amux-v19-system-registration.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
-    // A08/A09 readback, derivation, cost-catalog and unknown-unit guards.
+    // A08/A09 readback, derivation, cost-catalog and unknown-unit guards are
+    // real DB contracts; they must run in the CI agent lane.
     "tests/integration/amux-v4-resolution-catalog.db.test.ts",
     "tests/integration/amuxV4DerivationService.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
-    // sre-ops transaction bounds: the arming function refuses a short budget,
-    // sets the statement and idle timers, and on PostgreSQL 17 replaces an
-    // inherited transaction_timeout so the session ends at ours.
-    "tests/integration/ops-observer-transaction-bounds.db.test.ts",
-    // sre-ops genesis chain and state: chain shape, compare-and-set generation,
-    // checkpoint order, trigger stamps, immutability, and no late COMMIT.
-    "tests/integration/ops-observer-genesis-state.db.test.ts",
-    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
-    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
-    "tests/integration/ops-observer-transaction.db.test.ts",
-    // sre-ops reservations: reserved then closed once by mode, one open at a
-    // time, items only in their reservation's transaction and once per
-    // incident kind, retention-only deletion, no late COMMIT.
-    "tests/integration/ops-observer-delivery.db.test.ts",
     // sre-ops transition ledger: a row per advance in its own transaction, no
     // skipped generation, the signed audit entry's hash, append-only with
     // seven-year checkpoint-bound deletion, no late COMMIT.
@@ -705,10 +775,17 @@ run(
     // cap under one month lock across two connections, and each action's
     // statement count pinned.
     "tests/integration/marketing-llm-budget-store.db.test.ts",
+    // The operator's Admin settings for the generator's model and monthly cap:
+    // one writer, compare-and-set on the row, only a pinned model, the cap
+    // within its ceiling, and a refused save that writes nothing.
+    "tests/integration/marketing-llm-settings.db.test.ts",
     // The Scout's spending stop: a call reserved against the model and cap as
     // they are under the ledger lock, so turning the model off or lowering the
     // cap stops every later call, and racing reservations stay within the cap.
     "tests/integration/product-research-scout-settings.db.test.ts",
+    // The Marketing console overview: each of its four reads against the real
+    // tables, and an empty record reading as zeros rather than as unreadable.
+    "tests/integration/marketing-console-overview.db.test.ts",
     // The generator's budget route (S3c3a): signed, bounded, strict requests,
     // each action in its own transaction, and no model pinned as built.
     "tests/integration/marketing-llm-budget-route.db.test.ts",
@@ -739,6 +816,13 @@ run(
     // The Auto router optimizer's money and audit steps: one cycle at a time,
     // the run/day/month caps, promotion as a compare-and-set, one-step rollback.
     "tests/integration/auto-router-optimizer.db.test.ts",
+    "tests/integration/auto-router-tunables.db.test.ts",
+    // Its rewrite cycles: the shared lock and caps, the target CHECK, and
+    // promotion into the rewrite guidance only.
+    "tests/integration/auto-router-optimizer-rewrite.db.test.ts",
+    // An operator's status for a cycle's code and setting recommendations:
+    // stored in the summary with its audit entry, never losing a concurrent one.
+    "tests/integration/auto-router-optimizer-recommendations.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
     // history constraints that refuse a decision without its record.
@@ -855,6 +939,33 @@ run(
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
+// This suite creates and drops only its own synthetic schema. Give its Prisma
+// client that exact schema rather than letting it see the lane's public tables.
+const oneShotAuditSuite =
+  "tests/integration/prompt-refiner-vnext-v3-recovery.db.test.ts";
+if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
+    !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
+  fail("the isolated one-shot audit suite requires a dedicated test database name");
+}
+const oneShotTestUrl = new URL(rawTestDatabaseUrl);
+oneShotTestUrl.searchParams.set("schema", `chat01_b06_test_${process.pid.toString(36)}`);
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
+    oneShotAuditSuite],
+  "Running the isolated one-shot v3 recovery/audit/80-slot transaction scenarios",
+  { TEST_DATABASE_URL: oneShotTestUrl.toString(),
+    DATABASE_URL: oneShotTestUrl.toString(),
+    DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
+);
+// Managed Code replaces only provider/session seams while exercising the real
+// credit ledger. Keep its module mocks in a separate finance-lane process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/code-managed-execution.db.test.mjs"],
+  "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
+);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(
@@ -864,9 +975,19 @@ run(
     "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts",
     "tests/integration/prompt-refiner-chat-execution.db.test.ts",
     "tests/integration/prompt-refiner-chat-execution-full-schema.db.test.ts",
+    "tests/integration/chat-unified-optimizer-ledger.db.test.ts",
+    "tests/integration/chat-unified-optimizer-amux-test-card.db.test.ts",
     "tests/integration/prompt-refiner-product-operational-guard.db.test.ts",
     "tests/integration/chat-refiner-initial-auto-release.db.test.ts"],
   "Running the Prompt Refiner Auto budget hold transaction scenarios",
+);
+// Chat's lifecycle fixtures include identity, switches and real-query timing.
+// Keep their module mocks isolated from the ordinary database batch.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/chat-c16-lifecycle.db.test.ts"],
+  "Running Chat sharing, export and deletion lifecycle scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
@@ -1132,4 +1253,17 @@ run(
     "tests/integration/message-attachment-resend.db.test.ts",
   ],
   "Running restored question attachment persistence scenarios"
+);
+// The dynamic model catalogue: a refused enable writes nothing, accepted
+// writes carry their audit row, price revisions and snapshots are immutable.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/model-catalog.db.test.ts",
+  ],
+  "Running the dynamic model catalogue scenarios"
 );

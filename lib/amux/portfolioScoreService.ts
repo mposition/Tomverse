@@ -15,6 +15,11 @@ import { amuxPortfolioOwnerId, AmuxPortfolioError,
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import { scoreAmuxPortfolio } from "./portfolioScoreCore.ts";
 import type { AmuxPortfolioScorePayload } from "./portfolioScoreSchemas.ts";
+import { amuxRegistrationAuthorityActor,
+  amuxRegistrationAuthorityKind,
+  isAmuxSystemRegistrationAuthority,
+  type AmuxRegistrationAuditAuthority, writeAmuxRegistrationAudit } from
+  "./ideaRegistrationAuditAuthority.ts";
 
 type Assessment = Prisma.AmuxPortfolioAssessmentGetPayload<{
   select: { id: true; nodeId: true; cardId: true; subjectRevision: true;
@@ -170,10 +175,14 @@ export async function previewAmuxPortfolioScore(session: Session,
 
 /** One score inside the caller's transaction. The single route passes the
  * digest its preview showed; the plan approval passes null. */
-export async function writeAmuxPortfolioScoreInTx(tx: Prisma.TransactionClient, input: {
-  session: Session; request: Request; payload: AmuxPortfolioScorePayload;
+export async function writeAmuxPortfolioScoreInTx(tx: Prisma.TransactionClient,
+  input: AmuxRegistrationAuditAuthority & {
+  payload: AmuxPortfolioScorePayload;
   confirmationDigest: string | null; digestKey: AmuxDigestKey }) {
-  const actorUserId = amuxPortfolioOwnerId(input.session);
+  let actorUserId: string;
+  try { actorUserId = amuxRegistrationAuthorityActor(input); } catch {
+    throw new AmuxPortfolioError("forbidden");
+  }
   {
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await takeAuditChainLock(tx);
@@ -190,15 +199,20 @@ export async function writeAmuxPortfolioScoreInTx(tx: Prisma.TransactionClient, 
     if (input.confirmationDigest !== null && plan.inputDigest !== input.confirmationDigest) {
       throw new AmuxPortfolioError("reconfirm");
     }
-    const auditId = await writeAdminAuditLog({ tx, session: input.session,
-      request: input.request, action: "amux.v4.portfolio.score.confirm",
+    const auditInput = { tx,
+      action: "amux.v4.portfolio.score.confirm" as const,
       targetType: "AmuxPortfolioScoreSnapshot", targetId: input.payload.id,
       summary: "Confirmed a deterministic portfolio score snapshot.",
       metadata: { taskId: input.payload.taskId,
         scoreVersion: plan.score.version, scoreTotal: plan.score.total,
         inputDigest: plan.inputDigest,
-        evidenceAsOf: plan.score.evidenceConfirmedAt },
-    });
+        evidenceAsOf: plan.score.evidenceConfirmedAt,
+        registrationAuthority: amuxRegistrationAuthorityKind(input) },
+    };
+    const auditId = isAmuxSystemRegistrationAuthority(input) ?
+      await writeAmuxRegistrationAudit({ ...auditInput, authority: input }) :
+      await writeAdminAuditLog({ ...auditInput, session: input.session,
+        request: input.request });
     await tx.amuxPortfolioScoreSnapshot.create({ data: {
       id: input.payload.id, requestId: input.payload.requestId,
       taskId: input.payload.taskId, taskRevision: plan.taskRevision,

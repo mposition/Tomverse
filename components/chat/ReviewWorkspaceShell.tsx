@@ -17,6 +17,7 @@
  * route segment config export has to be in the route's own file.
  */
 
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { cookies } from "next/headers";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -52,6 +53,7 @@ import {
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
+import { ImageModelCatalogProvider } from "@/components/images/ImageModelCatalogProvider";
 import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
 import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
@@ -189,6 +191,11 @@ export async function ReviewWorkspaceShell({
   // router model and turns image triage on. Never throws; unreadable is off.
   const chatImageIntentEnabled =
     imageGenerationEnabled && (await chatImageTriageModelId()) !== null;
+
+  // The image catalogue an operator may have changed at runtime, resolved
+  // once here so the composer quotes the prices admission will charge
+  // (lib/modelCatalog.ts). Code seed when the database cannot be read.
+  const imageModels = imageGenerationEnabled ? await refreshImageModelCatalog() : undefined;
 
   // Which application-managed search backends this process can reach, resolved
   // here for the same reason the image limit is: the client cannot answer it.
@@ -338,6 +345,8 @@ export async function ReviewWorkspaceShell({
       {promptRefinerFixtureModeRefreshEnabled ? (
         <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
       ) : null}
+      {/* The catalogue crosses as context, not as a module global (see the provider). */}
+      <ImageModelCatalogProvider models={imageModels}>
       <ChatPageClient
         reviewEasyAvailable={reviewEasyEnabled() || reviewEasyFixtureOffered}
         guestDefaultModelId={guestDefaultModelId}
@@ -362,6 +371,7 @@ export async function ReviewWorkspaceShell({
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
       />
+      </ImageModelCatalogProvider>
       </HelpGuideAccessProvider>
     </GuestVerificationProvider>
   );

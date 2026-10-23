@@ -17,7 +17,7 @@
  *
  * ## What this file is not
  *
- * It is not the plugin. The Swift and Kotlin halves are unwritten, and nothing
+ * The Swift and Android implementations live in native-auth. Nothing
  * here has run on a device. `AUTH-03`'s evidence -- that a refresh token is
  * absent from the WebView JS context and from every bridge response -- is a
  * physical-device check (approved decision 16) and is not claimed by this file
@@ -30,6 +30,7 @@ export type MobileAccessGrant = {
   /** Epoch milliseconds. The JS side schedules against this and nothing else. */
   expiresAt: number;
 };
+export type DeviceSecurity = { available: boolean; enabled: boolean; locked: boolean };
 
 /**
  * The whole bridge surface.
@@ -40,8 +41,17 @@ export type MobileAccessGrant = {
  * many tabs and components happen to ask at once.
  */
 export type MobileAuthBridge = {
+  getDeviceSecurity(): Promise<DeviceSecurity>;
+  setDeviceLock(options: { enabled: boolean; reason?: string }): Promise<void>;
+  unlockDevice(options?: { reason?: string }): Promise<void>;
+  /** Opens system-browser PKCE sign-in. Credentials stay in the native layer. */
+  signIn(): Promise<void>;
+  /** Sends an existing-account email code. Returns no credential. */
+  requestEmailCode(options: { email: string; language: string }): Promise<void>;
+  /** Native verification stores the session without returning it to JS. */
+  verifyEmailCode(options: { email: string; code: string }): Promise<void>;
   /** A usable access token, refreshing behind the bridge if that is needed. */
-  getAccessToken(): Promise<MobileAccessGrant>;
+  getAccessToken(options?: { rejectedAccessToken?: string }): Promise<MobileAccessGrant>;
   /** Whether the device holds a session at all. Never says what it holds. */
   hasSession(): Promise<{ signedIn: boolean }>;
   /** Ends the session. The native layer clears its own stored credential. */
@@ -56,6 +66,12 @@ export type MobileAuthBridge = {
  * is the moment to ask what it returns.
  */
 export const MOBILE_AUTH_BRIDGE_METHODS = [
+  "getDeviceSecurity",
+  "setDeviceLock",
+  "unlockDevice",
+  "signIn",
+  "requestEmailCode",
+  "verifyEmailCode",
   "getAccessToken",
   "hasSession",
   "signOut",

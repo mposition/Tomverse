@@ -459,11 +459,10 @@ const RUNTIME_DIRECTORY = /^(?:app|components|lib|locales|packages|types|hooks|p
 
 /**
  * Path prefixes the deployed application does not contain. Empty: the image is
- * built from the whole tree (Railpack's node provider, no ignore file), so
- * every tracked file is present at runtime. A file absent from the image
- * cannot be read by it, which is the only reason a prefix could be listed
- * here -- and only with a check of what the image really contains, which does
- * not exist yet, so a test keeps the list empty.
+ * built from the whole tree unless the new .dockerignore exclusions are
+ * actually observed in a deployed image. Source rules alone are not proof:
+ * Railpack's exact build must be measured and tied to its image digest before
+ * any prefix may enter this T1 authority list. Until then it remains empty.
  */
 export const DEPLOY_EXCLUDED_PREFIXES: readonly string[] = [];
 

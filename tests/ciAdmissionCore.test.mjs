@@ -2,17 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CI_ADMISSION_CHECK_LIMIT,
+  CI_ADMISSION_HOLD_LABEL,
   CI_ADMISSION_RELEASE_GRACE_MS,
+  ciAdmissionDraftsToCheck,
+  ciAdmissionOrder,
   ciAdmissionUnits,
   ciRunKey,
   emptyCiAdmissionState,
   evaluateCiAdmission,
+  moveCiAdmissionEntry,
   parseCiAdmissionMode,
   parseCiAdmissionState,
   reorderCiAdmissionQueue,
 } from "../lib/ciAdmissionCore.ts";
 
-const T0 = Date.parse("2026-10-20T02:00:00Z");
+const T0 = Date.parse("2026-10-21T02:00:00Z");
 const sha = (n) => String(n % 10).repeat(40);
 const pull = (number, overrides = {}) => ({
   number,
@@ -21,22 +26,22 @@ const pull = (number, overrides = {}) => ({
   base: "develop",
   head: `claude/to-develop/x${number}`,
   headSha: sha(number),
-  draft: false,
+  draft: true,
   fork: false,
+  labels: [],
   ...overrides,
 });
-const queued = (number, base = "develop") => ({ number, title: `Pull ${number}`, base, head: `h${number}`, queuedAt: "2026-10-20T01:00:00.000Z" });
-const state = (overrides = {}) => ({ ...emptyCiAdmissionState(), ...overrides });
-// Tests name running heads by SHA; a run belongs to every listed pull request on that head.
-const run = ({ runningShas = new Set(), ...input }) =>
-  evaluateCiAdmission({
-    arrival: null,
-    nowMs: T0,
-    shadow: false,
-    ...input,
-    running: input.running ?? new Set(input.openPulls.filter((p) => runningShas.has(p.headSha)).map((p) => ciRunKey(p.number, p.headSha))),
-  });
-const kinds = (evaluation) => evaluation.actions.map((a) => `${a.kind}:${a.pull.number}`);
+const clean = { conflict: false, behind: false };
+const checksFor = (pulls, check = clean) => new Map(pulls.map((p) => [p.number, check]));
+// The scenarios below were written in slots; the same proportions in runners keep their meaning.
+const SLOT_NEEDS = { develop: 1, main: 2, developPush: 1, mainPush: 2 };
+const state = (overrides = {}) => ({ ...emptyCiAdmissionState(), capacity: 3, needs: SLOT_NEEDS, ...overrides });
+const lineOf = (...numbers) => numbers.map((number) => ({ number, title: "", base: "develop", head: "", headSha: "", queuedAt: "2026-10-21T01:00:00.000Z", draft: true, status: "waiting" }));
+// Running pull_request runs of these pull requests, on their heads.
+const runs = (...pulls) => new Set(pulls.map((p) => ciRunKey(p.number, p.headSha)));
+const judge = (input) => evaluateCiAdmission({ running: new Set(), nowMs: T0, shadow: false, ...input });
+const kinds = (evaluation) => evaluation.actions.map((a) => `${a.kind}:${a.kind === "clear_status" ? a.number : a.pull.number}`);
+const statuses = (evaluation) => Object.fromEntries(evaluation.state.queue.map((e) => [e.number, e.status]));
 
 test("mode: undeclared or empty is off; only off, shadow and on", () => {
   assert.equal(parseCiAdmissionMode(undefined), "off");
@@ -46,472 +51,228 @@ test("mode: undeclared or empty is off; only off, shadow and on", () => {
   for (const value of ["ON", "true", "1"]) assert.equal(parseCiAdmissionMode(value), null);
 });
 
-test("slots: develop 1, main 2 (release and hotfix alike), stacked and forks not handled", () => {
-  assert.equal(ciAdmissionUnits({ base: "develop", fork: false }), 1);
-  assert.equal(ciAdmissionUnits({ base: "main", fork: false }), 2);
+test("runners: develop 15, main 34 by default (measured peaks); stacked and forks not handled", () => {
+  assert.equal(ciAdmissionUnits({ base: "develop", fork: false }), 15);
+  assert.equal(ciAdmissionUnits({ base: "main", fork: false }), 34);
+  assert.equal(ciAdmissionUnits({ base: "main", fork: false }, SLOT_NEEDS), 2);
+  assert.equal(emptyCiAdmissionState().capacity, 40);
   assert.equal(ciAdmissionUnits({ base: "claude/to-develop/a", fork: false }), null);
   assert.equal(ciAdmissionUnits({ base: "develop", fork: true }), null);
 });
 
-test("an unreadable stored state is an empty one", () => {
+test("an unreadable stored state is an empty one; older shapes keep their order, not their slot budget", () => {
   assert.deepEqual(parseCiAdmissionState(null), emptyCiAdmissionState());
   assert.deepEqual(parseCiAdmissionState("{"), emptyCiAdmissionState());
-  assert.deepEqual(parseCiAdmissionState(JSON.stringify({ version: 2 })), emptyCiAdmissionState());
-});
-
-test("an arrival runs while it fits: three develop, or main and develop", () => {
-  const running = [pull(1), pull(2)];
-  const arrives = run({ state: state(), openPulls: [...running, pull(3)], runningShas: new Set([sha(1), sha(2)]), arrival: 3 });
-  assert.deepEqual(kinds(arrives), ["admit:3"]);
-  assert.equal(arrives.state.events.at(-1).kind, "admitted");
-
-  const main = pull(4, { base: "main", head: "release/x" });
-  const withMain = run({ state: state(), openPulls: [main, pull(5)], runningShas: new Set([main.headSha]), arrival: 5 });
-  assert.deepEqual(kinds(withMain), ["admit:5"]);
-});
-
-test("an arrival that does not fit is held at the end of the line", () => {
-  const running = [pull(1), pull(2), pull(3)];
-  const evaluation = run({ state: state(), openPulls: [...running, pull(4)], runningShas: new Set(running.map((p) => p.headSha)), arrival: 4 });
-  assert.deepEqual(kinds(evaluation), ["hold:4"]);
-  assert.deepEqual(evaluation.state.queue.map((e) => e.number), [4]);
-  assert.equal(evaluation.state.events.at(-1).detail, "no_slot");
-
-  // A second release into main does not fit beside one already running.
-  const main = pull(5, { base: "main", head: "release/a" });
-  const second = pull(6, { base: "main", head: "release/b" });
-  const mains = run({ state: state(), openPulls: [main, second], runningShas: new Set([main.headSha]), arrival: 6 });
-  assert.deepEqual(kinds(mains), ["hold:6"]);
-});
-
-test("an arrival never jumps a waiting line, even with room -- a hotfix included", () => {
-  const hotfix = pull(9, { base: "main", head: "hotfix/urgent" });
-  const evaluation = run({
-    state: state({ capacity: 3, queue: [queued(7, "main"), queued(8)] }),
-    openPulls: [pull(1), pull(7, { base: "main", draft: true }), pull(8, { draft: true }), hotfix],
-    runningShas: new Set([sha(1), sha(1)]),
-    arrival: 9,
-  });
-  // #1 uses 1 of 3; #7 (main, 2) is released from the top; #9 waits behind #8.
-  assert.deepEqual(kinds(evaluation), ["hold:9", "release:7"]);
-  assert.deepEqual(evaluation.state.queue.map((e) => e.number), [8, 9]);
-});
-
-test("release is strictly from the top: a smaller pull request does not pass one that does not fit", () => {
-  const evaluation = run({
-    state: state({ queue: [queued(7, "main"), queued(8)] }),
-    openPulls: [pull(1), pull(2), pull(7, { base: "main", draft: true }), pull(8, { draft: true })],
-    runningShas: new Set([sha(1), sha(2)]),
-  });
-  assert.deepEqual(kinds(evaluation), []);
-  assert.equal(evaluation.used, 2);
-});
-
-test("a pull request whose CI finished holds no slot; a released one holds its slots until its runs appear", () => {
-  const evaluation = run({
-    state: state({ queue: [queued(8)] }),
-    openPulls: [pull(1), pull(2), pull(3), pull(8, { draft: true })],
-    runningShas: new Set([sha(1)]),
-  });
-  assert.deepEqual(kinds(evaluation), ["release:8"]);
-  assert.deepEqual(evaluation.state.released.map((r) => r.number), [8]);
-
-  // Just released, no runs visible yet: still counts, so nothing else is released.
-  const next = run({
-    state: { ...evaluation.state, queue: [queued(9, "main")] },
-    openPulls: [pull(1), pull(8), pull(9, { base: "main", draft: true })],
-    runningShas: new Set([sha(1)]),
-    nowMs: T0 + 60_000,
-  });
-  assert.deepEqual(kinds(next), []);
-  // After the grace period with no runs, its slot is free again.
-  const later = run({
-    state: { ...evaluation.state, queue: [queued(9, "main")] },
-    openPulls: [pull(1), pull(8), pull(9, { base: "main", draft: true })],
-    runningShas: new Set([sha(1)]),
-    nowMs: T0 + CI_ADMISSION_RELEASE_GRACE_MS,
-  });
-  assert.deepEqual(kinds(later), ["release:9"]);
-});
-
-test("its own release's ready_for_review event is not an arrival to hold", () => {
-  const released = run({ state: state({ queue: [queued(8)] }), openPulls: [pull(8, { draft: true })] });
-  const echo = run({ state: released.state, openPulls: [pull(8)], arrival: 8, nowMs: T0 + 2_000 });
-  assert.deepEqual(kinds(echo), []);
-});
-
-test("the line drops closed pull requests and ones made ready elsewhere", () => {
-  const evaluation = run({
-    state: state({ capacity: 1, queue: [queued(7), queued(8), queued(9)] }),
-    openPulls: [pull(1), pull(8), pull(9, { draft: true })],
-    runningShas: new Set([sha(1), sha(8)]),
-  });
-  assert.deepEqual(evaluation.state.queue.map((e) => e.number), [9]);
-  assert.deepEqual(
-    evaluation.state.events.map((e) => `${e.kind}:${e.number}:${e.detail}`),
-    ["dropped:7:closed", "dropped:8:ready_elsewhere"],
+  assert.deepEqual(parseCiAdmissionState(JSON.stringify({ version: 9 })), emptyCiAdmissionState());
+  const legacy = parseCiAdmissionState(
+    JSON.stringify({
+      version: 1,
+      capacity: 5,
+      queue: [{ number: 7, title: "Seven", base: "develop", head: "a", queuedAt: "2026-10-20T00:00:00.000Z" }, { number: 3 }],
+      released: [],
+    }),
   );
+  assert.equal(legacy.version, 3);
+  // A slot count means nothing in runners: the budget is the runner default.
+  assert.equal(legacy.capacity, 40);
+  assert.deepEqual(legacy.queue.map((e) => e.number), [7, 3]);
+  assert.equal(legacy.queue[0].title, "Seven");
 });
 
-test("a draft running CI (a replayed re-run) is cancelled; a draft at rest is not", () => {
-  const evaluation = run({
-    state: state(),
-    openPulls: [pull(1, { draft: true }), pull(2, { draft: true }), pull(3, { draft: true, base: "claude/x" })],
-    runningShas: new Set([sha(1), sha(3)]),
+test("the line is every open handled pull request, drafts included: stored order kept, new ones appended by number", () => {
+  const open = [pull(30), pull(10, { draft: false }), pull(20), pull(40, { base: "claude/x" }), pull(50, { fork: true }), pull(5, { base: "main" })];
+  const order = ciAdmissionOrder(lineOf(20, 99, 30), open).map((p) => p.number);
+  // 99 is closed; 40 (stacked) and 50 (a fork) are not handled; 5 and 10 are new, by number.
+  assert.deepEqual(order, [20, 30, 5, 10]);
+});
+
+test("the same GitHub snapshot judged again gives the same line: nothing appears and disappears", () => {
+  const open = [pull(1), pull(2), pull(3), pull(4, { draft: false })];
+  const first = judge({ state: state(), openPulls: open, checks: checksFor(open) });
+  // GitHub after the releases: 1-3 ready with runs showing.
+  const after = open.map((p) => ({ ...p, draft: false }));
+  const running = runs(after[0], after[1], after[2]);
+  const second = judge({ state: first.state, openPulls: after, running, checks: new Map(), nowMs: T0 + 60_000 });
+  const third = judge({ state: second.state, openPulls: after, running, checks: new Map(), nowMs: T0 + 120_000 });
+  for (const evaluation of [first, second, third]) assert.deepEqual(evaluation.state.queue.map((e) => e.number), [1, 2, 3, 4]);
+  assert.deepEqual(statuses(third), { 1: "running", 2: "running", 3: "running", 4: "done" });
+  assert.deepEqual(kinds(third), []);
+  assert.equal(third.state.events.length, first.state.events.length, "an unchanged line records no new event");
+});
+
+test("drafts the slots reach are marked ready from the top, within the budget", () => {
+  const open = [pull(1), pull(2), pull(3), pull(4)];
+  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4) }), openPulls: open, checks: checksFor(open) });
+  assert.deepEqual(kinds(evaluation), ["release:1", "release:2", "release:3"]);
+  assert.deepEqual(statuses(evaluation), { 1: "next", 2: "next", 3: "next", 4: "waiting" });
+  assert.equal(evaluation.used, 3);
+  assert.deepEqual(evaluation.state.queue.map((e) => e.draft), [false, false, false, true]);
+});
+
+test("a draft with a conflict, behind its base, held by label, or not checked yet is passed over and says why", () => {
+  const open = [pull(1), pull(2), pull(3, { labels: [CI_ADMISSION_HOLD_LABEL] }), pull(4), pull(5), pull(6)];
+  const checks = new Map([
+    [1, { conflict: true, behind: false }],
+    [2, { conflict: false, behind: true }],
+    [4, { conflict: null, behind: null }],
+    [5, clean],
+    [6, { conflict: false, behind: null }],
+  ]);
+  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4, 5, 6) }), openPulls: open, checks });
+  assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "behind", 3: "hold", 4: "checking", 5: "next", 6: "next" });
+  // Behind unknown (no permission to compare) does not block.
+  assert.deepEqual(kinds(evaluation), ["release:5", "release:6"]);
+});
+
+test("nothing jumps a higher draft: one that does not fit stops the drafts below it", () => {
+  const open = [pull(1, { draft: false }), pull(2, { base: "main", head: "release/x" }), pull(3)];
+  // 1 runs (1 slot) and a deploy takes 1: 2 needs 2 of the 1 left; 3 must not go first.
+  const evaluation = judge({
+    state: state({ queue: lineOf(1, 2, 3) }),
+    openPulls: open,
+    running: runs(open[0]),
+    deploys: [{ branch: "develop", sha: "d".repeat(40), title: "Merge" }],
+    checks: checksFor(open),
   });
+  assert.deepEqual(statuses(evaluation), { 1: "running", 2: "waiting", 3: "waiting" });
+  assert.deepEqual(kinds(evaluation), []);
+});
+
+test("a ready pull request lower in line whose CI runs past the budget goes back to draft", () => {
+  const open = [pull(1, { draft: false }), pull(2), pull(3, { draft: false }), pull(4, { draft: false })];
+  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4) }), openPulls: open, running: runs(open[0], open[2], open[3]), checks: checksFor(open) });
+  // 1 runs (1), 2 is reached (2), 3 runs (3); 4 is past the budget.
+  assert.deepEqual(statuses(evaluation), { 1: "running", 2: "next", 3: "running", 4: "held" });
+  // 2 waits until 4's cancelled runs stop: they still hold runners.
+  assert.deepEqual(kinds(evaluation), ["hold:4"]);
+  assert.equal(evaluation.state.queue.find((e) => e.number === 4).draft, true);
+  assert.deepEqual(evaluation.state.pendingStatus, [{ number: 4, headSha: sha(4) }]);
+  assert.notEqual(evaluation.nextCheckInMs, null, "judged again without waiting for an event");
+  // Once 4's runs stop, 2 is marked ready.
+  const later = judge({
+    state: evaluation.state,
+    openPulls: open.map((p) => (p.number === 4 ? { ...p, draft: true } : p)),
+    running: runs(open[0], open[2]),
+    checks: checksFor(open),
+    nowMs: T0 + 30_000,
+  });
+  assert.deepEqual(kinds(later), ["release:2"]);
+});
+
+test("a ready pull request whose CI is not running takes no slot and is left alone", () => {
+  const open = [pull(1, { draft: false }), pull(2, { draft: false }), pull(3, { draft: false }), pull(4)];
+  const evaluation = judge({ state: state({ capacity: 1, queue: lineOf(1, 2, 3, 4) }), openPulls: open, checks: checksFor(open) });
+  assert.deepEqual(statuses(evaluation), { 1: "done", 2: "done", 3: "done", 4: "next" });
+  assert.deepEqual(kinds(evaluation), ["release:4"]);
+});
+
+test("deploy CI and runs of closed pull requests use slots nobody can give back", () => {
+  const open = [pull(1), pull(2)];
+  const evaluation = judge({
+    state: state({ queue: lineOf(1, 2) }),
+    openPulls: open,
+    running: new Set([ciRunKey(77, "7".repeat(40))]),
+    runningBases: new Map([[77, "develop"]]),
+    deploys: [{ branch: "develop", sha: "d".repeat(40), title: "Merge" }],
+    checks: checksFor(open),
+  });
+  assert.deepEqual(kinds(evaluation), ["release:1"]);
+  assert.equal(evaluation.used, 3);
+  assert.deepEqual(evaluation.state.lastRound.running.map((r) => r.number), [1, 77]);
+});
+
+test("a release is reserved until its runs show or the grace period ends", () => {
+  const open = [pull(1), pull(2), pull(3), pull(4)];
+  const first = judge({ state: state({ queue: lineOf(1, 2, 3, 4) }), openPulls: open, checks: checksFor(open) });
+  const ready = open.map((p) => (p.number <= 3 ? { ...p, draft: false } : p));
+  // No runs shown yet: the reservations still hold the slots.
+  const soon = judge({ state: first.state, openPulls: ready, checks: checksFor(open), nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(soon), []);
+  assert.deepEqual(statuses(soon), { 1: "running", 2: "running", 3: "running", 4: "waiting" });
+  // Grace over, still no runs: the slots are free again.
+  const late = judge({ state: soon.state, openPulls: ready, checks: checksFor(open), nowMs: T0 + CI_ADMISSION_RELEASE_GRACE_MS + 1 });
+  assert.deepEqual(kinds(late), ["release:4"]);
+});
+
+test("a draft with a run in progress has it cancelled", () => {
+  const open = [pull(1)];
+  const evaluation = judge({ state: state(), openPulls: open, running: runs(open[0]), checks: new Map([[1, { conflict: true, behind: false }]]) });
   assert.deepEqual(kinds(evaluation), ["cancel:1"]);
-  assert.equal(evaluation.state.events.at(-1).detail, "draft_rerun");
+  assert.equal(evaluation.state.events.at(-1).kind, "cancelled");
 });
 
-test("shadow marks every event", () => {
-  const evaluation = run({ state: state({ queue: [queued(8)] }), openPulls: [pull(8, { draft: true })], shadow: true });
-  assert.ok(evaluation.state.events.every((e) => e.shadow));
+test("a pending status admission left is cleared once its pull request is ready again, on a new head, or closed", () => {
+  const pending = [1, 2, 3, 4].map((number) => ({ number, headSha: sha(number) }));
+  const open = [pull(1, { draft: false }), pull(2, { headSha: "a".repeat(40) }), pull(4)];
+  const evaluation = judge({ state: state({ capacity: 1, queue: lineOf(1, 2, 4), pendingStatus: pending }), openPulls: open, checks: new Map() });
+  // 1 is ready again, 2 moved on, 3 is closed; 4, still a draft on that head, keeps it.
+  assert.deepEqual(kinds(evaluation).filter((k) => k.startsWith("clear_status")), ["clear_status:1", "clear_status:2", "clear_status:3"]);
 });
 
-test("reorder accepts exactly the same numbers rearranged", () => {
-  const s = state({ queue: [queued(1), queued(2), queued(3)] });
-  assert.deepEqual(reorderCiAdmissionQueue(s, [3, 1, 2]).queue.map((e) => e.number), [3, 1, 2]);
-  assert.equal(reorderCiAdmissionQueue(s, [3, 1]), null);
-  assert.equal(reorderCiAdmissionQueue(s, [3, 1, 1]), null);
-  assert.equal(reorderCiAdmissionQueue(s, [3, 1, 4]), null);
+test("GitHub is asked only about drafts the free slots reach, held ones skipped, at most the limit", () => {
+  const open = Array.from({ length: CI_ADMISSION_CHECK_LIMIT + 3 }, (_, i) =>
+    pull(i + 1, i === 0 ? { labels: [CI_ADMISSION_HOLD_LABEL] } : i === 1 ? { draft: false } : {}),
+  );
+  const checked = ciAdmissionDraftsToCheck({ state: state(), openPulls: open, running: new Set(), nowMs: T0 }).map((p) => p.number);
+  assert.equal(checked.length, CI_ADMISSION_CHECK_LIMIT);
+  assert.deepEqual(checked.slice(0, 2), [3, 4]);
+  // Every slot taken by running CI: nothing to ask about.
+  const busy = [pull(1, { draft: false }), pull(2, { draft: false }), pull(3, { draft: false }), pull(4)];
+  assert.deepEqual(ciAdmissionDraftsToCheck({ state: state(), openPulls: busy, running: runs(busy[0], busy[1], busy[2]), nowMs: T0 }), []);
 });
 
-test("the round records which pull requests use the slots, released ones included", () => {
-  const evaluation = run({
-    state: state({ capacity: 4, queue: [queued(8)] }),
-    openPulls: [pull(1), pull(2, { draft: true }), pull(8, { draft: true }), pull(9, { base: "main", head: "release/x" })],
-    runningShas: new Set([sha(1), sha(9)]),
+test("reorder keeps pull requests the operator did not see; move sends one to the top or the bottom", () => {
+  const s = state({ queue: lineOf(1, 2, 3, 4) });
+  assert.deepEqual(reorderCiAdmissionQueue(s, [3, 1, 99]).queue.map((e) => e.number), [3, 1, 2, 4]);
+  assert.equal(reorderCiAdmissionQueue(s, [99]), null);
+  assert.deepEqual(moveCiAdmissionEntry(s, 3, "top").queue.map((e) => e.number), [3, 1, 2, 4]);
+  assert.deepEqual(moveCiAdmissionEntry(s, 1, "bottom").queue.map((e) => e.number), [2, 3, 4, 1]);
+  assert.equal(moveCiAdmissionEntry(s, 9, "top"), null);
+});
+
+test("shadow decisions are marked as shadow", () => {
+  const open = [pull(1)];
+  const evaluation = judge({ state: state(), openPulls: open, checks: checksFor(open), shadow: true });
+  assert.equal(evaluation.state.events.at(-1).shadow, true);
+});
+
+test("a stored slot state (version 2) becomes runners: order and events kept, budget and needs reset", () => {
+  const v2 = { ...emptyCiAdmissionState(), version: 2, capacity: 3, queue: lineOf(5, 4), events: [] };
+  delete v2.needs;
+  const parsed = parseCiAdmissionState(JSON.stringify(v2));
+  assert.equal(parsed.version, 3);
+  assert.equal(parsed.capacity, 40);
+  assert.deepEqual(parsed.needs, { develop: 15, main: 34, developPush: 18, mainPush: 19 });
+  assert.deepEqual(parsed.queue.map((e) => e.number), [5, 4]);
+});
+
+test("in runners: two develop pull requests fit 40, a third waits; a develop deploy leaves room for one", () => {
+  const open = [pull(1), pull(2), pull(3)];
+  const free = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2, 3) }, openPulls: open, checks: checksFor(open) });
+  assert.deepEqual(kinds(free), ["release:1", "release:2"]);
+  assert.equal(statuses(free)[3], "waiting");
+  assert.equal(free.used, 30);
+
+  const deploying = judge({
+    state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2, 3) },
+    openPulls: open,
+    checks: checksFor(open),
+    deploys: [{ branch: "develop", sha: "d".repeat(40), title: "Merge" }],
   });
-  assert.equal(evaluation.state.lastRound.used, 4);
-  assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [1, 8, 9]);
+  assert.deepEqual(kinds(deploying), ["release:1"]);
+  assert.equal(deploying.used, 33);
 });
 
-test("a burst of arrivals before any run is visible cannot share one free slot", () => {
-  const first = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(2, { draft: true })], arrival: 1 });
-  assert.deepEqual(kinds(first), ["admit:1"]);
-  const second = run({ state: first.state, openPulls: [pull(1), pull(2)], arrival: 2, nowMs: T0 + 1_000 });
-  assert.deepEqual(kinds(second), ["hold:2"]);
-});
-
-test("once a released pull request's runs are seen, a fast finish frees its slot at once", () => {
-  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
-  assert.deepEqual(kinds(released), ["release:8"]);
-  assert.ok(released.nextCheckInMs > 0, "someone waits behind an unobserved reservation");
-  const seen = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), nowMs: T0 + 30_000 });
-  assert.deepEqual(kinds(seen), []);
-  assert.equal(seen.nextCheckInMs, null);
-  // Two minutes later its CI has finished: well inside the grace period, #9 goes.
-  const done = run({ state: seen.state, openPulls: [pull(8), pull(9, { draft: true })], nowMs: T0 + 120_000 });
-  assert.deepEqual(kinds(done), ["release:9"]);
-});
-
-test("its own ready event is not an arrival even when its runs are already visible", () => {
-  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
-  const echo = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), arrival: 8, nowMs: T0 + 3_000 });
-  assert.deepEqual(kinds(echo), []);
-  assert.deepEqual(echo.state.queue.map((e) => e.number), [9]);
-});
-
-test("an arrival that would be held and released in the same round is simply let through", () => {
-  // #7 waits; #1 finished, so both #7 (2 slots) and the arriving #9 (1) fit.
-  const evaluation = run({
-    state: state({ queue: [queued(7, "main")] }),
-    openPulls: [pull(7, { base: "main", draft: true }), pull(9)],
-    arrival: 9,
-  });
-  assert.deepEqual(kinds(evaluation), ["release:7", "admit:9"]);
-  assert.deepEqual(evaluation.state.queue, []);
-  assert.deepEqual(evaluation.state.events.map((e) => `${e.kind}:${e.number}`), ["released:7", "admitted:9"]);
-  assert.deepEqual(evaluation.state.released.map((r) => r.number).sort(), [7, 9]);
-});
-
-test("a release carries its place in line so a failed ready can put it back", () => {
-  const evaluation = run({ state: state({ queue: [queued(8)] }), openPulls: [pull(8, { draft: true })] });
-  const release = evaluation.actions.find((a) => a.kind === "release");
-  assert.equal(release.entry.number, 8);
-  assert.equal(release.entry.queuedAt, "2026-10-20T01:00:00.000Z");
-});
-
-test("a pull request that leaves the line while open has its waiting status cleared", () => {
-  const evaluation = run({
-    state: state({ capacity: 1, queue: [queued(7), queued(8)] }),
-    openPulls: [pull(1), pull(7, { base: "claude/x", draft: true }), pull(8)],
-    runningShas: new Set([sha(1), sha(8)]),
-  });
-  assert.deepEqual(kinds(evaluation), []);
-  assert.deepEqual(evaluation.state.owedCommits.sort(), [sha(7), sha(8)].sort());
-});
-
-test("a full line takes no more, so the stored state stays inside its schema", () => {
-  const full = Array.from({ length: 100 }, (_, i) => queued(1000 + i));
-  const unique = (n) => n.toString(16).padStart(40, "e");
-  const openPulls = [pull(1), ...full.map((e) => pull(e.number, { draft: true, headSha: unique(e.number) })), pull(5)];
-  const evaluation = run({ state: state({ capacity: 1, queue: full }), openPulls, runningShas: new Set([sha(1)]), arrival: 5 });
-  assert.deepEqual(kinds(evaluation), []);
-  assert.equal(evaluation.state.queue.length, 100);
-  assert.equal(evaluation.state.events.at(-1).detail, "queue_full");
-  assert.equal(parseCiAdmissionState(JSON.stringify(evaluation.state)).queue.length, 100);
-});
-
-test("new commits on a granted pull request keep its slots, reserved for the new head", () => {
-  const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
-  assert.deepEqual(admitted.state.granted.map((g) => g.number), [1]);
-  const seen = run({ state: admitted.state, openPulls: [pull(1)], runningShas: new Set([sha(1)]), nowMs: T0 + 60_000 });
-  assert.equal(seen.state.released[0].observed, true);
-  // A fix push while #2 waits: #1 keeps its slot, and its new head is reserved
-  // until its runs show, so #2 is not released into the same slot.
-  const head = "f".repeat(40);
-  const fix = run({
-    state: { ...seen.state, queue: [queued(2)] },
-    openPulls: [pull(1, { headSha: head }), pull(2, { draft: true })],
-    arrival: 1,
-    nowMs: T0 + 2 * 60_000,
-  });
-  assert.deepEqual(kinds(fix), []);
-  assert.deepEqual(fix.state.released.map((r) => [r.number, r.headSha, r.observed]), [[1, head, false]]);
-  assert.equal(fix.state.events.at(-1).detail, "continuing");
-});
-
-test("a pull request seen running but never granted is judged like any arrival", () => {
-  // #3's runs were seen (an event raced ahead of its ready event); it was never granted.
-  const raced = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(3)], runningShas: new Set([sha(1), sha(3)]) });
-  assert.deepEqual(raced.state.granted.map((g) => g.number), []);
-  const arrives = run({ state: raced.state, openPulls: [pull(1), pull(3)], runningShas: new Set([sha(1), sha(3)]), arrival: 3, nowMs: T0 + 1_000 });
-  assert.deepEqual(kinds(arrives), ["hold:3"]);
-});
-
-test("a grant ends when its pull request no longer runs", () => {
-  const admitted = run({ state: state(), openPulls: [pull(1)], runningShas: new Set([sha(1)]), arrival: 1 });
-  assert.deepEqual(admitted.state.granted.map((g) => g.number), [1]);
-  const finished = run({ state: admitted.state, openPulls: [pull(1)], nowMs: T0 + 60_000 });
-  assert.deepEqual(finished.state.granted.map((g) => g.number), []);
-});
-
-test("a pull request released from the line stays granted, so a later fix push keeps its slot", () => {
-  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
-  assert.deepEqual(released.state.granted.map((g) => g.number), [8]);
-  const running = run({ state: released.state, openPulls: [pull(8), pull(9, { draft: true })], runningShas: new Set([sha(8)]), nowMs: T0 + 20 * 60_000 });
-  assert.deepEqual(running.state.granted.map((g) => g.number), [8]);
-  const fix = run({ state: running.state, openPulls: [pull(8, { headSha: "d".repeat(40) }), pull(9, { draft: true })], arrival: 8, nowMs: T0 + 21 * 60_000 });
-  assert.deepEqual(kinds(fix), []);
-});
-
-test("an older head's reservation does not exempt new commits from judgment", () => {
-  // #1 admitted, its CI seen and finished within the grace period: grant ends, reservation (old head) remains.
-  const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
-  const seen = run({ state: admitted.state, openPulls: [pull(1)], runningShas: new Set([sha(1)]), nowMs: T0 + 30_000 });
-  const finished = run({ state: { ...seen.state, queue: [queued(2)] }, openPulls: [pull(1), pull(2, { draft: true })], nowMs: T0 + 60_000 });
-  assert.deepEqual(finished.state.granted.map((g) => g.number), [2]);
-  // A new commit on #1 while #2 holds the only slot: #1 is held, not let through.
-  const push = run({
-    state: finished.state,
-    openPulls: [pull(1, { headSha: "c".repeat(40) }), pull(2)],
-    arrival: 1,
-    nowMs: T0 + 90_000,
-  });
-  assert.deepEqual(kinds(push), ["hold:1"]);
-});
-
-test("a fix push seen first by another round keeps its slot (the push event arrives later)", () => {
-  // #1 granted and running on its old head; #2 waits.
-  const admitted = run({ state: state({ capacity: 1 }), openPulls: [pull(1)], arrival: 1 });
-  const running = run({ state: { ...admitted.state, queue: [queued(2)] }, openPulls: [pull(1), pull(2, { draft: true })], runningShas: new Set([sha(1)]), nowMs: T0 + 60_000 });
-  assert.deepEqual(kinds(running), []);
-  // A workflow_run event is judged before #1's synchronize: GitHub already shows
-  // the new head, only the old head's run is listed.
-  const head = "b".repeat(40);
-  const between = run({
-    state: running.state,
-    openPulls: [pull(1, { headSha: head }), pull(2, { draft: true })],
-    runningShas: new Set([sha(1)]),
-    nowMs: T0 + 2 * 60_000,
-  });
-  assert.deepEqual(kinds(between), [], "#2 is not released into #1's slot");
-  assert.deepEqual(between.state.granted, [{ number: 1, headSha: head }]);
-  assert.deepEqual(between.state.released.map((r) => [r.number, r.headSha]), [[1, head]]);
-  // Then the synchronize arrives: still #1's slot, nothing held.
-  const sync = run({ state: between.state, openPulls: [pull(1, { headSha: head }), pull(2, { draft: true })], arrival: 1, nowMs: T0 + 2 * 60_000 + 5_000 });
-  assert.deepEqual(kinds(sync), []);
-});
-
-test("a run on a shared commit counts, and is cancelled, only for the pull request it runs for", () => {
-  // #1 (granted, running) and draft #2 point at the same commit; the run is #1's.
-  const shared = "a".repeat(40);
-  const evaluation = run({
-    state: state({ capacity: 1 }),
-    openPulls: [pull(1, { headSha: shared }), pull(2, { draft: true, headSha: shared })],
-    running: new Set([ciRunKey(1, shared)]),
-  });
-  assert.deepEqual(kinds(evaluation), [], "#2 runs nothing, so nothing of #2 is cancelled");
-  assert.equal(evaluation.used, 1);
-});
-
-test("a draft running a re-run of an older head is cancelled too", () => {
-  const evaluation = run({
-    state: state(),
-    openPulls: [pull(4, { draft: true, headSha: "9".repeat(40) })],
-    running: new Set([ciRunKey(4, "8".repeat(40))]),
-  });
-  assert.deepEqual(kinds(evaluation), ["cancel:4"]);
-});
-
-test("an arrival left pending by a failed read is judged by the next round", () => {
-  const evaluation = run({
-    state: state({ capacity: 1, queue: [queued(2)], pendingArrivals: [3] }),
-    openPulls: [pull(1), pull(2, { draft: true }), pull(3)],
-    runningShas: new Set([sha(1)]),
-  });
-  assert.deepEqual(kinds(evaluation), ["hold:3"]);
-  assert.deepEqual(evaluation.state.queue.map((e) => e.number), [2, 3]);
-  assert.deepEqual(evaluation.state.pendingArrivals, []);
-});
-
-test("a release the last round recorded but GitHub still shows as a draft goes back to the top", () => {
-  const released = run({ state: state({ capacity: 1, queue: [queued(8), queued(9)] }), openPulls: [pull(8, { draft: true }), pull(9, { draft: true })] });
-  assert.deepEqual(released.state.releasing.map((e) => e.number), [8]);
-  // The process stopped before marking #8 ready: the next round finds it a draft.
-  const next = run({ state: released.state, openPulls: [pull(1), pull(8, { draft: true }), pull(9, { draft: true })], runningShas: new Set([sha(1)]), nowMs: T0 + 60_000 });
-  assert.deepEqual(next.state.queue.map((e) => e.number), [8, 9]);
-  assert.ok(next.state.events.some((e) => e.number === 8 && e.detail === "release_unconfirmed"));
-});
-
-test("every status a round's actions will write is recorded before they run", () => {
-  const evaluation = run({
-    state: state({ capacity: 2, queue: [queued(8)], owedCommits: ["5".repeat(40)] }),
-    openPulls: [pull(8, { draft: true }), pull(9, { draft: true, headSha: "7".repeat(40) })],
-    running: new Set([ciRunKey(9, "7".repeat(40))]),
-  });
-  assert.deepEqual(kinds(evaluation).sort(), ["cancel:9", "release:8"]);
-  // The released pull request's commit is owed a status; a cancel alone owes none; the earlier one stays owed.
-  assert.deepEqual(evaluation.state.owedCommits.sort(), ["5".repeat(40), sha(8)].sort());
-});
-
-test("a hold the last round recorded but GitHub still shows ready is judged again, not dropped", () => {
-  const held = run({ state: state({ capacity: 1 }), openPulls: [pull(1), pull(4)], runningShas: new Set([sha(1), sha(4)]), arrival: 4 });
-  assert.deepEqual(kinds(held), ["hold:4"]);
-  assert.deepEqual(held.state.holding, [4]);
-  // The process stopped before drafting #4: the next round finds it ready.
-  const next = run({ state: held.state, openPulls: [pull(1), pull(4)], runningShas: new Set([sha(1), sha(4)]), nowMs: T0 + 60_000 });
-  assert.deepEqual(kinds(next), ["hold:4"]);
-  assert.ok(!next.state.events.some((e) => e.number === 4 && e.detail === "ready_elsewhere"));
-});
-
-test("slots of a pull request held this round count as free for the release that follows", () => {
-  // Budget 2: draft #7 waits; #9 arrives with its runs already visible. Both fit.
-  const evaluation = run({
-    state: state({ capacity: 2, queue: [queued(7)] }),
-    openPulls: [pull(7, { draft: true }), pull(9)],
-    runningShas: new Set([sha(9)]),
-    arrival: 9,
-  });
-  assert.deepEqual(kinds(evaluation), ["release:7", "admit:9"]);
-});
-
-test("the slots shown as running match the budget: a held pull request's runs still show", () => {
-  const evaluation = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
-  assert.deepEqual(kinds(evaluation), ["hold:9"]);
-  assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [9]);
-  assert.equal(evaluation.state.lastRound.used, 1);
-});
-
-test("a draft whose runs have not stopped keeps its slots, round after round, until they do", () => {
-  // Round 1: #9 arrives running while #7 waits (budget 1): hold #9, release #7.
-  const first = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
-  // #7 is not released in the round that holds #9: #9's runs still show.
-  assert.deepEqual(kinds(first), ["hold:9"]);
-  const deferred = first.state;
-  // Round 2: #9 is a draft whose runs still run. #7 must not be released beside them.
-  const second = run({ state: deferred, openPulls: [pull(7, { draft: true }), pull(9, { draft: true })], runningShas: new Set([sha(9)]), nowMs: T0 + 60_000 });
-  assert.deepEqual(kinds(second), ["cancel:9"]);
-  // Round 3: #9's runs stopped. Now #7 goes.
-  const third = run({ state: second.state, openPulls: [pull(7, { draft: true }), pull(9, { draft: true })], nowMs: T0 + 120_000 });
-  assert.deepEqual(kinds(third), ["release:7"]);
-});
-
-test("a hold's cancellation does not free its slots in the same round", () => {
-  // Budget 1: #9 arrives with its runs visible while #7 waits. #9 is held and
-  // its runs cancelled, but #7 waits for a round that sees them stopped.
-  const evaluation = run({ state: state({ capacity: 1, queue: [queued(7)] }), openPulls: [pull(7, { draft: true }), pull(9)], runningShas: new Set([sha(9)]), arrival: 9 });
-  assert.deepEqual(kinds(evaluation), ["hold:9"]);
-});
-
-test("a ready pull request re-running an older head's run occupies its slots", () => {
-  const evaluation = run({
-    state: state({ capacity: 1, queue: [queued(7)] }),
-    openPulls: [pull(7, { draft: true }), pull(5, { headSha: "5".repeat(39) + "a" })],
-    running: new Set([ciRunKey(5, "5".repeat(40))]),
-  });
-  assert.deepEqual(kinds(evaluation), []);
-  assert.equal(evaluation.used, 1);
-});
-
-test("a closed pull request whose runs still run occupies its slots until they stop", () => {
-  const evaluation = run({
-    state: state({ capacity: 2, queue: [queued(7)] }),
-    openPulls: [pull(7, { draft: true })],
-    running: new Set([ciRunKey(30, "3".repeat(40))]),
-    runningBases: new Map([[30, "main"]]),
-  });
-  assert.deepEqual(kinds(evaluation), []);
-  assert.equal(evaluation.used, 2);
-  assert.deepEqual(evaluation.state.lastRound.running.map((p) => p.number), [30]);
-});
-
-test("a waiting pull request that closes has the shared commit's status decided again", () => {
-  const shared = "e".repeat(40);
-  const evaluation = run({
-    state: state({ queue: [{ ...queued(8), headSha: shared }] }),
-    openPulls: [pull(3, { headSha: shared })],
-    running: new Set([ciRunKey(3, shared)]),
-  });
-  assert.deepEqual(kinds(evaluation), []);
-  assert.deepEqual(evaluation.state.owedCommits, [shared]);
-});
-
-test("new commits on a waiting draft move its waiting status and redo the old commit's", () => {
-  const oldHead = "a".repeat(40);
-  const newHead = "b".repeat(40);
-  const evaluation = run({
-    state: state({ capacity: 1, queue: [{ ...queued(8), headSha: oldHead }] }),
-    openPulls: [pull(8, { draft: true, headSha: newHead }), pull(3, { headSha: oldHead })],
-    running: new Set([ciRunKey(3, oldHead)]),
-  });
-  assert.deepEqual(kinds(evaluation), []);
-  assert.deepEqual(evaluation.state.owedCommits.sort(), [oldHead, newHead].sort());
-  assert.equal(evaluation.state.queue[0].headSha, newHead);
-});
-
-test("deploy CI on develop and main occupies slots like a pull request into the same branch, and is shown", () => {
-  const deploys = [
-    { branch: "main", sha: "a".repeat(40), title: "Merge pull request #2825 from mposition/release/x" },
-    { branch: "develop", sha: "b".repeat(40), title: "Merge pull request #2820 from mposition/claude/to-develop/y" },
-  ];
-  // main 2 + develop 1 fill the 3-slot budget: a ready develop pull request waits.
-  const held = run({ state: state(), openPulls: [pull(31)], arrival: 31, deploys });
-  assert.deepEqual(kinds(held), ["hold:31"]);
-  assert.equal(held.state.events.at(-1).detail, "no_slot");
-  assert.equal(held.used, 3);
-  assert.deepEqual(held.state.lastRound.deploys, deploys);
-
-  // Once the main deploy's CI stops, the same arrival fits.
-  const admitted = run({ state: state(), openPulls: [pull(31)], arrival: 31, deploys: deploys.slice(1) });
-  assert.deepEqual(kinds(admitted), ["admit:31"]);
-  assert.equal(admitted.used, 2);
-});
-
-test("deploy CI keeps the head of the line waiting until its slots free", () => {
-  const waiting = state({ queue: [queued(41)] });
-  const deploys = [{ branch: "main", sha: "c".repeat(40), title: "" }, { branch: "develop", sha: "d".repeat(40), title: "" }];
-  assert.deepEqual(kinds(run({ state: waiting, openPulls: [pull(41, { draft: true })], deploys })), []);
-  assert.deepEqual(kinds(run({ state: waiting, openPulls: [pull(41, { draft: true })], deploys: [] })), ["release:41"]);
-});
-
-test("a state stored before deploys were recorded reads with none, and an operator stop is a known event", () => {
-  const stored = state({
-    lastRound: { at: "2026-10-20T01:00:00.000Z", used: 1, running: [{ number: 1, title: "a", base: "develop" }] },
-    events: [{ at: "2026-10-20T01:00:00.000Z", kind: "stopped", number: 1, shadow: false, detail: "drafted cancelled_runs:3" }],
-  });
-  const parsed = parseCiAdmissionState(JSON.stringify(stored));
-  assert.deepEqual(parsed.lastRound.deploys, []);
-  assert.equal(parsed.events[0].kind, "stopped");
+test("runners other workflows hold count too, and a CI needing more than the budget still runs alone", () => {
+  const open = [pull(1), pull(2)];
+  // 22 runners in use by something admission does not know: 18 left, one develop PR fits.
+  const busy = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) }, openPulls: open, checks: checksFor(open), liveRunners: 22 });
+  assert.deepEqual(kinds(busy), ["release:1"]);
+  // Live usage below what the known CI needs changes nothing: needs are counted, not the jobs of the moment.
+  const quiet = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) }, openPulls: open, checks: checksFor(open), liveRunners: 0 });
+  assert.deepEqual(kinds(quiet), ["release:1", "release:2"]);
+  // A budget below one CI's need does not starve it.
+  const main = [pull(9, { base: "main" })];
+  const small = judge({ state: { ...emptyCiAdmissionState(), capacity: 20, queue: lineOf(9) }, openPulls: main, checks: checksFor(main) });
+  assert.deepEqual(kinds(small), ["release:9"]);
 });

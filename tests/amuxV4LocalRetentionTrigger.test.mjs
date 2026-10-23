@@ -12,6 +12,10 @@ const completed = {
   cancellation: { cancelled: 0, scanned: 0, batchLimit: 8 },
   raw: { bodiesPurged: 0, keysDeleted: 0, scanned: 0, batchLimit: 8 },
   analysis: { bodiesPurged: 0, keysDeleted: 0, scanned: 0, batchLimit: 8 },
+  taskResults: { available: false, reason: "v22_task_result_retention_disabled" },
+  readManifests: { available: false, reason: "v19_read_manifest_retention_disabled" },
+  sessionResults: { available: false,
+    reason: "v19_session_result_retention_disabled" },
 };
 
 function marker() {
@@ -85,6 +89,55 @@ test("invalid success body and redirect both keep the halt marker", async () => 
     assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret,
       ...state, fetchImpl }), { kind: "halted" });
     assert.equal(state.isMarked(), true);
+  }
+});
+
+test("retention accepts the deployed route shape with separately gated v19 cleanup", async () => {
+  const route = readFileSync(new URL(
+    "../app/api/internal/amux/v4/content-retention/route.ts", import.meta.url), "utf8");
+  assert.match(route, /available: false, reason: "v22_task_result_retention_disabled"/);
+  assert.match(route, /amuxJsonNoStore\(\{ holdNotices, cancellation, raw, analysis,\s*taskResults, readManifests, sessionResults \}\)/);
+  const state = marker();
+  assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret, ...state,
+    fetchImpl: async () => Response.json(completed) }), { kind: "completed" });
+  assert.equal(state.isMarked(), false);
+  const v19Only = { ...completed,
+    holdNotices: { available: false, reason: "v4_content_retention_disabled" },
+    cancellation: { available: false, reason: "v4_content_retention_disabled" },
+    raw: { available: false, reason: "v4_content_retention_disabled" },
+    analysis: { available: false, reason: "v4_content_retention_disabled" },
+    readManifests: { manifests: { bodiesPurged: 0, keysDeleted: 0,
+      scanned: 0, batchLimit: 8 },
+      orphanKeys: { keysDeleted: 0, scanned: 0, batchLimit: 8 } } };
+  const secondState = marker();
+  assert.deepEqual(await runAmuxV4LocalRetentionOnce({ origin, secret,
+    ...secondState, fetchImpl: async () => Response.json(v19Only) }),
+  { kind: "completed" });
+  assert.equal(secondState.isMarked(), false);
+});
+
+test("missing, active, or malformed task retention results halt without retry", async () => {
+  const legacy = { ...completed };
+  delete legacy.taskResults;
+  for (const body of [
+    legacy,
+    { ...completed, taskResults: { bodiesPurged: 0, keysDeleted: 0, scanned: 0, batchLimit: 8 } },
+    { ...completed, taskResults: { available: true, reason: "v22_task_result_retention_disabled" } },
+    { ...completed, taskResults: { available: false, reason: "unknown" } },
+    { ...completed, taskResults: null },
+    { ...completed, taskResults: { ...completed.taskResults, extra: true } },
+    { ...completed, extra: true },
+  ]) {
+    const state = marker();
+    let calls = 0;
+    const input = { origin, secret, ...state, fetchImpl: async () => {
+      calls += 1;
+      return Response.json(body);
+    } };
+    assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "halted" });
+    assert.equal(state.isMarked(), true);
+    assert.deepEqual(await runAmuxV4LocalRetentionOnce(input), { kind: "halted" });
+    assert.equal(calls, 1);
   }
 });
 

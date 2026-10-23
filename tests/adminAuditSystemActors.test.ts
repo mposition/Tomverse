@@ -5,6 +5,13 @@ import test from "node:test";
 
 import {
   AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
+  AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
+  AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+  AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+  AMUX_SESSION_ANALYSIS_RESERVED_SCOPE,
+  AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
@@ -56,6 +63,25 @@ test("the Prompt Refiner Auto budget actor has only its audited hold transitions
     "prompt_refiner.auto_budget_reserved", "AdminAuditLog"), false);
   assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
     "prompt_refiner.provider_dispatch", "PromptRefinerAutoBudgetHold"), false);
+});
+
+test("the unified optimizer actor is limited to provider-free ledger facts", () => {
+  assert.equal(isSystemAuditActor("chat-unified-optimizer"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.run_admitted", "ChatUnifiedOptimizerRun"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.dispatch_intended",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.run_terminal",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.queued_before_dispatch_terminal",
+    "ChatUnifiedOptimizerRoleJob"), true);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_candidate.promoted", "ChatUnifiedOptimizerCandidate"), false);
+  assert.equal(systemAuditActionAllowed("chat-unified-optimizer",
+    "chat.unified_optimizer.dispatch_intended", "AdminAuditLog"), false);
 });
 
 // The closed list of system actors and the reserved metadata key.
@@ -126,35 +152,46 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-checker",
     "amux-v22-recovery-controller",
     "amux-v22-api-model-access",
+    // docs/policy/chat-unified-router-refiner-v1.md §7 and
+    // docs/policy/chat-unified-router-refiner-v1.md §12: provider-free facts.
+    "chat-unified-optimizer",
     "auto-router-optimizer",
+    "auto-router-rec-agent",
     "amux-v4-intake",
+    "amux-session-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
     "engineering-agent-retention",
     "engineering-agent-observer",
     "engineering-agent-registrar",
-    // docs/policy/qa-release-agent.md section 5: the digest intake route.
-    "qa-release-intake",
-    // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
-    "qa-release-merge-lane",
-    // The shared AgentDigestItem body expiry and meta purge, for every agent
-    // (docs/policy/qa-release-agent.md section 4).
-    "agent-digest-retention",
     // The product-research agent's two actions and no more
     // (docs/policy/product-research-agent.md §5): a slot recorded, and rows
     // removed once past the retention period. Neither is a person, and this
     // agent has nothing to approve because it decides nothing.
     "product-research-observer",
     "product-research-retention",
+    // docs/policy/qa-release-agent.md section 5: the digest intake route.
+    "qa-release-intake",
+    "support-triage-worker",
+    "support-triage-retention",
     // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
     "billing-finance-ops-intake",
+    "support-triage-account-deletion",
+    // The shared AgentDigestItem body expiry and meta purge, for every agent
+    // (docs/policy/billing-finance-ops.md §1.4).
+    "agent-digest-retention",
+    // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
+    "qa-release-merge-lane",
+    // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
+    "ops-observer",
     // docs/policy/amux-decision-maker.md §10: the routing route and one actor
     // per DM instance. A DM writes proposals, never approvals (§1).
     "amux-decision-router",
     "amux-decision-maker-openai",
     "amux-decision-maker-anthropic",
-    // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
-    "ops-observer",
+    // The scheduled renewal of the Code client's coding catalogue snapshot:
+    // identical content only, one action about one snapshot row.
+    "model-catalog-renewal",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
@@ -190,6 +227,31 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
   assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
   assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
+  assert.equal(isSystemAuditActor(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    AMUX_SESSION_IDEA_SUBMITTED_ACTION, AMUX_SESSION_IDEA_SUBMITTED_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+    AMUX_SESSION_ANALYSIS_RESERVED_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    "amux.idea.operating_scope.updated", "AmuxIdeaOperatingScopeSetting"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+    targetType: AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+      actorScope: AMUX_SESSION_ANALYSIS_RESERVED_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+    targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+      actorScope: AMUX_SESSION_IDEA_SUBMITTED_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+    targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR },
+  })), "unknown");
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
     AMUX_V4_UNIT_UNKNOWN_ACTION, AMUX_V4_UNIT_DECISION_TARGET), true);
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
@@ -391,7 +453,14 @@ test("no administrator audit call site names the reserved key", () => {
   // free of it, so a future caller that needs both has to come through review.
   // It reads source text only: metadata built at runtime (a parsed body, a
   // result object) is covered by the writer's own refusal, not by this scan.
-  const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts"]);
+  const allowed = new Set([
+    "lib/adminAudit.ts",
+    "lib/adminAuditSystemActors.ts",
+    // Reviewed authority multiplexer: it sends system registrations to the
+    // system writer and leaves owner registrations on the administrator writer.
+    // Both writers independently reject a reserved-key mismatch.
+    "lib/amux/ideaRegistrationAuditAuthority.ts",
+  ]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))
     .map((path) => relative(ROOT, path).split("\\").join("/"))
@@ -405,6 +474,17 @@ test("no administrator audit call site names the reserved key", () => {
       .map(({ path }) => path),
     []
   );
+});
+
+test("the AMUX registration authority keeps owner and system audit writers separate", () => {
+  const source = readFileSync(resolve(ROOT,
+    "lib/amux/ideaRegistrationAuditAuthority.ts"), "utf8");
+  const writer = source.slice(source.indexOf(
+    "export async function writeAmuxRegistrationAudit"));
+  assert.equal((writer.match(/writeSystemAuditLog\(/g) ?? []).length, 1);
+  assert.equal((writer.match(/writeAdminAuditLog\(/g) ?? []).length, 1);
+  assert.match(writer,
+    /if \(isAmuxSystemRegistrationAuthority\(input\.authority\)\) \{[\s\S]*?return writeSystemAuditLog\([\s\S]*?\}\);[\s\S]*?\}\s+return writeAdminAuditLog\(/);
 });
 
 test("the marketing generator writes only the LLM cost ledger's five actions", () => {
@@ -429,13 +509,54 @@ test("the marketing generator writes only the LLM cost ledger's five actions", (
   assert.equal(systemAuditActionAllowed("marketing-guard", "marketing_post.intake_queued", "MarketingPost"), true);
 });
 
+test("the coding catalogue renewal actor may only record a snapshot renewal", () => {
+  assert.equal(isSystemAuditActor("model-catalog-renewal"), true);
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.snapshot_renewed", "ModelCatalogSnapshot"), true);
+  // A person's publish, an entry change and any other target stay outside its scope.
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.snapshot_published", "ModelCatalogSnapshot"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.entry_updated", "ModelCatalogEntry"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.snapshot_renewed", "AppSettings"), false);
+});
+
+test("the Auto router coding agent may only claim a recommendation and record its result", () => {
+  assert.equal(isSystemAuditActor("auto-router-rec-agent"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.claimed", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.result_recorded", "AutoRouterOptimizerCycle"), true);
+  // An operator's status change and a promotion stay outside its scope.
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.status_changed", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-rec-agent",
+    "auto.llm_router_recommendation.claimed", "AppSettings"), false);
+});
+
 test("the Auto router optimizer actor may only start a cycle and promote one", () => {
   assert.equal(isSystemAuditActor("auto-router-optimizer"), true);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",
     "auto.llm_router_optimizer.cycle_started", "AutoRouterOptimizerCycle"), true);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",
     "auto.llm_router_guidance.promoted", "AutoRouterOptimizerCycle"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_rewrite_guidance.promoted", "AutoRouterOptimizerCycle"), true);
+  // Its own setting changes, on the settings row only.
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_tunable.applied", "AppSettings"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_tunable.reverted", "AppSettings"), true);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_tunable.applied", "AutoRouterOptimizerCycle"), false);
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_setting_auto_apply.updated", "AppSettings"), false);
   // Rollback stays a person's action, and no other target is in scope.
+  assert.equal(systemAuditActionAllowed("auto-router-optimizer",
+    "auto.llm_router_rewrite_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",
     "auto.llm_router_guidance.rolled_back", "AutoRouterOptimizerCycle"), false);
   assert.equal(systemAuditActionAllowed("auto-router-optimizer",

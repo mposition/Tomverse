@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -6,6 +7,7 @@ import {
   TURBOPACK_CACHE_DIR,
   isRecoverableTurbopackCacheFailure,
   nodeOptionsForBuild,
+  LARGE_HEAP_FLAG,
 } from "../scripts/run-next-build-core.mjs";
 
 test("GitHub build has a bounded larger heap without overriding an explicit operator limit", () => {
@@ -20,6 +22,60 @@ test("GitHub build has a bounded larger heap without overriding an explicit oper
     assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true", NODE_OPTIONS: explicit }),
       explicit);
   }
+});
+
+test("Railway builds use the bounded CI heap and preserve explicit operator limits", () => {
+  const railway = { RAILWAY_ENVIRONMENT_ID: "synthetic-build-environment" };
+  assert.equal(nodeOptionsForBuild(railway), "--max-old-space-size=6144");
+  assert.equal(nodeOptionsForBuild({ ...railway, NODE_OPTIONS: "--trace-warnings" }),
+    "--trace-warnings --max-old-space-size=6144");
+  for (const explicit of ["--max-old-space-size=2048", "--max_old_space_size=2048",
+    "--max-old-space-size 2048"]) {
+    assert.equal(nodeOptionsForBuild({ ...railway, NODE_OPTIONS: explicit }), explicit);
+  }
+  for (const absent of [undefined, "", "   "]) {
+    assert.equal(nodeOptionsForBuild({ RAILWAY_ENVIRONMENT_ID: absent }), "");
+  }
+});
+
+test("actual build children inherit the Railway ceiling and an explicit smaller limit", (t) => {
+  const childHeapMiB = (buildEnv) => {
+    const child = spawnSync(process.execPath, ["-e",
+      "process.stdout.write(String(require('node:v8').getHeapStatistics().heap_size_limit / 1024 / 1024))"], {
+      env: { ...process.env, NODE_OPTIONS: nodeOptionsForBuild(buildEnv) },
+      encoding: "utf8",
+    });
+    assert.equal(child.status, 0, child.stderr);
+    return Number(child.stdout);
+  };
+  const railway = { RAILWAY_ENVIRONMENT_ID: "synthetic-build-environment" };
+  const inherited = childHeapMiB(railway);
+  const explicit = childHeapMiB({ ...railway, NODE_OPTIONS: "--max-old-space-size=2048" });
+  t.diagnostic(`Railway child heap ${inherited} MiB; explicit 2048 child heap ${explicit} MiB`);
+  // V8 adds a small young-generation allowance to the old-space ceiling.
+  assert.ok(inherited >= 6144 && inherited < 6400, `Railway heap: ${inherited}`);
+  assert.ok(explicit >= 2048 && explicit < 2304, `Explicit heap: ${explicit}`);
+});
+
+test("a caller can still ask for the same heap off CI", () => {
+  // What `npm run build:local` passes: a local build has died in Mark-Compact
+  // at the default heap, and the remedy was an environment variable the
+  // developer had to know about. It does not reproduce on an idle machine, so
+  // this borrows CI's ceiling rather than fixing a deterministic failure.
+  assert.equal(nodeOptionsForBuild({}, { largeHeap: true }),
+    "--max-old-space-size=6144");
+  assert.equal(nodeOptionsForBuild({ NODE_OPTIONS: "--trace-warnings" }, { largeHeap: true }),
+    "--trace-warnings --max-old-space-size=6144");
+  // An operator's own limit still wins, exactly as it does on CI.
+  assert.equal(
+    nodeOptionsForBuild({ NODE_OPTIONS: "--max-old-space-size=5120" }, { largeHeap: true }),
+    "--max-old-space-size=5120");
+  // Unrelated environment names do not opt an ordinary local build in.
+  assert.equal(nodeOptionsForBuild({ RAILWAY_ENVIRONMENT: "production" }), "");
+  assert.equal(nodeOptionsForBuild({ RAILWAY_ENVIRONMENT: "production" }, { largeHeap: false }),
+    "");
+  // Stripped before the rest are forwarded, so it has to look like a flag.
+  assert.match(LARGE_HEAP_FLAG, /^--[a-z-]+$/);
 });
 
 /**
@@ -54,6 +110,38 @@ test("the production cache-restore failure is recognised", () => {
   assert.equal(isRecoverableTurbopackCacheFailure(CACHE_RESTORE_FAILURE), true);
 });
 
+/**
+ * The same corrupt cache in another form, from Railway deployment 4a96f1cc
+ * (staging, develop 1c02353, 2026-10-07T11:41:55Z): a panic in the task
+ * backend while reading the persisted store, reported as "Panic in async
+ * function" with none of the earlier internal-error markers. The same commit
+ * built and deployed on the other services that build it.
+ */
+const TASK_ID_PANIC = `
+▲ Next.js 16.3.8 (Turbopack)
+  Creating an optimized production build ...
+
+thread 'tokio-rt-worker' (84) panicked at turbopack/crates/turbo-tasks-backend/src/backend/mod.rs:249:14:
+Failed to get task id: Unable to read next free task id from database
+
+Caused by:
+    0: Unable to open static sorted file
+
+> Build error occurred
+[Error: Panic in async function]
+`;
+
+test("a task-backend panic reading the persisted cache is recognised", () => {
+  assert.equal(isRecoverableTurbopackCacheFailure(TASK_ID_PANIC), true);
+  // The panic site alone, without a cache-read line, is not enough.
+  assert.equal(
+    isRecoverableTurbopackCacheFailure(
+      "thread 'tokio-rt-worker' panicked at turbopack/crates/turbo-tasks-backend/src/backend/mod.rs:10:1:\nindex out of bounds"
+    ),
+    false
+  );
+});
+
 // Next.js 16.3.8 aborts outside the per-task panic boundary instead of emitting
 // TurbopackInternalError. Observed on Railway staging d9efa670, 2026-10-11.
 const PANIC_BOUNDARY_CACHE_FAILURE = `
@@ -77,7 +165,10 @@ test("the panic-boundary marker does not retry unrelated failures", () => {
   assert.equal(isRecoverableTurbopackCacheFailure(marker), false);
   assert.equal(isRecoverableTurbopackCacheFailure(`${marker}\nUnexpected task execution failure`), false);
   assert.equal(isRecoverableTurbopackCacheFailure(
-    PANIC_BOUNDARY_CACHE_FAILURE.replace(marker, "An unrelated process panicked")), false);
+    PANIC_BOUNDARY_CACHE_FAILURE.replace(marker, "An unrelated process panicked")
+      // The panic site is a marker of its own (the task-backend test above),
+      // so it goes too: the restore lines alone must not be enough.
+      .replace("panicked at turbopack/crates/turbo-tasks-backend/", "panicked at some/other/crate/")), false);
 });
 
 // Production, Railway deployment 40fda894 (main f08502b3e), 2026-10-12: only

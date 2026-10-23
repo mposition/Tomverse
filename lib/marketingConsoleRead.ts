@@ -3,6 +3,10 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
+import { readMarketingLlmSettings } from "@/lib/marketingLlmSettingsStore";
+import { readMarketingConsoleOverview, type MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
+import { marketingLlmModelOptions } from "@/lib/marketingLlmModelCatalog";
+import type { MarketingLlmSettings } from "@/lib/marketingLlmBudgetCore";
 import {
   MARKETING_WEBHOOK_SHADOW_KEY,
   marketingWebhookApplyScopeStatus,
@@ -112,6 +116,27 @@ export type MarketingWebhookStagingView = {
   }>;
 };
 
+export type MarketingConsoleLlmView = {
+  settings: MarketingLlmSettings | null;
+  version: string | null;
+  /** Every OpenAI model the catalog prices, with why one cannot be selected. */
+  models: Array<{ model: string; name: string; worstCallMicroUsd: number; unavailable: string | null }>;
+};
+
+const readLlm = async (): Promise<MarketingConsoleLlmView> => {
+  const read = await readMarketingLlmSettings(prisma);
+  return {
+    settings: read.settings,
+    version: read.version,
+    models: marketingLlmModelOptions().map(({ model, name, worstCallMicroUsd, unavailable }) => ({
+      model,
+      name,
+      worstCallMicroUsd,
+      unavailable,
+    })),
+  };
+};
+
 export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
@@ -141,6 +166,14 @@ export type MarketingConsolePayload = {
    * a new generation would save against a state nobody saw.
    */
   configGeneration: number | null;
+  /**
+   * The generator's model and monthly LLM cap (Admin Console, operator decision
+   * 2026-10-19). `settings` is null when the stored document is unreadable;
+   * `version` is what a change sends back; `models` is what may be chosen.
+   */
+  llm: MarketingConsoleLlmView;
+  /** The four numbers at the top of the console (lib/marketingConsoleOverview.ts). */
+  overview: MarketingConsoleOverview;
   /** Null outside staging; see `MarketingWebhookStagingView`. */
   webhookStaging: MarketingWebhookStagingView | null;
   /**
@@ -355,9 +388,11 @@ export async function readMarketingConsole(
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
   const availability = marketingSectionAvailability(section);
-  const [{ switches, configGeneration }, webhookStaging] = await Promise.all([
+  const [{ switches, configGeneration }, webhookStaging, llm, overview] = await Promise.all([
     readSwitches(),
     readWebhookStaging(),
+    readLlm(),
+    readMarketingConsoleOverview(),
   ]);
 
   if (!availability.available) {
@@ -369,6 +404,8 @@ export async function readMarketingConsole(
       rows: [],
       switches,
       configGeneration,
+      llm,
+      overview,
       webhookStaging,
       canWrite,
     };
@@ -405,6 +442,8 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      llm,
+      overview,
       webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
@@ -426,6 +465,10 @@ export async function readMarketingConsole(
         guardCodes: post.guardCodes,
         guardRuleIds: post.guardRuleIds,
         excerpt: excerpt(post.envelope),
+        // How many registry claims the draft cites: a count, not the claims.
+        claimCount: Array.isArray((post.envelope as { claimIds?: unknown } | null)?.claimIds)
+          ? ((post.envelope as { claimIds: unknown[] }).claimIds.length)
+          : null,
         // The words themselves, not only the shortened line above them: the
         // edit control starts from what is actually there, and an edit box
         // that opened empty would replace a draft with whatever was typed.
@@ -469,6 +512,8 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      llm,
+      overview,
       webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
@@ -535,6 +580,8 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      llm,
+      overview,
       webhookStaging,
       canWrite,
       rows: channels.map((channel) => ({
@@ -578,6 +625,8 @@ export async function readMarketingConsole(
       pageSize: MARKETING_COMPETITOR_READ_LIMIT,
       switches,
       configGeneration,
+      llm,
+      overview,
       webhookStaging,
       canWrite,
       truncated: competitors.length > MARKETING_COMPETITOR_READ_LIMIT,
@@ -608,6 +657,8 @@ export async function readMarketingConsole(
     pageSize: MARKETING_READ_PAGE_SIZE,
     switches,
     configGeneration,
+    llm,
+    overview,
     webhookStaging,
     canWrite,
     rows: reports.map((report) => ({

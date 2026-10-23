@@ -7,6 +7,7 @@ import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.share
 
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
+import { chatProductUiCopy } from "@/lib/chatProductUiCopy";
 import { SUPPORTED_LANGUAGES, type Language } from "@/lib/language";
 
 const guestCopyBoundaries: Record<Language, readonly RegExp[]> = {
@@ -38,32 +39,34 @@ const render = (language: Language, authenticated = false) => renderToStaticMark
         ? { user: { id: "account-a" }, expires: "2099-01-01T00:00:00.000Z" }
         : null}>
         <LanguageProvider initialLang={language}>
-          <LandingPageContent guestTrialAvailable />
+          <LandingPageContent />
         </LanguageProvider>
       </SessionProvider>
     </PathnameContext.Provider>
   </AppRouterContext.Provider>
 );
 
-test("the actual static Guest landing renders direct Chat entry and Review comparison CTAs in every locale", () => {
+test("the Review product page retains direct comparison CTAs in every locale", () => {
   for (const language of SUPPORTED_LANGUAGES) {
     const html = render(language);
-    assert.match(html, new RegExp(`<a(?=[^>]*data-testid="landing-chat-product-cta")(?=[^>]*href="/chat\\?lang=${language}")[^>]*>`));
-    for (const testId of ["landing-primary-cta", "landing-final-cta", "landing-review-product-cta"]) {
-      assert.match(html, new RegExp(`<a(?=[^>]*data-testid="${testId}")(?=[^>]*href="/review\\?lang=${language}&amp;entry=guest-preview")[^>]*>`));
+    for (const testId of ["landing-primary-cta", "landing-final-cta"]) {
+      assert.ok(html.includes('href="/review?lang=' + language + '"'), language + ": canonical Review entry");
+      assert.ok(html.includes('data-testid="' + testId + '"'), language + ": comparison action");
     }
-    assert.match(html, /data-testid="landing-hero-signup-note"/);
-    const description = html.match(/<p[^>]*data-testid="landing-chat-product-description"[^>]*>([^<]*)<\/p>/)?.[1];
-    assert.ok(description, `${language}: the Guest card must disclose its Smart Adaptive boundary`);
+    assert.doesNotMatch(html, /href="\/chat\?lang=/);
+  }
+});
+
+test("Guest Chat copy retains the existing allowance and manual attachment boundary", () => {
+  for (const language of SUPPORTED_LANGUAGES) {
     for (const boundary of guestCopyBoundaries[language]) {
-      assert.match(description, boundary, `${language}: missing ${boundary} disclosure`);
+      assert.match(chatProductUiCopy[language].guestChatDescription, boundary);
     }
   }
 });
 
-test("an authenticated landing renders an unavailable Chat card until its private offer resolves", () => {
+test("the authenticated Review page stays a comparison entry", () => {
   const html = render("en", true);
-  assert.match(html, /data-testid="landing-chat-unavailable"/);
   assert.doesNotMatch(html, /data-testid="landing-chat-product-cta"/);
   assert.doesNotMatch(html, /data-testid="landing-hero-signup-note"/);
   assert.match(html, /href="\/review\?lang=en"/);

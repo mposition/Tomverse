@@ -6,6 +6,8 @@ import test from "node:test";
 import {
     DB_INTEGRATION_FALLBACK_GROUP,
     DB_INTEGRATION_GROUPS,
+    POSTGRES16_COMPAT_GROUP,
+    POSTGRES16_COMPAT_SUITES,
     dbIntegrationGroupOf,
 } from "../scripts/db-integration-groups.mjs";
 
@@ -107,6 +109,30 @@ test("the workflow runs every lane the module defines", () => {
     }
 });
 
+test("the PostgreSQL 16 compatibility job runs its suites on 16 and stays out of the lanes", () => {
+    // The support-triage policy requires its timeout suites on 16 and 17. The
+    // lanes run 17; this job reruns the listed suites on 16 without taking
+    // them out of their lane.
+    assert.ok(!DB_INTEGRATION_GROUPS.includes(POSTGRES16_COMPAT_GROUP));
+    for (const suite of POSTGRES16_COMPAT_SUITES) {
+        assert.ok(onDisk.includes(suite), `${suite} is not on disk`);
+        assert.notEqual(dbIntegrationGroupOf(suite), POSTGRES16_COMPAT_GROUP);
+    }
+    const workflow = readFileSync(
+        resolve(ROOT, ".github", "workflows", "credit-finance-db-integration.yml"),
+        "utf8"
+    );
+    assert.ok(
+        /credit-finance-db-postgres16:[\s\S]*?image: postgres:16-alpine[\s\S]*?DB_INTEGRATION_GROUP: postgres16/.test(workflow),
+        "a job must run the postgres16 group on postgres:16-alpine"
+    );
+    assert.ok(
+        /credit-finance-db-result:[\s\S]*?needs: \[[^\]]*\bcredit-finance-db-postgres16\b[^\]]*\]/.test(workflow) &&
+            workflow.includes('test "$POSTGRES16_RESULT" = "success"'),
+        "the required result job must fail when the PostgreSQL 16 job does"
+    );
+});
+
 test("no lane is large enough to put the timeout back where it was", () => {
     // The split exists because a 28-minute suite rode a 30-minute timeout. A
     // lane holding most of the suites would recreate that, and the next person
@@ -121,4 +147,16 @@ test("no lane is large enough to put the timeout back where it was", () => {
         largest <= onDisk.length / 3,
         `the largest lane holds ${largest} of ${onDisk.length} suites; rebalance the rules`
     );
+});
+
+test("the optimizer ledger and AMUX card DB suites run with the AMUX suites", () => {
+    assert.equal(dbIntegrationGroupOf(
+        "tests/integration/chat-unified-optimizer-ledger.db.test.ts"), "amux");
+    assert.equal(dbIntegrationGroupOf(
+        "tests/integration/chat-unified-optimizer-amux-test-card.db.test.ts"), "amux");
+});
+
+test("managed Code monetary scenarios run in the finance lane", () => {
+    assert.equal(dbIntegrationGroupOf(
+        "tests/integration/code-managed-execution.db.test.mjs"), "finance");
 });
