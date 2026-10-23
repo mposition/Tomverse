@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { readVoiceCreditPayload, settleVoiceConversationCredits } from "@/lib/voiceConversationCredits";
@@ -11,6 +12,27 @@ const epoch = new Date(0);
 const receivers = new Map<string, () => void>();
 const receiverClosers = new Map<string, () => void>();
 const retryAfter = new Map<string, number>();
+
+/** A database lease also excludes receivers in other worker/maintenance processes. */
+export async function claimVoiceRecoveryLease(id: string) {
+  const token = randomUUID(); const until = new Date(Date.now() + 30_000).toISOString();
+  const changed = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{recoveryLease}', jsonb_build_object('token', ${token}::text, 'until', ${until}::text)), "updatedAt" = NOW()
+    WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND ("status" = 'reserved' OR "lastError" = 'VOICE_PROVIDER_STOP_PENDING')
+    AND COALESCE(("reservationPayload"->>'webLeaseUntil')::timestamptz, 'epoch'::timestamptz) <= NOW()
+    AND COALESCE(("reservationPayload"->'recoveryLease'->>'until')::timestamptz, 'epoch'::timestamptz) <= NOW()`;
+  return changed === 1 ? token : null;
+}
+async function renewRecoveryLease(id: string, token: string) {
+  const until = new Date(Date.now() + 30_000).toISOString();
+  const changed = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{recoveryLease,until}', to_jsonb(${until}::text))
+    WHERE "id" = ${id} AND "reservationPayload"->'recoveryLease'->>'token' = ${token}
+    AND ("status" = 'reserved' OR "lastError" = 'VOICE_PROVIDER_STOP_PENDING')`;
+  if (changed !== 1) throw new Error("The recovery receiver lost ownership.");
+}
+export async function releaseVoiceRecoveryLease(id: string, token: string) {
+  await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = "reservationPayload" - 'recoveryLease'
+    WHERE "id" = ${id} AND "reservationPayload"->'recoveryLease'->>'token' = ${token}`;
+}
 
 /** The independent worker receives final usage even when the web process dies. */
 export async function observeActiveVoiceConversations() {
@@ -32,12 +54,21 @@ export async function observeActiveVoiceConversations() {
       }
       continue;
     }
+    const lease = await claimVoiceRecoveryLease(row.id);
+    if (!lease) continue;
     const socket = attachVoiceProviderSession(row.providerRequestId!);
     const close = () => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
     const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
     const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
     const expiryTimer = setTimeout(() => { void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
-    function release() { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000); socket.close(); }
+    let released = false;
+    const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(release); }, 5_000);
+    function release() {
+      if (released) return; released = true;
+      clearTimeout(stopTimer); clearTimeout(expiryTimer); clearInterval(leaseTimer);
+      receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
+      socket.close(); void releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
+    }
     receivers.set(row.id, release);
     receiverClosers.set(row.id, close);
     socket.once("open", () => { if (row.lastError || Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) close(); });
@@ -53,7 +84,7 @@ export async function observeActiveVoiceConversations() {
       }
     });
     socket.once("error", () => { release(); });
-    socket.once("close", () => { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000); });
+    socket.once("close", release);
   }
 }
 
@@ -61,7 +92,8 @@ export function stopVoiceRecoveryReceivers() { for (const release of receivers.v
 
 export async function renewVoiceWebLease(id: string) {
   const until = new Date(Date.now() + 30_000).toISOString();
-  const count = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{webLeaseUntil}', to_jsonb(${until}::text)), "updatedAt" = NOW() WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND "status" = 'reserved' AND "lastError" IS NULL`;
+  const count = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{webLeaseUntil}', to_jsonb(${until}::text)), "updatedAt" = NOW() WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND "status" = 'reserved' AND "lastError" IS NULL
+    AND COALESCE(("reservationPayload"->'recoveryLease'->>'until')::timestamptz, 'epoch'::timestamptz) <= NOW()`;
   if (count !== 1) throw new Error("The primary voice receiver must close.");
 }
 
@@ -123,16 +155,20 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 10) 
   });
   const result = { examined: rows.length, settled: 0, deferred: 0 };
   await Promise.all(rows.map(async row => {
+    let lease: string | null = null;
     try {
       const payload = readVoiceCreditPayload(row.reservationPayload);
       if (receivers.has(row.id)) return;
       if (Date.parse(payload.webLeaseUntil ?? "") > now.getTime()) return;
+      if (Date.parse(payload.recoveryLease?.until ?? "") > now.getTime()) return;
       const saved = row.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
       if (saved?.confirmed && typeof saved.seconds === "number" && saved.seconds >= 0 && saved.seconds <= payload.maxSeconds) {
         await finalizeVoiceReservation(row.id, saved.seconds); result.settled++; return;
       }
       const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
       if (!row.lastError && now.getTime() < closeAt) return;
+      lease = await claimVoiceRecoveryLease(row.id);
+      if (!lease) return;
       let providerStopped = !row.providerRequestId && !payload.dispatchStartedAt;
       if (row.providerRequestId) {
         const seconds = await closeVoiceProviderSession(row.providerRequestId);
@@ -158,6 +194,7 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 10) 
       result.deferred++;
       await prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {});
     } finally {
+      if (lease) await releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
       await prisma.chatCreditReservation.updateMany({ where: { id: row.id }, data: { updatedAt: now } }).catch(() => {});
     }
   }));

@@ -13,7 +13,7 @@ if (url.hostname !== "127.0.0.1" || url.port !== "55439" || url.pathname !== "/v
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: 300, dailyMessageLimit: 300 }) } });
 const { prisma } = await import(mod("lib/prisma.ts"));
 const { reserveVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
-const { recordVoiceUsage, finalizeVoiceReservation } = await import(mod("lib/voiceConversationRecovery.ts"));
+const { recordVoiceUsage, finalizeVoiceReservation, claimVoiceRecoveryLease, releaseVoiceRecoveryLease } = await import(mod("lib/voiceConversationRecovery.ts"));
 const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } = await import(mod("lib/voiceConversationTasks.ts"));
 let userId;
 beforeEach(async () => {
@@ -95,6 +95,24 @@ test("the research migration allows existing jobs and links new jobs to their du
   const legacy = await prisma.perplexityAsyncJob.create({ data }); assert.equal(legacy.sourceUserMessageId, null);
   const linked = await prisma.perplexityAsyncJob.create({ data: { ...data, perplexityJobId: randomUUID(), assistantMessageId: randomUUID(), sourceUserMessageId: randomUUID() } });
   assert.ok(linked.sourceUserMessageId);
+});
+
+test("settlement removes undelivered answer content while preserving accounting references", async () => {
+  const row = await reserve(); await registerVoiceTask(row.id, "queued-task", "Question");
+  await queueVoiceTaskResult(row.id, { delegationId: "queued-task", conversationId: "chat-1", sourceId: randomUUID(), sourceText: "Question", answer: "Transient answer" });
+  await settleVoiceConversationCredits(row.id, 10, true);
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(saved.reservationPayload.tasks[0].answer, undefined);
+  assert.equal(saved.reservationPayload.tasks[0].id, "queued-task");
+  assert.ok(saved.reservationPayload.providerCostHold);
+});
+
+test("database ownership excludes competing recovery processes and fences stale releases", async () => {
+  const row = await reserve();
+  const claims = await Promise.all(Array.from({ length: 6 }, () => claimVoiceRecoveryLease(row.id)));
+  const winner = claims.find(Boolean); assert.ok(winner); assert.equal(claims.filter(Boolean).length, 1);
+  await releaseVoiceRecoveryLease(row.id, "stale-token"); assert.equal(await claimVoiceRecoveryLease(row.id), null);
+  await releaseVoiceRecoveryLease(row.id, winner); assert.ok(await claimVoiceRecoveryLease(row.id));
 });
 
 test("a killed primary process is recovered by an independent receiver with one durable charge", { timeout: 25000 }, async () => {

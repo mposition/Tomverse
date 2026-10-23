@@ -9,7 +9,19 @@ class SecurityError extends Error { constructor(status, code, message) { super(m
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ApiSecurityError: SecurityError } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatUsageBucket: { findUnique: async () => w.heartbeat ? { updatedAt: new Date(w.heartbeat) } : null, upsert: async () => { w.heartbeat = Date.now(); } },
-  $executeRaw: async (_parts, seconds, confirmed, id) => {
+  $executeRaw: async (parts, ...values) => {
+    const sql = parts.join("");
+    if (sql.includes("jsonb_build_object('token'")) {
+      const [token, until, id] = values; const row = w.rows.find(row => row.id === id);
+      if (!row || Date.parse(row.reservationPayload.webLeaseUntil ?? "") > Date.now() || Date.parse(row.reservationPayload.recoveryLease?.until ?? "") > Date.now()) return 0;
+      row.reservationPayload.recoveryLease = { token, until }; return 1;
+    }
+    if (sql.includes("- 'recoveryLease'")) {
+      const [id, token] = values; const row = w.rows.find(row => row.id === id);
+      if (row?.reservationPayload.recoveryLease?.token === token) delete row.reservationPayload.recoveryLease;
+      return 1;
+    }
+    const [seconds, confirmed, id] = values;
     const row = w.rows.find(row => row.id === id); const saved = row.providerUsageSnapshot;
     if (row.status !== "reserved" || saved?.confirmed || (saved?.seconds ?? 0) > seconds || seconds > row.reservationPayload.maxSeconds) return 0;
     row.providerUsageSnapshot = { seconds, confirmed }; return 1;

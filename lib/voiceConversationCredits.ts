@@ -29,6 +29,7 @@ export type VoiceCreditPayload = {
   dispatchStartedAt?: string;
   closeAt?: string;
   webLeaseUntil?: string;
+  recoveryLease?: { token: string; until: string };
   providerCostHold?: { dayStart: string; monthStart: string; amount: number };
 };
 
@@ -192,8 +193,14 @@ export async function settleVoiceConversationCredits(id: string, seconds: number
       reservation: restoreVoiceBudgets(payload.budgets), client: tx,
       basis: evidence === "observed_minimum" ? { kind: "reservation" } : initialized ? { kind: "provider_seconds", seconds: Math.max(VOICE_CONVERSATION_INITIAL_SECONDS, seconds) } : { kind: "not_billed" },
     });
+    // Transient delivery content must not outlive the voice session in a ledger row.
+    const settledPayload = { ...payload } as Record<string, unknown>;
+    if (Array.isArray(settledPayload.tasks)) settledPayload.tasks = settledPayload.tasks.map(task => {
+      const saved = { ...task }; delete saved.answer; return saved;
+    });
     await tx.chatCreditReservation.update({ where: { id }, data: {
       status: "settled", outcome: seconds > 0 ? "completed" : "empty", settledAt: new Date(),
+      reservationPayload: settledPayload as Prisma.InputJsonValue,
       settledCredits: price.credits, settledCostMicroUsd: BigInt(price.costMicroUsd),
       providerUsageSnapshot: { seconds, source: "provider", confirmed: evidence === "final", settlementBasis: evidence,
         providerCostEstimated: evidence !== "final", providerStopped },

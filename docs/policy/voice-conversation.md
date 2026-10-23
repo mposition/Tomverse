@@ -50,6 +50,8 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   available credits refuses Start; unused credits return after known settlement.
 - Voice reservations use `source=voice_conversation` in `ChatCreditReservation`.
   Their JSON contains accounting/session references, not transcript or audio.
+  A delegated answer is queued temporarily for delivery and removed when sent,
+  when delivery fails, or atomically with settlement, including crash recovery.
   The generic token-reservation expiry reconciler excludes this source: expiry
   or a missing final event is not evidence of zero voice usage.
 - Wallet and subject/provider seconds reservations now commit and settle in the
@@ -57,7 +59,8 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 - The independent `voice:watchdog` process records monotonic provider usage and
   takes over the provider sideband after the web receiver's 30-second durable
   lease expires. A healthy receiver renews every five seconds; the worker
-  avoids competing receivers, enforces the deadline and observes the kill
+  uses a database lease to exclude competing recovery and maintenance
+  receivers, enforces the deadline and observes the kill
   switch on every cycle. It receives final events after a web process dies.
   New paid starts require a
   heartbeat newer than 15 seconds. Its timers close sessions at the persisted

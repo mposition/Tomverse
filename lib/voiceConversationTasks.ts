@@ -52,7 +52,7 @@ export async function dispatchVoiceTask(id: string, socket: WebSocket) {
     await change(id, payload => { const saved = payload.tasks?.find(t => t.id === task.id); if (saved) { saved.state = "sent"; delete saved.answer; } });
   } catch (error) {
     // A possibly accepted append is not retried after an unknown outcome.
-    await change(id, payload => { const saved = payload.tasks?.find(t => t.id === task.id); if (saved) saved.state = "failed"; }).catch(() => {});
+    await change(id, payload => { const saved = payload.tasks?.find(t => t.id === task.id); if (saved) { saved.state = "failed"; delete saved.answer; } }).catch(() => {});
     throw error;
   }
 }
