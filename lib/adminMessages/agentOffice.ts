@@ -414,7 +414,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           human: [
             "Accepts or dismisses each suggestion, confirms groups and sends any reply.",
           ],
-          switch: "SUPPORT_TRIAGE_ENABLED set to exactly \"true\"; without it a run writes nothing.",
+          switch: "Turned on in Support → Feedback (AI triage); with nothing saved there, SUPPORT_TRIAGE_ENABLED=\"true\". Off, a run writes nothing.",
         },
         marketing: {
           summary: "Publishes approved social posts to the brand's accounts through a deterministic Guard, with a person in charge of what goes public.",
@@ -1295,7 +1295,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           human: [
             "제안을 받아들이거나 버리고, 묶음을 확인하고, 답변은 사람이 보냅니다.",
           ],
-          switch: "SUPPORT_TRIAGE_ENABLED가 정확히 \"true\"여야 합니다. 아니면 실행해도 아무것도 쓰지 않습니다.",
+          switch: "지원 → 피드백 탭의 AI 분류에서 켭니다. 거기 저장된 값이 없으면 SUPPORT_TRIAGE_ENABLED=\"true\"를 봅니다. 꺼져 있으면 실행해도 아무것도 쓰지 않습니다.",
         },
         marketing: {
           summary: "승인된 소셜 게시물을 결정적 Guard를 거쳐 브랜드 계정에 게시합니다. 무엇이 공개될지는 사람이 정합니다.",

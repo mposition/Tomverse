@@ -106,6 +106,7 @@ type PromptPayload = {
 };
 
 export type DesktopChatShellProps = {
+  workspaceNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   studioStarterCards?: readonly VisibleStarterCard[];
@@ -179,7 +180,11 @@ export type DesktopChatShellProps = {
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-  onStartImageDraft?: (draftText: string, modelId?: string) => void;
+  onStartImageDraft?: (
+    draftText: string,
+    modelId?: string,
+    options?: { fromImageRequest?: boolean }
+  ) => void;
   imageWorkspace?: React.ReactNode;
   /**
    * A read-only block above the panel row, for a conversation that has one.
@@ -409,6 +414,7 @@ export type DesktopChatShellProps = {
 };
 
 export function DesktopChatShell({
+  workspaceNotice,
   review,
   chatWorkspace,
   studioStarterCards,
@@ -789,7 +795,7 @@ export function DesktopChatShell({
   // STG-F003: portal into a host rather than into the slot itself, so a slot
   // that remounts never rebuilds the composer and drops a draft in progress.
   const composerPortalHost = useComposerPortalHost(bottomInputSlot);
-  // The consent notice sits directly above the composer, so it follows it.
+  // The consent notice follows the composer at the bottom of its section.
   const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
   const consentSlotTarget = bottomConsentSlot;
   const registerChatConsentSlot = useChatConsentSlotRef();
@@ -1104,6 +1110,7 @@ export function DesktopChatShell({
             })}
           </div>
         )}
+        {workspaceNotice}
         <div
           ref={setConversationDropSurface}
           data-testid="desktop-conversation-surface"
@@ -1497,9 +1504,6 @@ export function DesktopChatShell({
         </div>
         <div className={studio ? "review-studio-task" : "contents"}>
         {studio && <h2>{singleTranscript ? t("chat.inputPlaceholder") : reviewWorkspaceCopy[lang].question}</h2>}
-        <div className="w-full shrink-0 px-4 md:px-6">
-          <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-5xl" />
-        </div>
         <div ref={setBottomInputSlot} className={studio ? "review-studio-composer-slot" : undefined} />
         {composerPortalHost &&
           createPortal(
@@ -1572,6 +1576,11 @@ export function DesktopChatShell({
             composerPortalHost
           )}
         {studio && !singleTranscript && <div className="review-mobile-starters"><ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /></div>}
+        <div
+          ref={setBottomConsentSlot}
+          data-testid="composer-consent-slot"
+          className="mx-auto w-full max-w-5xl shrink-0 px-4 empty:hidden md:px-6"
+        />
         </div>
           </>
         )}

@@ -26,6 +26,7 @@ import {
   AMUX_SESSION_INTAKE_ENV,
   amuxSessionIntakeWritePermitted,
   inspectAmuxIdeaSessionSubmission,
+  inspectAmuxSessionModelChoice,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 import {
   AmuxIdeaSessionSubmissionError,
@@ -75,6 +76,7 @@ const SESSION_PREWRITE_STATUS: Partial<Record<AmuxIdeaSessionSubmissionError["co
   scope_unavailable: 409,
   outside_scope: 409,
   model_not_approved: 409,
+  model_not_launchable: 409,
   reference_snapshot_unavailable: 503,
   // key_store_unavailable stays a read-back: the shared UI table treats it so
   // on the v4 path, where a key outcome can be uncertain.
@@ -138,12 +140,17 @@ export async function POST(request: Request) {
       if (!inspected.ok) {
         return NextResponse.json({ error: inspected.code }, { status: 400, headers: noStore });
       }
+      // The owner may pick this idea's model; without one the scope's model runs.
+      const choice = inspectAmuxSessionModelChoice(body.model);
+      if (!choice.ok) {
+        return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
+      }
       // The session analysis reads its references from pinned checkouts; an
       // idea with none would be claimed and then have nothing to read.
       if (inspected.counts.repositoryCount + inspected.counts.pullRequestCount === 0) {
         return NextResponse.json({ error: "references_required" }, { status: 400, headers: noStore });
       }
-      const committed = await submitAmuxIdeaFromSession({ inspected });
+      const committed = await submitAmuxIdeaFromSession({ inspected, model: choice.model });
       return NextResponse.json(
         { ideaId: committed.ideaId, requestId: committed.requestId, state: "submitted",
           origin: "session",

@@ -25,3 +25,23 @@ export async function resolveChatRouteSession(request: Request): Promise<
   if (!user || user.accountStatus !== "active") return { response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.refreshRejected) };
   return { session: { user: { id: user.id, name: user.name, email: user.email, image: user.image }, expires: new Date(Date.now() + 600_000).toISOString() } };
 }
+
+/** Sensitive account actions retain the same step-up window as the web. */
+export async function resolveAccountRouteSession(request: Request) {
+  if (!request.headers.has("authorization")) return resolveChatRouteSession(request);
+  // Local implementation does not activate a new export/deletion authority.
+  if (process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED !== "true") {
+    return { response: Response.json({ code: "NATIVE_ACCOUNT_UNAVAILABLE" }, { status: 503 }) };
+  }
+  const authentication = await resolveChatRouteSession(request);
+  if (authentication.response || !authentication.session) return authentication;
+  const bearer = await requireMobileBearer(request);
+  if (!bearer.ok) return { response: bearer.response };
+  const family = await prisma.mobileTokenFamily.findFirst({
+    where: { id: bearer.identity.familyId, userId: bearer.identity.userId, deviceId: bearer.identity.deviceId, revokedAt: null, absoluteExpiresAt: { gt: new Date() } },
+    select: { createdAt: true },
+  });
+  if (!family) return { response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.refreshRejected) };
+  // Rotation changes lastRotatedAt, never createdAt: refresh is not reauthentication.
+  return { session: { ...authentication.session, user: { ...authentication.session.user, authenticatedAt: family.createdAt.toISOString() } } };
+}

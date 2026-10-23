@@ -19,15 +19,17 @@ const entry = (number: number, base: string, head: string) => ({
   status: "waiting",
 });
 const seed = {
-  version: 2,
-  capacity: 3,
+  version: 3,
+  capacity: 40,
+  needs: { develop: 15, main: 34, developPush: 18, mainPush: 19 },
   queue: [entry(901, "develop", "claude/to-develop/a"), entry(902, "main", "release/2026-10-20-b"), entry(903, "develop", "claude/to-develop/c")],
   released: [],
   pendingStatus: [],
   events: [{ at: "2026-10-20T01:05:00.000Z", kind: "held", number: 903, shadow: false, detail: "no_slot" }],
   lastRound: {
     at: "2026-10-20T01:05:00.000Z",
-    used: 3,
+    // main 34 + the develop deploy 18.
+    used: 52,
     running: [{ number: 800, title: "Release in flight", base: "main" }],
     deploys: [{ branch: "develop", sha: "e".repeat(40), title: "Merge pull request #799 from mposition/claude/to-develop/z" }],
   },
@@ -50,17 +52,17 @@ test("the operator reorders the line by dragging and from the keyboard, and each
     update: { value: JSON.stringify(seed) },
   });
   await signInAs("owner");
-  await page.goto("/admin/agent-digests?tab=ci-admission");
+  await page.goto("/admin/qa-release?tab=ci-admission");
   // The analytics consent banner sits over the bottom of the page until declined.
   await page.getByRole("button", { name: "Decline", exact: true }).click();
 
   const section = page.getByTestId("ci-admission-section");
   await expect(section).toBeVisible();
-  await expect(section.getByTestId("ci-admission-slots")).toContainText("3 / 3");
+  await expect(section.getByTestId("ci-admission-slots")).toContainText("52 / 40 runners");
   await expect(section.getByTestId("ci-admission-slots")).toContainText("#800 Release in flight");
   // Deploy CI on develop is shown in the slots it occupies.
   await expect(section.getByTestId("ci-admission-deploy-eeeeeee")).toContainText("Merge pull request #799");
-  await expect(section.getByTestId("ci-admission-deploy-eeeeeee")).toContainText("deploy · develop · 1 slot(s)");
+  await expect(section.getByTestId("ci-admission-deploy-eeeeeee")).toContainText("deploy · develop · 18 runners");
   expect(await shownOrder(page)).toEqual([901, 902, 903]);
   await page.screenshot({ path: "test-results-admin/ci-admission-dark.png", fullPage: true });
 

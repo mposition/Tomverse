@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { compileManifestPattern } from "../lib/agentAuthorityFiles.ts";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -13,9 +14,27 @@ const POLICY = readFileSync(new URL("../docs/policy/qa-release-agent.md", import
 test("the appendix A patterns are read from the policy as it stands", () => {
   const patterns = qaReleaseAgentOwnPatterns(POLICY);
   assert.ok(patterns, "appendix A is found");
-  assert.ok(patterns.includes("lib/qaRelease*"));
+  // Only what changes the lane itself (owner, 2026-10-23): its merge code, its start check and the IaC.
+  assert.ok(patterns.includes("lib/qaReleaseMergeLane*"));
+  assert.ok(patterns.includes("scripts/merge-train-core.mjs"));
   assert.ok(patterns.includes(".railway/**"));
-  assert.ok(patterns.includes("app/(site)/(application)/admin/agent-digests/**"));
+  assert.ok(!patterns.includes("lib/qaRelease*"));
+  assert.ok(!patterns.some((pattern) => pattern.startsWith("components/") || pattern.startsWith("tests/")));
+  // What controls the lane stays too (independent review, 2026-10-23): its API entry points, the
+  // operator control and its Admin routes, the stores that write the audit chain, the train.
+  const own = (path) => patterns.some((pattern) => compileManifestPattern(pattern).test(path));
+  for (const path of [
+    "app/api/internal/agents/qa-release/merge-lane/consume/route.ts",
+    "app/api/admin/agent-digests/qa-release/control/route.ts",
+    "lib/qaReleaseOperatorControlAdmin.ts",
+    "lib/qaReleaseTrainStore.ts",
+    "lib/qaReleaseTrainPorts.ts",
+    "lib/agentDigestStore.ts",
+    "scripts/qa-release-train-service.mjs",
+  ]) assert.ok(own(path), path);
+  for (const path of ["components/admin/QaReleaseLaneVerdictsSection.tsx", "lib/qaReleaseAttentionCore.ts", "lib/qaReleaseDigestBuildCore.ts", "tests/qaReleaseTrainService.test.mjs"]) {
+    assert.ok(!own(path), path);
+  }
   assert.ok(patterns.every((pattern) => !pattern.includes(" ")));
 });
 

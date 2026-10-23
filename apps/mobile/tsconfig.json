@@ -1,10 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": ["vite/client"],
+    "types": [
+      "vite/client"
+    ],
     "strict": true,
     "noEmit": true,
     "isolatedModules": true,
@@ -14,9 +20,24 @@
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": ["../../*"],
-      "@tomverse/chat-core": ["../../packages/chat-core/src/index.ts"]
+      "@/*": [
+        "../../*"
+      ],
+      "@tomverse/chat-core": [
+        "../../packages/chat-core/src/index.ts"
+      ],
+      "@tomverse/chat-ui": [
+        "../../packages/chat-ui/src/index.tsx"
+      ],
+      "@tomverse/api-client": [
+        "../../packages/api-client/src/index.ts"
+      ]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "capacitor.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts",
+    "capacitor.config.ts"
+  ]
 }

@@ -2,6 +2,7 @@ import {
   classifyFeedbackFailure,
   feedbackReferenceFromId,
   isFeedbackReference,
+  type FeedbackAnswerSignal,
   type FeedbackSubmitFailure,
 } from "@/lib/feedbackPolicy";
 
@@ -24,6 +25,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export type FeedbackSubmitPayload = {
   type: string;
   message: string;
+  messageId?: string;
+  answerSignal?: FeedbackAnswerSignal;
   email?: string;
   traceId?: string;
   /** Server-issued proof for the trace above; sent once, never stored. */

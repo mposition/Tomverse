@@ -156,7 +156,11 @@ const drawerControls = (page: Page, mode: "guest" | "authenticated"): DrawerCont
       // `minHeight` override remains to hide a regression.
       {
         label: "login",
-        locator: drawer.getByTestId("sidebar-account-controls").getByRole("button").first(),
+        locator: drawer.getByTestId("guest-account-login"),
+      },
+      {
+        label: "guest account menu trigger",
+        locator: drawer.getByTestId("sidebar-rail-account-trigger"),
       },
       {
         label: "analytics cookie settings",

@@ -9,6 +9,7 @@
    docs/policy/shared-packages.md. Font tokens stay below, because they
    resolve `next/font` variables this app injects. */
 @import "@tomverse/ui-tokens/tokens.css";
+@import "@tomverse/ui-tokens/wordmark.css";
 
 /* UI-001. `dark:` used to mean one thing only: an ancestor carries `.dark`.
    That is correct for an explicit choice and wrong for everyone who has not

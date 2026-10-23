@@ -13,7 +13,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef, MouseEventHandler } from "react";
-import { CHAT_MARKDOWN_REMARK_PLUGINS } from "@/lib/chatMarkdownPlugins";
+import { AnswerMarkdown } from "@tomverse/chat-ui";
 import rehypeHighlight from "rehype-highlight";
 import {
   ArrowDown,
@@ -40,7 +40,8 @@ import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
-import { getImageModel, imageModelOwner } from "@/lib/imageModelRegistry";
+import { imageModelOwner } from "@/lib/imageModelRegistry";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
@@ -423,6 +424,7 @@ export function ChatMessageList({
   importedTranscript,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS, getModel } = useModelCatalog();
+  const { getModel: getImageModel } = useImageModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
@@ -1236,8 +1238,7 @@ export function ChatMessageList({
                     )
                   ) : msg.role === "assistant" ? (
                     <>
-                    <ReactMarkdown
-                      remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
+                    <AnswerMarkdown
                       rehypePlugins={[rehypeHighlight]}
                       components={{
                         /*
@@ -1333,7 +1334,7 @@ export function ChatMessageList({
                       }}
                     >
                       {displayContent}
-                    </ReactMarkdown>
+                    </AnswerMarkdown>
                     {isActivelyGenerating && (
                       <span
                         className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-zinc-400 align-middle motion-reduce:animate-none dark:bg-zinc-500"
@@ -1382,6 +1383,11 @@ export function ChatMessageList({
                           </p>
                         );
                       })()}
+                    {!isUser && !isActivelyGenerating && !msg.carriedAnswer && msg.status !== "error" && displayContent.trim() && (
+                      <FeedbackButton sourceMessageId={msg.id} currentModelId={msg.modelId}
+                        triggerLabel={t("memoryReview.reportAnswer")} triggerTestId="memory-answer-feedback"
+                        triggerClassName="mt-2 text-[11px] text-zinc-500 underline underline-offset-2" />
+                    )}
                     {/*
                       Which model answered, on a turn Auto routed
                       (docs/ui-contracts/auto-model-selection.md).

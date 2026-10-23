@@ -11,7 +11,7 @@
 // Every request follows no redirect and times out. The output is the outcome
 // code -- never a header, a token, a key or a body.
 
-import { createQaReleaseMergeLaneAppPorts } from "../lib/qaReleaseMergeLaneAppClient.ts";
+import { createQaReleaseLaneRoundReporter, createQaReleaseMergeLaneAppPorts } from "../lib/qaReleaseMergeLaneAppClient.ts";
 import { createQaReleaseGithubPorts, qaReleaseInstallationToken } from "../lib/qaReleaseMergeLaneGithub.ts";
 import { createQaReleaseRailwayPorts } from "../lib/qaReleaseMergeLaneRailway.ts";
 import { runQaReleaseMergeLaneRound } from "../lib/qaReleaseMergeLaneServiceCore.ts";
@@ -51,11 +51,21 @@ const privateKey = (env.QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY ?? "").includes("\
 
 const readHttp = httpWith(READ_TIMEOUT_MS);
 const token = qaReleaseInstallationToken(readHttp, (env.QA_RELEASE_MERGE_LANE_APP_ID ?? "").trim(), privateKey, Date.now);
-const result = await runQaReleaseMergeLaneRound(env, {
-  app: createQaReleaseMergeLaneAppPorts({ http: httpWith(APP_TIMEOUT_MS), env }),
-  github: createQaReleaseGithubPorts({ http: readHttp, token }),
-  railway: createQaReleaseRailwayPorts({ http: readHttp, token: env.QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN ?? "" }),
-});
+let verdicts = null;
+const result = await runQaReleaseMergeLaneRound(
+  env,
+  {
+    app: createQaReleaseMergeLaneAppPorts({ http: httpWith(APP_TIMEOUT_MS), env }),
+    github: createQaReleaseGithubPorts({ http: readHttp, token }),
+    railway: createQaReleaseRailwayPorts({ http: readHttp, token: env.QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN ?? "" }),
+  },
+  { verdicts: (list) => { verdicts = list; } },
+);
+// The Admin screen's round record. Display only: a failure here is not the
+// round's, and a round that refused to start or was switched off sends none.
+if (result.outcome !== "refused_to_start" && result.outcome !== "disabled") {
+  await createQaReleaseLaneRoundReporter({ http: httpWith(READ_TIMEOUT_MS), env })({ outcome: result.outcome, verdicts }).catch(() => false);
+}
 clearTimeout(supervisor);
 console.log(JSON.stringify(result));
 process.exitCode = result.exitCode;

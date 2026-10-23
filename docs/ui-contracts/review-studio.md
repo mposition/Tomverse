@@ -40,6 +40,16 @@ existing handlers. Chat and Review appearance preferences are independent
 Both default to Studio; Classic stays selectable without losing the draft.
 Light/Dark is independent of either appearance preference.
 
+Chat and Review share `ChatInput` for local/Drive attachments, upload status,
+paste/drop, voice, web search, memory, assistants and image/research handoffs.
+Studio search/research shortcuts use the same handlers as the tools menu;
+Easy retains its existing research restriction. Product-specific model selection
+and submission stay with the workspace. All composer menus portal outside the
+scrolling panels so attachment sources remain reachable in either product.
+Analytics consent sits after the composer and AI disclaimer, at the bottom of
+the Studio question panel or mobile dock, without changing the consent actions.
+The mobile dock reserves the bottom safe area after its last visible footer.
+
 In Review Studio, drag a model card or answer header into the large answer
 panel to focus that model. The same cards support click, tap, Enter and Space.
 Changing focus or switching to side-by-side only changes the live layout:

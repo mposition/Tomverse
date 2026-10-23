@@ -24,6 +24,24 @@ const release = (number, body, merged = true) => ({ number, title: `release: ${n
 test("a release pull request names the develop pull requests it carries", () => {
   assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "release: two (#2873)", body: "Brings #2862 and #2873.\nSee #2873." }), [2873, 2862]);
   assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: null, body: null }), []);
+  // A train names what it left out and skipped too; only its Included section is carried (#2906).
+  const train = [
+    "Release train 20261023-1400 (AEST), opened by the QA-release agent.",
+    "",
+    "## Included (2)",
+    "",
+    "- #2789 feat(agents): ci-budget subagent",
+    "- #2844 AMUX Workers",
+    "",
+    "## Left out (1)",
+    "",
+    "- #2776 feat(amux): price — cherry-pick conflict on main",
+    "",
+    "Already on main, skipped: #2824, #2872.",
+  ].join("\n");
+  assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "release: train 20261023-1400 (3 PRs)", body: train }), [2789, 2844]);
+  // An Included section at the end of the body counts to its end.
+  assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "x", body: "## Included (1)\n\n- #11 a" }), [11]);
 });
 
 test("candidates: merged develop pull requests in the window, newest first, each with whether it can ride", () => {
@@ -63,6 +81,37 @@ test("candidates: merged develop pull requests in the window, newest first, each
     candidates.filter((c) => qaReleaseTrainCargoPickable(c.status)).map((c) => c.number),
     [5, 1],
   );
+});
+
+test("a hotfix cut from the same branch name is on main, and a back-merge never rides", () => {
+  const candidates = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [
+      develop(10, "2026-10-22T01:00:00Z", { head: { ref: "claude/to-develop/ci-admission-fast-webhook" } }),
+      develop(11, "2026-10-22T02:00:00Z", { head: { ref: "claude/to-develop/back-merge-main-20261022" } }),
+      develop(12, "2026-10-22T03:00:00Z", { head: { ref: "main" } }),
+      develop(13, "2026-10-22T04:00:00Z", { head: { ref: "codex/to-develop/x" }, title: "Back-merge main into develop" }),
+      develop(14, "2026-10-22T05:00:00Z", { head: { ref: "claude/to-develop/train-picker" } }),
+      develop(15, "2026-10-22T06:00:00Z", { head: { ref: "claude/to-develop/fast-webhook" } }),
+    ],
+    // A hotfix whose body names no number; an open release cut from #14's branch name.
+    mergedMainJson: [{ ...release(865, "Answer webhooks at once."), head: { ref: "hotfix/2026-10-21-ci-admission-fast-webhook" } }],
+    openMainJson: [{ ...release(902, "No numbers.", false), head: { ref: "release/2026-10-23-train-picker" } }],
+    files: new Map([[15, ["lib/a.ts"]]]),
+    nowMs: NOW,
+  });
+  assert.deepEqual(
+    candidates.map((c) => [c.number, c.status, c.mainPullRequest]),
+    [
+      // Only the whole last segment matches: "fast-webhook" is not "ci-admission-fast-webhook".
+      [15, "available", null],
+      [14, "in_main_pull_request", 902],
+      [13, "back_merge", null],
+      [12, "back_merge", null],
+      [11, "back_merge", null],
+      [10, "on_main", 865],
+    ],
+  );
+  assert.deepEqual(candidates.filter((c) => qaReleaseTrainCargoPickable(c.status)).map((c) => c.number), [15]);
 });
 
 test("a pick is distinct positive numbers, at most the train's capacity", () => {

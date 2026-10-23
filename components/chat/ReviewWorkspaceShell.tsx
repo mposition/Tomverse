@@ -53,6 +53,7 @@ import {
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
+import { ImageModelCatalogProvider } from "@/components/images/ImageModelCatalogProvider";
 import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
 import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
@@ -338,6 +339,8 @@ export async function ReviewWorkspaceShell({
       {promptRefinerFixtureModeRefreshEnabled ? (
         <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
       ) : null}
+      {/* The catalogue crosses as context, not as a module global (see the provider). */}
+      <ImageModelCatalogProvider models={imageModels}>
       <ChatPageClient
         reviewEasyAvailable={reviewEasyEnabled() || reviewEasyFixtureOffered}
         guestDefaultModelId={guestDefaultModelId}
@@ -352,7 +355,6 @@ export async function ReviewWorkspaceShell({
         // keep offering yesterday's limit after a deployment changed it. This
         // page is `force-dynamic`, so the value is the running process's.
         imageGroupMaxModels={maxImageModels}
-        imageModels={imageModels}
         webSearchBackendReadiness={webSearchBackendReadiness}
         chatStarterEnabled={chatStarterEnabled}
         chatStarterKnownFlagKeys={starterKnownFlagKeys}
@@ -361,6 +363,7 @@ export async function ReviewWorkspaceShell({
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
       />
+      </ImageModelCatalogProvider>
       </HelpGuideAccessProvider>
     </GuestVerificationProvider>
   );

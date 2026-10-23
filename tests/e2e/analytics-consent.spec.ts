@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
+
+test.beforeEach(async ({ page }) => {
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
+});
 
 test("mobile analytics consent stays compact with one-row actions", async ({
   page,
@@ -456,9 +461,6 @@ const chatComposerLocators = (page: Page) => {
   return {
     moreActions: page.getByTestId("composer-tools-button"),
     modelSelect: page.getByTestId("composer-model-select"),
-    estimatedCredits: page.getByRole("button", {
-      name: /Estimated .* credits, view breakdown/,
-    }),
     sendButton: page.getByTestId("chat-send-button"),
     textarea: page.getByTestId("chat-textarea"),
   };

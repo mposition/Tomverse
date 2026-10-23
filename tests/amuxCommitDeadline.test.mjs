@@ -275,6 +275,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // registry change keeps its ordinary mutation boundary; no deadline guard
   // changes.
   "20261020200000_amux_worker_registry_direct_activation",
+  // Intake v19 per-idea model choice, owner decision 2026-10-23: a read-only
+  // model predicate and the submission and reservation guard bodies; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261023090000_amux_v19_session_model_choice",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

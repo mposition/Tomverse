@@ -90,7 +90,12 @@ As implemented, that is:
 [composer-textarea-row]       ← always; the textarea alone, width: 100%
 [actions row]                 ← tools/model/search left; credit, voice and send right
 [chat-ai-disclaimer-mobile]   ← always; AI + sensitive-data notice with "details"
+[composer-consent-slot]       ← optional analytics consent notice
 ```
+
+The bottom dock reserves the bottom safe-area inset once, after the last visible
+footer row. Neither the composer bar nor the disclaimer reserves it again, so
+the optional analytics notice stays inside the dock's safe area.
 
 ## Non-negotiable invariants
 

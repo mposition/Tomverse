@@ -25,13 +25,20 @@ export function SupportTriageModelPanel() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [enabledSource, setEnabledSource] = useState<"admin" | "environment" | null>(null);
 
   useEffect(() => {
     let live = true;
     void (async () => {
       try {
         const response = await adminFetch(ROUTE);
-        const payload = (await response.json()) as { modelId?: string | null; options?: Option[] };
+        const payload = (await response.json()) as {
+          modelId?: string | null;
+          options?: Option[];
+          enabled?: boolean;
+          enabledSource?: "admin" | "environment";
+        };
         if (!live) return;
         if (!response.ok || !Array.isArray(payload.options)) {
           setNotice({ tone: "error", text: m.triageModelLoadFailed });
@@ -40,6 +47,8 @@ export function SupportTriageModelPanel() {
         setOptions(payload.options);
         setSaved(payload.modelId ?? null);
         setChoice(payload.modelId ?? "");
+        setEnabled(payload.enabled ?? null);
+        setEnabledSource(payload.enabledSource ?? null);
       } catch {
         if (live) setNotice({ tone: "error", text: m.triageModelLoadFailed });
       }
@@ -49,7 +58,7 @@ export function SupportTriageModelPanel() {
     };
   }, [m.triageModelLoadFailed]);
 
-  const save = async () => {
+  const put = async (body: { modelId?: string | null; enabled?: boolean }) => {
     setBusy(true);
     setNotice(null);
     setReauthenticationRequired(false);
@@ -57,9 +66,13 @@ export function SupportTriageModelPanel() {
       const response = await adminFetch(ROUTE, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: choice === "" ? null : choice }),
+        body: JSON.stringify(body),
       });
-      const payload = (await response.json().catch(() => ({}))) as { code?: unknown; modelId?: string | null };
+      const payload = (await response.json().catch(() => ({}))) as {
+        code?: unknown;
+        modelId?: string | null;
+        enabled?: boolean;
+      };
       if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
         setReauthenticationRequired(true);
         return;
@@ -68,7 +81,11 @@ export function SupportTriageModelPanel() {
         setNotice({ tone: "error", text: response.status === 403 ? m.triageModelOwnerOnly : m.triageModelSaveFailed });
         return;
       }
-      setSaved(payload.modelId ?? null);
+      if (body.modelId !== undefined) setSaved(payload.modelId ?? null);
+      if (typeof payload.enabled === "boolean") {
+        setEnabled(payload.enabled);
+        setEnabledSource("admin");
+      }
       setNotice({ tone: "ok", text: m.triageModelSaved });
     } catch {
       setNotice({ tone: "error", text: m.triageModelSaveFailed });
@@ -87,6 +104,25 @@ export function SupportTriageModelPanel() {
         {m.triageModelTitle}
       </h2>
       <p className="mt-1 text-xs leading-5 text-zinc-400">{m.triageModelHelp}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-zinc-200">
+          {enabled === null ? m.triageSwitchUnknown : enabled ? m.triageSwitchOn : m.triageSwitchOff}
+        </span>
+        {enabledSource ? (
+          <span className="text-xs text-zinc-500">
+            {enabledSource === "admin" ? m.triageSwitchFromAdmin : m.triageSwitchFromEnvironment}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          data-testid="support-triage-switch"
+          onClick={() => void put({ enabled: !enabled })}
+          disabled={enabled === null || busy}
+          className="min-h-11 rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:opacity-50"
+        >
+          {enabled ? m.triageSwitchTurnOff : m.triageSwitchTurnOn}
+        </button>
+      </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor="support-triage-model-select">
           {m.triageModelTitle}
@@ -107,7 +143,7 @@ export function SupportTriageModelPanel() {
         </select>
         <button
           type="button"
-          onClick={() => void save()}
+          onClick={() => void put({ modelId: choice === "" ? null : choice })}
           disabled={options === null || busy || choice === (saved ?? "")}
           className="min-h-11 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 text-sm font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:opacity-50"
         >

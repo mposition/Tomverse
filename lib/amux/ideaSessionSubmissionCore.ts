@@ -1,3 +1,5 @@
+import { isAmuxIdeaAnalysisProvider } from "./ideaAnalysisChannelCore.ts";
+import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
 import type { IdeaInput } from "./ideaInputCore.ts";
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import type { AmuxOperatingScopeAuthority } from "./ideaOperatingScopeStore.ts";
@@ -158,6 +160,34 @@ export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessio
   const inspected = inspectAmuxIdeaSessionInput(record.input);
   if (!inspected.ok) return inspected;
   return { ...inspected, requestId: record.requestId, source: source.source };
+}
+
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
+const EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
+
+/**
+ * The owner's optional per-idea model choice (owner decision 2026-10-23). An
+ * absent choice keeps the operating scope's model; a present one must be an
+ * exact selection, and the service still checks it against the approved
+ * Frontier catalog and an approved subscription price before anything is
+ * written. Coding sessions never send one.
+ */
+export function inspectAmuxSessionModelChoice(value: unknown):
+  | { ok: true; model: AmuxIdeaModelSelection | null }
+  | { ok: false } {
+  if (value === undefined || value === null) return { ok: true, model: null };
+  if (typeof value !== "object" || Array.isArray(value) ||
+      !exactKeys(value as Record<string, unknown>, ["provider", "modelId", "reasoningEffort"])) {
+    return { ok: false };
+  }
+  const model = value as Record<string, unknown>;
+  if (typeof model.provider !== "string" || !isAmuxIdeaAnalysisProvider(model.provider) ||
+      typeof model.modelId !== "string" || !MODEL_ID.test(model.modelId) ||
+      typeof model.reasoningEffort !== "string" || !EFFORTS.includes(model.reasoningEffort)) {
+    return { ok: false };
+  }
+  return { ok: true, model: { provider: model.provider, modelId: model.modelId,
+    reasoningEffort: model.reasoningEffort } };
 }
 
 export const sameAmuxOperatingScopeAuthority = (

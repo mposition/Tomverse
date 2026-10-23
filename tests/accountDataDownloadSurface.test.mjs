@@ -131,7 +131,7 @@ test("reading the history needs a session and a rate limit, but not a step-up", 
   assert.ok(getAt > 0 && postAt > getAt, "expected GET to be declared before POST");
 
   const get = route.slice(getAt, postAt);
-  assert.match(get, /getServerSession/);
+  assert.match(get, /resolveAccountRouteSession/);
   assert.match(get, /consumeApiRateLimit/);
   assert.match(get, /"Cache-Control": "no-store"/);
 
