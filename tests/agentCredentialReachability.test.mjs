@@ -830,7 +830,11 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // CLI and became workflow_dispatch only. The propose job and the chained-event
 // reason left the baseline (publish stays, reached by no agent event), so its
 // two exclusions were removed rather than re-pinned. Nothing was added.
-const POSTURE_DIGEST = "81a4d32c337f";
+// 2026-10-23: voice routes and lib/voiceConversation*.ts now trigger the
+// existing finance DB workflow. Compared with fc36be440^, credentialed jobs,
+// credential reasons and the forbid state are identical; only these two
+// additional CI path patterns change the path-rule portion of this digest.
+const POSTURE_DIGEST = "a2999e874657";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();

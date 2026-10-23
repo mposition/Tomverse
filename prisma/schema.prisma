@@ -2167,6 +2167,7 @@ model PerplexityAsyncJob {
   perplexityJobId    String    @unique
   conversationId     String
   assistantMessageId String    @unique
+  sourceUserMessageId String?
   modelId            String
   reservationId      String
   traceId            String
@@ -2199,6 +2200,7 @@ model PerplexityAsyncJob {
   updatedAt          DateTime  @updatedAt
 
   @@index([status, lastPolledAt])
+  @@index([conversationId, sourceUserMessageId])
   // The retention sweep's clock. `updatedAt` moves on every poll and on
   // finalization, so one column covers a finished job and one abandoned
   // mid-flight -- and without an index the sweep is a sequential scan over a

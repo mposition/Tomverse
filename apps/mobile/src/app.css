@@ -1,5 +1,10 @@
 @import "@tomverse/ui-tokens/tokens.css";
 @import "@tomverse/ui-tokens/wordmark.css";
+@import "@tomverse/chat-ui/voice.css";
+@font-face{font-family:"Noto Sans KR";src:url("../../../lib/fonts/noto-sans-kr-400-subset.ttf") format("truetype");font-weight:400;font-display:swap}
+.native-voice-dialog{padding:0;border:0;width:100%;height:100%;max-width:none;max-height:none;background:transparent;overflow:hidden}
+.native-voice-dialog[open]{display:flex;align-items:center;justify-content:center}.native-voice-dialog::backdrop{background:#080c1680}
+.composer-actions .native-voice-trigger{background:#385af5;color:#fff;font-size:1.5rem;padding:4px!important;border-radius:50%}
 :root { --mobile-background: #f7f9fd; --mobile-ink: #15233b; --mobile-action: #2563eb; --mobile-paper: #fff; --mobile-soft: #eaf1ff; --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --font-code: ui-monospace, monospace; --mobile-surface: var(--mobile-paper); --mobile-border: #dfe6f0; --mobile-muted: #65738b; color-scheme: light dark; }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }

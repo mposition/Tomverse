@@ -22,6 +22,8 @@ import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } fro
 import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
+import { VoiceConversationControl } from "@/components/chat/VoiceConversationControl";
+import type { VoiceAnswerReceipt } from "@/components/chat/voiceConversationClient";
 import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
@@ -753,6 +755,8 @@ export function ChatPageClient({
   chatImageIntentEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
+  voiceConversationEnabled = false,
+  voiceConversationMaxSeconds = 300,
   promptRefinerMode = "off",
   promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: false },
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
@@ -790,6 +794,8 @@ export function ChatPageClient({
    * after an operator pulled the kill switch.
    */
   voiceInputEnabled?: boolean;
+  voiceConversationEnabled?: boolean;
+  voiceConversationMaxSeconds?: number;
   /**
    * The server's final Prompt Refiner mode. The only active value today is a
    * deterministic, no-cost loopback fixture; there is no product adapter.
@@ -7238,6 +7244,10 @@ export function ChatPageClient({
       setCachedCompareSummaryChatId(null);
       if (pendingScreenModels) setSelectedModels(pendingScreenModels);
       if (pendingScreenDisabled) setDisabledPanels(pendingScreenDisabled);
+      if (voiceTurnRef.current && !voiceTurnRef.current.promptId) {
+        voiceTurnRef.current.promptId = comparisonId;
+        voiceTurnRef.current.sourceUserMessageId = userMsgId;
+      }
       setPromptPayload({
         id: comparisonId,
         text: authoredPrompt,
@@ -7495,8 +7505,22 @@ export function ChatPageClient({
    * never reach its expected count and the offer would wait for a completion
    * that is not coming.
    */
+  const voiceTurnRef = useRef<{
+    promptId: string | null;
+    sourceUserMessageId: string | null;
+    resolve: (receipt: VoiceAnswerReceipt) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+  useEffect(() => () => {
+    voiceTurnRef.current?.reject(new Error("Voice conversation identity changed."));
+    voiceTurnRef.current = null;
+  }, [identityKey]);
+
   const handleTurnError = useCallback(
     (promptId: string | null, modelId: string, errorCode: string) => {
+      if (promptId && voiceTurnRef.current?.promptId === promptId) {
+        voiceTurnRef.current.reject(new Error(errorCode));
+      }
       const retry = webSearchRetryOutcomeRef.current;
       if (!retry || promptId !== retry.promptId) return;
       if (errorCode === WEB_SEARCH_COST_UNBOUNDED) retry.blocked = true;
@@ -7522,6 +7546,9 @@ export function ChatPageClient({
       responseText: string,
       searchMetadata?: WebSearchExecution | null
     ) => {
+      if (promptId && voiceTurnRef.current?.promptId === promptId && voiceTurnRef.current.sourceUserMessageId && currentChatIdRef.current) {
+        voiceTurnRef.current.resolve({ sourceUserMessageId: voiceTurnRef.current.sourceUserMessageId, conversationId: currentChatIdRef.current });
+      }
       if (
         promptId &&
         responseText.trim() &&
@@ -8613,6 +8640,27 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
+  const requestVoiceAnswer = (text: string): Promise<VoiceAnswerReceipt> => {
+    if (voiceTurnRef.current || inputValue.trim() || attachments.length || pendingSubmission) {
+      return Promise.reject(new Error("The composer is busy."));
+    }
+    return new Promise<VoiceAnswerReceipt>((resolve, reject) => {
+      const timer = setTimeout(() => pending.reject(new Error("The voice answer timed out.")), 240_000);
+      const pending = {
+        promptId: null as string | null,
+        sourceUserMessageId: null as string | null,
+        resolve: (receipt: VoiceAnswerReceipt) => { clearTimeout(timer); if (voiceTurnRef.current === pending) voiceTurnRef.current = null; resolve(receipt); },
+        reject: (error: Error) => { clearTimeout(timer); if (voiceTurnRef.current === pending) voiceTurnRef.current = null; reject(error); },
+      };
+      voiceTurnRef.current = pending;
+      // Use the normal draft and Send pipeline: Auto routing, tools, credits,
+      // durable messages, and existing conversation context all stay canonical.
+      flushSync(() => setInputValue(text));
+      void handleGlobalSubmitRef.current().then(() => {
+        if (!pending.promptId) pending.reject(new Error("The voice request was not sent."));
+      }).catch(pending.reject);
+    });
+  };
   const pendingDeepResearchSubmitRef = useRef<{
     depth: "quick" | "standard" | "deep";
     /**
@@ -9995,6 +10043,19 @@ export function ChatPageClient({
   const productSwitchHasUnknownWrite =
     selectionModeUnknown?.identityKey === identityKey &&
     selectionModeUnknown.conversationId === currentChatId;
+  const [voiceHistoryRevision, setVoiceHistoryRevision] = useState(0);
+  const voiceConversationControl = voiceConversationEnabled && mountedSurface === "chat" && !isGuestMode ? (
+    <VoiceConversationControl
+      conversationId={currentChatId}
+      scopeKey={identityKey ?? "unresolved"}
+      maxSeconds={voiceConversationMaxSeconds}
+      disabled={!isInitialConversationResolved || Boolean(pendingSubmission) || Boolean(inputValue.trim()) || attachments.length > 0}
+      selectionLabel={selectionMode === "auto" ? "Smart Adaptive" : getModel(selectedModels[0])?.name ?? "Tomverse"}
+      searchEnabled={isWebSearchEnabled(webSearchMode)}
+      onRequest={requestVoiceAnswer}
+      onSessionEnded={() => setVoiceHistoryRevision(value => value + 1)}
+    />
+  ) : undefined;
   const productSwitchDisabled =
     Boolean(pendingSubmission) ||
     selectionModePending ||
@@ -10204,6 +10265,8 @@ export function ChatPageClient({
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
+          voiceConversationControl={voiceConversationControl}
+          voiceHistoryRevision={voiceConversationEnabled ? voiceHistoryRevision : undefined}
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}
@@ -10375,6 +10438,8 @@ export function ChatPageClient({
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
+          voiceConversationControl={voiceConversationControl}
+          voiceHistoryRevision={voiceConversationEnabled ? voiceHistoryRevision : undefined}
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}
