@@ -145,6 +145,7 @@ for (const recovery of ["receipt", "same-request", 400, 401, 403, 409, 422, 429]
   await page.getByLabel("이미지 설명").fill("Keep the same image request");
   const consent = page.getByRole("checkbox", { name: /선택한 모델과 표시된 크레딧/ }); await consent.check(); await page.getByRole("button", { name: "이미지 생성", exact: true }).click();
   await expect(page.getByLabel("이미지 설명")).toBeDisabled();
+  await expect(page.getByRole("button",{name:"보류 중인 요청 닫기",exact:true})).toHaveCount(0);
   const first = await page.evaluate(() => (window as unknown as { imageRequests: Array<{idempotencyKey:string}> }).imageRequests[0]);
   await page.getByRole("button", { name: "저장된 결과 조회", exact: true }).click();
   if (recovery !== "receipt") {
@@ -160,6 +161,7 @@ for (const recovery of ["receipt", "same-request", 400, 401, 403, 409, 422, 429]
       await page.getByRole("checkbox",{name:"새 요청에는 크레딧이 별도로 사용될 수 있음을 이해했습니다."}).check();await close.click();
       await expect(consent).not.toBeChecked();await expect(page.getByRole("button",{name:"이미지 생성",exact:true})).toBeDisabled();
     } else {
+      await expect(page.getByRole("button",{name:"보류 중인 요청 닫기",exact:true})).toHaveCount(0);
       await page.evaluate(() => { (window as unknown as {receiptAvailable:boolean}).receiptAvailable=true; });
       await page.getByRole("button", { name: "저장된 결과 조회", exact: true }).click();
     }

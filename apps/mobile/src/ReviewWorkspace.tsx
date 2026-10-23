@@ -126,7 +126,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
         if (current === request.current) setPartial(previous => ({ ...previous, [modelId]: value }));
       });
       const saved = await transport.load(item.id);
-      if (current !== request.current) return false;
+      if (current !== request.current) return;
       setConversation(saved); setPartial({}); setUncertain(saved.activeAttempt === true);
       if (!outcome.failedModelIds.length) setDraft(""); else setError(copy.disconnected);
       const history = await transport.listReview!();

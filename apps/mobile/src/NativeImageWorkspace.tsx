@@ -22,6 +22,7 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
   const [conversationId, setConversationId] = useState(pending ? pending.conversationId : historyId); const [groups, setGroups] = useState<string[]>([]);
   const [unknown, setUnknown] = useState(Boolean(pending));
   const [closingPending, setClosingPending] = useState(false); const [closeConsent, setCloseConsent] = useState(false);
+  const [canClosePending, setCanClosePending] = useState(false);
   useEffect(() => { onBusy(busy); return () => onBusy(false); }, [busy, onBusy]);
   useEffect(() => { let active = true;
     void transport.mobileCapabilities?.(true).then(value => { if (active) { setCap(value); if (!initial && !pending) setSelected(value.images?.models.slice(0, 1).map(model => model.id) ?? []); } }).catch(() => { if (active) setError(c.unavailable); });
@@ -36,7 +37,7 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
   const quote = selected.map(id => { const model = models.find(row => row.id === id); return { model, price: model?.prices.find(price => price.quality === quality && price.size === size) }; });
   const valid = Boolean(cap?.images?.enabled && selected.length && selected.length <= (cap.images.maxModels ?? 1) && quote.every(item => item.model?.pricingVersion && item.price && item.price.credits >= 0));
   function accept(receipt: { conversationId: string; groupId: string }) {
-    setConversationId(receipt.conversationId); setGroups(previous => [...new Set([...previous, receipt.groupId])]); onCreated(receipt.conversationId); localStorage.removeItem(pendingKey); setPending(null); setUnknown(false); setConsent(false); setClosingPending(false); setCloseConsent(false); setError("");
+    setConversationId(receipt.conversationId); setGroups(previous => [...new Set([...previous, receipt.groupId])]); onCreated(receipt.conversationId); localStorage.removeItem(pendingKey); setPending(null); setUnknown(false); setConsent(false); setClosingPending(false); setCloseConsent(false); setCanClosePending(false); setError("");
   }
   async function recover() {
     if (!pending || !transport.imageRequest || busy) return;
@@ -45,12 +46,12 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
     catch { setError(c.pendingImages); } finally { setBusy(false); }
   }
   function closePending() {
-    if (busy || !closeConsent) return;
+    if (busy || !canClosePending || !closeConsent) return;
     localStorage.removeItem(pendingKey); setPending(null); setUnknown(false); setConsent(false); setClosingPending(false); setCloseConsent(false); setError("");
   }
   async function generate(resume = false) {
     if (!valid || !consent || busy || (unknown && !resume) || !prompt.trim() || !transport.generateImages) return;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setCanClosePending(false); setClosingPending(false); setCloseConsent(false);
     try {
       // Read the existing catalogue again immediately before dispatch; a new quote needs a new consent.
       const fresh = await transport.mobileCapabilities!(true);
@@ -68,6 +69,7 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
       if (status && status >= 400 && status < 500 && status !== 408) {
         // A replay can be refused before the server reads an already-created group.
         if (!resume) { localStorage.removeItem(pendingKey); setPending(null); setUnknown(false); }
+        else setCanClosePending(![401,409,429].includes(status));
         setConsent(false); setError(status === 409 ? c.quoteChanged : c.failed); if (status === 409) setCap(await transport.mobileCapabilities!(true).catch(() => cap));
       }
       else setError(c.pendingImages);
@@ -84,7 +86,7 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
     <strong>{quote.reduce((total, item) => total + (item.price?.credits ?? 0), 0)} {c.credits}</strong>
     <label className="switch-field">{c.imageConsent}<input type="checkbox" disabled={busy || !valid} checked={consent} onChange={event => setConsent(event.target.checked)} /></label>
     <button className="primary" disabled={busy || unknown || !valid || !consent || !prompt.trim()} onClick={() => void generate()}>{busy ? copy.loading : c.generate}</button>
-    {unknown && <div className="notice"><p role="status">{c.pendingImages}</p><button disabled={busy} onClick={() => void recover()}>{c.refresh}</button><p>{c.resumeHint}</p><button disabled={busy || !valid || !consent} onClick={() => void generate(true)}>{c.resumeImages}</button><button disabled={busy} onClick={() => setClosingPending(true)}>{c.closePending}</button>{closingPending && <div><p>{c.closePendingHint}</p><label className="switch-field">{c.closePendingConsent}<input type="checkbox" disabled={busy} checked={closeConsent} onChange={event => setCloseConsent(event.target.checked)} /></label><button disabled={busy || !closeConsent} onClick={closePending}>{c.closePendingAction}</button></div>}</div>}
+    {unknown && <div className="notice"><p role="status">{c.pendingImages}</p><button disabled={busy} onClick={() => void recover()}>{c.refresh}</button><p>{c.resumeHint}</p><button disabled={busy || !valid || !consent} onClick={() => void generate(true)}>{c.resumeImages}</button>{canClosePending && <><button disabled={busy} onClick={() => setClosingPending(true)}>{c.closePending}</button>{closingPending && <div><p>{c.closePendingHint}</p><label className="switch-field">{c.closePendingConsent}<input type="checkbox" disabled={busy} checked={closeConsent} onChange={event => setCloseConsent(event.target.checked)} /></label><button disabled={busy || !closeConsent} onClick={closePending}>{c.closePendingAction}</button></div>}</>}</div>}
     {conversationId && <button disabled={busy} onClick={() => void history(conversationId).catch(() => setError(c.failed))}>{c.refresh}</button>}
     {groups.map(id => <ImageTurn key={id} groupId={id} transport={transport} language={language} />)}
   </div></Sheet>;
