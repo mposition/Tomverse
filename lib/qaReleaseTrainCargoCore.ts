@@ -16,8 +16,14 @@ export type QaReleaseTrainCargoStatus =
   | "available"
   /** Waiting in an open main pull request already; picking it would release it twice. */
   | "in_main_pull_request"
-  /** A merged main pull request names it: already released. */
+  /**
+   * Already released: a merged main pull request names it, or was cut from a
+   * branch with the same name (`hotfix/2026-10-21-x` for `claude/to-develop/x`),
+   * which is how a hotfix that names no number is recognised.
+   */
   | "on_main"
+  /** Brings main into develop: it has nothing to release. */
+  | "back_merge"
   /** Changes .github/workflows: the train's App cannot push it. */
   | "changes_workflows"
   /** Its files could not be read; the train itself still leaves a workflow change out. */
@@ -48,6 +54,13 @@ export function qaReleaseTrainReferencedNumbers(pull: Json): number[] {
  * window, each with why it can or cannot ride. `files` holds the changed paths
  * read for a pull request; one missing is "unchecked".
  */
+/** A back-merge: main itself, or a branch or title that says it brings main back. */
+export const qaReleaseTrainIsBackMerge = (headRef: string, title: string): boolean =>
+  headRef === "main" || /back-?merge/i.test(headRef) || /back-?merge/i.test(title);
+
+/** The last segment of a branch name: `claude/to-develop/x` → `x`. */
+const branchTail = (ref: string): string => ref.slice(ref.lastIndexOf("/") + 1);
+
 export function qaReleaseTrainCargoCandidates(input: {
   mergedDevelopJson: unknown;
   mergedMainJson: unknown;
@@ -67,6 +80,19 @@ export function qaReleaseTrainCargoCandidates(input: {
   };
   const onMain = named(list(input.mergedMainJson), true);
   const inMainPull = named(list(input.openMainJson), false);
+  const branches = (pulls: Json[], merged: boolean) => {
+    const byTail = new Map<string, number>();
+    for (const pull of pulls) {
+      if (merged && typeof pull.merged_at !== "string") continue;
+      const ref = String(record(pull.head)?.ref ?? "");
+      if (typeof pull.number !== "number" || !/^(hotfix|release)\//.test(ref)) continue;
+      const tail = ref.replace(/^(hotfix|release)\//, "").replace(/^\d{4}-\d{2}-\d{2}-/, "");
+      if (tail !== "" && !byTail.has(tail)) byTail.set(tail, pull.number);
+    }
+    return byTail;
+  };
+  const onMainBranches = branches(list(input.mergedMainJson), true);
+  const inMainPullBranches = branches(list(input.openMainJson), false);
   return list(input.mergedDevelopJson)
     .filter((pull) => record(pull.base)?.ref === "develop" && typeof pull.merged_at === "string" && typeof pull.number === "number")
     .filter((pull) => Date.parse(pull.merged_at as string) >= since)
@@ -74,9 +100,14 @@ export function qaReleaseTrainCargoCandidates(input: {
     .map((pull) => {
       const number = pull.number as number;
       const files = input.files.get(number);
-      const status: QaReleaseTrainCargoStatus = onMain.has(number)
+      const headRef = String(record(pull.head)?.ref ?? "");
+      const mainNumber = onMain.get(number) ?? onMainBranches.get(branchTail(headRef));
+      const mainPullNumber = inMainPull.get(number) ?? inMainPullBranches.get(branchTail(headRef));
+      const status: QaReleaseTrainCargoStatus = qaReleaseTrainIsBackMerge(headRef, String(pull.title ?? ""))
+        ? "back_merge"
+        : mainNumber !== undefined
         ? "on_main"
-        : inMainPull.has(number)
+        : mainPullNumber !== undefined
           ? "in_main_pull_request"
           : files === undefined
             ? "unchecked"
@@ -89,7 +120,7 @@ export function qaReleaseTrainCargoCandidates(input: {
         author: String(record(pull.user)?.login ?? "").slice(0, 60),
         mergedAt: pull.merged_at as string,
         status,
-        mainPullRequest: onMain.get(number) ?? inMainPull.get(number) ?? null,
+        mainPullRequest: mainNumber ?? mainPullNumber ?? null,
       };
     });
 }

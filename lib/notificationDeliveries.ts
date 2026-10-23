@@ -464,7 +464,7 @@ async function renderNotification(
       to: recipient,
       ...buildQaReleaseOperatorEmail(qaReleaseEmail.email, {
         date,
-        consoleUrl: `${consoleBase}/admin/agent-digests?tab=qa-release`,
+        consoleUrl: `${consoleBase}/admin/qa-release`,
       }),
     };
   }

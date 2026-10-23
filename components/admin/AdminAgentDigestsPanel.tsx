@@ -25,7 +25,7 @@ import type { QaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesCore"
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
 import { QA_RELEASE_SECTION_IDS, card, openSection } from "@/components/admin/qaReleaseTabParts";
 
-const PAGE_PATH = "/admin/agent-digests";
+const PAGE_PATH = "/admin/qa-release";
 const CONTROL_ROUTE = "/api/admin/agent-digests/qa-release/control";
 const RUN_URL = "https://github.com/mposition/Tomverse/actions/runs/";
 

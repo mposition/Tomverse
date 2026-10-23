@@ -18,7 +18,7 @@ import {
 import type { QaReleaseTrainCargoCandidatesRead } from "@/lib/qaReleaseTrainCargoRead";
 
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
-const PAGE_PATH = "/admin/agent-digests?tab=qa-release";
+const PAGE_PATH = "/admin/qa-release";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 
 const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
@@ -27,6 +27,7 @@ const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   in_main_pull_request: "bg-zinc-800 text-zinc-400",
   on_main: "bg-zinc-800 text-zinc-400",
   changes_workflows: "bg-amber-300/15 text-amber-300",
+  back_merge: "bg-zinc-800 text-zinc-400",
 };
 
 type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleaseTrainSelection };
@@ -76,6 +77,18 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
     (candidate) => query.trim() === "" || `#${candidate.number} ${candidate.title}`.toLowerCase().includes(query.trim().toLowerCase()),
   );
 
+  // "Select all" covers what can ride among the rows shown, so a search narrows it.
+  const shownPickable = shown.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status)).map((candidate) => candidate.number);
+  const allShownPicked = shownPickable.length > 0 && shownPickable.every((number) => picked.has(number));
+  const someShownPicked = shownPickable.some((number) => picked.has(number));
+  const toggleAll = () =>
+    setPicked((current) => {
+      const next = new Set(current);
+      if (allShownPicked) for (const number of shownPickable) next.delete(number);
+      else for (const number of shownPickable) if (next.size < QA_RELEASE_TRAIN_CARGO_MAX) next.add(number);
+      return next;
+    });
+
   const toggle = (number: number) =>
     setPicked((current) => {
       const next = new Set(current);
@@ -88,7 +101,8 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
     setBusy(true);
     setNotice(null);
     try {
-      const numbers = candidates.filter((candidate) => picked.has(candidate.number)).map((candidate) => candidate.number);
+      // Only what can still ride: a pick saved earlier may have reached main since.
+      const numbers = pickable.filter((candidate) => picked.has(candidate.number)).map((candidate) => candidate.number);
       const response = await adminFetch(API, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -120,6 +134,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       in_main_pull_request: m.trainCargoInMainPull.replace("{number}", String(candidate.mainPullRequest ?? "")),
       on_main: m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
       changes_workflows: m.trainCargoWorkflows,
+      back_merge: m.trainCargoBackMerge,
     })[candidate.status];
 
   const button =
@@ -150,7 +165,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
           <div className="mt-3 grid grid-cols-3 gap-2">
             {[
               [m.trainCargoCandidates, candidates.length],
-              [m.trainCargoPicked, picked.size],
+              [m.trainCargoPicked, pickable.filter((candidate) => picked.has(candidate.number)).length],
               [m.trainCargoCannotRide, candidates.length - pickable.length],
             ].map(([label, value]) => (
               <div key={String(label)} className="rounded-lg bg-zinc-950 px-3 py-2">
@@ -169,14 +184,19 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
               aria-label={m.trainCargoSearch}
               className="min-h-9 min-w-[12rem] flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100"
             />
-            <button
-              type="button"
-              className={button}
-              disabled={!canWrite || busy}
-              onClick={() => setPicked(new Set(pickable.slice(0, QA_RELEASE_TRAIN_CARGO_MAX).map((candidate) => candidate.number)))}
-            >
+            <label className={`${button} cursor-pointer gap-2`} data-testid="qa-release-train-cargo-select-all">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={allShownPicked}
+                ref={(element) => {
+                  if (element) element.indeterminate = someShownPicked && !allShownPicked;
+                }}
+                disabled={!canWrite || busy || shownPickable.length === 0}
+                onChange={toggleAll}
+              />
               {m.trainCargoPickAll}
-            </button>
+            </label>
             <button type="button" className={button} disabled={!canWrite || busy} onClick={() => setPicked(new Set())}>
               {m.trainCargoClear}
             </button>
@@ -189,11 +209,15 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
               {shown.map((candidate) => {
                 const can = qaReleaseTrainCargoPickable(candidate.status);
                 return (
-                  <li key={candidate.number} className="flex items-center gap-3 px-3 py-2.5" data-testid={`qa-release-train-cargo-${candidate.number}`}>
+                  <li
+                    key={candidate.number}
+                    className={`flex items-center gap-3 px-3 py-2.5 ${can ? "" : "opacity-55"}`}
+                    data-testid={`qa-release-train-cargo-${candidate.number}`}
+                  >
                     <input
                       type="checkbox"
-                      className="h-4 w-4 shrink-0"
-                      checked={picked.has(candidate.number)}
+                      className={`h-4 w-4 shrink-0 ${can ? "" : "cursor-not-allowed"}`}
+                      checked={can && picked.has(candidate.number)}
                       disabled={!canWrite || busy || !can}
                       onChange={() => toggle(candidate.number)}
                       aria-label={m.trainCargoPickLabel.replace("{number}", String(candidate.number))}

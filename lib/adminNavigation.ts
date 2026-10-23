@@ -661,24 +661,43 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     aliases: ["sre", "ops observer", "genesis", "trust", "state chain", "pager"],
   },
   {
-    id: "agent-digests",
-    label: "Agent digests",
-    href: "/admin/agent-digests",
-    description: "What each agent reported each day, and the operator control it runs under",
+    // QA and release left Agent digests for its own page (owner, 2026-10-23):
+    // the merge lane, CI admission and the release train are one pipeline the
+    // operator works in, not one agent's daily report.
+    id: "qa-release",
+    label: "QA and release",
+    href: "/admin/qa-release",
+    description: "From develop merge to production: the merge lane, CI admission and the release train",
     group: "Operations",
     writeRoles: ["owner", "ops"],
-    aliases: ["digest", "qa", "release", "release readiness", "merge lane", "control revision", "price deadline", "billing-finance-ops", "ci admission", "runners"],
+    aliases: ["qa", "release", "release readiness", "merge lane", "release train", "control revision", "ci admission", "runners"],
     tabs: [
       {
-        id: "qa-release",
-        label: "QA and release",
-        description: "What needs the operator, production against main, the merge lane and the latest digest",
+        id: "overview",
+        label: "Overview",
+        description: "What needs the operator, production against main, the merge lane, the train and the latest digest",
+      },
+      {
+        id: "lane",
+        label: "Merge lane",
+        description: "What the merge lane will merge, and which pull requests are yours, with the files that decide it",
       },
       {
         id: "ci-admission",
         label: "CI admission",
         description: "Pull requests waiting for runners, their order and live runner usage",
       },
+    ],
+  },
+  {
+    id: "agent-digests",
+    label: "Agent digests",
+    href: "/admin/agent-digests",
+    description: "What each agent reported each day, and the operator control it runs under",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    aliases: ["digest", "price deadline", "billing-finance-ops"],
+    tabs: [
       {
         id: "billing-finance-ops",
         label: "Billing and finance",
@@ -1284,6 +1303,17 @@ export const adminRedirectTarget = (
  */
 export const ADMIN_ENGINEERING_AGENT_LEGACY_TABS: Readonly<Record<string, string>> = {
   "product-research": "/admin/product-research?tab=observations",
+};
+
+/**
+ * QA and release, and CI admission, left Agent digests for their own page
+ * (2026-10-23). Operator emails, commit statuses and the agent office link
+ * these addresses with their `?tab=`. A bare `/admin/agent-digests` is the
+ * sidebar's own link and opens the digests that stayed.
+ */
+export const ADMIN_AGENT_DIGESTS_LEGACY_TABS: Readonly<Record<string, string>> = {
+  "qa-release": "/admin/qa-release?tab=overview",
+  "ci-admission": "/admin/qa-release?tab=ci-admission",
 };
 
 /** The old section links remain bookmarks, never a second control surface. */

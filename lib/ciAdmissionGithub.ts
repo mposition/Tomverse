@@ -212,7 +212,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         state,
         context: CI_ADMISSION_STATUS_CONTEXT,
         description: description.slice(0, 140),
-        ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/agent-digests?tab=ci-admission` } : {}),
+        ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/qa-release?tab=ci-admission` } : {}),
       });
       if (answer.status !== 201) throw new Error(`github_status_${answer.status}`);
     },
