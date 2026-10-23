@@ -60,7 +60,11 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
       accept(await transport.generateImages(input));
     } catch (error) {
       const status = (error as { status?: number }).status;
-      if (status && status >= 400 && status < 500 && status !== 408) { localStorage.removeItem(pendingKey); setPending(null); setUnknown(false); setConsent(false); setError(status === 409 ? c.quoteChanged : c.failed); if (status === 409) setCap(await transport.mobileCapabilities!(true).catch(() => cap)); }
+      if (status && status >= 400 && status < 500 && status !== 408) {
+        // A replay can be refused before the server reads an already-created group.
+        if (!resume) { localStorage.removeItem(pendingKey); setPending(null); setUnknown(false); }
+        setConsent(false); setError(status === 409 ? c.quoteChanged : c.failed); if (status === 409) setCap(await transport.mobileCapabilities!(true).catch(() => cap));
+      }
       else setError(c.pendingImages);
     } finally { setBusy(false); }
   }

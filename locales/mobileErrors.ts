@@ -9,14 +9,26 @@ const copy: Record<MobileLanguage, { unsupported: string; size: string; file: st
   es: { unsupported: "Formato no compatible. Elige otro archivo.", size: "El archivo es demasiado grande. Elige uno más pequeño.", file: "No se pudo leer el archivo. Revisa el formato y la contraseña.", plan: "Este modelo o función no está disponible en tu plan.", limited: "Demasiadas solicitudes. Espera un momento antes de intentarlo de nuevo." },
   pt: { unsupported: "Formato não suportado. Escolha outro ficheiro.", size: "O ficheiro é demasiado grande. Escolha um mais pequeno.", file: "Não foi possível ler o ficheiro. Verifique o formato e a proteção por palavra-passe.", plan: "Este modelo ou funcionalidade não está disponível no seu plano.", limited: "Demasiados pedidos. Aguarde um momento antes de tentar novamente." },
 };
+const retry: Record<MobileLanguage, string> = {
+  en: "Requests are being sent too quickly. Please try again in {seconds} seconds.",
+  ko: "요청이 너무 빠르게 전송되었습니다. {seconds}초 후 다시 시도해 주세요.",
+  zh: "请求发送过快，请在 {seconds} 秒后重试。",
+  de: "Anfragen werden zu schnell gesendet. Bitte versuchen Sie es in {seconds} Sekunden erneut.",
+  fr: "Les requêtes sont envoyées trop rapidement. Réessayez dans {seconds} secondes.",
+  es: "Las solicitudes se están enviando demasiado rápido. Inténtalo de nuevo en {seconds} segundos.",
+  pt: "As solicitações estão sendo enviadas rápido demais. Tente novamente em {seconds} segundos.",
+};
 export function mobileErrorText(error: unknown, language: MobileLanguage, fallback: string): string {
-  const input = (error ?? {}) as { code?: unknown; status?: unknown };
+  const input = (error ?? {}) as { code?: unknown; status?: unknown; retryAfterSeconds?: unknown; traceId?: unknown };
   const code = typeof input.code === "string" ? input.code : "";
   const status = typeof input.status === "number" ? input.status : undefined;
   if (["ATTACHMENT_UNSUPPORTED_FORMAT", "UNSUPPORTED_ATTACHMENT_TYPE"].includes(code)) return copy[language].unsupported;
   if (code.includes("TOO_LARGE") || status === 413) return copy[language].size;
   if (code.startsWith("ATTACHMENT_") || code.startsWith("ARCHIVE_")) return copy[language].file;
   if (code.startsWith("PLAN_") || status === 403) return copy[language].plan;
-  if (status === 429) return copy[language].limited;
+  if (status === 429) {
+    const text = typeof input.retryAfterSeconds === "number" && input.retryAfterSeconds > 0 && input.retryAfterSeconds <= 86400 ? retry[language].replace("{seconds}", String(Math.ceil(input.retryAfterSeconds))) : copy[language].limited;
+    return text + (typeof input.traceId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(input.traceId) ? ` · Trace ID: ${input.traceId}` : "");
+  }
   return fallback;
 }

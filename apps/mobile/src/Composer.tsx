@@ -15,7 +15,7 @@ type Props = {
   language: MobileLanguage;
   conversation?: Conversation | null; onConfigureTools?: (input: ToolChange) => Promise<void>;
   extraTools?: ComposerAction[];
-  offline?: boolean; disabled: boolean; streaming: boolean; onSend: (text: string, files: MobileAttachment[]) => Promise<void>; onStop: () => void;
+  offline?: boolean; disabled: boolean; streaming: boolean; onSend: (text: string, files: MobileAttachment[]) => Promise<void | boolean>; onStop: () => void;
 };
 export function Composer({ copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools }: Props) {
   const [files, setFiles] = useState<MobileAttachment[]>([]);
@@ -61,7 +61,7 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
   }
   function submit() {
     if (disabled || offline || streaming || uploading || voiceBusy || composing.current || (!draft.trim() && files.length === 0)) return;
-    void onSend(draft, files); setFiles([]);
+    void onSend(draft, files).then(result => { if (result !== false) setFiles([]); });
   }
   return <div className="composer-area">
     {error && <p role="alert" className="notice error">{error}</p>}

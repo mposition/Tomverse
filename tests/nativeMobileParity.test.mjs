@@ -61,18 +61,31 @@ test("native upload destination and credential headers are fail-closed", () => {
   for(const url of ["http://fixture.r2.cloudflarestorage.com/a?X-Amz-Signature=s", "https://evil.invalid/a?X-Amz-Signature=s", "https://fixture.r2.cloudflarestorage.com.evil.invalid/a?X-Amz-Signature=s", "https://user@fixture.r2.cloudflarestorage.com/a?X-Amz-Signature=s", "https://fixture.r2.cloudflarestorage.com/a", valid+"#fragment"]) assert.throws(()=>validateMobileUpload(url,{}));
   for(const headers of [{Authorization:"Bearer secret"},{Cookie:"a=b"},{"Content-Type":"image/png\r\nx: injected"}])assert.throws(()=>validateMobileUpload(valid,headers));
 });
-test("Review saves a question once and isolates each model's follow-up context", async () => {
+for (const bundle of [null, "priced-context"]) test(`Review saves once and isolates follow-up context with bundle ${bundle}`, async () => {
   const calls=[];const conversation={id:"review-a",selectedModels:["a","b"],messages:[{id:"old-user",role:"user",content:"Previous"},{id:"a-old",role:"assistant",modelId:"a",content:"A previous"},{id:"b-old",role:"assistant",modelId:"b",content:"B previous"}],webSearchMode:"always"};
   const transport=createApiTransport(async(path,init={})=>{
     calls.push({path,init});
     if(path==="/api/products/mobile/capabilities")return Response.json(capability);
-    if(path==="/api/chat/preflight")return Response.json({ok:true,admissionToken:"aggregate-admission",contextBundle:"priced-context"});
+    if(path==="/api/chat/preflight")return Response.json({ok:true,admissionToken:"aggregate-admission",contextBundle:bundle});
     if(path.endsWith("/messages")){const input=JSON.parse(init.body).messages[0];conversation.messages.push({id:"saved",role:"user",content:input.content});return Response.json({messageMappings:[{requestId:input.clientRequestId,messageId:"saved"}]});}
-    if(path==="/api/chat"){const body=JSON.parse(init.body);assert.equal(body.admissionToken,"aggregate-admission");assert.equal(body.contextBundle,"priced-context");assert.equal(body.sourceUserMessageId,"saved");assert.equal(body.webSearchMode,"always");assert.ok(!body.messages.some(message=>message.content===(body.modelId==="a"?"B previous":"A previous")));conversation.messages.push({id:body.assistantMessageId,role:"assistant",modelId:body.modelId,content:"Done",status:"normal"});return new Response("Done");}
+    if(path==="/api/chat"){const body=JSON.parse(init.body);assert.equal(body.admissionToken,"aggregate-admission");assert.equal(body.contextBundle,bundle??undefined);if(!bundle)assert.equal("contextBundle" in body,false);assert.equal(body.sourceUserMessageId,"saved");assert.equal(body.webSearchMode,"always");assert.ok(!body.messages.some(message=>message.content===(body.modelId==="a"?"B previous":"A previous")));conversation.messages.push({id:body.assistantMessageId,role:"assistant",modelId:body.modelId,content:"Done",status:"normal"});return new Response("Done");}
     return Response.json(conversation);
   },bridge);
   const result=await transport.sendReview(conversation,"Follow-up",[],new AbortController().signal,()=>{});
   assert.deepEqual(result.failedModelIds,[]);assert.equal(calls.filter(call=>call.path.endsWith("/messages")).length,1);assert.equal(calls.filter(call=>call.path==="/api/chat").length,2);assert.equal(calls.filter(call=>call.path==="/api/chat/preflight").length,1);
+  assert.ok(calls.findIndex(call=>call.path==="/api/chat/preflight")<calls.findIndex(call=>call.path.endsWith("/messages")));
+});
+
+for (const infrastructure of [500,503,"offline"]) test(`comparison preflight retries ${infrastructure} once then uses ordinary model admission`, async () => {
+  let preflights=0;let requests=0;const conversation={id:"review",selectedModels:["a","b"],messages:[]};
+  const transport=createApiTransport(async(path,init={})=>{
+    if(path.includes("capabilities"))return Response.json(capability);
+    if(path.endsWith("preflight")){preflights++;if(infrastructure==="offline")throw new TypeError("Offline");return Response.json({code:"UNAVAILABLE"},{status:infrastructure});}
+    if(path.endsWith("/messages")){assert.equal(preflights,2);const input=JSON.parse(init.body).messages[0];conversation.messages.push({id:"saved",role:"user",content:input.content});return Response.json({messageMappings:[{requestId:input.clientRequestId,messageId:"saved"}]});}
+    if(path==="/api/chat"){requests++;const input=JSON.parse(init.body);assert.equal("admissionToken" in input,false);assert.equal("contextBundle" in input,false);conversation.messages.push({id:input.assistantMessageId,role:"assistant",content:"Answer",modelId:input.modelId,status:"normal"});return new Response("Answer");}
+    return Response.json(conversation);
+  },bridge);
+  assert.deepEqual((await transport.sendReview(conversation,"Question",[],new AbortController().signal,()=>{})).failedModelIds,[]);assert.equal(preflights,2);assert.equal(requests,2);
 });
 
 test("restore reads every message page and restores the canonical assistant profile", async () => {
@@ -93,16 +106,16 @@ test("Deep Research uses its durable job status without submitting a second ques
   assert.equal(progress.at(-1),"Finished research");assert.equal(calls.filter(path=>path==="/api/chat").length,1);assert.equal(calls.filter(path=>path.endsWith("/messages")).length,1);assert.equal(calls.filter(path=>path==="/api/chat/deep-research/status").length,1);
 });
 
-test("comparison admission refusal starts no paid model request", async () => {
-  let dispatches=0;const conversation={id:"comparison",selectedModels:["a","b"],messages:[]};
+for (const refusal of [429,403]) test(`comparison admission ${refusal} saves no question and starts no model request`, async () => {
+  let dispatches=0;let persisted=0;const conversation={id:"comparison",selectedModels:["a","b"],messages:[]};
   const transport=createApiTransport(async(path,init={})=>{
     if(path==="/api/products/mobile/capabilities")return Response.json(capability);
-    if(path.endsWith("/messages")){const input=JSON.parse(init.body).messages[0];conversation.messages.push({id:"saved",role:"user",content:input.content});return Response.json({messageMappings:[{requestId:input.clientRequestId,messageId:"saved"}]});}
-    if(path==="/api/chat/preflight")return Response.json({code:"CHAT_CONCURRENCY_EXCEEDED"},{status:429});
+    if(path.endsWith("/messages")){persisted++;throw Error("Admission must precede persistence");}
+    if(path==="/api/chat/preflight")return Response.json({code:"CHAT_CONCURRENCY_EXCEEDED",details:{retryAfterSeconds:12}},{status:refusal,headers:{"Retry-After":"12","X-Request-ID":"synthetic-trace"}});
     if(path==="/api/chat")dispatches++;
     return Response.json(conversation);
   },bridge);
-  await assert.rejects(transport.sendReview(conversation,"Compare",[],new AbortController().signal,()=>{}));assert.equal(dispatches,0);
+  await assert.rejects(transport.sendReview(conversation,"Compare",[],new AbortController().signal,()=>{}),error=>error.status===refusal&&error.questionPersisted===false&&error.retryAfterSeconds===12&&error.traceId==="synthetic-trace");assert.equal(dispatches,0);assert.equal(persisted,0);
 });
 test("item feedback uses the route's PUT contract and withdrawal remains DELETE", async () => {
   const calls=[];const transport=createApiTransport(async(path,init={})=>{calls.push({path,method:init.method});return Response.json(path.includes("capabilities")?capability:{});},bridge);
@@ -111,7 +124,7 @@ test("item feedback uses the route's PUT contract and withdrawal remains DELETE"
 });
 test("restored research keeps polling until terminal and never submits another job", async t => {
   t.mock.timers.enable({apis:["setTimeout"]});
-  let polls=0;const updates=[];const conversation={id:"research",selectedModels:["a"],messages:[{id:"answer",role:"assistant",modelId:"a",pendingJobId:"provider",status:"pending",content:""}]};
+  let polls=0;const updates=[];const conversation={id:"research",selectedModels:["a"],assistantProfile:{profileId:"owned-assistant"},messages:[{id:"answer",role:"assistant",modelId:"a",pendingJobId:"provider",status:"pending",content:""}]};
   const transport=createApiTransport(async(path)=>{
     if(path.includes("capabilities"))return Response.json(capability);
     if(path==="/api/chat")throw Error("Must not resubmit a job");
@@ -120,7 +133,7 @@ test("restored research keeps polling until terminal and never submits another j
   },bridge);
   const running=transport.resumeResearch(conversation,new AbortController().signal,item=>updates.push(item));
   await new Promise(resolve=>setImmediate(resolve));assert.equal(polls,1);t.mock.timers.tick(8000);await running;
-  assert.equal(polls,2);assert.equal(updates.at(-1).activeAttempt,false);assert.equal(updates.at(-1).messages[0].content,"Saved research");
+  assert.equal(polls,2);assert.equal(updates.at(-1).activeAttempt,false);assert.equal(updates.at(-1).messages[0].content,"Saved research");assert.equal(updates.at(-1).assistantProfileId,"owned-assistant");
 });
 
 test("restored research survives a transient connection failure and abort stops its timer", async t => {
