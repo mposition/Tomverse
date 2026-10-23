@@ -25,8 +25,11 @@ test("a latch, an open attempt or unread lane state stops the round, in that ord
   assert.deepEqual(round({ latched: true, attemptOpen: null }), { action: "stop", reason: "state_unknown" });
 });
 
-test("any dev deployment in flight holds; unread deployments stop", () => {
-  for (const status of ["WAITING", "NEEDS_APPROVAL", "QUEUED", "INITIALIZING", "BUILDING", "DEPLOYING"]) {
+test("a dev deployment waiting for CI or a start holds; one already building does not; unread deployments stop", () => {
+  for (const status of ["BUILDING", "DEPLOYING"]) {
+    assert.notEqual(round({ developDeployments: [{ status: "SUCCESS" }, { status }] }).action, "hold", status);
+  }
+  for (const status of ["WAITING", "NEEDS_APPROVAL", "QUEUED", "INITIALIZING"]) {
     assert.deepEqual(
       round({ developDeployments: [{ status: "SUCCESS" }, { status }] }),
       { action: "hold", reason: "deployment_in_flight", inFlight: 1 },
