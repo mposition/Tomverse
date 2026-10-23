@@ -46,7 +46,7 @@ mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
   attachVoiceProviderSession: () => { if (!w.allowReceiver) assert.fail("No sideband should be opened here"); const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; socket.send = value => w.commands.push(JSON.parse(value)); socket.close = () => socket.emit("close"); w.socket = socket; return socket; },
   closeVoiceProviderSession: async id => { w.closes.push(id); return w.finalSeconds; },
-  hangupVoiceProviderSession: async id => { w.hangs.push(id); if (w.hangFailure) throw new Error("Provider unreachable"); },
+  hangupVoiceProviderSession: async id => { w.hangs.push(id); if (w.hangFailure) throw new Error("Provider unreachable"); if (w.finalOnHangup) w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: w.finalOnHangup } })); },
 } });
 const { assertVoiceWatchdogReady, touchVoiceWatchdog, recordVoiceUsage, finalizeVoiceReservation, reconcileVoiceConversations, observeActiveVoiceConversations, stopVoiceRecoveryReceivers } = await import(mod("lib/voiceConversationRecovery.ts"));
 const row = () => ({ id: "voice-1", userId: "owner", status: "reserved", providerRequestId: "live_1", lastError: null, settledCredits: 0,
@@ -166,6 +166,47 @@ for (const emergency of ["kill switch", "deadline"]) test(`a worker ${emergency}
   await observeActiveVoiceConversations(); await observeActiveVoiceConversations();
   assert.deepEqual(w.hangs, ["live_1"]); assert.deepEqual(w.commands, []);
   assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
+});
+
+for (const emergency of ["kill switch", "deadline"]) test(`a cold ${emergency} observes final usage before issuing the emergency hangup`, async () => {
+  w.allowReceiver = true; w.commands = []; w.finalOnHangup = 15;
+  w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  if (emergency === "kill switch") process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  else w.rows[0].reservationPayload.closeAt = new Date(0).toISOString();
+  await observeActiveVoiceConversations(); w.socket.readyState = 0;
+  await observeActiveVoiceConversations();
+  assert.deepEqual(w.hangs, []); assert.equal(w.charges.length, 0);
+  w.socket.readyState = 1; w.socket.emit("open");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(w.hangs, ["live_1"]); assert.equal(w.charges.length, 1);
+  assert.equal(w.charges[0].seconds, 15); assert.equal(w.charges[0].evidence, "final");
+  assert.deepEqual(w.commands, []);
+});
+
+test("an unavailable emergency observer still stops the call and its retry can collect final usage", async () => {
+  w.allowReceiver = true; w.commands = [];
+  w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  await observeActiveVoiceConversations(); const failedSocket = w.socket;
+  failedSocket.readyState = 0; failedSocket.emit("error", Error("Unavailable sideband"));
+  assert.deepEqual(w.hangs, ["live_1"]); assert.equal(w.charges.length, 0);
+  await observeActiveVoiceConversations(); assert.notEqual(w.socket, failedSocket);
+  w.socket.emit("open"); assert.equal(w.hangs.length, 1);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.charges.length, 1); assert.equal(w.charges[0].seconds, 15);
+});
+
+test("expired holds do not cycle observers or block observed-minimum reconciliation", async () => {
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  await observeActiveVoiceConversations(); await observeActiveVoiceConversations();
+  assert.deepEqual(w.hangs, ["live_1"]); assert.equal(w.socket, undefined);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(0).toISOString();
+  await observeActiveVoiceConversations(); await reconcileVoiceConversations();
+  assert.equal(w.rows[0].status, "settled"); assert.equal(w.charges[0].evidence, "observed_minimum");
 });
 
 test("an orphaned primary is durably marked for immediate closure without dispatching queued work", async () => {

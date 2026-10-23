@@ -11,7 +11,9 @@ const heartbeatPeriod = "worker";
 const epoch = new Date(0);
 const receivers = new Map<string, () => void>();
 const receiverClosers = new Map<string, () => Promise<void>>();
+const receiverEmergencyClosers = new Map<string, () => void>();
 const retryAfter = new Map<string, number>();
+const hangupRetryAfter = new Map<string, number>();
 
 /** A database lease also excludes receivers in other worker/maintenance processes. */
 export async function claimVoiceRecoveryLease(id: string) {
@@ -39,22 +41,27 @@ export async function observeActiveVoiceConversations() {
   if (process.env.VOICE_CONVERSATION_KILL_SWITCH) for (const close of receiverClosers.values()) void close().catch(() => {});
   const rows = await prisma.chatCreditReservation.findMany({ where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }], providerRequestId: { not: null } } });
   for (const id of retryAfter.keys()) if (!rows.some(row => row.id === id)) retryAfter.delete(id);
+  for (const id of hangupRetryAfter.keys()) if (!rows.some(row => row.id === id)) hangupRetryAfter.delete(id);
   for (const [id, release] of receivers) if (!rows.some(row => row.id === id)) release();
   for (const row of rows) {
     let payload;
     try { payload = readVoiceCreditPayload(row.reservationPayload); } catch { continue; }
     const webHealthy = Date.parse(payload.webLeaseUntil ?? "") > Date.now();
-    // Preserve the existing emergency authority even if the web still renews
-    // its lease. An observer's ordinary close command remains lease-fenced.
-    if (webHealthy && (Date.parse(payload.closeAt ?? "") <= Date.now() || process.env.VOICE_CONVERSATION_KILL_SWITCH) && (retryAfter.get(row.id) ?? 0) <= Date.now()) {
-      retryAfter.set(row.id, Date.now() + 10_000);
+    const urgent = () => webHealthy && (Date.parse(payload.closeAt ?? row.expiresAt.toISOString()) <= Date.now() || Boolean(process.env.VOICE_CONVERSATION_KILL_SWITCH));
+    const hangup = () => {
+      if ((hangupRetryAfter.get(row.id) ?? 0) > Date.now()) return;
+      hangupRetryAfter.set(row.id, Date.now() + 10_000);
       void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {});
-    }
+    };
     if (receivers.has(row.id)) {
+      if (urgent()) receiverEmergencyClosers.get(row.id)?.();
       if (!webHealthy) await receiverClosers.get(row.id)?.();
       continue;
     }
-    if ((retryAfter.get(row.id) ?? 0) > Date.now()) continue;
+    // Expired holds belong to the grace reconciler; never repeatedly attach an
+    // observer whose retention deadline has already passed.
+    if (row.expiresAt.getTime() <= Date.now()) { if (urgent()) hangup(); continue; }
+    if (!urgent() && (retryAfter.get(row.id) ?? 0) > Date.now()) continue;
     // Observe from the start: late attachment can miss the final usage event
     // when the web process disappears. Only an expired web lease grants commands.
     const socket = attachVoiceProviderSession(row.providerRequestId!);
@@ -67,6 +74,7 @@ export async function observeActiveVoiceConversations() {
     const close = () => { if (lease && !closeRequested && socket.readyState === socket.OPEN) { socket.send(JSON.stringify({ type: "session.close" })); closeRequested = true; } };
     const expiryTimer = setTimeout(() => { if (finalizing) return; if (lease) void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
     let released = false;
+    const emergencyClose = () => { if (socket.readyState === socket.OPEN && urgent()) hangup(); };
     async function takeOver() {
       if (released || finalizing || claiming) return;
       if (lease) { close(); return; }
@@ -83,12 +91,15 @@ export async function observeActiveVoiceConversations() {
     function release() {
       if (released) return; released = true;
       clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer);
-      receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
+      receivers.delete(row.id); receiverClosers.delete(row.id); receiverEmergencyClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
       socket.close(); if (lease) void releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
     }
     receivers.set(row.id, release);
     receiverClosers.set(row.id, takeOver);
-    socket.once("open", close);
+    receiverEmergencyClosers.set(row.id, emergencyClose);
+    // Observe before an emergency hangup can emit its terminal usage event.
+    // A failed attachment still uses the existing emergency stop authority.
+    socket.once("open", () => { close(); emergencyClose(); });
     socket.on("message", data => {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;
@@ -106,13 +117,13 @@ export async function observeActiveVoiceConversations() {
         }).finally(release);
       }
     });
-    socket.once("error", () => { if (!finalizing) release(); });
+    socket.once("error", () => { if (!finalizing) { if (urgent()) hangup(); release(); } });
     socket.once("close", () => { if (!finalizing) release(); });
     if (!webHealthy) await takeOver();
   }
 }
 
-export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); retryAfter.clear(); }
+export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); retryAfter.clear(); hangupRetryAfter.clear(); }
 
 export async function renewVoiceWebLease(id: string) {
   const until = new Date(Date.now() + 30_000).toISOString();
