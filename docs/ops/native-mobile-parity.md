@@ -93,7 +93,10 @@ lost response by its original request key. If no receipt is found, an explicit
 resume uses the same key and original options, with fresh quote consent. A replay
 refusal (including authentication, rate limit or stale pricing) retains that key:
 those checks can run before lookup of an already-created generation. A found
-receipt clears the local pending marker. Generated assets use short-lived signed
+receipt clears the local marker. A permanently refused request can be explicitly
+closed with confirmation that this does not cancel server processing or credits;
+closing requires fresh quote consent before any new request and never dispatches
+generation itself. Generated assets use short-lived signed
 URLs in memory and bounded automatic expiry recovery.
 
 ## Microphone capture

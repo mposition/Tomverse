@@ -4,6 +4,7 @@ import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { nativeParityBearerRoute } from "../lib/nativeBearerGate.ts";
 import { validateMobileUpload } from "../apps/mobile/src/nativeUpload.ts";
 import { deviceAccessGrant } from "../apps/mobile/src/deviceUnlock.ts";
+import { mobileErrorText } from "../locales/mobileErrors.ts";
 const bridge = { hasSession: async () => ({ signedIn: true }), signOut: async () => {} };
 const capability = { reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" };
 
@@ -111,11 +112,11 @@ for (const refusal of [429,403]) test(`comparison admission ${refusal} saves no 
   const transport=createApiTransport(async(path,init={})=>{
     if(path==="/api/products/mobile/capabilities")return Response.json(capability);
     if(path.endsWith("/messages")){persisted++;throw Error("Admission must precede persistence");}
-    if(path==="/api/chat/preflight")return Response.json({code:"CHAT_CONCURRENCY_EXCEEDED",details:{retryAfterSeconds:12}},{status:refusal,headers:{"Retry-After":"12","X-Request-ID":"synthetic-trace"}});
+    if(path==="/api/chat/preflight")return Response.json({code:"CHAT_CONCURRENCY_EXCEEDED",details:{retryAfterSeconds:12},traceId:"synthetic-trace"},{status:refusal,headers:{"Retry-After":"12",...(refusal===429?{"X-Request-ID":"synthetic-trace"}:{})}});
     if(path==="/api/chat")dispatches++;
     return Response.json(conversation);
   },bridge);
-  await assert.rejects(transport.sendReview(conversation,"Compare",[],new AbortController().signal,()=>{}),error=>error.status===refusal&&error.questionPersisted===false&&error.retryAfterSeconds===12&&error.traceId==="synthetic-trace");assert.equal(dispatches,0);assert.equal(persisted,0);
+  await assert.rejects(transport.sendReview(conversation,"Compare",[],new AbortController().signal,()=>{}),error=>{assert.match(mobileErrorText(error,"ko","Fallback"),/Trace ID: synthetic-trace/);return error.status===refusal&&error.questionPersisted===false&&error.retryAfterSeconds===12&&error.traceId==="synthetic-trace";});assert.equal(dispatches,0);assert.equal(persisted,0);
 });
 test("item feedback uses the route's PUT contract and withdrawal remains DELETE", async () => {
   const calls=[];const transport=createApiTransport(async(path,init={})=>{calls.push({path,method:init.method});return Response.json(path.includes("capabilities")?capability:{});},bridge);

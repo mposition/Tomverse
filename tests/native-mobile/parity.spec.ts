@@ -131,7 +131,7 @@ test("a long file selection preserves the draft behind the lock and resumes uplo
   await expect(page.locator("article")).toHaveCount(0);
 });
 
-for (const recovery of ["receipt", "same-request", 401, 409, 429] as const) test(`lost image responses recover through ${recovery} without a new request key`, async ({ page }) => {
+for (const recovery of ["receipt", "same-request", 400, 401, 403, 409, 422, 429] as const) test(`lost image responses recover or explicitly close after ${recovery}`, async ({ page }) => {
   await page.route("**/src/main.tsx", async route => {
     const response = await route.fetch(); const source = await response.text();
     const injection = `transport.mobileCapabilities=async()=>({reviewEasy:true,assistants:false,maxModels:3,plan:"Max",images:{enabled:true,maxModels:1,models:[{id:"synthetic-image",name:"Synthetic image model",provider:"openai",pricingVersion:"v1",prices:[{quality:"medium",size:"1024x1024",credits:10}]}]}});
@@ -154,13 +154,31 @@ for (const recovery of ["receipt", "same-request", 401, 409, 429] as const) test
     await expect(consent).not.toBeChecked(); await expect(page.getByLabel("이미지 설명")).toBeDisabled();
     const savedKey=await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-image-pending:synthetic-demo")!).idempotencyKey);expect(savedKey).toBe(first.idempotencyKey);
     await expect(page.getByRole("button", { name: "이미지 생성", exact: true })).toBeDisabled();
-    await page.evaluate(() => { (window as unknown as {receiptAvailable:boolean}).receiptAvailable=true; });
-    await page.getByRole("button", { name: "저장된 결과 조회", exact: true }).click();
+    if ([400,403,422].includes(recovery)) {
+      await page.getByRole("button",{name:"보류 중인 요청 닫기",exact:true}).click();
+      const close=page.getByRole("button",{name:"닫고 새 요청 작성 허용",exact:true});await expect(close).toBeDisabled();
+      await page.getByRole("checkbox",{name:"새 요청에는 크레딧이 별도로 사용될 수 있음을 이해했습니다."}).check();await close.click();
+      await expect(consent).not.toBeChecked();await expect(page.getByRole("button",{name:"이미지 생성",exact:true})).toBeDisabled();
+    } else {
+      await page.evaluate(() => { (window as unknown as {receiptAvailable:boolean}).receiptAvailable=true; });
+      await page.getByRole("button", { name: "저장된 결과 조회", exact: true }).click();
+    }
   }
   await expect(page.getByLabel("이미지 설명")).toBeEnabled();
   const requests = await page.evaluate(() => (window as unknown as { imageRequests: Array<{idempotencyKey:string}> }).imageRequests);
   expect(requests).toHaveLength(recovery === "receipt" ? 1 : 2); expect(requests.every(input => input.idempotencyKey === first.idempotencyKey)).toBe(true);
   expect(await page.evaluate(() => localStorage.getItem("tomverse-image-pending:synthetic-demo"))).toBeNull();
+});
+
+test("missing Review participants keeps the attachment and draft editable", async ({ page }) => {
+  await signIn(page);await page.getByTestId("product-switcher").selectOption("review");
+  await page.getByTestId("file-picker").setInputFiles({name:"keep.txt",mimeType:"text/plain",buffer:Buffer.from("Keep")});
+  await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();
+  await page.getByRole("textbox").fill("Keep my question");await page.getByRole("button",{name:/참여 모델 선택/}).click();
+  for (const checkbox of await page.getByRole("dialog").getByRole("checkbox").all()) await checkbox.uncheck();
+  await page.getByRole("button",{name:"닫기",exact:true}).click();await page.getByRole("button",{name:"메시지 보내기",exact:true}).click();
+  await expect(page.getByRole("alert")).toBeVisible();await expect(page.getByRole("textbox")).toHaveValue("Keep my question");
+  await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();await expect(page.locator("article.user")).toHaveCount(0);
 });
 
 test("a refused Review admission preserves the draft and selected attachment without a saved question", async ({ page }) => {
