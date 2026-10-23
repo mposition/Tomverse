@@ -1895,6 +1895,20 @@ export const fr = {
         dataTabOpen: "Ouvrir les assistants IA",
     },
     memoryReview: {
+        restoreGrounds: "Ajouter un nouveau fondement",
+        restoreGroundsNotice: "Ajoutez votre propre justification pour remettre ce souvenir en révision. Approuvez-le ensuite pour l’utiliser.",
+
+        reportAnswer: "Signaler un problème avec cette réponse",
+        conflictReview: "Examiner les souvenirs liés",
+        conflictChoose: "Choisir un souvenir à comparer",
+        conflictKeep: "Garder les souvenirs existants",
+        conflictBoth: "Garder les deux",
+        conflictExpire: "Expirer les souvenirs existants",
+        conflictMerge: "Fusionner en un souvenir",
+        conflictMergedStatement: "Énoncé fusionné",
+        conflictMergeGrounds: "Expliquez pourquoi cet énoncé est correct",
+        conflictLoading: "Chargement des souvenirs liés…",
+
         sourceDeleteDerivedImport:
             "{count} souvenirs issus de cet import seront également supprimés.",
         sourceDeleteDerivedConversation:
@@ -1949,8 +1963,7 @@ export const fr = {
         sensitiveBadge: "Sensible",
         pinnedBadge: "Épinglé",
         expires: "Expire : {date}",
-        conflictNotice:
-            "Un souvenir actif couvre déjà le même élément. Vous pouvez conserver le souvenir existant ou le remplacer par celui-ci.",
+        conflictNotice: "Ces souvenirs peuvent concerner le même sujet. Examinez-les et choisissez quoi conserver.",
         conflictReplace: "Remplacer le souvenir existant",
         activeTitle: "Souvenirs en usage",
         activeEmpty: "Aucun souvenir n'est encore en usage.",

@@ -1898,6 +1898,20 @@ export const de = {
         dataTabOpen: "KI-Assistenten öffnen",
     },
     memoryReview: {
+        restoreGrounds: "Neue Begründung hinzufügen",
+        restoreGroundsNotice: "Geben Sie eine eigene Begründung ein, um die Erinnerung erneut zu prüfen. Die Verwendung erfordert eine separate Freigabe.",
+
+        reportAnswer: "Problem mit dieser Antwort melden",
+        conflictReview: "Ähnliche Erinnerungen prüfen",
+        conflictChoose: "Bestehende Erinnerung zum Vergleich wählen",
+        conflictKeep: "Bestehende Erinnerungen behalten",
+        conflictBoth: "Beide behalten",
+        conflictExpire: "Bestehende Erinnerungen ablaufen lassen",
+        conflictMerge: "Zu einer Erinnerung zusammenführen",
+        conflictMergedStatement: "Zusammengeführte Aussage",
+        conflictMergeGrounds: "Begründen Sie die zusammengeführte Aussage",
+        conflictLoading: "Ähnliche Erinnerungen werden geladen…",
+
         sourceDeleteDerivedImport:
             "{count} Erinnerungen aus diesem Import werden ebenfalls gelöscht.",
         sourceDeleteDerivedConversation:
@@ -1952,8 +1966,7 @@ export const de = {
         sensitiveBadge: "Sensibel",
         pinnedBadge: "Fixiert",
         expires: "Läuft ab: {date}",
-        conflictNotice:
-            "Eine aktive Erinnerung deckt denselben Punkt bereits ab. Sie können die bestehende Erinnerung behalten oder durch diese ersetzen.",
+        conflictNotice: "Diese Erinnerungen können dasselbe Thema betreffen. Prüfen Sie sie und wählen Sie aus, was Sie behalten möchten.",
         conflictReplace: "Bestehende Erinnerung ersetzen",
         activeTitle: "Verwendete Erinnerungen",
         activeEmpty: "Noch keine Erinnerungen in Verwendung.",

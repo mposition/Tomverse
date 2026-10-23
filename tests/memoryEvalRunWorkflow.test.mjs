@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
+import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
 
 /** The guard's own needle, written once so the escaping is stated in one place. */
 const HARNESS_LIMIT_GUARD = `harness.includes(${JSON.stringify('argValue("limit"')})`;
@@ -220,7 +221,7 @@ test("the checkout can answer the ancestry the budget gate asks about", () => {
     assert.deepEqual(depths, ["0"], "a numeric depth expires without saying so");
 });
 
-test("the per-run ceiling defaults to the register's approved figure", () => {
+test("a funded prompt uses its approved ceiling and an unfunded prompt cannot run", () => {
     // Compared against the register rather than pinned as a second copy of
     // the number, which is how it went stale: the default sat at v6's US$6.285
     // while the shipped pair became `mem-extract-v8` on `mem-eval-succ-9`,
@@ -243,11 +244,11 @@ test("the per-run ceiling defaults to the register's approved figure", () => {
         entry,
         `no register entry for gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION}`
     );
-    assert.ok(
-        entry.evalBudget,
-        `gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION} is unfunded, so this ` +
-            "workflow has no approved ceiling to default to"
-    );
+    if (!entry.evalBudget) {
+        assert.deepEqual(decideEvalRunMode({ live: true, registerEntry: entry, hasApiKey: true }),
+            { mode: "refused", reason: "no_eval_budget" });
+        return;
+    }
 
     const inputs = workflow.slice(
         workflow.indexOf("      max_cost_usd:"),

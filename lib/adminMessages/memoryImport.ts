@@ -29,6 +29,7 @@ export const adminMemoryImportMessages = defineAdminMessages({
       "A proxy, not a measurement of answer quality. A follow-up often means the answer was useful. Read the difference between the two arms, never either rate on its own, and never as a re-ask rate.",
     followupWithin: "Follow-up within 120s",
     regenerateWithin: "Regenerate within 120s",
+    feedbackWithin: "Answers reported within 120s",
     versus: (memory: string, plain: string) => `${memory} vs ${plain}`,
     followupDetail: (memoryAnswers: number, plainAnswers: number, difference: string) =>
       `memory-shaped (${memoryAnswers}) vs other answers (${plainAnswers}) · difference ${difference}`,
@@ -76,6 +77,7 @@ export const adminMemoryImportMessages = defineAdminMessages({
       "답변 품질을 측정한 값이 아니라 proxy입니다. 후속 질문은 답변이 유용했다는 뜻인 경우가 많습니다. 두 집단의 차이만 읽고, 한쪽 비율만 따로 읽거나 재질문율로 해석하지 마세요.",
     followupWithin: "120초 내 후속 질문",
     regenerateWithin: "120초 내 재생성",
+    feedbackWithin: "120초 내 오류 신고된 답변",
     versus: (memory: string, plain: string) => `${memory} 대 ${plain}`,
     followupDetail: (memoryAnswers: number, plainAnswers: number, difference: string) =>
       `메모리 기반 답변(${memoryAnswers}) 대 기타 답변(${plainAnswers}) · 차이 ${difference}`,

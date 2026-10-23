@@ -1383,6 +1383,11 @@ export function ChatMessageList({
                           </p>
                         );
                       })()}
+                    {!isUser && !isActivelyGenerating && !msg.carriedAnswer && msg.status !== "error" && displayContent.trim() && (
+                      <FeedbackButton sourceMessageId={msg.id} currentModelId={msg.modelId}
+                        triggerLabel={t("memoryReview.reportAnswer")} triggerTestId="memory-answer-feedback"
+                        triggerClassName="mt-2 text-[11px] text-zinc-500 underline underline-offset-2" />
+                    )}
                     {/*
                       Which model answered, on a turn Auto routed
                       (docs/ui-contracts/auto-model-selection.md).
