@@ -3793,7 +3793,7 @@ export function ChatInput({
           {isStudio && !webSearchState.isVisible && <button type="button" data-testid="composer-web-search-shortcut" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
           {!isStudio && (review && footerModelPicker ? <div data-testid="composer-review-models" className="flex min-w-0">
             {footerModelPicker}
-            <span className="sr-only">{activeSelectedModelObjects.map(model => <span key={model.id} data-testid="composer-review-selected-model" data-model-id={model.id}>{model.name}</span>)}</span>
+            <span className="sr-only">{activeSelectedModelObjects.map(model => <span key={model.id} className="sr-only" data-testid="composer-review-selected-model" data-model-id={model.id}>{model.name}</span>)}</span>
           </div> : footerModelPicker)}
         </div>
 
