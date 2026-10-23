@@ -29,8 +29,12 @@ import { fileURLToPath } from "node:url";
 
 export const DISPATCH_TOKEN_ENV = "PR_CI_AUTO_FIX_DISPATCH_TOKEN";
 export const SCAN_INTERVAL_SECONDS = 60;
-/** A request the sender did not see within the hour is stale: the branch has likely moved on. */
-export const REQUEST_MAX_AGE_MS = 60 * 60_000;
+/**
+ * A request older than this is not sent (logged once). The proposing half
+ * queues no faster than the hourly cap, so only a long outage expires one;
+ * the workflow refuses a head the branch has moved past anyway.
+ */
+export const REQUEST_MAX_AGE_MS = 6 * 60 * 60_000;
 export const REQUEST_MAX_BYTES = 128 * 1024;
 export const MAX_DISPATCHES_PER_HOUR = 6;
 export const SENT_KEEP_MS = 14 * 86_400_000;
@@ -164,6 +168,7 @@ export function createDispatchSender({
 }) {
   const sentPath = join(settings.stateDir, "sent.json");
   let capped = false;
+  const expired = new Set();
   return {
     async scanOnce() {
       let names;
@@ -189,7 +194,11 @@ export function createDispatchSender({
           log(`request ${name.slice(0, 9)} is not a valid request; not sending`);
           continue;
         }
-        if (at - request.createdAt > REQUEST_MAX_AGE_MS || request.createdAt - at > 5 * 60_000) continue;
+        if (at - request.createdAt > REQUEST_MAX_AGE_MS || request.createdAt - at > 5 * 60_000) {
+          if (!expired.has(request.headSha)) log(`#${request.prNumber} ${request.headSha.slice(0, 9)}: request expired; not sending`);
+          expired.add(request.headSha);
+          continue;
+        }
         requests.push(request);
       }
       requests.sort((a, b) => a.createdAt - b.createdAt);

@@ -18,7 +18,8 @@
 #   from GitHub's own records -- the pull request is open at exactly head_sha
 #   and served (same repository, develop base, not draft, agent branch, every
 #   commit read, fewer than two auto-fix commits), and each named run is a
-#   failed pull_request run of a required workflow on that same commit.
+#   failed pull_request run of a required workflow on that same commit and
+#   the newest run of that workflow there.
 # - publish: a fresh runner with a trusted checkout runs
 #   scripts/pr-ci-auto-fix-guard.mjs against the patch applied to a clean
 #   checkout of the pull request (no gate path -- the merge lane's own list --,
@@ -97,6 +98,10 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr.json
           [ "$(jq -r .state /tmp/pr.json)" = open ] || refuse "The pull request is not open."
           [ "$(jq -r .head.sha /tmp/pr.json)" = "$HEAD_SHA" ] || refuse "The branch moved on after the failed run; its own CI decides."
+          # Every pull_request run on this commit: a named run must be the newest
+          # of its workflow here, or a later green run (reopen, ready for
+          # review) would still let an old failure publish onto a green head.
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" > /tmp/head-runs.json
           workflows=""
           for id in ${RUN_IDS//,/ }; do
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" > /tmp/run.json
@@ -105,6 +110,9 @@ jobs:
               and .head_repository.full_name == $repo
               and (.name | IN("PR Fast Gate", "Admin Console E2E", "Credit Finance DB Integration", "Orchestrator Rust"))' /tmp/run.json)
             [ "$ok" = true ] || refuse "Run ${id} is not a failed required pull_request run on ${HEAD_SHA}."
+            newest=$(jq -r --argjson wf "$(jq .workflow_id /tmp/run.json)" \
+              '[.[].workflow_runs[] | select(.workflow_id == $wf)] | max_by(.id) | .id // empty' /tmp/head-runs.json)
+            [ "$newest" = "$id" ] || refuse "Run ${id} is not the newest run of its workflow on ${HEAD_SHA}."
             workflows="${workflows:+${workflows}, }$(jq -r .name /tmp/run.json)"
           done
           gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits?per_page=100" > /tmp/commits.json

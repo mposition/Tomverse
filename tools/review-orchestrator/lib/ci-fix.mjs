@@ -27,8 +27,11 @@ export const CI_FIX_MAX_ATTEMPTS = 2;
 export const CI_FIX_MAX_PATCH_CHARS = 60_000;
 export const CI_FIX_MAX_LOG_CHARS = 60_000;
 export const CI_FIX_LEDGER_DAYS = 14;
-/** The sender ignores a request older than an hour; this side clears a day-old one. */
+/** The sender ignores a request older than six hours; this side clears a day-old one. */
 export const CI_FIX_OUTBOX_KEEP_MS = 86_400_000;
+/** The sender's own hourly cap: queueing no faster means nothing waits there to expire. */
+export const CI_FIX_MAX_QUEUED_PER_HOUR = 6;
+export const CI_FIX_JOB_LOG_BYTES = 20_000;
 
 /** Open develop pull requests the workflow would serve, oldest first. */
 export function servedPulls(pulls) {
@@ -78,6 +81,23 @@ export function pruneLedger(ledger, now) {
     if (now - (entry?.at ?? 0) < CI_FIX_LEDGER_DAYS * 86_400_000) keep[sha] = entry;
   }
   return keep;
+}
+
+/**
+ * The last maxBytes of a stream, holding no more than about twice that: a
+ * job log can be hundreds of megabytes on a host the reviews share.
+ */
+export async function readTail(stream, maxBytes) {
+  if (!stream) return "";
+  const chunks = [];
+  let held = 0;
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk));
+    held += chunk.length;
+    while (chunks.length > 1 && held - chunks[0].length >= maxBytes) held -= chunks.shift().length;
+  }
+  const all = Buffer.concat(chunks);
+  return all.subarray(Math.max(0, all.length - maxBytes)).toString("utf8");
 }
 
 /** The ledger on disk, or an empty one before the first pass. */
@@ -136,18 +156,37 @@ export function githubClient({ repo, token, fetchImpl = fetch }) {
       if (!response.ok) throw new Error(`github_${response.status}: ${path.split("?")[0]}`);
       return response.json();
     },
-    async log(jobId) {
+    async log(jobId, maxBytes = CI_FIX_JOB_LOG_BYTES) {
       const response = await call(`/actions/jobs/${jobId}/logs`, { redirect: "manual" });
       const location = response.headers.get("location");
-      if (!location) return "";
+      if (!location) throw new Error(`github_log_${response.status}`);
       const blob = await fetchImpl(location, { signal: AbortSignal.timeout(60_000) });
-      return blob.ok ? blob.text() : "";
+      if (!blob.ok) throw new Error(`github_log_${blob.status}`);
+      return readTail(blob.body, maxBytes);
     },
   };
 }
 
-/** The Claude CLI on the server's subscription: edit tools only, no shell, no MCP, no network. */
-export function runClaude({ provider, model, cwd, logDir, prompt, timeoutMs, spawn = spawnSync }) {
+/**
+ * What the model may not read or write, as Claude Code deny rules. A deny
+ * rule matches a symlink when either the link or its target matches, and no
+ * other settings level can allow it back. The account's home holds the
+ * subscription credential; /proc holds this process's environment (the read
+ * token); the review state and the outbox are other work. The checkout and the
+ * log are outside all of them (ciFixSettings requires it).
+ */
+export function deniedPaths({ stateDir, outbox }) {
+  const roots = ["~/**", "//proc/**", "//sys/**", "//etc/**", "//run/**", "//root/**",
+    `/${stateDir.replace(/\/+$/, "")}/**`, `/${outbox.replace(/\/+$/, "")}/**`];
+  return roots.flatMap((root) => [`Read(${root})`, `Edit(${root})`]);
+}
+
+/**
+ * The Claude CLI on the server's subscription: file tools only, no shell, no
+ * MCP, no network. The deny rules go inline, not in a file: a settings file
+ * inside a directory the model can edit would be one it could rewrite.
+ */
+export function runClaude({ provider, model, cwd, logDir, prompt, timeoutMs, deny, spawn = spawnSync }) {
   const result = spawn(provider.command ?? "claude", [
     "-p", prompt,
     "--strict-mcp-config",
@@ -155,6 +194,7 @@ export function runClaude({ provider, model, cwd, logDir, prompt, timeoutMs, spa
     "--max-turns", "40",
     "--permission-mode", "acceptEdits",
     "--add-dir", logDir,
+    "--settings", JSON.stringify({ permissions: { deny } }),
     "--allowedTools", "Read,Edit,Write,Grep,Glob",
     "--disallowedTools", "Bash,NotebookEdit,WebFetch,WebSearch,Agent,Task",
     "--output-format", "text",
@@ -162,11 +202,52 @@ export function runClaude({ provider, model, cwd, logDir, prompt, timeoutMs, spa
   return { ok: result.status === 0, timedOut: result.error?.code === "ETIMEDOUT", tail: String(result.stdout ?? "").slice(-2000) };
 }
 
-/** The change the model made, without instruction files (the checkout holds develop's). */
-export function proposedPatch(worktree) {
+/**
+ * Removes every symlink the branch put in the checkout before the model sees
+ * it, so no path in the tree leads anywhere else. Returns the removed paths,
+ * which the patch then leaves out (their removal is not the model's change).
+ */
+export function removeTreeSymlinks(worktree) {
+  const links = git(["ls-files", "-s", "-z"], { cwd: worktree }).stdout.split("\0")
+    .filter((entry) => entry.startsWith("120000 "))
+    .map((entry) => entry.slice(entry.indexOf("\t") + 1));
+  for (const path of links) rmSync(join(worktree, path), { force: true });
+  return links;
+}
+
+const SECRET_SHAPES = [
+  /sk-ant-[A-Za-z0-9_-]{16,}/,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}/,
+  /\bgithub_pat_[A-Za-z0-9_]{30,}/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+];
+
+/**
+ * The one cheap check before a patch leaves the server: an accepted patch is
+ * pushed to a public branch, and a pushed secret cannot be taken back. It
+ * refuses binary and symlink changes, any secret this process knows in clear
+ * or base64, and secret-shaped text on added lines. Returns a reason, or null.
+ */
+export function patchProblem(patch, secrets) {
+  const text = patch.toString("utf8");
+  if (text.includes("GIT binary patch") || /^Binary files /m.test(text)) return "binary";
+  if (/^(new file mode|new mode|old mode|deleted file mode) 120000$/m.test(text)) return "symlink";
+  for (const secret of secrets) {
+    if (typeof secret !== "string" || secret.length < 16) continue;
+    const forms = [secret, Buffer.from(secret).toString("base64"), Buffer.from(secret).toString("base64url")];
+    if (forms.some((form) => text.includes(form))) return "known_secret";
+  }
+  const added = text.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).join("\n");
+  if (SECRET_SHAPES.some((shape) => shape.test(added))) return "secret_shape";
+  return null;
+}
+
+/** The change the model made, without instruction files (the checkout holds develop's) or the removed links. */
+export function proposedPatch(worktree, skip = []) {
   git(["add", "--all"], { cwd: worktree });
+  const skipped = new Set(skip);
   const paths = git(["diff", "--cached", "--no-renames", "--name-only", "-z", "HEAD"], { cwd: worktree })
-    .stdout.split("\0").filter((path) => path && !isInstructionPath(path));
+    .stdout.split("\0").filter((path) => path && !isInstructionPath(path) && !skipped.has(path));
   if (paths.length === 0) return Buffer.alloc(0);
   const result = spawnSync("git", ["--literal-pathspecs", "diff", "--cached", "--binary", "--no-renames", "HEAD", "--", ...paths],
     { cwd: worktree, maxBuffer: 64 * 1024 * 1024 });
@@ -178,14 +259,23 @@ export function proposedPatch(worktree) {
  * One pass: pick the oldest served pull request with a failed, settled head
  * not tried before, and try it once. The ledger is written before the model
  * runs, so a crash or a queued request is never tried again on the same head.
+ * Nothing is recorded for what the next pass can simply try again (quota,
+ * the hourly cap, an unreadable log).
  */
-export async function runCiFix({ config, github, outbox, model, minRemainingPercent, quota, claude = runClaude, now = Date.now(), log = console.log }) {
+export async function runCiFix({
+  config, github, outbox, workDir, model, minRemainingPercent, quota, secrets = [],
+  claude = runClaude, clock = Date.now, log = console.log,
+}) {
+  const now = clock();
   const ledgerPath = join(config.stateDir, "ci-fix", "ledger.json");
   const ledger = pruneLedger(readLedger(ledgerPath), now);
   const record = (sha, entry) => {
     ledger[sha] = { ...ledger[sha], ...entry, at: ledger[sha]?.at ?? now };
     writeJsonAtomic(ledgerPath, ledger);
   };
+
+  const queuedLastHour = Object.values(ledger).filter((entry) => now - (entry?.queuedAt ?? -Infinity) < 3_600_000).length;
+  if (queuedLastHour >= CI_FIX_MAX_QUEUED_PER_HOUR) return { outcome: "rate_capped" };
 
   let chosen = null;
   for (const pull of servedPulls(await github.json("/pulls?state=open&base=develop&per_page=100"))) {
@@ -207,61 +297,74 @@ export async function runCiFix({ config, github, outbox, model, minRemainingPerc
   if (!provider) return { outcome: "no_claude_provider" };
   const usage = await quota(provider);
   if (usage?.state !== "available" || !(usage.remainingPercent >= minRemainingPercent)) {
-    // Not recorded: the next pass tries again once the account has room.
     return { outcome: "quota_low", quota: usage };
   }
 
   const { pull, failed } = chosen;
   const sha = pull.head.sha;
+  let text = "";
+  try {
+    for (const run of failed) {
+      const { jobs = [] } = await github.json(`/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
+      for (const job of jobs.filter((j) => j.conclusion === "failure")) {
+        text += `\n===== ${run.name} / ${job.name} =====\n${await github.log(job.id)}`;
+      }
+    }
+  } catch (error) {
+    return { outcome: "logs_unreadable", detail: String(error?.message ?? error).slice(0, 200) };
+  }
+
   record(sha, { pr: pull.number, outcome: "started", runs: failed.map((run) => run.id) });
   log(`ci-fix: #${pull.number} ${sha.slice(0, 9)} ${failed.map((run) => run.name).join(", ")}`);
 
   const repo = config.repos.tomverse;
-  const workRoot = join(config.stateDir, "ci-fix", "work");
-  mkdirSync(workRoot, { recursive: true });
-  const logDir = mkdtempSync(join(workRoot, "log-"));
-  const worktree = join(workRoot, `wt-${sha.slice(0, 12)}`);
+  mkdirSync(workDir, { recursive: true });
+  const logDir = mkdtempSync(join(workDir, "log-"));
+  const worktree = join(workDir, `wt-${sha.slice(0, 12)}`);
   const mirrorLock = join(config.stateDir, "mirror.lock");
   try {
-    let text = "";
-    for (const run of failed) {
-      const { jobs = [] } = await github.json(`/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
-      for (const job of jobs.filter((j) => j.conclusion === "failure")) {
-        text += `\n===== ${run.name} / ${job.name} =====\n${(await github.log(job.id)).slice(-20_000)}`;
-      }
-    }
     const logFile = join(logDir, "ci.log");
     writeFileSync(logFile, text.slice(-CI_FIX_MAX_LOG_CHARS));
 
+    let links = [];
     await withLock(mirrorLock, () => {
       ensureMirror(repo);
       addWorktree(repo.mirror, worktree, sha);
       // The branch must not instruct the model: its instruction files are develop's.
       isolateInstructionFiles(worktree, "refs/heads/develop", sha);
+      links = removeTreeSymlinks(worktree);
     });
     const answer = claude({
       provider, model, cwd: worktree, logDir,
       prompt: ciFixPrompt({ workflows: failed.map((run) => run.name), logFile }),
+      deny: deniedPaths({ stateDir: config.stateDir, outbox }),
       timeoutMs: (provider.timeoutSeconds ?? config.timeoutSeconds) * 1000,
     });
     if (!answer.ok) {
       record(sha, { outcome: answer.timedOut ? "model_timeout" : "model_failed" });
       return { outcome: "model_failed" };
     }
-    const patch = proposedPatch(worktree);
+    const patch = proposedPatch(worktree, links);
     if (patch.length === 0) {
       record(sha, { outcome: "no_change" });
       return { outcome: "no_change" };
+    }
+    const problem = patchProblem(patch, secrets);
+    if (problem) {
+      record(sha, { outcome: "patch_refused", detail: problem });
+      log(`ci-fix: #${pull.number} patch refused: ${problem}`);
+      return { outcome: "patch_refused", reason: problem };
     }
     const encoded = encodePatch(patch);
     if (!encoded) {
       record(sha, { outcome: "patch_too_large" });
       return { outcome: "patch_too_large" };
     }
+    const queuedAt = clock();
     writeDispatchRequest(outbox, {
-      prNumber: pull.number, headSha: sha, runIds: failed.map((run) => run.id), patchGzB64: encoded, now,
+      prNumber: pull.number, headSha: sha, runIds: failed.map((run) => run.id), patchGzB64: encoded, now: queuedAt,
     });
-    record(sha, { outcome: "queued" });
+    record(sha, { outcome: "queued", queuedAt });
     return { outcome: "queued", pr: pull.number };
   } catch (error) {
     record(sha, { outcome: "error", detail: String(error?.message ?? error).slice(0, 200) });

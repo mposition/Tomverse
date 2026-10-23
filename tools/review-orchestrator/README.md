@@ -509,17 +509,31 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
 
 - **제안 pass(`bin/pr-ci-auto-fix.mjs`, `review` 계정, 5분마다 timer)**: GitHub를 **읽기 전용
   토큰**으로 읽고, 대상 PR을 하나 고르고, daemon이 마지막으로 읽은 Claude quota가
-  `PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`(기본 30) 이상일 때만 모델을 부릅니다. 모델은
-  Read/Edit/Write/Grep/Glob만 쓰고 shell·MCP·네트워크는 막혀 있으며, 지시 파일(AGENTS.md 등)은
-  develop의 것으로 바꾼 checkout에서 돕니다. 결과 patch는 outbox에 `<head sha>.json`으로 남깁니다.
-  dispatch 토큰은 갖지 않습니다. 이 토큰이 새어도 공개 저장소와 CI 로그를 읽는 것이 전부입니다.
+  `PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`(기본 30) 이상일 때만 모델을 부릅니다. 한 시간에 6건
+  넘게 내보내지 않습니다(sender의 상한과 같아서 sender에서 기다리다 만료되는 요청이 없습니다).
+  로그를 읽지 못하면 시도로 치지 않고 다음 pass가 다시 합니다.
+- **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
+  만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
+  - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.
+  - `--settings`로 **인라인** deny 규칙을 줍니다(모델이 고칠 수 있는 파일이 아닙니다). 홈 전체,
+    `/proc`(이 프로세스의 환경 = 읽기 토큰), `/etc`, `/run`, `/sys`, review 상태 폴더, outbox를
+    읽기·쓰기 모두 막습니다. deny 규칙은 symlink 경로나 그 대상 중 하나만 맞아도 막습니다.
+  - 그래서 checkout과 로그는 그 밖(`PR_CI_AUTO_FIX_WORK`)에 둡니다. 겹치면 pass가 시작하지 않습니다.
+  - 지시 파일(AGENTS.md 등)은 develop의 것으로 바꾸고, 브랜치가 넣은 symlink는 모델을 부르기
+    전에 모두 지웁니다.
+  - patch가 서버를 떠나기 전 마지막 검사: binary·symlink 변경, 이 계정이 아는 비밀값(읽기 토큰,
+    CLI에 넘기는 환경 변수, 자격증명 파일의 문자열 — 원문과 base64), 추가된 줄의 비밀 형태
+    문자열(`sk-ant-`, `ghp_`, `github_pat_`, private key)이 있으면 내보내지 않습니다.
+  - 결과 patch는 outbox에 `<head sha>.json`으로 남깁니다. dispatch 토큰은 갖지 않습니다. 읽기
+    토큰이 새어도 공개 저장소와 CI 로그를 읽는 것이 전부입니다.
 - **sender(`bin/pr-ci-auto-fix-sender.mjs`, systemd `DynamicUser`)**: workflow를 dispatch할 수
   있는 유일한 토큰을 갖습니다. Node 내장 모듈만 쓰는 파일 하나이고, 운영자가 GitHub main에서
   root 소유 경로로 받습니다. outbox 파일은 `review` 계정이 쓰므로 필드 단위로 다시 만들고,
   head 하나에 한 번(POST 전에 기록하므로 결과를 모르는 요청도 다시 보내지 않습니다), 한 시간에
-  최대 6건, 한 시간이 지난 요청은 버립니다.
+  최대 6건 보냅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
 - **판단의 경계는 workflow입니다.** dispatch 입력을 믿지 않고 GitHub 기록으로 다시 확인합니다
-  (PR이 그 head에서 열려 있는지, 넘겨받은 run이 그 커밋에서 실패한 필수 run인지, 자동 수정 커밋이
+  (PR이 그 head에서 열려 있는지, 넘겨받은 run이 그 커밋에서 실패한 필수 run이면서 그 workflow의
+  최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 자동 수정 커밋이
   2개 미만인지). 그 뒤 `scripts/pr-ci-auto-fix-guard.mjs`가 patch를 검사하고(게이트 경로·테스트
   파일·삭제·binary 금지, 400줄 이하) 통과할 때만 `GH_AUTOMATION_PAT`으로 push합니다. 위조된
   outbox 요청이 할 수 있는 최악은 나쁜 모델 patch와 같고, guard가 둘 다 같은 기준으로 판단합니다.
@@ -545,7 +559,7 @@ sender 파일도 main에서 받습니다.
 sudo install -d -m 0700 /etc/pr-ci-auto-fix
 read -rs -p "read token: " T; echo; printf 'PR_CI_AUTO_FIX_READ_TOKEN=%s\n' "$T" | sudo sh -c 'umask 077; cat > /etc/pr-ci-auto-fix/read.env'; unset T
 read -rs -p "dispatch token: " T; echo; printf 'PR_CI_AUTO_FIX_DISPATCH_TOKEN=%s\n' "$T" | sudo sh -c 'umask 077; cat > /etc/pr-ci-auto-fix/dispatch.env'; unset T
-sudo install -d -o review -m 0755 /var/lib/pr-ci-auto-fix /var/lib/pr-ci-auto-fix/outbox
+sudo install -d -o review -m 0755 /var/lib/pr-ci-auto-fix /var/lib/pr-ci-auto-fix/outbox /var/lib/pr-ci-auto-fix/work
 ```
 
 **③ 같은 서버 bash.** sender와 그 unit을 GitHub main에서 root 소유로 받고 켭니다.

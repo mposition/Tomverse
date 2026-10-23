@@ -13,12 +13,14 @@
  *   PR_CI_AUTO_FIX_READ_TOKEN              GitHub token with read access only (Actions, Pull requests)
  *   PR_CI_AUTO_FIX_REPO                    owner/name
  *   PR_CI_AUTO_FIX_OUTBOX                  absolute directory the sender reads
+ *   PR_CI_AUTO_FIX_WORK                    absolute directory for the model's checkout and log,
+ *                                          outside HOME, the review stateDir and the outbox
  *   PR_CI_AUTO_FIX_MODEL                   optional, default sonnet
  *   PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT   optional, default 30: the account quota a pass needs
  *
  * Exit 0 after a pass whatever it found, 64 when the settings cannot run, 65 on error.
  */
-import { mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { githubClient, pruneOutbox, runCiFix } from "../lib/ci-fix.mjs";
@@ -41,8 +43,17 @@ export function ciFixSettings(env, config) {
   if (typeof token !== "string" || token.length < 20) return { error: `${READ_TOKEN_ENV} is missing` };
   if (!REPO.test(env.PR_CI_AUTO_FIX_REPO ?? "")) return { error: "PR_CI_AUTO_FIX_REPO must be owner/name" };
   const outbox = env.PR_CI_AUTO_FIX_OUTBOX ?? "";
-  if (!outbox.startsWith("/") || outbox.split("/").includes("..")) {
-    return { error: "PR_CI_AUTO_FIX_OUTBOX must be an absolute path" };
+  const workDir = env.PR_CI_AUTO_FIX_WORK ?? "";
+  if (!isAbsolute(outbox)) return { error: "PR_CI_AUTO_FIX_OUTBOX must be an absolute path" };
+  if (!isAbsolute(workDir)) return { error: "PR_CI_AUTO_FIX_WORK must be an absolute path" };
+  // The model is denied the home, the review state and the outbox
+  // (deniedPaths), so its checkout must lie outside all three.
+  const home = env.HOME ?? "";
+  if (!isAbsolute(home)) return { error: "HOME must be an absolute path" };
+  for (const [name, dir] of [["HOME", home], ["stateDir", config.stateDir], ["PR_CI_AUTO_FIX_OUTBOX", outbox]]) {
+    if (within(workDir, dir) || within(dir, workDir)) {
+      return { error: `PR_CI_AUTO_FIX_WORK must not overlap ${name}: the model is denied it` };
+    }
   }
   const model = env.PR_CI_AUTO_FIX_MODEL ?? "sonnet";
   if (!MODEL.test(model)) return { error: "PR_CI_AUTO_FIX_MODEL is not a model name" };
@@ -53,7 +64,35 @@ export function ciFixSettings(env, config) {
   // reviewerEnv hands a CLI only the names it lists plus passEnv.
   const leaky = config.providers.find((p) => (p.passEnv ?? []).some((name) => name === READ_TOKEN_ENV || name === DISPATCH_TOKEN_ENV));
   if (leaky) return { error: `providers.${leaky.id}: passEnv must not carry a GitHub token` };
-  return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox, model, minRemainingPercent };
+  return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox, workDir, home, model, minRemainingPercent };
+}
+
+const isAbsolute = (path) => typeof path === "string" && path.startsWith("/") && !path.split("/").includes("..");
+/** Is path the directory dir or inside it? Both absolute POSIX paths. */
+export const within = (path, dir) => {
+  const clean = (value) => value.replace(/\/+$/, "") || "/";
+  const a = clean(path);
+  const b = clean(dir);
+  return a === b || b === "/" || a.startsWith(`${b}/`);
+};
+
+/**
+ * Every secret this account holds in clear, for the last check on a patch
+ * (patchProblem): the read token, credentials a CLI is given by environment,
+ * and the string values in the Claude CLI's credential file.
+ */
+export function knownSecrets(env, config, readText = (path) => readFileSync(path, "utf8")) {
+  const names = new Set([READ_TOKEN_ENV, "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
+    ...config.providers.flatMap((provider) => provider.passEnv ?? [])]);
+  const values = [...names].map((name) => env[name]).filter((value) => typeof value === "string");
+  const strings = (value) => (typeof value === "string" ? [value]
+    : value && typeof value === "object" ? Object.values(value).flatMap(strings) : []);
+  try {
+    values.push(...strings(JSON.parse(readText(join(env.HOME ?? "/nonexistent", ".claude", ".credentials.json")))));
+  } catch {
+    // no credential file: the CLI is signed in some other way
+  }
+  return values.filter((value) => value.length >= 16);
 }
 
 async function main() {
@@ -73,17 +112,17 @@ async function main() {
     return 0;
   }
   try {
-    const now = Date.now();
-    pruneOutbox(settings.outbox, now);
+    pruneOutbox(settings.outbox, Date.now());
     const result = await runCiFix({
       config,
       github: githubClient({ repo: settings.repo, token: settings.token }),
       outbox: settings.outbox,
+      workDir: settings.workDir,
       model: settings.model,
       minRemainingPercent: settings.minRemainingPercent,
       // The daemon's last reading: a pass never probes the account itself.
       quota: async (provider) => readQuotaStatus(config, Date.now())[provider.id],
-      now,
+      secrets: knownSecrets(process.env, config),
       log,
     });
     log(`ci-fix: ${JSON.stringify(result)}`);
