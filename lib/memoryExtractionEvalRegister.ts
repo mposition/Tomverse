@@ -154,6 +154,16 @@ export type MemoryExtractionEvalEntry = {
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
         {
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v9",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-10-21",
+            notes: "Adds model-proposed canonical topics for user-reviewed conflict resolution. No paid evaluation or runtime approval; historical v8 result remains revoked.",
+            evalBudget: null,
+            evaluation: null,
+        },
+        {
             // **Never approved, superseded by v2.** The pair was the §12.5
             // first eval target and its only live run reached five
             // consecutive unscoreable answers: the prompt asked for JSON

@@ -19,6 +19,10 @@ export const FEEDBACK_MESSAGE_MAX_LENGTH = 2_000;
 /** Mirrors `traceId: z.string().trim().max(120)`. */
 export const FEEDBACK_TRACE_ID_MAX_LENGTH = 120;
 
+/** Closed answer assessments shared by request validation and the DB check. */
+export const FEEDBACK_ANSWER_SIGNALS = ["needs_improvement", "helpful"] as const;
+export type FeedbackAnswerSignal = (typeof FEEDBACK_ANSWER_SIGNALS)[number];
+
 /** Separates the user's own words from attached diagnostics. */
 const DIAGNOSTICS_SEPARATOR = "\n\n---\n";
 const TRUNCATION_MARKER = "\n[truncated]";

@@ -78,7 +78,7 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // the pair and the dataset have to appear together, because a run
         // that named the new prompt over the old sample would be the failure
         // the switch exists to avoid.
-        assert.match(result.output, /gpt-5-6-luna::mem-extract-v8/);
+        assert.ok(result.output.includes(`gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION}`));
         // "frozen" since 2026-09-04, for succ-9 as it was for succ-8 before
         // it. Each spent a period unsigned and the header said so throughout.
         // A smoke run is admissible either way, because nothing is spent; the

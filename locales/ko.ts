@@ -1896,6 +1896,20 @@ export const ko = {
         dataTabOpen: "AI 어시스턴트 열기",
     },
     memoryReview: {
+        restoreGrounds: "새 근거 추가",
+        restoreGroundsNotice: "직접 작성한 근거로 검토 목록에 복원합니다. 사용하려면 별도로 승인하세요.",
+
+        reportAnswer: "이 답변의 문제 신고",
+        conflictReview: "관련 기억 검토",
+        conflictChoose: "비교할 기존 기억을 선택하세요",
+        conflictKeep: "기존 기억 유지",
+        conflictBoth: "함께 유지",
+        conflictExpire: "기존 기억 만료",
+        conflictMerge: "하나로 병합",
+        conflictMergedStatement: "병합할 기억 내용",
+        conflictMergeGrounds: "병합한 내용이 맞는 근거를 직접 작성하세요",
+        conflictLoading: "관련 기억을 불러오는 중…",
+
         sourceDeleteDerivedImport:
             "이 가져오기에서 만들어진 기억 {count}개도 함께 삭제됩니다.",
         sourceDeleteDerivedConversation:
@@ -1948,8 +1962,7 @@ export const ko = {
         sensitiveBadge: "민감",
         pinnedBadge: "고정됨",
         expires: "만료: {date}",
-        conflictNotice:
-            "같은 항목의 기억이 이미 사용 중입니다. 기존 기억을 유지하거나 이 내용으로 교체할 수 있습니다.",
+        conflictNotice: "같은 주제와 관련된 기억입니다. 내용을 검토하고 유지할 방법을 선택하세요.",
         conflictReplace: "기존 기억을 교체",
         activeTitle: "사용 중인 기억",
         activeEmpty: "아직 사용 중인 기억이 없습니다.",
