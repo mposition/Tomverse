@@ -10,6 +10,7 @@ mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
   attachVoiceProviderSession: () => new WebSocket(endpoint),
   closeVoiceProviderSession: async () => null,
   hangupVoiceProviderSession: async () => {},
+  sendVoiceProviderResult: async (socket, id, content) => { socket.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content })); },
 } });
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: 300, dailyMessageLimit: 300 }) } });
 const recovery = await import(mod("lib/voiceConversationRecovery.ts"));

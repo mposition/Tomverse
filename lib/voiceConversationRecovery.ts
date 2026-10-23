@@ -5,6 +5,7 @@ import { ApiSecurityError } from "@/lib/apiSecurity";
 import { readVoiceCreditPayload, settleVoiceConversationCredits } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, closeVoiceProviderSession, hangupVoiceProviderSession } from "@/lib/voiceConversationProvider";
 import { VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
+import { abandonVoiceDispatch, dispatchVoiceTask } from "@/lib/voiceConversationTasks";
 
 const heartbeatKey = "voice-conversation:watchdog";
 const heartbeatPeriod = "worker";
@@ -58,7 +59,10 @@ export async function observeActiveVoiceConversations() {
     if (!lease) continue;
     const socket = attachVoiceProviderSession(row.providerRequestId!);
     let finalizing = false;
-    const close = () => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
+    let dispatching = false;
+    let taskTimer: ReturnType<typeof setInterval> | undefined;
+    let closing = false;
+    const close = () => { closing = true; clearInterval(taskTimer); if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
     const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
     const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
     const expiryTimer = setTimeout(() => { void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
@@ -66,13 +70,23 @@ export async function observeActiveVoiceConversations() {
     const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(release); }, 5_000);
     function release() {
       if (released) return; released = true;
-      clearTimeout(stopTimer); clearTimeout(expiryTimer); clearInterval(leaseTimer);
+      clearTimeout(stopTimer); clearTimeout(expiryTimer); clearInterval(leaseTimer); clearInterval(taskTimer);
       receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
       socket.close(); void releaseVoiceRecoveryLease(row.id, lease!).catch(() => {});
     }
     receivers.set(row.id, release);
     receiverClosers.set(row.id, close);
-    socket.once("open", () => { if (row.lastError || Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) close(); });
+    socket.once("open", () => {
+      if (row.lastError || Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) { close(); return; }
+      void abandonVoiceDispatch(row.id).then(unknown => {
+        if (unknown) { close(); return; }
+        taskTimer = setInterval(() => {
+          if (dispatching || finalizing || closing || released || socket.readyState !== socket.OPEN) return;
+          dispatching = true;
+          void dispatchVoiceTask(row.id, socket).catch(close).finally(() => { dispatching = false; });
+        }, 500);
+      }).catch(close);
+    });
     socket.on("message", data => {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;

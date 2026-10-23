@@ -62,15 +62,38 @@ mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   settleVoiceBudgets: async input => w.settlements.push(input.basis),
 } });
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
-  createVoiceProviderSession: async (sdp, history) => { w.providerCalls.push({ sdp, history }); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
+  createVoiceProviderSession: async (sdp, history) => { w.providerCalls.push({ sdp, history }); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "malformed-sdp") return { ok: false, rejected: false, sessionId: "live_known" }; if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
   attachVoiceProviderSession: () => { const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 0; socket.send = () => {}; socket.close = () => { socket.readyState = 3; socket.emit("close"); }; w.socket = socket; queueMicrotask(() => { socket.readyState = 1; socket.emit("open"); }); return socket; },
   hangupVoiceProviderSession: async id => { w.hangs.push(id); },
+  closeVoiceProviderSession: async id => { assert.ok(w.updates.some(update => update.data.providerRequestId === id)); return w.closingSeconds ?? null; },
   sendVoiceProviderResult: async (...args) => w.results.push(args),
 } });
 const { POST } = await import(mod("app/api/chat/voice/route.ts"));
 const request = body => new Request("http://localhost/api/chat/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const start = () => ({ action: "start", requestId: "91a27fea-6ceb-4c92-92e4-4fd77ac5a901", conversationId: "chat-1", sdp: "offer" });
 test.beforeEach(reset);
+
+test("malformed provider SDP is durably linked before collecting and settling final usage", async () => {
+  w.provider = "malformed-sdp"; w.closingSeconds = 15;
+  assert.equal((await POST(request(start()))).status, 502);
+  assert.deepEqual(w.refunds, [{ id: "reservation", seconds: 15 }]);
+  assert.equal(w.providerCalls.length, 1); assert.equal(w.hangs.length, 0);
+});
+
+test("sentence pauses and two queued delegations preserve both questions by audio offset", async () => {
+  const response = await POST(request(start())); const text = response.text();
+  const emit = event => w.socket.emit("message", JSON.stringify(event));
+  try {
+    emit({ type: "session.input_transcript.delta", event_id: "input-a", delta: "Tell me about", start_ms: 0, end_ms: 500 });
+    emit({ type: "session.delegation.created", event_id: "task-a", offset_ms: 1600, delegation: { id: "delegation-a" } });
+    await new Promise(resolve => setTimeout(resolve, 1000)); assert.equal(w.issued, undefined);
+    emit({ type: "session.input_transcript.delta", event_id: "input-tail", delta: " cats.", start_ms: 600, end_ms: 1500 });
+    emit({ type: "session.input_transcript.delta", event_id: "input-b", delta: "And dogs?", start_ms: 2000, end_ms: 2500 });
+    emit({ type: "session.delegation.created", event_id: "task-b", offset_ms: 2600, delegation: { id: "delegation-b" } });
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    assert.deepEqual(w.issued.map(task => [task.delegationId, task.text]), [["delegation-a", "Tell me about cats."], ["delegation-b", "And dogs?"]]);
+  } finally { emit({ type: "session.closed", usage: { seconds: 4 } }); await text; }
+});
 
 test("disabled, unauthenticated, foreign and locked starts never call a paid provider", async () => {
   delete process.env.VOICE_CONVERSATION_ENABLED; assert.equal((await POST(request(start()))).status, 503);
@@ -142,9 +165,9 @@ test("voice accepts a completed research answer only through its saved source-me
 
 test("a delegation arriving before transcript fragments is retained and sent after the fragments arrive", async () => {
   const response = await POST(request(start())); const text = response.text();
-  w.socket.emit("message", JSON.stringify({ type: "session.delegation.created", event_id: "delegate-late", delegation: { id: "delegation-late" } }));
+  w.socket.emit("message", JSON.stringify({ type: "session.delegation.created", event_id: "delegate-late", offset_ms: 1000, delegation: { id: "delegation-late" } }));
   w.socket.emit("message", JSON.stringify({ type: "session.input_transcript.delta", event_id: "input-late", delta: "The late question", start_ms: 0, end_ms: 1000 }));
-  await new Promise(resolve => setTimeout(resolve, 400));
+  await new Promise(resolve => setTimeout(resolve, 2100));
   assert.deepEqual(w.issued, [{ id: "reservation", delegationId: "delegation-late", text: "The late question" }]);
   w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 1 } }));
   assert.match(await text, /delegation-late/);

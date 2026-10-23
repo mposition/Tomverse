@@ -7,6 +7,7 @@ const mod = path => pathToFileURL(resolve(path)).href;
 let w;
 class SecurityError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ApiSecurityError: SecurityError } });
+mock.module(mod("lib/voiceConversationTasks.ts"), { namedExports: { abandonVoiceDispatch: async () => Boolean(w.unknownDispatch), dispatchVoiceTask: async () => { w.dispatches = (w.dispatches ?? 0) + 1; } } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatUsageBucket: { findUnique: async () => w.heartbeat ? { updatedAt: new Date(w.heartbeat) } : null, upsert: async () => { w.heartbeat = Date.now(); } },
   $executeRaw: async (parts, ...values) => {
@@ -43,7 +44,7 @@ mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
   },
 } });
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
-  attachVoiceProviderSession: () => { if (!w.allowReceiver) assert.fail("No sideband should be opened here"); const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; socket.send = value => w.commands.push(JSON.parse(value)); socket.close = () => socket.emit("close"); return socket; },
+  attachVoiceProviderSession: () => { if (!w.allowReceiver) assert.fail("No sideband should be opened here"); const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; socket.send = value => w.commands.push(JSON.parse(value)); socket.close = () => socket.emit("close"); w.socket = socket; return socket; },
   closeVoiceProviderSession: async id => { w.closes.push(id); return w.finalSeconds; },
   hangupVoiceProviderSession: async id => { w.hangs.push(id); if (w.hangFailure) throw new Error("Provider unreachable"); },
 } });
@@ -134,4 +135,12 @@ test("a kill switch closes an already attached independent receiver on the next 
   process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
   await observeActiveVoiceConversations();
   assert.deepEqual(w.commands, [{ type: "session.close" }]);
+});
+
+test("an unknown dispatched answer closes recovery without replaying the append", async () => {
+  w.allowReceiver = true; w.unknownDispatch = true; w.commands = [];
+  w.rows[0].expiresAt = new Date(Date.now() + 300000); w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200000).toISOString();
+  await observeActiveVoiceConversations(); w.socket.emit("open");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(w.commands, [{ type: "session.close" }]); assert.equal(w.dispatches, undefined);
 });

@@ -29,7 +29,7 @@ export async function createVoiceProviderSession(sdp: string, history: Array<{ r
     throw new Error("Invalid voice provider response.");
   }
   if (typeof result.transport?.sdp !== "string" || !result.transport.sdp.trim() || result.transport.sdp.length > 128_000) {
-    await hangupVoiceProviderSession(result.session.id).catch(() => {});
+    // The caller durably records this identity before installing a closing receiver.
     return { ok: false as const, rejected: false, sessionId: result.session.id };
   }
   return { ok: true as const, sessionId: result.session.id, sdp: result.transport.sdp };
@@ -83,7 +83,7 @@ export async function sendVoiceProviderResult(socket: WebSocket, delegationId: s
     if (part) pieces.push(part);
     for (const [index, piece] of pieces.entries()) {
       const eventId = `result_${delegationId}_${index}`;
-      const acknowledged = new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => { socket.off("message", onMessage); reject(new Error("Voice result acknowledgment timed out.")); }, 10_000);
         function onMessage(data: WebSocket.RawData) {
           let event; try { event = JSON.parse(data.toString()) as Record<string, unknown>; } catch { return; }
@@ -93,8 +93,8 @@ export async function sendVoiceProviderResult(socket: WebSocket, delegationId: s
           if (event.type === "error") reject(new Error("Voice result was rejected.")); else resolve();
         }
         socket.on("message", onMessage);
+        try { socket.send(JSON.stringify({ type: "session.commentary.append", event_id: eventId, delegation_id: delegationId, content: piece })); }
+        catch (error) { clearTimeout(timer); socket.off("message", onMessage); reject(error); }
       });
-      socket.send(JSON.stringify({ type: "session.commentary.append", event_id: eventId, delegation_id: delegationId, content: piece }));
-      await acknowledged;
     }
 }

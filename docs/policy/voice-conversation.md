@@ -124,3 +124,13 @@ the nullable `PerplexityAsyncJob.sourceUserMessageId` field; its migration must
 be applied with the server release before that path is activated. Voice also
 reserves and settles the canonical OpenAI day/month cost buckets atomically
 with its existing credit and seconds holds.
+
+Delegations are queued by provider audio offset while transcript fragments
+arrive. A two-second quiet window includes sentence pauses; fragments do not
+individually define a completed turn. Recovery delivers a still-ready result
+through its leased receiver. A task left in dispatching has an unknown append
+outcome: recovery discards the duplicate text and closes the call, preserving
+the canonical answer in Chat instead of risking a repeated spoken result.
+Malformed answer SDP is durably linked before a closing receiver collects final
+usage; a known final releases excess provider cost holds normally. Missing final
+evidence continues to retain conservative exposure under the existing rule.

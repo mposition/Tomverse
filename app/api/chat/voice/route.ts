@@ -11,7 +11,7 @@ import { VoiceBudgetError } from "@/lib/voiceInputBudget";
 import { assertVoiceWatchdogReady, finalizeVoiceReservation, recordVoiceUsage, renewVoiceWebLease } from "@/lib/voiceConversationRecovery";
 import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
 import { reserveVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } from "@/lib/voiceConversationCredits";
-import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession } from "@/lib/voiceConversationProvider";
+import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession, closeVoiceProviderSession } from "@/lib/voiceConversationProvider";
 import { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } from "@/lib/voiceConversationTasks";
 
 const schema = z.discriminatedUnion("action", [
@@ -118,6 +118,13 @@ export async function POST(request: Request) {
         await settleVoiceConversationCredits(reservation.id, 0);
       } else {
         await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN", ...("sessionId" in providerResult && providerResult.sessionId ? { providerRequestId: providerResult.sessionId } : {}) } });
+        if ("sessionId" in providerResult && providerResult.sessionId) {
+          // Persist identity before any cleanup. Prefer a trusted final receipt
+          // so a malformed answer SDP does not retain a full cost hold unnecessarily.
+          const seconds = await closeVoiceProviderSession(providerResult.sessionId).catch(() => null);
+          if (seconds !== null) await finalizeVoiceReservation(reservation.id, seconds).catch(() => {});
+          else await hangupVoiceProviderSession(providerResult.sessionId).catch(() => {});
+        }
       }
       return json(providerResult.rejected ? "VOICE_PROVIDER_UNAVAILABLE" : "VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });
     }
@@ -140,9 +147,10 @@ export async function POST(request: Request) {
         let latestSeconds = 0;
         let finished = false;
         let closing = false;
-        let input = "";
-        let pendingDelegation: string | null = null;
-        let pendingSince = 0;
+        let input: Array<{ delta: string; start_ms: number }> = [];
+        const pendingDelegations: Array<{ id: string; offset: number; since: number }> = [];
+        const delegationIds = new Set<string>();
+        let flushing = false;
         let delegationTimer: ReturnType<typeof setTimeout> | undefined;
         let dispatching = false;
         const resultTimer = setInterval(() => {
@@ -152,16 +160,28 @@ export async function POST(request: Request) {
         }, 500);
         const flushDelegation = () => {
           clearTimeout(delegationTimer);
+          // Transcript fragments are not completed turns. Preserve sentence
+          // pauses, and partition queued requests by provider audio offsets.
           delegationTimer = setTimeout(() => {
-            if (!pendingDelegation || closing || finished) return;
-            if (!input.trim()) {
-              if (Date.now() - pendingSince < 2_000) flushDelegation();
-              else { send({ type: "error", code: "VOICE_TRANSCRIPT_UNAVAILABLE" }); stop(); }
-              return;
-            }
-            const delegationId = pendingDelegation; const text = input; input = ""; pendingDelegation = null;
-            void registerVoiceTask(reservation.id, delegationId, text).then(() => { if (!finished && !closing) send({ type: "delegation", delegationId, text }); }).catch(() => { send({ type: "error", code: "VOICE_TASK_RECORDING_FAILED" }); stop(); });
-          }, 350);
+            if (!pendingDelegations.length || closing || finished || flushing) return;
+            flushing = true;
+            void (async () => {
+              while (pendingDelegations.length && !closing && !finished) {
+                const next = pendingDelegations[0];
+                const boundary = pendingDelegations.length > 1 ? next.offset : Infinity;
+                const parts = input.filter(part => part.start_ms <= boundary);
+                const text = parts.sort((a, b) => a.start_ms - b.start_ms).map(part => part.delta).join("").slice(-16_000);
+                if (!text.trim()) {
+                  if (Date.now() - next.since < 10_000) { flushDelegation(); return; }
+                  send({ type: "error", code: "VOICE_TRANSCRIPT_UNAVAILABLE" }); stop(); return;
+                }
+                input = input.filter(part => part.start_ms > boundary);
+                pendingDelegations.shift();
+                await registerVoiceTask(reservation.id, next.id, text);
+                if (!finished && !closing) send({ type: "delegation", delegationId: next.id, text });
+              }
+            })().catch(() => { send({ type: "error", code: "VOICE_TASK_RECORDING_FAILED" }); stop(); }).finally(() => { flushing = false; });
+          }, 2_000);
         };
         const seen = new Set<string>();
         const send = (value: unknown) => { try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`)); } catch { /* Client left; the provider still needs finalization. */ } };
@@ -206,12 +226,13 @@ export async function POST(request: Request) {
           if (event.type === "session.started") {
             send({ type: "started" });
           } else if (isVoiceTranscriptEvent(event)) {
-            if (event.type === "session.input_transcript.delta") { input = (input + event.delta).slice(-16_000); if (pendingDelegation) flushDelegation(); }
+            if (event.type === "session.input_transcript.delta") { input.push({ delta: event.delta, start_ms: event.start_ms }); input = input.slice(-256); if (pendingDelegations.length) flushDelegation(); }
             send({ type: "transcript", event });
           } else if (event.type === "session.delegation.created" && !closing) {
             const delegation = event.delegation as { id?: unknown } | undefined;
-            if (typeof delegation?.id === "string") {
-              pendingDelegation = delegation.id; pendingSince = Date.now(); flushDelegation();
+            if (typeof delegation?.id === "string" && typeof event.offset_ms === "number" && Number.isFinite(event.offset_ms) && event.offset_ms >= 0 && !delegationIds.has(delegation.id)) {
+              delegationIds.add(delegation.id);
+              pendingDelegations.push({ id: delegation.id, offset: event.offset_ms, since: Date.now() }); flushDelegation();
             }
           } else if (event.type === "session.usage.updated") {
             const seconds = (event.usage as { seconds?: unknown } | undefined)?.seconds;

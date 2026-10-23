@@ -4,12 +4,12 @@ import { EventEmitter } from "node:events";
 import { createVoiceProviderSession, sendVoiceProviderResult } from "../../lib/voiceConversationProvider.ts";
 const originalFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = originalFetch; });
-test("a valid provider session id survives a malformed SDP and is hung up without creating another session", async () => {
+test("a malformed SDP returns its session identity for durable closing before any further provider command", async () => {
   const calls = [];
   globalThis.fetch = async url => { calls.push(String(url)); return Response.json(calls.length === 1 ? { session: { id: "live_known" }, transport: {} } : {}); };
   const result = await createVoiceProviderSession("fixture-offer", []);
   assert.deepEqual(result, { ok: false, rejected: false, sessionId: "live_known" });
-  assert.equal(calls.length, 2); assert.match(calls[1], /live_known\/hangup$/);
+  assert.equal(calls.length, 1);
 });
 test("answer chunks use the existing sideband, preserve UTF8 limits and never close its metering receiver", async () => {
   const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; const commands = [];
