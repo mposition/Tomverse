@@ -21,6 +21,8 @@ export const QA_RELEASE_MERGE_LANE_BRANCH = "develop";
 /** The fields of `gh pr list --json` that the selection reads. */
 export type QaReleaseLanePullRequest = {
   number: number;
+  /** For the Admin screen only; the selection never reads it. */
+  title?: string;
   createdAt: string;
   baseRefName: string;
   headRefName: string;

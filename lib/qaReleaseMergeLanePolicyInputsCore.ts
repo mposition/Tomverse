@@ -55,7 +55,11 @@ export function qaReleasePolicyTestPaths(documents: readonly string[]): string[]
  * AGENTS.md and CLAUDE.md. Filtering by extension would let a test that only a
  * YAML registry names be merged unattended.
  */
+/**
+ * The documents whose named tests the lane leaves to a person: the
+ * repository-wide instructions and the lane's own policy (owner decision
+ * 2026-10-23; until then every docs/policy/ file counted, which left nearly
+ * every feature pull request to a person).
+ */
 export const isQaReleasePolicyDocument = (path: string): boolean =>
-  path === "AGENTS.md" ||
-  path === "CLAUDE.md" ||
-  (path.startsWith("docs/policy/") && path.length > "docs/policy/".length && !path.endsWith("/"));
+  path === "AGENTS.md" || path === "CLAUDE.md" || path === "docs/policy/qa-release-agent.md";

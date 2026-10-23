@@ -4,7 +4,7 @@ import test from "node:test";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 
-import { CHAT_MARKDOWN_REMARK_PLUGINS } from "../lib/chatMarkdownPlugins.ts";
+import { CHAT_MARKDOWN_REMARK_PLUGINS } from "../packages/chat-ui/src/markdownPlugins.ts";
 
 /**
  * How an assistant answer is parsed, executed.

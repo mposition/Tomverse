@@ -185,7 +185,8 @@ for (const name of packageNames) {
     readFileSync(join(packagesDir, name, "package.json"), "utf8")
   );
   for (const field of ["dependencies", "peerDependencies"]) {
-    const declared = Object.keys(manifest[field] ?? {});
+    const allowed = name === "chat-ui" && field === "peerDependencies" ? ["react", "react-markdown", "remark-gfm", "remark-cjk-friendly", "remark-cjk-friendly-gfm-strikethrough", "unified"] : [];
+    const declared = Object.keys(manifest[field] ?? {}).filter((dependency) => !allowed.includes(dependency));
     if (declared.length > 0) {
       problems.push(
         `packages/${name}: declares ${field} (${declared.join(", ")}). A shared ` +

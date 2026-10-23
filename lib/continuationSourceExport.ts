@@ -123,7 +123,7 @@ export async function buildContinuationSourceExport(input: {
     userId: string;
     conversationId: string;
     header: (context: {
-        conversation: { title: string; createdAt: Date; kind: string; password: string | null };
+        conversation: { title: string; createdAt: Date; kind: string; password: string | null; productKey: string | null };
         bridge: {
             provider: string;
             sourceImportedAt: Date;
@@ -180,6 +180,7 @@ export async function buildContinuationSourceExport(input: {
                     createdAt: true,
                     password: true,
                     kind: true,
+                    productKey: true,
                     continuationBridge: {
                         select: {
                             id: true,

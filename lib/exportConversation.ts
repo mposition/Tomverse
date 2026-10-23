@@ -10,6 +10,7 @@ type ExportMessage = {
 type ExportConversation = {
     title: string;
     createdAt?: Date | string;
+    productKey?: string | null;
     messages: ExportMessage[];
 };
 
@@ -40,7 +41,7 @@ export function formatConversationAsText(conversation: ExportConversation) {
 }
 
 export function formatConversationHeader(
-    conversation: Pick<ExportConversation, "title" | "createdAt">,
+    conversation: Pick<ExportConversation, "title" | "createdAt" | "productKey">,
     /**
      * The §13.3 notice, when an answer here could have been influenced by the
      * author's account memory. Passed in rather than read here: this module is
@@ -62,7 +63,7 @@ export function formatConversationHeader(
     continuationProvenance: readonly string[] = []
 ) {
     return [
-        "Tomverse Review Export",
+        conversation.productKey === "chat" ? "Tomverse Chat Export" : "Tomverse Review Export",
         `Conversation: ${headerLineText(conversation.title)}`,
         `Created: ${formatDate(conversation.createdAt)}`,
         ...(personalizationNotice ? [personalizationNotice] : []),

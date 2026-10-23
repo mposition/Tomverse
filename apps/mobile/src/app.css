@@ -140,3 +140,13 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 .email-login .login-actions { display: flex; justify-content: space-between; gap: 12px; }
 .email-login .login-actions button { min-height: 44px; }
 .email-login .login-error { border-left: 3px solid currentColor; padding: 8px 12px; }
+/* Answers share the web Markdown parser while native layout remains local. */
+.answer-content { overflow-wrap: anywhere; min-width: 0; }
+.answer-content pre { overflow-x: auto; padding: 1rem; border-radius: .75rem; background: var(--background); }
+.answer-content code { font-family: ui-monospace, monospace; }
+.answer-content table { display: block; overflow-x: auto; border-collapse: collapse; }
+.answer-content td, .answer-content th { padding: .5rem; border: 1px solid currentColor; }
+.answer-content a { color: var(--tomverse-accent-mid); text-decoration: underline; }
+.answer-sources { font-size: .875rem; }
+.generated-file { display: grid; gap: .5rem; margin-block: .75rem; padding: 1rem; border: 1px solid currentColor; border-radius: .75rem; }
+.generated-file button { min-height: 44px; }

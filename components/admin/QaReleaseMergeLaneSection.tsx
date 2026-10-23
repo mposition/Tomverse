@@ -11,7 +11,7 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { aestStamp } from "@/lib/agentOffice/time";
 import { card } from "@/components/admin/qaReleaseTabParts";
 
-const PAGE_PATH = "/admin/agent-digests";
+const PAGE_PATH = "/admin/qa-release";
 const RELEASE_ROUTE = "/api/admin/agent-digests/qa-release/merge-lane/release";
 
 const fill = (template: string, values: Record<string, string | number>) =>

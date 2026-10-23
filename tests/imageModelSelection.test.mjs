@@ -167,6 +167,17 @@ test("limiting reports, and never invents a substitute", () => {
 /* The server's refusal                                                       */
 /* -------------------------------------------------------------------------- */
 
+test("limitImageModelSelection orders by the catalogue it is handed", () => {
+  const catalogue = [{ id: FAL }, { id: OPENAI }, { id: XAI }];
+  const outcome = limitImageModelSelection({
+    modelIds: [OPENAI, XAI, FAL],
+    maxModels: 2,
+    models: catalogue,
+  });
+  assert.deepEqual(outcome.modelIds, [FAL, OPENAI]);
+  assert.deepEqual(outcome.excludedModelIds, [XAI]);
+});
+
 test("the server's own maxModels wins over the client's copy", () => {
   // The point of the detail: a stale tab believes 3 and admission applied 2.
   assert.equal(reportedImageModelLimit(2, 3), 2);

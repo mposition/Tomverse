@@ -5,9 +5,13 @@ import {
   prepareGuestPage,
   type QaConversationMessage,
 } from "./support/app-fixtures";
-import { restoreActiveConversation } from "./support/chat-state-fixtures";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage, restoreActiveConversation } from "./support/chat-state-fixtures";
 import { openOnScreenKeyboard, closeOnScreenKeyboard } from "./support/ui-audit";
 import { setRootFontSize } from "./support/chat-state-fixtures";
+
+test.beforeEach(async ({ page }) => {
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
+});
 
 /**
  * REAUDIT-P1-04. The mobile shell was `h-[100dvh] overflow-hidden`: a box that

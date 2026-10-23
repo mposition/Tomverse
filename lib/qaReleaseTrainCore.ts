@@ -3,15 +3,15 @@
  * item 12): when a train departs, which develop pull requests it carries and
  * in what order, and the main pull request it opens. Owner decisions
  * 2026-10-20: departures at 08, 11, 14, 17 and 20 AEST (UTC+10, no daylight
- * saving), configurable as one value; the cargo is every develop pull request
- * a person labelled `main:next` that is not already on main; a conflicting
+ * saving), configurable as one value; the cargo is the merged develop pull
+ * requests the operator picked in Admin (2026-10-23; until then a `main:next`
+ * label) that are not already on main; a conflicting
  * one is left out and named, never resolved; one open train at a time.
  *
  * Pure: no clock, network, git or database. The service
  * (lib/qaReleaseTrainService.ts) passes what it read.
  */
 
-export const QA_RELEASE_TRAIN_LABEL = "main:next";
 export const QA_RELEASE_TRAIN_DEFAULT_SLOTS = "08,11,14,17,20";
 /** How long after a departure time a round may still start that departure: six 10-minute crons. */
 export const QA_RELEASE_TRAIN_WINDOW_MS = 60 * 60 * 1000;
@@ -62,7 +62,7 @@ export const qaReleaseTrainBranch = (slot: string): string => {
 
 export type QaReleaseTrainCandidate = { number: number; title: string; mergeCommitSha: string; mergedAt: string };
 
-/** Labelled develop pull requests in develop merge order, deduplicated; malformed entries are dropped. */
+/** Picked develop pull requests in develop merge order, deduplicated; malformed entries are dropped. */
 export function orderQaReleaseTrainCandidates(candidates: readonly QaReleaseTrainCandidate[]): QaReleaseTrainCandidate[] {
   const seen = new Set<number>();
   return candidates
@@ -96,7 +96,7 @@ export type QaReleaseTrainPick = {
   outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows";
 };
 
-/** Outcomes that leave a labelled pull request for a later release. */
+/** Outcomes that leave a picked pull request for a later release. */
 export const QA_RELEASE_TRAIN_LEFT_OUT: ReadonlySet<QaReleaseTrainPick["outcome"]> = new Set(["conflict", "over_capacity", "changes_workflows"]);
 
 export function qaReleaseTrainPullRequest(input: {
@@ -111,8 +111,8 @@ export function qaReleaseTrainPullRequest(input: {
   const left = input.picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome));
   const already = input.picks.filter((p) => p.outcome === "already_in_main");
   const reason = {
-    conflict: "cherry-pick conflict on main; still labelled, rides a later train once resolved",
-    over_capacity: "train full; rides the next train",
+    conflict: "cherry-pick conflict on main; pick it again for a later train once resolved",
+    over_capacity: "train full; pick it again for the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;
   const lines = [

@@ -1,3 +1,5 @@
+import { filenameFromContentDisposition } from "@tomverse/api-client";
+export { filenameFromContentDisposition } from "@tomverse/api-client";
 /**
  * Saving a server response as a file from inside the page, rather than by
  * navigating to it.
@@ -32,29 +34,6 @@
  * percent-decoded, because a quoted value is defined to be literal and guessing
  * would corrupt any name that legitimately contains a `%`.
  */
-export function filenameFromContentDisposition(
-    header: string | null,
-    fallback: string
-): string {
-    if (!header) return fallback;
-
-    const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header)?.[1];
-    if (encoded) {
-        try {
-            const decoded = decodeURIComponent(encoded.trim());
-            if (decoded) return decoded;
-        } catch {
-            // A malformed `filename*` is not worth failing a download over.
-        }
-    }
-
-    const quoted = /filename\s*=\s*"([^"]*)"/i.exec(header)?.[1]?.trim();
-    if (quoted) return quoted;
-
-    const bare = /filename\s*=\s*([^;]+)/i.exec(header)?.[1]?.trim();
-    return bare || fallback;
-}
-
 /** Hands a blob to the browser as a download named `filename`. */
 export function saveBlobAsFile(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);

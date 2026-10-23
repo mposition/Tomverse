@@ -854,12 +854,7 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
     testInfo.project.name.startsWith("mobile"),
     "The 3-panel cap assertion only applies to the desktop chat shell."
   );
-  await mockAuthenticatedApi(page);
-  // Signed in at `/chat?lang=en`, so the settings read carries `?lang=en`,
-  // which mockAuthenticatedApi's `**/api/user/settings` route does not match:
-  // the E2E server answers it, and the workspace opens on the compiled default,
-  // APP_DEFAULTS.defaultModelId -- the trio's OpenAI slot, SELECTED.gpt. It
-  // named gpt-5-6-luna until the default moved to gpt-6-luna on 2026-10-12.
+  await mockAuthenticatedApi(page, { selectedModels: [SELECTED.gpt.id] });
   await mockProviderStatus(page, [
     {
       id: SELECTED.gpt.id,

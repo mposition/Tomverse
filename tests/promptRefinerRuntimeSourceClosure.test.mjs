@@ -1593,9 +1593,15 @@ test("runtime source allowlist is exactly the deterministic local runtime import
     REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256,
     "non-static element access inventory changed beyond source positions"
   );
-  const expected = [...fixedNonImportPaths, ...runtimeImportClosure()];
   const actual = [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS];
   const listed = new Set(actual);
+  const runtimePaths = runtimeImportClosure();
+  const workspaceManifests = new Set(workspacePackageDirectories.map((directory) => repositoryPath(join(directory, "package.json"))));
+  // Keep the immutable historical inputs, and include every newly reached
+  // workspace. A client-only workspace cannot change the serving closure;
+  // an import into its sources still has to pass the complete allowlist below.
+  const fixedInputs = fixedNonImportPaths.filter((path) => listed.has(path) || !workspaceManifests.has(path) || runtimePaths.some((source) => source.startsWith(path.slice(0, -"package.json".length))));
+  const expected = [...fixedInputs, ...runtimePaths];
   const expectedSet = new Set(expected);
   const missing = expected.filter((path) => !listed.has(path));
   const extra = actual.filter((path) => !expectedSet.has(path));

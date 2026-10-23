@@ -238,7 +238,7 @@ test("the instruction is the fixed preamble first and the report as data after i
 test("the PR text names the recommendation, the cycle and the review, and ends with the fixed footer", () => {
   const body = buildPrBody({ claim: CLAIM, reviewJobId: "r-20261020-010203-abcdef", cycleUrl: cycleUrlFrom(CLAIM) });
   assert.ok(body.includes(`> ${CLAIM.recommendation}`));
-  assert.ok(body.includes("https://tomverse.app/admin/auto-router/cycles/42"));
+  assert.match(body, /(?:^|[\s(<])https:\/\/tomverse\.app\/admin\/auto-router\/cycles\/42(?:[\s)>]|$)/m);
   assert.ok(body.includes("r-20261020-010203-abcdef"));
   assert.ok(body.endsWith(PR_BODY_FOOTER));
   assert.equal(buildPrTitle(CLAIM), `auto-rec: ${CLAIM.recommendation}`);

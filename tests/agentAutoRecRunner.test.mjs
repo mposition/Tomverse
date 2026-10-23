@@ -113,6 +113,9 @@ test("happy path: claim, agent, tests, lint, review, publish, report the PR", as
   assert.ok(publish.header.body.includes(JOB));
   assert.deepEqual(publish.payload, Buffer.from("bundle"));
 
+  const fetchDevelop = calls.find(({ signature }) => / fetch --no-tags /.test(signature));
+  assert.deepEqual(fetchDevelop.args.slice(2, 5), ["-c", "http.version=HTTP/1.1", "fetch"]);
+
   const worktreeAdd = calls.find(({ signature }) => / worktree add /.test(signature));
   assert.ok(worktreeAdd.args.includes(BRANCH));
   assert.equal(worktreeAdd.args.at(-1), BASE);
@@ -136,7 +139,7 @@ test("happy path: claim, agent, tests, lint, review, publish, report the PR", as
   assert.deepEqual(submit.args.slice(1, 6), ["submit", "--author", "claude", "--base", BASE]);
   // The worktree goes away at the end.
   assert.ok(ran(calls, / worktree remove --force /));
-  assert.ok(ran(calls, new RegExp(` branch -D ${BRANCH.replace(/[/]/g, "\\/")}$`)));
+  assert.ok(calls.some(({ signature }) => signature.endsWith(` branch -D ${BRANCH}`)));
 });
 
 test("no child process ever receives a gateway secret or a GitHub token", async () => {

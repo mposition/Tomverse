@@ -1077,7 +1077,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "AutoRouterDecision",
     state: "included_filtered",
     withheldReason:
-      "The user's message as Auto read it and the model chosen to answer it. The candidate list, the rule's choice, the router model, token counts and timings are Tomverse's routing internals.",
+      "The user's message, previous-answer excerpt, retained rewrite and conversation topic as Auto read or produced them, and the model chosen to answer it. The candidate list, session bookkeeping, the rule's choice, the router model, token counts and timings are Tomverse's routing internals.",
   },
   {
     domain: "comparisonReview",

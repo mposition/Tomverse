@@ -7,6 +7,7 @@ import { Lock } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
+import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
 import { QaReleaseTrainSection, type QaReleaseTrainView } from "@/components/admin/QaReleaseTrainSection";
 import type { AgentDigestConsole, AgentDigestConsoleRow } from "@/lib/agentDigestConsoleRead";
 import { aestStamp } from "@/lib/agentOffice/time";
@@ -24,7 +25,7 @@ import type { QaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesCore"
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
 import { QA_RELEASE_SECTION_IDS, card, openSection } from "@/components/admin/qaReleaseTabParts";
 
-const PAGE_PATH = "/admin/agent-digests";
+const PAGE_PATH = "/admin/qa-release";
 const CONTROL_ROUTE = "/api/admin/agent-digests/qa-release/control";
 const RUN_URL = "https://github.com/mposition/Tomverse/actions/runs/";
 
@@ -81,6 +82,7 @@ export function AdminAgentDigestsPanel({
         <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.lane} />
       </div>
       <LatestDigest digests={initial.digests} limit={initial.limit} />
+      <QaReleaseTrainCargoSection canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
       <QaReleaseTrainSection trains={trains} id={QA_RELEASE_SECTION_IDS.train} />
       <AgentSettings initial={initial} />
     </section>

@@ -10,6 +10,7 @@
 // Pure and client-safe (no server-only import, no Prisma): the workspace model
 // picker renders straight from these profiles.
 
+import { FAL_HIGH_THINKING_SURCHARGE_MICRO_USD } from "@/lib/falImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
@@ -648,11 +649,47 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
 export const DEFAULT_IMAGE_MODEL_ID = OPENAI_GPT_IMAGE_2.id;
 
 /**
- * The catalogue the lookups below read. Starts as the code seed; the server
- * replaces it with the resolved catalogue (code seed + ModelCatalogEntry rows +
- * effective price revisions, lib/modelCatalog.ts), and the browser replaces it
- * with the copy the server rendered the page with. If the database cannot be
- * read, it stays the code seed.
+ * Lookups over an explicit catalogue. Pure: nothing here reads module state, so
+ * a client component can resolve against the list it was handed (the image
+ * catalogue context, components/images/ImageModelCatalogProvider.tsx) without
+ * touching the server-only global below.
+ */
+export const findImageModel = (
+  models: readonly ImageModelProfile[],
+  modelId: string
+): ImageModelProfile | null =>
+  models.find((model) => model.id === modelId) ?? null;
+
+/**
+ * Fail-closed price lookup. A disabled model, an unknown model, or an option
+ * with no price returns null and the caller must reject the request -- never
+ * fall back to another model's price.
+ */
+export const findImageModelPrice = (
+  models: readonly ImageModelProfile[],
+  modelId: string,
+  quality: string,
+  size: string
+): ImageModelOptionPrice | null => {
+  const model = findImageModel(models, modelId);
+  if (!model || model.disabledReason !== null) return null;
+  return (
+    model.prices.find(
+      (price) => price.quality === quality && price.size === size
+    ) ?? null
+  );
+};
+
+/**
+ * The catalogue the server-side lookups below read. Starts as the code seed;
+ * the server replaces it with the resolved catalogue (code seed +
+ * ModelCatalogEntry rows + effective price revisions, lib/modelCatalog.ts). If
+ * the database cannot be read, it stays the code seed.
+ *
+ * Server-only by contract: a browser must never write it. Client components
+ * receive the catalogue the server rendered the page with through the image
+ * catalogue context instead, because a module global is shared between server
+ * requests and survives a prop going undefined.
  */
 let activeImageModels: readonly ImageModelProfile[] = IMAGE_MODEL_REGISTRY;
 
@@ -670,32 +707,110 @@ export const listEnabledImageModels = () =>
   activeImageModels.filter((model) => model.disabledReason === null);
 
 export const getImageModel = (modelId: string): ImageModelProfile | null =>
-  activeImageModels.find((model) => model.id === modelId) ?? null;
+  findImageModel(activeImageModels, modelId);
 
-/**
- * Fail-closed price lookup. A disabled model, an unknown model, or an option
- * with no price returns null and the caller must reject the request -- never
- * fall back to another model's price.
- */
 export const getImageModelPrice = (
   modelId: string,
   quality: string,
   size: string
-): ImageModelOptionPrice | null => {
-  const model = getImageModel(modelId);
-  if (!model || model.disabledReason !== null) return null;
-  return (
-    model.prices.find(
-      (price) => price.quality === quality && price.size === size
-    ) ?? null
-  );
+): ImageModelOptionPrice | null =>
+  findImageModelPrice(activeImageModels, modelId, quality, size);
+
+/**
+ * How a provider bills the thinking of one image request, and so whether the
+ * request this code sends keeps it at or under `thinkingCapMicroUsd`.
+ *
+ * Code, not data. A price revision can *state* a cap; only the request the
+ * adapter builds can *hold* it, and a cap nothing enforces is a reservation
+ * the provider is free to exceed (section 12 condition 2).
+ *
+ *   - `not_billed`: no reasoning charge on an image request. OpenAI images and
+ *     xAI, both verified 2026-08-04. A stated cap is a margin, never owed.
+ *   - `flat_per_request`: a fixed surcharge for the thinking level the request
+ *     pins. fal's Nano Banana 2 page: "If high thinking is used, an additional
+ *     $0.002 will be charged" (re-read 2026-10-21), and `buildFalImageRequest`
+ *     always sends `thinking_level: "high"`. The surcharge cannot exceed its
+ *     own price, and it is incurred on every request whether or not the
+ *     response reports a thinking count -- fal reports none. So the cap is a
+ *     bound only at or above that surcharge: below it, the request still
+ *     spends the full amount.
+ *   - `per_token_uncapped`: billed per thinking token with no request
+ *     parameter that bounds the count. Google direct: thinking "is enabled by
+ *     default and cannot be disabled in the API"; `thinking_level` is a level
+ *     ("relative allowances for thinking rather than strict token
+ *     guarantees"); and `max_output_tokens: 2048` billed 2,533 output+thinking
+ *     on gemini-3.1-flash-lite-image on 2026-08-14 (policy section 12.1). The
+ *     thinking guide updated 2026-10-14 now calls `max_output_tokens` a hard
+ *     cutoff including thought tokens, which is the opposite of that
+ *     measurement; until a new measurement settles it, it is not a bound.
+ */
+export type ImageThinkingBilling =
+  | "not_billed"
+  | "flat_per_request"
+  | "per_token_uncapped";
+
+const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
+  Record<ImageModelProvider, ImageThinkingBilling>
+> = {
+  openai: "not_billed",
+  xai: "not_billed",
+  fal: "flat_per_request",
+  google: "per_token_uncapped",
+};
+
+/** The surcharge each `flat_per_request` provider's request incurs every time. */
+const IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD: Readonly<
+  Partial<Record<ImageModelProvider, number>>
+> = {
+  fal: FAL_HIGH_THINKING_SURCHARGE_MICRO_USD,
+};
+
+/** Null for a provider this code has no adapter for. */
+export const imageThinkingBilling = (
+  provider: unknown
+): ImageThinkingBilling | null =>
+  typeof provider === "string" &&
+  Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
+    ? IMAGE_PROVIDER_THINKING_BILLING[provider as ImageModelProvider]
+    : null;
+
+/**
+ * The smallest stated cap that bounds what this provider's request spends on
+ * thinking: 0 where thinking is not billed, the pinned level's surcharge
+ * where it is flat, and null where no stated cap can bound it.
+ */
+export const imageThinkingCapMinimumMicroUsd = (
+  provider: unknown
+): number | null => {
+  const billing = imageThinkingBilling(provider);
+  if (billing === "not_billed") return 0;
+  if (billing === "flat_per_request") {
+    return IMAGE_PROVIDER_FLAT_THINKING_MICRO_USD[provider as ImageModelProvider] ?? null;
+  }
+  return null;
+};
+
+/**
+ * Whether the request this model would be sent cannot spend more on thinking
+ * than its stated cap. False for an unknown cap; false for a stated cap on a
+ * provider whose thinking the request cannot bound -- an operator revision can
+ * write a number for a Google model, and that number is not a bound; and false
+ * for a cap below the flat surcharge the request incurs anyway.
+ */
+export const imageThinkingCapEnforced = (
+  model: Pick<ImageModelProfile, "provider" | "priceVerification">
+): boolean => {
+  const cap = model.priceVerification.thinkingCapMicroUsd;
+  if (cap === null) return false;
+  const minimum = imageThinkingCapMinimumMicroUsd(model.provider);
+  return minimum !== null && cap >= minimum;
 };
 
 /**
  * Worst legitimate provider cost of one request: image output plus the full
  * prompt budget plus the model's proven thinking cap. Returns null when the
- * cap is unknown -- an unbounded worst case cannot carry a fixed price
- * (section 12 condition 1).
+ * cap is unknown, or stated but not enforceable by the request -- an unbounded
+ * worst case cannot carry a fixed price (section 12 conditions 1 and 2).
  */
 export const maxImageRequestCostMicroUsd = (
   model: ImageModelProfile,
@@ -703,6 +818,7 @@ export const maxImageRequestCostMicroUsd = (
 ): number | null => {
   const thinkingCap = model.priceVerification.thinkingCapMicroUsd;
   if (thinkingCap === null) return null;
+  if (!imageThinkingCapEnforced(model)) return null;
   return price.outputCostMicroUsd + IMAGE_PROMPT_BUDGET_MICRO_USD + thinkingCap;
 };
 

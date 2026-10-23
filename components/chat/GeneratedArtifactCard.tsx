@@ -1,5 +1,7 @@
 "use client";
 
+import { createApiClient } from "@tomverse/api-client";
+
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
@@ -158,7 +160,7 @@ export function GeneratedArtifactCard({
     setIsDownloading(true);
     setDownloadError(null);
     try {
-      const response = await fetch(artifactDownloadPath(artifact.id), {
+      const response = await createApiClient(fetch).response(artifactDownloadPath(artifact.id), {
         cache: "no-store",
       });
       if (!response.ok) {
@@ -216,7 +218,7 @@ export function GeneratedArtifactCard({
 
     void (async () => {
       try {
-        const response = await fetch(artifactDownloadPath(artifact.id), {
+        const response = await createApiClient(fetch).response(artifactDownloadPath(artifact.id), {
           cache: "no-store",
         });
         if (!response.ok) {

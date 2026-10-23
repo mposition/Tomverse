@@ -45,21 +45,10 @@ test("a migration alone does not exclude (policy: unattended develop merges incl
 test("each gate path excludes", () => {
   for (const path of [
     ".github/workflows/pr-fast-gate.yml",
-    "scripts/security-regression-check.mjs",
-    "scripts/verify-smoke-coverage.mjs",
-    "scripts/deep/nested/run.mjs",
-    "package.json",
-    "package-lock.json",
-    "eslint.config.mjs",
-    ".gitleaks.toml",
-    "tsconfig.json",
-    "next.config.ts",
-    "playwright.config.ts",
+    ".github/actions/setup/action.yml",
     "AGENTS.md",
     "CLAUDE.md",
     "docs/policy/qa-release-agent.md",
-    "docs/ui-contracts/mobile-chat-composer.md",
-    "docs/release-gates/tomverse-chat-v1.yaml",
     "lib/adminAuth.ts",
     "lib/adminAuthCore.ts",
     "lib/adminAuditSystemActors.ts",
@@ -69,8 +58,40 @@ test("each gate path excludes", () => {
   }
 });
 
+test("only the minimum is a gate: scripts, root config, manifests and audit records are the lane's (owner, 2026-10-23)", () => {
+  for (const path of [
+    "scripts/security-regression-check.mjs",
+    "scripts/deep/nested/run.mjs",
+    "package.json",
+    "package-lock.json",
+    "packages/ui-tokens/package.json",
+    "apps/mobile/.npmrc",
+    "eslint.config.mjs",
+    "tsconfig.json",
+    "next.config.ts",
+    ".gitattributes",
+    ".github/audits/ui-test-tiers.md",
+    ".github/RELEASE_CHECKLIST.md",
+    "docs/policy/marketing-automation.md",
+    "docs/ui-contracts/mobile-chat-composer.md",
+  ]) {
+    assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
+  }
+});
+
 test("near-miss paths are not gates", () => {
   for (const path of ["docs/ops/railway-restore-drill.md", "lib/adminAudit.ts", "components/package.json.md", "docs/AGENTS.md.bak"]) {
+    assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
+  }
+});
+
+test("other features' policy documents, UI contracts and release gates are not gates (owner 2026-10-23)", () => {
+  for (const path of [
+    "docs/policy/image-generation.md",
+    "docs/policy/tomverse-chat-data-domain-registry.yaml",
+    "docs/ui-contracts/mobile-chat-composer.md",
+    "docs/release-gates/tomverse-chat-v1.yaml",
+  ]) {
     assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
   }
 });
@@ -155,7 +176,7 @@ test("reasons accumulate and are stable", () => {
   assert.deepEqual(
     judge({
       headBranch: "dependabot/npm/x",
-      changedFiles: [{ path: "package.json" }, { path: "lib/qaReleaseX.ts" }],
+      changedFiles: [{ path: ".github/workflows/x.yml" }, { path: "lib/qaReleaseX.ts" }],
     }),
     { excluded: true, reasons: ["agent_own_path", "excluded_branch", "gate_path"] },
   );
@@ -182,24 +203,6 @@ test("migration SQL on a non-migration path is ignored", () => {
   assert.deepEqual(
     judge({ changedFiles: [{ path: "docs/notes.md", migrationSql: 'DROP TABLE "QaReleaseX";' }] }),
     { excluded: false },
-  );
-});
-
-test("npm's manifest, lockfiles and configuration are gates at any depth (policy version 3)", () => {
-  for (const path of [
-    "packages/shared/package.json",
-    "apps/mobile/package-lock.json",
-    "tools/review-orchestrator/npm-shrinkwrap.json",
-    "packages/shared/.npmrc",
-    "apps/mobile/Package.json",
-    "a/b/c/d/.NPMRC",
-  ]) {
-    assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: true, reasons: ["gate_path"] }, path);
-  }
-  // A rename that only moves a manifest away still touched one.
-  assert.deepEqual(
-    judge({ changedFiles: [{ path: "packages/shared/manifest.txt", previousPath: "packages/shared/package.json" }] }),
-    { excluded: true, reasons: ["gate_path"] },
   );
 });
 

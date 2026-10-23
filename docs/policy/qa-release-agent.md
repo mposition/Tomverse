@@ -67,7 +67,7 @@ workflow·secret·branch protection·ruleset·GitHub App·Railway 변경도 그 
    label이 아닙니다. 결정적 규칙이고 판정이 아닙니다. 근거가 없으면 `undetermined`이며 소유자 할 일을 만들지 않습니다.
 3. **재실행 권고.** 최대 2건, 7일 만료. 실행은 사람이 합니다.
 4. **병합 레인.** 8절.
-5. **릴리스 열차.** 8절 12항. 정해진 출발 시각에 `main:next` 라벨이 붙은 develop PR을 모아 main PR 하나를 엽니다.
+5. **릴리스 열차.** 8절 12항. 정해진 출발 시각에 운영자가 Admin에서 고른 develop PR을 모아 main PR 하나를 엽니다.
 
 **LLM을 쓰지 않습니다.** 모든 판정은 결정적 코드입니다. 외부 텍스트(CI 로그, issue·PR 문장)는 판정의 입력일 뿐
 명령이 아니며, **digest에 들어가지 않습니다.** digest schema는 닫혀 있고 숫자·열거값·이슈 번호·SHA만 담습니다. CI 로그,
@@ -126,7 +126,10 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 
 - 결과는 공유 `AgentDigestItem` 계약(운영자 결정, 다섯 팀 공통)을 따릅니다: `agentKey = qa-release`, payload 직렬화
   16 KiB 이하, 닫힌 schema, 단일 writer, 본문 보존 **90일**, 그 뒤 meta 행은 공통 규칙.
-- Admin은 공통 Agent digest 영역(`/admin/agent-digests`) 하나를 씁니다. 이 Agent의 쓰기 행위는 둘입니다: 운영자 제어
+- Admin은 QA·릴리스 메뉴(`/admin/qa-release`, 2026-10-23 운영자 결정으로 공통 Agent digest 영역에서 독립. 옛
+  `/admin/agent-digests?tab=qa-release`·`?tab=ci-admission`은 redirect) 하나를 씁니다. 병합 레인은 회차마다 결과 코드와
+  열린 develop PR별 판정(다음 병합·대기·사람 몫·고쳐야 함·draft, 사람 몫이면 그 이유가 된 파일)을 `round` 경로로 보내고, 앱은
+  최신 회차만 `AppSetting` 한 행에 덮어써 `병합 레인` 탭에 보입니다. 표시 전용이며 레인의 선택에 쓰이지 않고 감사 이벤트도 아닙니다. 이 Agent의 쓰기 행위는 둘입니다: 운영자 제어
   revision 기록, 병합 레인 latch 해제. 둘 다 owner·ops 권한(`ops:write`)과 최근 로그인(step-up)을 요구합니다.
   **승인 버튼은 없습니다.**
 
@@ -176,13 +179,14 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    건너뛰고 다음으로 오래된 PR을 봅니다. 그래서 제외 대상이든 실패 PR이든 **뒤의 PR을 막지 않습니다.**
 3. **제외.** 아래 PR은 레인이 **병합하지 않고** Admin에 "사람 처리 대상"으로 표시만 합니다. 사람이 GitHub에서 각자의 계약대로
    처리합니다.
-   - 변경 경로에 게이트 파일: `.github/**`, **`scripts/**` 전체**(PR Fast Gate와 다른 workflow가 실행하는 검사 script가 여기에
-     있습니다), **저장소 루트의 모든 파일**(`eslint.config.mjs`, `tsconfig*.json`, `.gitleaks.toml`, `next.config.*`,
-     `playwright*.config.ts` 등 검사의 실행과 설정을 정하는 파일), **경로와 관계없이 모든 `package.json`·`package-lock.json`·
-     `npm-shrinkwrap.json`·`.npmrc`**(workspaces의 `packages/*`·`apps/*` 아래 것을 포함합니다 — 그 `postinstall`은 `npm ci`에서
-     실행됩니다), 정책 테스트(PR base의 `docs/policy/**`·`AGENTS.md`·`CLAUDE.md`가 경로로 이름 댄 `tests/**` 파일), `AGENTS.md`,
-     `CLAUDE.md`, `docs/policy/**`, `docs/ui-contracts/**`, `docs/release-gates/**`, `lib/adminAuth*`,
-     `lib/adminAuditSystemActors.ts`, `lib/agentAuthorityFiles.ts`.
+   - 변경 경로에 게이트 파일: `.github/workflows/**`, `.github/actions/**`(CI가 비밀값을 들고 도는 곳), 정책 테스트(PR base의
+     `AGENTS.md`·`CLAUDE.md`·`docs/policy/qa-release-agent.md`가 경로로 이름 댄 `tests/**` 파일), `AGENTS.md`, `CLAUDE.md`,
+     `docs/policy/qa-release-agent.md`, `lib/adminAuth*`, `lib/adminAuditSystemActors.ts`, `lib/agentAuthorityFiles.ts`.
+     **이것이 전부입니다**(운영자 결정 2026-10-23 "최소한의 장치만": revert로 되돌릴 수 없는 것과 Agent가 자기 게이트를 넓힐 수
+     있는 것만 남김). 나머지 `.github/**`(감사 기록 등), `scripts/**`, 저장소 루트 설정, `package.json`·lock 파일, 다른 기능의
+     정책·UI 계약 문서는 되돌릴 수 있는 코드로 보고 레인이 병합합니다 — PR의 CI가 이미 그 내용으로 돌았습니다. CI 자동 수정은
+     모델이 쓰는 변경이므로 이전의 넓은 경계(`.github/**`, `scripts/**`, 루트 파일, package 파일, 계약 문서)를 그대로 둡니다
+     (`lib/prCiAutoFixGuardCore.ts`). 같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
    - 변경 경로에 이 Agent 자신의 파일(부록 A, 판정은 PR base의 목록으로).
    - 이 Agent의 테이블(`AgentDigestItem`, `QaRelease`로 시작하는 테이블)을 이름 대는 migration. 판정은 변경된
      `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.
@@ -283,9 +287,11 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     서비스가 develop 회차 뒤에 **열차 회차**를 돕니다. 판정은 `lib/qaReleaseTrainCore.ts`, 순서는 `lib/qaReleaseTrainService.ts`입니다.
     - **출발 시각**은 AEST 08·11·14·17·20시이고 `QA_RELEASE_TRAIN_SLOTS`(쉼표로 나눈 시) 하나로 바꿉니다. 출발 뒤 한 시간 안의
       회차만 그 출발을 시작하며, 그 출발의 브랜치 `release/train-YYYYMMDD-HHMM`(AEST)이 GitHub에 있으면 다시 시작하지 않습니다.
-    - **실을 PR**은 develop에 병합됐고 `main:next` 라벨이 붙은 PR입니다. 라벨은 사람이나 개발 세션이 붙이고 에이전트는 읽기만
-      합니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 실을 PR이 없으면 열지 않습니다. 한 열차는 최대 30개를 싣고 나머지는
-      다음 열차를 탑니다. 라벨은 main에 들어간 뒤에도 남으므로 검색 결과를 모든 페이지(GitHub 검색 상한 1,000건)까지 읽습니다.
+    - **실을 PR**은 운영자가 Admin › Agent digests › QA·릴리스의 "다음 열차"에서 고른 develop 병합 PR입니다(운영자 결정
+      2026-10-23, 그 전에는 `main:next` 라벨). 선택은 앱이 감사 기록(`qa_release.train_cargo_selected`, owner·ops와 최근
+      로그인)으로 남기고, 서비스는 출발 때 앱에서 읽기만 하며 GitHub에서 그 PR이 develop에 병합됐는지 확인합니다. 선택은 그 뒤
+      처음 승인된 출발이 가져가고 소진됩니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 고른 PR이 없으면 열지 않습니다. 한
+      열차는 최대 30개를 싣습니다. 서비스는 30분마다 돌고(운영자 2026-10-23) 출발 창 한 시간 안에서 두 번 기회가 있습니다.
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뛰고, 충돌하는 PR은 abort하고 뺍니다. 뺀 PR과
       이유는 PR 본문과 Admin에 보이고 라벨은 그대로 둡니다. 충돌 해결은 하지 않습니다. `.github/workflows/**`를 바꾸는 PR도
@@ -294,9 +300,11 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
       — 운영자가 `npm run merge-train`으로 합니다. label·comment·status는 쓰지 않습니다.
-    - **스위치**: `QA_RELEASE_TRAIN_ENABLED`가 정확히 `true`일 때만 돌고(기본 꺼짐), 병합 레인의 kill switch가 비어 있지 않으면
-      멈춥니다. develop 레인(`QA_RELEASE_MERGE_LANE_ENABLED`)과는 따로 켭니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
-      revision이 최신 운영자 제어 revision과 같고 레인이 latch되지 않았을 때만이며, 승인과 결과를 병합 레인 actor의 시스템 감사
+    - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 10분마다)에서 `QA_RELEASE_TRAIN_ENABLED`가 정확히
+      `true`일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
+      레인을 함께 멈추지 않게 하기 위해서입니다. 레인의 App과 앱 secret을 같이 쓰므로 앱 쪽에 새로 둘 것은 없습니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
+      revision이 최신 운영자 제어 revision과 같고 같은 출발을 전에 승인하지 않았을 때만이며(레인 latch는 보지 않습니다 —
+      운영자 결정 2026-10-23, train은 레인과 독립), 승인과 결과를 병합 레인 actor의 시스템 감사
       행(`qa_release.train_admitted`, `qa_release.train_reported`)으로 남깁니다. 전용 테이블은 없습니다.
     - **ruleset**: 7항의 update ruleset은 App의 develop 밖 브랜치 생성을 막으므로, 켜기 전에 운영자가 `refs/heads/release/train-*`를
       그 ruleset의 제외 목록에 더합니다. 이것은 보안 경계 변경이라 운영자의 승인 대상입니다.
@@ -340,26 +348,27 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 병합 레인은 아래 경로를 바꾸는 PR을 무인 병합하지 않습니다(8절 3항). 판정은 그 PR의 base에 있던 이 목록으로 합니다.
 패턴에서 `**`는 디렉터리를 넘고, `*`는 한 경로 조각 안에서 맞추되 **패턴 끝의 `*`는 그 이름으로 시작하는 더 깊은 경로까지**
 맞춥니다(`lib/qaRelease*`는 `lib/qaRelease` 디렉터리 아래 파일도 맞춤). 8절 3항의 `lib/adminAuth*`도 같습니다.
-목록을 바꾸는 것은 이 정책 문서를 바꾸는 것이고, 정책 문서는 게이트 파일입니다. 이 Agent의 script(`scripts/**` 아래)는 8절
-3항의 `scripts/**` 제외에 이미 들어가므로 여기 다시 적지 않습니다. 공유 `AgentDigestItem` 계약의 파일과 Admin의 공통 Agent digest
-영역도 이 Agent가 쓰는 판정과 표시를 정하므로 함께 적습니다.
+목록을 바꾸는 것은 이 정책 문서를 바꾸는 것이고, 정책 문서는 게이트 파일입니다. 2026-10-23 운영자 결정("최소한의 장치만")으로
+레인이 **스스로를 바꾸거나 자기를 통제하는 장치를 바꾸는 파일**만 남깁니다: 병합을 판단하고 실행하는 코드와 그 API 진입점,
+운영자 제어(레인 스위치·래치 해제·열차 선택)의 권한 검사와 쓰기 API, 감사 기록을 쓰는 store, push 자격증명을 쓰는 열차,
+서비스의 변수 허용 목록과 시작 검사, 정책 승인 판정, Agent 서비스의 IaC(독립 검토 반영, 2026-10-23). QA 화면·digest 표시·
+테스트 같은 나머지 이 Agent의 파일은 레인이 병합합니다.
 
 ```
-lib/qaRelease*
-lib/agentDigest*
+lib/qaReleaseMergeLane*
+lib/qaReleaseTrain*
+lib/qaReleaseOperatorControl*
+lib/qaRelease*Store.ts
+lib/qaReleaseMonitor.ts
+lib/qaReleaseDigestIntake.ts
+lib/qaReleaseServiceEnvCore.ts
+lib/qaReleaseRouteAuthCore.ts
+lib/agentDigestStore.ts
 lib/agentPolicyApproval*
-lib/adminMessages/agentDigests*
+lib/prCiAutoFixGuardCore.ts
 app/api/internal/agents/qa-release/**
-app/api/admin/agent-digests/**
-app/(site)/(application)/admin/agent-digests/**
-components/admin/AdminAgentDigests*
-components/admin/QaRelease*
-tests/qaRelease*
-tests/agentDigest*
-tests/agentPolicyApproval*
-tests/integration/qa-release-*
-tests/integration/agent-digest-*
-tests/mergeTrainCore.test.mjs
-tests/mainPrSourcePolicy.test.mjs
+app/api/admin/agent-digests/qa-release/**
+scripts/merge-train-core.mjs
+scripts/qa-release-*
 .railway/**
 ```
