@@ -1,3 +1,4 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
@@ -144,7 +145,9 @@ export async function GET(
   context: RouteContext<"/api/conversations/[conversationId]">
 ) {
     try {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     if (!session?.user?.id) {
         return privateNoStore(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
     }
@@ -367,7 +370,9 @@ export async function PATCH(
   context: RouteContext<"/api/conversations/[conversationId]">
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
