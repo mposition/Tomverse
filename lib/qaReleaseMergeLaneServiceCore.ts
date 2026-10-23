@@ -20,9 +20,9 @@
 import {
   IN_FLIGHT_DEPLOYMENT_STATUSES,
   deploymentOutcome,
-  inFlightDeployments,
   refusalReason,
   replacementCommits,
+  servicesDeployingBranch,
   skippedCommits,
 } from "../scripts/merge-train-core.mjs";
 import {
@@ -34,7 +34,7 @@ import {
 import { type QaReleaseLaneVerdict, qaReleaseLaneVerdicts } from "./qaReleaseMergeLaneVerdictCore.ts";
 import { type QaReleaseLanePullRequest, pickQaReleaseLaneCandidate } from "./qaReleaseMergeLaneCandidateCore.ts";
 import { type QaReleaseDeployObservation, type QaReleaseMergeReport, qaReleaseDeployObservation } from "./qaReleaseMergeLaneReportCore.ts";
-import { judgeQaReleaseMergeLanding } from "./qaReleaseMergeLaneRoundCore.ts";
+import { judgeQaReleaseMergeLanding, qaReleaseHoldingDeployments } from "./qaReleaseMergeLaneRoundCore.ts";
 import { decideQaReleaseServiceStart } from "./qaReleaseServiceEnvCore.ts";
 
 /** `not_seen` waits this long after the merge, `in_progress`/`partial` this long (the merge train's defaults). */
@@ -109,7 +109,7 @@ export type QaReleaseMergeLaneRoundOutcome =
   | { exitCode: 0; outcome: "instruction_refused"; pullRequestNumber: number; headSha: string; reason: string }
   | { exitCode: 0; outcome: "reported"; report: QaReleaseMergeReport["kind"]; detail: string }
   | { exitCode: 0; outcome: "merged"; pullRequestNumber: number }
-  | { exitCode: 1; outcome: "refused_to_start" | "state_unknown" | "report_not_recorded" | "candidates_unknown" };
+  | { exitCode: 1; outcome: "refused_to_start" | "state_unknown" | "report_not_recorded" | "candidates_unknown" | "dev_deploy_failed" };
 
 /**
  * A service name in the report's closed form: characters outside it become
@@ -158,6 +158,29 @@ const commitOf = (deployment: QaReleaseDeployment) => String(deployment.meta?.co
 const newestFirst = (a: QaReleaseDeployment, b: QaReleaseDeployment) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
 
 /** The deployment judgement for an attempt awaiting deploy (section 8 item 5). */
+/**
+ * Railway builds a "Wait for CI" deployment only once every check on its
+ * commit passed, so a deployment past these states says the merge's CI
+ * passed. Owner, 2026-10-23: the lane moves on there rather than waiting out
+ * the build and deploy (about fifty minutes per merge before); a build that
+ * fails afterwards shows on the next merge's deploy.
+ */
+const PAST_CI_STATUSES = new Set(["BUILDING", "DEPLOYING", "SUCCESS", "SLEEPING"]);
+
+const FAILED_STATUSES = new Set(["FAILED", "CRASHED"]);
+
+/**
+ * A service that deploys develop and whose newest deployment failed: dev is
+ * broken. Since an attempt closes once its CI passes, nothing else watches a
+ * build or pre-deploy step (the migration) that fails after that; the lane
+ * merges nothing on top of it until a later develop deploy succeeds
+ * (independent review, 2026-10-23).
+ */
+const developBroken = (deployments: QaReleaseDeployment[]) =>
+  servicesDeployingBranch(deployments, "develop").some(
+    (serviceId) => FAILED_STATUSES.has(deployments.filter((d) => d.serviceId === serviceId).sort(newestFirst)[0]?.status ?? ""),
+  );
+
 async function judgeAwaitingDeploy(
   ports: QaReleaseMergeLanePorts,
   attempt: NonNullable<QaReleaseLaneState["openAttempt"]>,
@@ -187,6 +210,20 @@ async function judgeAwaitingDeploy(
   const waitedMs = dbNowMs - attempt.mergeNotBeforeMs;
   if (outcome === "succeeded" || outcome === "failed" || outcome === "unknown") {
     return sendReport(ports, attempt.id, { kind: "deploy", outcome, observation }, outcome);
+  }
+  // Every service that deploys develop has a deployment of the merge (or of
+  // a later commit that contains it) past CI: the merge's checks passed.
+  // Closed as deployed (the app's closed set has no separate "CI passed"); the
+  // observation shows the build still running, and developBroken watches it.
+  const carries = (d: QaReleaseDeployment) => commitOf(d) === sha.toLowerCase() || containing.has(commitOf(d));
+  const services = servicesDeployingBranch(deployments, "develop");
+  if (
+    services.length > 0 &&
+    services.every((serviceId) =>
+      PAST_CI_STATUSES.has(deployments.filter((d) => d.serviceId === serviceId && carries(d)).sort(newestFirst)[0]?.status ?? ""),
+    )
+  ) {
+    return sendReport(ports, attempt.id, { kind: "deploy", outcome: "succeeded", observation }, "ci_passed");
   }
   // A service whose newest deployment of the merge was skipped (Railway's
   // Wait for CI saw a failed check) will not deploy it by itself: the merge
@@ -282,7 +319,8 @@ export async function runQaReleaseMergeLaneRound(
     deployments = null;
   }
   if (deployments === null) return { exitCode: 1, outcome: "state_unknown" };
-  if (inFlightDeployments(deployments).length > 0) return { exitCode: 0, outcome: "hold" };
+  if (developBroken(deployments)) return { exitCode: 1, outcome: "dev_deploy_failed" };
+  if (qaReleaseHoldingDeployments(deployments).length > 0) return { exitCode: 0, outcome: "hold" };
 
   let pulls: QaReleaseLanePullRequest[];
   let ordered: QaReleaseLanePullRequest[];
@@ -355,7 +393,7 @@ export async function runQaReleaseMergeLaneRound(
     return abandon();
   }
   const freshDeployments = await ports.railway.developDeployments().catch(() => null);
-  if (freshDeployments === null || inFlightDeployments(freshDeployments).length > 0) return abandon();
+  if (freshDeployments === null || developBroken(freshDeployments) || qaReleaseHoldingDeployments(freshDeployments).length > 0) return abandon();
   if (decideQaReleaseServiceStart("mergeLane", env) !== "run") return abandon();
 
   const consumed = await ports.app
