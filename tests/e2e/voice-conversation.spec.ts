@@ -72,7 +72,8 @@ for (const mode of ["auto", "manual"] as const) test(`${mode} voice reuses Chat 
   const chatRequests: Array<Record<string, unknown>> = [];
   page.on("request", request => { if (new URL(request.url()).pathname === "/api/chat" && request.method() === "POST") chatRequests.push(request.postDataJSON()); });
   await openVoice(page, mode);
-  await expect(page.getByText("Voice: 36 credits/minute", { exact: false })).toBeVisible();
+  await expect(page.getByText("Voice usage", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog")).not.toContainText("36 credits/minute");
   expect(await page.evaluate(() => (window as unknown as { __voiceConversationQa: VoiceQa }).__voiceConversationQa.calls.length)).toBe(0);
   await page.getByRole("button", { name: "Start voice conversation", exact: true }).click();
   await expect(page.getByText("Listening · interrupt whenever you need")).toBeVisible();

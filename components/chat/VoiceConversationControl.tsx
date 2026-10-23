@@ -11,7 +11,7 @@ import "./voice-conversation.css";
 const english = {
   title: "Voice conversation", start: "Start voice conversation", close: "Close", stop: "End conversation",
   ready: "Continue this chat by speaking.", hint: "You can interrupt at any time. Your questions and answers stay in this chat.",
-  price: "Voice: 36 credits/minute", extra: "Answer model and search usage are charged separately.",
+  usageTitle: "Voice usage", extra: "Answer model and search usage are charged separately.",
   clock: "Connected time is billed, including pauses and time with your microphone muted.",
   connecting: "Connecting…", listening: "Listening · interrupt whenever you need", finishing: "Ending conversation…",
   ended: "Conversation ended", saved: "Your questions and answers are saved in this chat.", unknown: "Final voice usage is still being confirmed.",
@@ -25,7 +25,7 @@ const english = {
 const korean: typeof english = {
   title: "음성 대화", start: "음성 대화 시작", close: "닫기", stop: "대화 종료",
   ready: "지금 대화를 말로 이어가세요.", hint: "언제든 말로 끼어들 수 있어요. 질문과 답변은 이 채팅에 이어집니다.",
-  price: "음성 36크레딧/분", extra: "답변 모델·검색 사용량은 별도로 차감됩니다.",
+  usageTitle: "음성 사용량", extra: "답변 모델·검색 사용량은 별도로 차감됩니다.",
   clock: "말을 쉬거나 마이크를 꺼도 연결 시간은 계속 계산돼요.",
   connecting: "연결 중…", listening: "듣고 있어요 · 언제든 말씀하세요", finishing: "대화를 종료하고 있어요…",
   ended: "대화가 종료됐어요", saved: "질문과 답변은 이 채팅에 남아 있어요.", unknown: "최종 음성 사용량을 확인하고 있어요.",
@@ -95,7 +95,7 @@ export function VoiceConversationControl({ conversationId, scopeKey, maxSeconds,
         </div>
         <footer>
           {state && <div className="voice-conversation-meter"><time>{String(Math.floor(time / 60)).padStart(2, "0")}:{String(time % 60).padStart(2, "0")}</time><span>{state.confirmed ? c.charged : c.estimated}: {state.credits}</span></div>}
-          <p><strong>{c.price}</strong><br />{c.extra}</p>
+          <p><strong>{c.usageTitle}</strong><br />{c.extra}</p>
           {!state ? <button className="voice-conversation-start" type="button" onClick={start}>{c.start}</button> : finished ? <button type="button" onClick={close}>{c.back}</button> : <div className="voice-conversation-actions"><button type="button" disabled={!active} aria-pressed={state.muted} aria-label={state.muted ? c.unmute : c.mute} onClick={() => clientRef.current?.toggleMicrophone()}>{state.muted ? <MicOff size={22} /> : <Mic size={22} />}</button><button type="button" disabled={state.status === "closing"} onClick={() => void clientRef.current?.stop()}>{c.stop}</button></div>}
         </footer>
       </div>

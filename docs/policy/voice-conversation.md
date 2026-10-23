@@ -12,11 +12,14 @@ Owner decisions in chat, 2026-10-23:
 - Voice usage is charged to the user's ordinary plan/purchased-credit wallet at
   **36 credits/minute**. Meter cumulative provider seconds and round up once per
   session. Answer-model and search charges remain separate.
+- The owner removed the per-minute price wording from the voice UI and Figma
+  mockups. This presentation change does not change the approved billing rate.
 
 ## User flow
 
-The waveform control beside Send opens a voice dialog. Before Start, disclose the
-voice price, separate answer/search charges and the maximum temporary hold.
+The waveform control beside Send opens a voice dialog. Before Start, disclose
+separate answer/search charges and the maximum temporary hold; omit the per-minute
+price wording in the voice UI.
 Start requests microphone access before any paid request. The dialog shows both
 speakers' captions independently, connection duration, estimated voice credits,
 microphone mute and End. Muting does not pause billing. End returns to the same
