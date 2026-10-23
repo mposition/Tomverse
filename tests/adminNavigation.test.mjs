@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ADMIN_AGENT_DIGESTS_LEGACY_TABS,
   ADMIN_AMUX_EXECUTION_LEGACY_TABS,
   ADMIN_DETAIL_ROUTES,
   ADMIN_ENGINEERING_AGENT_LEGACY_TABS,
@@ -716,6 +717,23 @@ test("product research is its own workspace and the engineering agent's old tab 
   );
   const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/engineering-agent/page.tsx"), "utf8");
   assert.ok(page.includes("ADMIN_ENGINEERING_AGENT_LEGACY_TABS[query.tab]"));
+  assert.ok(page.includes("redirect(adminRedirectTarget(legacy, query))"));
+});
+
+test("QA and release left Agent digests; its old tab links land on the same section", () => {
+  assert.deepEqual(ADMIN_AGENT_DIGESTS_LEGACY_TABS, {
+    "qa-release": "/admin/qa-release?tab=overview",
+    "ci-admission": "/admin/qa-release?tab=ci-admission",
+  });
+  // Operator emails and GitHub commit statuses carry these, with their own query.
+  assert.equal(
+    adminRedirectTarget(ADMIN_AGENT_DIGESTS_LEGACY_TABS["ci-admission"], { tab: "ci-admission", pr: "2890" }),
+    "/admin/qa-release?tab=ci-admission&pr=2890"
+  );
+  assert.deepEqual(adminNavItemTabs("qa-release").map((tab) => tab.id), ["overview", "ci-admission"]);
+  assert.deepEqual(adminNavItemTabs("agent-digests").map((tab) => tab.id), ["billing-finance-ops"]);
+  const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/agent-digests/page.tsx"), "utf8");
+  assert.ok(page.includes("ADMIN_AGENT_DIGESTS_LEGACY_TABS[query.tab]"));
   assert.ok(page.includes("redirect(adminRedirectTarget(legacy, query))"));
 });
 

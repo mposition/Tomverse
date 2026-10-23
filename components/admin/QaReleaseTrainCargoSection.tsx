@@ -18,7 +18,7 @@ import {
 import type { QaReleaseTrainCargoCandidatesRead } from "@/lib/qaReleaseTrainCargoRead";
 
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
-const PAGE_PATH = "/admin/agent-digests?tab=qa-release";
+const PAGE_PATH = "/admin/qa-release";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 
 const BADGE: Record<QaReleaseTrainCargoStatus, string> = {

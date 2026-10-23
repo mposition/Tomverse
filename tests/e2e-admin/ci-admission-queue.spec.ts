@@ -50,7 +50,7 @@ test("the operator reorders the line by dragging and from the keyboard, and each
     update: { value: JSON.stringify(seed) },
   });
   await signInAs("owner");
-  await page.goto("/admin/agent-digests?tab=ci-admission");
+  await page.goto("/admin/qa-release?tab=ci-admission");
   // The analytics consent banner sits over the bottom of the page until declined.
   await page.getByRole("button", { name: "Decline", exact: true }).click();
 

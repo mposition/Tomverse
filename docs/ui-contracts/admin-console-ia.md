@@ -35,8 +35,8 @@
 
 ## The navigation
 
-Seven groups, twenty-nine entries. One page, one job. The owner sees all
-twenty-nine; every other role sees twenty-seven, because two AMUX entries are
+Seven groups, thirty-two entries. One page, one job. The owner sees all
+thirty-two; every other role sees thirty, because two AMUX entries are
 owner-only (rule 14).
 
 | Group | Entry | Route | Sections (`?tab=`) |
@@ -58,8 +58,11 @@ owner-only (rule 14).
 | Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
 | Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `competitors`, `comments` |
+| Operations | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
-| Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
+| Operations | SRE agent | `/admin/sre-ops` | — |
+| Operations | QA and release | `/admin/qa-release` | `overview`, `ci-admission` |
+| Operations | Agent digests | `/admin/agent-digests` | `billing-finance-ops` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio`, `import`, `reconciliation`, `metadata`, `recovery` |
@@ -91,9 +94,16 @@ this slice. Reading takes ordinary admin authentication; every control takes
 `engineering-agent:write` and a recent sign-in, checked by its own route, and
 `t1` is not a mode this screen can set.
 
+**QA and release** (2026-10-23) is the pipeline from a develop merge to
+production: the QA-release agent's digest and controls, the merge lane, the
+release train and CI admission. It left Agent digests because the operator
+works in it, not only reads it; `/admin/agent-digests?tab=qa-release` and
+`?tab=ci-admission` redirect to its sections (`ADMIN_AGENT_DIGESTS_LEGACY_TABS`).
+
 **Agent digests** is the common area where agent teams' daily digests are
 read (`docs/policy/qa-release-agent.md` section 4), one section per agent
-that stores them; QA and release is the first. It shows the newest operator
+that stores them. What follows describes the QA and release section, which
+kept the same panel when it moved. It shows the newest operator
 control revision and the recent digests as counts and codes, says how many
 it lists, and shows an expired or unreadable body as such rather than
 drawing a digest that is not there. It carries no badge. Its one control
