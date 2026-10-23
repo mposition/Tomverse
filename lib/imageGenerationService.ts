@@ -1823,7 +1823,7 @@ export const retryImageGenerationTarget = async (
       // nothing.
       chatTurnHost: input.chatTurnHostAllowed === true ||
         (target.group.conversation != null &&
-          (target.group.conversation.productKey === "review" || target.group.conversation.productKey === null) &&
+          target.group.conversation.productKey === "review" &&
           target.group.conversation.continuationBridge === null),
     },
     now

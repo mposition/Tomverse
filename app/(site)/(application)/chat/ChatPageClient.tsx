@@ -5716,9 +5716,15 @@ export function ChatPageClient({
         panels: selectedModels, models: AVAILABLE_MODELS.filter(item => item.enabled && canUseModelWithPlan(currentAccessPlan, item)),
         preset: "standard", comparisonId: crypto.randomUUID() });
       if (!plan) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
-      flushSync(() => mutateModelSettings(currentChatIdRef.current, plan.panelIds, []));
+      // An image choice sends only its provider's panel without discarding
+      // the other text models the Professional user selected.
+      const panelId = plan.panelIds[0];
+      const panels = selectedModels.includes(panelId) ? selectedModels :
+        [...selectedModels.slice(0, Math.max(0, maxSelectableModels - 1)), panelId];
+      flushSync(() => mutateModelSettings(currentChatIdRef.current, panels,
+        disabledPanels.filter(id => id !== panelId)));
       return handleGlobalSubmitRef.current({ reviewRouteChecked: true,
-        imageIntentChecked: true, imageTurnsByModel: plan.turns });
+        imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds });
     }
     const professionalImageRouting = mountedSurface === "workspace" &&
       options === undefined &&

@@ -337,6 +337,9 @@ test("Professional image selection stages the composer, then answers inline with
   await expect(page.getByTestId("chat-image-turn").locator("img")).toHaveCount(1);
   expect(calls.turns).toHaveLength(1);
   expect(calls.turns[0].imageModelIds).toEqual(["gpt-image-2"]);
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
+  const saved = await page.evaluate(async () => (await fetch("/api/conversations/qa-conversation")).json());
+  expect(saved.selectedModels).toEqual(THREE_MODELS);
   expect(calls.counts()).toEqual({ textCalls: 0, workspaceCalls: 0, preflightCalls: 0, routingCalls: 0 });
 });
 

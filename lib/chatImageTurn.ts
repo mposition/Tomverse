@@ -75,11 +75,11 @@ export async function startChatImageTurn(
     if (!conversation) {
         throw new ChatAccessError(404, "CONVERSATION_NOT_FOUND", "Conversation not found.");
     }
-    // Review keeps its product identity, including legacy unclassified rows.
+    // Only explicit product identities grant the in-conversation image host.
     // Continued conversations and image-workspace rows are still excluded.
     if (
         !isChatConversationKind(conversation.kind) ||
-        !["chat", "review", null].includes(conversation.productKey) ||
+        !["chat", "review"].includes(conversation.productKey ?? "") ||
         conversation.continuationBridge !== null
     ) {
         throw new ChatAccessError(
@@ -127,7 +127,7 @@ export async function startChatImageTurn(
         throw new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That answer id is taken.");
     }
 
-    const isReview = conversation.productKey !== "chat";
+    const isReview = conversation.productKey === "review";
     if (input.imageGroupModelIds && (!isReview || input.imageModelIds.length !== 1 ||
         [...input.imageGroupModelIds].sort()[Number(input.assistantMessageId.split("_").at(-1))] !== input.imageModelIds[0] ||
         chatImageTurnGroupKey(input.assistantMessageId) === input.assistantMessageId)) {

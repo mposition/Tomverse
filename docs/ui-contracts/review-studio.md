@@ -36,7 +36,10 @@ once for the selected providers and gives each panel only its own image model;
 unsupported panels show their notice without a text or image provider call.
 Professional keeps explicit image-model choices in the composer. Its automatic
 image-intent check uses the existing Chat image-triage switch; text decisions
-retain the manually selected text models. Image turns reuse Chat's transcript
+retain the manually selected text models. When enabled, this adds one existing
+budgeted router call per eligible Professional prompt, as Chat's image triage
+does. Only an explicit `review` product identity grants Review image hosting;
+unclassified rows gain no image execution or retry exception. Image turns reuse Chat's transcript
 cards, saved-question path, image reservation and idempotent retry. Supported
 panels share one atomic group and workflow lease per question; each card and
 restored message shows only its own target. They neither

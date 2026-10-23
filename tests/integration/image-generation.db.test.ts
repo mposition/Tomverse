@@ -901,6 +901,24 @@ test("Review image turns keep product identity, persist images and replay one re
     (error: Error & { code?: string }) => error.code === "CONVERSATION_LOCKED");
 });
 
+test("unclassified image hosts cannot bypass the Chat image switch for starts or retries", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const chat = await createChatConversation(user.id);
+  await prisma.conversation.update({ where: { id: chat.id }, data: { productKey: null } });
+  const question = await prisma.message.create({ data: { conversationId: chat.id, role: "user", content: "a mountain icon" } });
+  await assert.rejects(startChatImageTurn({ userId: user.id, conversationId: chat.id, sourceUserMessageId: question.id,
+    assistantMessageId: randomUUID(), modelId: "gpt-6-luna", imageModelIds: ["gpt-image-2"], preset: "draft" }),
+    (error: Error & { code?: string }) => error.code === "CONVERSATION_KIND_NOT_SUPPORTED");
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
+  const generation = await createGeneration(user.id, chat.id);
+  await prisma.imageGeneration.update({ where: { id: generation.id }, data: { status: "failed" } });
+  await assert.rejects(retryImageGenerationTarget({ userId: user.id, targetId: generation.targetId!,
+    retryIdempotencyKey: "unclassified-retry-refused" }),
+    (error: Error & { code?: string }) => error.code === "CONVERSATION_KIND_NOT_SUPPORTED");
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
+});
+
 test("Review provider panels share one concurrent group, reservation set and durable target mapping", async () => {
   await enableImageGeneration();
   const user = await createUser();
