@@ -433,21 +433,23 @@ test("a budget opens the budget gate and nothing else", () => {
     );
 });
 
-test("no pair in the shipped register resolves as approved for runtime use", () => {
-    // The other half of the same contract: even with the flag on, the product
-    // runtime finds no approved pair, so extraction fails closed (§12.1).
+test("only the owner-launch pair resolves for runtime use, and only until it expires", () => {
+    // The other half of the same contract: every other pair fails closed even
+    // with the flag on (§12.1), and the one approval ends on its own date.
+    const during = new Date("2026-10-24T00:00:00Z");
+    const after = new Date("2026-11-22T00:00:00Z");
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
+        const pair = {
+            extractionModelId: entry.extractionModelId,
+            promptVersion: entry.promptVersion,
+        };
+        const launched = `${pair.extractionModelId}::${pair.promptVersion}` === "gpt-5-6-luna::mem-extract-v9";
         assert.equal(
-            findApprovedEvalPair(
-                {
-                    extractionModelId: entry.extractionModelId,
-                    promptVersion: entry.promptVersion,
-                },
-                { kind: "none" }
-            ),
-            null,
-            `${entry.extractionModelId} must not resolve as approved`
+            Boolean(findApprovedEvalPair(pair, { kind: "none" }, MEMORY_EXTRACTION_EVAL_REGISTER, during)),
+            launched,
+            `${pair.extractionModelId}::${pair.promptVersion}`
         );
+        assert.equal(findApprovedEvalPair(pair, { kind: "none" }, MEMORY_EXTRACTION_EVAL_REGISTER, after), null);
     }
 });
 

@@ -796,8 +796,9 @@ export async function isMemoryExtractionEnabled(): Promise<boolean> {
  * it is what decides whether an approved memory may reach a prompt at all.
  *
  * It is still off, and turning it on is a human procedure, not a code change:
- * §12.4 requires a decision-grade eval, blind review, an independent re-run,
- * a signed approval and a staging verification first. The wiring exists ahead
+ * an approved pair first — docs/policy/external-conversation-import-and-memory.md
+ * §12.4 (decision-grade eval, blind review, an independent re-run, a signed
+ * approval) or its §12.4a owner launch — and a staging verification. The wiring exists ahead
  * of that on purpose, so the day it is turned on is a settings change against
  * a path that has already been reviewed and tested — not a deploy.
  */
