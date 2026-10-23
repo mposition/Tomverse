@@ -95,6 +95,28 @@ test("sentence pauses and two queued delegations preserve both questions by audi
   } finally { emit({ type: "session.closed", usage: { seconds: 4 } }); await text; }
 });
 
+test("later transcript remains available when its delegation arrives after the earlier quiet window", async () => {
+  const response = await POST(request(start())); const text = response.text();
+  const emit = event => w.socket.emit("message", JSON.stringify(event));
+  try {
+    emit({ type: "session.input_transcript.delta", event_id: "first", delta: "First question", start_ms: 0, end_ms: 1000 });
+    emit({ type: "session.delegation.created", event_id: "first-task", offset_ms: 1000, delegation: { id: "first-delegation" } });
+    emit({ type: "session.input_transcript.delta", event_id: "later", delta: "Later question", start_ms: 2000, end_ms: 2500 });
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    assert.deepEqual(w.issued.map(task => task.text), ["First question"]);
+    emit({ type: "session.delegation.created", event_id: "later-task", offset_ms: 2500, delegation: { id: "later-delegation" } });
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    assert.deepEqual(w.issued.map(task => task.text), ["First question", "Later question"]);
+  } finally { emit({ type: "session.closed", usage: { seconds: 5 } }); await text; }
+});
+
+test("a malformed delegation terminates with an explicit error instead of silently waiting", async () => {
+  const response = await POST(request(start())); const text = response.text();
+  w.socket.emit("message", JSON.stringify({ type: "session.delegation.created", delegation: { id: "missing-offset" } }));
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 0 } }));
+  assert.match(await text, /VOICE_DELEGATION_INVALID/); assert.equal(w.issued, undefined);
+});
+
 test("disabled, unauthenticated, foreign and locked starts never call a paid provider", async () => {
   delete process.env.VOICE_CONVERSATION_ENABLED; assert.equal((await POST(request(start()))).status, 503);
   process.env.VOICE_CONVERSATION_ENABLED = "true"; w.user = null; assert.equal((await POST(request(start()))).status, 401);

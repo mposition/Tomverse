@@ -5,6 +5,13 @@ import { auditDbIntegrationCoverage } from "../scripts/check-db-integration-cove
 const runnerWith = (...paths) =>
   paths.map((path) => `    "${path}",\n`).join("");
 
+test("JavaScript database suites are checked in both directions", () => {
+  const path = "tests/integration/voice.db.test.mjs";
+  assert.deepEqual(auditDbIntegrationCoverage({ suiteFiles: ["voice.db.test.mjs"], runnerSource: runnerWith(path) }).failures, []);
+  assert.equal(auditDbIntegrationCoverage({ suiteFiles: ["voice.db.test.mjs"], runnerSource: "" }).failures.length, 1);
+  assert.equal(auditDbIntegrationCoverage({ suiteFiles: [], runnerSource: runnerWith(path) }).failures.length, 1);
+});
+
 test("a runner and a directory that agree pass", () => {
   const { failures, referenced } = auditDbIntegrationCoverage({
     suiteFiles: ["a.db.test.ts", "b.db.test.ts"],

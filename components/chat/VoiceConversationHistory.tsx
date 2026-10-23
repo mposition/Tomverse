@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { VoiceSessionSummary, type VoiceSessionSummaryValue } from "@tomverse/chat-ui";
 import { useLanguage } from "@/components/LanguageProvider";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 export function VoiceConversationHistory({ conversationId, revision }: { conversationId: string; revision: number }) {
   const { lang } = useLanguage();
@@ -11,7 +12,7 @@ export function VoiceConversationHistory({ conversationId, revision }: { convers
     const load = async () => {
       try {
         const response = await fetch("/api/chat/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "history", conversationId }), signal: abort.signal });
-        if (!response.ok) return;
+        if (!response.ok) { await discardResponseBody(response); return; }
         const data = await response.json();
         if (!Array.isArray(data.sessions) || abort.signal.aborted) return;
         const rows = data.sessions.filter((s: Record<string, unknown>) => typeof s.id === "string" && typeof s.seconds === "number" && typeof s.credits === "number").map((s: VoiceSessionSummaryValue & { settled: boolean }) => ({ ...s, status: s.settled ? "settled" : "reserved" }));

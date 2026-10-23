@@ -168,7 +168,7 @@ export async function POST(request: Request) {
             void (async () => {
               while (pendingDelegations.length && !closing && !finished) {
                 const next = pendingDelegations[0];
-                const boundary = pendingDelegations.length > 1 ? next.offset : Infinity;
+                const boundary = next.offset;
                 const parts = input.filter(part => part.start_ms <= boundary);
                 const text = parts.sort((a, b) => a.start_ms - b.start_ms).map(part => part.delta).join("").slice(-16_000);
                 if (!text.trim()) {
@@ -233,7 +233,7 @@ export async function POST(request: Request) {
             if (typeof delegation?.id === "string" && typeof event.offset_ms === "number" && Number.isFinite(event.offset_ms) && event.offset_ms >= 0 && !delegationIds.has(delegation.id)) {
               delegationIds.add(delegation.id);
               pendingDelegations.push({ id: delegation.id, offset: event.offset_ms, since: Date.now() }); flushDelegation();
-            }
+            } else if (typeof delegation?.id !== "string" || typeof event.offset_ms !== "number" || !Number.isFinite(event.offset_ms) || event.offset_ms < 0) { send({ type: "error", code: "VOICE_DELEGATION_INVALID" }); stop(); }
           } else if (event.type === "session.usage.updated") {
             const seconds = (event.usage as { seconds?: unknown } | undefined)?.seconds;
             if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= latestSeconds) {
