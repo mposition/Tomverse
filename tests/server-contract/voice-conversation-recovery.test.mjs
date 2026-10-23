@@ -7,7 +7,7 @@ const mod = path => pathToFileURL(resolve(path)).href;
 let w;
 class SecurityError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ApiSecurityError: SecurityError } });
-mock.module(mod("lib/voiceConversationTasks.ts"), { namedExports: { abandonVoiceDispatch: async () => Boolean(w.unknownDispatch), dispatchVoiceTask: async () => { w.dispatches = (w.dispatches ?? 0) + 1; } } });
+mock.module(mod("lib/voiceConversationTasks.ts"), { namedExports: { dispatchVoiceTask: async () => { w.dispatches = (w.dispatches ?? 0) + 1; } } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatUsageBucket: { findUnique: async () => w.heartbeat ? { updatedAt: new Date(w.heartbeat) } : null, upsert: async () => { w.heartbeat = Date.now(); } },
   $executeRaw: async (parts, ...values) => {
@@ -15,7 +15,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
     if (sql.includes("jsonb_build_object('token'")) {
       const [token, until, id] = values; const row = w.rows.find(row => row.id === id);
       if (!row || Date.parse(row.reservationPayload.webLeaseUntil ?? "") > Date.now() || Date.parse(row.reservationPayload.recoveryLease?.until ?? "") > Date.now()) return 0;
-      row.reservationPayload.recoveryLease = { token, until }; return 1;
+      row.reservationPayload.recoveryLease = { token, until }; row.lastError ??= "VOICE_CLOSE_REQUESTED"; return 1;
     }
     if (sql.includes("- 'recoveryLease'")) {
       const [id, token] = values; const row = w.rows.find(row => row.id === id);
@@ -46,7 +46,7 @@ mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
   attachVoiceProviderSession: () => { if (!w.allowReceiver) assert.fail("No sideband should be opened here"); const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; socket.send = value => w.commands.push(JSON.parse(value)); socket.close = () => socket.emit("close"); w.socket = socket; return socket; },
   closeVoiceProviderSession: async id => { w.closes.push(id); return w.finalSeconds; },
-  hangupVoiceProviderSession: async id => { w.hangs.push(id); if (w.hangFailure) throw new Error("Provider unreachable"); },
+  hangupVoiceProviderSession: async id => { w.hangs.push(id); if (w.hangFailure) throw new Error("Provider unreachable"); if (w.finalOnHangup) w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: w.finalOnHangup } })); },
 } });
 const { assertVoiceWatchdogReady, touchVoiceWatchdog, recordVoiceUsage, finalizeVoiceReservation, reconcileVoiceConversations, observeActiveVoiceConversations, stopVoiceRecoveryReceivers } = await import(mod("lib/voiceConversationRecovery.ts"));
 const row = () => ({ id: "voice-1", userId: "owner", status: "reserved", providerRequestId: "live_1", lastError: null, settledCredits: 0,
@@ -121,11 +121,107 @@ test("a previously persisted invalid final cannot retain a customer hold indefin
   assert.equal(w.charges[0].seconds, 0);
 });
 
-test("the watchdog never opens a competing sideband while the web receiver lease is healthy", async () => {
+test("the watchdog observes usage during a healthy web lease without taking command ownership", async () => {
+  w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
   w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
   w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 300_000).toISOString();
   await observeActiveVoiceConversations(); await reconcileVoiceConversations();
+  w.socket.emit("open");
+  w.socket.emit("message", JSON.stringify({ type: "session.usage.updated", usage: { seconds: 12 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.rows[0].providerUsageSnapshot.seconds, 12);
+  assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
+  assert.equal(w.rows[0].lastError, null); assert.deepEqual(w.commands, []);
   assert.equal(w.closes.length, 0); assert.equal(w.charges.length, 0);
+  const observedSocket = w.socket;
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(0).toISOString();
+  await observeActiveVoiceConversations();
+  assert.equal(w.socket, observedSocket);
+  assert.ok(w.rows[0].reservationPayload.recoveryLease);
+  assert.deepEqual(w.commands, [{ type: "session.close" }]);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.charges.length, 1); assert.equal(w.charges[0].seconds, 15);
+});
+
+test("a trusted final observed during a healthy web lease settles once alongside the primary", async () => {
+  w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  await observeActiveVoiceConversations(); w.socket.emit("open");
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  await finalizeVoiceReservation("voice-1", 15);
+  assert.equal(w.charges.length, 1); assert.equal(w.rows[0].settledCredits, 9);
+  assert.deepEqual(w.commands, []); assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
+});
+
+for (const emergency of ["kill switch", "deadline"]) test(`a worker ${emergency} hangs up despite a healthy web lease`, async () => {
+  w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  await observeActiveVoiceConversations(); w.socket.emit("open");
+  if (emergency === "kill switch") process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  else w.rows[0].reservationPayload.closeAt = new Date(0).toISOString();
+  await observeActiveVoiceConversations(); await observeActiveVoiceConversations();
+  assert.deepEqual(w.hangs, ["live_1"]); assert.deepEqual(w.commands, []);
+  assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
+});
+
+for (const emergency of ["kill switch", "deadline"]) test(`a cold ${emergency} observes final usage before issuing the emergency hangup`, async () => {
+  w.allowReceiver = true; w.commands = []; w.finalOnHangup = 15;
+  w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  if (emergency === "kill switch") process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  else w.rows[0].reservationPayload.closeAt = new Date(0).toISOString();
+  await observeActiveVoiceConversations(); w.socket.readyState = 0;
+  await observeActiveVoiceConversations();
+  assert.deepEqual(w.hangs, []); assert.equal(w.charges.length, 0);
+  w.socket.readyState = 1; w.socket.emit("open");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(w.hangs, ["live_1"]); assert.equal(w.charges.length, 1);
+  assert.equal(w.charges[0].seconds, 15); assert.equal(w.charges[0].evidence, "final");
+  assert.deepEqual(w.commands, []);
+});
+
+test("an unavailable emergency observer still stops the call and its retry can collect final usage", async () => {
+  w.allowReceiver = true; w.commands = [];
+  w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  await observeActiveVoiceConversations(); const failedSocket = w.socket;
+  failedSocket.readyState = 0; failedSocket.emit("error", Error("Unavailable sideband"));
+  assert.deepEqual(w.hangs, ["live_1"]); assert.equal(w.charges.length, 0);
+  await observeActiveVoiceConversations(); assert.notEqual(w.socket, failedSocket);
+  w.socket.emit("open"); assert.equal(w.hangs.length, 1);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.charges.length, 1); assert.equal(w.charges[0].seconds, 15);
+});
+
+test("expired holds do not cycle observers or block observed-minimum reconciliation", async () => {
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  await observeActiveVoiceConversations(); await observeActiveVoiceConversations();
+  assert.deepEqual(w.hangs, ["live_1"]); assert.equal(w.socket, undefined);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(0).toISOString();
+  await observeActiveVoiceConversations(); await reconcileVoiceConversations();
+  assert.equal(w.rows[0].status, "settled"); assert.equal(w.charges[0].evidence, "observed_minimum");
+});
+
+test("an orphaned primary is durably marked for immediate closure without dispatching queued work", async () => {
+  w.allowReceiver = true; w.commands = [];
+  w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  await observeActiveVoiceConversations();
+  assert.equal(w.rows[0].lastError, "VOICE_CLOSE_REQUESTED");
+  w.socket.emit("open");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(w.commands, [{ type: "session.close" }]);
+  assert.equal(w.dispatches, undefined);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 35 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.rows[0].status, "settled"); assert.equal(w.charges[0].seconds, 35);
 });
 
 test("a kill switch closes an already attached independent receiver on the next cycle", async () => {
@@ -135,14 +231,6 @@ test("a kill switch closes an already attached independent receiver on the next 
   process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
   await observeActiveVoiceConversations();
   assert.deepEqual(w.commands, [{ type: "session.close" }]);
-});
-
-test("an unknown dispatched answer closes recovery without replaying the append", async () => {
-  w.allowReceiver = true; w.unknownDispatch = true; w.commands = [];
-  w.rows[0].expiresAt = new Date(Date.now() + 300000); w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200000).toISOString();
-  await observeActiveVoiceConversations(); w.socket.emit("open");
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(w.commands, [{ type: "session.close" }]); assert.equal(w.dispatches, undefined);
 });
 
 test("socket errors and expiry retain ownership until an observed final receipt commits", async () => {

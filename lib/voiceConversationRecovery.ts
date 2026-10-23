@@ -5,19 +5,20 @@ import { ApiSecurityError } from "@/lib/apiSecurity";
 import { readVoiceCreditPayload, settleVoiceConversationCredits } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, closeVoiceProviderSession, hangupVoiceProviderSession } from "@/lib/voiceConversationProvider";
 import { VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
-import { abandonVoiceDispatch, dispatchVoiceTask } from "@/lib/voiceConversationTasks";
 
 const heartbeatKey = "voice-conversation:watchdog";
 const heartbeatPeriod = "worker";
 const epoch = new Date(0);
 const receivers = new Map<string, () => void>();
-const receiverClosers = new Map<string, () => void>();
+const receiverClosers = new Map<string, () => Promise<void>>();
+const receiverEmergencyClosers = new Map<string, () => void>();
 const retryAfter = new Map<string, number>();
+const hangupRetryAfter = new Map<string, number>();
 
 /** A database lease also excludes receivers in other worker/maintenance processes. */
 export async function claimVoiceRecoveryLease(id: string) {
   const token = randomUUID(); const until = new Date(Date.now() + 30_000).toISOString();
-  const changed = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{recoveryLease}', jsonb_build_object('token', ${token}::text, 'until', ${until}::text)), "updatedAt" = NOW()
+  const changed = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{recoveryLease}', jsonb_build_object('token', ${token}::text, 'until', ${until}::text)), "lastError" = COALESCE("lastError", 'VOICE_CLOSE_REQUESTED'), "updatedAt" = NOW()
     WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND ("status" = 'reserved' OR "lastError" = 'VOICE_PROVIDER_STOP_PENDING')
     AND COALESCE(("reservationPayload"->>'webLeaseUntil')::timestamptz, 'epoch'::timestamptz) <= NOW()
     AND COALESCE(("reservationPayload"->'recoveryLease'->>'until')::timestamptz, 'epoch'::timestamptz) <= NOW()`;
@@ -37,62 +38,73 @@ export async function releaseVoiceRecoveryLease(id: string, token: string) {
 
 /** The independent worker receives final usage even when the web process dies. */
 export async function observeActiveVoiceConversations() {
-  if (process.env.VOICE_CONVERSATION_KILL_SWITCH) for (const close of receiverClosers.values()) close();
+  if (process.env.VOICE_CONVERSATION_KILL_SWITCH) for (const close of receiverClosers.values()) void close().catch(() => {});
   const rows = await prisma.chatCreditReservation.findMany({ where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }], providerRequestId: { not: null } } });
   for (const id of retryAfter.keys()) if (!rows.some(row => row.id === id)) retryAfter.delete(id);
+  for (const id of hangupRetryAfter.keys()) if (!rows.some(row => row.id === id)) hangupRetryAfter.delete(id);
   for (const [id, release] of receivers) if (!rows.some(row => row.id === id)) release();
   for (const row of rows) {
-    if (receivers.has(row.id)) continue;
-    if ((retryAfter.get(row.id) ?? 0) > Date.now()) continue;
     let payload;
     try { payload = readVoiceCreditPayload(row.reservationPayload); } catch { continue; }
-    // A healthy web receiver owns the sideband. After its process disappears,
-    // the durable lease expires and this independent receiver takes over.
-    if (Date.parse(payload.webLeaseUntil ?? "") > Date.now()) {
-      if (Date.parse(payload.closeAt ?? "") <= Date.now() || process.env.VOICE_CONVERSATION_KILL_SWITCH) {
-        retryAfter.set(row.id, Date.now() + 10_000);
-        void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {});
-      }
+    const webHealthy = Date.parse(payload.webLeaseUntil ?? "") > Date.now();
+    const urgent = () => webHealthy && (Date.parse(payload.closeAt ?? row.expiresAt.toISOString()) <= Date.now() || Boolean(process.env.VOICE_CONVERSATION_KILL_SWITCH));
+    const hangup = () => {
+      if ((hangupRetryAfter.get(row.id) ?? 0) > Date.now()) return;
+      hangupRetryAfter.set(row.id, Date.now() + 10_000);
+      void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {});
+    };
+    if (receivers.has(row.id)) {
+      if (urgent()) receiverEmergencyClosers.get(row.id)?.();
+      if (!webHealthy) await receiverClosers.get(row.id)?.();
       continue;
     }
-    const lease = await claimVoiceRecoveryLease(row.id);
-    if (!lease) continue;
+    // Expired holds belong to the grace reconciler; never repeatedly attach an
+    // observer whose retention deadline has already passed.
+    if (row.expiresAt.getTime() <= Date.now()) { if (urgent()) hangup(); continue; }
+    if (!urgent() && (retryAfter.get(row.id) ?? 0) > Date.now()) continue;
+    // Observe from the start: late attachment can miss the final usage event
+    // when the web process disappears. Only an expired web lease grants commands.
     const socket = attachVoiceProviderSession(row.providerRequestId!);
+    let lease: string | null = null;
+    let claiming = false;
     let finalizing = false;
-    let dispatching = false;
-    let taskTimer: ReturnType<typeof setInterval> | undefined;
+    let closeRequested = false;
     let finalizationTimer: ReturnType<typeof setTimeout> | undefined;
-    let closing = false;
-    const close = () => { closing = true; clearInterval(taskTimer); if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
-    const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
-    const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
-    const expiryTimer = setTimeout(() => { if (finalizing) return; void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
+    let leaseTimer: ReturnType<typeof setInterval> | undefined;
+    const close = () => { if (lease && !closeRequested && socket.readyState === socket.OPEN) { socket.send(JSON.stringify({ type: "session.close" })); closeRequested = true; } };
+    const expiryTimer = setTimeout(() => { if (finalizing) return; if (lease) void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
     let released = false;
-    const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(() => { if (!finalizing) release(); }); }, 5_000);
+    const emergencyClose = () => { if (socket.readyState === socket.OPEN && urgent()) hangup(); };
+    async function takeOver() {
+      if (released || finalizing || claiming) return;
+      if (lease) { close(); return; }
+      claiming = true;
+      try {
+        const token = await claimVoiceRecoveryLease(row.id);
+        if (!token) return;
+        if (released || finalizing) { await releaseVoiceRecoveryLease(row.id, token); return; }
+        lease = token;
+        leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, token).catch(() => { if (!finalizing) release(); }); }, 5_000);
+        close();
+      } finally { claiming = false; }
+    }
     function release() {
       if (released) return; released = true;
-      clearTimeout(stopTimer); clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer); clearInterval(taskTimer);
-      receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
-      socket.close(); void releaseVoiceRecoveryLease(row.id, lease!).catch(() => {});
+      clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer);
+      receivers.delete(row.id); receiverClosers.delete(row.id); receiverEmergencyClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
+      socket.close(); if (lease) void releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
     }
     receivers.set(row.id, release);
-    receiverClosers.set(row.id, close);
-    socket.once("open", () => {
-      if (row.lastError || Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) { close(); return; }
-      void abandonVoiceDispatch(row.id).then(unknown => {
-        if (unknown) { close(); return; }
-        taskTimer = setInterval(() => {
-          if (dispatching || finalizing || closing || released || socket.readyState !== socket.OPEN) return;
-          dispatching = true;
-          void dispatchVoiceTask(row.id, socket).catch(close).finally(() => { dispatching = false; });
-        }, 500);
-      }).catch(close);
-    });
+    receiverClosers.set(row.id, takeOver);
+    receiverEmergencyClosers.set(row.id, emergencyClose);
+    // Observe before an emergency hangup can emit its terminal usage event.
+    // A failed attachment still uses the existing emergency stop authority.
+    socket.once("open", () => { close(); emergencyClose(); });
     socket.on("message", data => {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;
       if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return;
-      if (seconds > payload.maxSeconds) { close(); return; }
+      if (seconds > payload.maxSeconds) { void takeOver().catch(() => {}); return; }
       if (event.type === "session.usage.updated") {
         void recordVoiceUsage(row.id, seconds).catch(() => close());
       } else if (event.type === "session.closed") {
@@ -105,12 +117,13 @@ export async function observeActiveVoiceConversations() {
         }).finally(release);
       }
     });
-    socket.once("error", () => { if (!finalizing) release(); });
+    socket.once("error", () => { if (!finalizing) { if (urgent()) hangup(); release(); } });
     socket.once("close", () => { if (!finalizing) release(); });
+    if (!webHealthy) await takeOver();
   }
 }
 
-export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); retryAfter.clear(); }
+export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); retryAfter.clear(); hangupRetryAfter.clear(); }
 
 export async function renewVoiceWebLease(id: string) {
   const until = new Date(Date.now() + 30_000).toISOString();

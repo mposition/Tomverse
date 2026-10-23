@@ -56,11 +56,24 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   or a missing final event is not evidence of zero voice usage.
 - Wallet and subject/provider seconds reservations now commit and settle in the
   same transaction. Their original bucket dates travel in the durable payload.
-- The independent `voice:watchdog` process records monotonic provider usage and
-  takes over the provider sideband after the web receiver's 30-second durable
-  lease expires. A healthy receiver renews every five seconds; the worker
-  uses a database lease to exclude competing recovery and maintenance
-  receivers, enforces the deadline and observes the kill
+- The independent `voice:watchdog` process observes provider usage from session
+  startup so a web-process failure cannot remove its final-event listener.
+  While the web receiver's durable lease is healthy, the worker observes only:
+  it does not acquire routine command ownership or replay delegated work.
+  The existing emergency hangup remains effective when the persisted duration
+  deadline passes or the worker's kill switch is set, including a healthy web lease.
+  A cold worker installs its observer before sending that hangup; failed attachment
+  still triggers the emergency stop. Hangup cooldown and attachment backoff are
+  separate, so a stop request cannot prevent final-event observation. Expired
+  holds go to grace reconciliation rather than repeated short-lived observers.
+  A synthetic provider check on 2026-10-23 kept one WebRTC primary connected
+  with two authenticated sidebands; both received the same 15-second final
+  usage. This verifies connection interoperability, not crash settlement or
+  physical-device audio.
+  After that 30-second lease expires, it acquires a database lease before sending
+  the close command on its existing receiver. A healthy web receiver renews
+  every five seconds. The command lease excludes competing recovery and maintenance
+  owners. The worker enforces the deadline and observes the kill
   switch on every cycle. It receives final events after a web process dies.
   Processing a final receipt has a 15-second deadline. A stalled database
   operation stops renewing receiver ownership so another sweep can recover;
@@ -132,10 +145,16 @@ with its existing credit and seconds holds.
 
 Delegations are queued by provider audio offset while transcript fragments
 arrive. A two-second quiet window includes sentence pauses; fragments do not
-individually define a completed turn. Recovery delivers a still-ready result
-through its leased receiver. A task left in dispatching has an unknown append
-outcome: recovery discards the duplicate text and closes the call, preserving
-the canonical answer in Chat instead of risking a repeated spoken result.
+individually define a completed turn. If the server stream fails, the client
+immediately stops microphone capture and mutes playback. It keeps the silent
+primary connection for at most 60 seconds, bounded by the session's existing
+30-second closing allowance, while polling persisted billing. Unmount still
+releases resources immediately. Once the web lease expires, recovery durably
+requests closure and sends `session.close` through its already attached observer
+(or through a newly attached receiver after a worker restart).
+It does not dispatch queued answers during termination. The canonical answer
+remains in Chat; settlement removes the temporary answer without risking a
+repeated spoken result.
 Malformed answer SDP is durably linked before a closing receiver collects final
 usage; a known final releases excess provider cost holds normally. Missing final
 evidence continues to retain conservative exposure under the existing rule.

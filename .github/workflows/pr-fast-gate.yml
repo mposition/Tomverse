@@ -1030,11 +1030,10 @@ jobs:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: High-risk UI regression checks (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
-    # Each job: install, build, then one shard of one project. 25 minutes is
-    # well above the measured work so a slow runner or a slow cache save does
-    # not fail a passing suite, while still bounding a hung Playwright web
-    # server.
-    timeout-minutes: 25
+    # Cold browser setup can consume 15 minutes before a passing shard starts.
+    # Keep the bounded install and 20-minute test-step limits, with enough total
+    # time for both so setup does not cancel a shard while its tests pass.
+    timeout-minutes: 40
     strategy:
       # One job's failure must not cancel its siblings: the other results are
       # what tell a reviewer whether the defect is viewport-specific, and

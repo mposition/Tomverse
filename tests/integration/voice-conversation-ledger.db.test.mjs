@@ -16,7 +16,7 @@ mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingP
 const { prisma } = await import(mod("lib/prisma.ts"));
 const { reserveVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
 const { recordVoiceUsage, finalizeVoiceReservation, claimVoiceRecoveryLease, releaseVoiceRecoveryLease } = await import(mod("lib/voiceConversationRecovery.ts"));
-const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask, abandonVoiceDispatch } = await import(mod("lib/voiceConversationTasks.ts"));
+const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } = await import(mod("lib/voiceConversationTasks.ts"));
 let userId;
 beforeEach(async () => {
   await prisma.chatCreditReservation.deleteMany({}); await prisma.chatUsageBucket.deleteMany({});
@@ -124,21 +124,23 @@ test("database ownership excludes competing recovery processes and fences stale 
   const row = await reserve();
   const claims = await Promise.all(Array.from({ length: 6 }, () => claimVoiceRecoveryLease(row.id)));
   const winner = claims.find(Boolean); assert.ok(winner); assert.equal(claims.filter(Boolean).length, 1);
+  assert.equal((await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } })).lastError, "VOICE_CLOSE_REQUESTED");
   await releaseVoiceRecoveryLease(row.id, "stale-token"); assert.equal(await claimVoiceRecoveryLease(row.id), null);
   await releaseVoiceRecoveryLease(row.id, winner); assert.ok(await claimVoiceRecoveryLease(row.id));
 });
 
-test("recovery abandons an unknown append instead of replaying it", async () => {
+test("recovery closes an unknown append without replay and settlement discards its answer", async () => {
   const row = await reserve(); await registerVoiceTask(row.id, "unknown-task", "Question");
   await queueVoiceTaskResult(row.id, { delegationId: "unknown-task", conversationId: "chat-1", sourceId: randomUUID(), sourceText: "Question", answer: "Transient answer" });
   const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
   saved.reservationPayload.tasks[0].state = "dispatching";
   await prisma.chatCreditReservation.update({ where: { id: row.id }, data: { reservationPayload: saved.reservationPayload } });
-  assert.equal(await abandonVoiceDispatch(row.id), true); assert.equal(await abandonVoiceDispatch(row.id), false);
+  assert.ok(await claimVoiceRecoveryLease(row.id));
   const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; socket.send = () => assert.fail("Unknown appends must not replay");
-  await dispatchVoiceTask(row.id, socket);
+  await assert.rejects(dispatchVoiceTask(row.id, socket), error => error.code === "VOICE_SESSION_ENDED");
+  await finalizeVoiceReservation(row.id, 15);
   const ended = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
-  assert.equal(ended.reservationPayload.tasks[0].state, "failed"); assert.equal(ended.reservationPayload.tasks[0].answer, undefined);
+  assert.equal(ended.status, "settled"); assert.equal(ended.reservationPayload.tasks[0].state, "dispatching"); assert.equal(ended.reservationPayload.tasks[0].answer, undefined);
 });
 
 test("failed provider delivery discards its queued answer and cannot be dispatched twice", async () => {
@@ -158,13 +160,14 @@ test("a killed primary process is recovered by an independent receiver with one 
   await queueVoiceTaskResult(row.id, { delegationId: "recovered-task", conversationId: "chat-1", sourceId: randomUUID(), sourceText: "Question", answer: "Saved answer after primary loss" });
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 }); await once(server, "listening");
   const children = [];
-  let appends = 0;
+  let appends = 0; let closes = 0;
   server.on("connection", socket => socket.on("message", data => {
     const event = JSON.parse(data.toString());
     if (event.type === "session.commentary.append") {
       appends++; assert.equal(event.content, "Saved answer after primary loss");
       setTimeout(() => socket.send(JSON.stringify({ type: "session.closed", usage: { seconds: 15 } })), 100);
     } else if (event.type === "session.close") {
+      closes++;
       socket.send(JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
     }
   }));
@@ -178,12 +181,16 @@ test("a killed primary process is recovered by an independent receiver with one 
     return processChild;
   }
   try {
-    const primary = await child("primary"); const exit = once(primary, "exit"); primary.kill("SIGKILL"); await exit;
+    const primary = await child("primary");
+    await prisma.chatCreditReservation.update({ where: { id: row.id }, data: { providerRequestId: "fixture-session" } });
+    await child("worker");
+    for (let attempt = 0; attempt < 80 && server.clients.size === 0; attempt++) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(server.clients.size, 1); assert.equal(closes, 0);
+    const exit = once(primary, "exit"); primary.kill("SIGKILL"); await exit;
     const durable = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
     assert.equal(durable.providerUsageSnapshot.seconds, 10);
     // Advance the persisted lease/deadline after the actual process kill.
     await prisma.chatCreditReservation.update({ where: { id: row.id }, data: { reservationPayload: { ...durable.reservationPayload, webLeaseUntil: new Date(0).toISOString(), closeAt: new Date(Date.now() + 15000).toISOString() }, providerRequestId: "fixture-session" } });
-    await child("worker");
     let settled;
     for (let attempt = 0; attempt < 80; attempt++) {
       settled = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
@@ -191,7 +198,9 @@ test("a killed primary process is recovered by an independent receiver with one 
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.equal(settled.status, "settled"); assert.equal(settled.settledCredits, 9);
-    assert.equal(appends, 1);
+    assert.equal(appends, 0);
+    assert.equal(closes, 1);
+    assert.equal(settled.reservationPayload.tasks[0].answer, undefined);
     assert.equal(settled.providerUsageSnapshot.confirmed, true);
     await finalizeVoiceReservation(row.id, 15);
     assert.equal((await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } })).settledCredits, 9);
