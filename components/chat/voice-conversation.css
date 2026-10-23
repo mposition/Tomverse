@@ -1,0 +1,4 @@
+.voice-conversation-trigger{display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:50%;background:#385af5;color:#fff;flex-shrink:0}
+.voice-conversation-trigger:disabled{opacity:.4;cursor:not-allowed}
+.voice-conversation-trigger:focus-visible{outline:3px solid #60a5fa;outline-offset:3px}
+.voice-conversation-overlay{position:fixed;inset:0;z-index:110;background:#080c1680;display:flex;align-items:center;justify-content:center}

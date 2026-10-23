@@ -826,7 +826,9 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // chained-event reason and two credentialed jobs. Both are owner-reviewed
 // exact-blob exclusions in lib/agentCredentialReviewedExclusions.ts, so the
 // excluded analysis still does not forbid everything.
-const POSTURE_DIGEST = "f17f6f634878";
+// The selective voice release keeps this lane's credentialed workflows and
+// exclusions. Only the two voice finance-CI path patterns are added.
+const POSTURE_DIGEST = "b8c220ff8c93";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();

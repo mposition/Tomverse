@@ -40,6 +40,7 @@ import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactS
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
 import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
+import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -103,6 +104,7 @@ export async function POST(request: Request) {
     // failed one.
     const deepResearchSettlements =
       await reconcileUnsettledDeepResearchSettlementsQuietly();
+    const voiceConversations = await reconcileVoiceConversationsQuietly();
     const result = await reconcileCreditReservationsWithRetry();
     // Code owns independent task/call leases and shares the same credit wallet.
     const codeTasks = await reconcileExpiredCodeTasks().catch(() => {
@@ -241,6 +243,7 @@ export async function POST(request: Request) {
         ...result,
         codeTasks,
         deepResearchSettlements,
+        voiceConversations,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
@@ -264,6 +267,7 @@ export async function POST(request: Request) {
         result,
         codeTasks,
         deepResearchSettlements,
+        voiceConversations,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,

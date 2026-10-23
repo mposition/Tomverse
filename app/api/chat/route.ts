@@ -2932,6 +2932,10 @@ async function handleChatPost(
         await consumeRefinerPreview();
         recordAutoSelection();
 
+        if (modelConfig.usageClass === "deep-research" && session?.user?.id && conversationId && persistenceSourceUserMessageId) {
+            await verifyDurableChatSourceMessage({ userId: session.user.id, conversationId,
+                sourceUserMessageId: persistenceSourceUserMessageId, messages });
+        }
         const isDurableStoredChat = Boolean(
             session?.user?.id &&
                 conversationId &&
@@ -4351,6 +4355,7 @@ async function handleChatPost(
                     });
                     await tx.perplexityAsyncJob.create({
                         data: {
+                            ...(persistenceSourceUserMessageId ? { sourceUserMessageId: persistenceSourceUserMessageId } : {}),
                             perplexityJobId,
                             conversationId,
                             assistantMessageId,

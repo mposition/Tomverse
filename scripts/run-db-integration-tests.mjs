@@ -1054,6 +1054,10 @@ run(
 // The audio budget ledger: which bucket refused decides which boundary the
 // caller is told to wait for, and only a database has two buckets to refuse in.
 run(
+  ["--conditions=react-server", "--experimental-test-module-mocks", "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test", "--test-concurrency=1", "tests/integration/voice-conversation-ledger.db.test.mjs"],
+  "Running metered voice settlement, delegation and independent recovery scenarios"
+);
+run(
   [
     "--conditions=react-server",
     "--import",

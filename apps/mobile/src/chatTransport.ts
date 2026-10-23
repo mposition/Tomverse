@@ -37,6 +37,9 @@ export type ChatSummary = Pick<Conversation, "id" | "title"> & { kind?: string }
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
+  voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number }>;
+  voiceRequest?(body: unknown, signal?: AbortSignal): Promise<Response>;
+  sendVoice?(conversation: Conversation, text: string, signal: AbortSignal, progress: (text: string) => void): Promise<{ conversationId: string; sourceUserMessageId: string }>;
   resumeResearch?(conversation: Conversation, signal: AbortSignal, update: (conversation: Conversation) => void): Promise<void>;
   reviewPreview?(id: string, mode?: string, synthesis?: boolean): Promise<import("../../../packages/chat-core/src/review").ReviewSetup>;
   runComparison?(id: string, input: { promptMessageId: string; assistantMessageIds: string[]; reviewMode: import("../../../packages/chat-core/src/review").ReviewMode; includeSynthesis: boolean }): Promise<import("../../../packages/chat-core/src/review").ComparisonReview>;

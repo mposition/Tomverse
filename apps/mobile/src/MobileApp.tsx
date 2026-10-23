@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { mobileCopy, mobileLanguages, type MobileLanguage } from "../../../locales/mobile";
 import type { ChatSummary, ChatTransport, Conversation, MobileAttachment } from "./chatTransport";
 import { Composer } from "./Composer";
+import { VoiceConversation, VoiceHistory } from "./VoiceConversation";
 import type { ToolChange } from "./ComposerTools";
 import { AppIcon } from "./AppIcon";
 import { mobileWorkspaceCopy } from "../../../locales/mobileWorkspace";
@@ -26,6 +27,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const copy = mobileCopy[language];
   const workspaceCopy = mobileWorkspaceCopy[language];
   const [signedIn, setSignedIn] = useState(false);
+  const [voiceRevision, setVoiceRevision] = useState(0);
   const [emailLogin, setEmailLogin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [chats, setChats] = useState<ChatSummary[]>([]);
@@ -174,8 +176,8 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       if (current === requestEpoch.current) setConversation(updated);
     } catch (error) { if (current === requestEpoch.current) { setUncertain(true); setError(mobileErrorText(error, language, copy.error)); } throw error; }
   }
-  async function send(text: string, files: MobileAttachment[]) {
-    if (streaming || uncertain) return;
+  async function send(text: string, files: MobileAttachment[], fromVoice = false) {
+    if (streaming || uncertain) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return; }
     const current = ++requestEpoch.current;
     const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial("");
@@ -186,7 +188,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       setConversation({ ...item, messages: [...item.messages, { id: "pending-user", role: "user", content: text }] });
       localStorage.setItem(LAST_CHAT, item.id);
       setDraft("");
-      await transport.send(item, text, files, controller.signal, (value) => {
+      const receipt = fromVoice ? await transport.sendVoice!(item, text, controller.signal, (value) => {
+        if (current === requestEpoch.current) setPartial(value);
+      }) : await transport.send(item, text, files, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
       });
       const restored = await transport.load(item.id);
@@ -194,9 +198,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       setConversation(restored); setPartial(null);
       const list = await transport.list();
       if (current === requestEpoch.current) setChats(list);
+      return receipt;
     } catch (error) {
       if (current !== requestEpoch.current) return;
       setUncertain(Boolean(item)); setError(mobileErrorText(error, language, item ? copy.disconnected : copy.error));
+      if (fromVoice) throw error;
     } finally { if (current === requestEpoch.current) setStreaming(false); }
   }
 
@@ -234,11 +240,12 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         {!conversation?.messages.length && !streaming && <div className="empty-chat"><AppIcon name="logo" /><h1>{copy.empty}</h1><p>{copy.hint}</p><span className="chat-product-pill"><AppIcon name="spark" />Tomverse Chat</span><div className="starters"><button onClick={() => { setDraft(copy.starterIdea); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="idea" />{copy.starterIdea}</button><button onClick={() => { setDraft(copy.starterFile); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="file" />{copy.starterFile}</button></div></div>}
         {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label">{message.modelId ?? "Tomverse"}</span>}<AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><span className="message-label">Tomverse</span><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
+        {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />
       </section>
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
       <button className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><AppIcon name="spark" />{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? workspaceCopy.model}<span aria-hidden="true">⌄</span></button>
-      <Composer copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} />
+      <Composer copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(() => undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation?.webSearchMode === "always"} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
     {accountOpen && <Sheet title={copy.account} closeLabel={copy.close} onClose={() => setAccountOpen(false)}><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}

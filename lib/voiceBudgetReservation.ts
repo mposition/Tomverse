@@ -1,4 +1,5 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
 
 import {
   releaseVoiceSeconds,
@@ -45,6 +46,7 @@ export const reserveVoiceBudgets = async (input: {
   /** `identifyChatCaller`'s `subjectKey`: a user or a guest. */
   subjectKey: string;
   seconds: number;
+  client?: Prisma.TransactionClient;
 }): Promise<VoiceBudgetReservation> => {
   // The subject's budget first: refusing one person for their own use is the
   // more specific answer, and it does not consume the shared budget to say so.
@@ -56,14 +58,16 @@ export const reserveVoiceBudgets = async (input: {
   const subject = await reserveVoiceSeconds({
     subjectKey: input.subjectKey,
     seconds: input.seconds,
+    ...(input.client ? { client: input.client } : {}),
   });
   try {
     const provider = await reserveVoiceProviderSeconds({
       seconds: input.seconds,
+      ...(input.client ? { client: input.client } : {}),
     });
     return { subject, provider };
   } catch (error) {
-    await releaseVoiceSeconds(subject).catch(() => undefined);
+    if (!input.client) await releaseVoiceSeconds(subject).catch(() => undefined);
     throw error;
   }
 };
@@ -71,14 +75,17 @@ export const reserveVoiceBudgets = async (input: {
 export const settleVoiceBudgets = async (input: {
   reservation: VoiceBudgetReservation;
   basis: VoiceSettlementBasis;
+  client?: Prisma.TransactionClient;
 }): Promise<{ releasedSeconds: number }> => {
   const subject = await settleVoiceSeconds({
     reservation: input.reservation.subject,
     basis: input.basis,
+    ...(input.client ? { client: input.client } : {}),
   });
   await settleVoiceProviderSeconds({
     reservation: input.reservation.provider,
     basis: input.basis,
+    ...(input.client ? { client: input.client } : {}),
   });
   // The subject's number is what the caller reports: it is the one a user
   // could notice. Both moved by the same arithmetic.
