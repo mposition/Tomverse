@@ -140,8 +140,10 @@ export async function runQaReleaseTrainRound(
   let assembled;
   try {
     assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO);
-  } catch {
-    return fail("assemble_failed");
+  } catch (error) {
+    // The port's own code (git_missing, git_clone ...) says what to fix.
+    const message = error instanceof Error ? error.message : "";
+    return fail(/^git_[a-z]{1,20}$/.test(message) ? `assemble_${message}` : "assemble_failed");
   }
   const picks = assembled.picks;
   if (!picks.some((p) => p.outcome === "included")) {

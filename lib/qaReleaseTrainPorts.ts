@@ -102,9 +102,11 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.extraEnv },
       });
       return { ok: true, stdout: stdout.trim() };
-    } catch {
+    } catch (error) {
+      // No git binary at all is a deployment problem, not a repository one.
+      if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") throw new Error("git_missing");
       if (options.allowFail) return { ok: false, stdout: "" };
-      throw new Error("git_failed");
+      throw new Error(`git_${args[0] === "clone" ? "clone" : args[0] === "push" ? "push" : "failed"}`);
     }
   };
   return {

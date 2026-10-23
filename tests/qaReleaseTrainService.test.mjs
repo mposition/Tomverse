@@ -169,3 +169,17 @@ test("only the picked pull requests ride, in develop merge order", async () => {
   await runQaReleaseTrainRound(env(), p, NOW);
   assert.deepEqual(calls.find(([n]) => n === "assemble")[1].numbers, [10, 12]);
 });
+
+test("an assembly failure says why: the port's git code reaches the report and the log", async () => {
+  const { p, calls } = ports();
+  p.git.assemble = async () => {
+    throw new Error("git_missing");
+  };
+  assert.deepEqual(await runQaReleaseTrainRound(env(), p, NOW), { exitCode: 1, train: "failed", failure: "assemble_git_missing" });
+  assert.equal(calls.find(([n]) => n === "report")[1].failure, "assemble_git_missing");
+  const other = ports();
+  other.p.git.assemble = async () => {
+    throw new Error("fetch failed: https://x");
+  };
+  assert.equal((await runQaReleaseTrainRound(env(), other.p, NOW)).failure, "assemble_failed");
+});
