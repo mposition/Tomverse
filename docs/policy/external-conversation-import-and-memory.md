@@ -947,6 +947,28 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   `memoryInjectionEnabled=true`. 승인 pair가 없거나 revoke되면 flag가 켜져
   있어도 injection은 fail-closed입니다.
 
+### 12.4a 운영자 출시 승인 — [확정 · 2026-10-23 @mposition]
+
+운영자는 eval 없이 현재 품질로 pair를 승인할 수 있습니다. register 항목에
+`evaluation` 대신 `ownerLaunch`(승인자, 승인일, 만료일, 결정 출처, 알려진 한계)를
+적고 `status: approved`로 둡니다. 첫 대상은 `gpt-5-6-luna × mem-extract-v9`입니다.
+이후 품질은 메모리 개선 에이전트로 매일 올립니다.
+
+이 경로에서도 그대로 남는 것:
+
+- **만료**: 승인일로부터 최대 30일(`MEMORY_OWNER_LAUNCH_MAX_DAYS`)입니다. CI의
+  register 검사뿐 아니라 runtime(`findApprovedEvalPair`)도 만료일을 읽으므로,
+  만료되면 배포 없이도 추출·주입이 닫힙니다. 연장은 새 승인 기록입니다.
+- **치명 안전 검사**: register 검사가 결정적 validator probe(`MUST_REJECT`,
+  `MUST_REQUIRE_SENSITIVE_REVIEW`)를 다시 돌려, 하나라도 bulk-safe면 승인을
+  거부합니다. 그리고 이 pair가 만든 후보는 **일괄 승인에서 제외**됩니다
+  (`allowsBulkApproval`). 모델이 비밀정보나 지시문을 잘못 분류해도, 사용자가 그
+  항목을 하나씩 승인하지 않는 한 prompt에 들어가지 않습니다. §12.3의 "bulk-safe
+  채택 0건"을 측정 대신 구조로 지킵니다.
+- 승인은 프롬프트 버전을 따라가지 않습니다. 새 버전은 새 승인입니다.
+- flag 활성화(§15.1)는 별도 승인입니다. 특히 `memoryExtractionEnabled`는 유료
+  호출을 시작합니다.
+
 ### 12.5 첫 승인 후보 pair와 eval 예산 (§23 항목 4)
 
 - **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v3)`입니다**

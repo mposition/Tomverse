@@ -61,6 +61,7 @@ const seedCandidate = async (
         sensitivity?: string;
         conflictKey?: string | null;
         evidenceRole?: "user" | "assistant";
+        promptVersion?: string;
     } = {}
 ) => {
     const importRow = await prisma.externalImport.create({
@@ -110,7 +111,7 @@ const seedCandidate = async (
             confidence: 0.9,
             conflictKey: overrides.conflictKey ?? null,
             extractionModelId: "gpt-5-6-luna",
-            promptVersion: "mem-extract-v1",
+            promptVersion: overrides.promptVersion ?? "mem-extract-v1",
         },
     });
     await prisma.memoryEvidence.create({
@@ -492,6 +493,17 @@ test("bulk approval takes only clean, bulk-safe, conflict-free candidates (§8.4
     // else is still awaiting individual review.
     assert.equal(byStatus.active, 2);
     assert.equal(byStatus.candidate, 4);
+});
+
+test("bulk approval leaves an owner-launch pair's candidates for individual approval", async () => {
+    const user = await createUser();
+    const launched = await seedCandidate(user.id, { promptVersion: "mem-extract-v9" });
+    await seedCandidate(user.id, { statement: "사용자는 다크 테마를 선호한다" });
+
+    assert.deepEqual(await bulkApproveMemories(user.id), { approved: 1, skipped: 1 });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: launched.id } })).status, "candidate");
+    await approveMemory({ userId: user.id, memoryId: launched.id });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: launched.id } })).status, "active");
 });
 
 test("memory settings default on and round-trip (§8.1)", async () => {

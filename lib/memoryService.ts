@@ -18,6 +18,7 @@ import {
     type MemoryEvidenceInput,
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
+import { allowsBulkApproval } from "@/lib/memoryExtractionEvalRegister";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { lockCreditAccount } from "@/lib/creditDebt";
@@ -640,6 +641,12 @@ export async function bulkApproveMemories(userId: string) {
                     },
                 });
                 if (!item) return "skipped" as const;
+                // An owner-launch pair has not shown zero critical bulk-safe
+                // adoptions, so its candidates are approved one by one.
+                const pair = item.extractionModelId && item.promptVersion
+                    ? { extractionModelId: item.extractionModelId, promptVersion: item.promptVersion }
+                    : null;
+                if (!allowsBulkApproval(pair)) return "skipped" as const;
                 // Bulk approval must not choose a winner merely because one
                 // of several topic proposals happens to be visited first.
                 if (memoryCanonicalKey(item.conflictKey)) {

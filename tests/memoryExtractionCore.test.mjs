@@ -25,7 +25,9 @@ import {
 } from "../lib/memoryExtractionCore.ts";
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
+    allowsBulkApproval,
     findApprovedEvalPair,
+    findCriticalProbeFailures,
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
@@ -198,13 +200,98 @@ const approvedEntry = (overrides = {}) => ({
 
 const NOW = new Date("2026-08-03T12:00:00.000Z");
 
-test("the shipped register has no problems and no approved pairs", () => {
-    assert.deepEqual(findEvalRegisterProblems(MEMORY_EXTRACTION_EVAL_REGISTER, NOW), []);
-    assert.equal(
-        MEMORY_EXTRACTION_EVAL_REGISTER.filter((entry) => entry.status === "approved")
-            .length,
-        0
+test("the shipped register has no problems and one approved pair, on an owner launch", () => {
+    assert.deepEqual(
+        findEvalRegisterProblems(MEMORY_EXTRACTION_EVAL_REGISTER, new Date("2026-10-24T00:00:00Z")),
+        []
     );
+    const approved = MEMORY_EXTRACTION_EVAL_REGISTER.filter((entry) => entry.status === "approved");
+    assert.deepEqual(
+        approved.map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`),
+        ["gpt-5-6-luna::mem-extract-v9"]
+    );
+    assert.equal(approved[0].evaluation, null);
+    assert.equal(approved[0].ownerLaunch.expiresAt, "2026-11-22");
+});
+
+const ownerLaunchEntry = (launch = {}) => ({
+    extractionModelId: "gpt-5-6-luna",
+    promptVersion: "mem-extract-v9",
+    status: "approved",
+    owner: "@qa",
+    registeredAt: "2026-10-21",
+    evalBudget: null,
+    evaluation: null,
+    ownerLaunch: {
+        approver: "@qa",
+        approvedAt: "2026-10-23",
+        expiresAt: "2026-11-22",
+        decisionRef: "chat",
+        knownLimitations: "unmeasured",
+        ...launch,
+    },
+});
+const DURING_LAUNCH = new Date("2026-10-24T00:00:00Z");
+
+test("an owner launch needs neither a budget nor metrics", () => {
+    assert.deepEqual(findEvalRegisterProblems([ownerLaunchEntry()], DURING_LAUNCH), []);
+});
+
+test("an owner launch must expire within thirty days and before it is used", () => {
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry({ expiresAt: "2026-11-23" })], DURING_LAUNCH)[0],
+        /expire within 30 days/
+    );
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry()], new Date("2026-11-22T00:00:00Z"))[0],
+        /expired/
+    );
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry({ expiresAt: "soon" })], DURING_LAUNCH)[0],
+        /ISO dates/
+    );
+});
+
+test("an owner launch with an empty field fails", () => {
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry({ decisionRef: " " })], DURING_LAUNCH)[0],
+        /empty fields/
+    );
+});
+
+test("an approval rests on one basis, never both", () => {
+    const both = { ...approvedEntry(), ownerLaunch: ownerLaunchEntry().ownerLaunch };
+    assert.match(findEvalRegisterProblems([both], NOW)[0], /one basis/);
+});
+
+test("every critical validator probe still holds", () => {
+    assert.deepEqual(findCriticalProbeFailures(), []);
+});
+
+test("an approval stops resolving at its expiry, at runtime", () => {
+    const pair = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" };
+    const register = [ownerLaunchEntry()];
+    assert.ok(findApprovedEvalPair(pair, { kind: "none" }, register, DURING_LAUNCH));
+    assert.equal(
+        findApprovedEvalPair(pair, { kind: "none" }, register, new Date("2026-11-22T00:00:00Z")),
+        null
+    );
+    // An approved entry that names no expiry resolves to nothing.
+    assert.equal(
+        findApprovedEvalPair(pair, { kind: "none" }, [{ ...ownerLaunchEntry(), ownerLaunch: null }], DURING_LAUNCH),
+        null
+    );
+});
+
+test("an owner-launch pair's candidates are never bulk-approved", () => {
+    const launched = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" };
+    const evaluated = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v1" };
+    const register = [ownerLaunchEntry(), approvedEntry()];
+    assert.equal(allowsBulkApproval(launched, register), false);
+    assert.equal(allowsBulkApproval(evaluated, register), true);
+    assert.equal(allowsBulkApproval(null, register), true);
+    // An expired launch still holds: the candidates it produced were never measured.
+    assert.equal(allowsBulkApproval(launched, [ownerLaunchEntry({ expiresAt: "2026-10-24" })]), false);
 });
 
 test("candidate pairs are never resolvable as approved", () => {
