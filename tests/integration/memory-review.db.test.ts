@@ -61,6 +61,8 @@ const seedCandidate = async (
         sensitivity?: string;
         conflictKey?: string | null;
         evidenceRole?: "user" | "assistant";
+        /** null: a user-authored memory, which no extraction pair proposed. */
+        pair?: { extractionModelId: string; promptVersion: string } | null;
     } = {}
 ) => {
     const importRow = await prisma.externalImport.create({
@@ -109,8 +111,8 @@ const seedCandidate = async (
             sensitivity: overrides.sensitivity ?? "standard",
             confidence: 0.9,
             conflictKey: overrides.conflictKey ?? null,
-            extractionModelId: "gpt-5-6-luna",
-            promptVersion: "mem-extract-v1",
+            extractionModelId: overrides.pair === null ? null : (overrides.pair?.extractionModelId ?? "gpt-5-6-luna"),
+            promptVersion: overrides.pair === null ? null : (overrides.pair?.promptVersion ?? "mem-extract-v1"),
         },
     });
     await prisma.memoryEvidence.create({
@@ -229,8 +231,8 @@ test("a newly active peer cannot be hidden by selecting just one comparison targ
 
 test("bulk approval leaves competing topic proposals for individual review instead of choosing the first", async () => {
     const user = await createUser();
-    await seedCandidate(user.id, { statement: "The user prefers tea", conflictKey: "topic:preference:user.drink" });
-    await seedCandidate(user.id, { statement: "The user prefers coffee", conflictKey: "topic:preference:user.drink" });
+    await seedCandidate(user.id, { statement: "The user prefers tea", conflictKey: "topic:preference:user.drink", pair: null });
+    await seedCandidate(user.id, { statement: "The user prefers coffee", conflictKey: "topic:preference:user.drink", pair: null });
     assert.deepEqual(await bulkApproveMemories(user.id), { approved: 0, skipped: 2 });
     assert.equal(await prisma.memoryItem.count({ where: { userId: user.id, status: "active" } }), 0);
 });
@@ -453,26 +455,32 @@ test("pinning is active-only and deletion removes evidence with the row", async 
 test("bulk approval takes only clean, bulk-safe, conflict-free candidates (§8.4)", async () => {
     const user = await createUser();
     await seedCandidate(user.id, {
+        pair: null,
         statement: "사용자는 존댓말 답변을 선호한다",
     });
     await seedCandidate(user.id, {
+        pair: null,
         statement: "사용자는 https://example.com 을 참조한다", // demote → skip
     });
     await seedCandidate(user.id, {
+        pair: null,
         statement: "사용자는 건강 정보를 다룬다",
         sensitivity: "sensitive", // individual review only → not selected
     });
     await seedCandidate(user.id, {
+        pair: null,
         kind: "identity",
         statement: "사용자는 서울에 거주한다",
         evidenceRole: "assistant", // §12.3 ② → skip
     });
     const active = await seedCandidate(user.id, {
+        pair: null,
         statement: "사용자는 다크 테마를 선호한다",
         conflictKey: "preference:theme",
     });
     await approveMemory({ userId: user.id, memoryId: active.id });
     await seedCandidate(user.id, {
+        pair: null,
         statement: "사용자는 라이트 테마를 선호한다",
         conflictKey: "preference:theme", // conflict → skip
     });
@@ -492,6 +500,19 @@ test("bulk approval takes only clean, bulk-safe, conflict-free candidates (§8.4
     // else is still awaiting individual review.
     assert.equal(byStatus.active, 2);
     assert.equal(byStatus.candidate, 4);
+});
+
+test("bulk approval leaves an unevaluated pair's candidates for individual approval", async () => {
+    const user = await createUser();
+    const launched = await seedCandidate(user.id, {
+        pair: { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" },
+    });
+    await seedCandidate(user.id, { statement: "사용자는 다크 테마를 선호한다", pair: null });
+
+    assert.deepEqual(await bulkApproveMemories(user.id), { approved: 1, skipped: 1 });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: launched.id } })).status, "candidate");
+    await approveMemory({ userId: user.id, memoryId: launched.id });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: launched.id } })).status, "active");
 });
 
 test("memory settings default on and round-trip (§8.1)", async () => {
