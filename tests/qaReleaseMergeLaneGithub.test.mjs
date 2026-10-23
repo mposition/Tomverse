@@ -224,7 +224,7 @@ test("exclusion inputs: every changed file to the last page, migration text at t
     { path: "lib/b.ts", previousPath: "lib/old.ts" },
   ]);
   assert.ok(input.policyTestPaths.includes("tests/autoPrAutoMergeArming.test.mjs"));
-  assert.ok(input.agentOwnPatterns.includes("lib/qaRelease*"));
+  assert.ok(input.agentOwnPatterns.includes("lib/qaReleaseMergeLane*"));
   assert.equal(calls.find((call) => call.url.includes("/contents/")).headers.accept, "application/vnd.github.raw+json");
 
   // Read once per round, however many candidates.
