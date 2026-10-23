@@ -21,7 +21,13 @@ import { prisma } from "@/lib/prisma";
  * in-process sequence as rounds, so a round's corrections never undo one.
  */
 
-export { ciAdmissionMode, runCiAdmissionRound, type CiAdmissionRoundOutcome } from "@/lib/ciAdmissionRound";
+export {
+  ciAdmissionMode,
+  recordCiAdmissionArrival,
+  requestCiAdmissionRound,
+  runCiAdmissionRound,
+  type CiAdmissionRoundOutcome,
+} from "@/lib/ciAdmissionRound";
 
 /* ------------------------------------------------------------------------- */
 /* Admin                                                                      */

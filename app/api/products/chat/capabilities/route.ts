@@ -2,9 +2,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 
-import { authOptions } from "@/lib/auth";
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { autoSelectionCapability } from "@/lib/autoRoutingUi";
 import { identifyChatCaller } from "@/lib/chatSecurity";
@@ -32,7 +31,9 @@ const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
  * side.
  */
 export async function GET(request: Request) {
-  const session = await getServerSession(authOptions);
+  const routeAuth = await resolveChatRouteSession(request);
+  if (routeAuth.response) return routeAuth.response;
+  const session = routeAuth.session;
   if (!session?.user?.id) {
     const access = identifyChatCaller(request, null);
     try {

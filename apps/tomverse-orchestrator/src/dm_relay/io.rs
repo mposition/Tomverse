@@ -1518,6 +1518,9 @@ mod tests {
     #[tokio::test]
     async fn a_restart_settles_every_unsettled_decision_before_any_delivery() {
         use crate::dm_relay::flow::tests::{answered, recorded, FakeApp, FakeBroker, FakeLocal};
+        // The operator's record, and the clock the walk starts from a minute
+        // later: a fixed record against the host clock fell out of the lookback
+        // window 31 days on, and the walk then passed it without a report.
         const RECORDED_AT: i64 = 1_790_000_000;
         let unsettled = answered(
             200,
@@ -1575,8 +1578,7 @@ mod tests {
             FakeBroker::answering(|_| BrokerExchange::Lost),
             false,
         );
-        // Keep the fixture answer inside the scan window regardless of the calendar date.
-        relay.direct_cursor = DirectCursor::starting_at(RECORDED_AT);
+        relay.direct_cursor = DirectCursor::starting_at(RECORDED_AT + 60);
         // Tick one: the decision is settled from the local records, and nothing else happens.
         assert_eq!(relay.tick().await, Tick::Busy);
         assert_eq!(relay.halt(), None);

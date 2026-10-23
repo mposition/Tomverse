@@ -1,0 +1,5 @@
+package app.tomverse.shell;
+
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {}

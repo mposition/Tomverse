@@ -20,3 +20,4 @@ export {
   type ChatCompletionStatus,
   type ChatIncompleteReason,
 } from "./completionStatus";
+export { chatStreamDisplayText } from "./streamText";

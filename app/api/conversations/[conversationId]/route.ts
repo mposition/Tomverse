@@ -1,3 +1,4 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
@@ -8,6 +9,7 @@ import {
   PUBLIC_CHAT_MESSAGE_SELECT,
   toPublicChatMessage,
 } from "@/lib/publicChatMessage";
+import { attachChatImageTurns } from "@/lib/chatImageTurnRead";
 import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { publicChatResponseAttempt } from "@/lib/chatResponseAttemptCore";
@@ -143,7 +145,9 @@ export async function GET(
   context: RouteContext<"/api/conversations/[conversationId]">
 ) {
     try {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     if (!session?.user?.id) {
         return privateNoStore(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
     }
@@ -261,9 +265,15 @@ export async function GET(
       select: PUBLIC_CHAT_MESSAGE_SELECT,
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
-    const messages = (
+    const pageMessages = (
       hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
     ).map(toPublicChatMessage);
+    // A chat turn answered with an image carries the group its card polls
+    // (lib/chatImageTurn.ts).
+    const messages =
+      conversation.kind === "chat"
+        ? await attachChatImageTurns(userId, conversationId, pageMessages)
+        : pageMessages;
 
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])
@@ -360,7 +370,9 @@ export async function PATCH(
   context: RouteContext<"/api/conversations/[conversationId]">
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }

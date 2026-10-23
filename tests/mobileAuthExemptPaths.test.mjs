@@ -17,17 +17,19 @@ const EXEMPT = [
   "/api/auth/mobile/exchange",
   "/api/auth/mobile/refresh",
   "/api/auth/mobile/logout",
+  "/api/auth/mobile/email",
 ];
 
 const HANDLERS = {
   "/api/auth/mobile/exchange": "app/api/auth/mobile/exchange/route.ts",
   "/api/auth/mobile/refresh": "app/api/auth/mobile/refresh/route.ts",
   "/api/auth/mobile/logout": "app/api/auth/mobile/logout/route.ts",
+  "/api/auth/mobile/email": "app/api/auth/mobile/email/route.ts",
 };
 
 const post = (pathname) => requiresMutationOriginCheck("POST", pathname);
 
-test("the three native paths skip the mutation-origin check", () => {
+test("the exact body-proof native paths skip the mutation-origin check", () => {
   for (const pathname of EXEMPT) {
     assert.equal(post(pathname), false, pathname);
   }

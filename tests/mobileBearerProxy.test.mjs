@@ -55,6 +55,29 @@ const post = (headers, url) =>
 const get = (headers, url = "https://tomverse.app/chat") =>
   proxy(request({ headers: { host: "tomverse.app", ...headers } }, url));
 
+test("native Chat enrollment verifies a real token before replacing CSRF and overwrites spoofed identity", async () => {
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  try {
+    for (const origin of NATIVE_APP_ORIGINS) {
+      const response = await post({ origin, authorization: validBearer(), "x-tomverse-auth-subject": "foreign-user" }, "https://tomverse.app/api/chat");
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-middleware-request-x-tomverse-auth-subject"), "user_1");
+    }
+  } finally { delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; }
+});
+
+test("enrollment rejects invalid bearers and hostile origins without admitting cookies", async () => {
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  try {
+    for (const authorization of ["Bearer invalid", "Basic invalid", ""]) {
+      assert.equal((await post({ origin: "https://localhost", authorization, cookie: "session=synthetic" }, "https://tomverse.app/api/chat")).status, authorization === "" ? 403 : 401);
+    }
+    const response = await post({ origin: "https://attacker.invalid", authorization: validBearer() }, "https://tomverse.app/api/chat");
+    assert.equal(response.status, 401); assert.equal(response.headers.get("access-control-allow-origin"), null);
+    assert.equal((await post({ origin: "https://localhost", authorization: validBearer() }, "https://tomverse.app/api/conversations/other/share")).status, 403);
+  } finally { delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; }
+});
+
 // --- 1. a bearer header never buys anything by existing ------------------
 
 test("a bearer header does not skip the mutation-origin check", async () => {
