@@ -43,26 +43,25 @@ test("policy tests are the tests/** paths the documents name, nothing looser", (
   ]);
 });
 
-test("the documents are AGENTS.md, CLAUDE.md and every file under docs/policy/", () => {
-  for (const path of [
-    "AGENTS.md",
-    "CLAUDE.md",
-    "docs/policy/qa-release-agent.md",
-    "docs/policy/sub/x.md",
-    "docs/policy/tomverse-chat-data-domain-registry.yaml",
-    "docs/policy/x.txt",
-    "docs/policy/a",
-    "docs/policy/b/c",
-  ]) {
+test("the documents are AGENTS.md, CLAUDE.md and the lane's own policy only (owner 2026-10-23)", () => {
+  for (const path of ["AGENTS.md", "CLAUDE.md", "docs/policy/qa-release-agent.md"]) {
     assert.equal(isQaReleasePolicyDocument(path), true, path);
   }
-  for (const path of ["docs/ops/x.md", "docs/policyx/a.md", "docs/policy/", "docs/policy/sub/", "agents.md", "lib/AGENTS.md"]) {
+  for (const path of [
+    "docs/policy/image-generation.md",
+    "docs/policy/tomverse-chat-data-domain-registry.yaml",
+    "docs/policy/sub/x.md",
+    "docs/ops/x.md",
+    "docs/policyx/a.md",
+    "docs/policy/",
+    "agents.md",
+    "lib/AGENTS.md",
+  ]) {
     assert.equal(isQaReleasePolicyDocument(path), false, path);
   }
 });
 
-test("a test only a YAML registry under docs/policy names is still a policy test", () => {
+test("a YAML document's named tests are read like a Markdown one's", () => {
   const registry = readFileSync(new URL("../docs/policy/tomverse-chat-data-domain-registry.yaml", import.meta.url), "utf8");
-  assert.ok(isQaReleasePolicyDocument("docs/policy/tomverse-chat-data-domain-registry.yaml"));
   assert.ok(qaReleasePolicyTestPaths([registry]).includes("tests/comparisonReviewRunCore.test.mjs"));
 });
