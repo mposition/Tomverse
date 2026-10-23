@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { createReplayAdapter, createScriptedAdapters, loadFixtures } from "./mock";
+import {
+  loadRetrievalCases, measureProductRetrieval, PRODUCT_RETRIEVAL_CORPORA, type ProductRetrievalCorpus,
+} from "./productRetrieval";
 import { runQualityLoop, QualityStop } from "./runner";
 import { createRunStore, listRuns, readEvents, requestStop, runPath } from "./store";
 
@@ -14,12 +17,16 @@ list    --out <directory>
 show    --out <directory> --run <id>
 stop    --out <directory> --run <id>
 export-replay --out <directory> --run <id> --file <new-json-file>
-Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000.
+retrieval [--corpus retrieval-ko|development|validation|all]
+        Product retrieval (selectMemoryContext) Recall@5; no model call, no output files.
+Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000,
+corpus=retrieval-ko.
 No live mode, paid execution, product writes, promotion, network or raw Memory collection.`;
 const commandOptions: Record<string, string[]> = {
   run: ["mode", "out", "responses", "iterations", "max-calls", "timeout-ms"],
   list: ["out"], show: ["out", "run"], stop: ["out", "run"],
   "export-replay": ["out", "run", "file"],
+  retrieval: ["corpus"],
 };
 function parse(args: string[]) {
   const command = args[0] ?? "help", options: Record<string, string> = {};
@@ -39,6 +46,15 @@ function parse(args: string[]) {
 export async function main(args: string[]) {
   const { command, options } = parse(args);
   if (command === "help") return { help: HELP };
+  if (command === "retrieval") {
+    const corpus = options.corpus ?? "retrieval-ko";
+    const names = corpus === "all" ? PRODUCT_RETRIEVAL_CORPORA
+      : PRODUCT_RETRIEVAL_CORPORA.filter((name) => name === corpus);
+    if (names.length === 0) throw new QualityStop("unknown_corpus");
+    const results: Record<string, ReturnType<typeof measureProductRetrieval>> = {};
+    for (const name of names) results[name] = measureProductRetrieval(await loadRetrievalCases(name as ProductRetrievalCorpus));
+    return { retrieval: results };
+  }
   const output = resolve(options.out ?? ".tmp/memory-quality");
   if (command === "list") return { runs: await listRuns(output) };
   if (command !== "run") {
