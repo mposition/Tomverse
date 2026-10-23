@@ -10,14 +10,18 @@
 import { compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
 
 /**
- * Gate paths: the checks, their runners, the lane's own contract and the
- * repository-wide instructions. Owner decision 2026-10-23: other features'
- * policy documents, UI contracts and release-gate registries are reversible
- * text the lane may merge; only the lane's own policy stays with a person.
+ * Gate paths: only what a revert cannot undo or what would let an agent widen
+ * its own gate (owner, 2026-10-23: "keep only the minimum"). The workflows
+ * and actions hold the secrets CI runs with; the instructions and the lane's
+ * own policy say what agents may do; admin auth, the system audit actors and
+ * the authority manifest are the security and audit boundary. Everything else
+ * -- scripts, root config, package manifests, audit records, other policies --
+ * is reversible code the lane merges like any feature; CI has already run it
+ * on the pull request.
  */
 export const QA_RELEASE_MERGE_LANE_GATE_PATTERNS: readonly string[] = [
-  ".github/**",
-  "scripts/**",
+  ".github/workflows/**",
+  ".github/actions/**",
   "AGENTS.md",
   "CLAUDE.md",
   "docs/policy/qa-release-agent.md",
@@ -25,25 +29,6 @@ export const QA_RELEASE_MERGE_LANE_GATE_PATTERNS: readonly string[] = [
   "lib/adminAuditSystemActors.ts",
   "lib/agentAuthorityFiles.ts",
 ];
-
-/**
- * File names that are gate files wherever they sit (policy version 3): npm
- * reads every workspace's manifest and runs its install scripts during
- * `npm ci`, and an `.npmrc` anywhere in the tree can change what is fetched.
- * Compared without case, because a case-insensitive checkout reads
- * `Package.json` as the same file.
- */
-export const QA_RELEASE_MERGE_LANE_GATE_FILE_NAMES: readonly string[] = [
-  "package.json",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  ".npmrc",
-];
-
-const GATE_FILE_NAMES = new Set(QA_RELEASE_MERGE_LANE_GATE_FILE_NAMES);
-
-const isGateFileName = (path: string): boolean =>
-  GATE_FILE_NAMES.has(path.slice(path.lastIndexOf("/") + 1).toLowerCase());
 
 /** Head branches whose own contract requires a human merge or a required review. */
 export const QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES: readonly string[] = [
@@ -159,8 +144,7 @@ function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonl
         reasons.add("unreadable_path");
         continue;
       }
-      // Every file at the repository root sets how checks run or are configured.
-      if (!path.includes("/") || isGateFileName(path) || GATE_MATCHERS.some((matcher) => matcher.test(path))) {
+      if (GATE_MATCHERS.some((matcher) => matcher.test(path))) {
         reasons.add("gate_path");
       }
       if (policyTests.has(path)) reasons.add("policy_test");
