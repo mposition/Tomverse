@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type Peer = { id: string; statement: string; revision: number };
 const button = "rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs disabled:opacity-50 dark:border-zinc-700";
@@ -24,7 +25,10 @@ export function MemoryConflictReview({ memoryId, activeMemories, disabled, onRes
         const controller = new AbortController();
         void fetch(`/api/memories/${memoryId}`, { cache: "no-store", signal: controller.signal })
             .then(async response => {
-                if (!response.ok) throw new Error("memory_conflict_unavailable");
+                if (!response.ok) {
+                    await discardResponseBody(response);
+                    throw new Error("memory_conflict_unavailable");
+                }
                 const body = await response.json();
                 if (!body.memory || !Array.isArray(body.conflicts)) throw new Error("memory_conflict_unavailable");
                 setContext(body);
