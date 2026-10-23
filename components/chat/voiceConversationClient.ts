@@ -79,7 +79,7 @@ export function createVoiceConversationClient(options: {
           const recoveredTransport = recoveringTransport;
           if (recoveredTransport) cleanup();
           patch({ billingPending: false, confirmed: status.confirmed === true, credits: status.credits,
-            ...(recoveredTransport ? { status: "ended" } : {}),
+            ...(recoveredTransport ? { status: "ended", error: status.confirmed === true && view.error === "VOICE_CONNECTION_LOST" ? null : view.error } : {}),
             ...(typeof status.seconds === "number" && Number.isFinite(status.seconds) && status.seconds >= 0 ? { seconds: status.seconds } : {}) });
           return;
         }
@@ -91,9 +91,10 @@ export function createVoiceConversationClient(options: {
     if (recoveringTransport) return true;
     recoveringTransport = true;
     clearInterval(heartbeatTimer); clearTimeout(durationTimer); clearTimeout(closeTimeout);
-    for (const track of microphone?.getTracks() ?? []) track.stop();
+    for (const track of microphone?.getTracks() ?? []) { try { track.stop(); } catch {} }
     if (audio) audio.muted = true;
     patch({ status: "closing", muted: true, working: false, inputLevel: 0, outputLevel: 0, error: view.error ?? "VOICE_CONNECTION_LOST" });
+    controller?.abort();
     void post({ action: "stop", reservationId }).then(r => r.body?.cancel()).catch(() => {});
     // Keep the silent primary connection available while the independent receiver
     // takes over. Closing it immediately can discard the final provider event.
@@ -125,7 +126,7 @@ export function createVoiceConversationClient(options: {
       mediaReady = true; closingDeadline = Date.now() + (seconds + 30) * 1_000;
       durationTimer = setTimeout(() => { void stop(); }, seconds * 1_000);
     } else if (event.type === "started") {
-      patch({ status: "listening" });
+      if (view.status === "connecting") patch({ status: "listening" });
     } else if (event.type === "transcript" && isVoiceTranscriptEvent(event.event)) {
       const fragment = event.event;
       if (seen.has(fragment.event_id)) return; seen.add(fragment.event_id);
@@ -152,8 +153,10 @@ export function createVoiceConversationClient(options: {
         }
       });
     } else if (event.type === "closed") {
+      const recoveredTransport = recoveringTransport;
       cleanup();
       patch({ status: "ended", confirmed: event.confirmed === true, billingPending: event.settled !== true && event.confirmed !== true,
+        ...(recoveredTransport && event.confirmed === true && view.error === "VOICE_CONNECTION_LOST" ? { error: null } : {}),
         ...(typeof event.seconds === "number" ? { seconds: event.seconds } : {}), ...(typeof event.credits === "number" ? { credits: event.credits } : {}) });
       if (view.billingPending) void recoverBilling(owner);
     } else if (event.type === "error") {
