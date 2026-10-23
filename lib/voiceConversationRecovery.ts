@@ -44,6 +44,12 @@ export async function observeActiveVoiceConversations() {
     let payload;
     try { payload = readVoiceCreditPayload(row.reservationPayload); } catch { continue; }
     const webHealthy = Date.parse(payload.webLeaseUntil ?? "") > Date.now();
+    // Preserve the existing emergency authority even if the web still renews
+    // its lease. An observer's ordinary close command remains lease-fenced.
+    if (webHealthy && (Date.parse(payload.closeAt ?? "") <= Date.now() || process.env.VOICE_CONVERSATION_KILL_SWITCH) && (retryAfter.get(row.id) ?? 0) <= Date.now()) {
+      retryAfter.set(row.id, Date.now() + 10_000);
+      void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {});
+    }
     if (receivers.has(row.id)) {
       if (!webHealthy) await receiverClosers.get(row.id)?.();
       continue;

@@ -59,7 +59,9 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 - The independent `voice:watchdog` process observes provider usage from session
   startup so a web-process failure cannot remove its final-event listener.
   While the web receiver's durable lease is healthy, the worker observes only:
-  it does not acquire command ownership, close the call, or replay delegated work.
+  it does not acquire routine command ownership or replay delegated work.
+  The existing emergency hangup remains effective when the persisted duration
+  deadline passes or the worker's kill switch is set, including a healthy web lease.
   After that 30-second lease expires, it acquires a database lease before sending
   the close command on its existing receiver. A healthy web receiver renews
   every five seconds. The command lease excludes competing recovery and maintenance

@@ -147,12 +147,25 @@ test("the watchdog observes usage during a healthy web lease without taking comm
 test("a trusted final observed during a healthy web lease settles once alongside the primary", async () => {
   w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
   w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
   await observeActiveVoiceConversations(); w.socket.emit("open");
   w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
   await new Promise(resolve => setImmediate(resolve));
   await finalizeVoiceReservation("voice-1", 15);
   assert.equal(w.charges.length, 1); assert.equal(w.rows[0].settledCredits, 9);
   assert.deepEqual(w.commands, []); assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
+});
+
+for (const emergency of ["kill switch", "deadline"]) test(`a worker ${emergency} hangs up despite a healthy web lease`, async () => {
+  w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  await observeActiveVoiceConversations(); w.socket.emit("open");
+  if (emergency === "kill switch") process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  else w.rows[0].reservationPayload.closeAt = new Date(0).toISOString();
+  await observeActiveVoiceConversations(); await observeActiveVoiceConversations();
+  assert.deepEqual(w.hangs, ["live_1"]); assert.deepEqual(w.commands, []);
+  assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
 });
 
 test("an orphaned primary is durably marked for immediate closure without dispatching queued work", async () => {
