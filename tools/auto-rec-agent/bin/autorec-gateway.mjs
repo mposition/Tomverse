@@ -196,26 +196,35 @@ async function result(deps, header) {
 
 // ---------------------------------------------------------------- publish
 
-function gitEnv(config, extra = {}) {
-  return {
+/**
+ * HTTP/1.1 for every GitHub transfer: on the AMUX host an HTTP/2 stream was
+ * cut mid-pack on a large fetch (curl 92, "stream was not closed cleanly"),
+ * and this process's first fetch of develop is that large.
+ */
+const GIT_HTTP_CONFIG = [["http.version", "HTTP/1.1"]];
+
+function gitEnv(config, extraConfig = []) {
+  const entries = [...GIT_HTTP_CONFIG, ...extraConfig];
+  const env = {
     PATH: config.path,
     HOME: config.stateDir,
     LANG: "C",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_TERMINAL_PROMPT: "0",
-    ...extra,
+    GIT_CONFIG_COUNT: String(entries.length),
   };
+  entries.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = key;
+    env[`GIT_CONFIG_VALUE_${index}`] = value;
+  });
+  return env;
 }
 
 /** The token reaches git through its environment, never its argv (/proc/<pid>/cmdline is world-readable). */
 function pushEnv(config) {
   const basic = Buffer.from(`x-access-token:${config.githubToken}`, "utf8").toString("base64");
-  return gitEnv(config, {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
-  });
+  return gitEnv(config, [["http.https://github.com/.extraheader", `AUTHORIZATION: basic ${basic}`]]);
 }
 
 /** Reserve one of the day's publishes before doing anything that can leave the host. */

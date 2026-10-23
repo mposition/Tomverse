@@ -23,6 +23,11 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
     ["M\tAGENTS.md", "1\t1\tAGENTS.md", "gate_path"],
     ["M\tlib/adminAuth.ts", "1\t1\tlib/adminAuth.ts", "gate_path"],
     ["M\tpackages/x/package.json", "1\t1\tpackages/x/package.json", "gate_path"],
+    // The lane may merge these when a person wrote them; the model still may not touch them.
+    ["M\t.github/audits/x.md", "1\t1\t.github/audits/x.md", "gate_path"],
+    ["M\teslint.config.mjs", "1\t1\teslint.config.mjs", "gate_path"],
+    ["M\tapps/mobile/.npmrc", "1\t1\tapps/mobile/.npmrc", "gate_path"],
+    ["M\tscripts/deep/run.mjs", "1\t1\tscripts/deep/run.mjs", "gate_path"],
     ["M\ttests/foo.test.mjs", "1\t1\ttests/foo.test.mjs", "test_file"],
     ["M\tlib/foo.spec.ts", "1\t1\tlib/foo.spec.ts", "test_file"],
     ["R100\ttests/a.mjs\tlib/a.mjs", "0\t0\tlib/a.mjs", "test_file"],
