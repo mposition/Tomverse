@@ -56,11 +56,14 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   or a missing final event is not evidence of zero voice usage.
 - Wallet and subject/provider seconds reservations now commit and settle in the
   same transaction. Their original bucket dates travel in the durable payload.
-- The independent `voice:watchdog` process records monotonic provider usage and
-  takes over the provider sideband after the web receiver's 30-second durable
-  lease expires. A healthy receiver renews every five seconds; the worker
-  uses a database lease to exclude competing recovery and maintenance
-  receivers, enforces the deadline and observes the kill
+- The independent `voice:watchdog` process observes provider usage from session
+  startup so a web-process failure cannot remove its final-event listener.
+  While the web receiver's durable lease is healthy, the worker observes only:
+  it does not acquire command ownership, close the call, or replay delegated work.
+  After that 30-second lease expires, it acquires a database lease before sending
+  the close command on its existing receiver. A healthy web receiver renews
+  every five seconds. The command lease excludes competing recovery and maintenance
+  owners. The worker enforces the deadline and observes the kill
   switch on every cycle. It receives final events after a web process dies.
   Processing a final receipt has a 15-second deadline. A stalled database
   operation stops renewing receiver ownership so another sweep can recover;
@@ -137,7 +140,8 @@ immediately stops microphone capture and mutes playback. It keeps the silent
 primary connection for at most 60 seconds, bounded by the session's existing
 30-second closing allowance, while polling persisted billing. Unmount still
 releases resources immediately. Once the web lease expires, recovery durably
-requests closure and closes its leased receiver immediately after attachment.
+requests closure and sends `session.close` through its already attached observer
+(or through a newly attached receiver after a worker restart).
 It does not dispatch queued answers during termination. The canonical answer
 remains in Chat; settlement removes the temporary answer without risking a
 repeated spoken result.

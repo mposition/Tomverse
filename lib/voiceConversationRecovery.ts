@@ -10,7 +10,7 @@ const heartbeatKey = "voice-conversation:watchdog";
 const heartbeatPeriod = "worker";
 const epoch = new Date(0);
 const receivers = new Map<string, () => void>();
-const receiverClosers = new Map<string, () => void>();
+const receiverClosers = new Map<string, () => Promise<void>>();
 const retryAfter = new Map<string, number>();
 
 /** A database lease also excludes receivers in other worker/maintenance processes. */
@@ -36,49 +36,58 @@ export async function releaseVoiceRecoveryLease(id: string, token: string) {
 
 /** The independent worker receives final usage even when the web process dies. */
 export async function observeActiveVoiceConversations() {
-  if (process.env.VOICE_CONVERSATION_KILL_SWITCH) for (const close of receiverClosers.values()) close();
+  if (process.env.VOICE_CONVERSATION_KILL_SWITCH) for (const close of receiverClosers.values()) void close().catch(() => {});
   const rows = await prisma.chatCreditReservation.findMany({ where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }], providerRequestId: { not: null } } });
   for (const id of retryAfter.keys()) if (!rows.some(row => row.id === id)) retryAfter.delete(id);
   for (const [id, release] of receivers) if (!rows.some(row => row.id === id)) release();
   for (const row of rows) {
-    if (receivers.has(row.id)) continue;
-    if ((retryAfter.get(row.id) ?? 0) > Date.now()) continue;
     let payload;
     try { payload = readVoiceCreditPayload(row.reservationPayload); } catch { continue; }
-    // A healthy web receiver owns the sideband. After its process disappears,
-    // the durable lease expires and this independent receiver takes over.
-    if (Date.parse(payload.webLeaseUntil ?? "") > Date.now()) {
-      if (Date.parse(payload.closeAt ?? "") <= Date.now() || process.env.VOICE_CONVERSATION_KILL_SWITCH) {
-        retryAfter.set(row.id, Date.now() + 10_000);
-        void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {});
-      }
+    const webHealthy = Date.parse(payload.webLeaseUntil ?? "") > Date.now();
+    if (receivers.has(row.id)) {
+      if (!webHealthy) await receiverClosers.get(row.id)?.();
       continue;
     }
-    const lease = await claimVoiceRecoveryLease(row.id);
-    if (!lease) continue;
+    if ((retryAfter.get(row.id) ?? 0) > Date.now()) continue;
+    // Observe from the start: late attachment can miss the final usage event
+    // when the web process disappears. Only an expired web lease grants commands.
     const socket = attachVoiceProviderSession(row.providerRequestId!);
+    let lease: string | null = null;
+    let claiming = false;
     let finalizing = false;
+    let closeRequested = false;
     let finalizationTimer: ReturnType<typeof setTimeout> | undefined;
-    const close = () => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
-    const expiryTimer = setTimeout(() => { if (finalizing) return; void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
+    let leaseTimer: ReturnType<typeof setInterval> | undefined;
+    const close = () => { if (lease && !closeRequested && socket.readyState === socket.OPEN) { socket.send(JSON.stringify({ type: "session.close" })); closeRequested = true; } };
+    const expiryTimer = setTimeout(() => { if (finalizing) return; if (lease) void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
     let released = false;
-    const leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, lease).catch(() => { if (!finalizing) release(); }); }, 5_000);
+    async function takeOver() {
+      if (released || finalizing || claiming) return;
+      if (lease) { close(); return; }
+      claiming = true;
+      try {
+        const token = await claimVoiceRecoveryLease(row.id);
+        if (!token) return;
+        if (released || finalizing) { await releaseVoiceRecoveryLease(row.id, token); return; }
+        lease = token;
+        leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, token).catch(() => { if (!finalizing) release(); }); }, 5_000);
+        close();
+      } finally { claiming = false; }
+    }
     function release() {
       if (released) return; released = true;
       clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer);
       receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
-      socket.close(); void releaseVoiceRecoveryLease(row.id, lease!).catch(() => {});
+      socket.close(); if (lease) void releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
     }
     receivers.set(row.id, release);
-    receiverClosers.set(row.id, close);
-    // The web receiver is gone. End the existing call rather than leaving a
-    // silent primary billable until its original maximum duration.
+    receiverClosers.set(row.id, takeOver);
     socket.once("open", close);
     socket.on("message", data => {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;
       if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return;
-      if (seconds > payload.maxSeconds) { close(); return; }
+      if (seconds > payload.maxSeconds) { void takeOver().catch(() => {}); return; }
       if (event.type === "session.usage.updated") {
         void recordVoiceUsage(row.id, seconds).catch(() => close());
       } else if (event.type === "session.closed") {
@@ -93,6 +102,7 @@ export async function observeActiveVoiceConversations() {
     });
     socket.once("error", () => { if (!finalizing) release(); });
     socket.once("close", () => { if (!finalizing) release(); });
+    if (!webHealthy) await takeOver();
   }
 }
 

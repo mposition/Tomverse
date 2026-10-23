@@ -121,11 +121,38 @@ test("a previously persisted invalid final cannot retain a customer hold indefin
   assert.equal(w.charges[0].seconds, 0);
 });
 
-test("the watchdog never opens a competing sideband while the web receiver lease is healthy", async () => {
+test("the watchdog observes usage during a healthy web lease without taking command ownership", async () => {
+  w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
   w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
   w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 300_000).toISOString();
   await observeActiveVoiceConversations(); await reconcileVoiceConversations();
+  w.socket.emit("open");
+  w.socket.emit("message", JSON.stringify({ type: "session.usage.updated", usage: { seconds: 12 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.rows[0].providerUsageSnapshot.seconds, 12);
+  assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
+  assert.equal(w.rows[0].lastError, null); assert.deepEqual(w.commands, []);
   assert.equal(w.closes.length, 0); assert.equal(w.charges.length, 0);
+  const observedSocket = w.socket;
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(0).toISOString();
+  await observeActiveVoiceConversations();
+  assert.equal(w.socket, observedSocket);
+  assert.ok(w.rows[0].reservationPayload.recoveryLease);
+  assert.deepEqual(w.commands, [{ type: "session.close" }]);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.charges.length, 1); assert.equal(w.charges[0].seconds, 15);
+});
+
+test("a trusted final observed during a healthy web lease settles once alongside the primary", async () => {
+  w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  await observeActiveVoiceConversations(); w.socket.emit("open");
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  await finalizeVoiceReservation("voice-1", 15);
+  assert.equal(w.charges.length, 1); assert.equal(w.rows[0].settledCredits, 9);
+  assert.deepEqual(w.commands, []); assert.equal(w.rows[0].reservationPayload.recoveryLease, undefined);
 });
 
 test("an orphaned primary is durably marked for immediate closure without dispatching queued work", async () => {
