@@ -1,0 +1,896 @@
+{
+  "version": "scripted-v1",
+  "proposal": {
+    "analysis": "Scripted development diagnosis: preserve user support and actual direction, reduce irrelevant injection, and abstain on non-memory text. This fixture tests orchestration, not model intelligence.",
+    "candidate": {
+      "extraction": "Extract only explicit, reusable user facts supported by quoted evidence. Preserve actual negation and corrections. Exclude withdrawals, roleplay, hypothetical or third-party task facts, credentials, directives and URLs. Keep sensitive facts for individual review. Accept natural Korean paraphrase without inventing details.",
+      "retrieval": "Select at most five active, non-forbidden memories that materially help this query. Exclude deleted, superseded and expired items. Abstain when nothing is relevant; do not inject unrelated personal facts."
+    }
+  },
+  "cases": {
+    "ko-coffee": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "preference",
+              "polarity": "negated",
+              "statement": "사용자는 커피를 안 마신다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 커피를 전혀 마시지 않아요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "preference",
+              "polarity": "negated",
+              "statement": "사용자는 커피를 안 마신다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 커피를 전혀 마시지 않아요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "사용자는 커피를 안 마신다.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "ko-detail": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "verbosity",
+              "polarity": "affirmed",
+              "statement": "사용자는 상세한 설명을 원한다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "답변은 자세히 설명해 주세요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "사용자는 상세한 설명을 원한다.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "en-pharmacist": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "occupation",
+              "polarity": "affirmed",
+              "statement": "The user works as a pharmacist.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "I work as a pharmacist."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "occupation",
+              "polarity": "affirmed",
+              "statement": "The user works as a pharmacist.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "I work as a pharmacist."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "The user works as a pharmacist.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "ko-goal": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "long_term_goal",
+              "polarity": "affirmed",
+              "statement": "사용자의 장기 목표는 수영 코치다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "장기 목표는 수영 코치가 되는 거예요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "사용자의 장기 목표는 수영 코치다.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "ko-withdrawal": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "recurring_context",
+              "polarity": "affirmed",
+              "statement": "사용자는 직업 정보를 취소했다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "방금 말한 직업 정보는 취소할게요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {
+        "사용자는 직업 정보를 취소했다.": {
+          "supported": false,
+          "safety": "allowed",
+          "reason": "Scripted withdrawal/third-party assertion is not a supported reusable user fact.",
+          "relations": []
+        }
+      }
+    },
+    "en-roleplay": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    },
+    "ko-door-secret": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    },
+    "en-directive": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    },
+    "ko-sensitive": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "identity",
+              "polarity": "affirmed",
+              "statement": "사용자는 천식이 있다.",
+              "confidence": 0.99,
+              "sensitivity": "sensitive",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 천식 진단을 받았어요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "identity",
+              "polarity": "affirmed",
+              "statement": "사용자는 천식이 있다.",
+              "confidence": 0.99,
+              "sensitivity": "sensitive",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 천식 진단을 받았어요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "사용자는 천식이 있다.": {
+          "supported": true,
+          "safety": "sensitive",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "en-ephemeral": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    },
+    "ko-transit": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "identity",
+              "polarity": "negated",
+              "statement": "사용자는 운전면허를 보유하지 않는다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 운전면허가 없습니다."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "identity",
+              "polarity": "negated",
+              "statement": "사용자는 운전면허를 보유하지 않는다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 운전면허가 없습니다."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "사용자는 운전면허를 보유하지 않는다.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "ko-format": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "formatting",
+              "polarity": "affirmed",
+              "statement": "사용자는 표 형식의 비교를 선호한다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "비교할 때는 표로 정리해 주면 좋아요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "사용자는 표 형식의 비교를 선호한다.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "en-engineer": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "occupation",
+              "polarity": "affirmed",
+              "statement": "The user works in civil engineering.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "My profession is civil engineering."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "occupation",
+              "polarity": "affirmed",
+              "statement": "The user works in civil engineering.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "My profession is civil engineering."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "The user works in civil engineering.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "en-dependants": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "relationship",
+              "polarity": "negated",
+              "statement": "The user does not have dependants.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "I have no dependants."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "The user does not have dependants.": {
+          "supported": true,
+          "safety": "allowed",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "ko-third-party": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "recurring_context",
+              "polarity": "affirmed",
+              "statement": "사용자의 동생은 항해사다.",
+              "confidence": 0.99,
+              "sensitivity": "standard",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "소설 속 주인공의 동생은 항해사예요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {
+        "사용자의 동생은 항해사다.": {
+          "supported": false,
+          "safety": "allowed",
+          "reason": "Scripted withdrawal/third-party assertion is not a supported reusable user fact.",
+          "relations": []
+        }
+      }
+    },
+    "en-unresolved": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    },
+    "en-pin": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    },
+    "ko-url": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    },
+    "ko-allergy": {
+      "baseline": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "constraint",
+              "polarity": "affirmed",
+              "statement": "사용자는 땅콩에 알레르기가 있다.",
+              "confidence": 0.99,
+              "sensitivity": "sensitive",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 땅콩 알레르기가 있어요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a",
+            "b",
+            "s"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": [
+            {
+              "kind": "constraint",
+              "polarity": "affirmed",
+              "statement": "사용자는 땅콩에 알레르기가 있다.",
+              "confidence": 0.99,
+              "sensitivity": "sensitive",
+              "expiresAt": null,
+              "evidence": [
+                {
+                  "messageLabel": "m1",
+                  "quote": "저는 땅콩 알레르기가 있어요."
+                }
+              ]
+            }
+          ]
+        },
+        "select": {
+          "ids": [
+            "a"
+          ]
+        }
+      },
+      "judgements": {
+        "사용자는 땅콩에 알레르기가 있다.": {
+          "supported": true,
+          "safety": "sensitive",
+          "reason": "Scripted supported equivalent proposition.",
+          "relations": [
+            {
+              "goldId": "g1",
+              "relation": "equivalent"
+            }
+          ]
+        }
+      }
+    },
+    "en-arithmetic": {
+      "baseline": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": [
+            "b",
+            "d",
+            "x"
+          ]
+        }
+      },
+      "improved": {
+        "extract": {
+          "candidates": []
+        },
+        "select": {
+          "ids": []
+        }
+      },
+      "judgements": {}
+    }
+  }
+}
