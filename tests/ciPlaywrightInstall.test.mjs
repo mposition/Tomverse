@@ -233,9 +233,30 @@ test("an abandoned apt run that finished is confirmed, not reported as out of bu
         /if \[ "\$budget" -lt 30 \]; then[\s\S]*?APT_FINISHED_ALONE" -eq 1[\s\S]*?timeout --signal=TERM --kill-after=10s "\$CONFIRM_WINDOW"[\s\S]*?ran out of the install budget/,
         "the out-of-budget branch must confirm a finished run before reporting"
     );
-    const reserve = Number(/^DEADLINE_LIGHT_DEFAULT=(\d+)$/m.exec(script)[1]) / 4;
+    // apt is the last half, so the confirming attempt runs past the deadline and
+    // is paid from the step's slack, together with the kill-after grace.
     const confirm = Number(/^CONFIRM_WINDOW=(\d+)$/m.exec(script)[1]);
-    assert.ok(confirm + 10 < reserve, "the confirming attempt must leave the browser download part of its reserve");
+    assert.ok(confirm + 10 < STEP_SLACK_MINUTES * 60, "the confirming attempt must fit in the slack above the deadline");
+});
+
+test("the browser download runs first and apt gets what it leaves", () => {
+    // 2026-10-23 (#2938): a 39 kB/s mirror needed 664s, apt was given 675s and
+    // was killed setting up its last package, with 225s held back for a browser
+    // download that is a no-op on a cache hit and a fast CDN fetch otherwise.
+    const script = read(SCRIPT_PATH);
+    const download = script.indexOf('retry "playwright install" ""');
+    const apt = script.indexOf('retry "playwright install-deps" release_dpkg_lock');
+    assert.ok(download > 0 && apt > download, "the browser download must run before apt");
+    assert.match(
+        script,
+        /DEADLINE_AT=\$\(\(STARTED_AT \+ DOWNLOAD_RESERVE\)\)\s+retry "playwright install" ""/,
+        "the download is capped so a stalled CDN cannot spend apt's budget"
+    );
+    assert.match(
+        script,
+        /DEADLINE_AT="\$ENDS_AT"\s+retry "playwright install-deps"/,
+        "apt runs to the end of the whole budget"
+    );
 });
 
 test("the wrapper is executable", () => {
