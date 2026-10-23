@@ -24,6 +24,24 @@ const release = (number, body, merged = true) => ({ number, title: `release: ${n
 test("a release pull request names the develop pull requests it carries", () => {
   assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "release: two (#2873)", body: "Brings #2862 and #2873.\nSee #2873." }), [2873, 2862]);
   assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: null, body: null }), []);
+  // A train names what it left out and skipped too; only its Included section is carried (#2906).
+  const train = [
+    "Release train 20261023-1400 (AEST), opened by the QA-release agent.",
+    "",
+    "## Included (2)",
+    "",
+    "- #2789 feat(agents): ci-budget subagent",
+    "- #2844 AMUX Workers",
+    "",
+    "## Left out (1)",
+    "",
+    "- #2776 feat(amux): price — cherry-pick conflict on main",
+    "",
+    "Already on main, skipped: #2824, #2872.",
+  ].join("\n");
+  assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "release: train 20261023-1400 (3 PRs)", body: train }), [2789, 2844]);
+  // An Included section at the end of the body counts to its end.
+  assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "x", body: "## Included (1)\n\n- #11 a" }), [11]);
 });
 
 test("candidates: merged develop pull requests in the window, newest first, each with whether it can ride", () => {
