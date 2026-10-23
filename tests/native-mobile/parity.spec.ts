@@ -172,12 +172,16 @@ for (const recovery of ["receipt", "same-request", 400, 401, 403, 409, 422, 429]
   expect(await page.evaluate(() => localStorage.getItem("tomverse-image-pending:synthetic-demo"))).toBeNull();
 });
 
-test("missing Review participants keeps the attachment and draft editable", async ({ page }) => {
+for (const mode of ["Easy", "Professional"] as const) test(`missing ${mode} Review participants keeps the attachment and draft editable`, async ({ page }) => {
   await signIn(page);await page.getByTestId("product-switcher").selectOption("review");
   await page.getByTestId("file-picker").setInputFiles({name:"keep.txt",mimeType:"text/plain",buffer:Buffer.from("Keep")});
   await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();
   await page.getByRole("textbox").fill("Keep my question");await page.getByRole("button",{name:/참여 모델 선택/}).click();
-  for (const checkbox of await page.getByRole("dialog").getByRole("checkbox").all()) await checkbox.uncheck();
+  const picker = page.getByRole("dialog");
+  await picker.getByRole("button", { name: mode, exact: true }).click();
+  const options = picker.getByRole("checkbox");
+  await expect(options).toHaveCount(3);
+  for (const checkbox of await options.all()) { await checkbox.uncheck(); await expect(checkbox).not.toBeChecked(); }
   await page.getByRole("button",{name:"닫기",exact:true}).click();await page.getByRole("button",{name:"메시지 보내기",exact:true}).click();
   await expect(page.getByRole("alert")).toBeVisible();await expect(page.getByRole("textbox")).toHaveValue("Keep my question");
   await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();await expect(page.locator("article.user")).toHaveCount(0);
