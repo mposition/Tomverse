@@ -33,7 +33,9 @@ const pull = (number, overrides = {}) => ({
 });
 const clean = { conflict: false, behind: false };
 const checksFor = (pulls, check = clean) => new Map(pulls.map((p) => [p.number, check]));
-const state = (overrides = {}) => ({ ...emptyCiAdmissionState(), ...overrides });
+// The scenarios below were written in slots; the same proportions in runners keep their meaning.
+const SLOT_NEEDS = { develop: 1, main: 2, developPush: 1, mainPush: 2 };
+const state = (overrides = {}) => ({ ...emptyCiAdmissionState(), capacity: 3, needs: SLOT_NEEDS, ...overrides });
 const lineOf = (...numbers) => numbers.map((number) => ({ number, title: "", base: "develop", head: "", headSha: "", queuedAt: "2026-10-21T01:00:00.000Z", draft: true, status: "waiting" }));
 // Running pull_request runs of these pull requests, on their heads.
 const runs = (...pulls) => new Set(pulls.map((p) => ciRunKey(p.number, p.headSha)));
@@ -49,14 +51,16 @@ test("mode: undeclared or empty is off; only off, shadow and on", () => {
   for (const value of ["ON", "true", "1"]) assert.equal(parseCiAdmissionMode(value), null);
 });
 
-test("slots: develop 1, main 2, stacked and forks not handled", () => {
-  assert.equal(ciAdmissionUnits({ base: "develop", fork: false }), 1);
-  assert.equal(ciAdmissionUnits({ base: "main", fork: false }), 2);
+test("runners: develop 15, main 34 by default (measured peaks); stacked and forks not handled", () => {
+  assert.equal(ciAdmissionUnits({ base: "develop", fork: false }), 15);
+  assert.equal(ciAdmissionUnits({ base: "main", fork: false }), 34);
+  assert.equal(ciAdmissionUnits({ base: "main", fork: false }, SLOT_NEEDS), 2);
+  assert.equal(emptyCiAdmissionState().capacity, 40);
   assert.equal(ciAdmissionUnits({ base: "claude/to-develop/a", fork: false }), null);
   assert.equal(ciAdmissionUnits({ base: "develop", fork: true }), null);
 });
 
-test("an unreadable stored state is an empty one; the first shape keeps its budget and order", () => {
+test("an unreadable stored state is an empty one; older shapes keep their order, not their slot budget", () => {
   assert.deepEqual(parseCiAdmissionState(null), emptyCiAdmissionState());
   assert.deepEqual(parseCiAdmissionState("{"), emptyCiAdmissionState());
   assert.deepEqual(parseCiAdmissionState(JSON.stringify({ version: 9 })), emptyCiAdmissionState());
@@ -68,8 +72,9 @@ test("an unreadable stored state is an empty one; the first shape keeps its budg
       released: [],
     }),
   );
-  assert.equal(legacy.version, 2);
-  assert.equal(legacy.capacity, 5);
+  assert.equal(legacy.version, 3);
+  // A slot count means nothing in runners: the budget is the runner default.
+  assert.equal(legacy.capacity, 40);
   assert.deepEqual(legacy.queue.map((e) => e.number), [7, 3]);
   assert.equal(legacy.queue[0].title, "Seven");
 });
@@ -229,4 +234,45 @@ test("shadow decisions are marked as shadow", () => {
   const open = [pull(1)];
   const evaluation = judge({ state: state(), openPulls: open, checks: checksFor(open), shadow: true });
   assert.equal(evaluation.state.events.at(-1).shadow, true);
+});
+
+test("a stored slot state (version 2) becomes runners: order and events kept, budget and needs reset", () => {
+  const v2 = { ...emptyCiAdmissionState(), version: 2, capacity: 3, queue: lineOf(5, 4), events: [] };
+  delete v2.needs;
+  const parsed = parseCiAdmissionState(JSON.stringify(v2));
+  assert.equal(parsed.version, 3);
+  assert.equal(parsed.capacity, 40);
+  assert.deepEqual(parsed.needs, { develop: 15, main: 34, developPush: 18, mainPush: 19 });
+  assert.deepEqual(parsed.queue.map((e) => e.number), [5, 4]);
+});
+
+test("in runners: two develop pull requests fit 40, a third waits; a develop deploy leaves room for one", () => {
+  const open = [pull(1), pull(2), pull(3)];
+  const free = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2, 3) }, openPulls: open, checks: checksFor(open) });
+  assert.deepEqual(kinds(free), ["release:1", "release:2"]);
+  assert.equal(statuses(free)[3], "waiting");
+  assert.equal(free.used, 30);
+
+  const deploying = judge({
+    state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2, 3) },
+    openPulls: open,
+    checks: checksFor(open),
+    deploys: [{ branch: "develop", sha: "d".repeat(40), title: "Merge" }],
+  });
+  assert.deepEqual(kinds(deploying), ["release:1"]);
+  assert.equal(deploying.used, 33);
+});
+
+test("runners other workflows hold count too, and a CI needing more than the budget still runs alone", () => {
+  const open = [pull(1), pull(2)];
+  // 22 runners in use by something admission does not know: 18 left, one develop PR fits.
+  const busy = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) }, openPulls: open, checks: checksFor(open), liveRunners: 22 });
+  assert.deepEqual(kinds(busy), ["release:1"]);
+  // Live usage below what the known CI needs changes nothing: needs are counted, not the jobs of the moment.
+  const quiet = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) }, openPulls: open, checks: checksFor(open), liveRunners: 0 });
+  assert.deepEqual(kinds(quiet), ["release:1", "release:2"]);
+  // A budget below one CI's need does not starve it.
+  const main = [pull(9, { base: "main" })];
+  const small = judge({ state: { ...emptyCiAdmissionState(), capacity: 20, queue: lineOf(9) }, openPulls: main, checks: checksFor(main) });
+  assert.deepEqual(kinds(small), ["release:9"]);
 });
