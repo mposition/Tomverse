@@ -55,7 +55,7 @@ export function ReviewProviderDefaultsSettings({ scope = "personal" }: { scope?:
     return () => controller.abort();
   }, [owner, revision, url, c.loadFailed]);
   const defaults = snapshot?.owner === owner ? snapshot.defaults : null;
-  const selected = draft ?? defaults?.platform ?? [];
+  const selected = draft ?? (platformScope ? defaults?.platform : defaults?.effective) ?? [];
   const writeBlocked = busy || readbackRequired || Boolean(failure?.requiresReauthentication);
   const save = async () => {
     if (writeBlocked || !defaults) return;

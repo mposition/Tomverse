@@ -109,7 +109,9 @@ The owner requested consistent Chat/Review controls. The editable proposal is
   instead of outlining the whole composer in blue.
 - Easy defaults are separate from Professional's default model combination.
   `UserSettings.reviewEasyDefaultProviders` is nullable: null inherits
-  `AppSetting["review.easy.defaultProviders"]`, whose absent value retains OpenAI.
+  `AppSetting["review.easy.defaultProviders"]`, whose absent value defaults to OpenAI.
+  New Easy Reviews use these configured defaults rather than deriving providers
+  from the Professional selection; stored conversations keep their selection.
   An explicit current Review selection wins. Defaults initialize a new Review
   only; preference saves and history navigation never rewrite existing choices.
 - The profile's AI tab owns the personal setting. Admin Console > Platform

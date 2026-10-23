@@ -161,6 +161,7 @@ test("Review mode controls preserve the draft and the product switch returns to 
   await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep this Review draft.");
   await mode.getByRole("button", { name: "Easy", exact: true }).click();
   await expect(page.getByTestId("chat-textarea")).toHaveValue("Keep this Review draft.");
+  await expect(page.locator(".review-participant-list>button")).toContainText(["Anthropic"]);
   await page.getByTestId("chat-input").getByTestId("chat-product-switcher").getByRole("link").filter({ hasText: "Chat" }).click();
   await expect(page).toHaveURL(/\/chat\?lang=en/);
 });
@@ -180,6 +181,21 @@ test("personal Easy defaults apply to the next Review and survive reload", { tag
   await page.reload();
   await page.locator(".review-new-task").click();
   await expect(page.locator(".review-participant-list>button")).toContainText(["Google"]);
+});
+
+test("inherited Easy defaults display the providers eligible within the account cap", { tag: "@ui-risk" }, async ({ page }) => {
+  await prepareReviewDefaults(page);
+  await page.route("**/api/user/settings**", route => route.fulfill({ json: {
+    reviewEasyDefaultProviders: null, reviewEasyPlatformProviders: ["openai", "anthropic", "google"],
+    reviewEasyEffectiveProviders: ["openai", "anthropic"],
+    reviewEasyProviderOptions: ["openai", "anthropic", "google"], reviewEasyMaxProviders: 2,
+  } }));
+  await page.locator(".review-avatar").click();
+  await page.getByTestId("settings-tab-ai").click();
+  const card = page.getByTestId("review-defaults-personal");
+  await expect(card.getByTestId("review-defaults-source")).toHaveValue("platform");
+  await expect(card.locator('[data-provider][aria-pressed="true"]')).toHaveCount(2);
+  await expect(card.locator('[data-provider="google"]')).toHaveAttribute("aria-pressed", "false");
 });
 
 test("an uncertain default save requires read-back before another write", { tag: "@ui-risk" }, async ({ page }) => {
