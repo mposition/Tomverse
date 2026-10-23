@@ -19,6 +19,8 @@ import {
 } from "./ideaFrontierCatalogRead.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
+import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
+import { amuxV19ChannelAdmits } from "./ideaV19CliChannels.mjs";
 import { amuxIdeaReferencesOutsideScope,
   amuxOperatingScopeSelection } from "./ideaOperatingScopeCore.ts";
 import { pinAmuxSessionReferences } from "./ideaSessionReferencePinning.ts";
@@ -57,6 +59,7 @@ export class AmuxIdeaSessionSubmissionError extends Error {
       | "scope_unavailable"
       | "outside_scope"
       | "model_not_approved"
+      | "model_not_launchable"
       | "reference_snapshot_unavailable"
       | "key_store_unavailable"
       | "request_already_seen"
@@ -93,11 +96,23 @@ const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
   return now;
 };
 
+/** The owner's per-idea choice, or the operating scope's model. */
+const analysisModel = (authority: AmuxOperatingScopeAuthority,
+  chosen: AmuxIdeaModelSelection | null | undefined): AmuxIdeaModelSelection =>
+  chosen ?? amuxOperatingScopeSelection(authority.scope);
+
+/** A chosen model the runner's CLI channel cannot launch at that effort would
+ * wait in the queue until the seven-day deadline; refuse it before writing. */
+const requireLaunchableChoice = (chosen: AmuxIdeaModelSelection | null | undefined) => {
+  if (chosen && !amuxV19ChannelAdmits(chosen)) {
+    throw new AmuxIdeaSessionSubmissionError("model_not_launchable");
+  }
+};
+
 const requireCurrentModel = async (
-  authority: AmuxOperatingScopeAuthority,
+  selection: AmuxIdeaModelSelection,
   tx?: Prisma.TransactionClient,
 ) => {
-  const selection = amuxOperatingScopeSelection(authority.scope);
   const model = tx
     ? await readCurrentAmuxIdeaFrontierSelectionFromTx(tx, selection)
     : await readCurrentAmuxIdeaFrontierSelection(selection);
@@ -127,6 +142,7 @@ export async function commitAmuxIdeaSessionSubmission(
   input: {
     inspected: Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }>;
     expectedAuthority: AmuxOperatingScopeAuthority;
+    model?: AmuxIdeaModelSelection | null;
     ideaId: string;
     keys: AmuxContentKeys;
     pinnedCommitShas: readonly string[];
@@ -146,7 +162,8 @@ export async function commitAmuxIdeaSessionSubmission(
         !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha))) {
     throw new AmuxIdeaSessionSubmissionError("reference_snapshot_unavailable");
   }
-  await requireCurrentModel(authority, tx);
+  const model = analysisModel(authority, input.model);
+  await requireCurrentModel(model, tx);
   const existing = await tx.amuxIdeaSubmission.findUnique({
     where: { requestId: input.inspected.requestId },
     select: { id: true },
@@ -175,9 +192,9 @@ export async function commitAmuxIdeaSessionSubmission(
       sourceProvenanceDigestKeyId: source.digestKeyId,
       operatingScopeSettingId: authority.settingId,
       operatingScopeVersion: authority.version,
-      modelProvider: authority.scope.model.provider,
-      modelId: authority.scope.model.modelId,
-      reasoningEffort: authority.scope.model.reasoningEffort,
+      modelProvider: model.provider,
+      modelId: model.modelId,
+      reasoningEffort: model.reasoningEffort,
       ideaBytes: input.inspected.counts.ideaBytes,
       repositoryCount: input.inspected.counts.repositoryCount,
       pullRequestCount: input.inspected.counts.pullRequestCount,
@@ -318,6 +335,8 @@ export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): P
  * complete boundary; this queue receipt reserves no money. */
 export async function submitAmuxIdeaFromSession(input: {
   inspected: Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }>;
+  /** The owner's per-idea choice from the Admin input; absent for coding sessions. */
+  model?: AmuxIdeaModelSelection | null;
 }): Promise<CommittedAmuxIdeaSessionIntake> {
   if (!amuxSessionIntakeWritePermitted(
     process.env[AMUX_SESSION_INTAKE_ENV],
@@ -336,7 +355,8 @@ export async function submitAmuxIdeaFromSession(input: {
     readAmuxOperatingScopeAuthority(tx), { ...AMUX_IDEA_STANDARD_TRANSACTION });
   if (!expectedAuthority) throw new AmuxIdeaSessionSubmissionError("scope_unavailable");
   requireInputWithinScope(expectedAuthority, input.inspected);
-  await requireCurrentModel(expectedAuthority);
+  requireLaunchableChoice(input.model);
+  await requireCurrentModel(analysisModel(expectedAuthority, input.model));
   let pinnedCommitShas: string[];
   try {
     pinnedCommitShas = await pinAmuxSessionReferences(input.inspected.input,
@@ -367,6 +387,7 @@ export async function submitAmuxIdeaFromSession(input: {
         requestId: committed.requestId,
         submissionAuditId: committed.auditId,
         authority: expectedAuthority,
+        model: analysisModel(expectedAuthority, input.model),
       });
       callbackReturned = true;
       return { ...committed, reservationId: reservation.reservationId,

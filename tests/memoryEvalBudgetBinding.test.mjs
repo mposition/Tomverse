@@ -104,7 +104,7 @@ test("the v7 instrument no longer describes this tree, and says so", () => {
     // naming it here is how that stopped being true quietly.
     assert.match(
         failures.find((line) => line.startsWith("promptVersion")),
-        /approved mem-extract-v7, this run would use mem-extract-v8/
+        new RegExp(`approved mem-extract-v7, this run would use ${MEMORY_EXTRACTION_PROMPT_VERSION}`)
     );
     assert.notEqual(budget.boundTuple.promptDigest, actual.promptDigest);
 

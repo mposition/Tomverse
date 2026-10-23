@@ -730,9 +730,9 @@ test.describe("Model configuration", { tag: "@ui-risk" }, () => {
         await expect(extraCount(page)).toHaveCount(0);
       }
 
-      // The header's count and the composer's must agree.
+      // The header and Composer use different labels for the same active count.
       await expect(page.getByTestId("composer-active-model-count")).toHaveText(
-        models.length === 1 ? "1 model" : `${models.length} models`
+        models.length === 1 ? "1 AI" : `${models.length} AIs`
       );
       await expectNoHorizontalOverflow(page);
     });

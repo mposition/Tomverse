@@ -176,6 +176,17 @@ dm_file_action() {
   fi
 }
 
+# Whether a CLI's source in its vendor account's home is read, from the state
+# of its root-owned destination and §5a's sha256. The source is only ever the
+# input of a copy, so it is read unless the destination is already "same":
+# the vendor account updates or prunes its own install (a fresh login can do
+# it), and that must not block reinstalling the broker or the launcher.
+dm_cli_source_needed() {
+  local action
+  action=$(dm_file_action "${1:-}" "${2:-}" 0555) || return 0
+  [[ $action != same ]]
+}
+
 # A directory, without following a link: absent | link | other | dir <uid> <mode>
 dm_directory_state() {
   local path=$1 meta
@@ -354,6 +365,13 @@ dm_cli_source_fits() {
   [[ -f $1 && ! -L $1 && $(dm_sha256_of "$1") == "$2" ]]
 }
 
+# The check for one CLI: its destination is already §5a's file, or its source is.
+dm_cli_fits() {
+  local dest=$1 source=$2 wanted=$3
+  dm_cli_source_needed "$(dm_file_state "$dest")" "$wanted" || return 0
+  dm_cli_source_fits "$source" "$wanted"
+}
+
 dm_tools_present() {
   local tool
   for tool in /usr/bin/node /usr/bin/sha256sum /usr/bin/stat /usr/bin/install /usr/bin/systemctl \
@@ -459,8 +477,10 @@ dm_main() {
   dm_check "/var/lib/amux-dm/requests is $DM_BROKER_USER:$DM_BROKER_USER 711" \
     dm_owner_mode_is /var/lib/amux-dm/requests "$DM_BROKER_USER:$DM_BROKER_USER:711"
   dm_check "no managed settings for claude (/etc/claude-code absent)" test ! -e /etc/claude-code -a ! -L /etc/claude-code
-  dm_check "codex source is §5a's file" dm_cli_source_fits "$DM_CODEX_SOURCE" "$DM_CODEX_SHA256"
-  dm_check "claude source is §5a's file" dm_cli_source_fits "$DM_CLAUDE_SOURCE" "$DM_CLAUDE_SHA256"
+  dm_check "codex is §5a's file at its destination or its source" \
+    dm_cli_fits "$DM_CODEX_DEST" "$DM_CODEX_SOURCE" "$DM_CODEX_SHA256"
+  dm_check "claude is §5a's file at its destination or its source" \
+    dm_cli_fits "$DM_CLAUDE_DEST" "$DM_CLAUDE_SOURCE" "$DM_CLAUDE_SHA256"
   dm_check "no Decision Maker unit is running" dm_units_not_running
   dm_check "every existing directory on the way to a destination or the backup is root's, not a link, not writable by others" \
     dm_destinations_safe

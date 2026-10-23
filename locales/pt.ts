@@ -1895,6 +1895,20 @@ export const pt = {
         dataTabOpen: "Abrir assistentes de IA",
     },
     memoryReview: {
+        restoreGrounds: "Adicionar novos fundamentos",
+        restoreGroundsNotice: "Escreva os seus fundamentos para devolver esta memória à revisão. Aprove-a separadamente antes da utilização.",
+
+        reportAnswer: "Comunicar um problema com esta resposta",
+        conflictReview: "Rever memórias relacionadas",
+        conflictChoose: "Escolha uma memória para comparar",
+        conflictKeep: "Manter as memórias existentes",
+        conflictBoth: "Manter ambas",
+        conflictExpire: "Expirar as memórias existentes",
+        conflictMerge: "Unir numa memória",
+        conflictMergedStatement: "Conteúdo unido",
+        conflictMergeGrounds: "Explique por que o conteúdo unido está correto",
+        conflictLoading: "A carregar memórias relacionadas…",
+
         sourceDeleteDerivedImport:
             "{count} memórias criadas a partir desta importação também serão excluídas.",
         sourceDeleteDerivedConversation:
@@ -1948,8 +1962,7 @@ export const pt = {
         sensitiveBadge: "Sensível",
         pinnedBadge: "Fixada",
         expires: "Expira: {date}",
-        conflictNotice:
-            "Uma memória ativa já cobre o mesmo item. Você pode manter a memória existente ou substituí-la por esta.",
+        conflictNotice: "Estas memórias podem tratar do mesmo assunto. Reveja-as e escolha o que manter.",
         conflictReplace: "Substituir a memória existente",
         activeTitle: "Memórias em uso",
         activeEmpty: "Ainda não há memórias em uso.",

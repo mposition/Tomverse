@@ -32,6 +32,11 @@ import {
 } from "@/lib/amux/ideaSubmissionRecoveryCore";
 import { classifySourceScopePreview } from "@/lib/amux/ideaSourceScopePreviewUiCore";
 import { AmuxIdeaScopeRepositoryPicker } from "@/components/admin/AmuxIdeaScopeRepositoryPicker";
+import { AmuxIdeaSessionModelPicker } from "@/components/admin/AmuxIdeaSessionModelPicker";
+import { readAvailableFrontierModels, type AvailableFrontierModel } from "@/lib/amux/ideaFrontierCatalogUiCore";
+import {
+  SESSION_MODEL_SCOPE_DEFAULT, sessionModelSelection, type SessionModelChoice,
+} from "@/lib/amux/ideaSessionModelChoiceCore";
 import {
   classifyScopeRepositoryRead, pickedScopeRepositories, scopeRepositoryBlock, toggleScopeRepository,
   type ScopeRepositoryRead,
@@ -108,7 +113,13 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [deselectedRepositories, setDeselectedRepositories] = useState<string[]>([]);
   const selectedRepositories = sessionIntake
     ? pickedScopeRepositories(scopeRead, deselectedRepositories) : lines(repositories);
-  const scopeBlocked = sessionIntake && scopeRepositoryBlock(scopeRead, selectedRepositories) !== null;
+  // Session intake: the analysis model, the scope's unless the owner picks another approved one.
+  const [sessionModels, setSessionModels] = useState<AvailableFrontierModel[] | null | "error">(null);
+  const [sessionModel, setSessionModel] = useState<SessionModelChoice>(SESSION_MODEL_SCOPE_DEFAULT);
+  const sessionModelBody = sessionIntake
+    ? sessionModelSelection(Array.isArray(sessionModels) ? sessionModels : null, sessionModel) : null;
+  const scopeBlocked = sessionIntake && (scopeRepositoryBlock(scopeRead, selectedRepositories) !== null ||
+    sessionModelBody === "incomplete");
   const hasUnsavedInput = !!(idea.trim() || repositories.trim() || pullRequests.trim());
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
@@ -333,6 +344,23 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     return () => { active = false; };
   }, [sessionIntake]);
 
+  // The approved Frontier models (existing GET, read only) the owner may pick for this idea.
+  useEffect(() => {
+    if (!sessionIntake) return;
+    let active = true;
+    void (async () => {
+      let next: AvailableFrontierModel[] | "error";
+      try {
+        const response = await adminFetch("/api/admin/amux/ideas/frontier-models?mode=available", { cache: "no-store" });
+        next = readAvailableFrontierModels(response.status, await response.json().catch(() => null)) ?? "error";
+      } catch {
+        next = "error";
+      }
+      if (active) setSessionModels(next);
+    })();
+    return () => { active = false; };
+  }, [sessionIntake]);
+
   const submit = async (inputChecked = false) => {
     if (!submissionAvailable || !recoveryChecked || inFlight.current || scopeBlocked ||
         (!inputChecked && result?.outcome !== "input_checked") ||
@@ -354,6 +382,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         body: JSON.stringify({
           version: 1, requestId,
           input: { version: 1, idea, repositories: selectedRepositories, pullRequests: refs },
+          ...(sessionModelBody && sessionModelBody !== "incomplete" ? { model: sessionModelBody } : {}),
         }),
       });
       const decision = classifyIdeaSubmissionPost({
@@ -707,6 +736,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           {submission.kind !== "submitted" && sessionIntake ? (
             <div className={card === null ? "flex flex-wrap items-center gap-3" : "hidden"}
               data-testid="amux-idea-session-submit">
+              <AmuxIdeaSessionModelPicker models={sessionModels}
+                scopeModel={scopeRead.kind === "ready" ? scopeRead.model : undefined}
+                choice={sessionModel} disabled={pending || frozen} onChange={setSessionModel} />
               <button type="button"
                 onClick={() => void (async () => { if (await checkInput()) await submit(true); })()}
                 disabled={!submissionAvailable || !recoveryChecked || pending || frozen || scopeBlocked ||

@@ -8,6 +8,7 @@ import {
   inspectAmuxIdeaSessionInput,
   inspectAmuxIdeaSessionSource,
   inspectAmuxIdeaSessionSubmission,
+  inspectAmuxSessionModelChoice,
   inspectSealedAmuxIdeaSessionInput,
   sameAmuxOperatingScopeAuthority,
 } from "@/lib/amux/ideaSessionSubmissionCore";
@@ -146,4 +147,17 @@ test("scope authority equality binds its row, version, owner and normalized scop
   assert.equal(sameAmuxOperatingScopeAuthority(authority, {
     ...authority, approvedByUserId: "owner-2",
   }), false);
+});
+
+test("a per-idea model choice is absent or one exact approved-catalog shape", () => {
+  assert.deepEqual(inspectAmuxSessionModelChoice(undefined), { ok: true, model: null });
+  assert.deepEqual(inspectAmuxSessionModelChoice(null), { ok: true, model: null });
+  const model = { provider: "github-copilot", modelId: "kimi-k3", reasoningEffort: "high" };
+  assert.deepEqual(inspectAmuxSessionModelChoice(model), { ok: true, model });
+  for (const bad of [{ ...model, extra: true }, { provider: "cursor", modelId: "grok" },
+    { ...model, provider: "operator" }, { ...model, modelId: "../x" },
+    { ...model, modelId: "a".repeat(121) }, { ...model, reasoningEffort: "extreme" },
+    [model], "kimi-k3", 1]) {
+    assert.deepEqual(inspectAmuxSessionModelChoice(bad), { ok: false }, JSON.stringify(bad));
+  }
 });

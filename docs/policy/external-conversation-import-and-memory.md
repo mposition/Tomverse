@@ -525,9 +525,10 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
   retrieval에서 즉시 제외되고, 사용자가 evidence를 직접 작성해 재승인해야
   active로 복귀합니다. 자동 복귀는 없습니다.
 
+- 추출 v9는 기존 LLM 호출에서 값·극성을 제외한 주제 `canonicalKey`를 제안합니다. 서버가 형식을 검증해 기존 `conflictKey`에 보관하며, 이 값은 검토 힌트일 뿐 승인 권한이 아닙니다. 과거 기억은 사용자가 비교 대상을 직접 선택할 수 있습니다.
 - 같은 conflict group(canonical key)의 값이 다르면 자동 덮어쓰지 않고 사용자가
   유지/교체/병기/만료/직접 병합을 선택합니다. 최신 날짜만으로 진위를 정하지
-  않습니다.
+  않습니다. 명시적 해결은 대상 기억과 비교 기억의 revision을 확인하며, 병기는 서로 다른 내용을 검색에서 보존합니다. 직접 병합에는 사용자가 작성한 문장과 근거가 필요합니다. 원문 삭제로 중지된 기억은 새 수동 근거를 추가하면 검토 대기 상태로 돌아가며 별도 승인을 거칩니다. 수동 근거 추가·편집·개별 승인 후에도 원래 추출 pair의 승인·철회 검사를 유지합니다.
 
 ### 8.4 서버 deterministic validator
 
@@ -1944,23 +1945,14 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     보고서 전체에 문장이 없는지 확인합니다.
   - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
     (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
-    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy의 feedback
-    신호 하나**(`Feedback`에 대상 답변으로 가는 연결이 없음). lock
-    suspension/restore(B5), chunk당 credit·batch sub-budget(slice 1.6),
-    injection 비율·token bucket·stale bundle 비율(§10 배선), follow-up·regenerate
-    (답변별 귀속)은 모두 출처가 생겨 목록에서 빠졌습니다.
-  - **`followup_repair_proxy_feedback_signal` = `POLICY_DECISION_REQUIRED /
-    METRIC_UNAVAILABLE`.** 이 하나가 비어 있다는 사실이 릴리스 B **코드**를
-    미완으로 만들지는 않습니다 — 위 규칙대로 `unavailable`로 표시되어 0으로
-    위장되지 않기 때문입니다. 초기 staging은 이 상태로 진행할 수 있고,
-    **production 확대와 효과 판정 전에 닫습니다.** 그때까지의 판정문은 이 신호를
-    제외했다고 명시하고, 확대 여부는 사람에게 다시 확인합니다.
+    혼동이 이 목록이 존재하는 이유입니다. 현재 구현된 지표 중 출처가 없는 항목은 없습니다. DB/schema를 읽을 수 없는 경우의 unavailable 상태는 계속 별도로 표시합니다.
+  - **명시적 answer attribution 구현 (2026-10-21):** 답변별 신고는 문의 분류와 별도로 `needs_improvement`를 보냅니다. 이 연결은 사용자 신고 의도이며 Trace 인증이나 자동 수정 권한이 아닙니다. 일반 문의와 `helpful`은 repair proxy에 포함하지 않습니다. 이는 코드 구현 기록이며 production 활성화나 효과 판정의 증거가 아닙니다.
 
     닫는 방법은 "가장 최근 답변 추정"이 아니라 **명시적 answer attribution**입니다.
     추정은 comparison·재생성·동시 요청에서 조용히 틀리고, 틀린 귀속은
     `unavailable`보다 나쁩니다(0이 아닌 값을 보고하므로).
 
-    - `Feedback.answerMessageId`를 **nullable relation**으로 추가합니다. 특정
+    - `Feedback.messageId`를 **nullable relation**으로 사용합니다. 특정
       assistant 답변에서 연 피드백만 이 ID를 보내고, sidebar·support·billing
       등 일반 진입점은 계속 `null`입니다.
     - 서버가 인증 사용자·Conversation 소유권·`role=assistant`를 **재검증**합니다.
@@ -1973,7 +1965,7 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     - **무엇을 repair 신호로 셀 것인가도 함께 정합니다.** 현재 `Feedback.type`은
       bug·feature·billing 같은 **문의 분류**이지 답변 품질의 방향성이 아니므로,
       answer-linked Feedback을 전부 부정 신호로 세면 안 됩니다. 답변 진입점에
-      폐쇄형 의미를 따로 둡니다 — `needs_improvement`는 proxy에 포함,
+      폐쇄형 `answerSignal`을 따로 둡니다 — `needs_improvement`는 proxy에 포함,
       `helpful`은 별도 관측(첫 버전 미지원 가능), 일반 Feedback은 proxy 제외.
     - **Trace와 answer attribution은 분리합니다.** Trace ID로 답변을 찾거나
       `occurrenceId`를 답변 ID로 재사용하지 않습니다. Trace evidence는 검증된
@@ -2044,16 +2036,14 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 | 항목 | 상태 | 차단 범위 |
 |---|---|---|
 | `memory_eval_dataset` | `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW` | 실제 extraction pair 승인과 `memoryInjectionEnabled` 활성화 (§12.6) |
-| `followup_repair_proxy_feedback_signal` | `POLICY_DECISION_REQUIRED / METRIC_UNAVAILABLE` | 없음 — production 확대·효과 판정 전에 닫습니다 (§22) |
+| `followup_repair_proxy_feedback_signal` | 구현됨 — 답변 FK·명시적 signal·집계 | production 실행·효과 실측은 별도 (§22) |
 
 - **릴리스 B 코드 완료는 위 두 항목과 분리해 판단합니다.** 두 항목 중 어느 것도
-  코드 계약의 결함이 아니며, feedback 신호는 §22 규칙대로 `unavailable`로
-  표시되어 0으로 위장되지 않습니다.
+  코드 계약의 결함이 아닙니다. feedback 신호는 §22의 소유권 확인과 명시적 평가를 거쳐 집계하며, 분모가 없으면 null로 표시합니다.
 - **extraction·injection 운영 활성화는 eval 데이터셋과 §12.4 승인 절차 완료 전까지
   차단**입니다. 이것이 데이터셋 항목의 실제 무게이며, 코드 완료로 대체되지
   않습니다.
-- **production 효과 판정 시에는** feedback 신호를 제외했다고 판정문에 명시하고,
-  확대 여부를 사람에게 다시 확인합니다.
+- **production 효과 판정 시에는** 실제 배포 버전과 계측 가능 여부를 기록하고, 확대 여부를 사람에게 확인합니다.
 
 기록된 한계:
 

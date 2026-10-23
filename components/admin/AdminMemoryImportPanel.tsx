@@ -75,6 +75,7 @@ type MemoryReport = {
 };
 
 type FollowupArm = {
+    feedbackRate?: number | null;
     answers: number;
     followups: number;
     regenerates: number;
@@ -331,6 +332,8 @@ export function AdminMemoryImportPanel() {
                                     value={m.versus(rate(memory.followupProxy.memory.regenerateRate), rate(memory.followupProxy.plain.regenerateRate))}
                                     detail={m.regenerateDetail(rate(memory.followupProxy.regenerateDifference))}
                                 />
+                                <Stat label={m.feedbackWithin}
+                                    value={m.versus(rate(memory.followupProxy.memory.feedbackRate ?? null), rate(memory.followupProxy.plain.feedbackRate ?? null))} />
                             </div>
                         ) : (
                             /* Named as absent rather than drawn as zero — the

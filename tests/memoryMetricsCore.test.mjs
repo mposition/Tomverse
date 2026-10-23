@@ -159,7 +159,6 @@ test("pair order is stable so two identical windows render identically", () => {
 /* -------------------------------------------------------------- honesty  -- */
 
 test("every unavailable metric carries a reason", () => {
-    assert.ok(MEMORY_METRICS_UNAVAILABLE.length > 0);
     for (const entry of MEMORY_METRICS_UNAVAILABLE) {
         assert.ok(entry.metric.length > 0);
         assert.ok(
@@ -174,12 +173,12 @@ test("the summary always carries the unavailable list, even when empty", () => {
     assert.deepEqual(summarize().unavailable, MEMORY_METRICS_UNAVAILABLE);
 });
 
-test("only the follow-up proxy's feedback signal is still unmeasured", () => {
+test("the feedback proxy is available once reports link to owned answers", () => {
     // Answers now carry their attribution, so the follow-up and regenerate
     // halves are measured. What is still missing is narrower and says so:
     // Feedback has no link to the answer a report is about.
     const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
-    assert.ok(declared.includes("followup_repair_proxy_feedback_signal"));
+    assert.ok(!declared.includes("followup_repair_proxy_feedback_signal"));
     assert.ok(!declared.includes("followup_repair_proxy"));
 });
 
@@ -438,10 +437,21 @@ test("both arms are always present in the shape", () => {
     const proxy = summarizeFollowupProxy([]);
     assert.deepEqual(Object.keys(proxy.memory).sort(), [
         "answers",
+        "feedbackRate",
+        "feedbacks",
         "followupRate",
         "followups",
         "regenerateRate",
         "regenerates",
     ]);
     assert.deepEqual(Object.keys(proxy.plain), Object.keys(proxy.memory));
+});
+
+test("feedback compares reported answers without counting report text or ids", () => {
+    const proxy = summarizeFollowupProxy([
+        arm("memory", { answers: 20, feedbacks: 2 }), arm("plain", { answers: 20, feedbacks: 1 }),
+    ]);
+    assert.equal(proxy.memory.feedbackRate, 0.1);
+    assert.equal(proxy.feedbackDifference, 0.05);
+    assert.equal(summarizeFollowupProxy([]).feedbackDifference, null);
 });

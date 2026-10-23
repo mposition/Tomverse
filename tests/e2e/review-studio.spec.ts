@@ -23,7 +23,7 @@ async function prepare(page: Page, width: number, theme: "light" | "dark" = "lig
   if (imageTriage) await page.context().addCookies([{ name: "__tomverse_e2e_chat_image_intent", value: "1", url: "http://127.0.0.1:3100" }]);
   await page.goto("/review?lang=ko", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("chat-input")).toBeVisible({ timeout: 60_000 });
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Easy", exact: true }).click();
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Easy", exact: true }).click();
   await expect(page.locator(".review-participant-list>button")).toHaveCount(providerCount, { timeout: 20000 });
 }
 
@@ -95,11 +95,11 @@ for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const)
       await page.getByTestId("mobile-sidebar-open").click();
       await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar")).toBeVisible();
       await expectHeaderControlsFit(page);
-      await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
-      await expect(page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+      await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
     }
     await page.getByTestId("review-appearance").selectOption("studio");
-    await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+    await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
     await expect(page.getByTestId("chat-textarea")).toHaveValue("Preserve this draft across appearance and mode changes.");
     await page.locator(".review-participants-heading").click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
@@ -159,9 +159,9 @@ for (const width of [1600, 430]) test(`Easy ${width}px selects the provider's re
   expect(requests.map(request => request.modelId).sort()).toEqual([deep, "gpt-6-luna"].sort());
   expect(routes).toBe(1);
   if (width <= 768) await page.getByTestId("mobile-sidebar-open").click();
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await (width <= 768 ? page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar") : page.getByTestId("composer-review-mode")).getByRole("button", { name: "Professional", exact: true }).click();
   if (width <= 768) await page.keyboard.press("Escape");
-  else await expect(page.locator(".review-research-shortcut")).toBeVisible();
+  else await expect(page.locator(".review-research-shortcut")).toHaveCount(0);
   await page.getByTestId("composer-tools-button").click();
   await expect(page.getByTestId("tools-deep-research-row")).toBeVisible();
 });
@@ -185,7 +185,7 @@ test("Easy routes once and dispatches each selected provider through the existin
   await expect(page.getByText("Answer from gpt-6-luna.", { exact: true })).toBeVisible();
   await expect(page.getByText(`Answer from ${THREE_MODELS[0]}.`, { exact: true })).toBeVisible();
   expect(routes).toBe(2);
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
   await expect.poll(() => page.getByTestId("desktop-model-panel").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-model-id")))).toEqual(THREE_MODELS);
 });
 
@@ -380,7 +380,7 @@ test("Studio at 320px preserves a full-width textarea and reachable controls at 
 test("Easy deduplicates Professional providers and restores every model when switched back", async ({ page }) => {
   await prepare(page, 1600, "light", ["gpt-5-4-mini", "gpt-6-luna", "claude-haiku-4-5"], 2);
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(2);
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 });
 
@@ -426,7 +426,7 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
       ...Object.fromEntries(healthy.map(id => [id, { kind: "success", chunks: [`Healthy ${id}.`] }])),
     });
     await prepare(page, width, theme);
-    await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+    await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
     await page.getByTestId("chat-textarea").fill("Compare, then recover the failed provider.");
     await page.getByTestId("chat-send-button").click();
     await page.getByRole("button", { name: "다시 시도", exact: true }).click();
