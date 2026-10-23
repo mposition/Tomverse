@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
   DEFAULT_IMAGE_MODEL_ID,
   IMAGE_MODEL_REGISTRY,
+  findImageModel,
+  findImageModelPrice,
   getImageModel,
   getImageModelPrice,
   listActiveImageProviders,
@@ -15,6 +18,9 @@ import {
   imageModelChipLabel,
   imageModelBrandParts,
   imageModelOwner,
+  imageThinkingBilling,
+  imageThinkingCapEnforced,
+  imageThinkingCapMinimumMicroUsd,
   shouldUseCompactImageModelPicker,
   IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
 } from "../lib/imageModelRegistry.ts";
@@ -24,6 +30,38 @@ import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
 } from "../lib/imageGenerationPricing.ts";
+
+test("catalogue-parametrised lookups resolve against the given list, not module state", () => {
+  const seed = IMAGE_MODEL_REGISTRY;
+  const only = [seed[0]];
+  assert.equal(findImageModel(only, seed[0].id)?.id, seed[0].id);
+  // A model absent from the handed list is unknown even though the seed has it.
+  assert.equal(findImageModel([], seed[0].id), null);
+  const price = seed[0].prices[0];
+  assert.equal(findImageModelPrice([], seed[0].id, price.quality, price.size), null);
+  assert.deepEqual(
+    findImageModelPrice(only, seed[0].id, price.quality, price.size),
+    price
+  );
+});
+
+test("client components never write the module-global image catalogue", () => {
+  for (const file of [
+    "../app/(site)/(application)/chat/ChatPageClient.tsx",
+    "../components/images/ImageGenerationWorkspace.tsx",
+    "../components/chat/ImageModelTabPanel.tsx",
+    "../components/chat/ChatMessageList.tsx",
+  ]) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /setActiveImageModelCatalog/, file);
+  }
+});
+
+test("a held model never prices through the parametrised lookup", () => {
+  const held = { ...IMAGE_MODEL_REGISTRY[0], disabledReason: "held" };
+  const price = held.prices[0];
+  assert.equal(findImageModelPrice([held], held.id, price.quality, price.size), null);
+});
 
 test("the registry ships GPT Image 2 enabled and Nano Banana 2 on a verification hold", () => {
   const openai = getImageModel("gpt-image-2");
@@ -129,6 +167,59 @@ test("worst-case cost is null when the thinking cap is unknown", () => {
   // so no fixed credit figure can be derived from it.
   assert.equal(maxImageRequestCostMicroUsd(google, hypotheticalPrice), null);
   assert.equal(minimumCreditsForImageOption(google, hypotheticalPrice), null);
+});
+
+test("a stated thinking cap is a bound only where the request can hold it", () => {
+  // Google bills thinking per token and no request parameter caps the count,
+  // so a cap an operator writes into a price revision is a number, not a
+  // bound: the worst case stays unbounded and no floor can be derived.
+  const google = getImageModel("gemini-3.1-flash-image");
+  const stated = {
+    ...google,
+    priceVerification: { ...google.priceVerification, thinkingCapMicroUsd: 2_000 },
+  };
+  const price = { quality: "medium", size: "1024x1024", credits: 10_000, outputCostMicroUsd: 67_000 };
+  assert.equal(imageThinkingBilling("google"), "per_token_uncapped");
+  assert.equal(imageThinkingCapEnforced(stated), false);
+  assert.equal(maxImageRequestCostMicroUsd(stated, price), null);
+  assert.equal(minimumCreditsForImageOption(stated, price), null);
+
+  // fal's high thinking is a flat surcharge on a level the request pins, and
+  // the other two bill no thinking at all: each enabled model's cap holds.
+  assert.equal(imageThinkingBilling("fal"), "flat_per_request");
+  assert.equal(imageThinkingBilling("openai"), "not_billed");
+  assert.equal(imageThinkingBilling("xai"), "not_billed");
+  for (const model of listEnabledImageModels()) {
+    assert.equal(imageThinkingCapEnforced(model), true, model.id);
+  }
+  // A provider with no adapter, or a prototype key, has no billing answer.
+  assert.equal(imageThinkingBilling("ideogram"), null);
+  assert.equal(imageThinkingBilling("toString"), null);
+  assert.equal(imageThinkingBilling(undefined), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("ideogram"), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("google"), null);
+});
+
+test("a flat thinking surcharge is a bound only when the cap covers it", () => {
+  // Review finding 2026-10-21: fal's request always pins high thinking and
+  // pays $0.002 for it, so a revision that states a smaller cap would reserve
+  // and settle less than fal bills. Below the surcharge is not a bound.
+  const fal = getImageModel("fal-ai/nano-banana-2");
+  const price = fal.prices[0];
+  const withCap = (thinkingCapMicroUsd) => ({
+    ...fal,
+    priceVerification: { ...fal.priceVerification, thinkingCapMicroUsd },
+  });
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal"), 2_000);
+  assert.equal(imageThinkingCapMinimumMicroUsd("openai"), 0);
+  for (const understated of [0, 1, 1_999]) {
+    assert.equal(imageThinkingCapEnforced(withCap(understated)), false, String(understated));
+    assert.equal(maxImageRequestCostMicroUsd(withCap(understated), price), null, String(understated));
+  }
+  assert.equal(imageThinkingCapEnforced(withCap(2_000)), true);
+  assert.equal(maxImageRequestCostMicroUsd(withCap(2_000), price), 87_000);
+  // A wider stated margin still bounds the request; it is reserved, not owed.
+  assert.equal(imageThinkingCapEnforced(withCap(3_000)), true);
 });
 
 test("every enabled option prices at or above the policy minimum", () => {

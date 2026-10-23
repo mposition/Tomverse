@@ -166,7 +166,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "qa-release-intake",
   "qa-release-merge-lane",
   "agent-digest-retention",
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -246,7 +246,7 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
-  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) &&
+  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) &&
   (actor !== AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.inspected" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&
@@ -402,4 +402,20 @@ function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetTyp
       targetType === "MarketingLlmCall") ||
     (action === "marketing_report.generator_recorded" && targetType === "MarketingReport") ||
     (action === "marketing_competitor.proposed" && targetType === "MarketingCompetitor");
+}
+
+/**
+ * The scheduled renewal of the Code client's coding catalogue snapshot
+ * (renewCodingSnapshotIfUnchanged in lib/modelCatalog.ts): one action about one
+ * snapshot row, taken only when the judged content equals the newest
+ * snapshot's. A change of content is published by a person with
+ * writeAdminAuditLog. Not a person, so never approval evidence. Declared at the
+ * end of the file and joined into `systemAuditActionAllowed()` on its existing
+ * first line, so no access above it moves.
+ */
+export const MODEL_CATALOG_RENEWAL_AUDIT_ACTOR = "model-catalog-renewal" as const satisfies SystemAuditActor;
+export const MODEL_CATALOG_SNAPSHOT_RENEWED_ACTION = "model_catalog.snapshot_renewed" as const;
+function modelCatalogRenewalAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
+  return actor !== "model-catalog-renewal" ||
+    (action === "model_catalog.snapshot_renewed" && targetType === "ModelCatalogSnapshot");
 }

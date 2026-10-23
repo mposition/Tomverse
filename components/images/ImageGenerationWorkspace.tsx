@@ -38,13 +38,11 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   DEFAULT_IMAGE_MODEL_ID,
-  getImageModel,
-  getImageModelPrice,
   imageModelChipLabel,
   imageComposerModelLayout,
-  listEnabledImageModels,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import {
   limitImageModelSelection,
   reportedImageModelLimit,
@@ -191,8 +189,7 @@ const groupAttempts = (generations: GenerationView[]): GroupView[] => {
 // held after it produced its image, and a restore notice naming the model it
 // had to drop, both need the name of something that is no longer selectable.
 // Falling back to the raw id there showed `gemini-3.1-flash-image` to a user.
-const imageModelName = (modelId: string | undefined) =>
-  (modelId && getImageModel(modelId)?.name) || modelId || "";
+// Resolved inside the component against the context catalogue.
 
 const isTerminal = (status: string) =>
   status === "succeeded" || status === "failed";
@@ -290,6 +287,14 @@ export function ImageGenerationWorkspace({
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
   const isMobileShell = useIsMobileShell();
+  const {
+    models: catalogModels,
+    enabledModels: availableModels,
+    getModel: getImageModel,
+    getPrice: getImageModelPrice,
+  } = useImageModelCatalog();
+  const imageModelName = (modelId: string | undefined) =>
+    (modelId && getImageModel(modelId)?.name) || modelId || "";
   const [generations, setGenerations] = useState<GenerationView[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -299,14 +304,18 @@ export function ImageGenerationWorkspace({
   // limit as everything else: a deployment can lower it between the catalogue
   // render and this mount, and a seed is not more privileged than a restore.
   const [seedLimitOutcome] = useState(() => {
-    const enabled = new Set(listEnabledImageModels().map((model) => model.id));
+    const enabled = new Set(availableModels.map((model) => model.id));
     const seeded = (initialModelIds ?? []).filter((modelId) =>
       enabled.has(modelId)
     );
     if (seeded.length === 0) {
       return { modelIds: modelSelectionLocked ? [] : [DEFAULT_IMAGE_MODEL_ID], excludedModelIds: [] };
     }
-    return limitImageModelSelection({ modelIds: seeded, maxModels });
+    return limitImageModelSelection({
+      modelIds: seeded,
+      maxModels,
+      models: catalogModels,
+    });
   });
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>(
     seedLimitOutcome.modelIds
@@ -327,6 +336,12 @@ export function ImageGenerationWorkspace({
   useEffect(() => {
     maxModelsRef.current = maxModels;
   }, [maxModels]);
+  // Same reason: the catalogue is read when the history lands, and a new
+  // catalogue must not re-fetch the conversation's timeline.
+  const catalogModelsRef = useRef(catalogModels);
+  useEffect(() => {
+    catalogModelsRef.current = catalogModels;
+  }, [catalogModels]);
   // The restore's *outcome*, not its copy: rendering the sentences here would
   // pull `t` into the history-load effect and re-run the fetch on a language
   // change. Stored structurally, the notice simply follows the language.
@@ -359,7 +374,6 @@ export function ImageGenerationWorkspace({
 
   const quality = IMAGE_QUALITY_BY_PRESET[preset];
   const pricing = getImageGenerationPricing(quality, size);
-  const availableModels = useMemo(() => listEnabledImageModels(), []);
   // Decided by how many models are enabled, and by nothing else -- not the
   // viewport, not the selection, not a measured line count. The rule itself
   // lives in the registry so it can be tested at four and five enabled models,
@@ -441,6 +455,7 @@ export function ImageGenerationWorkspace({
           const limited = limitImageModelSelection({
             modelIds: restore.modelIds,
             maxModels: maxModelsRef.current,
+            models: catalogModelsRef.current,
           });
           setSelectedModelIds(limited.modelIds);
           // Options come back only when every target of the last comparison

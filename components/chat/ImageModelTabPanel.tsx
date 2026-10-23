@@ -5,10 +5,10 @@ import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   imageModelBrandParts,
-  listImageModels,
   type ImageModelOwner,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 
 // The catalogue's image tab (policy v2 section 13 of
 // docs/policy/image-generation.md).
@@ -89,7 +89,7 @@ export function ImageModelTabPanel({
   isKeyboardCompact,
 }: ImageModelTabPanelProps) {
   const { t } = useLanguage();
-  const models = listImageModels();
+  const { models } = useImageModelCatalog();
 
   return (
     <div

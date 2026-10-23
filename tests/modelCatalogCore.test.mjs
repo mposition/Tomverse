@@ -12,6 +12,7 @@ import {
 import {
   canonicalJson,
   catalogContentHash,
+  decideSnapshotRenewal,
   effectiveRevisions,
   imageExecutionDrift,
   imageExecutionProfile,
@@ -23,6 +24,7 @@ import {
   resolveImageCatalog,
   snapshotCoverageUntil,
   snapshotIsCurrent,
+  SNAPSHOT_RENEWAL_WINDOW_MS,
   stalePricingVersions,
 } from "../lib/modelCatalogCore.ts";
 import { codingDraftFromAnswer, draftPricingVersion, imageDraftFromAnswer, pageToText } from "../lib/modelCatalogDraftLlm.ts";
@@ -76,6 +78,77 @@ test("NULL inherits, a hold disables, and an override changes only what it names
 test("turning on a model whose worst case is unbounded is refused by the judge, not by the row", () => {
   const { models } = resolve([row(heldSeed.id, { enabled: true })]);
   assert.equal(models.find((m) => m.id === heldSeed.id).disabledReason, "worst_case_cost_unbounded");
+});
+
+test("a thinking cap stated for a provider whose request cannot hold it does not unbound the hold", () => {
+  // Google bills thinking per token with no request parameter that caps it.
+  // A revision may still write a number into thinkingCapMicroUsd; turning the
+  // model on with that number must not reserve less than the call can spend.
+  const googleRevision = (modelId) => ({
+    modelId,
+    pricingVersion: `${modelId}-stated-cap`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits: 10_000, outputCostMicroUsd: 67_000 }],
+    verification: {
+      verifiedAt: "2026-10-19",
+      sources: ["https://ai.google.dev/gemini-api/docs/pricing"],
+      thinkingCapMicroUsd: 2_000,
+    },
+  });
+
+  const seeded = resolve([row(heldSeed.id, { enabled: true })], [googleRevision(heldSeed.id)]);
+  assert.equal(heldSeed.provider, "google");
+  assert.equal(seeded.models.find((m) => m.id === heldSeed.id).disabledReason, "worst_case_cost_unbounded");
+
+  const profile = {
+    provider: "google",
+    apiModelId: "gemini-runtime-image",
+    name: "Runtime Gemini Image",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "balanced",
+    provenance: ["synthid"],
+    outputMimeTypes: ["image/jpeg"],
+    maxOutputTokens: 32_768,
+  };
+  const runtime = resolve(
+    [row("gemini-runtime-image", { profile, enabled: true })],
+    [googleRevision("gemini-runtime-image")]
+  );
+  assert.equal(
+    runtime.models.find((m) => m.id === "gemini-runtime-image").disabledReason,
+    "worst_case_cost_unbounded"
+  );
+
+  // The same judge admits fal's flat high-thinking surcharge as a bound.
+  const fal = IMAGE_MODEL_REGISTRY.find((model) => model.provider === "fal");
+  assert.deepEqual(judge()(fal), { admitted: true });
+  const statedGoogle = {
+    ...heldSeed,
+    disabledReason: null,
+    prices: googleRevision(heldSeed.id).prices,
+    priceVerification: googleRevision(heldSeed.id).verification,
+  };
+  assert.ok(judge()(statedGoogle).reasons.includes("worst_case_cost_unbounded"));
+});
+
+test("a fal revision whose thinking cap is below the pinned surcharge does not serve", () => {
+  // Review finding 2026-10-21: the request still pays fal's $0.002 for high
+  // thinking, so a cap of 0 would reserve and settle 2,000 less than fal bills.
+  const fal = IMAGE_MODEL_REGISTRY.find((model) => model.provider === "fal");
+  const understated = {
+    modelId: fal.id,
+    pricingVersion: "fal-understated-cap",
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: fal.prices,
+    verification: { ...fal.priceVerification, thinkingCapMicroUsd: 0 },
+  };
+  const { models } = resolve([], [understated]);
+  assert.equal(models.find((m) => m.id === fal.id).disabledReason, "worst_case_cost_unbounded");
+  const reasons = judge()({ ...fal, priceVerification: understated.verification }).reasons;
+  assert.ok(reasons.includes("worst_case_cost_unbounded"));
+  assert.ok(reasons.includes("thinking_cap_below_minimum:2000"));
 });
 
 test("turning on an admitted model serves it; a missing provider budget refuses it", () => {
@@ -297,6 +370,31 @@ test("a reserved image request runs only with the profile it was priced with", (
   assert.equal(imageExecutionDrift(snapshot, null), "model_missing");
   // A reservation from before the field existed has nothing to compare.
   assert.equal(imageExecutionDrift({ outputCostMicroUsd: 1 }, null), null);
+});
+
+test("the scheduled renewal extends identical content inside the last week and nothing else", () => {
+  const day = 24 * 60 * 60 * 1000;
+  const same = "a".repeat(64);
+  const snapshot = (daysLeft, contentHash = same) => ({
+    contentHash,
+    coverageUntil: new Date(NOW.getTime() + daysLeft * day),
+  });
+  assert.equal(SNAPSHOT_RENEWAL_WINDOW_MS, 7 * day);
+  // The first snapshot is a person's to publish.
+  assert.equal(decideSnapshotRenewal(null, same, NOW), "no_snapshot");
+  // Plenty of coverage left: nothing to do.
+  assert.equal(decideSnapshotRenewal(snapshot(29), same, NOW), "not_due");
+  assert.equal(decideSnapshotRenewal(snapshot(7.5), same, NOW), "not_due");
+  // Exactly a week left is already due (the manual publish uses the same edge).
+  assert.equal(decideSnapshotRenewal(snapshot(7), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(snapshot(1), same, NOW), "renew");
+  // Past coverage with content still judged the same is renewed too.
+  assert.equal(decideSnapshotRenewal(snapshot(-3), same, NOW), "renew");
+  // Changed content is never renewed by the job, due or not, expired or not.
+  const other = "b".repeat(64);
+  assert.equal(decideSnapshotRenewal(snapshot(29), other, NOW), "content_changed");
+  assert.equal(decideSnapshotRenewal(snapshot(2), other, NOW), "content_changed");
+  assert.equal(decideSnapshotRenewal(snapshot(-3), other, NOW), "content_changed");
 });
 
 test("page text drops scripts and tags", () => {

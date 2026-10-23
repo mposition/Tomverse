@@ -6,6 +6,7 @@ import {
   falAssetLengthRefused,
   falAuthorizationHeader,
   falPlatformHeaders,
+  FAL_HIGH_THINKING_SURCHARGE_MICRO_USD,
   FAL_MAX_ASSET_BYTES,
   isFalAssetUrl,
   parseFalImageResponse,
@@ -182,8 +183,10 @@ test("the priced thinking cap and the requested thinking level are one decision"
       : "the request does not ask for thinking, so the cap must not price it"
   );
   if (asksForThinking) {
-    // fal's published surcharge for high thinking is $0.002.
+    // fal's published surcharge for high thinking is $0.002, and the cap the
+    // judge accepts for fal is at least that constant.
     assert.equal(request().thinking_level, "high");
-    assert.ok(model.priceVerification.thinkingCapMicroUsd >= 2_000);
+    assert.equal(FAL_HIGH_THINKING_SURCHARGE_MICRO_USD, 2_000);
+    assert.ok(model.priceVerification.thinkingCapMicroUsd >= FAL_HIGH_THINKING_SURCHARGE_MICRO_USD);
   }
 });

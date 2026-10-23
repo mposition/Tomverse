@@ -14,11 +14,13 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-import type {
-  ImageModelDisabledReason,
-  ImageModelOptionPrice,
-  ImageModelPriceVerification,
-  ImageModelProfile,
+import {
+  imageThinkingCapEnforced,
+  imageThinkingCapMinimumMicroUsd,
+  type ImageModelDisabledReason,
+  type ImageModelOptionPrice,
+  type ImageModelPriceVerification,
+  type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 
 export const MODEL_CATALOG_CATEGORIES = ["chat", "image", "coding", "video"] as const;
@@ -262,8 +264,17 @@ export const judgeImageModel = (
       reasons.push(`unofficial_source:${source}`);
     }
   }
-  if (model.priceVerification.thinkingCapMicroUsd === null) {
+  // A stated cap counts only where the request can hold it: a revision that
+  // writes a number for a provider billing thinking per uncapped token has
+  // stated a cost, not bounded one, and a cap below a flat surcharge the
+  // request incurs anyway understates it.
+  if (!imageThinkingCapEnforced(model)) {
     reasons.push("worst_case_cost_unbounded");
+    const cap = model.priceVerification.thinkingCapMicroUsd;
+    const minimum = imageThinkingCapMinimumMicroUsd(model.provider);
+    if (cap !== null && minimum !== null && cap < minimum) {
+      reasons.push(`thinking_cap_below_minimum:${minimum}`);
+    }
   } else {
     for (const price of model.prices) {
       const floor = deps.minimumCredits(model, price);
@@ -487,6 +498,37 @@ export const snapshotCoverageUntil = (now: Date): Date =>
 /** A snapshot past its coverage cannot price anything: fail closed. */
 export const snapshotIsCurrent = (coverageUntil: Date, now: Date): boolean =>
   coverageUntil.getTime() > now.getTime();
+
+/** With less coverage than this left, an unchanged snapshot is due a new version. */
+export const SNAPSHOT_RENEWAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type SnapshotRenewalDecision =
+  | "no_snapshot"
+  | "content_changed"
+  | "not_due"
+  | "renew";
+
+/**
+ * Whether the scheduled job may extend the newest snapshot's coverage.
+ *
+ * Only a renewal of identical content is automatic: `currentHash` is the hash
+ * of what the judges admit right now, so a model an operator turned on or off,
+ * a price or a hold that moved, or an admission that lapsed all differ from the
+ * snapshot and wait for a person to publish. The first snapshot is a person's
+ * too. An expired snapshot with unchanged content is still renewed -- the
+ * content is judged current today, which is all coverage claims.
+ */
+export const decideSnapshotRenewal = (
+  latest: { contentHash: string; coverageUntil: Date } | null,
+  currentHash: string,
+  now: Date
+): SnapshotRenewalDecision => {
+  if (!latest) return "no_snapshot";
+  if (latest.contentHash !== currentHash) return "content_changed";
+  return latest.coverageUntil.getTime() - now.getTime() > SNAPSHOT_RENEWAL_WINDOW_MS
+    ? "not_due"
+    : "renew";
+};
 
 // --- quote binding -----------------------------------------------------------
 

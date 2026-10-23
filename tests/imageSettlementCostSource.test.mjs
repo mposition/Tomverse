@@ -71,3 +71,16 @@ test("a request that thought settles the reserved thinking cap, never zero", () 
   assert.equal(settledThinkingCostMicroUsd({ outputCostMicroUsd: 1 }, 512), null);
   assert.equal(settledThinkingCostMicroUsd(null, 512), null);
 });
+
+test("a flat thinking surcharge settles at the cap even when no thinking is reported", () => {
+  // fal bills high thinking as a fixed $0.002 on every request that pins it
+  // and reports no token counts at all. Reading the missing count as zero
+  // settles 80,000 for an image fal bills at 82,000 (policy section 16.8).
+  assert.equal(settledThinkingCostMicroUsd({ provider: "fal", thinkingCapMicroUsd: 2_000 }, 0), 2_000);
+  assert.equal(settledThinkingCostMicroUsd({ provider: "fal", thinkingCapMicroUsd: 2_000 }, 512), 2_000);
+  // Older fal snapshot without a cap: settle the whole reservation, never zero.
+  assert.equal(settledThinkingCostMicroUsd({ provider: "fal" }, 0), null);
+  // Providers that bill no thinking still settle zero.
+  assert.equal(settledThinkingCostMicroUsd({ provider: "openai", thinkingCapMicroUsd: 0 }, 0), 0);
+  assert.equal(settledThinkingCostMicroUsd({ provider: "xai", thinkingCapMicroUsd: 0 }, 0), 0);
+});
