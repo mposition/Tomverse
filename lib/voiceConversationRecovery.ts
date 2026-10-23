@@ -57,6 +57,7 @@ export async function observeActiveVoiceConversations() {
     const lease = await claimVoiceRecoveryLease(row.id);
     if (!lease) continue;
     const socket = attachVoiceProviderSession(row.providerRequestId!);
+    let finalizing = false;
     const close = () => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
     const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
     const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
@@ -67,7 +68,7 @@ export async function observeActiveVoiceConversations() {
       if (released) return; released = true;
       clearTimeout(stopTimer); clearTimeout(expiryTimer); clearInterval(leaseTimer);
       receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
-      socket.close(); void releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
+      socket.close(); void releaseVoiceRecoveryLease(row.id, lease!).catch(() => {});
     }
     receivers.set(row.id, release);
     receiverClosers.set(row.id, close);
@@ -80,11 +81,12 @@ export async function observeActiveVoiceConversations() {
       if (event.type === "session.usage.updated") {
         void recordVoiceUsage(row.id, seconds).catch(() => close());
       } else if (event.type === "session.closed") {
+        finalizing = true;
         void finalizeVoiceReservation(row.id, seconds).catch(() => prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {})).finally(release);
       }
     });
     socket.once("error", () => { release(); });
-    socket.once("close", release);
+    socket.once("close", () => { if (!finalizing) release(); });
   }
 }
 
@@ -156,6 +158,7 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 10) 
   const result = { examined: rows.length, settled: 0, deferred: 0 };
   await Promise.all(rows.map(async row => {
     let lease: string | null = null;
+    let leaseTimer: ReturnType<typeof setInterval> | undefined;
     try {
       const payload = readVoiceCreditPayload(row.reservationPayload);
       if (receivers.has(row.id)) return;
@@ -169,6 +172,8 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 10) 
       if (!row.lastError && now.getTime() < closeAt) return;
       lease = await claimVoiceRecoveryLease(row.id);
       if (!lease) return;
+      const token = lease;
+      leaseTimer = setInterval(() => { void renewRecoveryLease(row.id, token).catch(() => {}); }, 5_000);
       let providerStopped = !row.providerRequestId && !payload.dispatchStartedAt;
       if (row.providerRequestId) {
         const seconds = await closeVoiceProviderSession(row.providerRequestId);
@@ -194,6 +199,7 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 10) 
       result.deferred++;
       await prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {});
     } finally {
+      clearInterval(leaseTimer);
       if (lease) await releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
       await prisma.chatCreditReservation.updateMany({ where: { id: row.id }, data: { updatedAt: now } }).catch(() => {});
     }
