@@ -12,6 +12,11 @@ import {
   openOnScreenKeyboard,
   readVisualViewport,
 } from "./support/ui-audit";
+import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage } from "./support/chat-state-fixtures";
+
+test.beforeEach(async ({ page }) => {
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
+});
 
 /**
  * STG-F008 responsive contract. The picker is a full-height sheet on phones and

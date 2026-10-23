@@ -987,7 +987,7 @@ export function MobileChatShell({
   // STG-F003: portal into a host rather than into the slot itself, so a slot
   // that remounts never rebuilds the composer and drops a draft in progress.
   const composerPortalHost = useComposerPortalHost(bottomInputSlot);
-  // The consent notice sits directly above the composer, so it follows it.
+  // The consent notice follows the composer and disclaimer in the bottom dock.
   const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
   const consentSlotTarget = bottomConsentSlot;
   useEffect(() => {
@@ -1758,7 +1758,7 @@ export function MobileChatShell({
       <div
         ref={bottomDockRef}
         data-testid="mobile-bottom-dock"
-        className="flex w-full shrink-0 flex-col"
+        className="flex w-full shrink-0 flex-col pb-[env(safe-area-inset-bottom)]"
       >
       {/*
         The Deep Research expansion offer, above the comparison rail and
@@ -1842,7 +1842,6 @@ export function MobileChatShell({
         onGuestSignInPrompt={onGuestSignInPrompt}
       />}
 
-      <div ref={setBottomConsentSlot} className="shrink-0" />
       <div ref={setBottomInputSlot} />
       {composerPortalHost &&
         createPortal(
@@ -1920,6 +1919,7 @@ export function MobileChatShell({
         )}
 
       <AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />
+      <div ref={setBottomConsentSlot} data-testid="composer-consent-slot" className="shrink-0 empty:hidden" />
       </div>
       </>
       )}

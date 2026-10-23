@@ -72,6 +72,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `chat-unified-workspace.spec.ts` |
 | `chat-product-switcher.spec.ts` |
 | `compact-composer.spec.ts` |
+| `composer-feature-parity.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
 | `email-notification-settings.spec.ts` |
