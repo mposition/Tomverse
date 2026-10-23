@@ -3,44 +3,66 @@ import { prisma } from "@/lib/prisma";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { readVoiceCreditPayload, settleVoiceConversationCredits } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, closeVoiceProviderSession, hangupVoiceProviderSession } from "@/lib/voiceConversationProvider";
-import { VOICE_CONVERSATION_SOURCE } from "@/lib/voiceConversationCore";
+import { VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
 
 const heartbeatKey = "voice-conversation:watchdog";
 const heartbeatPeriod = "worker";
 const epoch = new Date(0);
 const receivers = new Map<string, () => void>();
+const receiverClosers = new Map<string, () => void>();
+const retryAfter = new Map<string, number>();
 
 /** The independent worker receives final usage even when the web process dies. */
 export async function observeActiveVoiceConversations() {
+  if (process.env.VOICE_CONVERSATION_KILL_SWITCH) for (const close of receiverClosers.values()) close();
   const rows = await prisma.chatCreditReservation.findMany({ where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }], providerRequestId: { not: null } } });
+  for (const id of retryAfter.keys()) if (!rows.some(row => row.id === id)) retryAfter.delete(id);
   for (const [id, release] of receivers) if (!rows.some(row => row.id === id)) release();
   for (const row of rows) {
     if (receivers.has(row.id)) continue;
+    if ((retryAfter.get(row.id) ?? 0) > Date.now()) continue;
     const payload = readVoiceCreditPayload(row.reservationPayload);
+    // A healthy web receiver owns the sideband. After its process disappears,
+    // the durable lease expires and this independent receiver takes over.
+    if (Date.parse(payload.webLeaseUntil ?? "") > Date.now()) {
+      if (Date.parse(payload.closeAt ?? "") <= Date.now() || process.env.VOICE_CONVERSATION_KILL_SWITCH) {
+        retryAfter.set(row.id, Date.now() + 10_000);
+        void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {});
+      }
+      continue;
+    }
     const socket = attachVoiceProviderSession(row.providerRequestId!);
     const close = () => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "session.close" })); };
     const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
     const stopTimer = setTimeout(close, Math.max(0, closeAt - Date.now()));
     const expiryTimer = setTimeout(() => { void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
-    function release() { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); socket.close(); }
+    function release() { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000); socket.close(); }
     receivers.set(row.id, release);
+    receiverClosers.set(row.id, close);
     socket.once("open", () => { if (Date.now() >= closeAt || process.env.VOICE_CONVERSATION_KILL_SWITCH) close(); });
     socket.on("message", data => {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;
       if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return;
+      if (seconds > payload.maxSeconds) { close(); return; }
       if (event.type === "session.usage.updated") {
         void recordVoiceUsage(row.id, seconds).catch(() => close());
       } else if (event.type === "session.closed") {
-        void finalizeVoiceReservation(row.id, seconds).catch(() => prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } })).finally(release);
+        void finalizeVoiceReservation(row.id, seconds).catch(() => prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {})).finally(release);
       }
     });
     socket.once("error", () => { release(); });
-    socket.once("close", () => { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); });
+    socket.once("close", () => { clearTimeout(stopTimer); clearTimeout(expiryTimer); receivers.delete(row.id); receiverClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000); });
   }
 }
 
-export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); }
+export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); retryAfter.clear(); }
+
+export async function renewVoiceWebLease(id: string) {
+  const until = new Date(Date.now() + 30_000).toISOString();
+  const count = await prisma.$executeRaw`UPDATE "ChatCreditReservation" SET "reservationPayload" = jsonb_set("reservationPayload", '{webLeaseUntil}', to_jsonb(${until}::text)), "updatedAt" = NOW() WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND "status" = 'reserved' AND "lastError" IS NULL`;
+  if (count !== 1) throw new Error("The primary voice receiver must close.");
+}
 
 export async function touchVoiceWatchdog() {
   await prisma.chatUsageBucket.upsert({
@@ -50,12 +72,12 @@ export async function touchVoiceWatchdog() {
   });
 }
 
-export async function assertVoiceWatchdogReady() {
+export async function assertVoiceWatchdogReady(userId: string) {
   const row = await prisma.chatUsageBucket.findUnique({ where: { key_period_periodStart: { key: heartbeatKey, period: heartbeatPeriod, periodStart: epoch } }, select: { updatedAt: true } });
   if (!row || Date.now() - row.updatedAt.getTime() > 15_000) {
     throw new ApiSecurityError(503, "VOICE_RECOVERY_UNAVAILABLE", "Voice recovery is unavailable. Continue in Chat.");
   }
-  if (await prisma.chatCreditReservation.findFirst({ where: { source: VOICE_CONVERSATION_SOURCE, lastError: "VOICE_PROVIDER_STOP_PENDING" }, select: { id: true } })) {
+  if (await prisma.chatCreditReservation.findFirst({ where: { userId, source: VOICE_CONVERSATION_SOURCE, lastError: "VOICE_PROVIDER_STOP_PENDING" }, select: { id: true } })) {
     throw new ApiSecurityError(503, "VOICE_RECOVERY_UNAVAILABLE", "An earlier voice session is still closing.");
   }
 }
@@ -69,6 +91,7 @@ export async function recordVoiceUsage(id: string, seconds: number, confirmed = 
     WHERE "id" = ${id} AND "source" = ${VOICE_CONVERSATION_SOURCE} AND "status" = 'reserved'
       AND COALESCE(("providerUsageSnapshot"->>'confirmed')::boolean, false) = false
       AND COALESCE(("providerUsageSnapshot"->>'seconds')::double precision, 0) <= ${seconds}
+      AND ${seconds} <= ("reservationPayload"->>'maxSeconds')::double precision
   `;
 }
 
@@ -93,25 +116,28 @@ export async function finalizeVoiceReservation(id: string, seconds: number) {
 }
 
 /** Uses persisted evidence after a process restart; never retries session creation. */
-export async function reconcileVoiceConversations(now = new Date(), limit = 100) {
+export async function reconcileVoiceConversations(now = new Date(), limit = 10) {
   const rows = await prisma.chatCreditReservation.findMany({
-    where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }] }, orderBy: { expiresAt: "asc" }, take: limit,
+    where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }] }, orderBy: { updatedAt: "asc" }, take: Math.min(10, limit),
   });
   const result = { examined: rows.length, settled: 0, deferred: 0 };
-  for (const row of rows) {
+  await Promise.all(rows.map(async row => {
     try {
       const payload = readVoiceCreditPayload(row.reservationPayload);
+      if (receivers.has(row.id)) return;
+      if (Date.parse(payload.webLeaseUntil ?? "") > now.getTime()) return;
       const saved = row.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
       if (saved?.confirmed && typeof saved.seconds === "number" && saved.seconds >= 0 && saved.seconds <= payload.maxSeconds) {
-        await finalizeVoiceReservation(row.id, saved.seconds); result.settled++; continue;
+        await finalizeVoiceReservation(row.id, saved.seconds); result.settled++; return;
       }
       const closeAt = payload.closeAt ? Date.parse(payload.closeAt) : row.expiresAt.getTime();
-      if (!row.lastError && now.getTime() < closeAt) continue;
+      if (!row.lastError && now.getTime() < closeAt) return;
       let providerStopped = !row.providerRequestId && !payload.dispatchStartedAt;
       if (row.providerRequestId) {
         const seconds = await closeVoiceProviderSession(row.providerRequestId);
         if (seconds !== null && seconds <= payload.maxSeconds) {
-          await finalizeVoiceReservation(row.id, seconds); result.settled++; continue;
+          const settled = await finalizeVoiceReservation(row.id, seconds).catch(() => null);
+          if (settled) { result.settled++; return; }
         }
         // The same session ID is safe to hang up repeatedly. No new session or work is dispatched.
         try { await hangupVoiceProviderSession(row.providerRequestId); providerStopped = true; } catch { providerStopped = false; }
@@ -119,9 +145,9 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 100)
       if (row.status === "settled") {
         if (providerStopped) await prisma.chatCreditReservation.updateMany({ where: { id: row.id, lastError: "VOICE_PROVIDER_STOP_PENDING" }, data: { lastError: "VOICE_USAGE_ADJUSTED_AFTER_DISCONNECT" } });
         else result.deferred++;
-        continue;
+        return;
       }
-      if (now < row.expiresAt) { result.deferred++; continue; }
+      if (now < row.expiresAt) { result.deferred++; return; }
       const seconds = saved?.confirmed ? 0 : Math.min(payload.maxSeconds, Math.max(0, Number(saved?.seconds) || 0));
       // Charge only the trusted observed minimum. The operational budget and
       // provider-cost estimate retain full exposure; unobserved seconds are waived.
@@ -130,8 +156,10 @@ export async function reconcileVoiceConversations(now = new Date(), limit = 100)
     } catch {
       result.deferred++;
       await prisma.chatCreditReservation.updateMany({ where: { id: row.id, status: "reserved" }, data: { lastError: "VOICE_RECOVERY_PENDING" } }).catch(() => {});
+    } finally {
+      await prisma.chatCreditReservation.updateMany({ where: { id: row.id }, data: { updatedAt: now } }).catch(() => {});
     }
-  }
+  }));
   return result;
 }
 

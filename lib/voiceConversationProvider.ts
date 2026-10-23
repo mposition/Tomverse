@@ -1,6 +1,6 @@
 import "server-only";
 import WebSocket from "ws";
-import { VOICE_CONVERSATION_INSTRUCTIONS, VOICE_CONVERSATION_MODEL } from "@/lib/voiceConversationCore";
+import { VOICE_CONVERSATION_INSTRUCTIONS, VOICE_CONVERSATION_MODEL } from "@tomverse/chat-core";
 
 const endpoint = "https://api.openai.com/v1/live/sessions";
 const headers = () => ({ Authorization: `Bearer ${process.env.VOICE_CONVERSATION_API_KEY}`, "Content-Type": "application/json" });

@@ -17,6 +17,7 @@ const reset = () => {
 };
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => w.user ? { user: { id: w.user } } : null } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
+mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => ({ session: w.user ? { user: { id: w.user } } : null }) } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   ApiSecurityError: SecurityError, consumeApiRateLimit: async () => {},
   apiSecurityResponse: error => error instanceof SecurityError ? Response.json({ code: error.code }, { status: error.status }) : null,
@@ -46,6 +47,7 @@ mock.module(mod("lib/voiceConversationRecovery.ts"), { namedExports: {
   assertVoiceWatchdogReady: async () => { if (w.watchdogUnavailable) throw new SecurityError(503, "VOICE_RECOVERY_UNAVAILABLE", "Unavailable"); },
   finalizeVoiceReservation: settleCredits,
   recordVoiceUsage: async () => {},
+  renewVoiceWebLease: async () => {},
 } });
 mock.module(mod("lib/voiceInputBudget.ts"), { namedExports: { VoiceBudgetError: BudgetError } });
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {

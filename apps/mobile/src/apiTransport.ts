@@ -132,6 +132,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     } finally { watchdog.stop(); signal.removeEventListener("abort", abort); }
   }
   return {
+    voiceConfiguration: async () => (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number } }>("/api/products/chat/capabilities")).voiceConversation ?? { enabled: false, maxSeconds: 300 },
+    voiceRequest: (body, signal) => run("/api/chat/voice", { ...json("POST", body), signal }),
+    sendVoice: async (conversation, text, signal, onProgress) => {
+      const { persisted, sourceId } = await persistQuestion(conversation, text, [], signal);
+      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress);
+      return { conversationId: persisted.id, sourceUserMessageId: sourceId };
+    },
     resumeResearch: async (conversation, signal, update) => {
       let pending = conversation.messages.filter(message => message.pendingJobId && message.status === "pending").map(message => message.id);
       while (pending.length && !signal.aborted) {

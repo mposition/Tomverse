@@ -1,10 +1,11 @@
-import { appendVoiceCaption, isVoiceTranscriptEvent, type VoiceCaption } from "@/lib/voiceConversationCore";
+import { appendVoiceCaption, isVoiceTranscriptEvent, type VoiceCaption } from "@tomverse/chat-core";
 
 export type VoiceAnswerReceipt = { sourceUserMessageId: string; conversationId: string };
 export type VoiceConversationView = {
   status: "idle" | "connecting" | "listening" | "closing" | "ended" | "error";
   captions: VoiceCaption[]; seconds: number; credits: number;
   muted: boolean; audioBlocked: boolean; confirmed: boolean; billingPending: boolean; error: string | null;
+  inputLevel?: number; outputLevel?: number; working?: boolean;
 };
 
 export type VoiceConversationDeps = {
@@ -12,6 +13,7 @@ export type VoiceConversationDeps = {
   createPeer: () => RTCPeerConnection;
   createAudio: () => HTMLAudioElement;
   fetch: typeof fetch;
+  monitorLevels?: (stream: MediaStream, onLevel: (level: number) => void) => () => void;
 };
 
 const initialView = (): VoiceConversationView => ({ status: "idle", captions: [], seconds: 0, credits: 0, muted: false, audioBlocked: false, confirmed: false, billingPending: false, error: null });
@@ -34,12 +36,14 @@ export function createVoiceConversationClient(options: {
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let durationTimer: ReturnType<typeof setTimeout> | undefined;
   let lastEventAt = 0;
+  const levelMonitors: (() => void)[] = [];
   let queue = Promise.resolve();
   const seen = new Set<string>();
   const patch = (value: Partial<VoiceConversationView>) => { view = { ...view, ...value }; options.onChange(view); };
   const cleanup = () => {
     clearTimeout(closeTimeout);
     clearInterval(heartbeatTimer); clearTimeout(durationTimer);
+    levelMonitors.splice(0).forEach(dispose => dispose());
     for (const track of microphone?.getTracks() ?? []) { try { track.stop(); } catch {} }
     microphone = null;
     try { peer?.close(); } catch {} peer = null;
@@ -106,7 +110,10 @@ export function createVoiceConversationClient(options: {
       const text = event.text;
       queue = queue.then(async () => {
         if (epoch !== owner || view.status !== "listening") return;
-        const receipt = await options.onRequest(text);
+        patch({ working: true });
+        let receipt: VoiceAnswerReceipt;
+        try { receipt = await options.onRequest(text); }
+        finally { if (epoch === owner) patch({ working: false }); }
         if (epoch !== owner || view.status !== "listening" || !reservationId) return;
         const response = await post({ action: "result", reservationId, delegationId, ...receipt }, controller?.signal);
         await response.body?.cancel();
@@ -134,11 +141,15 @@ export function createVoiceConversationClient(options: {
       const stream = await options.deps.getMicrophone();
       if (owner !== epoch || abort.signal.aborted) { stream.getTracks().forEach(t => t.stop()); return; }
       microphone = stream;
+      const monitor = options.deps.monitorLevels?.(stream, inputLevel => { if (owner === epoch) patch({ inputLevel }); });
+      if (monitor) levelMonitors.push(monitor);
       peer = options.deps.createPeer(); audio = options.deps.createAudio(); audio.autoplay = true;
       const connection = peer; const player = audio;
       connection.ontrack = event => {
         if (owner !== epoch) return;
         player.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+        const monitor = options.deps.monitorLevels?.(player.srcObject as MediaStream, outputLevel => { if (owner === epoch) patch({ outputLevel }); });
+        if (monitor) levelMonitors.push(monitor);
         void player.play().catch(() => { if (owner === epoch) patch({ audioBlocked: true }); });
       };
       connection.onconnectionstatechange = () => { if (connection.connectionState === "failed") void stop(); };
@@ -182,12 +193,13 @@ export function createVoiceConversationClient(options: {
       if (owner !== epoch) return;
       if (view.status === "ended") return;
       const wasClosing = view.status === "closing";
-      cleanup(); patch({ status: wasClosing ? "ended" : "error", error: wasClosing ? null : error instanceof Error ? error.message : "VOICE_CONNECTION_LOST" });
+      cleanup(); patch({ status: wasClosing ? "ended" : "error", error: wasClosing ? null : error instanceof Error && error.name === "NotAllowedError" ? "NotAllowedError" : error instanceof Error ? error.message : "VOICE_CONNECTION_LOST" });
       void recoverBilling(owner);
     }
   }
   return {
     start, stop,
+    getReservationId: () => reservationId,
     toggleMicrophone() { const muted = !view.muted; microphone?.getAudioTracks().forEach(t => { t.enabled = !muted; }); patch({ muted }); },
     async resumeAudio() { try { await audio?.play(); patch({ audioBlocked: false }); } catch { patch({ audioBlocked: true }); } },
     destroy() { void stop(); ++epoch; cleanup(); },

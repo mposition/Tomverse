@@ -12,7 +12,7 @@ import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import { reserveVoiceBudgets, settleVoiceBudgets } from "@/lib/voiceBudgetReservation";
 import { snapshotVoiceBudgets, restoreVoiceBudgets, type VoiceBudgetSnapshot } from "@/lib/voiceConversationBudget";
-import { VOICE_CONVERSATION_INITIAL_SECONDS, VOICE_CONVERSATION_MODEL, VOICE_CONVERSATION_PRICING_VERSION, VOICE_CONVERSATION_SOURCE, voiceDurationCharge } from "@/lib/voiceConversationCore";
+import { VOICE_CONVERSATION_INITIAL_SECONDS, VOICE_CONVERSATION_MODEL, VOICE_CONVERSATION_PRICING_VERSION, VOICE_CONVERSATION_SOURCE, voiceDurationCharge } from "@tomverse/chat-core";
 
 export type VoiceCreditPayload = {
   kind: "voice_conversation";
@@ -26,6 +26,7 @@ export type VoiceCreditPayload = {
   budgets?: VoiceBudgetSnapshot;
   dispatchStartedAt?: string;
   closeAt?: string;
+  webLeaseUntil?: string;
 };
 
 export function readVoiceCreditPayload(value: unknown): VoiceCreditPayload {
@@ -128,6 +129,14 @@ export async function settleVoiceConversationCredits(id: string, seconds: number
     if (!claim.count) return null;
     const row = await tx.chatCreditReservation.findUniqueOrThrow({ where: { id } });
     const payload = readVoiceCreditPayload(row.reservationPayload);
+    if (evidence === "observed_minimum") {
+      // This read follows the atomic claim, so evidence arriving while a sweep
+      // awaited provider closure wins over its earlier duration snapshot.
+      const saved = row.providerUsageSnapshot as { seconds?: number; confirmed?: boolean } | null;
+      const valid = typeof saved?.seconds === "number" && Number.isFinite(saved.seconds) && saved.seconds >= 0 && saved.seconds <= payload.maxSeconds;
+      seconds = valid ? saved.seconds! : 0;
+      if (valid && saved?.confirmed) { evidence = "final"; providerStopped = true; }
+    }
     const price = voiceDurationCharge(seconds, payload.creditsPerMinute);
     // Provider initialization has a 15-second minimum. Keep the provider cost
     // distinct from the user's reported active seconds; never add it twice.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { EventEmitter } from "node:events";
 const mod = path => pathToFileURL(resolve(path)).href;
 let w;
 class SecurityError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
@@ -10,12 +11,12 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   chatUsageBucket: { findUnique: async () => w.heartbeat ? { updatedAt: new Date(w.heartbeat) } : null, upsert: async () => { w.heartbeat = Date.now(); } },
   $executeRaw: async (_parts, seconds, confirmed, id) => {
     const row = w.rows.find(row => row.id === id); const saved = row.providerUsageSnapshot;
-    if (row.status !== "reserved" || saved?.confirmed || (saved?.seconds ?? 0) > seconds) return 0;
+    if (row.status !== "reserved" || saved?.confirmed || (saved?.seconds ?? 0) > seconds || seconds > row.reservationPayload.maxSeconds) return 0;
     row.providerUsageSnapshot = { seconds, confirmed }; return 1;
   },
   chatCreditReservation: {
     findMany: async () => w.rows,
-    findFirst: async () => w.rows.find(row => row.lastError === "VOICE_PROVIDER_STOP_PENDING") ?? null,
+    findFirst: async ({ where }) => w.rows.find(row => row.userId === where.userId && row.lastError === "VOICE_PROVIDER_STOP_PENDING") ?? null,
     findUniqueOrThrow: async ({ where }) => w.rows.find(row => row.id === where.id),
     updateMany: async ({ where, data }) => { const row = w.rows.find(row => row.id === where.id && (!where.status || row.status === where.status) && (!where.lastError || row.lastError === where.lastError)); if (row) Object.assign(row, data); return { count: row ? 1 : 0 }; },
   },
@@ -30,20 +31,21 @@ mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
   },
 } });
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
-  attachVoiceProviderSession: () => { assert.fail("No new session should be created by the reconciliation sweep"); },
+  attachVoiceProviderSession: () => { if (!w.allowReceiver) assert.fail("No sideband should be opened here"); const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 1; socket.send = value => w.commands.push(JSON.parse(value)); socket.close = () => socket.emit("close"); return socket; },
   closeVoiceProviderSession: async id => { w.closes.push(id); return w.finalSeconds; },
   hangupVoiceProviderSession: async id => { w.hangs.push(id); if (w.hangFailure) throw new Error("Provider unreachable"); },
 } });
-const { assertVoiceWatchdogReady, touchVoiceWatchdog, recordVoiceUsage, finalizeVoiceReservation, reconcileVoiceConversations } = await import(mod("lib/voiceConversationRecovery.ts"));
-const row = () => ({ id: "voice-1", status: "reserved", providerRequestId: "live_1", lastError: null, settledCredits: 0,
+const { assertVoiceWatchdogReady, touchVoiceWatchdog, recordVoiceUsage, finalizeVoiceReservation, reconcileVoiceConversations, observeActiveVoiceConversations, stopVoiceRecoveryReceivers } = await import(mod("lib/voiceConversationRecovery.ts"));
+const row = () => ({ id: "voice-1", userId: "owner", status: "reserved", providerRequestId: "live_1", lastError: null, settledCredits: 0,
   expiresAt: new Date(Date.now() - 1_000), reservationPayload: { maxSeconds: 330, closeAt: new Date(Date.now() - 30_000).toISOString(), dispatchStartedAt: new Date().toISOString() }, providerUsageSnapshot: { seconds: 10, confirmed: false } });
 test.beforeEach(() => { w = { heartbeat: 0, rows: [row()], charges: [], closes: [], hangs: [], finalSeconds: null }; });
+test.afterEach(() => { stopVoiceRecoveryReceivers(); delete process.env.VOICE_CONVERSATION_KILL_SWITCH; });
 
 test("new sessions require a fresh independent worker and no unresolved provider stop", async () => {
-  await assert.rejects(assertVoiceWatchdogReady(), e => e.code === "VOICE_RECOVERY_UNAVAILABLE");
-  await touchVoiceWatchdog(); await assertVoiceWatchdogReady();
+  await assert.rejects(assertVoiceWatchdogReady("owner"), e => e.code === "VOICE_RECOVERY_UNAVAILABLE");
+  await touchVoiceWatchdog(); await assertVoiceWatchdogReady("owner");
   w.rows[0].lastError = "VOICE_PROVIDER_STOP_PENDING";
-  await assert.rejects(assertVoiceWatchdogReady(), e => e.status === 503);
+  await assert.rejects(assertVoiceWatchdogReady("owner"), e => e.status === 503);
 });
 test("durable usage is monotonic and final receipts survive late interim events", async () => {
   await recordVoiceUsage("voice-1", 12); await recordVoiceUsage("voice-1", 11);
@@ -79,6 +81,18 @@ test("a final duration below durable observed usage is refused", async () => {
   assert.equal(w.charges.length, 0);
 });
 
+test("a contradictory closing final cannot prevent grace settlement of observed usage", async () => {
+  w.finalSeconds = 5;
+  await reconcileVoiceConversations();
+  assert.equal(w.rows[0].status, "settled"); assert.equal(w.charges[0].seconds, 10);
+});
+
+test("an uncertain provider stop blocks its account without blocking another account", async () => {
+  await touchVoiceWatchdog(); w.rows[0].lastError = "VOICE_PROVIDER_STOP_PENDING";
+  await assertVoiceWatchdogReady("another-owner");
+  await assert.rejects(assertVoiceWatchdogReady("owner"), e => e.status === 503);
+});
+
 test("an excessive final never poisons durable evidence or prevents expired-hold recovery", async () => {
   await assert.rejects(finalizeVoiceReservation("voice-1", 331), /authorized reservation/);
   assert.deepEqual(w.rows[0].providerUsageSnapshot, { seconds: 10, confirmed: false });
@@ -92,4 +106,20 @@ test("a previously persisted invalid final cannot retain a customer hold indefin
   await reconcileVoiceConversations();
   assert.equal(w.rows[0].status, "settled");
   assert.equal(w.charges[0].seconds, 0);
+});
+
+test("the watchdog never opens a competing sideband while the web receiver lease is healthy", async () => {
+  w.rows[0].reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString();
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 300_000).toISOString();
+  await observeActiveVoiceConversations(); await reconcileVoiceConversations();
+  assert.equal(w.closes.length, 0); assert.equal(w.charges.length, 0);
+});
+
+test("a kill switch closes an already attached independent receiver on the next cycle", async () => {
+  w.allowReceiver = true; w.commands = []; w.rows[0].expiresAt = new Date(Date.now() + 300_000);
+  w.rows[0].reservationPayload.closeAt = new Date(Date.now() + 200_000).toISOString();
+  await observeActiveVoiceConversations();
+  process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  await observeActiveVoiceConversations();
+  assert.deepEqual(w.commands, [{ type: "session.close" }]);
 });

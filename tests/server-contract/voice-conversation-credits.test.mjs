@@ -117,6 +117,7 @@ test("budget refusal rolls the wallet reservation back in the same transaction",
 
 test("incomplete finalization bills only observed seconds and retains conservative provider exposure once", async () => {
   const row = await reserveVoiceConversationCredits(input());
+  w.row.providerUsageSnapshot = { seconds: 10, confirmed: false };
   await settleVoiceConversationCredits(row.id, 10, true, "observed_minimum");
   assert.equal(w.row.settledCredits, 6);
   assert.equal(w.buckets.month, 6);
@@ -125,4 +126,12 @@ test("incomplete finalization bills only observed seconds and retains conservati
   assert.deepEqual(w.voiceSettlements, [{ kind: "reservation" }]);
   await settleVoiceConversationCredits(row.id, 10, true, "observed_minimum");
   assert.equal(w.voiceSettlements.length, 1);
+});
+
+test("grace settlement uses the latest durable evidence after its atomic claim", async () => {
+  const row = await reserveVoiceConversationCredits(input());
+  w.row.providerUsageSnapshot = { seconds: 20, confirmed: true };
+  await settleVoiceConversationCredits(row.id, 5, true, "observed_minimum", false);
+  assert.equal(w.row.settledCredits, 12); assert.equal(w.row.providerUsageSnapshot.confirmed, true);
+  assert.equal(w.row.providerUsageSnapshot.seconds, 20); assert.equal(w.row.lastError, null);
 });

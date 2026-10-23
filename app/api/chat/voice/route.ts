@@ -1,16 +1,15 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ApiSecurityError, apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { VoiceBudgetError } from "@/lib/voiceInputBudget";
-import { assertVoiceWatchdogReady, finalizeVoiceReservation, recordVoiceUsage } from "@/lib/voiceConversationRecovery";
-import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE } from "@/lib/voiceConversationCore";
+import { assertVoiceWatchdogReady, finalizeVoiceReservation, recordVoiceUsage, renewVoiceWebLease } from "@/lib/voiceConversationRecovery";
+import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
 import { reserveVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession, sendVoiceProviderResult } from "@/lib/voiceConversationProvider";
 
@@ -33,7 +32,9 @@ async function ownedConversation(request: Request, userId: string, conversationI
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) return json("VOICE_AUTHENTICATION_REQUIRED", 401);
     const userId = session.user.id;
     const body = await readLimitedJson(request, 96 * 1024, schema);
@@ -82,7 +83,7 @@ export async function POST(request: Request) {
     const config = voiceConversationConfig(process.env);
     if (!config) return json("VOICE_CONVERSATION_DISABLED", 503);
     await assertUserOperationalAccess(userId);
-    await assertVoiceWatchdogReady();
+    await assertVoiceWatchdogReady(userId);
     if (body.conversationId) await ownedConversation(request, userId, body.conversationId);
     const messages = body.conversationId ? await prisma.message.findMany({
       where: { conversationId: body.conversationId, status: "normal", role: { in: ["user", "assistant"] } },
@@ -100,7 +101,7 @@ export async function POST(request: Request) {
     const reservation = await reserveVoiceConversationCredits({ userId, requestId: body.requestId, conversationId: body.conversationId, creditsPerMinute: config.creditsPerMinute, maxSeconds: reservedSeconds, sessionSeconds: config.maxSeconds });
     let providerResult;
     await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { reservationPayload: {
-      ...readVoiceCreditPayload(reservation.reservationPayload), dispatchStartedAt: new Date().toISOString(),
+      ...readVoiceCreditPayload(reservation.reservationPayload), dispatchStartedAt: new Date().toISOString(), webLeaseUntil: new Date(Date.now() + 30_000).toISOString(),
     } } });
     try { providerResult = await createVoiceProviderSession(body.sdp, history); }
     catch {
@@ -139,7 +140,7 @@ export async function POST(request: Request) {
         const send = (value: unknown) => { try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`)); } catch { /* Client left; the provider still needs finalization. */ } };
         const keepalive = setInterval(() => send({ type: "heartbeat" }), 15_000);
         const durationTimer = setTimeout(() => stop(), config.maxSeconds * 1_000);
-        const killTimer = setInterval(() => { if (!voiceConversationConfig(process.env)) stop(); }, 5_000);
+        const killTimer = setInterval(() => { if (!voiceConversationConfig(process.env)) stop(); else if (!closing && !finished) void renewVoiceWebLease(reservation.id).catch(stop); }, 5_000);
         let closeTimer: ReturnType<typeof setTimeout> | undefined;
         const finish = async (seconds: number | null) => {
           if (finished) return; finished = true;

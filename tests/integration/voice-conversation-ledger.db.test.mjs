@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test, { after, beforeEach, mock } from "node:test";
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { WebSocketServer } from "ws";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 const mod = path => pathToFileURL(resolve(path)).href;
@@ -52,9 +55,59 @@ test("real durable evidence preserves final usage across a simulated lost respon
 
 test("an uncertain close returns unused wallet credits but retains provider exposure", async () => {
   const row = await reserve();
+  await recordVoiceUsage(row.id, 10);
   await settleVoiceConversationCredits(row.id, 10, true, "observed_minimum", false);
   const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
   assert.equal(saved.settledCredits, 6); assert.equal(saved.lastError, "VOICE_PROVIDER_STOP_PENDING");
   const providerBuckets = await prisma.chatUsageBucket.findMany({ where: { period: { notIn: ["month", "day"] } } });
   for (const bucket of providerBuckets) assert.equal(Number(bucket.count), 60);
+});
+
+test("a final receipt arriving before grace settlement retains the exact charge and evidence", async () => {
+  const row = await reserve(); await recordVoiceUsage(row.id, 20, true);
+  await settleVoiceConversationCredits(row.id, 5, true, "observed_minimum", false);
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(saved.settledCredits, 12); assert.equal(saved.providerUsageSnapshot.seconds, 20);
+  assert.equal(saved.providerUsageSnapshot.confirmed, true); assert.equal(saved.lastError, null);
+});
+
+test("a killed primary process is recovered by an independent receiver with one durable charge", { timeout: 25000 }, async () => {
+  const row = await reserve();
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 }); await once(server, "listening");
+  const children = [];
+  server.on("connection", socket => socket.on("message", data => {
+    if (JSON.parse(data.toString()).type === "session.close") {
+      socket.send(JSON.stringify({ type: "session.closed", usage: { seconds: 15 } }));
+    }
+  }));
+  async function child(mode) {
+    const processChild = spawn(process.execPath, ["--conditions=react-server", "--experimental-test-module-mocks", "--no-warnings=ExperimentalWarning", "--import", "tsx", "tests/fixtures/voice-recovery-process.mjs"], {
+      env: { ...process.env, VOICE_FIXTURE_MODE: mode, VOICE_FIXTURE_ID: row.id, VOICE_FIXTURE_SOCKET: `ws://127.0.0.1:${server.address().port}` },
+      stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true,
+    });
+    children.push(processChild); let errors = ""; processChild.stderr.on("data", data => { errors += data.toString(); });
+    await Promise.race([once(processChild, "message"), once(processChild, "exit").then(() => { throw Error(errors || "Recovery child exited before readiness"); }), new Promise((_, reject) => { const timer = setTimeout(() => reject(Error("Child readiness timeout")), 10000); timer.unref(); })]);
+    return processChild;
+  }
+  try {
+    const primary = await child("primary"); const exit = once(primary, "exit"); primary.kill("SIGKILL"); await exit;
+    const durable = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+    assert.equal(durable.providerUsageSnapshot.seconds, 10);
+    // Advance the persisted lease/deadline after the actual process kill.
+    await prisma.chatCreditReservation.update({ where: { id: row.id }, data: { reservationPayload: { ...durable.reservationPayload, webLeaseUntil: new Date(0).toISOString(), closeAt: new Date(0).toISOString() }, providerRequestId: "fixture-session" } });
+    await child("worker");
+    let settled;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      settled = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+      if (settled.status === "settled") break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(settled.status, "settled"); assert.equal(settled.settledCredits, 9);
+    assert.equal(settled.providerUsageSnapshot.confirmed, true);
+    await finalizeVoiceReservation(row.id, 15);
+    assert.equal((await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } })).settledCredits, 9);
+  } finally {
+    for (const processChild of children) if (processChild.exitCode === null && processChild.signalCode === null) { const done = once(processChild, "exit"); processChild.kill("SIGKILL"); await done; }
+    for (const socket of server.clients) socket.terminate(); await new Promise(resolve => server.close(resolve));
+  }
 });

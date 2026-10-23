@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendVoiceCaption, isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_INSTRUCTIONS } from "../lib/voiceConversationCore.ts";
+import { appendVoiceCaption, isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_INSTRUCTIONS } from "../packages/chat-core/src/voiceConversation.ts";
 
 test("voice is default-off and requires a dedicated provider credential", () => {
   assert.equal(voiceConversationConfig({}), null);

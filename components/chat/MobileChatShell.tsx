@@ -182,6 +182,7 @@ type MobileChatShellProps = {
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
   voiceConversationControl?: ReactNode;
+  voiceHistoryRevision?: number;
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
@@ -483,6 +484,7 @@ export function MobileChatShell({
   attachmentCapabilities,
   voiceInputEnabled = false,
   voiceConversationControl,
+  voiceHistoryRevision,
   promptRefinerOffered = false,
   promptRefinerState,
   promptRefinerProductMode = false,
@@ -1691,6 +1693,7 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  voiceHistoryRevision={singleTranscript ? voiceHistoryRevision : undefined}
                   reviewProvider={review?.mode === "easy" ? AVAILABLE_MODELS.find(model => model.id === modelId)?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}

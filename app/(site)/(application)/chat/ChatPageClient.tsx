@@ -10020,6 +10020,7 @@ export function ChatPageClient({
   const productSwitchHasUnknownWrite =
     selectionModeUnknown?.identityKey === identityKey &&
     selectionModeUnknown.conversationId === currentChatId;
+  const [voiceHistoryRevision, setVoiceHistoryRevision] = useState(0);
   const voiceConversationControl = voiceConversationEnabled && mountedSurface === "chat" && !isGuestMode ? (
     <VoiceConversationControl
       conversationId={currentChatId}
@@ -10029,6 +10030,7 @@ export function ChatPageClient({
       selectionLabel={selectionMode === "auto" ? "Smart Adaptive" : getModel(selectedModels[0])?.name ?? "Tomverse"}
       searchEnabled={isWebSearchEnabled(webSearchMode)}
       onRequest={requestVoiceAnswer}
+      onSessionEnded={() => setVoiceHistoryRevision(value => value + 1)}
     />
   ) : undefined;
   const productSwitchDisabled =
@@ -10241,6 +10243,7 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           voiceConversationControl={voiceConversationControl}
+          voiceHistoryRevision={voiceConversationEnabled ? voiceHistoryRevision : undefined}
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}
@@ -10413,6 +10416,7 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           voiceConversationControl={voiceConversationControl}
+          voiceHistoryRevision={voiceConversationEnabled ? voiceHistoryRevision : undefined}
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}

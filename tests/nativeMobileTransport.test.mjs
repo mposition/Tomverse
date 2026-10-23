@@ -38,6 +38,9 @@ function fixture({ unknown = false } = {}) {
 }
 
 test("native enrollment is default-off, exact-path and method limited", () => {
+  assert.equal(nativeChatBearerRoute("/api/chat/voice", "POST"), false);
+  assert.equal(nativeChatBearerRoute("/api/chat/voice", "POST", true), true);
+  assert.equal(nativeChatBearerRoute("/api/chat/voice", "GET", true), false);
   assert.equal(nativeChatBearerRoute("/api/chat", "POST"), false);
   assert.equal(nativeChatBearerRoute("/api/chat", "POST", false), false);
   assert.equal(nativeChatBearerRoute("/api/chat", "POST", true), true);
@@ -48,6 +51,15 @@ test("native enrollment is default-off, exact-path and method limited", () => {
   assert.equal(nativeChatBearerRoute("/api/conversations/c1/share", "POST", true), false);
   assert.equal(nativeChatBearerRoute("/api/admin/users", "GET", true), false);
   assert.equal(nativeChatBearerRoute("/api/conversations/%2Fadmin", "PATCH", true), false);
+});
+
+test("native voice sends through the existing model and search pipeline and returns only the durable receipt", async () => {
+  const f = fixture(); f.conversation.selectionMode = "auto"; f.conversation.webSearchMode = "always";
+  const receipt = await f.transport.sendVoice(f.conversation, "Please check the current information", new AbortController().signal, () => {});
+  assert.deepEqual(receipt, { sourceUserMessageId: "saved-source", conversationId: "conversation-a" });
+  const calls = f.calls.filter(c => c.path === "/api/chat"); assert.equal(calls.length, 1);
+  const body = JSON.parse(calls[0].body); assert.equal(body.webSearchMode, "always"); assert.equal(body.modelId, "fixture-model");
+  assert.equal(f.turns(), 1);
 });
 
 test("shared stream display holds every partial control and respects quoted braces", () => {

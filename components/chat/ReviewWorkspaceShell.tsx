@@ -61,7 +61,7 @@ import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
-import { voiceConversationConfig } from "@/lib/voiceConversationCore";
+import { voiceConversationConfig } from "@tomverse/chat-core";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default

@@ -1,4 +1,4 @@
-/** GPT-Live's duration meter is separate from the answer model's token meter. */
+/** Shared voice semantics; platform audio and credentials are injected by each host. */
 export const VOICE_CONVERSATION_MODEL = "gpt-live-1";
 export const VOICE_CONVERSATION_SOURCE = "voice_conversation";
 export const VOICE_CONVERSATION_PRICING_VERSION = "2026-10-23";
@@ -56,7 +56,8 @@ export function isVoiceTranscriptEvent(value: unknown): value is VoiceTranscript
 export function appendVoiceCaption(captions: readonly VoiceCaption[], event: VoiceTranscriptEvent): VoiceCaption[] {
   const role = event.type === "session.input_transcript.delta" ? "user" : "assistant";
   const result = [...captions];
-  const index = result.findLastIndex(c => c.role === role);
+  let index = result.length - 1;
+  while (index >= 0 && result[index].role !== role) index--;
   const previous = result[index];
   if (previous && event.start_ms >= previous.endMs && event.start_ms - previous.endMs < 1_500) {
     result[index] = { ...previous, text: previous.text + event.delta, endMs: event.end_ms };

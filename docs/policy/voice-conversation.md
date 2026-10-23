@@ -55,7 +55,11 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 - Wallet and subject/provider seconds reservations now commit and settle in the
   same transaction. Their original bucket dates travel in the durable payload.
 - The independent `voice:watchdog` process records monotonic provider usage and
-  receives final events even if the web process dies. New paid starts require a
+  takes over the provider sideband after the web receiver's 30-second durable
+  lease expires. A healthy receiver renews every five seconds; the worker
+  avoids competing receivers, enforces the deadline and observes the kill
+  switch on every cycle. It receives final events after a web process dies.
+  New paid starts require a
   heartbeat newer than 15 seconds. Its timers close sessions at the persisted
   deadline; the existing maintenance sweep also retries unresolved records.
 - A trusted final receipt settles the exact duration. After the closing grace
@@ -65,7 +69,8 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   This adjusted outcome is explicitly marked unconfirmed, never a fabricated
   final measurement. A start whose provider outcome is unknown is not retried.
 - A failed provider hangup remains pending after wallet settlement and blocks
-  new starts until closure is confirmed. A lost session identifier therefore
+  that account's new starts until closure is confirmed. Other accounts still
+  share the conservative provider budget. A lost session identifier therefore
   requires operator/provider evidence to clear; the customer hold is not kept
   indefinitely. Browser-reported seconds are never settlement evidence.
 - The server enforces duration and the kill switch; browser cancellation closes
@@ -100,3 +105,9 @@ Mock coverage: core pricing/captions, device lifecycle, server authorization and
 known/unknown outcomes, wallet allocation/refunds/idempotency, and browser reuse
 of ordinary Chat Send with Auto/manual selection and search. Financial changes
 require the repository's independent finished-diff review.
+
+The Android APK reuses the existing native MVP, its reviewed native bearer
+authentication and canonical Chat transport. `sendVoice` persists through that
+same transport and returns the saved source-message receipt. Web and native
+render `@tomverse/chat-ui`'s voice panel; both show persisted session usage in
+Chat after closing and reopening. The UI does not display the per-minute rate.

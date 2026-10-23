@@ -137,6 +137,7 @@ export type DesktopChatShellProps = {
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
   voiceConversationControl?: ReactNode;
+  voiceHistoryRevision?: number;
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
@@ -442,6 +443,7 @@ export function DesktopChatShell({
   attachmentCapabilities,
   voiceInputEnabled = false,
   voiceConversationControl,
+  voiceHistoryRevision,
   promptRefinerOffered = false,
   promptRefinerState,
   promptRefinerProductMode = false,
@@ -1364,6 +1366,7 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  voiceHistoryRevision={singleTranscript ? voiceHistoryRevision : undefined}
                   reviewProvider={review?.mode === "easy" ? modelInfo?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
