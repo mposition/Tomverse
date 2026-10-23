@@ -649,11 +649,47 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
 export const DEFAULT_IMAGE_MODEL_ID = OPENAI_GPT_IMAGE_2.id;
 
 /**
- * The catalogue the lookups below read. Starts as the code seed; the server
- * replaces it with the resolved catalogue (code seed + ModelCatalogEntry rows +
- * effective price revisions, lib/modelCatalog.ts), and the browser replaces it
- * with the copy the server rendered the page with. If the database cannot be
- * read, it stays the code seed.
+ * Lookups over an explicit catalogue. Pure: nothing here reads module state, so
+ * a client component can resolve against the list it was handed (the image
+ * catalogue context, components/images/ImageModelCatalogProvider.tsx) without
+ * touching the server-only global below.
+ */
+export const findImageModel = (
+  models: readonly ImageModelProfile[],
+  modelId: string
+): ImageModelProfile | null =>
+  models.find((model) => model.id === modelId) ?? null;
+
+/**
+ * Fail-closed price lookup. A disabled model, an unknown model, or an option
+ * with no price returns null and the caller must reject the request -- never
+ * fall back to another model's price.
+ */
+export const findImageModelPrice = (
+  models: readonly ImageModelProfile[],
+  modelId: string,
+  quality: string,
+  size: string
+): ImageModelOptionPrice | null => {
+  const model = findImageModel(models, modelId);
+  if (!model || model.disabledReason !== null) return null;
+  return (
+    model.prices.find(
+      (price) => price.quality === quality && price.size === size
+    ) ?? null
+  );
+};
+
+/**
+ * The catalogue the server-side lookups below read. Starts as the code seed;
+ * the server replaces it with the resolved catalogue (code seed +
+ * ModelCatalogEntry rows + effective price revisions, lib/modelCatalog.ts). If
+ * the database cannot be read, it stays the code seed.
+ *
+ * Server-only by contract: a browser must never write it. Client components
+ * receive the catalogue the server rendered the page with through the image
+ * catalogue context instead, because a module global is shared between server
+ * requests and survives a prop going undefined.
  */
 let activeImageModels: readonly ImageModelProfile[] = IMAGE_MODEL_REGISTRY;
 
@@ -671,26 +707,14 @@ export const listEnabledImageModels = () =>
   activeImageModels.filter((model) => model.disabledReason === null);
 
 export const getImageModel = (modelId: string): ImageModelProfile | null =>
-  activeImageModels.find((model) => model.id === modelId) ?? null;
+  findImageModel(activeImageModels, modelId);
 
-/**
- * Fail-closed price lookup. A disabled model, an unknown model, or an option
- * with no price returns null and the caller must reject the request -- never
- * fall back to another model's price.
- */
 export const getImageModelPrice = (
   modelId: string,
   quality: string,
   size: string
-): ImageModelOptionPrice | null => {
-  const model = getImageModel(modelId);
-  if (!model || model.disabledReason !== null) return null;
-  return (
-    model.prices.find(
-      (price) => price.quality === quality && price.size === size
-    ) ?? null
-  );
-};
+): ImageModelOptionPrice | null =>
+  findImageModelPrice(activeImageModels, modelId, quality, size);
 
 /**
  * How a provider bills the thinking of one image request, and so whether the

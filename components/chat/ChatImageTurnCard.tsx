@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { isImageAssetUrlExpired } from "@/lib/imageAssetPayload";
-import { getImageModel } from "@/lib/imageModelRegistry";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 
 /**
  * The picture a Tomverse Chat image turn answered with (lib/chatImageTurn.ts),
@@ -41,6 +41,7 @@ const isGroupView = (value: unknown): value is GroupView =>
 
 export function ChatImageTurnCard({ groupId }: { groupId: string }) {
   const { t } = useLanguage();
+  const { getModel: getImageModel } = useImageModelCatalog();
   const [group, setGroup] = useState<GroupView | null>(null);
   const [readFailed, setReadFailed] = useState(false);
   const inFlightRef = useRef(false);
