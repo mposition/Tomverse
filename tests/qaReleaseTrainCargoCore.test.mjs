@@ -65,6 +65,37 @@ test("candidates: merged develop pull requests in the window, newest first, each
   );
 });
 
+test("a hotfix cut from the same branch name is on main, and a back-merge never rides", () => {
+  const candidates = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [
+      develop(10, "2026-10-22T01:00:00Z", { head: { ref: "claude/to-develop/ci-admission-fast-webhook" } }),
+      develop(11, "2026-10-22T02:00:00Z", { head: { ref: "claude/to-develop/back-merge-main-20261022" } }),
+      develop(12, "2026-10-22T03:00:00Z", { head: { ref: "main" } }),
+      develop(13, "2026-10-22T04:00:00Z", { head: { ref: "codex/to-develop/x" }, title: "Back-merge main into develop" }),
+      develop(14, "2026-10-22T05:00:00Z", { head: { ref: "claude/to-develop/train-picker" } }),
+      develop(15, "2026-10-22T06:00:00Z", { head: { ref: "claude/to-develop/fast-webhook" } }),
+    ],
+    // A hotfix whose body names no number; an open release cut from #14's branch name.
+    mergedMainJson: [{ ...release(865, "Answer webhooks at once."), head: { ref: "hotfix/2026-10-21-ci-admission-fast-webhook" } }],
+    openMainJson: [{ ...release(902, "No numbers.", false), head: { ref: "release/2026-10-23-train-picker" } }],
+    files: new Map([[15, ["lib/a.ts"]]]),
+    nowMs: NOW,
+  });
+  assert.deepEqual(
+    candidates.map((c) => [c.number, c.status, c.mainPullRequest]),
+    [
+      // Only the whole last segment matches: "fast-webhook" is not "ci-admission-fast-webhook".
+      [15, "available", null],
+      [14, "in_main_pull_request", 902],
+      [13, "back_merge", null],
+      [12, "back_merge", null],
+      [11, "back_merge", null],
+      [10, "on_main", 865],
+    ],
+  );
+  assert.deepEqual(candidates.filter((c) => qaReleaseTrainCargoPickable(c.status)).map((c) => c.number), [15]);
+});
+
 test("a pick is distinct positive numbers, at most the train's capacity", () => {
   assert.deepEqual(parseQaReleaseTrainCargoPick([3, 1]), [3, 1]);
   assert.deepEqual(parseQaReleaseTrainCargoPick([]), []);
