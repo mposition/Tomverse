@@ -163,6 +163,7 @@ test("the release train is its own service: its own names, its flag is its switc
   });
   assert.equal(decideQaReleaseTrainStart(train()), "run");
   assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_TRAIN_SLOTS: "9,15" })), "run");
+  assert.equal(decideQaReleaseTrainStart(train({ RAILPACK_DEPLOY_APT_PACKAGES: "git" })), "run");
   for (const flag of [undefined, "false", "TRUE", "1"]) assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_TRAIN_ENABLED: flag })), "disabled", String(flag));
   assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY: "" })), "refuse");
   assert.equal(decideQaReleaseTrainStart(train({ QA_RELEASE_CONTROL_REVISION: "0" })), "refuse");
