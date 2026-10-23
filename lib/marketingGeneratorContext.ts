@@ -179,8 +179,8 @@ async function latestReport(
   return null;
 }
 
-const llmContext = (model: string | null): MarketingGeneratorContext["llm"] => {
-  const pin = model === null ? undefined : marketingLlmCatalogPins().find((candidate) => candidate.model === model);
+const llmContext = async (model: string | null): Promise<MarketingGeneratorContext["llm"]> => {
+  const pin = model === null ? undefined : (await marketingLlmCatalogPins()).find((candidate) => candidate.model === model);
   return pin ? { model, pin } : { model: null, pin: null };
 };
 
@@ -223,6 +223,6 @@ export async function readMarketingGeneratorContext(
     brief,
     marketIntel,
     competitors: { tracked, knownIds },
-    llm: llmContext(parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
+    llm: await llmContext(parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
   };
 }

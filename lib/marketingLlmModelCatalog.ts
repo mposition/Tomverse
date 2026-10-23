@@ -11,81 +11,105 @@ import {
   marketingLlmReservation,
   type MarketingLlmPricePin,
 } from "@/lib/marketingLlmBudgetCore";
-import { MODEL_PRICING, type ModelPricingProfile } from "@/lib/modelPricing";
-import { AVAILABLE_MODELS } from "@/lib/models";
+import { MODEL_PRICING, resolveModelPricing, type PricingCostSource } from "@/lib/modelPricing";
+import { getRuntimeModels } from "@/lib/modelRegistry";
+import type { AiModel } from "@/lib/models";
 
 /**
- * The models the marketing generator may use, and their price pins, derived
- * from the chat price catalog (operator decision 2026-10-19: the model is
- * chosen in the Admin Console, not pinned by hand in code).
+ * The models the marketing generator may use, and their price pins, read from
+ * the Tomverse model catalog -- the runtime registry an operator manages in
+ * Admin › Models (operator decisions 2026-10-19 and 2026-10-23: the model is
+ * chosen in the Admin Console from the catalog, not pinned by hand in code).
  *
- * The catalog already carries the prices the app bills users by, reviewed and
- * gated by `npm run check:model-pricing`; a pin is that price at its worst --
- * the most expensive tier and every scheduled revision -- with the window the
- * model list records, the generator's own output cap and search count, and
- * OpenAI's web search price. Only OpenAI models are offered: the adapter calls
- * OpenAI and nothing else.
+ * A pin is the catalog's own price at its worst: the long-context tier and
+ * every scheduled revision, a registry override when an operator set one,
+ * with the window the catalog records, the generator's output cap and search
+ * count, and OpenAI's web search price. Every enabled catalog model is
+ * listed; one the generator cannot use says why -- the adapter calls OpenAI
+ * only, an unverified (fallback) price is no price, and the ledger refuses a
+ * pin outside its row limits.
  */
 
 const PRICING_SOURCE = "https://developers.openai.com/api/docs/pricing";
 const FAR_FUTURE = "9999-12-31T00:00:00.000Z";
+const VERIFIED_SOURCES: readonly PricingCostSource[] = [
+  "registry",
+  "registry_long_context",
+  "registry_env_override",
+  "model_registry_override",
+];
 
 const microPerMillion = (usdPerMillion: number) => Math.ceil(usdPerMillion * 1_000_000);
-
-const worstRates = (profile: ModelPricingProfile) => {
-  const tiers = [profile.tiers, ...(profile.priceSchedule ?? []).map((revision) => revision.tiers)].flat();
-  return {
-    input: Math.max(...tiers.map((tier) => tier.inputUsdPerMillionTokens)),
-    output: Math.max(...tiers.map((tier) => tier.outputUsdPerMillionTokens)),
-  };
-};
+const pinText = (value: string) => value.replace(/[^A-Za-z0-9._:/-]/gu, "-").slice(0, 128) || "unknown";
 
 export type MarketingLlmModelOption = {
   /** The id the generator sends and the Admin setting stores. */
   readonly model: string;
   readonly name: string;
-  readonly pin: MarketingLlmPricePin;
-  /** The most one A3 web-search call can cost, in micro-USD. */
+  readonly provider: string;
+  /** Null when the model cannot be priced; then it is never selectable. */
+  readonly pin: MarketingLlmPricePin | null;
+  /** The most one A3 web-search call can cost, in micro-USD; 0 without a pin. */
   readonly worstCallMicroUsd: number;
-  /** Why it cannot be selected, or null: a pin the ledger would refuse is not offered. */
+  /** Why it cannot be selected, or null. */
   readonly unavailable: string | null;
 };
 
-export function marketingLlmModelOptions(): MarketingLlmModelOption[] {
+/** The options for a list of catalog models, priced now. Pure apart from the price registry. */
+export function marketingLlmModelOptionsFrom(
+  models: readonly AiModel[],
+  now: Date = new Date(),
+): MarketingLlmModelOption[] {
   const options: MarketingLlmModelOption[] = [];
   const seen = new Set<string>();
-  for (const model of AVAILABLE_MODELS) {
-    if (model.provider !== "openai" || !model.enabled || seen.has(model.apiModel)) continue;
-    const profile = MODEL_PRICING.find((entry) => entry.modelId === model.id);
-    if (!profile || profile.apiModelId !== model.apiModel) continue;
-    const contextWindowTokens = (model as { contextWindowTokens?: number }).contextWindowTokens;
-    if (!contextWindowTokens) continue;
+  for (const model of models) {
+    if (!model.enabled || seen.has(model.apiModel)) continue;
     seen.add(model.apiModel);
-    const rates = worstRates(profile);
+    const base = { model: model.apiModel, name: model.name, provider: model.provider };
+    if (model.provider !== "openai") {
+      options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "provider_not_supported" });
+      continue;
+    }
+    const window = model.contextWindowTokens;
+    if (!window) {
+      options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "context_window_unknown" });
+      continue;
+    }
+    // The worst rate: the top tier now, and at every revision still to come.
+    const future = (MODEL_PRICING.find((profile) => profile.modelId === model.id)?.priceSchedule ?? [])
+      .map((revision) => Date.parse(revision.effectiveFrom))
+      .filter((at) => Number.isFinite(at) && at > now.getTime());
+    const priced = [now.getTime(), ...future].map((at) =>
+      resolveModelPricing(model, { estimatedPromptTokens: window, at }),
+    );
+    const current = priced[0];
+    if (!VERIFIED_SOURCES.includes(current.costSource)) {
+      options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "price_unverified" });
+      continue;
+    }
     const pin: MarketingLlmPricePin = {
       model: model.apiModel,
       tokenizerFamily: "openai",
       projectId: MARKETING_LLM_KEY_SCOPED_PROJECT,
       region: "global",
       tiers: [MARKETING_LLM_SERVICE_TIER],
-      contextWindowTokens,
-      worstInputMicroUsdPerMillion: microPerMillion(rates.input),
-      worstOutputMicroUsdPerMillion: microPerMillion(rates.output),
+      contextWindowTokens: window,
+      worstInputMicroUsdPerMillion: microPerMillion(Math.max(...priced.map((p) => p.inputUsdPerMillionTokens))),
+      worstOutputMicroUsdPerMillion: microPerMillion(Math.max(...priced.map((p) => p.outputUsdPerMillionTokens))),
       maxOutputTokens: MARKETING_LLM_MAX_OUTPUT_TOKENS,
-      priceVersion: profile.pricingVersion,
-      verifiedAt: `${profile.effectiveDate}T00:00:00.000Z`,
+      priceVersion: pinText(current.pricingVersion),
+      verifiedAt: `${current.effectiveDate}T00:00:00.000Z`,
       expiresAt: FAR_FUTURE,
       source: PRICING_SOURCE,
       webSearchMicroUsdPerCall: Math.max(
-        profile.nativeSearchCostMicroUsdPerQuery ?? 0,
+        current.nativeSearchCostMicroUsdPerQuery ?? 0,
         MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL,
       ),
       maxWebSearchCalls: MARKETING_LLM_WEB_SEARCH_CALLS,
     };
     const problems = marketingLlmPinProblems(pin);
     options.push({
-      model: model.apiModel,
-      name: model.name,
+      ...base,
       pin,
       worstCallMicroUsd: marketingLlmReservation(pin, MARKETING_LLM_WEB_SEARCH_PROFILE).reservedMicroUsd,
       unavailable: problems.length === 0 ? null : problems.join(", "),
@@ -94,8 +118,14 @@ export function marketingLlmModelOptions(): MarketingLlmModelOption[] {
   return options;
 }
 
-/** The pins the ledger may reserve against: every option it would accept. */
-export const marketingLlmCatalogPins = (): MarketingLlmPricePin[] =>
-  marketingLlmModelOptions()
-    .filter((option) => option.unavailable === null)
-    .map((option) => option.pin);
+/** The options for the catalog as it stands. */
+export async function marketingLlmModelOptions(): Promise<MarketingLlmModelOption[]> {
+  return marketingLlmModelOptionsFrom(await getRuntimeModels());
+}
+
+/** The pins the ledger may reserve against: every catalog option it accepts. */
+export async function marketingLlmCatalogPins(): Promise<MarketingLlmPricePin[]> {
+  return (await marketingLlmModelOptions()).flatMap((option) =>
+    option.unavailable === null && option.pin ? [option.pin] : [],
+  );
+}

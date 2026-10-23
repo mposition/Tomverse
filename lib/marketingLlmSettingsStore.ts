@@ -62,7 +62,7 @@ export async function writeMarketingLlmSettings(
     readonly pins?: readonly MarketingLlmPricePin[];
   },
 ): Promise<MarketingLlmSettingsRead> {
-  const pins = input.pins ?? marketingLlmCatalogPins();
+  const pins = input.pins ?? (await marketingLlmCatalogPins());
   if (input.model !== null && !pins.some((pin) => pin.model === input.model)) {
     throw new MarketingLlmSettingsRefusedError("model_not_pinned", "That model cannot be priced within the ledger's limits");
   }

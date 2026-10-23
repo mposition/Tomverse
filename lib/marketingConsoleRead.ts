@@ -128,7 +128,7 @@ const readLlm = async (): Promise<MarketingConsoleLlmView> => {
   return {
     settings: read.settings,
     version: read.version,
-    models: marketingLlmModelOptions().map(({ model, name, worstCallMicroUsd, unavailable }) => ({
+    models: (await marketingLlmModelOptions()).map(({ model, name, worstCallMicroUsd, unavailable }) => ({
       model,
       name,
       worstCallMicroUsd,

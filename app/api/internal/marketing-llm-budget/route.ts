@@ -11,7 +11,8 @@ import { prisma } from "@/lib/prisma";
 //
 // The generator reserves before it calls its model, asks for one dispatch
 // receipt, calls the provider once, and reports what happened. The app counts
-// every dispatched call at its reservation, against the model and monthly cap
+// an open or unknown call at its reservation and a settled one at its reported
+// cost, against the model and monthly cap
 // the operator set in the Admin Console (read inside the reservation). With no
 // pinned model selected every reservation is refused and nothing can spend.
 
