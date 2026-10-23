@@ -275,6 +275,23 @@ retry() {
   done
 }
 
+# Hosted runners' Azure mirror repeatedly exhausted the whole install budget
+# before tests started. Use Ubuntu's primary archive for that exact mirror entry;
+# package signatures, suites, priorities and fallback entries stay unchanged.
+if [ "${GITHUB_ACTIONS:-}" = "true" ] && [ -f /etc/apt/apt-mirrors.txt ]; then
+  ubuntu_mirrors_tmp="$(mktemp)" || exit 1
+  if node "$(dirname "$0")/prefer-ubuntu-archive.mjs" < /etc/apt/apt-mirrors.txt > "$ubuntu_mirrors_tmp"; then
+    if ! cmp -s "$ubuntu_mirrors_tmp" /etc/apt/apt-mirrors.txt; then
+      sudo install -m 644 "$ubuntu_mirrors_tmp" /etc/apt/apt-mirrors.txt || { rm -f "$ubuntu_mirrors_tmp"; exit 1; }
+      echo "Using the official Ubuntu archive instead of the slow Azure mirror."
+    fi
+  else
+    rm -f "$ubuntu_mirrors_tmp"
+    exit 1
+  fi
+  rm -f "$ubuntu_mirrors_tmp"
+fi
+
 # Applies to the apt-get calls Playwright makes for us, which is the only way
 # to reach them -- `install-deps` takes no apt flags. Written before the first
 # attempt so even a single-attempt run benefits.
