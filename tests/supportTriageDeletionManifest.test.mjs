@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   SUPPORT_TRIAGE_DELETION_MANIFEST,
   auditDeletionManifest,
+  feedbackRelationClosure,
   parsePrismaSchema,
   stripPrismaComments,
 } from "../lib/supportTriageDeletionManifest.ts";
@@ -16,6 +17,31 @@ const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url),
 
 test("the manifest matches the schema exactly", () => {
   assert.deepEqual(auditDeletionManifest(schema), []);
+});
+
+test("source chat messages are not report-derived, while incoming report links remain classified", () => {
+  const reaching = feedbackRelationClosure(parsePrismaSchema(schema).models);
+  assert.equal(reaching.has("Message"), false);
+  assert.equal(reaching.has("Conversation"), false);
+  assert.equal(reaching.has("SupportTriageSuggestion"), true);
+  assert.equal(reaching.has("SupportTriageGroup"), true);
+});
+
+test("a second report relation on Message cannot hide behind source-message attribution", () => {
+  const edited = schema.replace(/^(model Message \{\n)/m,
+    "$1  report Feedback? @relation(fields: [reportId], references: [id])\n  reportId String?\n");
+  assert.ok(auditDeletionManifest(edited).some((failure) => /^Message: reaches Feedback/.test(failure)));
+});
+
+test("an unbacked or ambiguous source-message relation cannot exclude Message", () => {
+  for (const edited of [
+    schema.replace(/(sourceMessage\s+Message\?)\s+@relation\([^\n]+\)/, "$1"),
+    schema.replace(/^(model Feedback \{\n)/m,
+      "$1  otherMessage Message? @relation(fields: [otherMessageId], references: [id])\n  otherMessageId String?\n"),
+  ]) {
+    assert.notEqual(edited, schema);
+    assert.ok(auditDeletionManifest(edited).some((failure) => /^Message: reaches Feedback/.test(failure)));
+  }
 });
 
 // Negative controls: each edit below must be caught. They work on a copy of

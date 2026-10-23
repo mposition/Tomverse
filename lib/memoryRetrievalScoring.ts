@@ -30,7 +30,7 @@
  */
 
 import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
-import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
+import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS, memoryStatementKey } from "@/lib/memoryValidatorCore";
 
 /**
  * Identifies the scoring and selection algorithm — deliberately separate from
@@ -39,7 +39,7 @@ import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorC
  * invalidate a context bundle, but it does not change a single stored term,
  * so folding the two together would force a pointless re-index of every row.
  */
-export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 1;
+export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 2;
 
 /**
  * Kinds that describe who the user is rather than what they were doing.
@@ -240,13 +240,13 @@ const byScoreThenId = (left: ScoredMemory, right: ScoredMemory) => {
 };
 
 /**
- * The duplicate key. `conflictKey` is the server's own grouping of claims
- * that mean the same thing, so two rows sharing one are the same fact stated
- * twice — including it once and dropping the rest is what §9 means by
- * removing duplicates before removing relevance.
+ * Topic groups can contain explicitly coexisting values. Deduplicate equal
+ * assertions across both topic and legacy keys using the validator's key.
  */
-const duplicateKey = (memory: RetrievableMemory) =>
-    memory.conflictKey ?? `id:${memory.id}`;
+const duplicateKeys = (memory: RetrievableMemory) => [
+    `statement:${memory.kind}:${memoryStatementKey(memory.statement)}`,
+    ...(memory.conflictKey && !memory.conflictKey.startsWith("topic:") ? [`legacy:${memory.conflictKey}`] : []),
+];
 
 export function selectMemoryContext(input: {
     memories: readonly RetrievableMemory[];
@@ -309,8 +309,8 @@ export function selectMemoryContext(input: {
                 continue;
             }
 
-            const key = duplicateKey(candidate.memory);
-            if (seenDuplicates.has(key)) {
+            const keys = duplicateKeys(candidate.memory);
+            if (keys.some(key => seenDuplicates.has(key))) {
                 omitted.duplicate += 1;
                 continue;
             }
@@ -344,7 +344,7 @@ export function selectMemoryContext(input: {
             }
 
             selected.push(candidate);
-            seenDuplicates.add(key);
+            for (const key of keys) seenDuplicates.add(key);
             tokens += candidate.tokens;
             if (tier === "style") {
                 styleTokens += candidate.tokens;

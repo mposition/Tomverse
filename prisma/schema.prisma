@@ -482,6 +482,7 @@ model ConversationProject {
 model Message {
   id              String                  @id @default(cuid())
   role            String
+  feedbackReports Feedback[]
   content         String
   status          String                  @default("normal")
   modelId         String?
@@ -2230,6 +2231,11 @@ model Feedback {
   type                      String
   status                    String              @default("open")
   message                   String
+  /// Optional owner-verified assistant answer; no memory content is copied.
+  messageId                 String?
+  /// Explicit answer assessment, separate from inquiry type and trace proof.
+  answerSignal              String?
+  sourceMessage             Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
   traceId                   String?
   modelId                   String?
   plan                      String?
@@ -2286,6 +2292,7 @@ model Feedback {
   @@index([type, createdAt])
   @@index([userId, createdAt])
   @@index([traceId])
+  @@index([messageId])
 }
 
 /// One diagnosis-only shadow-mode case per verified bug report (Phase 2 of

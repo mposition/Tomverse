@@ -62,6 +62,7 @@ const PREWRITE_REFUSALS: Record<string, number> = {
   scope_unavailable: 409,
   outside_scope: 409,
   model_not_approved: 409,
+  model_not_launchable: 409,
   reference_snapshot_unavailable: 503,
 };
 
