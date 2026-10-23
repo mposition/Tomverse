@@ -23,7 +23,7 @@ FILES=(
   tools/auto-rec-agent/bin/autorec-gateway.mjs
   tools/auto-rec-agent/lib/contract.mjs
   tools/auto-rec-agent/lib/core.mjs
-  lib/agentAuthorityFiles.ts
+  tools/auto-rec-agent/lib/agentAuthorityFiles.generated.mjs
   tools/review-orchestrator/lib/fsutil.mjs
   tools/review-orchestrator/client/review.mjs
   tools/auto-rec-agent/deploy/review-ssh
@@ -43,9 +43,11 @@ id "$ACCOUNT" >/dev/null 2>&1 || fail "account $ACCOUNT does not exist" 64
 command -v git >/dev/null || fail "git is not installed" 64
 [ -x /usr/bin/node ] || fail "/usr/bin/node not found (the units use that path)" 64
 # Ask node itself for the flags the units use, instead of comparing versions
-# (23.0-23.6 are newer than 22.14 and still lack --disable-sigusr1).
-/usr/bin/node --disable-sigusr1 --experimental-strip-types --no-warnings=ExperimentalWarning -e 0 2>/dev/null \
-  || fail "this node does not accept --disable-sigusr1 --experimental-strip-types (use 22.14+ or 23.7+)" 64
+# (23.0-23.6 are newer than 22.14 and still lack --disable-sigusr1). No
+# TypeScript support is needed: Ubuntu's nodejs package has none, so the
+# runner reads the plain-JS manifest copy (agentAuthorityFiles.generated.mjs).
+/usr/bin/node --disable-sigusr1 --no-warnings=ExperimentalWarning -e 0 2>/dev/null \
+  || fail "this node does not accept --disable-sigusr1 (use 22.14+ or 23.7+)" 64
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
