@@ -36,11 +36,11 @@ const inputs = (files) => ({
 });
 
 test("the excluding files are exactly the ones the judgement stopped on, with why", () => {
-  const input = inputs([".github/workflows/pr-fast-gate.yml", "components/chat/x.tsx", "packages/a/package.json", "tests/mergeTrainCore.test.mjs", "lib/qaReleaseTrainCore.ts"]);
+  const input = inputs([".github/workflows/pr-fast-gate.yml", "components/chat/x.tsx", ".github/actions/setup/action.yml", "tests/mergeTrainCore.test.mjs", "lib/qaReleaseTrainCore.ts"]);
   assert.deepEqual(judgeQaReleaseMergeLaneExclusion(input), { excluded: true, reasons: ["agent_own_path", "gate_path", "policy_test"] });
   assert.deepEqual(qaReleaseMergeLaneExcludingFiles(input), [
     { path: ".github/workflows/pr-fast-gate.yml", reasons: ["gate_path"] },
-    { path: "packages/a/package.json", reasons: ["gate_path"] },
+    { path: ".github/actions/setup/action.yml", reasons: ["gate_path"] },
     { path: "tests/mergeTrainCore.test.mjs", reasons: ["policy_test"] },
     { path: "lib/qaReleaseTrainCore.ts", reasons: ["agent_own_path"] },
   ]);
@@ -130,7 +130,7 @@ const lanePorts = (pulls, filesOf, issue = { issued: false, reason: "lane_off" }
 };
 
 test("the round shows people their pull requests, even behind the pick, without changing the pick", async () => {
-  const files = { 2: [".github/workflows/a.yml"], 3: ["components/x.tsx"], 4: ["package.json"], 5: null };
+  const files = { 2: [".github/workflows/a.yml"], 3: ["components/x.tsx"], 4: ["AGENTS.md"], 5: null };
   const { ports, calls } = lanePorts([pull(2), pull(3), pull(4), pull(5)], (p) => files[p.number]);
   let seen = null;
   const outcome = await runQaReleaseMergeLaneRound(ENV, ports, { verdicts: (list) => { seen = list; } });
@@ -141,7 +141,7 @@ test("the round shows people their pull requests, even behind the pick, without 
     seen.map((v) => [v.number, v.status]),
     [[2, "human"], [3, "next"], [4, "human"], [5, "queued"]],
   );
-  assert.deepEqual(seen[2].files, [{ path: "package.json", reasons: ["gate_path"] }]);
+  assert.deepEqual(seen[2].files, [{ path: "AGENTS.md", reasons: ["gate_path"] }]);
 
   // Without an observer the round reads no more than it needs.
   const quiet = lanePorts([pull(2), pull(3), pull(4), pull(5)], (p) => files[p.number]);
