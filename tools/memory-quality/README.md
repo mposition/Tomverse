@@ -62,8 +62,33 @@ every stored candidate independently of matching: unsupported/forbidden bulk
 adoption and sensitive-review leaks remain visible even on zero-gold cases.
 Extraction uses the existing product parser and validator. Rejected candidates
 are not stored; original model outputs remain in synthetic run records for diagnosis.
-Retrieval is an offline candidate LLM selection experiment over the supplied
-synthetic pool, not a change to the product retrieval service.
+Retrieval in the quality loop is an offline candidate LLM selection experiment
+over the supplied synthetic pool, not a change to the product retrieval service.
+
+## Product retrieval Recall@5 (MEMORY-01)
+
+`retrieval` measures what the product actually ships: statements indexed with
+`memoryRetrievalTerms` and ranked by `selectMemoryContext`, the scorer the chat
+context builder uses. It makes no model call and writes no files.
+
+```powershell
+node --import tsx tools/memory-quality/cli.ts retrieval
+node --import tsx tools/memory-quality/cli.ts retrieval --corpus all
+```
+
+- Recall@5 is read off the prompt order, where core and pinned memories come
+  first and style last, exactly as injected. `koreanRecallInjected` counts
+  everything the prompt would carry (up to the 24-item budget).
+- `gatedIrrelevantRate` counts only term-matched memories; core and style are
+  never relevance-gated, so `summary.irrelevantInjectionRate` includes them.
+- Only active rows reach the scorer, as in `retrieveMemoryContext`. Forbidden
+  rows are kept: the read path does not remove them, so a selection is reported.
+- `fixtures/retrieval-ko.json` is a synthetic Korean set built on one account
+  pool, tagged by failure mode (particle, one_syllable, spacing, ending,
+  compound, synonym, nfd, mixed_script, core, abstain). Its overall number
+  follows its composition; `byTag` is the informative part. The development and
+  validation corpora carry no memory kinds, so they report `poolKinds: defaulted`
+  and treat every row as relevance-gated.
 
 Existing extraction gates are reused from the historical evaluation modules:
 
