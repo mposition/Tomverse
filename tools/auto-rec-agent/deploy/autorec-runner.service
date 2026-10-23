@@ -22,7 +22,7 @@ WorkingDirectory=/home/autorec
 # the agent's code runs as this uid and could otherwise SIGUSR1 this process
 # into opening the inspector and run code inside it -- the one process the
 # gateway answers. The runner refuses to start without it.
-ExecStart=/usr/bin/node --disable-sigusr1 --experimental-strip-types --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-runner.mjs
+ExecStart=/usr/bin/node --disable-sigusr1 --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-runner.mjs
 # Agent 30 min, tests, review wait up to 60 min, publish: bounded well below this.
 TimeoutStartSec=3h
 # When the run ends, anything the agent or a test left running ends with it.
