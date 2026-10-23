@@ -140,10 +140,18 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
     return { excluded: true, reasons: [...reasons].sort() };
   }
 
-  const policyTests = new Set(input.policyTestPaths);
-  const ownMatchers = input.agentOwnPatterns.map(compileManifestPattern);
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns);
+  for (const file of changedFiles) for (const reason of judgeFile(file)) reasons.add(reason);
 
-  for (const file of changedFiles) {
+  return reasons.size === 0 ? { excluded: false } : { excluded: true, reasons: [...reasons].sort() };
+}
+
+/** The per-file half of the judgement: what one changed file excludes for. */
+function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[]) {
+  const policyTests = new Set(policyTestPaths);
+  const ownMatchers = agentOwnPatterns.map(compileManifestPattern);
+  return (file: QaReleaseChangedFile): Set<QaReleaseExclusionReason> => {
+    const reasons = new Set<QaReleaseExclusionReason>();
     const paths = [file.path];
     if (file.previousPath !== undefined && file.previousPath !== null) paths.push(file.previousPath);
     for (const path of paths) {
@@ -163,7 +171,26 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
         reasons.add("protected_table_migration");
       }
     }
-  }
+    return reasons;
+  };
+}
 
-  return reasons.size === 0 ? { excluded: false } : { excluded: true, reasons: [...reasons].sort() };
+/**
+ * The changed files that leave a pull request to a person, with why, for the
+ * Admin screen: the same per-file rule as the judgement, so the screen names
+ * exactly the files the lane stopped on. Empty when the inputs were not read.
+ */
+export function qaReleaseMergeLaneExcludingFiles(
+  input: QaReleaseExclusionInput,
+  limit = 20,
+): { path: string; reasons: QaReleaseExclusionReason[] }[] {
+  if (!Array.isArray(input.changedFiles) || !Array.isArray(input.policyTestPaths) || !Array.isArray(input.agentOwnPatterns)) return [];
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns);
+  const out: { path: string; reasons: QaReleaseExclusionReason[] }[] = [];
+  for (const file of input.changedFiles) {
+    const reasons = judgeFile(file);
+    if (reasons.size > 0) out.push({ path: String(file.path).slice(0, 200), reasons: [...reasons].sort() });
+    if (out.length >= limit) break;
+  }
+  return out;
 }

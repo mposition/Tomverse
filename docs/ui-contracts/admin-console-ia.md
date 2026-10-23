@@ -61,7 +61,7 @@ owner-only (rule 14).
 | Operations | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | SRE agent | `/admin/sre-ops` | — |
-| Operations | QA and release | `/admin/qa-release` | `overview`, `ci-admission` |
+| Operations | QA and release | `/admin/qa-release` | `overview`, `lane`, `ci-admission` |
 | Operations | Agent digests | `/admin/agent-digests` | `billing-finance-ops` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
@@ -99,6 +99,10 @@ production: the QA-release agent's digest and controls, the merge lane, the
 release train and CI admission. It left Agent digests because the operator
 works in it, not only reads it; `/admin/agent-digests?tab=qa-release` and
 `?tab=ci-admission` redirect to its sections (`ADMIN_AGENT_DIGESTS_LEGACY_TABS`).
+Its `lane` tab is the merge lane's own record of its latest rounds: every
+open develop pull request with what the lane will do with it, the ones that
+are the operator's first with the files that made them so; that count is
+the tab's chip.
 
 **Agent digests** is the common area where agent teams' daily digests are
 read (`docs/policy/qa-release-agent.md` section 4), one section per agent

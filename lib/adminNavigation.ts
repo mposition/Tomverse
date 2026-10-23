@@ -678,6 +678,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "What needs the operator, production against main, the merge lane, the train and the latest digest",
       },
       {
+        id: "lane",
+        label: "Merge lane",
+        description: "What the merge lane will merge, and which pull requests are yours, with the files that decide it",
+      },
+      {
         id: "ci-admission",
         label: "CI admission",
         description: "Pull requests waiting for runners, their order and live runner usage",

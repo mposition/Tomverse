@@ -253,6 +253,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     aliases: ["QA", "릴리스", "릴리스 준비", "병합 레인", "릴리스 열차", "제어 revision", "CI 입장", "러너"],
     tabs: {
       overview: { label: "개요", description: "확인할 일, production과 main, 병합 레인, 열차, 최근 digest" },
+      lane: { label: "병합 레인", description: "레인이 병합할 PR과 내가 병합할 PR, 그 이유가 된 파일" },
       "ci-admission": { label: "CI 입장 관리", description: "러너를 기다리는 PR, 그 순서와 실시간 러너 사용량" },
     },
   },
