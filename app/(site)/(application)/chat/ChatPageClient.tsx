@@ -138,10 +138,6 @@ import { guestAutoClientExecutionState } from "@/lib/guestAutoClientExecution";
 import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
 import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
-import {
-  setActiveImageModelCatalog,
-  type ImageModelProfile,
-} from "@/lib/imageModelRegistry";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageIntent } from "@/lib/chatImageIntentClient";
@@ -757,7 +753,6 @@ export function ChatPageClient({
   promptRefinerMode = "off",
   promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: false },
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
-  imageModels,
   webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
   chatStarterEnabled = false,
   chatStarterKnownFlagKeys = [],
@@ -767,11 +762,6 @@ export function ChatPageClient({
   mountedSurface = "workspace",
 }: {
   guestDefaultModelId: string;
-  /**
-   * The image catalogue resolved on the server (code seed + runtime rows +
-   * effective prices, lib/modelCatalog.ts). Undefined keeps the code seed.
-   */
-  imageModels?: readonly ImageModelProfile[];
   /**
    * The effective default lineup (lib/appSettings PublicAppSettings), resolved
    * on the server like the lead so the first render and the server agree.
@@ -881,11 +871,6 @@ export function ChatPageClient({
    */
   mountedSurface?: ConversationSurface;
 }) {
-  // Before any image component reads the registry: the lookups in
-  // lib/imageModelRegistry.ts serve the catalogue the server priced this page with.
-  useMemo(() => {
-    if (imageModels) setActiveImageModelCatalog(imageModels);
-  }, [imageModels]);
   const {
     models: AVAILABLE_MODELS,
     getModel,

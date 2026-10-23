@@ -38,15 +38,17 @@ test("the image workspace never mounts a chat-only surface", () => {
 
 test("the image tab lists held models rather than only the runnable ones", () => {
   const source = read(IMAGE_TAB);
-  // listEnabledImageModels() would silently drop a model held by the price
+  // The enabled-only list would silently drop a model held by the price
   // verification rule, and the catalogue would answer "why is this model
-  // missing?" with nothing.
-  assert.ok(
-    source.includes("listImageModels"),
-    `${IMAGE_TAB} must list every registered model via listImageModels().`
+  // missing?" with nothing. The tab reads the catalogue context (not the
+  // module-global registry) and takes the full `models` list from it.
+  assert.match(
+    source,
+    /const \{ models \} = useImageModelCatalog\(\)/,
+    `${IMAGE_TAB} must list every registered model via the image catalogue context.`
   );
   assert.ok(
-    !source.includes("listEnabledImageModels"),
+    !source.includes("listEnabledImageModels") && !source.includes("enabledModels"),
     `${IMAGE_TAB} must not filter to enabled models; a held model is stated as a hold, not omitted.`
   );
 });
