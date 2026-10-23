@@ -64,8 +64,11 @@ than 11% for the idle composer.
 
 One question is persisted once. Parallel answers use independent model histories;
 switching the displayed provider does not submit a question. Multi-model sends
-first acquire the existing aggregate preflight admission and context bundle;
-refusal starts no model request. Easy routing uses the existing
+first acquire the existing aggregate preflight admission before persisting the
+question. A real refusal preserves the draft and selected attachments and starts
+no model request; infrastructure failures retry once, then use each model's
+ordinary admission as on the web. A null optional context bundle is omitted from
+model requests. Easy routing uses the existing
 client validator and server router, with no manual substitution for an unsupported
 provider. Professional selection uses the existing model catalogue and plan limit.
 Deep Research follows the existing durable async job and never submits a second
@@ -87,7 +90,9 @@ and pricing versions only. Current prices, selected models and consent are check
 before generation; a changed quote requires fresh consent. Unknown submissions are
 not automatically repeated. An owner-scoped read-only receipt lookup recovers a
 lost response by its original request key. If no receipt is found, an explicit
-resume uses the same key and original options, with fresh quote consent. A found
+resume uses the same key and original options, with fresh quote consent. A replay
+refusal (including authentication, rate limit or stale pricing) retains that key:
+those checks can run before lookup of an already-created generation. A found
 receipt clears the local pending marker. Generated assets use short-lived signed
 URLs in memory and bounded automatic expiry recovery.
 

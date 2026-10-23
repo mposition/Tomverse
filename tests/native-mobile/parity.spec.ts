@@ -131,12 +131,12 @@ test("a long file selection preserves the draft behind the lock and resumes uplo
   await expect(page.locator("article")).toHaveCount(0);
 });
 
-for (const recovery of ["receipt", "same-request"] as const) test(`lost image responses recover through ${recovery} without a new request key`, async ({ page }) => {
+for (const recovery of ["receipt", "same-request", 401, 409, 429] as const) test(`lost image responses recover through ${recovery} without a new request key`, async ({ page }) => {
   await page.route("**/src/main.tsx", async route => {
     const response = await route.fetch(); const source = await response.text();
     const injection = `transport.mobileCapabilities=async()=>({reviewEasy:true,assistants:false,maxModels:3,plan:"Max",images:{enabled:true,maxModels:1,models:[{id:"synthetic-image",name:"Synthetic image model",provider:"openai",pricingVersion:"v1",prices:[{quality:"medium",size:"1024x1024",credits:10}]}]}});
-      window.imageRequests=[];transport.generateImages=async input=>{window.imageRequests.push(input);if(window.imageRequests.length===1)throw new TypeError("Lost response");return {groupId:"saved-group",conversationId:"image-chat"};};
-      transport.imageRequest=async key=>{window.receiptKey=key;${recovery === "receipt" ? 'return {groupId:"saved-group",conversationId:"image-chat"};' : 'throw {status:404};'}};
+      window.imageRequests=[];transport.generateImages=async input=>{window.imageRequests.push(input);if(window.imageRequests.length===1)throw new TypeError("Lost response");${typeof recovery === "number" ? `throw {status:${recovery}};` : 'return {groupId:"saved-group",conversationId:"image-chat"};'}};
+      transport.imageRequest=async key=>{window.receiptKey=key;if(window.receiptAvailable) return {groupId:"saved-group",conversationId:"image-chat"};${recovery === "receipt" ? 'return {groupId:"saved-group",conversationId:"image-chat"};' : 'throw {status:404};'}};
       transport.imageGroup=async()=>({status:"failed",targets:[],generations:[]});`;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
@@ -147,13 +147,34 @@ for (const recovery of ["receipt", "same-request"] as const) test(`lost image re
   await expect(page.getByLabel("이미지 설명")).toBeDisabled();
   const first = await page.evaluate(() => (window as unknown as { imageRequests: Array<{idempotencyKey:string}> }).imageRequests[0]);
   await page.getByRole("button", { name: "저장된 결과 조회", exact: true }).click();
-  if (recovery === "same-request") {
+  if (recovery !== "receipt") {
     await consent.check(); await page.getByRole("button", { name: "같은 요청 확인 후 계속", exact: true }).click();
+  }
+  if (typeof recovery === "number") {
+    await expect(consent).not.toBeChecked(); await expect(page.getByLabel("이미지 설명")).toBeDisabled();
+    const savedKey=await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-image-pending:synthetic-demo")!).idempotencyKey);expect(savedKey).toBe(first.idempotencyKey);
+    await expect(page.getByRole("button", { name: "이미지 생성", exact: true })).toBeDisabled();
+    await page.evaluate(() => { (window as unknown as {receiptAvailable:boolean}).receiptAvailable=true; });
+    await page.getByRole("button", { name: "저장된 결과 조회", exact: true }).click();
   }
   await expect(page.getByLabel("이미지 설명")).toBeEnabled();
   const requests = await page.evaluate(() => (window as unknown as { imageRequests: Array<{idempotencyKey:string}> }).imageRequests);
   expect(requests).toHaveLength(recovery === "receipt" ? 1 : 2); expect(requests.every(input => input.idempotencyKey === first.idempotencyKey)).toBe(true);
   expect(await page.evaluate(() => localStorage.getItem("tomverse-image-pending:synthetic-demo"))).toBeNull();
+});
+
+test("a refused Review admission preserves the draft and selected attachment without a saved question", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response=await route.fetch();const source=await response.text();
+    await route.fulfill({response,body:source.replace("createRoot(container).render(", 'transport.sendReview=async()=>{throw Object.assign(new Error("CHAT_RATE_LIMITED"),{status:429,code:"CHAT_RATE_LIMITED",questionPersisted:false,retryAfterSeconds:12,traceId:"synthetic-trace"});};createRoot(container).render(')});
+  });
+  await signIn(page);await page.getByTestId("product-switcher").selectOption("review");
+  await page.getByTestId("file-picker").setInputFiles({name:"keep.txt",mimeType:"text/plain",buffer:Buffer.from("Keep this attachment")});
+  await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();
+  await page.getByRole("textbox").fill("Keep my question");await page.getByRole("button",{name:"메시지 보내기",exact:true}).click();
+  await expect(page.getByRole("alert")).toContainText("12초 후");await expect(page.getByRole("alert")).toContainText("Trace ID: synthetic-trace");await expect(page.getByRole("textbox")).toHaveValue("Keep my question");
+  await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();await expect(page.locator("article.user")).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"메시지 보내기",exact:true})).toBeEnabled();
 });
 
 test("microphone device failure does not tell an already permitted user to grant access again", async ({ page }) => {

@@ -132,7 +132,9 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       const history = await transport.listReview!();
       if (current === request.current) setChats(history);
     } catch (error) {
-      if (current === request.current) { setError(mobileErrorText(error, language, copy.error)); setUncertain(dispatched); }
+      const beforePersistence = (error as { questionPersisted?: boolean }).questionPersisted === false;
+      if (current === request.current) { setError(mobileErrorText(error, language, copy.error)); setUncertain(dispatched && !beforePersistence); if (beforePersistence) setConversation(item); }
+      if (beforePersistence || !dispatched) return false;
     } finally { if (current === request.current) setStreaming(false); }
   }
   const visibleModels = conversation?.selectedModels.length ? conversation.selectedModels : selected;

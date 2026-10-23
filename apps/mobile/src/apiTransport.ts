@@ -24,7 +24,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     try { const response = await source(path, init); if (response.status === 401) notifySessionLost(); return response; }
     catch (error) { if ((error as { code?: string }).code === "SIGN_IN_REQUIRED") notifySessionLost(); throw error; }
   };
-  const request = createApiClient(run).json;
+  const client = createApiClient(run);
+  const request = client.json;
   async function requireParity(refresh = false) {
     if (refresh) capabilityCache = null;
     if (capabilityCache && capabilityCache.expires > Date.now()) return capabilityCache.value;
@@ -46,7 +47,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const next = await request<ConversationReply>(`${pathFor(id)}?cursor=${encodeURIComponent(page.nextCursor)}`);
       messages.push(...next.messages); page = next.messagePage;
     }
-    return { ...first, messages: [...new Map(messages.map(message => [message.id, message])).values()] };
+    return { ...first, assistantProfileId: first.assistantProfile?.profileId ?? first.assistantProfileId ?? null, messages: [...new Map(messages.map(message => [message.id, message])).values()] };
   }
   async function researchStatus(id: string, signal?: AbortSignal) {
     await requireParity();
@@ -91,7 +92,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     if (!persisted.messages.some(message => message.id === sourceId)) throw Error("SAVED_MESSAGE_MISSING");
     return { persisted, sourceId };
   }
-  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle: string | null }) {
+  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }) {
     const messages = fitChatRequestTranscript(persisted.messages.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
       (message.role === "user" || message.status === "normal" || message.status === "incomplete" || !message.status))
@@ -220,14 +221,34 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress);
     },
     sendReview: async (conversation, text, files, signal, progress) => {
-      const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
-      const admission = persisted.selectedModels.length > 1 ? await (async () => {
+      let admission: { admissionToken: string; contextBundle?: string } | undefined;
+      try { if (conversation.selectedModels.length > 1) {
         await requireParity();
-        const result = await request<{ ok: boolean; admissionToken: string; contextBundle: string | null }>("/api/chat/preflight", { ...json("POST", { comparisonId: Date.now().toString(), conversationId: persisted.id, modelIds: persisted.selectedModels, prompt: text, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: persisted.webSearchMode ?? "off" }), signal });
-        if (!result.ok || !result.admissionToken) throw Error("COMPARISON_ADMISSION_MISSING");
-        return { admissionToken: result.admissionToken, contextBundle: result.contextBundle };
-      })() : undefined;
+        const input = { comparisonId: Date.now().toString(), conversationId: conversation.id, modelIds: conversation.selectedModels, prompt: text, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: conversation.webSearchMode ?? "off" };
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const response = await client.response("/api/chat/preflight", { ...json("POST", input), signal });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const seconds = Number(response.headers.get("Retry-After") ?? result?.details?.retryAfterSeconds);
+              const traceId = response.headers.get("X-Request-ID");
+              throw Object.assign(new ApiClientError(response.status, typeof result?.code === "string" ? result.code : "COMPARISON_PREFLIGHT_FAILED"), {
+                retryAfterSeconds: Number.isFinite(seconds) && seconds > 0 && seconds <= 86400 ? Math.ceil(seconds) : undefined,
+                traceId: traceId && /^[A-Za-z0-9_-]{1,100}$/.test(traceId) ? traceId : undefined,
+              });
+            }
+            if (result?.ok !== true || typeof result.admissionToken !== "string" || !result.admissionToken) throw Error("COMPARISON_ADMISSION_MISSING");
+            if (result.contextBundle != null && typeof result.contextBundle !== "string") throw Error("COMPARISON_CONTEXT_INVALID");
+            admission = { admissionToken: result.admissionToken, ...(result.contextBundle ? { contextBundle: result.contextBundle } : {}) }; break;
+          } catch (error) {
+            const status = (error as { status?: number }).status;
+            if (signal.aborted || !([500, 503].includes(status ?? 0) || error instanceof TypeError)) throw error;
+            // One infrastructure retry, then retain each model's ordinary server admission.
+          }
+        }
+      } } catch (error) { throw Object.assign(error instanceof Error ? error : new Error("COMPARISON_PREFLIGHT_FAILED"), { questionPersisted: false }); }
       if (signal.aborted) throw new DOMException("Stopped", "AbortError");
+      const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
       const outcomes = await Promise.allSettled(persisted.selectedModels.map(modelId =>
         streamModel(persisted, sourceId, modelId, signal, value => progress(modelId, value), true, admission)));
       return { failedModelIds: persisted.selectedModels.filter((_, index) => outcomes[index].status === "rejected") };
