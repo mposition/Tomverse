@@ -228,7 +228,12 @@ async function work(deps, claim, ctx) {
   // would leave it in a file this account (and the agent's code) can read.
   const origin = await git(config.mirror, ["remote", "get-url", "origin"]);
   if (origin.code === 0 && origin.stdout.includes("@")) return failed("setup_failed", "mirror_origin_has_credentials");
-  const fetched = await git(config.mirror, ["fetch", "--no-tags", "--quiet", REPO_URL, "+refs/heads/develop:refs/remotes/origin/develop"], LIMITS.setupMs);
+  // HTTP/1.1: an HTTP/2 stream from the host was cut mid-pack on a large fetch (curl 92).
+  const fetched = await git(
+    config.mirror,
+    ["-c", "http.version=HTTP/1.1", "fetch", "--no-tags", "--quiet", REPO_URL, "+refs/heads/develop:refs/remotes/origin/develop"],
+    LIMITS.setupMs,
+  );
   if (fetched.code !== 0) return failed("setup_failed", "develop_fetch");
   const baseResult = await git(config.mirror, ["rev-parse", "--verify", "refs/remotes/origin/develop^{commit}"]);
   if (baseResult.code !== 0) return failed("setup_failed", "develop_missing");
