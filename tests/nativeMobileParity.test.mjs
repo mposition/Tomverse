@@ -109,7 +109,7 @@ test("Deep Research uses its durable job status without submitting a second ques
 
 for (const refusal of [429,403]) test(`comparison admission ${refusal} saves no question and starts no model request`, async () => {
   let dispatches=0;let persisted=0;const conversation={id:"comparison",selectedModels:["a","b"],messages:[]};
-  const transport=createApiTransport(async(path,init={})=>{
+  const transport=createApiTransport(async(path)=>{
     if(path==="/api/products/mobile/capabilities")return Response.json(capability);
     if(path.endsWith("/messages")){persisted++;throw Error("Admission must precede persistence");}
     if(path==="/api/chat/preflight")return Response.json({code:"CHAT_CONCURRENCY_EXCEEDED",details:{retryAfterSeconds:12},traceId:"synthetic-trace"},{status:refusal,headers:{"Retry-After":"12",...(refusal===429?{"X-Request-ID":"synthetic-trace"}:{})}});
