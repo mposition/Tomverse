@@ -1,5 +1,6 @@
 import "server-only";
 import WebSocket from "ws";
+import type { Live } from "openai/resources/live";
 import { VOICE_CONVERSATION_INSTRUCTIONS, VOICE_CONVERSATION_MODEL } from "@tomverse/chat-core";
 
 const endpoint = "https://api.openai.com/v1/live/sessions";
@@ -12,12 +13,15 @@ export async function createVoiceProviderSession(sdp: string, history: Array<{ r
       session: {
         model: VOICE_CONVERSATION_MODEL, instructions: VOICE_CONVERSATION_INSTRUCTIONS,
         store: false, delegation: { type: "client" },
-        input: history.map(m => ({ type: "message", role: m.role, content: [{ type: m.role === "assistant" ? "output_text" : "input_text", text: m.content }] })),
+        input: history.map((m): Live.InitialItem => m.role === "assistant"
+          ? { type: "message", role: "assistant", content: [{ type: "output_text", text: m.content }] }
+          : { type: "message", role: "user", content: [{ type: "input_text", text: m.content }] }),
+        // Startup frontend capabilities belong to MediaSessionConfig.
+        // The frontend cannot change configuration, invoke Responses, or supply results.
+        client: { data_channel: { allowed_client_events: [], allowed_server_events: [{ type: "session.started" }, { type: "session.closed" }] } },
       },
-      // The untrusted frontend cannot change configuration, invoke Responses, or supply results.
-      client: { data_channel: { allowed_client_events: [], allowed_server_events: ["session.started", "session.closed"] } },
       transport: { type: "webrtc", sdp },
-    }),
+    } satisfies Live.LiveCreateParams),
   });
   if (!response.ok) {
     await response.body?.cancel();

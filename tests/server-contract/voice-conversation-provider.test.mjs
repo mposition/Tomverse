@@ -4,6 +4,30 @@ import { EventEmitter } from "node:events";
 import { createVoiceProviderSession, sendVoiceProviderResult } from "../../lib/voiceConversationProvider.ts";
 const originalFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = originalFetch; });
+
+test("WebRTC creation uses the documented session-scoped frontend permissions and event selectors", async () => {
+  // https://developers.openai.com/api/reference/resources/live/methods/create
+  let submitted;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://api.openai.com/v1/live/sessions");
+    assert.equal(init.method, "POST"); submitted = JSON.parse(init.body);
+    // The API rejects a top-level client field or string server selectors.
+    assert.deepEqual(Object.keys(submitted).sort(), ["session", "transport"]);
+    assert.deepEqual(submitted.session.client.data_channel, {
+      allowed_client_events: [],
+      allowed_server_events: [{ type: "session.started" }, { type: "session.closed" }],
+    });
+    return Response.json({ session: { id: "live_created" }, transport: { type: "webrtc", sdp: "fixture-answer" } }, { status: 201 });
+  };
+  assert.deepEqual(await createVoiceProviderSession("fixture-offer", [
+    { role: "user", content: "Our code name is Cedar." },
+    { role: "assistant", content: "Cedar." },
+  ]), { ok: true, sessionId: "live_created", sdp: "fixture-answer" });
+  assert.equal(submitted.session.store, false);
+  assert.deepEqual(submitted.session.delegation, { type: "client" });
+  assert.deepEqual(submitted.transport, { type: "webrtc", sdp: "fixture-offer" });
+  assert.deepEqual(submitted.session.input.map(message => [message.role, message.content[0].type]), [["user", "input_text"], ["assistant", "output_text"]]);
+});
 test("a malformed SDP returns its session identity for durable closing before any further provider command", async () => {
   const calls = [];
   globalThis.fetch = async url => { calls.push(String(url)); return Response.json(calls.length === 1 ? { session: { id: "live_known" }, transport: {} } : {}); };
