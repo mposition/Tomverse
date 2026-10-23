@@ -93,6 +93,20 @@ test("a registry override below the profile cannot lower a pin's rate under the 
   assert.equal(raised.pin.worstInputMicroUsdPerMillion, 1_000_000_000);
 });
 
+test("a registry window cannot narrow the code catalog's, and two rows for one API model choose neither", () => {
+  const luna = AVAILABLE_MODELS.find((model) => model.apiModel === "gpt-6-luna");
+  const [narrowed] = marketingLlmModelOptionsFrom([{ ...luna, contextWindowTokens: 8_000 }]);
+  assert.equal(narrowed.pin.contextWindowTokens, luna.contextWindowTokens);
+  const twice = marketingLlmModelOptionsFrom([
+    luna,
+    { ...luna, id: "cheap-luna-row", inputUsdPerMillionTokens: 0.01, outputUsdPerMillionTokens: 0.01 },
+  ]);
+  assert.deepEqual(
+    twice.map((entry) => [entry.model, entry.unavailable]),
+    [["gpt-6-luna", "api_model_duplicated"]],
+  );
+});
+
 test("an operator's registry price for both input and output is a verified price", () => {
   const base = AVAILABLE_MODELS.find((model) => model.apiModel === "gpt-5.4-mini");
   const [entry] = marketingLlmModelOptionsFrom([

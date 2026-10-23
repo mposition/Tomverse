@@ -10,6 +10,7 @@ import { MARKETING_COMPETITOR_ACTIONS } from "@/lib/marketingCompetitorCore";
 import { createApprovedMarketingCompetitor } from "@/lib/marketingCompetitorStore";
 import { marketingGeneratorContextAllowed } from "@/lib/marketingGeneratorContext";
 import { createMarketingChannel, insertMarketingReport, runMarketingTransaction } from "@/lib/marketingStore";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
@@ -252,6 +253,8 @@ test("the context carries the model selected in the Admin Console with its catal
     };
     try {
       assert.deepEqual(await llm(), { model: null, pin: null });
+      // The context reads the registry rows; seed them the way the app does.
+      await getRuntimeModels();
       await setMarketingLlmSettings(prisma, "gpt-5.4-mini", "5");
       const selected = await llm();
       assert.equal(selected.model, "gpt-5.4-mini");

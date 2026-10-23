@@ -28,7 +28,7 @@ import {
   parseMarketingLlmSettings,
   type MarketingLlmPricePin,
 } from "@/lib/marketingLlmBudgetCore";
-import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
+import { marketingLlmCatalogPinsIn } from "@/lib/marketingLlmModelCatalog";
 import type { MarketingTransaction } from "@/lib/marketingStore";
 
 /**
@@ -133,7 +133,7 @@ export type MarketingGeneratorReport = {
 
 type ContextReader = Pick<
   MarketingTransaction,
-  "marketingChannel" | "marketingReport" | "marketingCompetitor" | "appSetting"
+  "marketingChannel" | "marketingReport" | "marketingCompetitor" | "appSetting" | "modelRegistryEntry"
 >;
 
 /**
@@ -179,8 +179,9 @@ async function latestReport(
   return null;
 }
 
-const llmContext = async (model: string | null): Promise<MarketingGeneratorContext["llm"]> => {
-  const pin = model === null ? undefined : (await marketingLlmCatalogPins()).find((candidate) => candidate.model === model);
+const llmContext = async (db: ContextReader, model: string | null): Promise<MarketingGeneratorContext["llm"]> => {
+  // Through the caller's transaction, so the pin is read in its snapshot.
+  const pin = model === null ? undefined : (await marketingLlmCatalogPinsIn(db)).find((candidate) => candidate.model === model);
   return pin ? { model, pin } : { model: null, pin: null };
 };
 
@@ -223,6 +224,6 @@ export async function readMarketingGeneratorContext(
     brief,
     marketIntel,
     competitors: { tracked, knownIds },
-    llm: await llmContext(parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
+    llm: await llmContext(db, parseMarketingLlmSettings(llmSetting?.value)?.model ?? null),
   };
 }

@@ -15,7 +15,7 @@ import {
 } from "@/lib/marketingLlmBudgetCore";
 import { MODEL_PRICING, resolveModelPricing, type PricingCostSource } from "@/lib/modelPricing";
 import { getRuntimeModels, registryRowToModel } from "@/lib/modelRegistry";
-import type { AiModel } from "@/lib/models";
+import { AVAILABLE_MODELS, type AiModel } from "@/lib/models";
 
 /**
  * The models the marketing generator may use, and their price pins, read from
@@ -41,6 +41,9 @@ const VERIFIED_SOURCES: readonly PricingCostSource[] = [
   "model_registry_override",
 ];
 
+/** The code catalog, widened to its element type so every optional field reads. */
+const BUILT_MODELS: readonly AiModel[] = AVAILABLE_MODELS;
+
 const microPerMillion = (usdPerMillion: number) => Math.ceil(usdPerMillion * 1_000_000);
 const pinText = (value: string) => value.replace(/[^A-Za-z0-9._:/-]/gu, "-").slice(0, 128) || "unknown";
 
@@ -63,18 +66,20 @@ export function marketingLlmModelOptionsFrom(
   now: Date = new Date(),
 ): MarketingLlmModelOption[] {
   const options: MarketingLlmModelOption[] = [];
+  const enabled = models.filter((model) => model.enabled);
   const seen = new Set<string>();
-  for (const model of models) {
-    if (!model.enabled || seen.has(model.apiModel)) continue;
+  for (const model of enabled) {
+    if (seen.has(model.apiModel)) continue;
     seen.add(model.apiModel);
     const base = { model: model.apiModel, name: model.name, provider: model.provider };
     if (model.provider !== "openai") {
       options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "provider_not_supported" });
       continue;
     }
-    const window = model.contextWindowTokens;
-    if (!window) {
-      options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "context_window_unknown" });
+    // Two catalog rows for one API model would be two prices for one call:
+    // neither is chosen, rather than whichever sorts first.
+    if (enabled.filter((other) => other.apiModel === model.apiModel).length > 1) {
+      options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "api_model_duplicated" });
       continue;
     }
     // A verified price is the static profile for exactly this provider and
@@ -86,6 +91,17 @@ export function marketingLlmModelOptionsFrom(
     const profile = MODEL_PRICING.find((entry) => entry.modelId === model.id);
     const profileMatches = profile?.provider === model.provider && profile.apiModelId === model.apiModel;
     const explicit = model.inputUsdPerMillionTokens != null && model.outputUsdPerMillionTokens != null;
+    // The generator does not cut its input to the window, so the window is a
+    // reservation bound: a registry value may widen the code catalog's, never
+    // narrow it.
+    const builtWindow = profileMatches
+      ? BUILT_MODELS.find((entry) => entry.id === model.id && entry.apiModel === model.apiModel)?.contextWindowTokens
+      : undefined;
+    const window = Math.max(model.contextWindowTokens ?? 0, builtWindow ?? 0);
+    if (!window) {
+      options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "context_window_unknown" });
+      continue;
+    }
     // The worst rate: the top tier now, and at every revision still to come.
     const future = ((profileMatches && profile?.priceSchedule) || [])
       .map((revision) => Date.parse(revision.effectiveFrom))
