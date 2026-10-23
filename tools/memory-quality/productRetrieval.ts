@@ -47,7 +47,8 @@ export function measureProductRetrieval(cases: readonly RetrievalCase[]) {
       ...evaluateRetrieval(testCase, top), tag: testCase.tag, top,
       recalledInjected: relevantIds.filter((id) => injected.some((item) => item.id === id)).length,
       missed: relevantIds.filter((id) => !top.includes(id)),
-      // Core and style are never relevance-gated (§9), so they are counted
+      // Core and style are never relevance-gated
+      // (docs/policy/external-conversation-import-and-memory.md §9), so they are counted
       // apart from the term matches that MEMORY-02 is about.
       gatedSelected: gated.length,
       gatedIrrelevant: gated.filter((item) => !relevantIds.includes(item.id)).length,
