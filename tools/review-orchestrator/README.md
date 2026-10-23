@@ -495,6 +495,111 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 끄려면 `sudo systemctl disable --now review-status-sender`입니다. 검토실은 5분 뒤 "보고
 없음"이 됩니다.
 
+## CI 자동 수정 (PR CI Auto-Fix)
+
+develop으로 가는 `claude/to-develop/**`·`codex/to-develop/**` PR에서 필수 CI(PR Fast Gate,
+Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패하면, 이 서버의
+구독 Claude CLI가 가장 작은 수정을 만들고 `.github/workflows/pr-ci-auto-fix.yml`이 검사한 뒤
+그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
+운영자 결정 2026-10-23). PR 하나에 자동 수정 커밋은 최대 2개이고, head 하나에 한 번만 시도합니다.
+
+**두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.** 상태 보고와 같은 이유입니다. 모델은 `review`
+계정으로 돌고, CI 로그와 브랜치 내용은 모델에게 그 계정이 읽을 수 있는 파일이나 프로세스 환경을
+출력하라고 시킬 수 있습니다.
+
+- **제안 pass(`bin/pr-ci-auto-fix.mjs`, `review` 계정, 5분마다 timer)**: GitHub를 **읽기 전용
+  토큰**으로 읽고, 대상 PR을 하나 고르고, daemon이 마지막으로 읽은 Claude quota가
+  `PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT`(기본 30) 이상일 때만 모델을 부릅니다. 한 시간에 6건
+  넘게 내보내지 않습니다(sender의 상한과 같아서 sender에서 기다리다 만료되는 요청이 없습니다).
+  로그를 읽지 못하면 시도로 치지 않고 다음 pass가 다시 합니다.
+- **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
+  만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
+  - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.
+  - `--settings`로 **인라인** deny 규칙을 줍니다(모델이 고칠 수 있는 파일이 아닙니다). 홈 전체,
+    `/proc`(이 프로세스의 환경 = 읽기 토큰), `/etc`, `/run`, `/sys`, review 상태 폴더, outbox를
+    읽기·쓰기 모두 막습니다. deny 규칙은 symlink 경로나 그 대상 중 하나만 맞아도 막습니다.
+  - 그래서 checkout과 로그는 그 밖(`PR_CI_AUTO_FIX_WORK`)에 둡니다. 겹치면 pass가 시작하지 않습니다.
+  - 지시 파일(AGENTS.md 등)은 develop의 것으로 바꾸고, 브랜치가 넣은 symlink는 모델을 부르기
+    전에 모두 지웁니다.
+  - patch가 서버를 떠나기 전 마지막 검사: binary·symlink 변경, 이 계정이 아는 비밀값(읽기 토큰,
+    CLI에 넘기는 환경 변수, 자격증명 파일의 문자열 — 원문과 base64), 추가된 줄의 비밀 형태
+    문자열(`sk-ant-`, `ghp_`, `github_pat_`, private key)이 있으면 내보내지 않습니다.
+  - 결과 patch는 outbox에 `<head sha>.json`으로 남깁니다. dispatch 토큰은 갖지 않습니다. 읽기
+    토큰이 새어도 공개 저장소와 CI 로그를 읽는 것이 전부입니다.
+- **sender(`bin/pr-ci-auto-fix-sender.mjs`, systemd `DynamicUser`)**: workflow를 dispatch할 수
+  있는 유일한 토큰을 갖습니다. Node 내장 모듈만 쓰는 파일 하나이고, 운영자가 GitHub main에서
+  root 소유 경로로 받습니다. outbox 파일은 `review` 계정이 쓰므로 필드 단위로 다시 만들고,
+  head 하나에 한 번(POST 전에 기록하므로 결과를 모르는 요청도 다시 보내지 않습니다), 한 시간에
+  최대 6건 보냅니다. 6시간이 지난 요청은 로그 한 줄을 남기고 버립니다.
+- **판단의 경계는 workflow입니다.** dispatch 입력을 믿지 않고 GitHub 기록으로 다시 확인합니다
+  (PR이 그 head에서 열려 있는지, 넘겨받은 run이 그 커밋에서 실패한 필수 run이면서 그 workflow의
+  최신 run인지 — reopen 등으로 같은 커밋에 새로 돈 green run이 있으면 거절합니다 —, 자동 수정 커밋이
+  2개 미만인지). 그 뒤 `scripts/pr-ci-auto-fix-guard.mjs`가 patch를 검사하고(게이트 경로·테스트
+  파일·삭제·binary 금지, 400줄 이하) 통과할 때만 `GH_AUTOMATION_PAT`으로 push합니다. 위조된
+  outbox 요청이 할 수 있는 최악은 나쁜 모델 patch와 같고, guard가 둘 다 같은 기준으로 판단합니다.
+- **기본은 꺼짐입니다.** 저장소 변수 `PR_AUTO_FIX_ENABLED`가 정확히 `true`가 아니면 workflow가
+  아무것도 하지 않고, timer와 sender를 설치하지 않으면 서버도 아무것도 하지 않습니다.
+
+### 켜기
+
+이 변경이 **main**에 들어간 뒤에 합니다. `workflow_dispatch`는 기본 브랜치의 workflow를 돌리고,
+sender 파일도 main에서 받습니다.
+
+**① GitHub 웹(운영자).** fine-grained token 두 개를 `mposition/Tomverse` 하나에만 만듭니다.
+값은 대화나 문서에 옮기지 않습니다.
+
+- 읽기용: Actions **Read**, Pull requests **Read**(Metadata Read는 자동).
+- dispatch용: Actions **Read and write**만. 이 권한은 workflow를 끄거나 run을 취소·삭제할 수도
+  있으므로 sender 계정 밖으로 나가면 안 됩니다.
+
+**② Ubuntu 검토 서버의 관리 계정 bash, 아무 폴더.** 토큰을 root만 읽는 파일에 씁니다. `read -s`라
+값이 화면에 나오지 않고, `printf`는 bash 내장이라 프로세스 목록에도 나오지 않습니다.
+
+```bash
+sudo install -d -m 0700 /etc/pr-ci-auto-fix
+read -rs -p "read token: " T; echo; printf 'PR_CI_AUTO_FIX_READ_TOKEN=%s\n' "$T" | sudo sh -c 'umask 077; cat > /etc/pr-ci-auto-fix/read.env'; unset T
+read -rs -p "dispatch token: " T; echo; printf 'PR_CI_AUTO_FIX_DISPATCH_TOKEN=%s\n' "$T" | sudo sh -c 'umask 077; cat > /etc/pr-ci-auto-fix/dispatch.env'; unset T
+sudo install -d -o review -m 0755 /var/lib/pr-ci-auto-fix /var/lib/pr-ci-auto-fix/outbox /var/lib/pr-ci-auto-fix/work
+```
+
+**③ 같은 서버 bash.** sender와 그 unit을 GitHub main에서 root 소유로 받고 켭니다.
+
+```bash
+RAW=https://raw.githubusercontent.com/mposition/Tomverse/main/tools/review-orchestrator
+sudo install -d -m 0755 /usr/local/lib/pr-ci-auto-fix-sender
+sudo curl -fsSL -o /usr/local/lib/pr-ci-auto-fix-sender/pr-ci-auto-fix-sender.mjs "$RAW/bin/pr-ci-auto-fix-sender.mjs"
+sudo curl -fsSL -o /etc/systemd/system/pr-ci-auto-fix-sender.service "$RAW/deploy/pr-ci-auto-fix-sender.service"
+sudo chmod 0644 /usr/local/lib/pr-ci-auto-fix-sender/pr-ci-auto-fix-sender.mjs /etc/systemd/system/pr-ci-auto-fix-sender.service
+sudo systemctl daemon-reload && sudo systemctl enable --now pr-ci-auto-fix-sender
+sudo journalctl -u pr-ci-auto-fix-sender --since "5 min ago"     # ci-fix sender started
+```
+
+**④ 같은 서버 bash.** "서버 업데이트 (drain)" 절차로 checkout을 갱신한 뒤 제안 pass를 설치합니다.
+unit은 `/opt/...` 배치를 기준으로 쓰여 있으므로, 이 서버의 현재 배치(`/home/review/...`)로 경로를
+바꿉니다(`systemctl cat review-orchestrator`의 `ExecStart`·`REVIEW_ORCH_CONFIG`와 같아야 합니다).
+
+```bash
+D=/home/review/review-orchestrator/tools/review-orchestrator/deploy
+sed -e 's#/opt/review-orchestrator#/home/review/review-orchestrator#' \
+  -e 's#/etc/review-orchestrator/config.json#/home/review/.config/review-orchestrator/config.json#' \
+  "$D/pr-ci-auto-fix.service" | sudo tee /etc/systemd/system/pr-ci-auto-fix.service > /dev/null
+sudo cp "$D/pr-ci-auto-fix.timer" /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl start pr-ci-auto-fix && sudo journalctl -u pr-ci-auto-fix --since "5 min ago"
+sudo systemctl enable --now pr-ci-auto-fix.timer
+```
+
+pass 로그 끝에 `ci-fix: {"outcome":"nothing_to_fix"}`(또는 `queued` 등)가 보이면 됩니다.
+`ci-fix not started: ...`는 그 줄이 말하는 설정이 빠진 것입니다(종료 코드 64).
+
+**⑤ GitHub 웹(운영자), 마지막.** 저장소 Settings › Secrets and variables › Actions ›
+Variables에 `PR_AUTO_FIX_ENABLED` = `true`. 이것을 켜기 전에는 sender가 dispatch해도 workflow가
+`skipped`로 끝납니다. 켜면 자동 push가 시작됩니다(승인 목록 6, 운영자 승인 2026-10-20).
+
+**끄기**: 변수를 지우면 바로 멈춥니다. 서버 쪽은
+`sudo systemctl disable --now pr-ci-auto-fix.timer pr-ci-auto-fix-sender`입니다. 시도 기록은
+`<stateDir>/ci-fix/ledger.json`(14일), sender가 보낸 기록은
+`/var/lib/private/pr-ci-auto-fix-sender/sent.json`에 있습니다.
+
 ## 알려진 한계
 
 - `--author`와 `--author-vendor`는 요청자가 스스로 밝히는 값입니다. 세 앱이 같은 Windows
