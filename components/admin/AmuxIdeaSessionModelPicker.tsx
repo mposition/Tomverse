@@ -35,7 +35,7 @@ export function AmuxIdeaSessionModelPicker({ models, scopeModel, choice, disable
             onChange={(event) => onChange(chooseSessionModel(list, event.target.value))}>
             <option value="">{scopeLabel}</option>
             {list?.map((model) => (
-              <option key={model.approvalId} value={sessionModelKey(model)}>{model.modelId}</option>
+              <option key={model.approvalId} value={sessionModelKey(model)}>{model.provider} / {model.modelId}</option>
             ))}
           </select>
         </label>

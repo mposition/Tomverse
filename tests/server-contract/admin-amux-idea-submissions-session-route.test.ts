@@ -136,6 +136,7 @@ test("pre-write refusals keep their code; an uncertain write is read back", () =
   withSwitches(SWITCHES, async () => {
     const { POST } = await loadRoute();
     for (const [code, status] of [["outside_scope", 409], ["model_not_approved", 409],
+      ["model_not_launchable", 409],
       ["scope_unavailable", 409],
       ["reference_snapshot_unavailable", 503]] as const) {
       world.sessionError = { code };

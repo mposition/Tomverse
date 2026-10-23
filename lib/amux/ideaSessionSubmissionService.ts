@@ -20,6 +20,7 @@ import {
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
+import { amuxV19ChannelAdmits } from "./ideaV19CliChannels.mjs";
 import { amuxIdeaReferencesOutsideScope,
   amuxOperatingScopeSelection } from "./ideaOperatingScopeCore.ts";
 import { pinAmuxSessionReferences } from "./ideaSessionReferencePinning.ts";
@@ -58,6 +59,7 @@ export class AmuxIdeaSessionSubmissionError extends Error {
       | "scope_unavailable"
       | "outside_scope"
       | "model_not_approved"
+      | "model_not_launchable"
       | "reference_snapshot_unavailable"
       | "key_store_unavailable"
       | "request_already_seen"
@@ -98,6 +100,14 @@ const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
 const analysisModel = (authority: AmuxOperatingScopeAuthority,
   chosen: AmuxIdeaModelSelection | null | undefined): AmuxIdeaModelSelection =>
   chosen ?? amuxOperatingScopeSelection(authority.scope);
+
+/** A chosen model the runner's CLI channel cannot launch at that effort would
+ * wait in the queue until the seven-day deadline; refuse it before writing. */
+const requireLaunchableChoice = (chosen: AmuxIdeaModelSelection | null | undefined) => {
+  if (chosen && !amuxV19ChannelAdmits(chosen)) {
+    throw new AmuxIdeaSessionSubmissionError("model_not_launchable");
+  }
+};
 
 const requireCurrentModel = async (
   selection: AmuxIdeaModelSelection,
@@ -345,6 +355,7 @@ export async function submitAmuxIdeaFromSession(input: {
     readAmuxOperatingScopeAuthority(tx), { ...AMUX_IDEA_STANDARD_TRANSACTION });
   if (!expectedAuthority) throw new AmuxIdeaSessionSubmissionError("scope_unavailable");
   requireInputWithinScope(expectedAuthority, input.inspected);
+  requireLaunchableChoice(input.model);
   await requireCurrentModel(analysisModel(expectedAuthority, input.model));
   let pinnedCommitShas: string[];
   try {

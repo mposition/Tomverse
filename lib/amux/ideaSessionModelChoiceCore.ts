@@ -5,8 +5,8 @@ import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
  * The Admin idea input's per-idea model choice for unattended analysis (owner
  * decision 2026-10-23). The empty key keeps the operating scope's model, which
  * is the default and what coding sessions always use. Pure helpers: the server
- * still checks the choice against the approved catalog and an approved
- * subscription price before anything is written.
+ * still checks the choice against the approved catalog and the runner's CLI
+ * channel before anything is written; the claim later needs its approved price.
  */
 export type SessionModelChoice = { key: string; effort: string };
 
@@ -27,12 +27,14 @@ export function sessionModelSelection(models: readonly AvailableFrontierModel[] 
 
 const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
-/** Picking a model starts at its highest allowed effort, the Frontier default. */
+/** Picking a model starts where the Frontier picker does: high when it is
+ * allowed (the effort every launchable channel runs), else the highest. */
 export function chooseSessionModel(models: readonly AvailableFrontierModel[] | null,
   key: string): SessionModelChoice {
   const model = models?.find((entry) => sessionModelKey(entry) === key);
   if (!model) return SESSION_MODEL_SCOPE_DEFAULT;
-  const effort = [...model.allowedEfforts].sort((left, right) =>
-    EFFORT_ORDER.indexOf(right) - EFFORT_ORDER.indexOf(left))[0] ?? "";
+  const effort = model.allowedEfforts.includes("high") ? "high"
+    : [...model.allowedEfforts].sort((left, right) =>
+      EFFORT_ORDER.indexOf(right) - EFFORT_ORDER.indexOf(left))[0] ?? "";
   return { key, effort };
 }

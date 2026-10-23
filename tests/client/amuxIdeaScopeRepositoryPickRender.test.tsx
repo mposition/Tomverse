@@ -113,7 +113,8 @@ const modelPicker = (models: typeof sessionModels | null | "error", key = "", ef
 test("the session model picker defaults to the scope model and lists approved models", () => {
   const html = modelPicker(sessionModels);
   assert.match(html, /<option value="" selected="">Operating scope default \(claude-opus-5-5 · max\)<\/option>/);
-  assert.match(html, /<option value="cursor:grok-4\.7-high">grok-4\.7-high<\/option>/);
+  assert.match(html, /<option value="cursor:grok-4\.7-high">cursor \/ (<!-- -->)?grok-4\.7-high<\/option>/,
+    "the channel is named: Copilot and Cursor reuse model names");
   assert.doesNotMatch(html, /Effort/, "no effort box until a model is picked");
   assert.match(html, /min-h-11/);
   const picked = modelPicker(sessionModels, "cursor:grok-4.7-high", "high");

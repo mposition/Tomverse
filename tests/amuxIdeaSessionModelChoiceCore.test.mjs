@@ -17,13 +17,17 @@ test("the scope default sends no model, so the operating scope's model runs", ()
   assert.equal(sessionModelSelection(null, SESSION_MODEL_SCOPE_DEFAULT), null);
 });
 
-test("picking a model starts at its highest allowed effort and sends that exact selection", () => {
+test("picking a model starts at high when allowed, else its highest effort, and sends that exact selection", () => {
   const cursor = chooseSessionModel(models, sessionModelKey(models[0]));
   assert.deepEqual(cursor, { key: "cursor:grok-4.7-high", effort: "high" });
   assert.deepEqual(sessionModelSelection(models, cursor),
     { provider: "cursor", modelId: "grok-4.7-high", reasoningEffort: "high" });
   assert.deepEqual(chooseSessionModel(models, "anthropic:claude-opus-5-5"),
-    { key: "anthropic:claude-opus-5-5", effort: "max" }, "order of allowedEfforts does not matter");
+    { key: "anthropic:claude-opus-5-5", effort: "max" }, "no high: the highest, in any order");
+  const withHigh = [{ ...models[1], allowedEfforts: ["max", "high", "ultra"] }];
+  assert.deepEqual(chooseSessionModel(withHigh, "anthropic:claude-opus-5-5"),
+    { key: "anthropic:claude-opus-5-5", effort: "high" },
+    "high wins over max and ultra: the pinned Claude channel launches only high");
   assert.deepEqual(chooseSessionModel(models, ""), SESSION_MODEL_SCOPE_DEFAULT);
   assert.deepEqual(chooseSessionModel(models, "openai:gone"), SESSION_MODEL_SCOPE_DEFAULT);
 });

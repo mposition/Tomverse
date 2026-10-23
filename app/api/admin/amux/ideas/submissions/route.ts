@@ -76,6 +76,7 @@ const SESSION_PREWRITE_STATUS: Partial<Record<AmuxIdeaSessionSubmissionError["co
   scope_unavailable: 409,
   outside_scope: 409,
   model_not_approved: 409,
+  model_not_launchable: 409,
   reference_snapshot_unavailable: 503,
   // key_store_unavailable stays a read-back: the shared UI table treats it so
   // on the v4 path, where a key outcome can be uncertain.
