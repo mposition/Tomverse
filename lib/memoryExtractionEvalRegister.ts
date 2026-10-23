@@ -976,9 +976,10 @@ export function findApprovedEvalPair(
  * evaluation measured zero critical bulk-safe adoptions qualifies; an owner
  * launch, a revoked, candidate or unknown pair is reviewed one by one.
  *
- * Positive on purpose: keyed to the absence of `ownerLaunch`, revoking or
- * renewing a launch would drop the field and make the unmeasured candidates it
- * already stored bulk-eligible again. `null` is a user-authored memory.
+ * Positive on purpose: it requires `evaluation` rather than checking for the
+ * absence of `ownerLaunch`, because revoking or renewing a launch drops that
+ * field and would make the unmeasured candidates it already stored
+ * bulk-eligible again. `null` is a user-authored memory.
  */
 export function allowsBulkApproval(
     pair: MemoryExtractionPairRef | null,

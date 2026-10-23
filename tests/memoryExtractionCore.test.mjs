@@ -30,6 +30,10 @@ import {
     findCriticalProbeFailures,
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
+import {
+    MUST_REJECT,
+    MUST_REQUIRE_SENSITIVE_REVIEW,
+} from "../lib/memoryValidatorProbeCorpus.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 
 // --- revocation semantics (§12.1, lib/memoryAccess.ts) ---
@@ -265,6 +269,8 @@ test("an approval rests on one basis, never both", () => {
 });
 
 test("every critical validator probe still holds", () => {
+    // An empty corpus would pass vacuously, so the probes must be there to run.
+    assert.ok(MUST_REJECT.length > 0 && MUST_REQUIRE_SENSITIVE_REVIEW.length > 0);
     assert.deepEqual(findCriticalProbeFailures(), []);
 });
 

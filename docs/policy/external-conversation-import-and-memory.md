@@ -849,7 +849,7 @@ Node crypto)입니다.
   저장합니다.
 - **revocation surface는 중지만 합니다.** `feature.memoryExtractionEnabled`와
   `feature.memoryInjectionEnabled`에는 의도적으로 admin 쓰기 경로가 없습니다 —
-  활성화는 §12.4의 사람 절차이고, 마지막 단계만 버튼으로 만들면 앞의 다섯
+  활성화는 §12.4(또는 §12.4a)의 사람 절차이고, 마지막 단계만 버튼으로 만들면 앞의 다섯
   단계를 건너뛸 수 있게 됩니다. 이 결정은
   `tests/appSettingWriters.test.mjs`의 registry에 이유와 함께 기록돼 있고,
   누군가 쓰기 경로를 추가하면 그 테스트가 실패합니다.
@@ -945,7 +945,9 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   artifact 보존 → blind review → 독립 재실행 → §12.3 기준 그대로 판정(축약·
   완화 금지) → 승인자 서명 → register PR 병합 → staging 검증 → 그 후에만
   `memoryInjectionEnabled=true`. 승인 pair가 없거나 revoke되면 flag가 켜져
-  있어도 injection은 fail-closed입니다.
+  있어도 injection은 fail-closed입니다. eval 없이 출시하는 경로는 §12.4a이며,
+  그때는 이 순서 대신 운영자 출시 승인 → register PR 병합 → staging 검증 → flag
+  순서입니다.
 
 ### 12.4a 운영자 출시 승인 — [확정 · 2026-10-23 @mposition]
 
@@ -1491,7 +1493,7 @@ AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
 |---|---|---|
 | `externalConversationImportEnabled` | A | Import API·UI 전체 |
 | `memoryExtractionEnabled` | B | extraction run 생성 |
-| `memoryInjectionEnabled` | B | 새 대화 주입 (§12.4의 운영 절차 선행 필수) |
+| `memoryInjectionEnabled` | B | 새 대화 주입 (§12.4 또는 §12.4a의 운영 절차 선행 필수) |
 | `assistantProfilesEnabled` | C | profile CRUD·runtime |
 | `assistantKnowledgeEnabled` | C | knowledge 업로드·retrieval |
 
