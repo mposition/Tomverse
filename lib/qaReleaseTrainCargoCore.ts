@@ -43,9 +43,17 @@ type Json = Record<string, unknown>;
 const record = (value: unknown): Json | null => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Json) : null);
 const list = (value: unknown): Json[] => (Array.isArray(value) ? value.map(record).filter((item): item is Json => item !== null) : []);
 
-/** Pull request numbers a release pull request names in its title or body (`#2873`). */
+/**
+ * Pull request numbers a release pull request carries: those its title or
+ * body names (`#2873`). A train's body (lib/qaReleaseTrainCore.ts) also names
+ * what it left out and what it skipped as already on main, so when the body
+ * has an `## Included` section only that section counts (2026-10-23: #2906
+ * marked seventeen left-out pull requests as on main).
+ */
 export function qaReleaseTrainReferencedNumbers(pull: Json): number[] {
-  const text = `${typeof pull.title === "string" ? pull.title : ""}\n${typeof pull.body === "string" ? pull.body : ""}`;
+  const body = typeof pull.body === "string" ? pull.body : "";
+  const included = /^## Included\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body);
+  const text = `${typeof pull.title === "string" ? pull.title : ""}\n${included ? included[1] : body}`;
   return [...new Set([...text.matchAll(/#(\d{1,7})\b/g)].map((match) => Number(match[1])))];
 }
 
