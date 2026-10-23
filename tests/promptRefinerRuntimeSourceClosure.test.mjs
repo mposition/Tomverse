@@ -693,6 +693,7 @@ const expectedResolutionOptions = Object.freeze({
   paths: {
     "@/*": ["./*"],
     "@tomverse/chat-core": ["./packages/chat-core/src/index.ts"],
+    "@tomverse/chat-ui": ["./packages/chat-ui/src/index.tsx"],
   },
 });
 const assertResolutionOptions = (options) =>

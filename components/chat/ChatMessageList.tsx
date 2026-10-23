@@ -12,7 +12,7 @@ import {
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
-import type { ComponentPropsWithoutRef, MouseEventHandler } from "react";
+import type { ComponentPropsWithoutRef, MouseEventHandler, ReactNode } from "react";
 import { AnswerMarkdown } from "@tomverse/chat-ui";
 import rehypeHighlight from "rehype-highlight";
 import {
@@ -66,6 +66,7 @@ import {
 } from "@/lib/chatProductUiCopy";
 
 type ChatMessageListProps = {
+  transcriptFooter?: ReactNode;
   messages: Message[];
   onRetryLast?: () => void;
   /** Chat restores this message's question to the composer; never dispatches. */
@@ -404,6 +405,7 @@ function TypingIndicator({ label }: { label?: string }) {
 }
 
 export function ChatMessageList({
+  transcriptFooter,
   messages,
   onRetryLast,
   onRestoreQuestion,
@@ -1009,7 +1011,7 @@ export function ChatMessageList({
                     )}
                   </div>
                 )}
-                
+
                 {!isUser && !modelInfo && msg.id === "welcome" && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
                     <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
@@ -1838,6 +1840,7 @@ export function ChatMessageList({
               </Fragment>
             );
           })}
+          {transcriptFooter}
         </div>
       </div>
 

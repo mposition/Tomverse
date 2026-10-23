@@ -12,6 +12,7 @@ import {
   type MouseEventHandler,
 } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
+import { VoiceConversationHistory } from "@/components/chat/VoiceConversationHistory";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -209,6 +210,7 @@ function guestTranscriptWithCarriedAnswers(
 }
 
 type ChatAppProps = {
+  voiceHistoryRevision?: number;
   /** Product chrome that owns this panel's account and purchase returns. */
   currentProduct?: ChatWorkspaceProduct;
   modelId: string;
@@ -446,6 +448,7 @@ const interpolateModelOnlyLabel = (template: string, modelName: string) =>
     template.replace("{model}", modelName);
 
 function ChatAppComponent({
+  voiceHistoryRevision,
   currentProduct = "review",
   modelId,
   transcriptScope = "model",
@@ -3150,6 +3153,7 @@ function ChatAppComponent({
         // A continuation is not an empty conversation: the imported half is
         // its earlier turns, and they render inside this list.
         !hasImportedTranscript ? null : <ChatMessageList
+        transcriptFooter={voiceHistoryRevision !== undefined && initialConversationId && !isGuestMode ? <VoiceConversationHistory conversationId={initialConversationId} revision={voiceHistoryRevision} /> : undefined}
         messages={
           // The imported half first, always: it is what this conversation
           // continues from. `useCenteredWelcome` drops the panel's own

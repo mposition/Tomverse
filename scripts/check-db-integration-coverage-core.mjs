@@ -22,7 +22,7 @@ export function auditDbIntegrationCoverage({ suiteFiles, runnerSource }) {
     const failures = [];
 
     const referenced = new Set(
-        [...runnerSource.matchAll(/"(tests\/integration\/[^"]+\.db\.test\.ts)"/g)].map(
+        [...runnerSource.matchAll(/"(tests\/integration\/[^"]+\.db\.test\.(?:ts|mjs))"/g)].map(
             (match) => match[1]
         )
     );

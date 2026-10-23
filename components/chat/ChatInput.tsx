@@ -876,6 +876,7 @@ type ChatInputProps = {
    * deliberately not turned on.
    */
   voiceInputEnabled?: boolean;
+  voiceConversationControl?: ReactNode;
   /**
    * Appends a finished transcript to one conversation's draft
    * (docs/policy/voice-input.md §8.4).
@@ -1061,6 +1062,7 @@ export function ChatInput({
   onOpenDeepResearchSetup,
   onStartImageDraft,
   voiceInputEnabled = false,
+  voiceConversationControl,
   onVoiceTranscript,
   identityKey,
   imageGenerationLock = null,
@@ -3837,6 +3839,7 @@ export function ChatInput({
             Placed before the send/stop branch so it is the neighbour of
             whichever of the two is rendered.
           */}
+          {voiceConversationControl}
           {voiceInputEnabled && (
             <VoiceInputButton
               state={voice.state}

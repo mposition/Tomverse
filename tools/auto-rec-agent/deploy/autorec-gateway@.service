@@ -18,7 +18,7 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin
 # runner's MainPID, never a process the agent or its tests started.
 Environment=AUTOREC_PEER=%i
 # A root-owned copy installed by install.sh, never the autorec account's checkout.
-ExecStart=/usr/bin/node --disable-sigusr1 --experimental-strip-types --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-gateway.mjs
+ExecStart=/usr/bin/node --disable-sigusr1 --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-gateway.mjs
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal

@@ -88,11 +88,11 @@ test.beforeEach(() => {
   mintedAuthorities = [];
 });
 
-test("signed-in blank Chat receives only the server-owned offered boolean", async () => {
+test("signed-in blank Chat receives server-owned routing and voice capabilities", async () => {
   const response = await GET(new Request("https://tomverse.test/api/products/chat/capabilities"));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
-  assert.deepEqual(await response.json(), { autoSelection: { offered: true } });
+  assert.deepEqual(await response.json(), { autoSelection: { offered: true }, voiceConversation: { enabled: false, maxSeconds: 300 } });
   assert.deepEqual(reads, [["owner-a"]]);
 });
 

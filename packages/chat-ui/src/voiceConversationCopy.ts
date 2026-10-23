@@ -1,0 +1,32 @@
+const en = {
+  title: "Voice conversation", start: "Start voice conversation", close: "Close", stop: "End conversation",
+  ready: "Continue this chat by speaking.", hint: "You can interrupt at any time. Your questions and answers stay in this chat.",
+  usageTitle: "Voice usage", extra: "Answer model and search usage are charged separately.",
+  clock: "Connected time is billed, including pauses and time with your microphone muted.",
+  connecting: "Connecting…", listening: "Listening · interrupt whenever you need", speaking: "Speaking · you can interrupt", finishing: "Ending conversation…",
+  ended: "Conversation ended", saved: "Your questions and answers are saved in this chat.", unknown: "Final voice usage is still being confirmed.", adjusted: "Voice usage was adjusted after the connection ended. Unobserved time was not charged.",
+  mute: "Mute microphone", unmute: "Unmute microphone", audio: "Play assistant audio", error: "Voice could not complete this request. Your chat remains available.",
+  estimated: "Estimated voice credits", charged: "Voice credits", user: "You", assistant: "Tomverse", back: "Back to chat",
+  reserve: "Up to {credits} credits are temporarily reserved; unused credits are returned after confirmed settlement.",
+  searchOn: "Web search on", searchOff: "Web search off", working: "Preparing your answer with your current model and tools…",
+  insufficient: "There are not enough available credits to start voice. Your existing chat is saved.",
+  limited: "Voice has reached its current usage limit. You can continue in this chat.",
+  permission: "Allow microphone access in your device settings, then start voice again.",
+};
+const ko: typeof en = {
+  title: "음성 대화", start: "음성 대화 시작", close: "닫기", stop: "대화 종료",
+  ready: "지금 대화를 말로 이어가세요.", hint: "언제든 말로 끼어들 수 있어요. 질문과 답변은 이 채팅에 이어집니다.",
+  usageTitle: "음성 사용량", extra: "답변 모델·검색 사용량은 별도로 차감됩니다.",
+  clock: "말을 쉬거나 마이크를 꺼도 연결 시간은 계속 계산돼요.",
+  connecting: "연결 중…", listening: "듣고 있어요 · 언제든 말씀하세요", speaking: "답변 중 · 언제든 말씀하세요", finishing: "대화를 종료하고 있어요…",
+  ended: "대화가 종료됐어요", saved: "질문과 답변은 이 채팅에 남아 있어요.", unknown: "최종 음성 사용량을 확인하고 있어요.", adjusted: "연결 종료 후 음성 사용량을 조정했어요. 확인되지 않은 시간은 청구하지 않았습니다.",
+  mute: "마이크 끄기", unmute: "마이크 켜기", audio: "음성 답변 재생", error: "음성 요청을 완료하지 못했어요. 기존 채팅에서 이어갈 수 있습니다.",
+  estimated: "음성 예상 크레딧", charged: "음성 크레딧", user: "나", assistant: "Tomverse", back: "채팅으로 돌아가기",
+  reserve: "최대 {credits}크레딧을 임시 예약하고, 정산이 확인되면 사용하지 않은 크레딧을 돌려드려요.",
+  searchOn: "웹 검색 켜짐", searchOff: "웹 검색 꺼짐", working: "선택한 모델과 도구로 답변을 준비하고 있어요…",
+  insufficient: "음성을 시작할 수 있는 크레딧이 부족해요. 기존 대화는 이 채팅에 남아 있어요.",
+  limited: "현재 음성 사용 한도에 도달했어요. 이 채팅에서 계속 대화할 수 있습니다.",
+  permission: "기기 설정에서 마이크 사용을 허용한 뒤 다시 시작해 주세요.",
+};
+export type VoiceConversationCopy = typeof en;
+export const voiceConversationCopy = (language: string): VoiceConversationCopy => language.startsWith("ko") ? ko : en;

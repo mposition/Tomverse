@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 
@@ -95,8 +96,9 @@ export async function GET(request: Request) {
 
   try {
     const availability = await autoAvailabilityFor(session.user.id);
+    const voice = voiceConversationConfig(process.env);
     return NextResponse.json(
-      { autoSelection: autoSelectionCapability(availability) },
+      { autoSelection: autoSelectionCapability(availability), voiceConversation: { enabled: Boolean(voice), maxSeconds: voice?.maxSeconds ?? 300 } },
       { headers: NO_STORE_HEADERS }
     );
   } catch (error) {

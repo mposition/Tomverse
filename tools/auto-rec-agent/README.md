@@ -126,7 +126,9 @@ Settings → Developer settings → Personal access tokens → **Fine-grained to
 
 ### 2. 설치
 
-Node 22.14 이상 또는 23.7 이상(`--disable-sigusr1`과 타입 제거)과 git이 필요합니다(`/usr/bin/node --version`).
+Node 22.14 이상 또는 23.7 이상(`--disable-sigusr1`)과 git이 필요합니다(`/usr/bin/node --version`). TypeScript
+지원은 필요 없습니다. Ubuntu의 `nodejs` 패키지는 TypeScript를 실행하지 못하므로, runner는 소유권 manifest의 JS
+사본(`lib/agentAuthorityFiles.generated.mjs`, `npm run generate:auto-rec-authority`로 생성)을 읽습니다.
 설치 script는 공개 저장소를
 root 소유 임시 폴더에 받아 코드와 unit을 복사하고, 빈 env 파일을 만들 뿐 아무것도 켜지 않습니다.
 다시 실행해도 됩니다(업데이트도 같은 명령입니다).

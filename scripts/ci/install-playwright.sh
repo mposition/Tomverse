@@ -284,6 +284,22 @@ retry() {
   done
 }
 
+prefer_ubuntu_archive() {
+  local mirrors="$1"
+  [ "${GITHUB_ACTIONS:-false}" = "true" ] || return 0
+  [ -f "$mirrors" ] || return 0
+  if grep -Eq '^https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$mirrors"; then
+    # Change only the hosted runner's slow Azure endpoint. Package lists,
+    # signing keys and third-party repositories keep their existing settings.
+    if sudo sed -Ei 's#^https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)#https://archive.ubuntu.com/ubuntu/\1#' "$mirrors"; then
+      echo "Using archive.ubuntu.com for Ubuntu CI dependencies."
+    else
+      echo "::warning::Could not select the Ubuntu archive mirror; keeping the existing retry budget."
+    fi
+  fi
+}
+prefer_ubuntu_archive /etc/apt/apt-mirrors.txt
+
 # Applies to the apt-get calls Playwright makes for us, which is the only way
 # to reach them -- `install-deps` takes no apt flags. Written before the first
 # attempt so even a single-attempt run benefits.
