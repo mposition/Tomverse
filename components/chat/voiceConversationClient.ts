@@ -35,6 +35,9 @@ export function createVoiceConversationClient(options: {
   let closeTimeout: ReturnType<typeof setTimeout> | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let durationTimer: ReturnType<typeof setTimeout> | undefined;
+  let mediaReady = false;
+  let recoveringTransport = false;
+  let closingDeadline = 0;
   let lastEventAt = 0;
   const levelMonitors: (() => void)[] = [];
   let queue = Promise.resolve();
@@ -49,6 +52,7 @@ export function createVoiceConversationClient(options: {
     try { peer?.close(); } catch {} peer = null;
     if (audio) { audio.pause(); audio.srcObject = null; } audio = null;
     controller?.abort(); controller = null;
+    mediaReady = false; recoveringTransport = false; closingDeadline = 0;
   };
   async function post(body: unknown, signal?: AbortSignal) {
     const response = await options.deps.fetch("/api/chat/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
@@ -72,12 +76,34 @@ export function createVoiceConversationClient(options: {
         const status = await response.json();
         if (owner !== epoch) return;
         if (status.settled === true && typeof status.credits === "number" && Number.isFinite(status.credits) && status.credits >= 0) {
+          const recoveredTransport = recoveringTransport;
+          if (recoveredTransport) cleanup();
           patch({ billingPending: false, confirmed: status.confirmed === true, credits: status.credits,
+            ...(recoveredTransport ? { status: "ended" } : {}),
             ...(typeof status.seconds === "number" && Number.isFinite(status.seconds) && status.seconds >= 0 ? { seconds: status.seconds } : {}) });
           return;
         }
       } catch { /* The independent worker continues; reopening Chat reads the saved summary. */ }
     }
+  }
+  function recoverTransport(owner: number) {
+    if (owner !== epoch || !reservationId || !mediaReady) return false;
+    if (recoveringTransport) return true;
+    recoveringTransport = true;
+    clearInterval(heartbeatTimer); clearTimeout(durationTimer); clearTimeout(closeTimeout);
+    for (const track of microphone?.getTracks() ?? []) track.stop();
+    if (audio) audio.muted = true;
+    patch({ status: "closing", muted: true, working: false, inputLevel: 0, outputLevel: 0, error: view.error ?? "VOICE_CONNECTION_LOST" });
+    void post({ action: "stop", reservationId }).then(r => r.body?.cancel()).catch(() => {});
+    // Keep the silent primary connection available while the independent receiver
+    // takes over. Closing it immediately can discard the final provider event.
+    // Never keep it beyond the session's existing 30-second closing allowance.
+    closeTimeout = setTimeout(() => {
+      if (owner !== epoch) return;
+      cleanup(); patch({ status: "ended", confirmed: false });
+    }, Math.max(0, Math.min(60_000, closingDeadline - Date.now())));
+    void recoverBilling(owner);
+    return true;
   }
   async function stop() {
     if (view.status !== "connecting" && view.status !== "listening") return;
@@ -94,7 +120,9 @@ export function createVoiceConversationClient(options: {
     if (event.type === "ready" && typeof event.sdp === "string" && typeof event.reservationId === "string") {
       reservationId = event.reservationId;
       await peer?.setRemoteDescription({ type: "answer", sdp: event.sdp });
+      if (owner !== epoch) return;
       const seconds = typeof event.maxSeconds === "number" && event.maxSeconds >= 15 && event.maxSeconds <= 900 ? event.maxSeconds : 300;
+      mediaReady = true; closingDeadline = Date.now() + (seconds + 30) * 1_000;
       durationTimer = setTimeout(() => { void stop(); }, seconds * 1_000);
     } else if (event.type === "started") {
       patch({ status: "listening" });
@@ -168,6 +196,7 @@ export function createVoiceConversationClient(options: {
       lastEventAt = Date.now();
       heartbeatTimer = setInterval(() => {
         if (owner !== epoch || Date.now() - lastEventAt <= 35_000) return;
+        if (recoverTransport(owner)) return;
         void stop(); cleanup(); patch({ status: "ended", confirmed: false, error: "VOICE_CONNECTION_LOST" });
         void recoverBilling(owner);
       }, 5_000);
@@ -188,10 +217,11 @@ export function createVoiceConversationClient(options: {
           }
         }
       } finally { reader.releaseLock(); }
-      if (owner === epoch && view.status !== "ended") { cleanup(); patch({ status: "ended", confirmed: false }); void recoverBilling(owner); }
+      if (owner === epoch && view.status !== "ended" && !recoverTransport(owner)) { cleanup(); patch({ status: "ended", confirmed: false }); void recoverBilling(owner); }
     } catch (error) {
       if (owner !== epoch) return;
       if (view.status === "ended") return;
+      if (recoverTransport(owner)) return;
       const wasClosing = view.status === "closing";
       cleanup(); patch({ status: wasClosing ? "ended" : "error", error: wasClosing ? null : error instanceof Error && error.name === "NotAllowedError" ? "NotAllowedError" : error instanceof Error ? error.message : "VOICE_CONNECTION_LOST" });
       void recoverBilling(owner);

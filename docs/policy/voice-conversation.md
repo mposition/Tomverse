@@ -132,10 +132,15 @@ with its existing credit and seconds holds.
 
 Delegations are queued by provider audio offset while transcript fragments
 arrive. A two-second quiet window includes sentence pauses; fragments do not
-individually define a completed turn. Recovery delivers a still-ready result
-through its leased receiver. A task left in dispatching has an unknown append
-outcome: recovery discards the duplicate text and closes the call, preserving
-the canonical answer in Chat instead of risking a repeated spoken result.
+individually define a completed turn. If the server stream fails, the client
+immediately stops microphone capture and mutes playback. It keeps the silent
+primary connection for at most 60 seconds, bounded by the session's existing
+30-second closing allowance, while polling persisted billing. Unmount still
+releases resources immediately. Once the web lease expires, recovery durably
+requests closure and closes its leased receiver immediately after attachment.
+It does not dispatch queued answers during termination. The canonical answer
+remains in Chat; settlement removes the temporary answer without risking a
+repeated spoken result.
 Malformed answer SDP is durably linked before a closing receiver collects final
 usage; a known final releases excess provider cost holds normally. Missing final
 evidence continues to retain conservative exposure under the existing rule.

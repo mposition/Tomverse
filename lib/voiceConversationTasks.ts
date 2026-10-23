@@ -39,14 +39,6 @@ export function queueVoiceTaskResult(id: string, input: { delegationId: string; 
     task.answer = input.answer.slice(0, 12_000); task.sourceId = input.sourceId; task.state = "ready";
   });
 }
-/** A lost sender may already have appended audio. Never replay that unknown write. */
-export function abandonVoiceDispatch(id: string) {
-  return change(id, payload => {
-    let unknown = false;
-    for (const task of payload.tasks ?? []) if (task.state === "dispatching") { task.state = "failed"; delete task.answer; unknown = true; }
-    return unknown;
-  });
-}
 /** The existing receiver sends results. No second sideband connection is opened. */
 export async function dispatchVoiceTask(id: string, socket: WebSocket) {
   const task = await change(id, payload => {
