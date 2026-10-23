@@ -61,6 +61,12 @@ preferences 탭, `components/onboarding/ModelFinder.tsx`의 저장 동선,
 
 ## 회귀 범위
 
+Review Easy의 기본 공급자는 프로필의 AI 설정 탭에서 별도로 관리합니다.
+`UserSettings.reviewEasyDefaultProviders`가 null이면 플랫폼 기본값을 사용하고,
+개인 선택이 있으면 새 Review에서만 우선 적용합니다. 이번 Review에서 직접 고른
+공급자와 기존 대화의 선택은 설정 저장으로 바뀌지 않습니다. Professional의
+`newConversationModelIds`와 `defaultModel`은 이 저장에 포함하지 않습니다.
+
 - 관련 변경은 `tests/e2e/model-finder.spec.ts`(저장 → 새 대화 → 새로고침
   지속성)와 `npm run check:default-models`의 C 섹션을 통과해야 합니다.
 - 이 계약을 위반하는 변경은 릴리스 차단 사유입니다.
