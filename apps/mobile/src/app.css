@@ -231,3 +231,36 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 .native-image-workspace input[type="checkbox"] { width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--mobile-action); }
 
 [hidden] { display: none !important; }
+
+/* Mobile conversation chrome stays subordinate to the transcript. */
+.app-header { height: 52px; gap: 4px; padding: 4px 8px; }
+.app-header .brand-lockup { flex: 1; min-width: 0; gap: 6px; justify-content: center; }
+.app-header .brand-lockup .icon-logo { width: 24px; height: 24px; border-radius: 7px; }
+.app-header .wordmark { font-size: 24px; }
+.app-header .menu-button, .app-header .account-button { flex: 0 0 44px; min-width: 44px; min-height: 44px; padding: 8px; }
+.product-switcher { flex: 0 0 76px; width: 76px; min-width: 0; max-width: 84px; border: 0; background: transparent; font-size: 13px; font-weight: 600; padding: 4px; }
+.review-context-bar { height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-inline: 12px; flex-shrink: 0; border-bottom: 1px solid var(--mobile-border); }
+.review-setup-trigger { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 13px; min-height: 44px; }
+.participant-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 50%; background: var(--mobile-soft); font-size: 11px; color: var(--mobile-muted); }
+.review-response-select { max-width: 58%; min-width: 0; min-height: 40px; font-size: 13px; border: 0; background: transparent; padding-block: 4px; }
+.review-context-hint { font-size: 12px; color: var(--mobile-muted); }
+.review-transcript { padding: 20px 16px; }
+.review-intro { display: flex; flex-direction: column; justify-content: center; padding: 24px; }
+.review-intro h1 { font-size: 24px; letter-spacing: -.6px; }
+.review-intro > p { font-size: 14px; }
+.review-participants { display: none; }
+.composer-area { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); }
+.compact-composer { display: flex; align-items: flex-end; gap: 2px; padding: 4px; border-radius: 27px; }
+.compact-composer textarea { flex: 1; min-width: 0; width: 0; min-height: 40px; max-height: 120px; padding: 8px 4px; line-height: 24px; overflow-y: auto; }
+.compact-composer .composer-actions { flex-shrink: 0; gap: 0; min-height: 44px; align-items: center; }
+.compact-composer button, .compact-composer .send { width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 10px; }
+.compact-composer .send { border-radius: 50%; }
+.compact-composer .icon-attach, .compact-composer .icon-mic, .compact-composer .icon-send { width: 22px; height: 22px; }
+.compact-composer.is-recording textarea { display: none; }
+.compact-composer.is-recording .composer-actions { flex: 1; }
+.voice-clock { flex: 1; font-size: 13px; color: var(--mobile-muted); padding-inline: 8px; }
+.composer-progress { font-size: 12px; margin: 4px 8px 0; }
+.tool-action { display: flex; justify-content: space-between; gap: 16px; text-align: left; padding: 12px; background: var(--mobile-paper); }
+@media (max-width: 350px) { .app-header .brand-lockup .icon-logo { display: none; } .app-header .wordmark { font-size: 21px; } }
+
+.voice-privacy { font-size: 11px; line-height: 1.5; color: var(--mobile-muted); margin: 6px 6px 0; }

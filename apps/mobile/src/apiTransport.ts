@@ -91,7 +91,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     if (!persisted.messages.some(message => message.id === sourceId)) throw Error("SAVED_MESSAGE_MISSING");
     return { persisted, sourceId };
   }
-  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false) {
+  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle: string | null }) {
     const messages = fitChatRequestTranscript(persisted.messages.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
       (message.role === "user" || message.status === "normal" || message.status === "incomplete" || !message.status))
@@ -103,7 +103,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     const watchdog = createChatLivenessWatchdog({ onExpire: abort });
     try {
       const response = await run("/api/chat", { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
-        assistantMessageId, sourceUserMessageId: sourceId }), signal: controller.signal });
+        assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}) }), signal: controller.signal });
       watchdog.noteHeaders();
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new ApiClientError(response.status, typeof body?.code === "string" ? body.code : "CHAT_REQUEST_FAILED"); }
       if ((response.headers.get("content-type") ?? "").includes("application/json")) {
@@ -131,6 +131,28 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     } finally { watchdog.stop(); signal.removeEventListener("abort", abort); }
   }
   return {
+    resumeResearch: async (conversation, signal, update) => {
+      let pending = conversation.messages.filter(message => message.pendingJobId && message.status === "pending").map(message => message.id);
+      while (pending.length && !signal.aborted) {
+        try {
+        for (const id of pending) await researchStatus(id, signal);
+        const item = await readConversation(conversation.id);
+        if (signal.aborted) return;
+        const next = { ...item, activeAttempt: item.messages.some(message => message.pendingJobId && message.status === "pending") };
+        update(next);
+        pending = next.messages.filter(message => message.pendingJobId && message.status === "pending").map(message => message.id);
+        } catch (error) {
+          const status = (error as { status?: number }).status;
+          if (signal.aborted || (status && status < 500 && status !== 408 && status !== 429)) throw error;
+          // Retry reads after a temporary connection/server failure, never the paid submission.
+        }
+        if (pending.length) await new Promise<void>((resolve, reject) => {
+          const abort = () => { clearTimeout(timer); reject(new DOMException("Stopped", "AbortError")); };
+          const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 8000);
+          signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort();
+        });
+      }
+    },
     mobileCapabilities: requireParity,
     preferences: async () => { await requireParity(); return request("/api/user/settings"); },
     savePreferences: async (input) => { await requireParity(); await request("/api/user/settings", json("POST", input)); },
@@ -148,10 +170,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     reviewPreview: async (id, mode = "balanced", synthesis = false) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`); },
     runComparison: async (id, input) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews`, json("POST", input)); },
     reviewFeedback: async (id, reviewId) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews/item-feedback?reviewId=${encodeURIComponent(reviewId)}`); },
-    setReviewFeedback: async (id, reviewId, reviewItemId, verdict) => { await requireParity(); await request(`${pathFor(id)}/comparison-reviews/item-feedback`, json(verdict ? "POST" : "DELETE", { reviewId, reviewItemId, ...(verdict ? { verdict } : {}) })); },
+    setReviewFeedback: async (id, reviewId, reviewItemId, verdict) => { await requireParity(); await request(`${pathFor(id)}/comparison-reviews/item-feedback`, json(verdict ? "PUT" : "DELETE", { reviewId, reviewItemId, ...(verdict ? { verdict } : {}) })); },
     verifyReviewItem: async (id, item) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews/verify-item`, json("POST", { item })); },
     generateImages: async input => { await requireParity(); return request("/api/images/generations", json("POST", input)); },
     imageHistory: async id => { await requireParity(); return request(`${pathFor(id)}/generations`); },
+    imageRequest: async key => { await requireParity(); return request(`/api/images/generations?requestKey=${encodeURIComponent(key)}`); },
     imageGroup: async (id) => { await requireParity(); return request(`/api/images/groups/${encodeURIComponent(id)}`); },
     account: () => request("/api/user/account"),
     exportAccount: async () => {
@@ -198,8 +221,15 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     },
     sendReview: async (conversation, text, files, signal, progress) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
+      const admission = persisted.selectedModels.length > 1 ? await (async () => {
+        await requireParity();
+        const result = await request<{ ok: boolean; admissionToken: string; contextBundle: string | null }>("/api/chat/preflight", { ...json("POST", { comparisonId: Date.now().toString(), conversationId: persisted.id, modelIds: persisted.selectedModels, prompt: text, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: persisted.webSearchMode ?? "off" }), signal });
+        if (!result.ok || !result.admissionToken) throw Error("COMPARISON_ADMISSION_MISSING");
+        return { admissionToken: result.admissionToken, contextBundle: result.contextBundle };
+      })() : undefined;
+      if (signal.aborted) throw new DOMException("Stopped", "AbortError");
       const outcomes = await Promise.allSettled(persisted.selectedModels.map(modelId =>
-        streamModel(persisted, sourceId, modelId, signal, value => progress(modelId, value), true)));
+        streamModel(persisted, sourceId, modelId, signal, value => progress(modelId, value), true, admission)));
       return { failedModelIds: persisted.selectedModels.filter((_, index) => outcomes[index].status === "rejected") };
     },
     upload: async (file) => {

@@ -7,15 +7,17 @@ import { chatAttachmentAcceptAttribute } from "../../../lib/chatAttachmentFormat
 import { mobileErrorText } from "../../../locales/mobileErrors";
 import type { MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
-import { ComposerTools, type ToolChange } from "./ComposerTools";
+import { mobileVoiceError, mobileVoiceCopy, mobileVoicePrivacy } from "../../../locales/mobileVoice";
+import { ComposerTools, type ToolChange, type ComposerAction } from "./ComposerTools";
 
 type Props = {
   copy: typeof mobileCopy.en; transport: ChatTransport; draft: string; setDraft: (text: string) => void;
   language: MobileLanguage;
   conversation?: Conversation | null; onConfigureTools?: (input: ToolChange) => Promise<void>;
+  extraTools?: ComposerAction[];
   offline?: boolean; disabled: boolean; streaming: boolean; onSend: (text: string, files: MobileAttachment[]) => Promise<void>; onStop: () => void;
 };
-export function Composer({ copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools }: Props) {
+export function Composer({ copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools }: Props) {
   const [files, setFiles] = useState<MobileAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -23,6 +25,9 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
   const photos = useRef<HTMLInputElement>(null);
   const [tools, setTools] = useState(false);
   const parityCopy = mobileParityCopy(language);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const voiceCopy = mobileVoiceCopy(language);
+  useEffect(() => { const node = input.current; if (node) { node.style.height = "0px"; node.style.height = `${Math.min(120, Math.max(40, node.scrollHeight))}px`; } }, [draft]);
   const composing = useRef(false);
   const previousConversation = useRef(conversation?.id);
   useEffect(() => {
@@ -33,8 +38,12 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
     scopeId: `mobile-composer:${conversation?.id ?? "new"}`,
     onTranscript: (text) => setDraft(draft ? `${draft}\n${text}` : text),
     fetchImpl: async (_input, init) => {
-      const transcript = await transport.transcribe(init?.body as Blob, init?.signal ?? undefined);
-      return Response.json({ transcript });
+      try { const transcript = await transport.transcribe(init?.body as Blob, init?.signal ?? undefined); return Response.json({ transcript }); }
+      catch (error) {
+        const refusal = error as { status?: number; code?: string };
+        if (refusal.status && refusal.status >= 400 && refusal.status <= 599) return Response.json({ code: refusal.code ?? "VOICE_TRANSCRIPTION_FAILED" }, { status: refusal.status });
+        throw error;
+      }
     },
   });
   const voiceBusy = isVoiceRecorderBusy(voice.state);
@@ -56,20 +65,22 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
   }
   return <div className="composer-area">
     {error && <p role="alert" className="notice error">{error}</p>}
-    {voice.state.status === "error" && <p role="alert" className="notice error">{copy.microphone}<button onClick={voice.dismissError}>×</button></p>}
+    {voice.state.status === "error" && <p role="alert" className="notice error">{mobileVoiceError(language, voice.state.code, voice.serverCode)}<button onClick={voice.dismissError}>×</button></p>}
     {files.length > 0 && <ul className="attachments">{files.map((file) => <li key={file.uploadId}>{file.name}<button aria-label={`${copy.remove}: ${file.name}`} onClick={() => setFiles((items) => items.filter((item) => item.uploadId !== file.uploadId))}>×</button></li>)}</ul>}
-    <form className="composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-      <textarea maxLength={40000} aria-label={copy.placeholder} placeholder={copy.placeholder} rows={2} value={draft} disabled={disabled || streaming || voiceBusy}
-        onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
-        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); submit(); } }} />
-      <div className="composer-actions"><div className="input-tools">
-        <input data-testid="file-picker" ref={picker} type="file" multiple hidden accept={chatAttachmentAcceptAttribute({})} onChange={(event) => void attach(event.target.files)} />
-        <input data-testid="photo-picker" ref={photos} type="file" multiple hidden accept="image/*" onChange={(event) => void attach(event.target.files)} />
-        <button type="button" aria-label={copy.attach} aria-expanded={tools} disabled={disabled || offline || streaming || uploading || voiceBusy} onClick={() => setTools(true)}><AppIcon name="attach" /></button>
-        {voiceBusy ? <><button type="button" onClick={voice.stop} disabled={voice.state.status !== "recording"} aria-label={copy.finishVoice}>■ {voice.elapsedSeconds}s</button><button type="button" onClick={voice.cancel} aria-label={copy.cancelVoice}>×</button></> : <button type="button" aria-label={copy.voice} disabled={disabled || offline || streaming || uploading} onClick={voice.start}><AppIcon name="mic" /></button>}
-        {uploading && <span role="status">{copy.loading}</span>}
-      </div>{streaming ? <button type="button" className="send" aria-label={copy.stop} onClick={onStop}>■</button> : <button type="submit" className="send" aria-label={copy.send} disabled={disabled || offline || uploading || voiceBusy || (!draft.trim() && !files.length)}><AppIcon name="send" /></button>}</div>
-    </form><p className="composer-footnote">{copy.voiceReview}</p>
-    {tools && <ComposerTools transport={transport} language={language} conversation={conversation} onChange={onConfigureTools} onClose={() => setTools(false)} onFiles={() => { setTools(false); picker.current?.click(); }} onPhotos={() => { setTools(false); photos.current?.click(); }} />}
+    <input data-testid="file-picker" ref={picker} type="file" multiple hidden accept={chatAttachmentAcceptAttribute({})} onChange={event => void attach(event.target.files)} />
+    <input data-testid="photo-picker" ref={photos} type="file" multiple hidden accept="image/*" onChange={event => void attach(event.target.files)} />
+    <form className={`composer compact-composer${voiceBusy ? " is-recording" : ""}`} onSubmit={event => { event.preventDefault(); submit(); }}>
+      <button className="composer-add" type="button" aria-label={copy.attach} aria-expanded={tools} disabled={disabled || offline || streaming || uploading || voiceBusy} onClick={() => setTools(true)}><AppIcon name="attach" /></button>
+      <textarea ref={input} maxLength={40000} aria-label={copy.placeholder} placeholder={copy.placeholder} rows={1} value={draft} disabled={disabled || streaming || voiceBusy}
+        onChange={event => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
+        onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); submit(); } }} />
+      <div className="composer-actions">
+        {voiceBusy ? <><span className="voice-clock" role="status">{voice.state.status === "transcribing" ? voiceCopy.transcribing : `${voiceCopy.recording} ${voice.elapsedSeconds}s`}</span><button type="button" onClick={voice.cancel} aria-label={copy.cancelVoice}>×</button><button type="button" className="send" onClick={voice.stop} disabled={voice.state.status !== "recording"} aria-label={copy.finishVoice}>■</button></> : <><button type="button" aria-label={copy.voice} disabled={disabled || offline || streaming || uploading} onClick={voice.start}><AppIcon name="mic" /></button>{streaming ? <button type="button" className="send" aria-label={copy.stop} onClick={onStop}>■</button> : <button type="submit" className="send" aria-label={copy.send} disabled={disabled || offline || uploading || (!draft.trim() && !files.length)}><AppIcon name="send" /></button>}</>}
+      </div>
+    </form>
+    {voiceBusy && <p className="voice-privacy">{mobileVoicePrivacy(language)}</p>}
+    {!voiceBusy && voice.elapsedSeconds > 0 && draft && <p className="composer-progress">{copy.voiceReview}</p>}
+    {uploading && <p role="status" className="composer-progress">{copy.loading}</p>}
+    {tools && <ComposerTools extraTools={extraTools} transport={transport} language={language} conversation={conversation} onChange={onConfigureTools} onClose={() => setTools(false)} onFiles={() => { setTools(false); picker.current?.click(); }} onPhotos={() => { setTools(false); photos.current?.click(); }} />}
   </div>;
 }

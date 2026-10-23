@@ -30,7 +30,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const [imageHistory, setImageHistory] = useState<string | null>(null); const [imageOpen, setImageOpen] = useState(false);
   const reviewCopy = mobileReviewCopy(language);
   const [chats, setChats] = useState<ChatSummary[]>([]); const [query, setQuery] = useState("");
-  const [view, setView] = useState<"write" | "results">("write"); const [picker, setPicker] = useState(false);
+  const [picker, setPicker] = useState(false);
   const [activeModel, setActiveModel] = useState(""); const [partial, setPartial] = useState<Record<string, string>>({});
   const [streaming, setStreaming] = useState(false); const [loading, setLoading] = useState(true);
   const [uncertain, setUncertain] = useState(false); const [error, setError] = useState("");
@@ -38,6 +38,13 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const request = useRef(0); const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null); const followOutput = useRef(true);
   useEffect(() => { if (followOutput.current) end.current?.scrollIntoView({ block: "end" }); }, [conversation?.messages.length, partial, activeModel]);
+  const researchKey = conversation?.messages.filter(message => message.pendingJobId && message.status === "pending").map(message => message.id).join(",") ?? "";
+  useEffect(() => {
+    if (!researchKey || streaming || !conversation || !transport.resumeResearch) return;
+    const controller = new AbortController();
+    void transport.resumeResearch(conversation, controller.signal, item => { if (!controller.signal.aborted) { setConversation(item); setUncertain(item.activeAttempt === true); } }).catch(() => { /* Retain readback state; no model resubmission. */ });
+    return () => controller.abort();
+  }, [researchKey, streaming, transport]); // eslint-disable-line react-hooks/exhaustive-deps -- Job identity controls one restoration watcher.
   const initializationError = useRef(c.reviewUnavailable);
   useEffect(() => { initializationError.current = c.reviewUnavailable; }, [c.reviewUnavailable]);
   const lastKey = `tomverse-native-last-review:${owner ?? ""}`;
@@ -57,7 +64,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
         if (last && history.some(chat => chat.id === last && chat.kind !== "image")) {
           const item = await transport.load(last);
           if (current !== request.current) return;
-          setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setView(item.messages.length ? "results" : "write"); setUncertain(item.activeAttempt === true);
+          setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true);
         }
       } catch { if (current === request.current) setError(initializationError.current); }
       finally { if (current === request.current) setLoading(false); }
@@ -70,7 +77,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     try {
       const item = await transport.load(id);
       if (current !== request.current) return;
-      setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true); setPartial({}); setView(item.messages.length ? "results" : "write"); localStorage.setItem(lastKey, id); onCloseHistory();
+      setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true); setPartial({}); localStorage.setItem(lastKey, id); onCloseHistory();
     } catch { if (current === request.current) setError(copy.unavailable); }
     finally { if (current === request.current) setLoading(false); }
   }
@@ -112,7 +119,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       if (current !== request.current || controller.signal.aborted) return;
       item = await transport.configureReview(item.id, participants);
       if (current !== request.current) return;
-      setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setView("results");
+      setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? "");
       setConversation({ ...item, messages: [...item.messages, { id: "pending-review-user", role: "user", content: text }] });
       dispatched = true;
       const outcome = await transport.sendReview(item, text, files, controller.signal, (modelId, value) => {
@@ -132,23 +139,25 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const name = (id: string) => models.find(model => model.id === id)?.name ?? id;
   const messages = conversation?.messages.filter(message => message.role === "user" || message.modelId === activeModel || (message.imageTurn?.modelIds.includes(activeModel)) || (!message.modelId && activeModel === visibleModels[0])) ?? [];
   return <section className="review-workspace">
-    <div className="review-toolbar"><div className="segmented" role="group" aria-label="Review mode">
-      {(["easy", "professional"] as const).map(value => <button key={value} aria-pressed={mode === value} disabled={streaming || uncertain || (value === "easy" && !capability?.reviewEasy)} onClick={() => setMode(value)}>{value === "easy" ? "Easy" : "Professional"}</button>)}
-    </div><button disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}>{c.choose} · {mode === "easy" ? providers.length : selected.length}</button></div>
-    <div className="review-view-tabs" role="group" aria-label="Review view"><button aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button><button aria-pressed={view === "results"} onClick={() => setView("results")}>{c.results}</button></div>
-    <div className="review-actions"><button disabled={streaming || uncertain || loading || !conversation?.messages.some(message => message.role === "assistant")} onClick={() => setCrossReview(true)}>{reviewCopy.crossReview}</button><button disabled={streaming || uncertain || loading || !capability?.images?.enabled} onClick={() => { setImage(null); setImageHistory(null); setImageOpen(true); }}>{reviewCopy.images}</button></div>
+    <div className="review-context-bar">
+      <button className="review-setup-trigger" aria-label={`${c.choose} · ${mode === "easy" ? "Easy" : "Professional"}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}>{mode === "easy" ? "Easy" : "Professional"}<span className="participant-count">{mode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>
+      {conversation?.messages.length ? <select className="review-response-select" aria-label={c.models} value={activeModel} onChange={event => { followOutput.current = true; setActiveModel(event.target.value); }}>{visibleModels.map(id => <option value={id} key={id}>{name(id)}{streaming ? " ···" : ""}</option>)}</select> : <span className="review-context-hint">{c.review}</span>}
+    </div>
     {error && <p role="alert" className="notice error">{error}</p>}{loading && <p role="status">{copy.loading}</p>}
-    {view === "write" ? <div className="review-intro"><h1>{c.reviewEmpty}</h1><p>{mode === "easy" ? c.easy : c.professional}</p><div className="review-participants">{(mode === "easy" ? providers : selected).map(value => <span key={value}>{mode === "easy" ? value : name(value)}</span>)}</div></div> : <>
-      <nav className="review-provider-tabs" aria-label={c.models}>{visibleModels.map(id => <button key={id} aria-current={activeModel === id ? "page" : undefined} onClick={() => { followOutput.current = true; setActiveModel(id); }}>{name(id)}{streaming && <span aria-label={copy.loading}> ···</span>}</button>)}</nav>
+    {!conversation?.messages.length && !streaming ? <div className="review-intro"><h1>{c.reviewEmpty}</h1><p>{mode === "easy" ? c.easy : c.professional}</p><div className="review-participants">{(mode === "easy" ? providers : selected).map(value => <span key={value}>{mode === "easy" ? value : name(value)}</span>)}</div></div> : <>
+
       <div className="transcript review-transcript" aria-live="off" aria-busy={streaming} onScroll={event => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}>{messages.map(message => <article className={`message ${message.role}`} id={`review-message-${message.id}`} key={message.id}>{message.role === "assistant" && <span className="message-label">{name(message.modelId ?? activeModel)}</span>}<AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} /></article>)}{partial[activeModel] !== undefined && <article className="message assistant"><span className="message-label">{name(activeModel)}</span><AnswerContent content={partial[activeModel] || copy.waiting} transport={transport} language={language} /></article>}<div ref={end} /></div>
     </>}
     {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore}</button>}
-    <Composer copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || !capability || uncertain} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} />
-    {picker && <Sheet title={mode === "easy" ? c.providers : c.models} closeLabel={copy.close} onClose={() => setPicker(false)}><p>{mode === "easy" ? c.easy : c.professional}</p><div className="review-model-options">
+    <Composer copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || !capability || uncertain} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} extraTools={[
+      { label: reviewCopy.crossReview, disabled: !conversation?.messages.some(message => message.role === "assistant"), onSelect: () => setCrossReview(true) },
+      { label: reviewCopy.images, disabled: !capability?.images?.enabled, onSelect: () => { setImage(null); setImageHistory(null); setImageOpen(true); } },
+    ]} />
+    {picker && <Sheet title={mode === "easy" ? c.providers : c.models} closeLabel={copy.close} onClose={() => setPicker(false)}><div className="segmented" role="group" aria-label="Review mode">{(["easy", "professional"] as const).map(value => <button key={value} aria-pressed={mode === value} disabled={streaming || uncertain || (value === "easy" && !capability?.reviewEasy)} onClick={() => setMode(value)}>{value === "easy" ? "Easy" : "Professional"}</button>)}</div><p>{mode === "easy" ? c.easy : c.professional}</p><div className="review-model-options">
       {mode === "easy" ? [...new Set(models.map(model => model.provider))].map(provider => <label key={provider}>{provider}<input type="checkbox" checked={providers.includes(provider)} disabled={!providers.includes(provider) && providers.length >= Math.min(3, capability?.maxModels ?? 1)} onChange={event => setProviders(previous => event.target.checked ? [...previous, provider] : previous.filter(value => value !== provider))} /></label>) : models.map(model => <label key={model.id}><span>{model.name}<small>{model.provider}</small></span><input type="checkbox" checked={selected.includes(model.id)} disabled={!selected.includes(model.id) && selected.length >= (capability?.maxModels ?? 1)} onChange={event => setSelected(previous => event.target.checked ? [...previous, model.id] : previous.filter(value => value !== model.id))} /></label>)}
     </div></Sheet>}
-    {crossReview && conversation && <CrossReview id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setCrossReview(false)} onBusy={setActionBusy} onSource={messageId => { const source = conversation.messages.find(message => message.id === messageId); if (source?.modelId) setActiveModel(source.modelId); setView("results"); setCrossReview(false); setTimeout(() => document.getElementById(`review-message-${messageId}`)?.scrollIntoView({ block: "center" }), 50); }} />}
+    {crossReview && conversation && <CrossReview id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setCrossReview(false)} onBusy={setActionBusy} onSource={messageId => { const source = conversation.messages.find(message => message.id === messageId); if (source?.modelId) setActiveModel(source.modelId); setCrossReview(false); setTimeout(() => document.getElementById(`review-message-${messageId}`)?.scrollIntoView({ block: "center" }), 50); }} />}
     {imageOpen && <NativeImageWorkspace owner={owner} transport={transport} language={language} initial={image ?? undefined} historyId={imageHistory ?? undefined} onBusy={setActionBusy} onClose={() => setImageOpen(false)} onCreated={id => { setImageHistory(id); void transport.listReview!().then(setChats).catch(() => setError(copy.unavailable)); }} />}
-    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" onClick={() => { request.current++; setConversation(null); setPartial({}); setError(""); setView("write"); setUncertain(false); localStorage.removeItem(lastKey); onCloseHistory(); }}>{c.newReview}</button><input type="search" aria-label={c.history} value={query} onChange={event => setQuery(event.target.value)} />{chats.filter(chat => chat.title.toLowerCase().includes(query.toLowerCase())).map(chat => <button className="conversation-row" key={chat.id} onClick={() => void open(chat.id)}>{chat.title}</button>)}</Sheet>}
+    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" onClick={() => { request.current++; setConversation(null); setPartial({}); setError(""); setUncertain(false); localStorage.removeItem(lastKey); onCloseHistory(); }}>{c.newReview}</button><input type="search" aria-label={c.history} value={query} onChange={event => setQuery(event.target.value)} />{chats.filter(chat => chat.title.toLowerCase().includes(query.toLowerCase())).map(chat => <button className="conversation-row" key={chat.id} onClick={() => void open(chat.id)}>{chat.title}</button>)}</Sheet>}
   </section>;
 }

@@ -19,6 +19,7 @@ export const maxDuration = 968;
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import {
   apiSecurityResponse,
@@ -55,6 +56,21 @@ const createGenerationSchema = z
       .optional(),
   })
   .strict();
+
+/** Read-only receipt recovery for a request whose response was lost. */
+export async function GET(req: Request) {
+  try {
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    if (!authentication.session?.user?.id) return Response.json({ code: "AUTH_REQUIRED" }, { status: 401 });
+    const userId = authentication.session.user.id;
+    await consumeApiRateLimit(req, userId, "image-request-receipt", { minute: 30, day: 2000 });
+    const key = new URL(req.url).searchParams.get("requestKey") ?? "";
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(key)) return Response.json({ code: "INVALID_REQUEST_KEY" }, { status: 400 });
+    const group = await prisma.imageGenerationGroup.findUnique({ where: { userId_groupIdempotencyKey: { userId, groupIdempotencyKey: key } }, select: { id: true, conversationId: true } });
+    return Response.json(group ? { groupId: group.id, conversationId: group.conversationId } : { code: "IMAGE_REQUEST_NOT_FOUND" }, { status: group ? 200 : 404, headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "IMAGE_REQUEST_READ_FAILED" }, { status: 503 }); }
+}
 
 export async function POST(req: Request) {
   try {
