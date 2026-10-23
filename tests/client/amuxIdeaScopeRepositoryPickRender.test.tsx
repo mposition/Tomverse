@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxIdeaScopeRepositoryPicker } from "@/components/admin/AmuxIdeaScopeRepositoryPicker";
+import { AmuxIdeaSessionModelPicker } from "@/components/admin/AmuxIdeaSessionModelPicker";
 import {
   classifyScopeRepositoryRead, pickedScopeRepositories, scopeRepositoryBlock, toggleScopeRepository,
   type ScopeRepositoryRead,
@@ -28,7 +29,8 @@ const panel = (sessionIntake: boolean) => renderToStaticMarkup(
 
 test("a read scope selects every allowed repository by default", () => {
   assert.deepEqual(classifyScopeRepositoryRead(200, scopeBody),
-    { kind: "ready", repositories: ["mposition/amux", "mposition/Tomverse"] }, "ordered by the scope reader");
+    { kind: "ready", repositories: ["mposition/amux", "mposition/Tomverse"],
+      model: { provider: "openai", modelId: "gpt-x", reasoningEffort: "high" } }, "ordered by the scope reader");
   assert.deepEqual(pickedScopeRepositories(ready, []), ["mposition/amux", "mposition/Tomverse"]);
   assert.equal(scopeRepositoryBlock(ready, pickedScopeRepositories(ready, [])), null);
   const html = picker(ready);
@@ -98,4 +100,33 @@ test("the submitted and checked repositories are the selected ones", () => {
   assert.ok(source.includes("adminRecentAuthenticationHref") && source.includes("stepUpHref={STEP_UP_HREF}"));
   assert.match(source, /if \(scopeBlocked\) return false;/, "the input check refuses while saving is blocked");
   assert.match(source, /inFlight\.current \|\| scopeBlocked \|\|/, "and so does the save");
+});
+
+// Owner decision 2026-10-23: the unattended analysis model can be picked per idea.
+const sessionModels = [{ approvalId: "approval-cursor", approvalVersion: 1, provider: "cursor" as const,
+  modelId: "grok-4.7-high", allowedEfforts: ["high", "medium"] }];
+const modelPicker = (models: typeof sessionModels | null | "error", key = "", effort = "") => renderToStaticMarkup(
+  <AmuxIdeaSessionModelPicker models={models} disabled={false} onChange={() => undefined}
+    scopeModel={{ provider: "anthropic", modelId: "claude-opus-5-5", reasoningEffort: "max" }}
+    choice={{ key, effort }} />);
+
+test("the session model picker defaults to the scope model and lists approved models", () => {
+  const html = modelPicker(sessionModels);
+  assert.match(html, /<option value="" selected="">Operating scope default \(claude-opus-5-5 · max\)<\/option>/);
+  assert.match(html, /<option value="cursor:grok-4\.7-high">grok-4\.7-high<\/option>/);
+  assert.doesNotMatch(html, /Effort/, "no effort box until a model is picked");
+  assert.match(html, /min-h-11/);
+  const picked = modelPicker(sessionModels, "cursor:grok-4.7-high", "high");
+  assert.match(picked, /Effort/);
+  assert.match(picked, /<option value="high" selected="">high<\/option>/);
+  assert.match(modelPicker("error"), /model list is unavailable; the operating scope model will run/);
+  assert.match(modelPicker(null), /<select disabled=""/, "closed while the list loads");
+});
+
+test("the session panel shows the model picker and sends the choice only when one is made", () => {
+  assert.match(panel(true), /data-testid="amux-idea-session-model"/);
+  assert.doesNotMatch(panel(false), /amux-idea-session-model/);
+  const source = readFileSync("components/admin/AmuxIdeaInputPanel.tsx", "utf8");
+  assert.match(source, /\.\.\.\(sessionModelBody && sessionModelBody !== "incomplete" \? \{ model: sessionModelBody \} : \{\}\)/);
+  assert.match(source, /sessionModelBody === "incomplete"/, "an incomplete choice blocks the save");
 });

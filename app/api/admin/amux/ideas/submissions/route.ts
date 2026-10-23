@@ -26,6 +26,7 @@ import {
   AMUX_SESSION_INTAKE_ENV,
   amuxSessionIntakeWritePermitted,
   inspectAmuxIdeaSessionSubmission,
+  inspectAmuxSessionModelChoice,
 } from "@/lib/amux/ideaSessionSubmissionCore";
 import {
   AmuxIdeaSessionSubmissionError,
@@ -138,12 +139,17 @@ export async function POST(request: Request) {
       if (!inspected.ok) {
         return NextResponse.json({ error: inspected.code }, { status: 400, headers: noStore });
       }
+      // The owner may pick this idea's model; without one the scope's model runs.
+      const choice = inspectAmuxSessionModelChoice(body.model);
+      if (!choice.ok) {
+        return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
+      }
       // The session analysis reads its references from pinned checkouts; an
       // idea with none would be claimed and then have nothing to read.
       if (inspected.counts.repositoryCount + inspected.counts.pullRequestCount === 0) {
         return NextResponse.json({ error: "references_required" }, { status: 400, headers: noStore });
       }
-      const committed = await submitAmuxIdeaFromSession({ inspected });
+      const committed = await submitAmuxIdeaFromSession({ inspected, model: choice.model });
       return NextResponse.json(
         { ideaId: committed.ideaId, requestId: committed.requestId, state: "submitted",
           origin: "session",

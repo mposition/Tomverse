@@ -2247,3 +2247,82 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     .findUniqueOrThrow({ where: { claimId: unknownClaim.claimId } });
   assert.ok(orphanRow.keyDeletedAt && orphanRow.keyDeleteAuditLogId);
 });
+
+test("the owner's per-idea model choice is admitted only for an approved Frontier model at an allowed effort", async () => {
+  const chosenModelId = "synthetic-chosen-model-" + randomUUID();
+  const approvalId = randomUUID();
+  const approve = inspectFrontierCatalogWrite(JSON.stringify({
+    schemaVersion: 1, action: "approve", approvalId, provider: "anthropic",
+    modelId: chosenModelId, allowedEfforts: ["high", "max"], expectedPreviousVersion: 0,
+    ownerConfirmedFrontierEligibility: true,
+  }));
+  if (!approve.ok) throw new Error("Synthetic Frontier input rejected: " + approve.code);
+  await prisma.$transaction((tx) =>
+    commitFrontierCatalogDecision(tx, { session, request, decision: approve.request }));
+  const chosen = { provider: "anthropic", modelId: chosenModelId, reasoningEffort: "max" };
+
+  // The writer records the choice in the submission audit and the reservation.
+  const ideaId = randomUUID();
+  const inspected = inspect(ideaId);
+  const committed = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected, expectedAuthority: authority, ideaId, keys: keysFor(ideaId), model: chosen,
+    });
+    return commitAmuxSessionAnalysisReservation(tx, { ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority, model: chosen });
+  });
+  const reservation = await prisma.amuxIdeaSessionAnalysisReservation.findUniqueOrThrow({
+    where: { id: committed.reservationId } });
+  assert.deepEqual({ provider: reservation.modelProvider, modelId: reservation.modelId,
+    reasoningEffort: reservation.reasoningEffort }, chosen);
+  assert.equal(reservation.operatingScopeSettingId, authority.settingId, "the scope still owns the idea");
+  assert.equal((await readAmuxIdeaSessionSubmissionRequest(inspected.requestId)).status, "committed");
+
+  // The writer refuses a model the catalog does not hold, before any row.
+  const unlistedIdeaId = randomUUID();
+  await assert.rejects(prisma.$transaction((tx) => commitAmuxIdeaSessionSubmission(tx, {
+    inspected: inspect(unlistedIdeaId), expectedAuthority: authority, ideaId: unlistedIdeaId,
+    keys: keysFor(unlistedIdeaId),
+    model: { provider: "anthropic", modelId: "synthetic-unlisted-" + randomUUID(), reasoningEffort: "max" },
+  })), (error: unknown) => error instanceof AmuxIdeaSessionSubmissionError &&
+    error.code === "model_not_approved");
+  assert.equal(await prisma.amuxIdeaSubmission.count({ where: { id: unlistedIdeaId } }), 0);
+
+  // The database predicate both guards use: the scope model, or an approved
+  // Frontier model at one of its allowed efforts; nothing else.
+  const admitted = async (provider: string, model: string, effort: string) =>
+    (await prisma.$queryRaw<Array<{ ok: boolean }>>`
+      SELECT "amux_v19_session_model_admitted"(${authority.settingId}, ${provider},
+        ${model}, ${effort}) AS "ok"`)[0]?.ok;
+  assert.equal(await admitted(authority.scope.model.provider, authority.scope.model.modelId,
+    authority.scope.model.reasoningEffort), true);
+  assert.equal(await admitted("anthropic", chosenModelId, "max"), true);
+  assert.equal(await admitted("anthropic", chosenModelId, "low"), false, "effort not allowed");
+  assert.equal(await admitted("cursor", chosenModelId, "max"), false, "another channel");
+  assert.equal(await admitted(authority.scope.model.provider, authority.scope.model.modelId,
+    "low"), false, "the scope model at another effort is not approved");
+
+  // A reservation whose audit and row both name an unapproved model is refused.
+  const forgedIdeaId = randomUUID();
+  const forgedModel = "synthetic-forged-" + randomUUID();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(forgedIdeaId), expectedAuthority: authority, ideaId: forgedIdeaId,
+      keys: keysFor(forgedIdeaId), model: chosen,
+    });
+    await commitAmuxSessionAnalysisReservation(tx, { ideaId: forgedIdeaId,
+      requestId: submission.requestId, submissionAuditId: submission.auditId, authority,
+      model: { provider: "anthropic", modelId: forgedModel, reasoningEffort: "max" } });
+  }), /session reservation operating scope mismatch/);
+  assert.equal(await prisma.amuxIdeaSubmission.count({ where: { id: forgedIdeaId } }), 0);
+
+  // A revoked approval is no longer admitted.
+  const revoke = inspectFrontierCatalogWrite(JSON.stringify({
+    schemaVersion: 1, action: "revoke", approvalId, expectedVersion: 1,
+    ownerConfirmedRevocation: true,
+  }));
+  if (!revoke.ok) throw new Error("Synthetic Frontier revocation rejected: " + revoke.code);
+  await prisma.$transaction((tx) =>
+    commitFrontierCatalogDecision(tx, { session, request, decision: revoke.request }));
+  assert.equal(await admitted("anthropic", chosenModelId, "max"), false);
+});

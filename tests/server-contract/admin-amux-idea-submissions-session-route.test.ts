@@ -80,9 +80,10 @@ async function withSwitches<T>(values: Record<string, string>, fn: () => Promise
   }
 }
 
-const post = (input: unknown) => new Request("https://tomverse.test/api/admin/amux/ideas/submissions", {
-  method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ version: 1, requestId, input }) });
+const post = (input: unknown, extra: Record<string, unknown> = {}) =>
+  new Request("https://tomverse.test/api/admin/amux/ideas/submissions", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ version: 1, requestId, input, ...extra }) });
 const idea = (repositories: string[]) => ({ version: 1,
   idea: "Show why a session analysis made no plan.", repositories, pullRequests: [] });
 
@@ -100,6 +101,25 @@ test("with session intake on, an Admin idea enters the session writer as an Admi
     assert.equal(call.inspected.requestId, requestId);
     assert.deepEqual(call.inspected.source, { toolName: "tomverse-admin",
       modelProvider: "operator", sessionDisplay: "Admin idea input" });
+    assert.equal((call as { model: unknown }).model, null, "no choice keeps the scope's model");
+  }));
+
+test("the owner's per-idea model choice reaches the session writer exactly", () =>
+  withSwitches(SWITCHES, async () => {
+    world.sessionCalls = []; world.sessionError = null;
+    const { POST } = await loadRoute();
+    const model = { provider: "cursor", modelId: "grok-4.7-high", reasoningEffort: "high" };
+    const response = await POST(post(idea(["mposition/Tomverse"]), { model }));
+    assert.equal(response.status, 201);
+    assert.deepEqual((world.sessionCalls[0] as { model: unknown }).model, model);
+    for (const bad of [{ ...model, extra: 1 }, { ...model, provider: "other" },
+      { ...model, reasoningEffort: "huge" }, "grok-4.7-high"]) {
+      world.sessionCalls = [];
+      const refused = await POST(post(idea(["mposition/Tomverse"]), { model: bad }));
+      assert.equal(refused.status, 400);
+      assert.deepEqual(await refused.json(), { error: "schema_rejected" });
+      assert.equal(world.sessionCalls.length, 0, "nothing is written for a malformed choice");
+    }
   }));
 
 test("a session idea without any reference is refused before anything is written", () =>
@@ -116,7 +136,8 @@ test("pre-write refusals keep their code; an uncertain write is read back", () =
   withSwitches(SWITCHES, async () => {
     const { POST } = await loadRoute();
     for (const [code, status] of [["outside_scope", 409], ["model_not_approved", 409],
-      ["scope_unavailable", 409], ["reference_snapshot_unavailable", 503]] as const) {
+      ["scope_unavailable", 409],
+      ["reference_snapshot_unavailable", 503]] as const) {
       world.sessionError = { code };
       const response = await POST(post(idea(["mposition/Tomverse"])));
       assert.equal(response.status, status, code);
