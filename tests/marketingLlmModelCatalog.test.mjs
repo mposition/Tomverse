@@ -63,14 +63,32 @@ test("a model the catalog cannot price or size is listed but not selectable", ()
     { ...base, id: "unpriced-test-model", apiModel: "unpriced-test-model" },
     { ...base, id: "unsized-test-model", apiModel: "unsized-test-model", contextWindowTokens: undefined },
     { ...base, id: "disabled-test-model", apiModel: "disabled-test-model", enabled: false },
+    // One registry rate leaves the other to the fallback: not a verified price.
+    { ...base, id: "half-priced-test-model", apiModel: "half-priced-test-model", inputUsdPerMillionTokens: 0.1 },
+    { ...base, id: "cache-only-test-model", apiModel: "cache-only-test-model", cachedInputPriceMultiplier: 0.1 },
+    // A catalog row re-pointed at another API model keeps no profile price.
+    { ...base, apiModel: "gpt-5.6-sol" },
   ]);
   assert.deepEqual(
     listed.map((entry) => [entry.model, entry.unavailable]),
     [
       ["unpriced-test-model", "price_unverified"],
       ["unsized-test-model", "context_window_unknown"],
+      ["half-priced-test-model", "price_unverified"],
+      ["cache-only-test-model", "price_unverified"],
+      ["gpt-5.6-sol", "price_unverified"],
     ],
   );
+});
+
+test("an operator's registry price for both input and output is a verified price", () => {
+  const base = AVAILABLE_MODELS.find((model) => model.apiModel === "gpt-5.4-mini");
+  const [entry] = marketingLlmModelOptionsFrom([
+    { ...base, id: "registry-priced-test-model", apiModel: "registry-priced-test-model", inputUsdPerMillionTokens: 0.5, outputUsdPerMillionTokens: 2 },
+  ]);
+  assert.equal(entry.unavailable, null);
+  assert.equal(entry.pin.worstInputMicroUsdPerMillion, 500_000);
+  assert.equal(entry.pin.worstOutputMicroUsdPerMillion, 2_000_000);
 });
 
 test("the reservation's search overshoot is the chat path's recorded one", () => {

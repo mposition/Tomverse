@@ -75,15 +75,24 @@ export function marketingLlmModelOptionsFrom(
       options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "context_window_unknown" });
       continue;
     }
+    // A verified price is the static profile for exactly this provider and
+    // API model, or an operator's registry price for both input and output.
+    // The price registry finds a profile by catalog id alone and fills any
+    // rate an override leaves out from a fallback, so neither alone is proof:
+    // a catalog row re-pointed at another API model, or a lone override,
+    // would otherwise price the call at someone else's (or a guessed) rate.
+    const profile = MODEL_PRICING.find((entry) => entry.modelId === model.id);
+    const profileMatches = profile?.provider === model.provider && profile.apiModelId === model.apiModel;
+    const explicit = model.inputUsdPerMillionTokens != null && model.outputUsdPerMillionTokens != null;
     // The worst rate: the top tier now, and at every revision still to come.
-    const future = (MODEL_PRICING.find((profile) => profile.modelId === model.id)?.priceSchedule ?? [])
+    const future = ((profileMatches && profile?.priceSchedule) || [])
       .map((revision) => Date.parse(revision.effectiveFrom))
       .filter((at) => Number.isFinite(at) && at > now.getTime());
     const priced = [now.getTime(), ...future].map((at) =>
       resolveModelPricing(model, { estimatedPromptTokens: window, at }),
     );
     const current = priced[0];
-    if (!VERIFIED_SOURCES.includes(current.costSource)) {
+    if ((!profileMatches && !explicit) || !VERIFIED_SOURCES.includes(current.costSource)) {
       options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "price_unverified" });
       continue;
     }
