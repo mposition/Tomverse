@@ -14,7 +14,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
-import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import { FEEDBACK_ANSWER_SIGNALS, feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 import {
   initialFeedbackLifecycleEvents,
   initialFeedbackStatus,
@@ -46,7 +46,7 @@ const feedbackSchema = z
     email: z.string().trim().email().max(254).optional(),
     message: z.string().trim().min(5).max(2_000),
     messageId: z.string().trim().min(1).max(64).optional(),
-    answerSignal: z.enum(["needs_improvement", "helpful"]).optional(),
+    answerSignal: z.enum(FEEDBACK_ANSWER_SIGNALS).optional(),
     traceId: z.string().trim().max(120).optional(),
     /**
      * Server-issued proof that the trace above belongs to a real server

@@ -36,6 +36,13 @@ const migrationsDirectory = join(root, "prisma", "migrations");
  * how it becomes a decision somebody can revisit rather than an omission.
  */
 const REGISTRY = {
+  Feedback_answerSignal_check: {
+    owner: "list",
+    module: "lib/feedbackPolicy.ts",
+    list: "FEEDBACK_ANSWER_SIGNALS",
+    reason:
+      "Optional explicit assessment of an owned assistant answer. The request schema and client payload share this list; NULL represents reports without a verified answer link or assessment.",
+  },
   ProductAnalyticsEvent_name_check: {
     owner: "list",
     module: "lib/productAnalyticsShared.ts",
