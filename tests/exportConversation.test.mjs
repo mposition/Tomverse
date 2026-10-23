@@ -1,8 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatExportMessage } from "../lib/exportConversation.ts";
+import { formatConversationAsText, formatConversationHeader, formatExportMessage } from "../lib/exportConversation.ts";
 import { AVAILABLE_MODELS, getModel, isRetiredModel } from "../lib/models.ts";
+
+test("Chat downloads identify the product and retain every model's answer", () => {
+  const output = formatConversationAsText({
+    title: "A Chat conversation",
+    productKey: "chat",
+    messages: [
+      { role: "user", content: "First question" },
+      { role: "assistant", content: "First answer", modelId: "gpt-5-4-mini" },
+      { role: "assistant", content: "Follow-up answer", modelId: "gpt-4o" },
+    ],
+  });
+  assert.match(output, /^Tomverse Chat Export\n/);
+  assert.match(output, /First answer/);
+  assert.match(output, /Follow-up answer/);
+  assert.match(output, /\[GPT-4o\]/);
+});
+
+test("legacy and Review downloads retain their existing product header", () => {
+  for (const productKey of [undefined, null, "review"]) {
+    assert.match(formatConversationHeader({ title: "Review", productKey }), /^Tomverse Review Export\n/);
+  }
+});
 
 // Exporting is one of the few places a retired model's answers are still read
 // in full. Retirement deliberately keeps the catalogue entry, so the export

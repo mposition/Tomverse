@@ -154,6 +154,7 @@ const PROVIDER_BANNER_MIN_REM = 5;
 const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
+  workspaceNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   /** Current product chrome; switching routes never rewrites this conversation. */
@@ -457,6 +458,7 @@ const mobileModelTabPanelId = (modelId: string) =>
   `mobile-model-tabpanel-${modelId}`;
 
 export function MobileChatShell({
+  workspaceNotice,
   review,
   chatWorkspace,
   currentProduct,
@@ -1433,6 +1435,7 @@ export function MobileChatShell({
           )}
         </div>
         )}
+        {workspaceNotice}
       </header>
 
       {/*

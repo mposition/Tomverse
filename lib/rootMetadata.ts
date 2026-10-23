@@ -15,6 +15,8 @@ import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
 export const rootMetadata: Metadata = {
   metadataBase: new URL(SITE_ORIGIN),
   applicationName: SITE_NAME,
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "Tomverse", statusBarStyle: "default" },
   title: {
     default: "Tomverse | Multi-AI Comparison & Review",
     template: "%s | Tomverse",

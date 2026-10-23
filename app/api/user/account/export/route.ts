@@ -1,14 +1,13 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
+import { resolveAccountRouteSession } from "@/lib/chatRouteSession";
 
 import {
     assertRecentAccountAuthentication,
     isAccountReauthenticationError,
 } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
 import {
     issueAccountDataExportTicket,
     listAccountDataExportHistory,
@@ -26,7 +25,9 @@ import { logSecurityAuditEvent } from "@/lib/securityAudit";
  */
 export async function GET(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveAccountRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user?.id) {
             return NextResponse.json(
                 { error: "Authentication required." },
@@ -81,7 +82,9 @@ export async function GET(req: Request) {
  */
 export async function POST(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveAccountRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user?.id) {
             return NextResponse.json(
                 { error: "Authentication required." },

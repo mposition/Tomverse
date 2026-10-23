@@ -60,7 +60,7 @@ import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { detectChatTurnImage } from "@/lib/chatImageIntent";
 import { latestUserTurnHasAttachments } from "@/lib/chatImageIntentCore";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
-import { previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
+import { autoLlmRouterCandidates, previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -2097,7 +2097,20 @@ async function handleChatPost(
             : Promise.resolve({ image: false } as const);
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
-        // model; any failure keeps the deterministic choice.
+        // model; a missing decision keeps the ordinary Auto choice and recovery.
+        const fileRoutingContext = {
+            isAuthenticated: Boolean(session?.user?.id),
+            canPersist: Boolean(session?.user?.id && conversationId && assistantMessageId),
+            webSearchRequested: webSearchMode === "always",
+        };
+        const fileCapableModelIds = deterministicAutoSelection.routed
+            ? autoLlmRouterCandidates(
+                deterministicAutoSelection.record.eligibleModelIds,
+                routerCandidateInputs.models,
+                deterministicAutoSelection.candidateCreditsByModelId,
+                fileRoutingContext
+            ).filter(candidate => candidate.canCreateFiles).map(candidate => candidate.id)
+            : [];
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2113,6 +2126,7 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       traceId,
                       rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
+                      fileContext: fileRoutingContext,
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
                       recordDecision: autoImageDecisionPromise.then(
@@ -2123,7 +2137,14 @@ async function handleChatPost(
         const autoImageDecision = await autoImageDecisionPromise;
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
-            llmPick?.modelId ?? null
+            llmPick?.modelId ?? null,
+            {
+                // Restrict capabilities only for an identified file request.
+                // A missing semantic decision retains ordinary Auto recovery;
+                // offering file tools to every turn would disable that recovery.
+                required: llmPick?.requiresFileGeneration === true,
+                capableModelIds: fileCapableModelIds,
+            }
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;

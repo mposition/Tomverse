@@ -182,6 +182,7 @@ export const nativeAppCorsHeaders = (
     // differed only by case or surrounding whitespace is answered with the
     // canonical form rather than with its own input echoed back.
     "Access-Control-Allow-Origin": (origin as string).trim().toLowerCase(),
+    "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
   };
 };
 

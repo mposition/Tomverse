@@ -413,6 +413,7 @@ const routedSelection = (modelId: string) => ({
   modelId,
   sticky: { modelId, turnsFavouringChallenger: 0 },
   fallbackCandidateModelIds: [],
+  candidateCreditsByModelId: { [modelId]: 1 },
   versions: ROUTER_VERSIONS,
   cohort: { eligible: true, bucket: 0, version: "test", salt: "test" },
   record: {

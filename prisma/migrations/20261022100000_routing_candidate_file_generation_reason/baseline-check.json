@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "5bcd7d6cf560768c97d6c3781c190b0525da0e0818ba5f73859d5d1376ffc7a8",
+  "replacedChecks": [
+    {
+      "table": "RoutingCandidateVerdict",
+      "constraint": "RoutingCandidateVerdict_reason_check",
+      "previousDefinitionSha256": "1cef1e4ad5081a88b6af20d49014b1744599c5eeb7bcb17bf0a92f7e371cb194"
+    }
+  ]
+}

@@ -374,7 +374,7 @@ const REGISTRY = {
     module: "lib/routerCandidates.ts",
     list: "CANDIDATE_REJECTIONS",
     reason:
-      "The eleven reasons the candidate filter can give, the same list the filter itself emits. A reason the list does not know would be a refusal nobody could interpret, and the column is nullable because an eligible candidate has no reason to give.",
+      "The candidate filter rejection reasons, the same list the filter itself emits. A reason the list does not know would be a refusal nobody could interpret, and the column is nullable because an eligible candidate has no reason to give.",
   },
   QuotaScope_scopeKind_check: {
     owner: "list",

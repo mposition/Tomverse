@@ -1,4 +1,10 @@
 const isDevelopment = process.env.NODE_ENV === "development";
+
+/** The public offline document contains no account state or inline script. */
+export const createOfflineChatCsp = () => [
+  "default-src 'none'", "script-src 'self'", "style-src 'self'", "img-src 'self'",
+  "connect-src 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
+].join("; ");
 const shouldUpgradeInsecureRequests =
   process.env.DISABLE_CSP_UPGRADE_INSECURE_REQUESTS !== "true";
 

@@ -5,7 +5,8 @@
   "description": "Framework-neutral chat state, stream events, and completion semantics shared by every Tomverse client.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./device-draft": "./src/deviceDraft.ts"
   },
   "files": [
     "src"

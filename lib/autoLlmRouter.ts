@@ -33,6 +33,8 @@ import {
     type AutoLlmRouterCandidate,
     type AutoLlmRouterPick,
     type AutoLlmRouterSession,
+    type AutoFileGenerationContext,
+    withAutoFileCapabilities,
 } from "@/lib/autoLlmRouterCore";
 import { effectiveRouterTimeoutMs, withoutExcludedModels } from "@/lib/autoRouterTunablesCore";
 import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
@@ -66,8 +68,10 @@ type AutoLlmRouterCallInput = {
 /** What the call sends, built once so its cost bound is of the same request. */
 const routerRequest = (input: AutoLlmRouterCallInput) => {
     const rewrite = input.rewrite === true;
+    const candidates = withAutoFileCapabilities(input.candidates);
     return {
         rewrite,
+        candidates,
         system: buildAutoLlmRouterSystem(input.guidance, {
             rewrite,
             rewriteGuidance: input.rewriteGuidance,
@@ -75,7 +79,7 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
         prompt: autoLlmRouterUserMessage(
             input.prompt,
             input.previousAnswer,
-            input.candidates,
+            candidates,
             input.session
         ),
         maxOutputTokens: rewrite
@@ -87,7 +91,7 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
 export async function callAutoLlmRouter(
     input: AutoLlmRouterCallInput
 ): Promise<AutoLlmRouterCallResult> {
-    const { rewrite, system, prompt, maxOutputTokens } = routerRequest(input);
+    const { rewrite, system, prompt, maxOutputTokens, candidates } = routerRequest(input);
     try {
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
@@ -101,7 +105,7 @@ export async function callAutoLlmRouter(
             ),
             output: Output.object({
                 schema: jsonSchema(
-                    autoLlmRouterOutputSchema(input.candidates, { rewrite }) as unknown as JSONSchema7
+                    autoLlmRouterOutputSchema(candidates, { rewrite }) as unknown as JSONSchema7
                 ),
                 name: "auto_model_choice",
             }),
@@ -110,7 +114,7 @@ export async function callAutoLlmRouter(
         const usage = generated.usage as AutoLlmRouterCallResult["usage"];
         const pick = parseAutoLlmRouterOutput(
             generated.output,
-            input.candidates,
+            candidates,
             rewrite ? input.prompt : null
         );
         return { outcome: pick ? "picked" : "invalid", pick, usage };
@@ -261,6 +265,7 @@ export async function pickAutoModelWithLlm(input: {
      * conversation): the call then does not ask for one at all.
      */
     rewriteAllowed?: boolean;
+    fileContext?: AutoFileGenerationContext;
     /**
      * Resolves false when this turn turned out not to be a chat turn at all
      * (an Auto Chat image request, lib/chatImageIntent.ts): its decision row
@@ -268,7 +273,7 @@ export async function pickAutoModelWithLlm(input: {
      * session memory hold only turns a chat model answered. Absent is true.
      */
     recordDecision?: Promise<boolean>;
-}): Promise<{ modelId: string; rewrite: string | null } | null> {
+}): Promise<{ modelId: string; rewrite: string | null; requiresFileGeneration?: true } | null> {
     const routerModel = resolveAutoLlmRouterModel(
         input.models,
         (await readAutoLlmRouterModelId()) ?? undefined
@@ -279,7 +284,7 @@ export async function pickAutoModelWithLlm(input: {
     // for a while after their calls kept failing.
     const tunables = await readAutoRouterTunables();
     const candidates = withoutExcludedModels(
-        autoLlmRouterCandidates(input.eligibleModelIds, input.models, input.creditsByModelId),
+        autoLlmRouterCandidates(input.eligibleModelIds, input.models, input.creditsByModelId, input.fileContext),
         tunables,
         Date.now()
     );
@@ -401,5 +406,9 @@ export async function pickAutoModelWithLlm(input: {
                 );
             });
     }
-    return pick ? { modelId: pick.modelId, rewrite: pick.rewrite } : null;
+    return pick ? {
+        modelId: pick.modelId,
+        rewrite: pick.rewrite,
+        ...(pick.requiresFileGeneration ? { requiresFileGeneration: true as const } : {}),
+    } : null;
 }
