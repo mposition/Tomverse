@@ -105,6 +105,15 @@ test("a registry window cannot narrow the code catalog's, and two rows for one A
     twice.map((entry) => [entry.model, entry.unavailable]),
     [["gpt-6-luna", "api_model_duplicated"]],
   );
+  // With the canonical row gone, a hand-priced row for the same API model
+  // still meets the code catalog's rates and window.
+  const [alone] = marketingLlmModelOptionsFrom([
+    { ...luna, id: "cheap-luna-row", contextWindowTokens: 8_000, inputUsdPerMillionTokens: 0.01, outputUsdPerMillionTokens: 0.01 },
+  ]);
+  const [canonical] = marketingLlmModelOptionsFrom([luna]);
+  assert.equal(alone.pin.contextWindowTokens, luna.contextWindowTokens);
+  assert.equal(alone.pin.worstInputMicroUsdPerMillion, canonical.pin.worstInputMicroUsdPerMillion);
+  assert.equal(alone.pin.worstOutputMicroUsdPerMillion, canonical.pin.worstOutputMicroUsdPerMillion);
 });
 
 test("an operator's registry price for both input and output is a verified price", () => {

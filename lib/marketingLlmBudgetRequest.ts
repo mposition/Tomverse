@@ -9,7 +9,8 @@
  * the ledger store expects.
  *
  * The handler takes its environment as an argument so tests can give it a
- * price pin; the route passes the build's, in which no model is pinned yet.
+ * price pin. With none given, a reservation reads the runtime model catalog's
+ * pins before its transaction opens; an explicit empty list pins nothing.
  */
 
 import "server-only";

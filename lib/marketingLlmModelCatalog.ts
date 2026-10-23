@@ -91,12 +91,18 @@ export function marketingLlmModelOptionsFrom(
     const profile = MODEL_PRICING.find((entry) => entry.modelId === model.id);
     const profileMatches = profile?.provider === model.provider && profile.apiModelId === model.apiModel;
     const explicit = model.inputUsdPerMillionTokens != null && model.outputUsdPerMillionTokens != null;
+    // The floors below follow the API model, not the catalog row: a second row
+    // for a known API model, priced by hand, still meets the code catalog's
+    // rates and window even when the canonical row is off or gone.
+    const floorProfile = MODEL_PRICING.find(
+      (entry) => entry.provider === model.provider && entry.apiModelId === model.apiModel,
+    );
     // The generator does not cut its input to the window, so the window is a
     // reservation bound: a registry value may widen the code catalog's, never
     // narrow it.
-    const builtWindow = profileMatches
-      ? BUILT_MODELS.find((entry) => entry.id === model.id && entry.apiModel === model.apiModel)?.contextWindowTokens
-      : undefined;
+    const builtWindow = BUILT_MODELS.find(
+      (entry) => entry.provider === model.provider && entry.apiModel === model.apiModel,
+    )?.contextWindowTokens;
     const window = Math.max(model.contextWindowTokens ?? 0, builtWindow ?? 0);
     if (!window) {
       options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "context_window_unknown" });
@@ -113,10 +119,9 @@ export function marketingLlmModelOptionsFrom(
     // one included. With a profile it may raise a pin's rate, never lower it
     // below the profile's own worst tier (every revision counts: a pin may
     // over-reserve, never under-reserve).
-    const profileTiers =
-      profileMatches && profile
-        ? [profile.tiers, ...(profile.priceSchedule ?? []).map((revision) => revision.tiers)].flat()
-        : [];
+    const profileTiers = floorProfile
+      ? [floorProfile.tiers, ...(floorProfile.priceSchedule ?? []).map((revision) => revision.tiers)].flat()
+      : [];
     const current = priced[0];
     if ((!profileMatches && !explicit) || !VERIFIED_SOURCES.includes(current.costSource)) {
       options.push({ ...base, pin: null, worstCallMicroUsd: 0, unavailable: "price_unverified" });
