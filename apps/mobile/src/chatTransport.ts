@@ -59,7 +59,7 @@ export interface ChatTransport {
   mobileCapabilities?(refresh?: boolean): Promise<MobileCapabilities>;
   preferences?(): Promise<UserPreferences>;
   /** Reports a problem with one answer; the server links it only to the caller's own message. */
-  reportAnswer?(input: { messageId: string; modelId?: string; message: string; language: string }): Promise<void>;
+  reportAnswer?(input: { messageId: string; modelId?: string; message: string; language: string }): Promise<{ reference?: string }>;
   savePreferences?(input: Partial<UserPreferences> & { timeZoneSource?: "user" }): Promise<void>;
   memoryPreferences?(): Promise<MemoryPreferences>;
   saveMemoryPreferences?(input: MemoryPreferences): Promise<void>;

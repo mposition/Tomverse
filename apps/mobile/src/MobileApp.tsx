@@ -49,6 +49,10 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [reportFor, setReportFor] = useState<{ messageId: string; modelId?: string } | null>(null);
+  // Only a finished answer has a saved Message row the report can be linked to;
+  // a reopened claimed or streaming attempt does not yet.
+  const reportable = (message: { content: string; status?: string }) =>
+    Boolean(transport.reportAnswer) && Boolean(message.content.trim()) && [undefined, "normal", "incomplete"].includes(message.status);
   const [offline, setOffline] = useState(!navigator.onLine);
   const abort = useRef<AbortController | null>(null);
   const epoch = useRef(0);
@@ -75,7 +79,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }, [transport, signedIn, conversation]);
   useEffect(() => transport.onSessionLost?.(() => {
     epoch.current++; requestEpoch.current++; abort.current?.abort();
-    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null);
+    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setReportFor(null);
     setUncertain(false); setStreaming(false); setModelPicker(false); setSettings(false); setAccountOpen(false); setProduct("chat");
     localStorage.removeItem(LAST_CHAT); setLoading(false);
   }), [transport]);
@@ -131,7 +135,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }
   async function signOut() {
     epoch.current++; requestEpoch.current++; abort.current?.abort();
-    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null);
+    clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setReportFor(null);
     setUncertain(false); setStreaming(false); localStorage.removeItem(LAST_CHAT); setSettings(false); setModelPicker(false); setProduct("chat");
     try { await transport.signOut(); return true; } catch { setError(mobileCompletionCopy(language).logoutUnconfirmed); return false; }
   }
@@ -242,7 +246,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     </section> : <>
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {!conversation?.messages.length && !streaming && <div className="empty-chat"><AppIcon name="logo" /><h1>{copy.empty}</h1><p>{copy.hint}</p><span className="chat-product-pill"><AppIcon name="spark" />Tomverse Chat</span><div className="starters"><button onClick={() => { setDraft(copy.starterIdea); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="idea" />{copy.starterIdea}</button><button onClick={() => { setDraft(copy.starterFile); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="file" />{copy.starterFile}</button></div></div>}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((transport.reportAnswer && message.content.trim() && !["failed", "cancelled", "pending"].includes(message.status ?? "")) || message.routedModelId) && <div className="answer-footer">{transport.reportAnswer && message.content.trim() && !["failed", "cancelled", "pending"].includes(message.status ?? "") && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{message.routedModelId && <span className="routed-badge" data-testid="auto-routed-by" title={`${autoRoutingCopy[language].answeredByTitle} · ${getModel(message.routedModelId)?.name ?? message.routedModelId}`}><AppIcon name="spark" /><span>{autoRoutingCopy[language].answeredBy} · {getModel(message.routedModelId)?.name ?? message.routedModelId}</span></span>}</div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || message.routedModelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{message.routedModelId && <span className="routed-badge" data-testid="auto-routed-by" title={`${autoRoutingCopy[language].answeredByTitle} · ${getModel(message.routedModelId)?.name ?? message.routedModelId}`}><AppIcon name="spark" /><span>{autoRoutingCopy[language].answeredBy} · {getModel(message.routedModelId)?.name ?? message.routedModelId}</span></span>}</div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />
@@ -253,7 +257,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     </>}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
     {accountOpen && <Sheet title={copy.account} closeLabel={copy.close} onClose={() => setAccountOpen(false)}><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
-    {reportFor && <Sheet title={workspaceCopy.report} closeLabel={copy.close} onClose={() => setReportFor(null)}><AnswerReport transport={transport} language={language} messageId={reportFor.messageId} modelId={reportFor.modelId} /></Sheet>}
+    {reportFor && signedIn && <Sheet title={workspaceCopy.report} closeLabel={copy.close} onClose={() => setReportFor(null)}><AnswerReport transport={transport} language={language} messageId={reportFor.messageId} modelId={reportFor.modelId} /></Sheet>}
     {settings && <Sheet title={copy.settings} closeLabel={copy.close} onClose={() => setSettings(false)}><SettingsScreen transport={transport} signedIn={signedIn} language={language} theme={theme} onLanguage={setLanguage} onTheme={setTheme} onAccount={() => { setSettings(false); setAccountOpen(true); }} onSignOut={() => void signOut()} /></Sheet>}
 
   </main>;

@@ -233,6 +233,7 @@ test("an answer can be reported from the app, and the report names that answer",
   await dialog.getByRole("textbox").fill("카페인 설명이 틀렸습니다.");
   await dialog.getByRole("button", { name: "신고 보내기" }).click();
   await expect(dialog.getByRole("status")).toContainText("신고를 보냈습니다");
+  await expect(dialog.getByRole("status")).toContainText("접수 번호 TV-DEMO-1");
   await page.screenshot({ path: resolve(output, "answer-report-dark.png") });
   const reports = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo:reports") ?? "[]"));
   expect(reports).toHaveLength(1);

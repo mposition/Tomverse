@@ -94,6 +94,20 @@ test("Auto's choice from the response header is attached to that answer after re
   assert.equal(plain.routedModelId, undefined);
 });
 
+test("an answer report goes to /api/feedback for that answer and returns its reference", async () => {
+  const calls = [];
+  const transport = createApiTransport(async (path, init = {}) => {
+    calls.push({ path, body: init.body ? JSON.parse(init.body) : null });
+    if (path === "/api/products/mobile/capabilities") return Response.json({ reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" });
+    if (path === "/api/feedback") return Response.json({ ok: true, reference: "TV-ABC123" });
+    throw Error(`Unexpected request ${path}`);
+  }, bridge);
+  const result = await transport.reportAnswer({ messageId: "answer-1", modelId: "gpt-6-luna", message: "The answer is wrong.", language: "ko" });
+  assert.deepEqual(result, { reference: "TV-ABC123" });
+  const sent = calls.find((call) => call.path === "/api/feedback").body;
+  assert.deepEqual(sent, { type: "bug", message: "The answer is wrong.", messageId: "answer-1", answerSignal: "needs_improvement", language: "ko", modelId: "gpt-6-luna" });
+});
+
 test("unknown chat execution is never resubmitted; restoration reads its durable checkpoint", async () => {
   const f = fixture({ unknown: true });
   await assert.rejects(f.transport.send(f.conversation, "A question", [], new AbortController().signal, () => {}));

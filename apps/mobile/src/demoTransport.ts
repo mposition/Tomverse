@@ -17,7 +17,7 @@ export function createDemoTransport(): ChatTransport {
     mobileCapabilities: async () => ({ reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
     preferences: async () => preferences(),
     savePreferences: async input => { localStorage.setItem(key + ":preferences", JSON.stringify({ ...preferences(), ...input })); },
-    reportAnswer: async input => { localStorage.setItem(key + ":reports", JSON.stringify([...JSON.parse(localStorage.getItem(key + ":reports") ?? "[]"), input])); },
+    reportAnswer: async input => { const reports = [...JSON.parse(localStorage.getItem(key + ":reports") ?? "[]"), input]; localStorage.setItem(key + ":reports", JSON.stringify(reports)); return { reference: `TV-DEMO-${reports.length}` }; },
     memoryPreferences: async () => memory(),
     saveMemoryPreferences: async input => { localStorage.setItem(key + ":memory", JSON.stringify(input)); },
     assistants: async () => [{ id: "demo-assistant", name: "Synthetic writing assistant" }],

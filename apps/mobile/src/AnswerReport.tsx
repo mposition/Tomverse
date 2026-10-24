@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { mobileWorkspaceCopy } from "../../../locales/mobileWorkspace";
 import type { MobileLanguage } from "../../../locales/mobile";
 import type { ChatTransport } from "./chatTransport";
@@ -13,18 +13,26 @@ export function AnswerReport({ transport, language, messageId, modelId }: {
   const copy = mobileWorkspaceCopy[language];
   const [text, setText] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "failed" | "short">("idle");
+  const [reference, setReference] = useState<string | null>(null);
+  // A ref, not state: a second tap before the next render must not send twice.
+  const sending = useRef(false);
   const send = async () => {
+    if (sending.current) return;
     if (text.trim().length < 5) { setState("short"); return; }
+    sending.current = true;
     setState("sending");
     try {
-      await transport.reportAnswer?.({ messageId, modelId, message: text.trim(), language });
+      const result = await transport.reportAnswer?.({ messageId, modelId, message: text.trim(), language });
+      setReference(result?.reference ?? null);
       setState("sent");
     } catch {
       setState("failed");
+    } finally {
+      sending.current = false;
     }
   };
   if (state === "sent") {
-    return <div className="answer-report-form"><p role="status">{copy.reportSent}</p></div>;
+    return <div className="answer-report-form"><p role="status">{copy.reportSent}{reference && <> {copy.reportReference.replace("{reference}", reference)}</>}</p></div>;
   }
   return <div className="answer-report-form">
     <textarea aria-label={copy.report} placeholder={copy.reportPlaceholder} value={text} maxLength={2000}

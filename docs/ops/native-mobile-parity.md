@@ -20,8 +20,8 @@ renew that timestamp.
 The additional scope covers account preferences and memory settings, reading
 assistant profiles, creating Review conversations and routing Easy questions,
 reading generated-image groups/history, explicitly requested Studio generation,
-AI cross-review and item feedback/verification, and polling existing Deep Research
-jobs. No administration, sharing, publishing, profile creation or bulk deletion
+AI cross-review and item feedback/verification, reporting a problem with one
+answer (`POST /api/feedback`), and polling existing Deep Research jobs. No administration, sharing, publishing, profile creation or bulk deletion
 route is enrolled.
 
 An old or inactive server answers the capability probe without invalidating an
