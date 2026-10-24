@@ -218,11 +218,17 @@ test("renewal is idempotent while funded and cannot revive expired, closing, rec
 });
 
 test("small available balances can start without reserving the entire old session maximum", async () => {
-  w.monthlyLimit = 30; w.dailyLimit = 30;
+  w.monthlyLimit = 33; w.dailyLimit = 33;
   const row = await reserveContinuousVoiceCredits(continuousInput());
-  assert.equal(row.reservedCredits, 30); assert.equal(row.reservationPayload.maxSeconds, 50);
+  assert.equal(row.reservedCredits, 33); assert.equal(row.reservationPayload.maxSeconds, 55);
   await settleVoiceConversationCredits(row.id, 10, true);
   assert.equal(w.buckets.month, 6); assert.equal(w.providerCosts[0], 12_500);
+});
+
+test("a balance without viable startup headroom is refused without retaining any hold", async () => {
+  w.monthlyLimit = w.dailyLimit = 32;
+  await assert.rejects(reserveContinuousVoiceCredits(continuousInput()), e => e.code === "CREDIT_BALANCE_INSUFFICIENT");
+  assert.equal(w.row, null); assert.equal(w.buckets.month, 0); assert.equal(w.voiceHeld ?? 0, 0);
 });
 
 for (const limit of ["wallet", "daily", "voice", "provider"]) test(`${limit} exhaustion refuses additional funding without losing the existing hold`, async t => {

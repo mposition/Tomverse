@@ -14,6 +14,7 @@ const isolatedRunner = ["127.0.0.1", "localhost", "::1"].includes(url.hostname) 
 if (!localFixture && !isolatedRunner) throw new Error("This suite requires the isolated local fixture or the dedicated loopback CI test database.");
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: 300, dailyMessageLimit: 300 }) } });
 const { prisma } = await import(mod("lib/prisma.ts"));
+const { getUserChatUsageKey, usagePeriodStart } = await import(mod("lib/chatSecurity.ts"));
 const { reserveVoiceConversationCredits, reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
 const { recordVoiceUsage, finalizeVoiceReservation, claimVoiceRecoveryLease, releaseVoiceRecoveryLease } = await import(mod("lib/voiceConversationRecovery.ts"));
 const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } = await import(mod("lib/voiceConversationTasks.ts"));
@@ -24,6 +25,18 @@ beforeEach(async () => {
 });
 after(async () => { await prisma.$disconnect(); });
 const reserve = () => reserveVoiceConversationCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36, maxSeconds: 60 });
+
+test("the smaller viable startup window rolls back its refused larger hold and refunds unused credits", async () => {
+  const subjectKey = getUserChatUsageKey(userId);
+  await prisma.chatUsageBucket.createMany({ data: ["day", "month"].map(period => ({
+    key: subjectKey, period, periodStart: usagePeriodStart(period, new Date()), count: 267,
+  })) });
+  const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36 });
+  assert.equal(row.reservedCredits, 33); assert.equal(row.reservationPayload.maxSeconds, 55);
+  await finalizeVoiceReservation(row.id, 15);
+  const month = await prisma.chatUsageBucket.findFirst({ where: { key: subjectKey, period: "month" } });
+  assert.equal(Number(month.count), 276);
+});
 
 async function rollingDue() {
   const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36 });

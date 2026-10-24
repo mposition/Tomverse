@@ -76,7 +76,7 @@ const start = () => ({ action: "start", requestId: "91a27fea-6ceb-4c92-92e4-4fd7
 test.beforeEach(reset);
 
 test("an expired or depleted pre-dispatch window refunds everything without a provider call", async () => {
-  for (const remaining of [-1, 0, 14_000]) {
+  for (const remaining of [-1, 0, 14_000, 15_001, 19_999]) {
     reset(); w.initialWindowMs = remaining;
     const response = await POST(request(start()));
     assert.equal(response.status, 409); assert.equal((await response.json()).code, "VOICE_START_WINDOW_EXPIRED");
@@ -87,9 +87,11 @@ test("an expired or depleted pre-dispatch window refunds everything without a pr
 
 test("a slow dispatch write is checked again before any paid provider call", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
-  w.onDispatchWrite = () => { t.mock.timers.tick(20_000); };
-  assert.equal((await POST(request(start()))).status, 409);
-  assert.equal(w.providerCalls.length, 0); assert.deepEqual(w.refunds, [{ id: "reservation", seconds: 0 }]);
+  for (const delay of [10_001, 14_999, 20_000]) {
+    reset(); w.onDispatchWrite = () => { t.mock.timers.tick(delay); };
+    assert.equal((await POST(request(start()))).status, 409);
+    assert.equal(w.providerCalls.length, 0); assert.deepEqual(w.refunds, [{ id: "reservation", seconds: 0 }]);
+  }
 });
 
 test("a short funded window bounds setup and still leaves time for attachment and interaction", async t => {

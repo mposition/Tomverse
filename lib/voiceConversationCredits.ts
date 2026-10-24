@@ -154,10 +154,11 @@ export async function reserveVoiceConversationCredits(input: {
 export const isVoiceCapacityRefusal = (error: unknown): error is { code: string } => ["CREDIT_BALANCE_INSUFFICIENT", "PLAN_DAILY_CREDIT_LIMIT_REACHED", "PROVIDER_BUDGET_EXHAUSTED", "VOICE_OPERATIONAL_LIMIT_REACHED", "ADDON_CREDITS_INSUFFICIENT", "ADDON_COST_ALLOWANCE_INSUFFICIENT"].includes((error as { code?: string })?.code ?? "");
 
 export async function reserveContinuousVoiceCredits(input: { userId: string; requestId: string; conversationId: string | null; creditsPerMinute: number }) {
-  // Leave at least five seconds for provider creation in addition to a usable
-  // initial window and the existing shutdown exposure. This adds no spend cap.
-  const minimum = VOICE_CONVERSATION_INITIAL_SECONDS + VOICE_CONVERSATION_CLOSING_SECONDS + 5;
-  const windows = [VOICE_CONVERSATION_RESERVATION_SECONDS, minimum + 5, minimum];
+  // Include setup plus a commit margin: a 50-second hold has no margin above
+  // the required five-second dispatch budget. Shorter windows would be refunded
+  // before dispatch after even a small DB delay, rather than starting usefully.
+  const minimum = VOICE_CONVERSATION_INITIAL_SECONDS + VOICE_CONVERSATION_CLOSING_SECONDS + 10;
+  const windows = [VOICE_CONVERSATION_RESERVATION_SECONDS, minimum];
   for (let index = 0; ; index++) {
     const seconds = windows[index];
     try { return await reserveVoiceConversationCredits({ ...input, maxSeconds: seconds, sessionSeconds: seconds - VOICE_CONVERSATION_CLOSING_SECONDS, continuous: true }); }

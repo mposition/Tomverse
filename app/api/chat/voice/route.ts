@@ -114,13 +114,13 @@ export async function POST(request: Request) {
       await settleVoiceConversationCredits(reservation.id, 0);
       return json("VOICE_START_WINDOW_EXPIRED", 409, { reservationId: reservation.id });
     };
-    if (!Number.isFinite(fundedCloseAt) || startupTimeout() <= 0 || request.signal.aborted) return await refuseExpiredStart();
+    if (!Number.isFinite(fundedCloseAt) || startupTimeout() < 5_000 || request.signal.aborted) return await refuseExpiredStart();
     let providerResult;
     await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { reservationPayload: {
       ...readVoiceCreditPayload(reservation.reservationPayload), dispatchStartedAt: new Date().toISOString(), webLeaseUntil: new Date(Date.now() + 30_000).toISOString(),
     } } });
     const providerTimeoutMs = startupTimeout();
-    if (providerTimeoutMs <= 0 || request.signal.aborted) return await refuseExpiredStart();
+    if (providerTimeoutMs < 5_000 || request.signal.aborted) return await refuseExpiredStart();
     try { providerResult = await createVoiceProviderSession(body.sdp, history, providerTimeoutMs); }
     catch {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
