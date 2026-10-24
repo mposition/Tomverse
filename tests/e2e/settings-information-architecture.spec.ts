@@ -700,6 +700,23 @@ test.describe("returning to the chat from settings", () => {
     });
   }
 
+  test("settings entered from Chat returns to Chat, at both depths of the way out", async ({ page }) => {
+    // The Chat surface records itself when it renders; a page opened with
+    // that record is a settings page the visitor reached from Chat.
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem("tomverse.settings.returnProduct", "chat");
+    });
+    await gotoSettingsDepth(page, "/settings/notifications");
+
+    await expect(page.getByTestId(RETURN_TO_CHAT)).toHaveAttribute("href", "/chat");
+    const upHref = await page.getByTestId("email-notifications-back").getAttribute("href");
+    expect(upHref).toMatch(/^\/chat\?settings=/);
+
+    await page.getByTestId(RETURN_TO_CHAT).click();
+    await expect(page).toHaveURL(/\/chat$/);
+    await expect(settingsDialog(page)).toHaveCount(0);
+  });
+
   test("the exit is reachable from the keyboard @ui-risk", async ({ page }) => {
     await gotoSettingsDepth(page, "/settings/imports/conversations/conv-qa");
 
