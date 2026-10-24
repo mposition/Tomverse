@@ -47,8 +47,28 @@ p { margin: 0 0 16px; color: var(--mobile-muted); }
 .conversation-list { flex: 1; overflow: auto; padding: 24px 20px; }
 .list-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
 .list-heading h1, .list-heading .primary { margin: 0; }
-.conversation-row { display: flex; text-align: left; justify-content: space-between; width: 100%; border-bottom: 1px solid var(--mobile-border); border-radius: 0; padding: 16px 0; gap: 12px; }
-.conversation-row span { flex-shrink: 0; }
+.conversation-row { display: flex; align-items: center; text-align: left; width: 100%; min-height: 48px; border: 0; border-radius: 8px; padding: 8px 12px; margin-bottom: 4px; }
+.conversation-title { min-width: 0; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.conversation-row[aria-current="page"] { background: var(--mobile-soft); }
+.history-row { display: flex; align-items: stretch; min-width: 0; margin-bottom: 4px; }
+.history-row .conversation-row { flex: 1; min-width: 0; margin: 0; }
+.history-more { width: 44px; min-height: 48px; flex-shrink: 0; padding: 0; font-size: 24px; color: var(--mobile-muted); }
+.history-controls { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+.history-controls input { min-width: 0; width: 100%; min-height: 44px; color: var(--mobile-ink); border: 1px solid var(--mobile-border); border-radius: 10px; background: var(--mobile-paper); padding: 8px 12px; font: inherit; }
+.history-controls button { flex-shrink: 0; min-height: 44px; }
+.history-controls button[aria-pressed="true"], .history-menu button[aria-pressed="true"] { background: var(--mobile-soft); color: var(--mobile-action); }
+.history-group h2 { margin: 16px 12px 4px; font-size: 12px; font-weight: 500; color: var(--mobile-muted); }
+.history-snippet { display: block; color: var(--mobile-muted); font-size: 13px; }
+.history-lock { display: inline-block; margin-right: 6px; vertical-align: -1px; color: var(--mobile-muted); }
+.history-notice { font-size: 13px; padding: 8px 12px; }
+.history-menu { display: flex; flex-direction: column; gap: 4px; }
+.history-menu > button { min-height: 48px; text-align: left; }
+.history-menu h3 { color: var(--mobile-muted); font-size: 13px; margin: 12px 12px 0; }
+.history-menu label { display: flex; flex-direction: column; gap: 8px; }
+.history-menu input, .history-menu select { min-width: 0; width: 100%; min-height: 44px; padding: 8px 12px; font: inherit; background: var(--mobile-paper); color: var(--mobile-ink); border: 1px solid var(--mobile-border); border-radius: 8px; }
+.history-project { display: flex; align-items: center; }
+.history-project > button:first-child { flex: 1; text-align: left; }
+.history-row .conversation-title { flex: 1; }
 .notice { font-size: 14px; padding: 12px 20px; margin: 0; }
 .error { border-left: 3px solid currentColor; margin: 8px 12px; background: var(--mobile-surface); }
 .restore { margin: 8px 20px; border: 1px solid var(--mobile-border); }
@@ -93,9 +113,9 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 .composer textarea { min-height: 40px; }
 .composer-actions button { display: grid; place-items: center; }
 .message.user { background: var(--mobile-soft); border-radius: 20px; }
-.conversation-row { border: 0; background: var(--mobile-paper); padding: 20px 16px; border-radius: 16px; margin-bottom: 12px; }
-.conversation-list .list-heading { display: block; }
-.conversation-list .primary { display: block; width: 100%; text-align: left; margin-top: 20px; }
+.conversation-list .list-heading { display: flex; margin-bottom: 12px; }
+.conversation-list .list-heading h1 { font-size: 24px; line-height: 1.4; }
+.conversation-list .list-heading .primary { min-height: 44px; padding: 8px 12px; margin: 0; border-radius: 12px; }
 @media (max-height: 700px) { .empty-chat { padding-top: 8px; } .empty-chat h1 { font-size: 28px; }  .starters { display: none; } .welcome-mark { margin-bottom: 8px; } .welcome .primary { margin-top: 16px; } }
 
 .welcome .icon-logo { width: 128px; height: 128px; border-radius: 28px; }

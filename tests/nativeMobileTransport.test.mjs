@@ -166,3 +166,15 @@ test("title conflict, failed answers and old capability versions never change na
     if(!supported) await assert.rejects(transport.usage(),/NATIVE_USAGE_UNAVAILABLE/);
   }
 });
+
+test("usage retry refreshes server support before any cookie-only endpoint is called", async () => {
+  let enabled=false;let reads=0;let lost=0;
+  const transport=createApiTransport(async path=>{
+    if(path==="/api/products/mobile/capabilities")return Response.json({reviewEasy:true,assistants:true,maxModels:3,plan:"Max",accountUsage:enabled});
+    assert.equal(path,"/api/user/usage");reads++;return Response.json({plan:"Max",usage:{creditsMonth:25},limits:{creditsMonth:100}});
+  },bridge);
+  transport.onSessionLost(()=>lost++);
+  await assert.rejects(transport.usage(),error=>error.code==="NATIVE_USAGE_UNAVAILABLE");
+  assert.equal(reads,0);assert.equal(lost,0);enabled=true;
+  assert.equal((await transport.usage()).usage.creditsMonth,25);assert.equal(reads,1);
+});

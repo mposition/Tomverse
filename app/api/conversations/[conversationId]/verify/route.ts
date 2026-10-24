@@ -1,7 +1,6 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -29,7 +28,9 @@ export async function POST(
     context: RouteContext<"/api/conversations/[conversationId]/verify">
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
@@ -114,15 +115,16 @@ export async function POST(
             request: req,
             outcome: "success",
         });
-        const response = NextResponse.json({ success: true });
-        response.headers.append(
-            "Set-Cookie",
-            createConversationUnlockCookie(
+        const cookie = createConversationUnlockCookie(
                 userId,
                 conversationId,
                 effectivePassword
-            )
-        );
+            );
+        const native = req.headers.has("authorization");
+        const response = NextResponse.json({ success: true,
+            ...(native ? { unlockToken: cookie.slice(cookie.indexOf("=") + 1, cookie.indexOf(";")) } : {}),
+        }, { headers: { "Cache-Control": "no-store" } });
+        if (!native) response.headers.append("Set-Cookie", cookie);
         return response;
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
