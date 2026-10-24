@@ -94,7 +94,22 @@ export type QaReleaseTrainPick = {
    * out and released on its own.
    */
   outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows";
+  /**
+   * For a conflict: develop pull requests merged before it that changed a
+   * conflicted file, newest first. Some may be on main already; Admin shows
+   * only those that are not.
+   */
+  predecessors?: number[];
 };
+
+/** At most this many predecessors are named for one conflict. */
+export const QA_RELEASE_TRAIN_MAX_PREDECESSORS = 10;
+
+/** The pull request a develop merge commit's subject names (`Merge pull request #2950 from ...`), or null. */
+export function qaReleaseTrainMergedPullNumber(subject: string): number | null {
+  const match = /^Merge pull request #(\d{1,7}) from /.exec(subject);
+  return match ? Number(match[1]) : null;
+}
 
 /** Outcomes that leave a picked pull request for a later release. */
 export const QA_RELEASE_TRAIN_LEFT_OUT: ReadonlySet<QaReleaseTrainPick["outcome"]> = new Set(["conflict", "over_capacity", "changes_workflows"]);
@@ -111,8 +126,8 @@ export function qaReleaseTrainPullRequest(input: {
   const left = input.picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome));
   const already = input.picks.filter((p) => p.outcome === "already_in_main");
   const reason = {
-    conflict: "cherry-pick conflict on main; pick it again for a later train once resolved",
-    over_capacity: "train full; pick it again for the next train",
+    conflict: "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs first",
+    over_capacity: "train full; it rides the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;
   const lines = [

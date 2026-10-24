@@ -3246,8 +3246,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect(message(page, "recovered answer")).toBeVisible();
     await expect(page.getByTestId("search-citation-item")).toContainText("Recovery source");
     await expect(page.getByTestId("generated-artifact-filename")).toHaveText("recovered-result.csv");
-    await expect(page.getByTestId("memory-usage-disclosure")).toContainText("2");
-    await expect(page.getByTestId("memory-usage-disclosure")).toContainText("1");
+    await expect(page.getByTestId("knowledge-usage-disclosure")).toContainText("1");
     expect(await persistentChatPostCount(page)).toBe(0);
   });
 

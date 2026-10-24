@@ -594,8 +594,6 @@ export const ko = {
         artifactDownloadFailed: "파일을 다운로드하지 못했습니다. 다시 시도해 주세요.",
         artifactDownloadLocked: "파일을 다운로드하려면 대화 잠금을 해제하세요.",
         searchCitationsLabel: "출처",
-        answerContextLabel: "답변 컨텍스트",
-        answerContextMemory: "계정 기억 {count}개",
         answerContextKnowledge: "프로필 지식 발췌 {count}개",
         modelsSelectedOne: "개 모델",
         modelsSelectedOther: "개 모델",
@@ -1899,7 +1897,7 @@ export const ko = {
         restoreGrounds: "새 근거 추가",
         restoreGroundsNotice: "직접 작성한 근거로 검토 목록에 복원합니다. 사용하려면 별도로 승인하세요.",
 
-        reportAnswer: "이 답변의 문제 신고",
+        reportAnswer: "해당 답변의 문제 신고",
         conflictReview: "관련 기억 검토",
         conflictChoose: "비교할 기존 기억을 선택하세요",
         conflictKeep: "기존 기억 유지",

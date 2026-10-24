@@ -34,6 +34,21 @@ test("native voice independently verifies the bearer, account and exact method w
   assert.equal(cookies, before); delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
 });
 
+test("an answer report from the app needs the parity flag, POST only, and the bearer's identity", async () => {
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  const before = cookies;
+  delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
+  assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, "/api/feedback"))).response.status, 503);
+  process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "true";
+  const result = await resolveChatRouteSession(req({ authorization: "Bearer valid-owner", origin: "capacitor://localhost", cookie: "another-account" }, "/api/feedback"));
+  assert.equal(result.session.user.id, "bearer-owner");
+  for (const [path, method] of [["/api/feedback", "GET"], ["/api/feedback/export", "POST"], ["/api/admin/feedback", "POST"]]) {
+    assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, path, method))).response.status, 401);
+  }
+  assert.equal(cookies, before);
+  delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED; delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
+});
+
 test("cookie path is unchanged and does not consult bearer verification", async () => {
   delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
   const before = bearerChecks;

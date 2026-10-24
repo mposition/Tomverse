@@ -53,7 +53,7 @@ import {
   type ChatScrollMode,
 } from "@/lib/chatAutoScroll";
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
-import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
+import { knowledgeExcerptCountToShow } from "@/lib/answerContextDisclosure";
 import { recoveryPromptsForMessages } from "@/lib/chatTranscriptRecovery";
 import { splitInlineCode, splitUserMessageSegments } from "@/lib/userMessageSegments";
 import { CHAT_CONCURRENCY_ERROR_CODES } from "@/lib/chatConcurrencyCore";
@@ -1342,84 +1342,69 @@ export function ChatMessageList({
                       />
                     )}
                     {/*
-                      docs/policy/external-conversation-import-and-memory.md
-                      §13.4 and §14.3: what this answer was given, shown to its
-                      owner and counted by the server. Rendered only above zero
-                      -- the policy forbids a misleading indication, and
-                      "0 memories used" on an answer that never had any is one.
-                      It is a statement about this answer, so it sits with the
-                      answer rather than in any dock or rail, and touches
-                      neither the mobile composer contract nor the comparison
-                      rail's.
-
-                      One sentence for two facts, each named: an answer built
-                      from the user's own uploaded files and one built from
-                      their stored memories are different claims, and a single
-                      merged count would state neither.
+                      One row under the answer: report this answer, which model
+                      Auto chose, and -- only when a profile's knowledge was
+                      given to it -- how many excerpts (docs/policy/
+                      external-conversation-import-and-memory.md §14.3). Kept on
+                      a single line at every width: the badge truncates its model
+                      name rather than wrapping. It sits with the answer rather
+                      than in any dock or rail, and touches neither the mobile
+                      composer contract nor the comparison rail's.
                     */}
                     {!isUser &&
                       (() => {
-                        const disclosure = decideAnswerContextDisclosure({
-                          memoryUsedCount: msg.memoryUsedCount,
-                          knowledgeChunkCount: msg.knowledgeChunkCount,
-                        });
-                        if (!disclosure.shown) return null;
+                        const canReport =
+                          !isActivelyGenerating &&
+                          !msg.carriedAnswer &&
+                          msg.status !== "error" &&
+                          Boolean(displayContent.trim());
+                        const knowledgeCount = knowledgeExcerptCountToShow(msg.knowledgeChunkCount);
+                        if (!canReport && !msg.routedModelId && knowledgeCount === null) return null;
                         return (
-                          <p
-                            data-testid="memory-usage-disclosure"
-                            className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
-                          >
-                            {t("chat.answerContextLabel")}
-                            {": "}
-                            {disclosure.parts
-                              .map((part) =>
-                                t(
-                                  part.kind === "memory"
-                                    ? "chat.answerContextMemory"
-                                    : "chat.answerContextKnowledge"
-                                ).replaceAll("{count}", String(part.count))
-                              )
-                              .join(" · ")}
-                          </p>
+                          <div className="mt-3 flex min-w-0 flex-nowrap items-center gap-1.5 whitespace-nowrap">
+                            {canReport && (
+                              <FeedbackButton sourceMessageId={msg.id} currentModelId={msg.modelId}
+                                triggerLabel={t("memoryReview.reportAnswer")} triggerTestId="memory-answer-feedback"
+                                triggerClassName="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                                triggerIconClassName="h-3 w-3 text-blue-500" />
+                            )}
+                            {/*
+                              Which model answered, on a turn Auto routed
+                              (docs/ui-contracts/auto-model-selection.md).
+
+                              Only on a routed turn: `routedModelId` is set from a
+                              response header the server writes when the Router chose
+                              the model and omits when it did not, so a fallback turn
+                              has nothing here rather than a badge claiming a decision
+                              nobody made.
+
+                              The display name, not the id -- the id is for logs. A
+                              model that has since left the catalogue falls back to its
+                              id rather than rendering an empty badge, because "this
+                              answer came from something we no longer list" is still
+                              the truth about the answer.
+                            */}
+                            {!isUser && msg.routedModelId && (
+                              <AutoRoutedByBadge
+                                routed
+                                modelName={
+                                  getModel(msg.routedModelId)?.name ?? msg.routedModelId
+                                }
+                                reason={msg.routedReason ?? null}
+                                language={lang as Parameters<typeof AutoRoutedByBadge>[0]["language"]}
+                              />
+                            )}
+                            {knowledgeCount !== null && (
+                              <span
+                                data-testid="knowledge-usage-disclosure"
+                                className="shrink-0 text-[11px] text-zinc-400 dark:text-zinc-500"
+                              >
+                                {t("chat.answerContextKnowledge").replaceAll("{count}", String(knowledgeCount))}
+                              </span>
+                            )}
+                          </div>
                         );
                       })()}
-                    {!isUser && !isActivelyGenerating && !msg.carriedAnswer && msg.status !== "error" && displayContent.trim() && (
-                      <FeedbackButton sourceMessageId={msg.id} currentModelId={msg.modelId}
-                        triggerLabel={t("memoryReview.reportAnswer")} triggerTestId="memory-answer-feedback"
-                        triggerClassName="mt-2 text-[11px] text-zinc-500 underline underline-offset-2" />
-                    )}
-                    {/*
-                      Which model answered, on a turn Auto routed
-                      (docs/ui-contracts/auto-model-selection.md).
-
-                      Only on a routed turn: `routedModelId` is set from a
-                      response header the server writes when the Router chose
-                      the model and omits when it did not, so a fallback turn
-                      has nothing here rather than a badge claiming a decision
-                      nobody made.
-
-                      The display name, not the id -- the id is for logs. A
-                      model that has since left the catalogue falls back to its
-                      id rather than rendering an empty badge, because "this
-                      answer came from something we no longer list" is still
-                      the truth about the answer.
-
-                      It is a statement about this answer, so it sits with the
-                      answer. It touches neither the mobile composer contract
-                      nor the comparison rail's.
-                    */}
-                    {!isUser && msg.routedModelId && (
-                      <p className="mt-3">
-                        <AutoRoutedByBadge
-                          routed
-                          modelName={
-                            getModel(msg.routedModelId)?.name ?? msg.routedModelId
-                          }
-                          reason={msg.routedReason ?? null}
-                          language={lang as Parameters<typeof AutoRoutedByBadge>[0]["language"]}
-                        />
-                      </p>
-                    )}
                     {!isUser && msg.routedModelId && msg.autoRewrite && (
                       <AutoRewriteDisclosure
                         rewrite={msg.autoRewrite}

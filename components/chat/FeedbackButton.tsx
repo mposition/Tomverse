@@ -96,6 +96,7 @@ export function FeedbackButton({
   errorReport,
   triggerLabel,
   triggerClassName,
+  triggerIconClassName,
   triggerTestId,
   respondsToOpenRequests = false,
   sourceMessageId,
@@ -118,6 +119,7 @@ export function FeedbackButton({
   errorReport?: MessageErrorReportContext;
   triggerLabel?: string;
   triggerClassName?: string;
+  triggerIconClassName?: string;
   triggerTestId?: string;
   /**
    * Opens this dialog when `openFeedbackDialog()` asks (HELP-NAV-01's "report a
@@ -951,7 +953,7 @@ export function FeedbackButton({
           "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
         }
       >
-        <LifeBuoy className="h-4 w-4 text-blue-500" aria-hidden="true" />
+        <LifeBuoy className={triggerIconClassName || "h-4 w-4 text-blue-500"} aria-hidden="true" />
         {triggerLabel || t("feedback.button")}
       </button>
       {dialog}

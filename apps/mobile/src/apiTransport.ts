@@ -23,7 +23,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   let sessionRevision = 0;
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
   let capabilityRequest: Promise<MobileCapabilities> | null = null;
-  const clearSessionState = () => { sessionRevision++; capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); };
+  const routedModelByMessage = new Map<string, string>();
+  const clearSessionState = () => { sessionRevision++; capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
   const run: ApiFetch = async (path, init) => {
     try {
@@ -97,7 +98,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       messages.push({ id: attempt.assistantMessageId, role: "assistant", content: attempt.partialContent,
         modelId: attempt.actualModelId ?? attempt.requestedModelId, status: attempt.status });
     }
-    return { ...item, messages, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
+    const withRouting = messages.map((message) => routedModelByMessage.has(message.id) ? { ...message, routedModelId: routedModelByMessage.get(message.id) } : message);
+    return { ...item, messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
     await request(pathFor(id), json("PATCH", { selectionMode: auto ? "auto" : "manual", ...(!auto ? { selectedModels: [modelId] } : {}) }));
@@ -129,6 +131,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const response = await run("/api/chat", { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
         assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}) }), signal: controller.signal });
       watchdog.noteHeaders();
+      // Auto's choice arrives only as a header, as on the web; it is kept for
+      // this session and attached to the message when the conversation reloads.
+      const routed = response.headers.get("X-Chat-Routed-Model");
+      if (routed) routedModelByMessage.set(assistantMessageId, routed);
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new ApiClientError(response.status, typeof body?.code === "string" ? body.code : "CHAT_REQUEST_FAILED"); }
       if ((response.headers.get("content-type") ?? "").includes("application/json")) {
         const receipt = await response.json();
@@ -238,6 +244,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       return result.updated && typeof result.title === "string" ? result.title : null;
     },
     preferences: async () => { await requireParity(); return request("/api/user/settings"); },
+    reportAnswer: async ({ messageId, modelId, message, language }) => { await requireParity(); const result = await request<{ reference?: unknown }>("/api/feedback", json("POST", { type: "bug", message, messageId, answerSignal: "needs_improvement", language, ...(modelId ? { modelId } : {}) })); return typeof result?.reference === "string" ? { reference: result.reference } : {}; },
     savePreferences: async (input) => { await requireParity(); await request("/api/user/settings", json("POST", input)); },
     memoryPreferences: async () => { await requireParity(); return request("/api/memories/settings"); },
     saveMemoryPreferences: async (input) => { await requireParity(); await request("/api/memories/settings", json("PUT", input)); },
