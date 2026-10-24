@@ -7,7 +7,7 @@
  * This module is the layer that holds regardless of what any model says: an
  * extraction model's classification is advisory, and every candidate —
  * extracted or user-authored — passes through these checks before it can be
- * stored, and again before it can be bulk-approved. Pure and dependency-free
+ * stored, and again before it is activated. Pure and dependency-free
  * so the §12.4 "deterministic validator tests" run without a database or a
  * provider key.
  *

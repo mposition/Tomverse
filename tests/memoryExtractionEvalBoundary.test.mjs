@@ -433,7 +433,7 @@ test("a budget opens the budget gate and nothing else", () => {
     );
 });
 
-test("only the owner-launch pair resolves for runtime use, and only until it expires", () => {
+test("only the owner-launch pairs resolve for runtime use, and only until they expire", () => {
     // The other half of the same contract: every other pair fails closed even
     // with the flag on (§12.1), and the one approval ends on its own date.
     const during = new Date("2026-10-24T00:00:00Z");
@@ -443,7 +443,8 @@ test("only the owner-launch pair resolves for runtime use, and only until it exp
             extractionModelId: entry.extractionModelId,
             promptVersion: entry.promptVersion,
         };
-        const launched = `${pair.extractionModelId}::${pair.promptVersion}` === "gpt-5-6-luna::mem-extract-v9";
+        const launched = ["gpt-5-6-luna::mem-extract-v9", "gpt-5-6-luna::mem-extract-v10"]
+            .includes(`${pair.extractionModelId}::${pair.promptVersion}`);
         assert.equal(
             Boolean(findApprovedEvalPair(pair, { kind: "none" }, MEMORY_EXTRACTION_EVAL_REGISTER, during)),
             launched,

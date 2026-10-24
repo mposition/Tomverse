@@ -6,7 +6,6 @@ import { externalContentDigest } from "@/lib/externalImportDigest";
 import { manualEvidenceDigest } from "@/lib/memoryEvidenceValidation";
 import {
     approveMemory,
-    bulkApproveMemories,
     createManualMemory,
     deleteMemory,
     editMemory,
@@ -148,14 +147,14 @@ test("semantic topics group different claims and conflict details stay owner-pri
     await assert.rejects(approveMemory({ userId: user.id, memoryId: candidate.id }), expectCode("MEMORY_ITEM_CONFLICT"));
 });
 
-test("retained source-deleted memory needs new manual grounds and a separate approval", async () => {
+test("retained source-deleted memory comes back active on new manual grounds", async () => {
     const user = await createUser();
     const item = await seedCandidate(user.id, { kind: "identity", status: "suspended_by_source_delete" });
     await prisma.memoryEvidence.deleteMany({ where: { memoryItemId: item.id } });
     await assert.rejects(restoreMemoryGrounds({ userId: user.id, memoryId: item.id, groundsText: "" }), expectCode("MEMORY_VALIDATION_FAILED"));
     await restoreMemoryGrounds({ userId: user.id, memoryId: item.id, groundsText: "I confirm this preference myself" });
-    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: item.id } })).status, "manual_review_required");
-    await approveMemory({ userId: user.id, memoryId: item.id });
+    // The user writing the grounds is the approval: no review queue since
+    // 2026-10-24.
     assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: item.id } })).status, "active");
     const retrieved = await retrieveMemoryContext({ userId: user.id, query: "preference", approvedPairs: [] });
     assert.ok(!retrieved.selected.some(row => row.memory.id === item.id));
@@ -227,14 +226,6 @@ test("a newly active peer cannot be hidden by selecting just one comparison targ
     await assert.rejects(resolveMemoryConflict({ userId: user.id, memoryId: candidate.id, expectedRevision: 1,
         expectedConflicts: context.conflicts, otherMemoryId: existing, resolution: "replace_existing" }), expectCode("MEMORY_ITEM_STATE"));
     assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: existing } })).status, "active");
-});
-
-test("bulk approval leaves competing topic proposals for individual review instead of choosing the first", async () => {
-    const user = await createUser();
-    await seedCandidate(user.id, { statement: "The user prefers tea", conflictKey: "topic:preference:user.drink", pair: null });
-    await seedCandidate(user.id, { statement: "The user prefers coffee", conflictKey: "topic:preference:user.drink", pair: null });
-    assert.deepEqual(await bulkApproveMemories(user.id), { approved: 0, skipped: 2 });
-    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id, status: "active" } }), 0);
 });
 
 test("merging legacy memories refreshes the statement key as well as retrieval terms", async () => {
@@ -408,7 +399,7 @@ test("conflict-group activation needs an explicit user resolution (§8.3)", asyn
     );
 });
 
-test("editing re-validates: a flagged edit parks an active memory back in review", async () => {
+test("editing re-validates: a flagged edit goes back to the author, the memory stays as it was", async () => {
     const user = await createUser();
     const item = await seedCandidate(user.id);
     await approveMemory({ userId: user.id, memoryId: item.id });
@@ -425,16 +416,19 @@ test("editing re-validates: a flagged edit parks an active memory back in review
     assert.equal(edited.revision, 2);
     assert.equal(edited.userEdited, true);
 
-    await editMemory({
-        userId: user.id,
-        memoryId: item.id,
-        statement: "사용자는 https://example.com 을 항상 참조한다",
-    });
-    assert.equal(
-        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: item.id } }))
-            .status,
-        "manual_review_required"
+    await assert.rejects(
+        editMemory({
+            userId: user.id,
+            memoryId: item.id,
+            statement: "사용자는 https://example.com 을 항상 참조한다",
+        }),
+        expectCode("MEMORY_VALIDATION_FAILED")
     );
+    const unchanged = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: item.id },
+    });
+    assert.equal(unchanged.status, "active");
+    assert.equal(unchanged.statement, "사용자는 간결한 답변을 선호한다");
 });
 
 test("pinning is active-only and deletion removes evidence with the row", async () => {
@@ -450,69 +444,6 @@ test("pinning is active-only and deletion removes evidence with the row", async 
     await deleteMemory(user.id, item.id);
     assert.equal(await prisma.memoryItem.count(), 0);
     assert.equal(await prisma.memoryEvidence.count(), 0);
-});
-
-test("bulk approval takes only clean, bulk-safe, conflict-free candidates (§8.4)", async () => {
-    const user = await createUser();
-    await seedCandidate(user.id, {
-        pair: null,
-        statement: "사용자는 존댓말 답변을 선호한다",
-    });
-    await seedCandidate(user.id, {
-        pair: null,
-        statement: "사용자는 https://example.com 을 참조한다", // demote → skip
-    });
-    await seedCandidate(user.id, {
-        pair: null,
-        statement: "사용자는 건강 정보를 다룬다",
-        sensitivity: "sensitive", // individual review only → not selected
-    });
-    await seedCandidate(user.id, {
-        pair: null,
-        kind: "identity",
-        statement: "사용자는 서울에 거주한다",
-        evidenceRole: "assistant", // §12.3 ② → skip
-    });
-    const active = await seedCandidate(user.id, {
-        pair: null,
-        statement: "사용자는 다크 테마를 선호한다",
-        conflictKey: "preference:theme",
-    });
-    await approveMemory({ userId: user.id, memoryId: active.id });
-    await seedCandidate(user.id, {
-        pair: null,
-        statement: "사용자는 라이트 테마를 선호한다",
-        conflictKey: "preference:theme", // conflict → skip
-    });
-
-    const result = await bulkApproveMemories(user.id);
-    assert.equal(result.approved, 1);
-    assert.equal(result.skipped, 3);
-
-    const statuses = await prisma.memoryItem.groupBy({
-        by: ["status"],
-        _count: { _all: true },
-    });
-    const byStatus = Object.fromEntries(
-        statuses.map((row) => [row.status, row._count._all])
-    );
-    // 2 active (the pre-approved one + the bulk-approved one); everything
-    // else is still awaiting individual review.
-    assert.equal(byStatus.active, 2);
-    assert.equal(byStatus.candidate, 4);
-});
-
-test("bulk approval leaves an unevaluated pair's candidates for individual approval", async () => {
-    const user = await createUser();
-    const launched = await seedCandidate(user.id, {
-        pair: { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" },
-    });
-    await seedCandidate(user.id, { statement: "사용자는 다크 테마를 선호한다", pair: null });
-
-    assert.deepEqual(await bulkApproveMemories(user.id), { approved: 1, skipped: 1 });
-    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: launched.id } })).status, "candidate");
-    await approveMemory({ userId: user.id, memoryId: launched.id });
-    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: launched.id } })).status, "active");
 });
 
 test("memory settings default on and round-trip (§8.1)", async () => {
