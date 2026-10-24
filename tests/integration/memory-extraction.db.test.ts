@@ -469,6 +469,49 @@ test("turning memory off stops a running extraction before its next provider cal
     assert.equal(result.reason, "memory_off");
 });
 
+test("memory off on a chunk's last attempt pauses the run, and turning it back on finishes it", async () => {
+    const { user, run } = await seedRun(1);
+    // The claim below makes this the chunk's last allowed attempt.
+    await prisma.memoryExtractionChunk.updateMany({
+        where: { runId: run.id },
+        data: { attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 1 },
+    });
+    const paused = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        handler: async () => {
+            await prisma.userMemorySettings.create({
+                data: { userId: user.id, masterEnabled: false },
+            });
+            return { outcome: "failed", code: "memory_off" };
+        },
+    });
+    assert.equal(paused.outcome, "blocked");
+    assert.equal(paused.reason, "memory_off");
+    const chunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id },
+    });
+    assert.equal(chunk.status, "pending");
+    assert.equal(chunk.attemptCount, MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 1, "the attempt was not spent");
+    assert.equal(
+        (await prisma.memoryExtractionRun.findUniqueOrThrow({ where: { id: run.id } })).status,
+        "pending"
+    );
+
+    await prisma.userMemorySettings.update({
+        where: { userId: user.id },
+        data: { masterEnabled: true },
+    });
+    const resumed = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-b",
+        register: APPROVED_REGISTER,
+        handler: completingHandler,
+    });
+    assert.equal(resumed.outcome, "completed");
+});
+
 test("an unapproved pair blocks dispatch without contacting a provider (§12.1)", async () => {
     const { run } = await seedRun(1);
     const result = await driveMemoryExtractionRunSlice({

@@ -554,8 +554,9 @@ export async function handleMemoryExtractionChunk({
     );
 
     if (!commit.committed) {
-        // Memory off: the attempt failed and the chunk stays pending, behind
-        // the memory_off dispatch block, until memory is back on.
+        // Memory off: the slice driver hands the chunk back unspent
+        // (pauseExtractionChunk) and the run waits behind the memory_off
+        // dispatch block until memory is back on.
         return failed(commit.reason === "memory_off" ? "memory_off" : "lease_lost");
     }
     return { outcome: "completed" };

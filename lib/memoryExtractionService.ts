@@ -918,6 +918,34 @@ export async function completeExtractionChunk(
     });
 }
 
+/**
+ * Hands a claimed chunk back as if it had never been attempted.
+ *
+ * For memory turned off while the provider was answering: that is the user's
+ * choice, not a failure of the chunk, so it must not spend one of the
+ * chunk's bounded attempts -- otherwise turning memory off on a chunk's last
+ * attempt would end the whole run as failed. Fenced on the lease like every
+ * other chunk write.
+ */
+export async function pauseExtractionChunk(
+    lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">,
+    chunkIndex: number,
+    now: Date = new Date()
+): Promise<boolean> {
+    const paused = await prisma.$executeRaw`
+        UPDATE "MemoryExtractionChunk"
+        SET "status" = 'pending',
+            "leaseGeneration" = NULL,
+            "attemptCount" = GREATEST(0, "attemptCount" - 1),
+            "updatedAt" = ${now}
+        WHERE "runId" = ${lease.runId}
+          AND "chunkIndex" = ${chunkIndex}
+          AND "status" = 'running'
+          AND "leaseGeneration" = ${lease.leaseGeneration}
+    `;
+    return paused === 1;
+}
+
 /** User cancel: deterministic release, terminal state, idempotent. */
 export async function cancelMemoryExtractionRun(userId: string, runId: string) {
     const run = await loadOwnedRun(userId, runId);
@@ -1192,6 +1220,13 @@ export async function driveMemoryExtractionRunSlice(input: {
         const applied0 = timedOut
             ? { outcome: "failed" as const, code: "chunk_timeout" }
             : result;
+
+        if (applied0.outcome === "failed" && applied0.code === "memory_off") {
+            // Not a failure: the chunk goes back unspent and the run waits,
+            // blocked, until memory is back on.
+            await pauseExtractionChunk(lease, chunk.chunkIndex);
+            return stop("blocked", "memory_off");
+        }
 
         const applied = await completeExtractionChunk(
             lease,
