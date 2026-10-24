@@ -39,13 +39,16 @@ and at nothing at all on a directly-opened URL.
 
 **Global exit — out of settings, in one click, from any depth.** Rendered at
 the end of the same top area by the route shell, for every `/settings/**`
-screen. Its destination is `settingsExitHref()`, which is exactly `/review` with
-no query string: a `settings=` parameter here would reopen the panel the
-visitor just asked to leave, and the bare route is what lets the chat page
-restore the tab's own last conversation from its existing `sessionStorage`
-state. Review is the generic settings and assistant round-trip destination;
-an explicit Chat product flow carries its own `currentProduct` return instead.
-It never creates a conversation and never clears a selection.
+screen. Its destination is `settingsExitHref(product)`: the bare route of the
+product the visitor entered settings from (`/chat`, `/review`, `/studio`), with
+no query string. A `settings=` parameter here would reopen the panel the
+visitor just asked to leave, and the bare route is what lets that page restore
+the tab's own last conversation from its existing `sessionStorage` state. The
+product is recorded per tab by the surface that renders the account controls
+(`AuthButton`), so the panel, the account menu and deep links all return to
+where they started; when nothing usable is recorded (a URL opened directly) it
+is Review. Hierarchical back links to the settings list follow the same
+product. It never creates a conversation and never clears a selection.
 
 This edge exists because the panel's close button is on the chat surface, and
 the chat surface is precisely what a visitor three levels into settings cannot

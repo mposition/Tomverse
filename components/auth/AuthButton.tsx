@@ -79,6 +79,7 @@ import {
     type AccountSettingsTab,
 } from "@/lib/accountSettingsEvents";
 import { SettingsEntryRow } from "@/components/settings/SettingsEntryRow";
+import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
     isSettingsSectionId,
     parseSettingsDeepLink,
@@ -113,6 +114,13 @@ export function AuthButton({
     const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
+    // A settings detail page returns to the product it was entered from. Every
+    // way in -- this panel, the account menu, a deep link -- starts on a
+    // product surface that renders this component, so recording here covers
+    // them all.
+    useEffect(() => {
+        rememberSettingsReturnProduct(currentProduct);
+    }, [currentProduct]);
     const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
     const [activeSettingsTab, setActiveSettingsTab] = useState<AccountSettingsTab>("account");
     // Data-tab entry point for external conversation import. Hidden until the
