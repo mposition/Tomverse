@@ -995,7 +995,8 @@ export type ExtractionSliceResult = {
  * A run is durable and a slice may be picked up minutes or hours later, so
  * none of these can be decided once at creation: the rollout flag may have
  * been turned off, the (model, promptVersion) pair may have been revoked
- * without a deploy, the account may have been deleted, and the batch
+ * without a deploy, the account may have been deleted or turned memory off,
+ * and the batch
  * sub-budget may have been spent by other runs. Each is re-read immediately
  * before a provider call, never cached across chunks.
  */
@@ -1008,9 +1009,12 @@ async function extractionDispatchBlocker(
     if (!(await isMemoryExtractionEnabled())) return "feature_disabled";
     const user = await prisma.user.findUnique({
         where: { id: lease.userId },
-        select: { id: true },
+        select: { id: true, memorySettings: { select: { masterEnabled: true } } },
     });
     if (!user) return "owner_missing";
+    // Memory turned off after the run started: nothing more is sent. The run
+    // stays pending and continues if the user turns memory back on.
+    if (user.memorySettings?.masterEnabled === false) return "memory_off";
     let pricing;
     try {
         ({ pricing } = await resolveEffectiveExtractionPair({

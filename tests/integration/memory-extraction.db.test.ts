@@ -452,6 +452,23 @@ test("the rollout flag is re-read at every chunk boundary (§15)", async () => {
     assert.equal(parked.status, "pending");
 });
 
+test("turning memory off stops a running extraction before its next provider call", async () => {
+    const { user, run } = await seedRun(1);
+    await prisma.userMemorySettings.create({
+        data: { userId: user.id, masterEnabled: false },
+    });
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        handler: async () => {
+            assert.fail("memory off must not reach a provider");
+        },
+    });
+    assert.equal(result.outcome, "blocked");
+    assert.equal(result.reason, "memory_off");
+});
+
 test("an unapproved pair blocks dispatch without contacting a provider (§12.1)", async () => {
     const { run } = await seedRun(1);
     const result = await driveMemoryExtractionRunSlice({

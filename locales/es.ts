@@ -1985,14 +1985,14 @@ export const es = {
         deleteAllSubmit: "Eliminar todos los recuerdos",
         deleteAllDone: "Se han eliminado todos los recuerdos.",
         status: {
-            candidate: "Pendiente de revisión",
+            candidate: "Candidato anterior · sin usar",
             active: "En uso",
             rejected: "Rechazado",
             superseded: "Sustituido",
             expired: "Caducado",
             suspended_by_source_lock: "Suspendido: origen bloqueado",
             suspended_by_source_delete: "Suspendido: origen eliminado",
-            manual_review_required: "Requiere revisión individual",
+            manual_review_required: "Candidato anterior · sin usar",
         },
         kind: {
             identity: "Identidad",

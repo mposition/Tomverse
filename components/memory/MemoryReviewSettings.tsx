@@ -119,6 +119,10 @@ type ListState =
     | { kind: "error" };
 
 const ARCHIVED_STATUSES = [
+    // Left over from the review queue (removed 2026-10-24): never used in a
+    // chat, still the user's to see and delete.
+    "candidate",
+    "manual_review_required",
     "rejected",
     "superseded",
     "expired",

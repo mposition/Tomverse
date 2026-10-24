@@ -1997,14 +1997,14 @@ export const en = {
         deleteAllSubmit: "Delete all memories",
         deleteAllDone: "All memories have been deleted.",
         status: {
-            candidate: "Awaiting review",
+            candidate: "Earlier candidate · not used",
             active: "In use",
             rejected: "Rejected",
             superseded: "Replaced",
             expired: "Expired",
             suspended_by_source_lock: "Suspended by source lock",
             suspended_by_source_delete: "Suspended by source deletion",
-            manual_review_required: "Individual review required",
+            manual_review_required: "Earlier candidate · not used",
         },
         kind: {
             identity: "Identity",

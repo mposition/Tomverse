@@ -1,11 +1,14 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { isMemoryExtractionEnabled } from "@/lib/appSettings";
+import { ChatAccessError } from "@/lib/chatSecurity";
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
     type MemoryExtractionEvalEntry,
 } from "@/lib/memoryExtractionEvalRegister";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "@/lib/memoryExtractionPrompt";
 import {
     createMemoryExtractionRun,
     resolveEffectiveExtractionPair,
@@ -13,13 +16,15 @@ import {
 import { prisma } from "@/lib/prisma";
 
 /**
- * Automatic memory extraction (owner decision 2026-10-24, policy §11).
+ * Automatic memory extraction (owner decision 2026-10-24,
+ * docs/policy/external-conversation-import-and-memory.md §11).
  *
  * Importing conversations is the user's request to have them remembered, so
  * nobody picks a model or a selection and nobody confirms a price: a finished
  * import starts a run over the account's conversations that have not been
  * extracted yet, and the run is free to the account. What still bounds it is
- * the provider budget and the batch sub-budget (§3), checked when the run is
+ * the provider budget and the batch sub-budget (the same document's §3),
+ * checked when the run is
  * created and again at every chunk, the one-run-per-account rule, and the
  * account's memory switch.
  *
@@ -55,15 +60,18 @@ type Options = {
 };
 
 /**
- * The pair automatic runs use: the first register entry that resolves. The
- * register lists the current pair first, so a revoked or expired one falls
- * back to the next approved pair rather than stopping extraction.
+ * The pair automatic runs use: an approved entry for the prompt this build
+ * actually sends. The worker always builds the shipped prompt, so a run
+ * recorded under an older prompt version would send one prompt and label
+ * its memories with another; when the current pair is revoked or expired,
+ * extraction stops rather than falling back.
  */
 async function automaticExtractionPair(
     register: readonly MemoryExtractionEvalEntry[]
 ) {
     for (const entry of register) {
         if (entry.status !== "approved") continue;
+        if (entry.promptVersion !== MEMORY_EXTRACTION_PROMPT_VERSION) continue;
         try {
             await resolveEffectiveExtractionPair({
                 extractionModelId: entry.extractionModelId,
@@ -90,33 +98,72 @@ async function automaticExtractionPair(
  * cancelling, or deleting all their memories, is a reason not to extract the
  * same conversations again behind their back.
  */
+const awaitingExtraction = (now: Date) => {
+    const retryBefore = new Date(now.getTime() - AUTO_EXTRACTION_RETRY_AFTER_MS);
+    return Prisma.sql`
+        c.finalized = true
+        AND c.password IS NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM "MemoryExtractionRun" r
+            WHERE r."userId" = c."userId"
+              AND r."sourceSelection" @> jsonb_build_array(c.id)
+              AND (r.status <> 'failed' OR r."createdAt" > ${retryBefore})
+        )
+        AND (
+            SELECT count(*) FROM "MemoryExtractionRun" r
+            WHERE r."userId" = c."userId"
+              AND r.status = 'failed'
+              AND r."sourceSelection" @> jsonb_build_array(c.id)
+        ) < ${AUTO_EXTRACTION_MAX_FAILED_RUNS}
+    `;
+};
+
 async function conversationsAwaitingExtraction(
-    userId: string | null,
+    userId: string,
     now: Date,
     limit: number
-): Promise<Array<{ id: string; userId: string }>> {
-    const retryBefore = new Date(now.getTime() - AUTO_EXTRACTION_RETRY_AFTER_MS);
-    return prisma.$queryRaw<Array<{ id: string; userId: string }>>`
-        SELECT c.id, c."userId"
+): Promise<Array<{ id: string }>> {
+    return prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT c.id
         FROM "ExternalConversation" c
-        WHERE (${userId}::text IS NULL OR c."userId" = ${userId})
-          AND c.finalized = true
-          AND c.password IS NULL
-          AND NOT EXISTS (
-              SELECT 1 FROM "MemoryExtractionRun" r
-              WHERE r."userId" = c."userId"
-                AND r."sourceSelection" @> jsonb_build_array(c.id)
-                AND (r.status <> 'failed' OR r."createdAt" > ${retryBefore})
-          )
-          AND (
-              SELECT count(*) FROM "MemoryExtractionRun" r
-              WHERE r."userId" = c."userId"
-                AND r.status = 'failed'
-                AND r."sourceSelection" @> jsonb_build_array(c.id)
-          ) < ${AUTO_EXTRACTION_MAX_FAILED_RUNS}
+        WHERE c."userId" = ${userId} AND ${awaitingExtraction(now)}
         ORDER BY c."importedAt" DESC, c.id
         LIMIT ${limit}
     `;
+}
+
+/**
+ * Accounts that are waiting and could start a run now, most recent import
+ * first. Accounts that cannot start -- an open run, memory turned off, an
+ * account restricted or being deleted -- are left out here rather than
+ * skipped one by one, so a handful of them can never fill every pass and
+ * keep the other accounts waiting. The restriction test mirrors
+ * lib/userOperationalSecurity.ts; the run creation still enforces it.
+ */
+async function accountsAwaitingExtraction(
+    now: Date,
+    limit: number
+): Promise<string[]> {
+    const rows = await prisma.$queryRaw<Array<{ userId: string }>>`
+        SELECT c."userId"
+        FROM "ExternalConversation" c
+        JOIN "User" u ON u.id = c."userId"
+        LEFT JOIN "UserMemorySettings" s ON s."userId" = c."userId"
+        WHERE ${awaitingExtraction(now)}
+          AND COALESCE(s."masterEnabled", true)
+          AND u."accountStatus" = 'active'
+          AND (u."aiUsageRestricted" = false
+               OR (u."aiUsageRestrictedUntil" IS NOT NULL
+                   AND u."aiUsageRestrictedUntil" <= ${now}))
+          AND NOT EXISTS (
+              SELECT 1 FROM "MemoryExtractionRun" r
+              WHERE r."userId" = c."userId" AND r.status IN ('pending', 'running')
+          )
+        GROUP BY c."userId"
+        ORDER BY max(c."importedAt") DESC, c."userId"
+        LIMIT ${limit}
+    `;
+    return rows.map((row) => row.userId);
 }
 
 /**
@@ -165,9 +212,9 @@ export async function startAutomaticMemoryExtraction(
         return { outcome: "started", runId: run.id };
     } catch (error) {
         // An open run, a spent budget, a snapshot locked a moment ago or a
-        // restricted account. All of them resolve without the user doing
-        // anything, so they are reported, not raised.
-        if (error instanceof ApiSecurityError) {
+        // restricted account. None is a server failure, so each is reported
+        // with its code rather than raised.
+        if (error instanceof ApiSecurityError || error instanceof ChatAccessError) {
             return { outcome: "skipped", reason: error.code };
         }
         throw error;
@@ -176,8 +223,7 @@ export async function startAutomaticMemoryExtraction(
 
 /**
  * The dispatcher's half: start runs for accounts whose imported
- * conversations are still waiting, a few accounts per pass. Accounts with an
- * open run are left to finish it first.
+ * conversations are still waiting, a few accounts per pass.
  */
 export async function startAwaitingAutomaticExtractions(
     options: Options & { maxAccounts?: number } = {}
@@ -185,17 +231,9 @@ export async function startAwaitingAutomaticExtractions(
     const now = options.now ?? new Date();
     if (!(await isMemoryExtractionEnabled())) return 0;
     const maxAccounts = options.maxAccounts ?? AUTO_EXTRACTION_ACCOUNTS_PER_PASS;
-    // Over-fetched rows so a handful of accounts with many conversations do
-    // not hide every other account behind them.
-    const rows = await conversationsAwaitingExtraction(null, now, maxAccounts * 50);
-    const accounts = [...new Set(rows.map((row) => row.userId))];
+    const accounts = await accountsAwaitingExtraction(now, maxAccounts);
     let started = 0;
     for (const userId of accounts) {
-        if (started >= maxAccounts) break;
-        const open = await prisma.memoryExtractionRun.count({
-            where: { userId, status: { in: ["pending", "running"] } },
-        });
-        if (open > 0) continue;
         try {
             const result = await startAutomaticMemoryExtraction(userId, options);
             if (result.outcome === "started") started += 1;

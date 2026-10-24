@@ -1984,14 +1984,14 @@ export const fr = {
         deleteAllSubmit: "Supprimer tous les souvenirs",
         deleteAllDone: "Tous les souvenirs ont été supprimés.",
         status: {
-            candidate: "En attente d'examen",
+            candidate: "Ancien candidat · non utilisé",
             active: "En usage",
             rejected: "Refusé",
             superseded: "Remplacé",
             expired: "Expiré",
             suspended_by_source_lock: "Suspendu : source verrouillée",
             suspended_by_source_delete: "Suspendu : source supprimée",
-            manual_review_required: "Examen individuel requis",
+            manual_review_required: "Ancien candidat · non utilisé",
         },
         kind: {
             identity: "Identité",

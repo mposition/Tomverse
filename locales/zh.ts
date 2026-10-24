@@ -1970,14 +1970,14 @@ export const zh = {
         deleteAllSubmit: "删除全部记忆",
         deleteAllDone: "所有记忆已删除。",
         status: {
-            candidate: "等待审核",
+            candidate: "早期候选 · 未使用",
             active: "使用中",
             rejected: "已拒绝",
             superseded: "已替换",
             expired: "已过期",
             suspended_by_source_lock: "因来源锁定而暂停",
             suspended_by_source_delete: "因来源删除而暂停",
-            manual_review_required: "需单独审核",
+            manual_review_required: "早期候选 · 未使用",
         },
         kind: {
             identity: "身份",

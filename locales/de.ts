@@ -1988,14 +1988,14 @@ export const de = {
         deleteAllSubmit: "Alle Erinnerungen löschen",
         deleteAllDone: "Alle Erinnerungen wurden gelöscht.",
         status: {
-            candidate: "Wartet auf Prüfung",
+            candidate: "Früherer Kandidat · nicht verwendet",
             active: "In Verwendung",
             rejected: "Abgelehnt",
             superseded: "Ersetzt",
             expired: "Abgelaufen",
             suspended_by_source_lock: "Ausgesetzt: Quelle gesperrt",
             suspended_by_source_delete: "Ausgesetzt: Quelle gelöscht",
-            manual_review_required: "Einzelprüfung erforderlich",
+            manual_review_required: "Früherer Kandidat · nicht verwendet",
         },
         kind: {
             identity: "Identität",

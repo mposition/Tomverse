@@ -34,14 +34,19 @@ import { memoryStatementKey } from "@/lib/memoryValidatorCore";
  * statement) is compared by when the conversations said it: a candidate whose
  * evidence is at least as recent supersedes the older memories, and one whose
  * evidence is older is not stored. A memory the user wrote or edited is never
- * superseded by extraction -- the user's own words outrank an imported
- * conversation -- and a duplicate of an active memory adds nothing.
+ * superseded by extraction, nor is one they pinned -- the user's own choice
+ * outranks an imported conversation -- and a duplicate of an active memory
+ * adds nothing.
  *
- * **A retried chunk replaces its own rows.** A worker can die after this
- * transaction commits and before the chunk is reported, and §11's bounded
- * retry then re-runs that chunk. The delete below is scoped to this chunk and
- * to rows the user has not touched, so a retry never adds a second copy and
- * never takes back a memory the user pinned or edited.
+ * **A retried chunk adds only what is new.** A worker can die after this
+ * transaction commits and before the chunk is reported, and the bounded
+ * retry then re-runs that chunk. Nothing the first attempt stored is deleted
+ * -- it may already be suspended, superseded or relied on -- and a candidate
+ * repeating it is a duplicate, which the topic rule below does not store.
+ *
+ * **Memory off stores nothing.** The account switch is re-read here, under
+ * the memory lock, because a run started before the user turned memory off
+ * can still be answering.
  *
  * **Evidence is re-verified here, not only at analysis time.** The label map
  * the analysis used was built when the chunk was claimed; the provider call
@@ -82,11 +87,9 @@ export type PersistExtractionChunkResult = {
     unsourced: number;
     /**
      * Candidates not stored because an active memory already says the same,
-     * says something newer, or was written by the user.
+     * says something newer, or was written, edited or pinned by the user.
      */
     outranked: number;
-    /** Rows from a previous attempt at this chunk that were replaced. */
-    replaced: number;
 };
 
 /** When the source conversations said each message, as epoch milliseconds. */
@@ -129,7 +132,7 @@ const newest = (ids: readonly string[], times: Map<string, number>) =>
 /**
  * Whether the candidate may take its topic from the active memories it
  * conflicts with, superseding them. False when one of them is the user's own,
- * says the same thing already, or rests on newer evidence.
+ * or pinned by them, says the same thing already, or rests on newer evidence.
  */
 async function candidateWinsTopic(
     tx: Prisma.TransactionClient,
@@ -151,7 +154,7 @@ async function candidateWinsTopic(
     const userOwned = await tx.memoryItem.count({
         where: {
             id: { in: conflictIds },
-            OR: [{ extractionRunId: null }, { userEdited: true }],
+            OR: [{ extractionRunId: null }, { userEdited: true }, { pinned: true }],
         },
     });
     if (userOwned > 0) return false;
@@ -185,25 +188,22 @@ export async function persistExtractionChunkDecisions(
     // classification or finds its evidence already gone (lib/memoryItemLock.ts).
     await lockAccountMemoryItems(tx, input.userId);
 
-    // Only this chunk's own untouched rows. An edit and a pin are both signals
-    // the row stopped being the run's to manage.
-    const previous = await tx.memoryItem.deleteMany({
-        where: {
-            userId: input.userId,
-            extractionRunId: input.runId,
-            extractionChunkIndex: input.chunkIndex,
-            userEdited: false,
-            pinned: false,
-        },
+    const settings = await tx.userMemorySettings.findUnique({
+        where: { userId: input.userId },
+        select: { masterEnabled: true },
     });
-
-    const keep = input.decisions.filter(
-        (decision) =>
-            decision.outcome === "store_candidate" && decision.validation.bulkSafe
-    );
-    const discarded = input.decisions.filter(
-        (decision) => decision.outcome === "discard"
-    ).length;
+    const memoryOn = settings?.masterEnabled !== false;
+    const keep = memoryOn
+        ? input.decisions.filter(
+              (decision) =>
+                  decision.outcome === "store_candidate" &&
+                  decision.validation.bulkSafe
+          )
+        : [];
+    const discarded = memoryOn
+        ? input.decisions.filter((decision) => decision.outcome === "discard")
+              .length
+        : 0;
 
     // One query for the whole chunk rather than one per candidate: the same
     // message is normally cited by several of them, and the answer depends on
@@ -343,6 +343,5 @@ export async function persistExtractionChunkDecisions(
         discarded,
         unsourced,
         outranked,
-        replaced: previous.count,
     };
 }

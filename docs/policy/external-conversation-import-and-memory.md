@@ -535,8 +535,12 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
   검증해 `conflictKey`에 보관합니다. **같은 주제는 최신 대화가 이깁니다**: 새
   후보가 활성 기억과 같은 conflict group이면, 근거 메시지의 원래 시각
   (`sourceTimestamp`, 없으면 대화 시각)이 같거나 더 최근인 쪽이 남고 이전 기억은
-  `superseded`가 됩니다. 사용자가 직접 쓰거나 수정한 기억은 추출이 대체하지
-  않으며, 이미 있는 문장은 다시 저장하지 않습니다.
+  `superseded`가 됩니다. 사용자가 직접 쓰거나 수정하거나 고정한 기억은 추출이
+  대체하지 않으며, 이미 있는 문장은 다시 저장하지 않습니다. 재시도한 chunk도 이전
+  시도가 저장한 행을 지우지 않고 새 문장만 더합니다.
+- 기억 사용(master toggle)이 꺼져 있으면 저장 단계가 아무것도 저장하지 않습니다.
+  이 결정 이전의 `candidate`·`manual_review_required` 행은 보관된 기억 목록에서
+  보이고 삭제할 수 있습니다.
 - 원문 삭제로 중지된 기억은 사용자가 새 수동 근거를 쓰면 바로 `active`로
   돌아갑니다(근거 작성이 승인입니다). 사용 중인 기억을 validator가 그대로
   받아들이지 않는 문장으로 수정하면 저장하지 않고 다시 쓰게 합니다. 수동 근거
@@ -760,14 +764,17 @@ Node crypto)입니다.
   비율의 `settledCostMicroUsd`)을 기록합니다. provider 예산과 batch
   sub-budget(§3), `service_tier` 미지정, `pricingVersion`·`costSource` snapshot,
   원시 내부 USD 미노출은 그대로입니다.
-- pair는 register에서 해석되는 첫 승인 pair입니다(현재 `mem-extract-v10`).
-  사용자가 고르거나 내는 모델이 아니므로 요금제 제한은 없습니다. 승인되지 않은
-  대체 모델·다른 promptVersion으로의 fallback은 없습니다.
+- pair는 이 build가 실제로 보내는 프롬프트 버전(현재 `mem-extract-v10`)의 승인
+  pair뿐입니다. worker는 항상 현재 프롬프트를 만들기 때문에, 그 pair가 철회·만료되면
+  이전 버전으로 fallback하지 않고 추출을 멈춥니다. 사용자가 고르거나 내는 모델이
+  아니므로 요금제 제한은 없습니다.
 - 그 자리에서 시작하지 못한 run(이미 열린 run, 예산 소진, 그 사이 잠긴 대화,
   계정 제한)은 15분 dispatcher가 계정 5개씩 다시 시작합니다. 어떤 run에든 포함된
   대화는 다시 추출하지 않습니다(취소·전체 삭제 포함). 실패한 run의 대화는
   6시간 뒤 다시 시도하고, 실패가 3번이면 더 시도하지 않습니다. 계정의 기억 사용
-  (master toggle)이 꺼져 있으면 시작하지 않습니다.
+  (master toggle)이 꺼져 있으면 시작하지 않고, 진행 중인 run도 다음 chunk의
+  provider 호출 전에 멈춥니다(`memory_off`; 다시 켜면 이어서 실행). dispatcher는
+  시작할 수 있는 계정(열린 run 없음, 기억 사용 켬, 제한·삭제 예정 아님)만 고릅니다.
 - durable run: 사용자당 1개, 동일 source range 중복 방지, atomic chunk claim,
   lease expiry, retry, cancel, deterministic release, orphan reconciliation
   (15분), idempotent settlement. 브라우저를 닫아도 완료 chunk와 승인 상태가

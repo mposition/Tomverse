@@ -1984,14 +1984,14 @@ export const ko = {
         deleteAllSubmit: "모든 기억 삭제",
         deleteAllDone: "모든 기억이 삭제되었습니다.",
         status: {
-            candidate: "검토 대기",
+            candidate: "이전 후보 · 사용 안 함",
             active: "사용 중",
             rejected: "거절됨",
             superseded: "교체됨",
             expired: "만료됨",
             suspended_by_source_lock: "출처 잠금으로 일시중지",
             suspended_by_source_delete: "출처 삭제로 일시중지",
-            manual_review_required: "개별 검토 필요",
+            manual_review_required: "이전 후보 · 사용 안 함",
         },
         kind: {
             identity: "정체성",

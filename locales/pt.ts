@@ -1984,14 +1984,14 @@ export const pt = {
         deleteAllSubmit: "Excluir todas as memórias",
         deleteAllDone: "Todas as memórias foram excluídas.",
         status: {
-            candidate: "Aguardando revisão",
+            candidate: "Candidata anterior · não usada",
             active: "Em uso",
             rejected: "Rejeitada",
             superseded: "Substituída",
             expired: "Expirada",
             suspended_by_source_lock: "Suspensa: origem bloqueada",
             suspended_by_source_delete: "Suspensa: origem excluída",
-            manual_review_required: "Revisão individual necessária",
+            manual_review_required: "Candidata anterior · não usada",
         },
         kind: {
             identity: "Identidade",

@@ -10,6 +10,7 @@ import {
     startAwaitingAutomaticExtractions,
 } from "@/lib/memoryExtractionAuto";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "@/lib/memoryExtractionPrompt";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -40,10 +41,27 @@ after(async () => {
     await prisma.$disconnect();
 });
 
+const launch = (promptVersion: string): MemoryExtractionEvalEntry => ({
+    extractionModelId: "gpt-5-6-luna",
+    promptVersion,
+    status: "approved",
+    owner: "@qa",
+    registeredAt: "2026-10-24",
+    evalBudget: null,
+    evaluation: null,
+    ownerLaunch: {
+        approver: "@qa",
+        approvedAt: "2026-10-24",
+        expiresAt: "2099-01-01",
+        decisionRef: "test fixture",
+        knownLimitations: "test fixture",
+    },
+});
+
 const REGISTER: readonly MemoryExtractionEvalEntry[] = [
     {
         extractionModelId: "gpt-5-6-luna",
-        promptVersion: "mem-extract-v1",
+        promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         status: "approved",
         owner: "@qa",
         registeredAt: "2026-10-24",
@@ -257,4 +275,68 @@ test("the dispatcher starts runs for accounts that are still waiting", async () 
         await prisma.memoryExtractionRun.count({ where: { userId: busy.id } }),
         1
     );
+});
+
+test("only a pair for the prompt this build sends is used", async () => {
+    // The worker always builds the shipped prompt, so an approved older
+    // version would label memories with a prompt that was never sent.
+    await setFlag(true);
+    const user = await createUser();
+    await seedConversations(user.id, 1);
+    const older = await startAutomaticMemoryExtraction(user.id, {
+        register: [launch("mem-extract-v1")],
+    });
+    assert.deepEqual(older, { outcome: "skipped", reason: "no_approved_pair" });
+
+    const current = await startAutomaticMemoryExtraction(user.id, {
+        register: [launch("mem-extract-v1"), launch(MEMORY_EXTRACTION_PROMPT_VERSION)],
+    });
+    assert.ok(current.outcome === "started");
+    const run = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: current.runId },
+    });
+    assert.equal(run.promptVersion, MEMORY_EXTRACTION_PROMPT_VERSION);
+});
+
+test("accounts that cannot start never hold up the ones that can", async () => {
+    await setFlag(true);
+    const off = await createUser();
+    const restricted = await createUser();
+    const ready = await createUser();
+    // The two that cannot start have the newest imports, and a pass that
+    // only had room for them would otherwise start nothing.
+    await seedConversations(ready.id, 1);
+    await seedConversations(off.id, 3);
+    await seedConversations(restricted.id, 3);
+    await prisma.userMemorySettings.create({
+        data: { userId: off.id, masterEnabled: false },
+    });
+    await prisma.user.update({
+        where: { id: restricted.id },
+        data: { accountStatus: "pending_deletion" },
+    });
+
+    const started = await startAwaitingAutomaticExtractions({
+        register: REGISTER,
+        maxAccounts: 1,
+    });
+    assert.equal(started, 1);
+    assert.equal(
+        await prisma.memoryExtractionRun.count({ where: { userId: ready.id } }),
+        1
+    );
+});
+
+test("a restricted account's refusal is a coded skip, not a thrown error", async () => {
+    await setFlag(true);
+    const user = await createUser();
+    await seedConversations(user.id, 1);
+    await prisma.user.update({
+        where: { id: user.id },
+        data: { accountStatus: "pending_deletion" },
+    });
+    const result = await start(user.id);
+    assert.equal(result.outcome, "skipped");
+    assert.ok(result.outcome === "skipped" && result.reason.length > 0);
+    assert.equal(await prisma.memoryExtractionRun.count(), 0);
 });

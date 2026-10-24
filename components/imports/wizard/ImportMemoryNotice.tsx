@@ -8,7 +8,8 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * What finishing an import does to memory, said before the user confirms it
- * (policy §11, §16; owner decision 2026-10-24).
+ * (docs/policy/external-conversation-import-and-memory.md §11, §16; owner decision
+ * 2026-10-24).
  *
  * Finishing an import starts a free extraction over the imported
  * conversations, which sends them to an AI provider. That is a processing
