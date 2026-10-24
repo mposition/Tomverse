@@ -109,6 +109,33 @@ test("a missing, extra, disabled, redirected or altered rule is a problem", () =
   }
 });
 
+test("PostgreSQL 18's NOT NULL constraint rows are not compared", () => {
+  // Production on PostgreSQL 18 reported these and failed T3a (2026-10-24).
+  const notNull = (table, column) => ({ table, name: `${table}_${column}_not_null`, type: "n", deferrable: false, initiallyDeferred: false });
+  assert.deepEqual(
+    withEdit((c) =>
+      c.constraints.push(
+        notNull("OpsObserverState", "generation"),
+        notNull("OpsObserverDelivery", "runId"),
+        notNull("AdminAuditLog", "action"),
+      ),
+    ),
+    [],
+  );
+  // An expected rule is still required, whatever else the table carries.
+  assert.notDeepEqual(
+    withEdit((c) => {
+      c.constraints.splice(c.constraints.findIndex((r) => r.name === "OpsObserverState_keys_check"), 1);
+      c.constraints.push(notNull("OpsObserverState", "keys"));
+    }),
+    [],
+  );
+  // Only NOT NULL rows are skipped: a row that is not one, or is outside the
+  // checked tables, is still a problem.
+  assert.notDeepEqual(withEdit((c) => c.constraints.push({ ...notNull("OpsObserverState", "x"), type: "c" })), []);
+  assert.notDeepEqual(withEdit((c) => c.constraints.push(notNull("SomeOtherTable", "x"))), []);
+});
+
 test("missing row lists fail closed", () => {
   assert.notDeepEqual(catalogProblems({ triggers: [], constraints: [] }), []);
   assert.notDeepEqual(catalogProblems({ triggers: [], constraints: [], indexes: [] }), []);
