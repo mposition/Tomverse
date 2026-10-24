@@ -4,14 +4,8 @@ The worker is `scripts/voice-conversation-watchdog.mjs`; its package script is
 `npm run voice:watchdog`. Run it from the repository root, alongside `package.json`,
 not from `apps/mobile`, `scripts`, or the Android folder.
 
-On the owner's Windows PC, the verified implementation checkout is:
-
-```text
-C:\Users\Vyper\.codex\worktrees\native-mobile-auth-production\ai-chat-hub
-```
-
-At verification time, `H:\Project\ai-chat-hub` was a different checkout and did not
-contain this script. Do not reset that checkout or copy credentials between them.
+Use a checkout containing this script. Verify its presence before configuring the
+worker; preserve unrelated work if another checkout is on a different branch.
 
 ## Railway production service
 
@@ -120,7 +114,7 @@ and matching production environment before enabling new voice sessions.
 On the local PC, use PowerShell in the verified checkout:
 
 ```powershell
-Set-Location 'C:\Users\Vyper\.codex\worktrees\native-mobile-auth-production\ai-chat-hub'
+Set-Location '<checkout>'
 $env:VOICE_CONVERSATION_WATCHDOG_ENABLED='true'
 npm run voice:watchdog
 ```
