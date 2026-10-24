@@ -6,6 +6,7 @@ import {
   parseQaReleaseTrainCargoPick,
   qaReleaseTrainCargoCandidates,
   qaReleaseTrainCargoPickable,
+  qaReleaseTrainLastTrainFrom,
   qaReleaseTrainReferencedNumbers,
   qaReleaseTrainSelectionFrom,
 } from "../lib/qaReleaseTrainCargoCore.ts";
@@ -124,18 +125,83 @@ test("a pick is distinct positive numbers, at most the train's capacity", () => 
 
 test("the newest pick is the next train's cargo until a train is admitted after it", () => {
   const pickAt = new Date("2026-10-22T10:00:00Z");
-  assert.deepEqual(qaReleaseTrainSelectionFrom({ pick: null, admission: null }), { numbers: [], savedAt: null, savedBy: null, departedWith: null });
+  assert.deepEqual(qaReleaseTrainSelectionFrom({ pick: null, admission: null, lastTrain: null }), {
+    numbers: [],
+    savedAt: null,
+    savedBy: null,
+    departedWith: null,
+    lastTrain: null,
+  });
   const waiting = qaReleaseTrainSelectionFrom({
     pick: { numbers: [2, 1], at: pickAt, by: "owner@example.com" },
     admission: { slot: "20261022-0800", at: new Date("2026-10-22T09:00:00Z") },
+    lastTrain: null,
   });
-  assert.deepEqual(waiting, { numbers: [2, 1], savedAt: pickAt.toISOString(), savedBy: "owner@example.com", departedWith: null });
+  assert.deepEqual(waiting, { numbers: [2, 1], savedAt: pickAt.toISOString(), savedBy: "owner@example.com", departedWith: null, lastTrain: null });
   const spent = qaReleaseTrainSelectionFrom({
     pick: { numbers: [2, 1], at: pickAt, by: "owner@example.com" },
     admission: { slot: "20261022-1100", at: new Date("2026-10-22T11:00:00Z") },
+    lastTrain: null,
   });
   assert.deepEqual(spent.numbers, []);
   assert.equal(spent.departedWith, "20261022-1100");
   // A stored row that does not parse carries nothing.
-  assert.deepEqual(qaReleaseTrainSelectionFrom({ pick: { numbers: "x", at: pickAt, by: null }, admission: null }).numbers, []);
+  assert.deepEqual(qaReleaseTrainSelectionFrom({ pick: { numbers: "x", at: pickAt, by: null }, admission: null, lastTrain: null }).numbers, []);
+});
+
+// Owner request 2026-10-24: what a train left out must not drop out of sight.
+test("what the last train left out rides the next one until a new pick is saved", () => {
+  const report = {
+    slot: "20261024-1100",
+    outcome: "opened",
+    pullRequestNumber: 2948,
+    picks: [
+      { number: 2912, outcome: "included" },
+      { number: 2763, outcome: "conflict", predecessors: [2598, 2341] },
+      { number: 2742, outcome: "conflict" },
+      { number: 2950, outcome: "over_capacity" },
+      { number: 2900, outcome: "changes_workflows" },
+      { number: 2759, outcome: "already_in_main" },
+    ],
+  };
+  const lastTrain = qaReleaseTrainLastTrainFrom(report);
+  assert.deepEqual(lastTrain, {
+    slot: "20261024-1100",
+    pullRequestNumber: 2948,
+    carried: [
+      { number: 2763, reason: "conflict", predecessors: [2598, 2341] },
+      { number: 2742, reason: "conflict", predecessors: [] },
+      { number: 2950, reason: "over_capacity", predecessors: [] },
+    ],
+  });
+  // A train that failed before its pull request opened carries what it had included too.
+  assert.deepEqual(
+    qaReleaseTrainLastTrainFrom({ ...report, outcome: "failed", pullRequestNumber: null }).carried.map((c) => [c.number, c.reason]),
+    [
+      [2912, "train_failed"],
+      [2763, "conflict"],
+      [2742, "conflict"],
+      [2950, "over_capacity"],
+    ],
+  );
+  assert.equal(qaReleaseTrainLastTrainFrom({ slot: "x" }), null);
+  assert.equal(qaReleaseTrainLastTrainFrom(null), null);
+
+  const pick = { numbers: [2912, 2763, 2742, 2950, 2900, 2759], at: new Date("2026-10-24T00:00:00Z"), by: "owner@example.com" };
+  const admittedAt = new Date("2026-10-24T01:00:00Z");
+  // The train that took the pick reported: what it left out is the next cargo.
+  const carried = qaReleaseTrainSelectionFrom({ pick, admission: { slot: "20261024-1100", at: admittedAt }, lastTrain });
+  assert.deepEqual(carried.numbers, [2763, 2742, 2950]);
+  assert.equal(carried.departedWith, "20261024-1100");
+  // A later train still running (its report not in) carries nothing yet.
+  const running = qaReleaseTrainSelectionFrom({ pick, admission: { slot: "20261024-1400", at: new Date("2026-10-24T04:00:00Z") }, lastTrain });
+  assert.deepEqual(running.numbers, []);
+  // A pick saved after the train replaces the carry; the report stays for Admin to mark rows.
+  const repicked = qaReleaseTrainSelectionFrom({
+    pick: { numbers: [2598, 2763], at: new Date("2026-10-24T02:00:00Z"), by: "owner@example.com" },
+    admission: { slot: "20261024-1100", at: admittedAt },
+    lastTrain,
+  });
+  assert.deepEqual(repicked.numbers, [2598, 2763]);
+  assert.equal(repicked.lastTrain, lastTrain);
 });
