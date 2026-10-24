@@ -29,7 +29,7 @@ const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "vendor"
 ];
 const CONVENTION_VERSIONS = {
-  next: "16.3.8",
+  next: "16.4.2",
   typescript: "6.0.3"
 };
 const CONTROL_PLANE_NAME_TOKENS = [
@@ -124,7 +124,6 @@ const CONTROL_PLANE_PATTERNS = [
   "lib/adminMessages/agentOffice*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
-  "lib/chatUnifiedOptimizerAmux*",
   "crates/**",
   "apps/**",
   "app/api/internal/**",
@@ -132,10 +131,8 @@ const CONTROL_PLANE_PATTERNS = [
   // The independent Ubuntu AMUX server is still agent execution code, never tier one.
   "vendor/amux/**",
   "tests/amux*",
-  "tests/chatUnifiedOptimizerAmux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",
-  "tests/verifyAmuxWslGitTransfer.test.mjs",
   "tests/orchestrator*"
 ];
 const PRODUCT_PATTERNS = [
@@ -214,7 +211,7 @@ const RESERVED_DECISION_CONSTANTS = [
     definedIn: ["lib/modelPricing.ts", "scripts/report-issue-backlog-core.mjs"]
   },
   { name: "CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED", definedIn: ["lib/modelPricing.ts"] },
-  { name: "MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
+  { name: "MARKETING_LLM_PRICE_PINS", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
   { name: "STATIC_CATALOG_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "RESERVATION_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
