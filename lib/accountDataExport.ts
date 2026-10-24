@@ -45,6 +45,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         language: true,
         defaultModel: true,
         newConversationModelIds: true,
+        reviewEasyDefaultProviders: true,
         preferredTasks: true,
         preferredPriority: true,
         usesFilesFrequently: true,

@@ -151,7 +151,7 @@ test("the round shows people their pull requests, even behind the pick, without 
 
 test("a round that holds for a deploy shows nothing new", async () => {
   const { ports } = lanePorts([pull(2)], () => ["components/x.tsx"]);
-  ports.railway.developDeployments = async () => [{ status: "BUILDING", createdAt: new Date().toISOString(), serviceId: "s", meta: { branch: "develop", commitHash: HEAD } }];
+  ports.railway.developDeployments = async () => [{ status: "WAITING", createdAt: new Date().toISOString(), serviceId: "s", meta: { branch: "develop", commitHash: HEAD } }];
   let seen = "untouched";
   const outcome = await runQaReleaseMergeLaneRound(ENV, ports, { verdicts: (list) => { seen = list; } });
   assert.equal(outcome.outcome, "hold");

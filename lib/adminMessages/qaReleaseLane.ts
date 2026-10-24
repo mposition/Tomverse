@@ -49,6 +49,7 @@ export const adminQaReleaseLaneMessages = defineAdminMessages({
       state_unknown: "Could not read its state; it tries again next round.",
       candidates_unknown: "Could not read the pull requests; it tries again next round.",
       report_not_recorded: "A report was not recorded; a person should check the lane.",
+      dev_deploy_failed: "Stopped: the newest dev deploy failed. It merges again once a later develop deploy succeeds.",
     } as Record<string, string>,
     reasons: {
       gate_path: "CI or gate file",
@@ -115,6 +116,7 @@ export const adminQaReleaseLaneMessages = defineAdminMessages({
       state_unknown: "상태를 읽지 못했습니다. 다음 회차에 다시 봅니다.",
       candidates_unknown: "PR 목록을 읽지 못했습니다. 다음 회차에 다시 봅니다.",
       report_not_recorded: "보고가 기록되지 않았습니다. 레인을 확인해 주세요.",
+      dev_deploy_failed: "멈춤: 최신 dev 배포가 실패했습니다. 다음 develop 배포가 성공하면 다시 병합합니다.",
     } as Record<string, string>,
     reasons: {
       gate_path: "CI·게이트 파일",

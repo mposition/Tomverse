@@ -350,7 +350,7 @@ async function expectComposerContract(page: Page, label: string) {
 async function expectComposerControlsContained(page: Page) {
   await expect.poll(() => page.getByTestId("chat-input").evaluate((composer) => {
     const boundary = composer.getBoundingClientRect();
-    const controls = Array.from(composer.querySelectorAll<HTMLElement>("button, nav a"))
+    const controls = Array.from(composer.querySelectorAll<HTMLElement>("button, nav a, select"))
       .map((node) => ({ node, rect: node.getBoundingClientRect() }))
       .filter(({ rect }) => rect.width > 0 && rect.height > 0);
     const failures: string[] = [];
@@ -760,8 +760,8 @@ test.describe("Mobile composer: input remains reviewable", { tag: "@ui-risk" }, 
  * `:focus-visible` outline drew 4px outside the textarea, where the rounded,
  * clipped composer cut it off.
  *
- * Measured, not eyeballed, within stated limits: an outline on the textarea
- * or on the composer is turned into a rectangle, which must lie inside every
+ * Measured, not eyeballed, within stated limits: the prompt surface's inset
+ * underline, or an outline on the textarea/composer, becomes a rectangle inside every
  * clipping ancestor -- including the rounded corners, which a plain rectangle
  * test would pass. An outline counts as drawn only with a non-zero width and a
  * colour that is not transparent. This is clipping geometry, not contrast, and
@@ -802,10 +802,21 @@ async function readFocusIndicator(page: Page) {
       }
     }
 
+    const surface = textarea.parentElement!;
+    const marker = getComputedStyle(surface, "::after");
+    const markerWidth = px(marker.borderBottomWidth);
+    if (marker.content !== "none" && marker.borderBottomStyle !== "none" && markerWidth > 0) {
+      const rect = surface.getBoundingClientRect();
+      const bottom = rect.bottom - px(marker.bottom);
+      indicators.push({ owner: "surface", kind: "underline", box: {
+        left: rect.left + px(marker.left), right: rect.right - px(marker.right),
+        top: bottom - markerWidth, bottom,
+      } });
+    }
     const escapes: string[] = [];
     for (const indicator of indicators) {
       // The element that owns an outline does not clip it; its ancestors do.
-      const start = indicator.owner === "textarea" ? textarea.parentElement : composer.parentElement;
+      const start = indicator.owner === "surface" ? surface.parentElement : indicator.owner === "textarea" ? textarea.parentElement : composer.parentElement;
       for (let node = start; node && node !== document.body; node = node.parentElement) {
         const style = getComputedStyle(node);
         if (style.overflowX === "visible" && style.overflowY === "visible") continue;
@@ -941,7 +952,7 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
         await expectComposerContract(page, `${lang} 200% ${mode} scaling`);
         const modelsBox = (await composer.getByTestId("composer-review-models").boundingBox())!;
         const textareaBox = (await composer.getByTestId("chat-textarea").boundingBox())!;
-        expect(modelsBox.y + modelsBox.height).toBeLessThanOrEqual(textareaBox.y + 0.5);
+        expect(modelsBox.y).toBeGreaterThanOrEqual(textareaBox.y + textareaBox.height - 0.5);
         // Normal-height docks retain the canonical product navigation even at narrow zoom.
         await expect(composer.getByTestId("chat-product-switcher")).toBeVisible();
       });

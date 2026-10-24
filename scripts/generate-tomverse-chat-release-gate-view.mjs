@@ -108,8 +108,8 @@ function render(doc, sourceRelativePath) {
   out.push('| --- | --- | --- | --- | --- | --- |');
   for (const gate of gates) {
     const criteria = gate.criteria.map(renderCriterion).join('; ');
-    const applies = gate.appliesWhen ? `yes (when \`${gate.appliesWhen}\`)` : gate.blocking ? 'yes' : 'no';
-    out.push(`| \`${gate.id}\` | ${cell(gate.title)} | ${gate.owner} | ${applies} | ${criteria} | ${gate.status} |`);
+    const blocking = !gate.blocking ? 'no' : gate.appliesWhen ? `yes (when \`${gate.appliesWhen}\`)` : 'yes';
+    out.push(`| \`${gate.id}\` | ${cell(gate.title)} | ${gate.owner} | ${blocking} | ${criteria} | ${gate.status} |`);
   }
   out.push('');
 

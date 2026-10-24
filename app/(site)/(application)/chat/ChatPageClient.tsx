@@ -7,6 +7,7 @@ import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/us
 import { askReviewRoute } from "@/lib/reviewRoutingClient";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPanels } from "@/lib/reviewProviderTranscript";
+import { REVIEW_PROVIDER_PREFERENCES_UPDATED } from "@/lib/reviewProviderPreferencesCore";
 import { flushSync } from "react-dom";
 import React, {
   useState,
@@ -1042,6 +1043,19 @@ export function ChatPageClient({
     ? guestActiveChatStorageKey
     : GUEST_ACTIVE_CHAT_STORAGE_KEY;
   const reviewWorkspace = useReviewWorkspace(identityKey, reviewEasyAvailable && !isGuestMode, currentChatId);
+  const reviewDefaultProvidersRef = useRef<{ userId: string; providers: string[] } | null>(null);
+  const reviewDefaultsOwnerRef = useRef(sessionUserId);
+  useLayoutEffect(() => { reviewDefaultsOwnerRef.current = sessionUserId; }, [sessionUserId]);
+  useEffect(() => {
+    const remember = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId: string; providers: string[] }>).detail;
+      if (detail?.userId === sessionUserId && Array.isArray(detail.providers) && detail.providers.length <= 3 && detail.providers.every(provider => typeof provider === "string")) {
+        reviewDefaultProvidersRef.current = { userId: detail.userId, providers: detail.providers };
+      }
+    };
+    window.addEventListener(REVIEW_PROVIDER_PREFERENCES_UPDATED, remember);
+    return () => window.removeEventListener(REVIEW_PROVIDER_PREFERENCES_UPDATED, remember);
+  }, [sessionUserId]);
   const chatWorkspace = useWorkspaceAppearance("chat");
   const reviewWorkspaceRef = useRef(reviewWorkspace);
   useLayoutEffect(() => { reviewWorkspaceRef.current = reviewWorkspace; }, [reviewWorkspace]);
@@ -4242,6 +4256,11 @@ export function ChatPageClient({
                     return res.json();
                 })
                 .then((data) => {
+                    if (reviewDefaultsOwnerRef.current === sessionUserId && Array.isArray(data?.reviewEasyEffectiveProviders)) {
+                        const providers = data.reviewEasyEffectiveProviders.filter((provider: unknown): provider is string => typeof provider === "string").slice(0, 3);
+                        reviewDefaultProvidersRef.current = { userId: sessionUserId, providers };
+                        if (mountedSurface === "workspace" && !currentChatIdRef.current && !reviewWorkspaceRef.current.providersConfigured) reviewWorkspaceRef.current.setProviders(providers);
+                    }
                     if (typeof data?.imageHandoffAutoGenerate === "boolean") {
                         setImageHandoffAutoGenerate(data.imageHandoffAutoGenerate);
                     }
@@ -4363,6 +4382,9 @@ export function ChatPageClient({
 
     const handleNewChat = () => {
         resetPromptRefinerState();
+        const defaults = reviewDefaultProvidersRef.current;
+        if (defaults?.userId === sessionUserId) reviewWorkspace.setProviders(defaults.providers.slice(0, Math.min(3, maxSelectableModels)));
+        else reviewWorkspace.clearProviders();
         if (mountedSurface === "continuation" && identityKey) {
             // This route transition unmounts the continuation tree. Promote
             // accepted turns before changing the selection ticket so their
@@ -4825,6 +4847,7 @@ export function ChatPageClient({
         // Cross-surface navigation unmounts this workspace and the identity
         // cleanup clears the pending create; in-place selection clears it here.
         localComparisonResponsesRef.current.clear();
+        if (id !== currentChatIdRef.current) reviewWorkspace.clearProviders();
         pendingCreatedChatRef.current = null;
         setPendingCreatedDraftScope(null);
         latestLocalComparisonPromptRef.current = null;
@@ -5707,7 +5730,7 @@ export function ChatPageClient({
       if (reviewRoutingPendingRef.current) return;
       const routeText = options?.overrideText ?? inputValue;
       if (!routeText.trim()) return;
-      const providers = (reviewWorkspace.providers.length ? reviewWorkspace.providers :
+      const providers = (reviewWorkspace.providersConfigured ? reviewWorkspace.providers :
         [...new Set(selectedModels.filter(id => !disabledPanels.includes(id)).flatMap(id => {
           const model = getModel(id); return model ? [model.provider] : [];
         }))]).slice(0, Math.min(3, maxSelectableModels));
@@ -5734,7 +5757,7 @@ export function ChatPageClient({
         reviewWorkspaceRef.current.setPending(false);
       }
       const live = readDraft(scope);
-      const liveProviders = reviewWorkspaceRef.current.providers.length ? reviewWorkspaceRef.current.providers :
+      const liveProviders = reviewWorkspaceRef.current.providersConfigured ? reviewWorkspaceRef.current.providers :
         [...new Set(latestModelSettingsRef.current.models.filter(id => !latestModelSettingsRef.current.disabled.includes(id)).flatMap(id => {
           const model = getModel(id); return model ? [model.provider] : [];
         }))];
@@ -9844,7 +9867,7 @@ export function ChatPageClient({
     const seed = reviewImageSeedRouteRef.current;
     reviewImageSeedRouteRef.current = null;
     if (seed?.text === text) return seed;
-    const providers = reviewWorkspace.providers.length ? reviewWorkspace.providers :
+    const providers = reviewWorkspace.providersConfigured ? reviewWorkspace.providers :
       [...new Set(selectedModels.flatMap(id => { const model = getModel(id); return model ? [model.provider] : []; }))];
     const owner = identityKey;
     const epoch = submitIdentityFenceRef.current.epoch;

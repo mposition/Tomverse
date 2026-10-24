@@ -826,9 +826,13 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // chained-event reason and two credentialed jobs. Both are owner-reviewed
 // exact-blob exclusions in lib/agentCredentialReviewedExclusions.ts, so the
 // excluded analysis still does not forbid everything.
-// The selective voice release keeps this lane's credentialed workflows and
-// exclusions. Only the two voice finance-CI path patterns are added.
-const POSTURE_DIGEST = "b8c220ff8c93";
+// 2026-10-23: the auto-fix moved its model to the AMUX server's subscription
+// CLI and became workflow_dispatch only. The propose job and the chained-event
+// reason left the baseline (publish stays, reached by no agent event), so its
+// two exclusions were removed rather than re-pinned. Nothing was added.
+// The voice release preserves that reduced posture and its exact-blob
+// exclusions, adding only the two reviewed voice finance-CI path patterns.
+const POSTURE_DIGEST = "a2999e874657";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();
