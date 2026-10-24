@@ -98,7 +98,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       messages.push({ id: attempt.assistantMessageId, role: "assistant", content: attempt.partialContent,
         modelId: attempt.actualModelId ?? attempt.requestedModelId, status: attempt.status });
     }
-    const withRouting = messages.map((message) => routedModelByMessage.has(message.id) ? { ...message, routedModelId: routedModelByMessage.get(message.id) } : message);
+    const withRouting = messages.map(message => {
+      const attempt = item.responseAttempts?.find(value => value.assistantMessageId === message.id);
+      const modelId = attempt?.actualModelId ?? message.modelId;
+      return { ...message, ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
+    });
     return { ...item, messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
@@ -202,7 +206,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       },
       unlocked: id => Number(unlockGrants.get(id)?.split(".")[0] ?? 0) > Date.now() / 1000,
     },
-    voiceConfiguration: async () => (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number } }>("/api/products/chat/capabilities")).voiceConversation ?? { enabled: false, maxSeconds: 300 },
+    voiceConfiguration: async () => (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number | null } }>("/api/products/chat/capabilities")).voiceConversation ?? { enabled: false, maxSeconds: 300 },
     voiceRequest: (body, signal) => run("/api/chat/voice", { ...json("POST", body), signal }),
     sendVoice: async (conversation, text, signal, onProgress) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, [], signal);

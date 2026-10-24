@@ -799,7 +799,7 @@ export function ChatPageClient({
    */
   voiceInputEnabled?: boolean;
   voiceConversationEnabled?: boolean;
-  voiceConversationMaxSeconds?: number;
+  voiceConversationMaxSeconds?: number | null;
   /**
    * The server's final Prompt Refiner mode. The only active value today is a
    * deterministic, no-cost loopback fixture; there is no product adapter.

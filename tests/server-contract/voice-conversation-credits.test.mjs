@@ -7,13 +7,13 @@ const mod = path => pathToFileURL(resolve(path)).href;
 let w;
 class SecurityError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 const tx = {
-  $executeRaw: async (parts, ...values) => { if (parts.join("").startsWith('UPDATE "ChatUsageBucket"')) w.buckets[values[2]] -= values[0]; return 1; },
+  $executeRaw: async (parts, ...values) => { if (parts.join("").startsWith('UPDATE "ChatUsageBucket"')) { w.buckets[values[2]] -= values[0]; w.refundedPeriods.push({ amount: values[0], period: values[2], start: values[3].toISOString() }); } return 1; },
   creditLot: { aggregate: async () => ({ _sum: { remainingCredits: w.purchased } }) },
   chatCreditReservation: {
     findUnique: async ({ where }) => w.row && (w.row.idempotencyKey === where.idempotencyKey || w.row.id === where.id) ? w.row : null,
     findUniqueOrThrow: async () => w.row,
-    create: async ({ data }) => { w.row = { ...data, createdAt: new Date(), settledCredits: 0 }; return w.row; },
-    updateMany: async ({ where, data }) => { if (w.row?.status !== where.status) return { count: 0 }; Object.assign(w.row, data); return { count: 1 }; },
+    create: async ({ data }) => { w.row = { ...data, createdAt: new Date(), lastError: null, settledCredits: 0 }; return w.row; },
+    updateMany: async ({ where, data }) => { if (w.row?.status !== where.status) return { count: 0 }; for (const [key,value] of Object.entries(data)) w.row[key] = value && typeof value === 'object' && 'increment' in value ? w.row[key] + value.increment : value; return { count: 1 }; },
     update: async ({ data }) => { Object.assign(w.row, data); return w.row; },
   },
 };
@@ -22,30 +22,32 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { $transaction: asyn
 } } } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ApiSecurityError: SecurityError } });
 mock.module(mod("lib/providerCostBudget.ts"), { namedExports: { getProviderCostGuardrailLimits: () => ({ day: 1000000, month: 10000000 }) } });
-mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: 300, dailyMessageLimit: w.dailyLimit }) } });
+mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: w.monthlyLimit ?? 300, dailyMessageLimit: w.dailyLimit }) } });
 mock.module(mod("lib/chatSecurity.ts"), { namedExports: {
-  getUserChatUsageKey: id => `user:${id}`, usagePeriodStart: () => new Date("2026-10-01T00:00:00Z"),
+  getUserChatUsageKey: id => `user:${id}`, usagePeriodStart: (period, now = new Date()) => new Date(period === 'month' ? Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1) : Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())),
   readUsageBucketCount: async (_tx, _key, period) => w.buckets[period],
   incrementUsageBucket: async (_tx, _key, period, _start, limit, amount) => { if (period.startsWith("provider-cost") && w.providerBudgetBlocked || w.buckets[period] + amount > limit) return false; w.buckets[period] += amount; return true; },
 } });
-mock.module(mod("lib/userDailyUsage.ts"), { namedExports: { getUserDayWindow: async () => ({ start: new Date("2026-10-23T00:00:00Z"), end: new Date("2026-10-24T00:00:00Z") }) } });
+mock.module(mod("lib/userDailyUsage.ts"), { namedExports: { getUserDayWindow: async (_tx, _userId, now = new Date()) => ({ start: new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())), end: new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1)) }) } });
 mock.module(mod("lib/creditDebt.ts"), { namedExports: { lockCreditAccount: async () => {}, offsetCreditDebt: async () => ({ offsetCredits: w.debt ?? 0 }) } });
 mock.module(mod("lib/creditLedger.ts"), { namedExports: {
-  reserveAddOnCredits: async (_tx, input) => { w.addOnReserved += input.credits; return [{ lotId: "lot", purchaseId: "purchase", credits: input.credits, fundedCostMicroUsd: input.fundedCostMicroUsd }]; },
+  reserveAddOnCredits: async (_tx, input) => { w.addOnReserved += input.credits; w.purchased -= input.credits; return [{ lotId: "lot", purchaseId: "purchase", credits: input.credits, fundedCostMicroUsd: input.fundedCostMicroUsd }]; },
   settleAddOnCredits: async (_tx, input) => { w.addOnSettlements.push(input); },
 } });
 mock.module(mod("lib/providerUsageAccounting.ts"), { namedExports: { recordInternalProviderUsage: async input => { w.providerCosts.push(input.estimatedCostMicroUsd); } } });
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   reserveVoiceBudgets: async ({ subjectKey, seconds, client }) => {
     assert.equal(client, tx);
+    if ((w.voiceHeld ?? 0) + seconds > (w.voiceLimit ?? Infinity)) throw new SecurityError(429, 'VOICE_OPERATIONAL_LIMIT_REACHED', 'Daily voice time exhausted');
+    w.voiceHeld = (w.voiceHeld ?? 0) + seconds;
     if (w.budgetError) throw new Error("Provider budget exhausted");
-    return { subject: { subjectKey, reservedSeconds: seconds, periodStart: new Date("2026-10-23T00:00:00Z"), settled: false },
-      provider: { reservedSeconds: seconds, settled: false, bookings: ["day", "month"].map(period => ({ period, seconds, periodStart: new Date("2026-10-23T00:00:00Z") })) } };
+    return { subject: { subjectKey, reservedSeconds: seconds, periodStart: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())), settled: false },
+      provider: { reservedSeconds: seconds, settled: false, bookings: ["day", "month"].map(period => ({ period, seconds, periodStart: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) })) } };
   },
   settleVoiceBudgets: async input => { assert.equal(input.client, tx); (w.voiceSettlements ??= []).push(input.basis); },
 } });
-const { reserveVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
-test.beforeEach(() => { w = { buckets: { day: 0, month: 0, "provider-cost-day": 0, "provider-cost-month": 0 }, purchased: 0, dailyLimit: 300, row: null, addOnReserved: 0, addOnSettlements: [], providerCosts: [] }; });
+const { reserveVoiceConversationCredits, reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } = await import(mod("lib/voiceConversationCredits.ts"));
+test.beforeEach(() => { w = { buckets: { day: 0, month: 0, "provider-cost-day": 0, "provider-cost-month": 0 }, purchased: 0, dailyLimit: 300, row: null, addOnReserved: 0, addOnSettlements: [], providerCosts: [], refundedPeriods: [] }; });
 const input = () => ({ userId: "owner", requestId: "request-1", conversationId: "chat-1", creditsPerMinute: 36, maxSeconds: 60 });
 
 test("voice spends the same plan wallet and refunds unused duration exactly once", async () => {
@@ -145,4 +147,115 @@ test("voice shares OpenAI cost buckets and a refusal rolls back the wallet", asy
   assert.equal(w.buckets["provider-cost-day"], 50000);
   await settleVoiceConversationCredits(row.id, 10, true);
   assert.equal(w.buckets["provider-cost-day"], 12500); assert.equal(w.buckets["provider-cost-month"], 12500);
+});
+
+const continuousInput = () => ({ userId: "owner", requestId: "rolling-1", conversationId: "chat-1", creditsPerMinute: 36 });
+const lease = () => { w.row.reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString(); };
+
+test("one continuously funded session passes 900 seconds with cumulative rounding and one settlement", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  w.monthlyLimit = w.dailyLimit = 10_000;
+  const row = await reserveContinuousVoiceCredits(continuousInput()); lease();
+  assert.equal(row.reservedCredits, 36); assert.equal(row.reservationPayload.maxSeconds, 60);
+  for (let n = 0; n < 32; n++) {
+    t.mock.timers.tick(n ? 30_000 : 15_000); lease();
+    await extendVoiceConversationCredits(row.id, "owner");
+  }
+  assert.equal(w.row.reservationPayload.maxSeconds, 1020);
+  assert.equal(w.row.reservationPayload.funding.length, 1);
+  assert.equal(w.row.reservedCredits, 612); assert.equal(w.row.reservedCostMicroUsd, 850_000n);
+  await settleVoiceConversationCredits(row.id, 961.25, true);
+  assert.equal(w.row.settledCredits, 577); assert.equal(w.buckets.month, 577);
+  assert.equal(w.row.settledCostMicroUsd, 801_042n);
+  assert.equal(await settleVoiceConversationCredits(row.id, 961.25, true), null);
+});
+
+test("renewal is idempotent while funded and cannot revive expired, closing, recovered or foreign sessions", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const row = await reserveContinuousVoiceCredits(continuousInput()); lease();
+  await extendVoiceConversationCredits(row.id, "owner");
+  assert.equal(w.row.reservedCredits, 36);
+  t.mock.timers.tick(15_000); lease();
+  await extendVoiceConversationCredits(row.id, "owner");
+  await extendVoiceConversationCredits(row.id, "owner");
+  assert.equal(w.row.reservedCredits, 54);
+  const snapshot = structuredClone(w);
+  for (const change of [() => { w.row.lastError = "VOICE_CLOSE_REQUESTED"; }, () => { w.row.status = "settled"; }, () => { w.row.reservationPayload.recoveryLease = { until: new Date(Date.now()+30_000).toISOString() }; }, () => { w.row.reservationPayload.closeAt = new Date(Date.now()).toISOString(); }]) {
+    w = structuredClone(snapshot); change();
+    await assert.rejects(extendVoiceConversationCredits(row.id, "owner"), e => e.code === "VOICE_SESSION_ENDED");
+    assert.equal(w.row.reservedCredits, 54);
+  }
+  w = snapshot;
+  await assert.rejects(extendVoiceConversationCredits(row.id, "foreign"), e => e.code === "VOICE_SESSION_ENDED");
+});
+
+test("small available balances can start without reserving the entire old session maximum", async () => {
+  w.monthlyLimit = 30; w.dailyLimit = 30;
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  assert.ok(row.reservedCredits <= 30); assert.ok(row.reservationPayload.maxSeconds >= 45);
+  await settleVoiceConversationCredits(row.id, 10, true);
+  assert.equal(w.buckets.month, 6); assert.equal(w.providerCosts[0], 12_500);
+});
+
+for (const limit of ["wallet", "daily", "voice", "provider"]) test(`${limit} exhaustion refuses additional funding without losing the existing hold`, async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  t.mock.timers.tick(15_000); lease();
+  if (limit === "wallet") w.monthlyLimit = 36;
+  if (limit === "daily") w.dailyLimit = 36;
+  if (limit === "voice") w.voiceLimit = 60;
+  if (limit === "provider") w.providerBudgetBlocked = true;
+  await assert.rejects(extendVoiceConversationCredits(row.id, "owner"), e => /INSUFFICIENT|LIMIT|BUDGET/.test(e.code));
+  assert.equal(w.row.reservedCredits, 36); assert.equal(w.row.reservationPayload.maxSeconds, 60);
+  assert.equal(w.buckets.month, 36);
+  await settleVoiceConversationCredits(row.id, 29, true);
+  assert.equal(w.row.settledCredits, 18); assert.equal(w.buckets.month, 18);
+});
+
+test("purchased credits still fund renewals after the plan daily guardrail is exhausted", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  w.dailyLimit = 36; w.purchased = 20;
+  t.mock.timers.tick(15_000); lease();
+  await extendVoiceConversationCredits(row.id, "owner");
+  assert.equal(w.row.reservedCredits, 54); assert.equal(w.row.addOnReservedCredits, 18);
+  assert.equal(w.buckets.day, 36); assert.equal(w.purchased, 2);
+  await settleVoiceConversationCredits(row.id, 65, true);
+  assert.equal(w.row.settledCredits, 39); assert.equal(w.addOnSettlements[0].settledCredits, 3);
+});
+
+test("unknown final usage retains all funded provider exposure but bills only observed seconds", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  t.mock.timers.tick(15_000); lease(); await extendVoiceConversationCredits(row.id, "owner");
+  w.row.providerUsageSnapshot = { seconds: 20, confirmed: false };
+  await settleVoiceConversationCredits(row.id, 20, true, "observed_minimum", false);
+  assert.equal(w.row.settledCredits, 12); assert.equal(w.row.settledCostMicroUsd, 75_000n);
+  assert.equal(w.buckets["provider-cost-day"], 75_000); assert.equal(w.row.lastError, "VOICE_PROVIDER_STOP_PENDING");
+  assert.deepEqual(w.voiceSettlements, [{ kind: "reservation" }]);
+});
+
+test("invalid funding receipts cannot refund another window", async () => {
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  for (const change of [p => { p.funding[0].startSeconds = 1; }, p => { p.funding[0].planCredits++; }, p => { p.funding[0].providerCostHold.amount++; }, p => { p.maxSeconds++; }]) {
+    const payload = structuredClone(row.reservationPayload); change(payload);
+    assert.throws(() => readVoiceCreditPayload(payload), /Invalid voice/);
+  }
+});
+
+test("funding across midnight and month end refunds each original bucket without rerounding the session", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T23:59:40Z") });
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  t.mock.timers.tick(20_000); lease(); await extendVoiceConversationCredits(row.id, "owner");
+  const parts = w.row.reservationPayload.funding;
+  assert.equal(parts.length, 2); assert.equal(parts[0].dayStart, "2026-10-31T00:00:00.000Z");
+  assert.equal(parts[1].dayStart, "2026-11-01T00:00:00.000Z"); assert.equal(parts[1].monthStart, "2026-11-01T00:00:00.000Z");
+  await settleVoiceConversationCredits(row.id, 65, true);
+  assert.equal(w.row.settledCredits, 39); assert.equal(w.buckets.month, 39);
+  assert.deepEqual(w.refundedPeriods.filter(refund => ["month", "day"].includes(refund.period)), [
+    { amount: 15, period: "day", start: "2026-11-01T00:00:00.000Z" },
+    { amount: 15, period: "month", start: "2026-11-01T00:00:00.000Z" },
+  ]);
+  assert.deepEqual(w.providerCosts, [50_000, 4_167]);
+  assert.deepEqual(w.voiceSettlements, [{ kind: "provider_seconds", seconds: 60 }, { kind: "provider_seconds", seconds: 5 }]);
 });

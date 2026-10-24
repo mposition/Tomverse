@@ -18,8 +18,8 @@ function Icon({ kind }: { kind: "wave" | "close" | "mic" | "muted" }) {
 }
 
 /** Data and actions belong to the host; this view contains no transport or auth. */
-export function VoiceConversationPanel({ language, state, selectionLabel, searchEnabled, reservedCredits, onStart, onClose, onStop, onToggleMicrophone, onResumeAudio }: {
-  language: string; state: VoicePanelState | null; selectionLabel: string; searchEnabled: boolean; reservedCredits: number;
+export function VoiceConversationPanel({ language, state, selectionLabel, searchEnabled, reservedCredits, continuous = false, onStart, onClose, onStop, onToggleMicrophone, onResumeAudio }: {
+  language: string; state: VoicePanelState | null; selectionLabel: string; searchEnabled: boolean; reservedCredits: number; continuous?: boolean;
   onStart: () => void; onClose: () => void; onStop: () => void; onToggleMicrophone: () => void; onResumeAudio: () => void;
 }) {
   const c = voiceConversationCopy(language);
@@ -45,7 +45,7 @@ export function VoiceConversationPanel({ language, state, selectionLabel, search
         {state.error && <p role="alert" className="voice-conversation-error">{error}</p>}
         {finished && (state.billingPending || state.confirmed || state.seconds > 0 || state.captions.length > 0) && <p className="voice-conversation-billing-note">{state.billingPending ? c.unknown : state.confirmed ? c.saved : state.seconds > 0 ? c.adjusted : c.saved}</p>}
       </>}
-      {!state && <div className="voice-conversation-price-details"><p>{c.reserve.replace("{credits}", String(reservedCredits))}</p></div>}
+      {!state && <div className="voice-conversation-price-details"><p>{(continuous ? c.continuousReserve : c.reserve).replace("{credits}", String(reservedCredits))}</p></div>}
     </div>
     <footer>
       {state && <div className="voice-conversation-meter"><time>{clock(state.seconds)}</time><span>{state.billingPending ? c.estimated : c.charged}: {state.credits}</span></div>}

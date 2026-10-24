@@ -44,10 +44,16 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 - Results are read from the owned, completed `ChatResponseAttempt`; the browser
   supplies only an answer receipt, never trusted answer text or usage seconds.
 - The existing credit-account and subject locks, usage buckets, debt offset,
-  plan allocation and purchased-credit ledger are reused. Reserve the bounded
-  session and 30 seconds of closing headroom before the paid initialization.
-  The default 300-second session temporarily holds **198 credits**. Insufficient
-  available credits refuses Start; unused credits return after known settlement.
+  plan allocation and purchased-credit ledger are reused. Reserve only the next
+  60 seconds (including 30 seconds of closing headroom), initially up to 36 credits.
+  Smaller available balances can fund an initial window down to 45 seconds.
+  Renew the same reservation and provider connection in short windows before its
+  funded deadline. There is no Tomverse session-duration cap. Each renewal checks
+  the existing plan/purchased wallet, daily/monthly voice seconds and provider cost
+  budgets; none of their ceilings or the 36-credit/minute rate are increased.
+  Insufficient funding closes within the already reserved exposure. Refund unused
+  credits after settlement, rounding cumulative session usage once. Durable funding
+  segments retain their original bucket dates across day/month boundaries.
 - Voice reservations use `source=voice_conversation` in `ChatCreditReservation`.
   Their JSON contains accounting/session references, not transcript or audio.
   A delegated answer is queued temporarily for delivery and removed when sent,
@@ -103,9 +109,12 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 `VOICE_CONVERSATION_ENABLED=true` and a dedicated
 `VOICE_CONVERSATION_API_KEY` are required. A nonempty
 `VOICE_CONVERSATION_KILL_SWITCH` disables new starts and closes running sessions.
-`VOICE_CONVERSATION_MAX_SECONDS` defaults to 300 and accepts integers 15–900.
-Existing voice subject/provider seconds budgets also apply. These settings are
-not changed by this implementation.
+`VOICE_CONVERSATION_MAX_SECONDS` is obsolete and ignored by the continuous-session
+implementation; remove the variable when that server version is deployed. Existing
+voice subject/provider seconds and cost budgets still apply. The watchdog uses the
+latest funded deadline, not the session's initial funding window. Provider expiry,
+disconnects, Stop and the kill switch can still end a session; this change does not
+automatically create a new paid connection. Legacy reservations remain settleable.
 
 Run `npm run voice:watchdog` as an independently supervised process with
 `VOICE_CONVERSATION_WATCHDOG_ENABLED=true`, the dedicated provider credential,
@@ -130,8 +139,9 @@ require the repository's independent finished-diff review.
 The Android APK reuses the existing native MVP, its reviewed native bearer
 authentication and canonical Chat transport. `sendVoice` persists through that
 same transport and returns the saved source-message receipt. Web and native
-render `@tomverse/chat-ui`'s voice panel; both show persisted session usage in
-Chat after closing and reopening. The UI does not display the per-minute rate.
+render `@tomverse/chat-ui`'s voice panel. Native Chat omits settled session cards
+from the transcript and shows a compact notice only while billing is pending.
+The UI does not display the per-minute rate.
 
 Issued voice delegations retain an exact-question digest. A result must match
 that digest and an owned, durable source message. Ready results are claimed

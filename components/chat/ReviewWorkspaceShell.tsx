@@ -357,7 +357,7 @@ export async function ReviewWorkspaceShell({
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         voiceInputEnabled={voiceInputEnabled}
         voiceConversationEnabled={voiceConversationEnabled}
-        voiceConversationMaxSeconds={voiceConfig?.maxSeconds ?? 300}
+        voiceConversationMaxSeconds={voiceConfig ? voiceConfig.maxSeconds : 300}
         promptRefinerMode={promptRefinerMode}
         promptRefinerProductRelease={promptRefinerProductRelease}
         // The composer cannot read this itself: `process.env` in a Client

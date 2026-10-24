@@ -7,6 +7,18 @@ import { mobileErrorText } from "../locales/mobileErrors.ts";
 
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
 
+test("a fresh transport restores actual answer models from durable attempts and preserves manual attribution", async () => {
+  const transport = createApiTransport(async path => {
+    assert.equal(path, "/api/conversations/saved");
+    return Response.json({ id: "saved", selectedModels: ["requested-model"], messages: [
+      { id: "auto-answer", role: "assistant", content: "Auto answer", modelId: "requested-model" },
+      { id: "manual-answer", role: "assistant", content: "Manual answer", modelId: "manual-model" },
+    ], responseAttempts: [{ assistantMessageId: "auto-answer", actualModelId: "actual-model", requestedModelId: "requested-model", status: "completed" }] });
+  }, bridge);
+  const saved = await transport.load("saved");
+  assert.deepEqual(saved.messages.map(message => message.modelId), ["actual-model", "manual-model"]);
+});
+
 test("new mobile Chat and Review conversations enable web search without rewriting an existing choice", async () => {
   const calls = []; let webSearchMode = "off";
   const transport = createApiTransport(async (path, init = {}) => {

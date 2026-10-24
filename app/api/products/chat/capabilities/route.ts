@@ -98,7 +98,7 @@ export async function GET(request: Request) {
     const availability = await autoAvailabilityFor(session.user.id);
     const voice = voiceConversationConfig(process.env);
     return NextResponse.json(
-      { autoSelection: autoSelectionCapability(availability), voiceConversation: { enabled: Boolean(voice), maxSeconds: voice?.maxSeconds ?? 300 } },
+      { autoSelection: autoSelectionCapability(availability), voiceConversation: { enabled: Boolean(voice), maxSeconds: voice ? voice.maxSeconds : 300 } },
       { headers: NO_STORE_HEADERS }
     );
   } catch (error) {
