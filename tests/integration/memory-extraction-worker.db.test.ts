@@ -725,3 +725,45 @@ test("a chunk paused by memory off on its last attempt resumes through the real 
     assert.equal((await providerCallsFor(run.id)).length, 2, "a second, distinct ledger row");
     assert.equal(await prisma.memoryItem.count({ where: { userId: user.id, status: "active" } }), 1);
 });
+
+test("a paused attempt is left out of the retry budget when the resumed call fails", async () => {
+    // Paused one attempt before the last: without leaving the pause out, the
+    // failed resume would be the last attempt and end the run.
+    const { user, run } = await seedRun(1);
+    await prisma.memoryExtractionChunk.updateMany({
+        where: { runId: run.id },
+        data: { attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 2 },
+    });
+    await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-pause",
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            afterIssue: async () => {
+                await prisma.userMemorySettings.create({
+                    data: { userId: user.id, masterEnabled: false },
+                });
+            },
+        }),
+    });
+    await prisma.userMemorySettings.update({
+        where: { userId: user.id },
+        data: { masterEnabled: true },
+    });
+    await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-resume",
+        register: APPROVED_REGISTER,
+        adapterFactory: () => async () => {
+            throw new Error("provider exploded");
+        },
+    });
+    const chunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id },
+    });
+    assert.equal(chunk.status, "pending", "one real attempt is still left");
+    assert.equal(
+        (await prisma.memoryExtractionRun.findUniqueOrThrow({ where: { id: run.id } })).status,
+        "pending"
+    );
+});
