@@ -1,10 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
-import { authOptions } from "@/lib/auth";
 import {
   getChatCostGuardrails,
   getUserChatUsageKey,
@@ -33,7 +32,9 @@ const monthStartUtc = (now = new Date()) =>
 
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }

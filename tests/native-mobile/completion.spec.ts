@@ -28,14 +28,15 @@ test.beforeEach(async ({ page }) => {
   });
 });
 async function signIn(page: import("@playwright/test").Page) { await page.goto("/"); await page.getByRole("button", { name: "Continue with Tomverse" }).click(); await expect(page.getByRole("textbox")).toBeVisible(); }
-async function account(page: import("@playwright/test").Page) { await page.getByRole("button", { name: "Settings" }).click(); await page.getByRole("button", { name: "Privacy & data", exact: true }).click(); await page.getByRole("button", { name: "Account, export & deletion" }).click(); }
+async function account(page: import("@playwright/test").Page) { await page.getByRole("button", { name: "Conversations", exact: true }).click(); await page.getByRole("button", { name: "Settings" }).click(); await page.getByRole("button", { name: "Privacy & data", exact: true }).click(); await page.getByRole("button", { name: "Account, export & deletion" }).click(); }
 
 test("answers render Markdown, citations and generated files with a real browser download", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Make a file"); await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Answer", exact: true })).toBeVisible(); await expect(page.locator("table")).toBeVisible(); await expect(page.locator("pre code")).toContainText("const value");
   await expect(page.getByRole("link", { name: "Source", exact: true })).toHaveAttribute("rel", "noopener noreferrer");
   const downloaded = page.waitForEvent("download"); await page.getByRole("button", { name: "Save file", exact: true }).click(); expect((await downloaded).suggestedFilename()).toBe("answer.txt");
-  await page.reload(); await expect(page.getByRole("button", { name: "Save file", exact: true })).toBeVisible();
+  await page.reload(); await page.getByRole("button", { name: "Conversations", exact: true }).click(); await page.locator(".conversation-row").click();
+  await expect(page.getByRole("button", { name: "Save file", exact: true })).toBeVisible();
 });
 test("unsent native drafts survive reload and model selection without a dispatch", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Keep this draft"); await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("Keep this draft");
@@ -46,7 +47,7 @@ test("offline native typing persists without a send or upload", async ({ page, c
   await signIn(page); await context.setOffline(true);
   await expect(page.getByRole("textbox")).toBeEnabled(); await expect(page.getByRole("button", { name: "Record voice", exact: true })).toBeDisabled(); await page.getByRole("textbox").fill("An offline draft"); await page.getByRole("textbox").press("Enter");
   await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled(); await expect(page.locator("article.user")).toHaveCount(0);
-  await context.setOffline(false); await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("An offline draft");
+  await context.setOffline(false); await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("An offline draft\n");
 });
 test("account deletion requires typed confirmation and a deliberate click", async ({ page }) => {
   await signIn(page); await account(page); const button = page.getByRole("button", { name: "Delete my account", exact: true }); await expect(button).toBeDisabled();

@@ -16,8 +16,6 @@ import { publicChatResponseAttempt } from "@/lib/chatResponseAttemptCore";
 import { listChatResponseAttempts } from "@/lib/chatResponseAttemptPersistence";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS, normalizeWebSearchMode, WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import {
   CONVERSATION_MEMORY_MODES,
@@ -788,7 +786,9 @@ export async function PATCH(
 
 export async function DELETE(req: Request, { params }: Params) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }

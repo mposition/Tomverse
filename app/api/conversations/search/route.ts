@@ -1,8 +1,7 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -26,7 +25,9 @@ import {
  */
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }

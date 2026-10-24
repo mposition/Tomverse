@@ -162,6 +162,16 @@ export function nativeChatBearerRoute(path: string, method: string, enabled = fa
 /** Native web-parity additions require their own reviewed operational activation. */
 export function nativeParityBearerRoute(path: string, method: string, enabled = false): boolean {
   if (!enabled) return false;
+  if (path === "/api/user/usage") return method === "GET";
+  if (path === "/api/conversations/search") return method === "GET";
+  if (path === "/api/projects") return ["GET", "POST"].includes(method);
+  if (/^\/api\/projects\/[A-Za-z0-9_-]{1,100}$/.test(path)) return ["PATCH", "DELETE"].includes(method);
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "DELETE";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/pin$/.test(path)) return method === "PUT";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/share$/.test(path)) return ["POST", "DELETE"].includes(method);
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/export$/.test(path)) return method === "GET";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/verify$/.test(path)) return method === "POST";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generate-title$/.test(path)) return method === "POST";
   if (path === "/api/chat/preflight") return method === "POST";
   if (path === "/api/chat/deep-research/status") return method === "POST";
   if (path === "/api/products/mobile/capabilities") return method === "GET";
