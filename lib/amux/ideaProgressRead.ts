@@ -31,7 +31,9 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
     excludedCount: number;
     excludedReasons: { secretPath: number; secretContent: number;
       nonRegular: number; unscannableContent: number };
-    readManifest: { fileCount: number; digest: string; bodyPurged: boolean } | null;
+    /** One read manifest per analysis page, in page order. */
+    readManifests: Array<{ manifestId: string; fileCount: number; digest: string;
+      bodyPurged: boolean }>;
   }>;
 };
 
@@ -79,8 +81,8 @@ type SqlCheckoutEvidence = {
   referenceOrdinal: number; pinnedCommitSha: string; excludedCount: number;
   secretPath: number; secretContent: number; nonRegular: number;
   unscannableContent: number;
-  readFileCount: number | null; readDigest: string | null;
-  readBodyPurged: boolean;
+  readManifests: Array<{ manifestId: string; fileCount: number; digest: string;
+    bodyPurged: boolean }> | null;
 };
 type SqlIdea = {
   id: string; requestId: string; state: string; submissionOrigin: "owner" | "session";
@@ -155,12 +157,16 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           'secretContent', e."excludedSecretContentCount",
           'nonRegular', e."excludedNonRegularCount",
           'unscannableContent', e."excludedUnscannableCount",
-          'readFileCount', m."fileCount", 'readDigest', m."digest",
-          'readBodyPurged', m."bodyPurgedAt" IS NOT NULL)
+          -- One read manifest per analysis page, each with its own count,
+          -- digest and purge state.
+          'readManifests', (SELECT json_agg(json_build_object(
+              'manifestId', m."id", 'fileCount', m."fileCount",
+              'digest', m."digest", 'bodyPurged', m."bodyPurgedAt" IS NOT NULL)
+              ORDER BY m."createdAt", m."id")
+            FROM "AmuxIdeaTrackedCheckoutReadManifest" m
+            WHERE m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"))
           ORDER BY e."referenceOrdinal")
         FROM "AmuxIdeaTrackedCheckoutEvidence" e
-        LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m
-          ON m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"
         WHERE e."ideaId" = n."id") AS "checkoutEvidence"
     FROM newest n
     ORDER BY n."submittedAt" DESC, n."id" ASC
@@ -202,9 +208,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         excludedReasons: { secretPath: evidence.secretPath,
           secretContent: evidence.secretContent, nonRegular: evidence.nonRegular,
           unscannableContent: evidence.unscannableContent },
-        readManifest: evidence.readFileCount !== null && evidence.readDigest !== null
-          ? { fileCount: evidence.readFileCount, digest: evidence.readDigest,
-            bodyPurged: evidence.readBodyPurged } : null,
+        readManifests: evidence.readManifests ?? [],
       })),
     };
   });

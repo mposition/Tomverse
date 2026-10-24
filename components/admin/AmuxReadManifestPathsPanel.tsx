@@ -12,8 +12,8 @@ type State = "idle" | "loading" | "available" | "missing" |
 
 /** Paths are fetched only when the owner asks to see them. Hiding clears the
  * browser component state; the server enforces the original retention clock. */
-export function AmuxReadManifestPathsPanel({ ideaId, referenceOrdinal,
-  fileCount }: { ideaId: string; referenceOrdinal: number; fileCount: number }) {
+export function AmuxReadManifestPathsPanel({ ideaId, manifestId,
+  fileCount }: { ideaId: string; manifestId: string; fileCount: number }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
   const [state, setState] = useState<State>("idle");
   const [files, setFiles] = useState<string[]>([]);
@@ -24,8 +24,7 @@ export function AmuxReadManifestPathsPanel({ ideaId, referenceOrdinal,
     setFiles([]);
     setState("loading");
     try {
-      const params = new URLSearchParams({ ideaId,
-        referenceOrdinal: String(referenceOrdinal) });
+      const params = new URLSearchParams({ ideaId, manifestId });
       const response = await adminFetch(
         `/api/admin/amux/ideas/read-manifest?${params}`, { cache: "no-store" });
       if (current !== requestId.current) return;

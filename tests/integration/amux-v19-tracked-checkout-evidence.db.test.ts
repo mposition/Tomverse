@@ -214,7 +214,7 @@ test("pinned checkout evidence and its canonical system audit commit atomically"
   assert.deepEqual(progress.find((row) => row.ideaId === ideaId)?.checkoutEvidence,
     [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 4,
       excludedReasons: { secretPath: 1, secretContent: 1,
-        nonRegular: 1, unscannableContent: 1 }, readManifest: null }]);
+        nonRegular: 1, unscannableContent: 1 }, readManifests: [] }]);
 });
 
 test("verified CLI read paths persist encrypted with one canonical audit", async () => {
@@ -236,8 +236,8 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
     const receipt = await prisma.$transaction((tx) =>
       recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys));
     assert.equal(receipt.fileCount, 2);
-    const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
-      where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
+    const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirstOrThrow({
+      where: { ideaId, referenceOrdinal: 0 },
     });
     const intent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
       where: { id: manifestId },
@@ -276,8 +276,8 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
     const progress = await prisma.$transaction((tx) =>
       readAmuxIdeaProgressInTx(tx, authority.approvedByUserId, new Date()));
     assert.deepEqual(progress.find((item) => item.ideaId === ideaId)
-      ?.checkoutEvidence[0]?.readManifest,
-    { fileCount: 2, digest: row.digest, bodyPurged: false });
+      ?.checkoutEvidence[0]?.readManifests,
+    [{ manifestId: row.id, fileCount: 2, digest: row.digest, bodyPurged: false }]);
     assert.equal(await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirst({
       where: { ideaId, referenceOrdinal: 0,
         idea: { actorUserId: "wrong-owner" } },
@@ -433,8 +433,8 @@ test("database rejects mismatched canonical audit and mutation of stored evidenc
 });
 
 test("seven-day read-manifest purge clears paths and retires only its key", async () => {
-  const manifest = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
-    where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
+  const manifest = await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirstOrThrow({
+    where: { ideaId, referenceOrdinal: 0 },
   });
   assert.equal(await ownerMayReadManifest(authority.approvedByUserId,
     ideaId, manifest.id), true);
@@ -505,7 +505,7 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   // Access expires at the database clock boundary even if retention has not
   // purged the ciphertext or retired its external key yet.
   assert.equal(await readAmuxTrackedCheckoutReadManifestForOwner(
-    authority.approvedByUserId, ideaId, 0), null);
+    authority.approvedByUserId, ideaId, manifest.id), null);
   await assert.rejects(prisma.amuxIdeaTrackedCheckoutReadManifest.update({
     where: { id: manifest.id }, data: { ciphertext: null, keyId: null,
       keyVersion: null, bodyPurgedAt: new Date() },
@@ -537,8 +537,8 @@ test("seven-day read-manifest purge clears paths and retires only its key", asyn
   const progress = await prisma.$transaction((tx) =>
     readAmuxIdeaProgressInTx(tx, authority.approvedByUserId, new Date()));
   assert.deepEqual(progress.find((item) => item.ideaId === ideaId)
-    ?.checkoutEvidence[0]?.readManifest,
-  { fileCount: 2, digest: manifest.digest, bodyPurged: true });
+    ?.checkoutEvidence[0]?.readManifests,
+  [{ manifestId: manifest.id, fileCount: 2, digest: manifest.digest, bodyPurged: true }]);
   assert.deepEqual(await prisma.$transaction((tx) =>
     readAmuxIdeaRetentionHoldScope(tx, ideaId)),
   { remainingBodies: 1, alreadyPurgedBodies: 2 });

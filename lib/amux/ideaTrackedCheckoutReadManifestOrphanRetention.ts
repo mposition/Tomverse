@@ -42,9 +42,10 @@ async function claimDueIntent(item: IntentIdentity): Promise<string | null> {
       const idea = await tx.amuxIdeaSubmission.findUnique({
         where: { id: item.ideaId }, select: { submittedAt: true },
       });
+      // An intent's own manifest shares its id; other pages of the same
+      // reference have their own intents.
       const manifest = await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
-        where: { ideaId_referenceOrdinal: { ideaId: item.ideaId,
-          referenceOrdinal: item.referenceOrdinal } }, select: { id: true },
+        where: { id: item.id }, select: { id: true },
       });
       const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
         SELECT clock_timestamp() AS "now"`;
@@ -194,8 +195,7 @@ export async function purgeDueAmuxOrphanReadManifestKeys(
     WHERE k."keyRetirementClaimedAt" IS NULL AND k."keyDeletedAt" IS NULL
       AND i."submittedAt" + INTERVAL '7 days' <= clock_timestamp()
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaTrackedCheckoutReadManifest" m
-        WHERE m."ideaId" = k."ideaId" AND
-          m."referenceOrdinal" = k."referenceOrdinal")
+        WHERE m."id" = k."id")
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaRetentionHold" h
         WHERE h."ideaId" = k."ideaId" AND h."releasedAt" IS NULL AND
           h."expiresAt" > clock_timestamp())
