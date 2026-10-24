@@ -25,6 +25,11 @@ test("the v19 cycle unit refreshes mirrors before any claim and installs switche
   assert.doesNotMatch(env, /^TOMVERSE_AMUX_V19_DIAGNOSTIC_DETAIL=/m);
   assert.match(refresh, /^set -euo pipefail$/m);
   assert.match(refresh, /fetch --quiet --prune --no-tags origin/);
+  // The app pins develop where it exists, so the mirror fetches it then; a
+  // remote without develop (ls-remote exit 2) is not a failure.
+  assert.match(refresh, /ls-remote --exit-code --heads origin refs\/heads\/develop/);
+  assert.match(refresh, /"\+refs\/heads\/develop:refs\/remotes\/origin\/develop"/);
+  assert.match(refresh, /test "\$status" -eq 2 \|\| exit "\$status"/);
   assert.doesNotMatch(refresh, /\b(?:checkout|reset|clean|pull)\b/,
     "the refresh never touches a working tree");
 });

@@ -207,8 +207,10 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
    모델이거나 현재 승인된 Frontier 모델인지 다시 확인한다. claim은 그 모델의 승인 가격을 그대로 요구한다.
 3. **분석 CLI의 저장소 직접 읽기.** 앱이 발췌를 골라 보내지 않는다. Ubuntu의 분석 CLI가 저장소를
    직접 읽는다.
-   - 참조마다 고정 SHA 하나를 정한다(저장소는 접수 시점의 기본 브랜치 full commit SHA, PR은 그
-     시점의 head full SHA). 그 SHA를 앱에 기록한다.
+   - 참조마다 고정 SHA 하나를 정한다(저장소는 접수 시점의 `develop` 브랜치 full commit SHA, `develop`이
+     없는 저장소는 기본 브랜치 full commit SHA, PR은 그 시점의 head full SHA). 그 SHA를 앱에 기록한다.
+     개발은 `develop`에서 이뤄지고 기본 브랜치에는 릴리스로만 들어가므로, 계획이 실제 작업 기준과
+     같은 코드를 읽게 한다(운영자 결정 2026-10-24). runner 미러도 `develop`이 있으면 함께 가져온다.
    - 분석 작업 디렉터리는 그 SHA의 **Git이 추적하는 파일만** 담은 새 checkout이다. 추적되지 않는
      파일(`.env` 등)은 없다. 닫힌 비밀 경로 패턴(환경 파일, 키, 인증서 등)에 해당하는 파일은
      checkout에서 뺀다. 실행 전에 checkout 전체에 secret 검사를 하고, 걸린 파일은 checkout에서 빼고
