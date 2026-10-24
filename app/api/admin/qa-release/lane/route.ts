@@ -6,14 +6,16 @@ import { getServerSession } from "next-auth/next";
 import { isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { readGithubOpenPullNumbers } from "@/lib/githubOpenPullNumbers";
+import { readGithubPullActivity } from "@/lib/githubPullActivity";
 import { readQaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 
 /**
  * Admin › QA and release › Merge lane: the lane's latest rounds and verdicts
  * (lib/qaReleaseMergeLaneRoundStore.ts) with the pull requests open on GitHub
- * right now, polled by the lane tab so a pull request closed or merged since
- * the lane's last round leaves the page at once. Any administrator may read it.
+ * right now and those whose CI still runs, polled by the lane tab so a pull
+ * request closed or merged since the lane's last round leaves the page at
+ * once, and one whose CI finished stops saying it runs. Any administrator may
+ * read it.
  */
 export async function GET(req: Request) {
   try {
@@ -22,8 +24,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
     await consumeApiRateLimit(req, session.user.id, "admin-qa-release-lane-read", { minute: 20, day: 5000 });
-    const [rounds, open] = await Promise.all([readQaReleaseLaneRounds(), readGithubOpenPullNumbers()]);
-    return NextResponse.json({ rounds, open });
+    const [rounds, github] = await Promise.all([readQaReleaseLaneRounds(), readGithubPullActivity()]);
+    return NextResponse.json({ rounds, github });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
