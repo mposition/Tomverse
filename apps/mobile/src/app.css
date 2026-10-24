@@ -269,3 +269,9 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 @media (max-width: 350px) { .app-header .brand-lockup .icon-logo { display: none; } .app-header .wordmark { font-size: 21px; } }
 
 .voice-privacy { font-size: 11px; line-height: 1.5; color: var(--mobile-muted); margin: 6px 6px 0; }
+
+/* One row under an answer, never wrapped: Auto's choice, with a long model name truncated. */
+.answer-footer { display: flex; align-items: center; gap: 6px; margin-top: 10px; min-width: 0; white-space: nowrap; }
+.routed-badge { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; border: 1px solid var(--mobile-border); border-radius: 999px; padding: 2px 9px; font-size: 11px; color: var(--mobile-muted); }
+.routed-badge .app-icon { width: 12px; height: 12px; flex: none; }
+.routed-badge > span { overflow: hidden; text-overflow: ellipsis; }

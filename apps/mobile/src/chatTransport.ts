@@ -3,6 +3,8 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   modelId?: string;
+  /** Set only on a turn Auto routed, from the response header; kept for this session. */
+  routedModelId?: string;
   status?: string;
   pendingJobId?: string | null;
   artifacts?: import("../../../lib/generatedArtifactCore").ChatStreamArtifact[];

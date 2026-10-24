@@ -6,7 +6,7 @@ import { nativeChatBearerRoute } from "../lib/nativeBearerGate.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
 
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
-function fixture({ unknown = false } = {}) {
+function fixture({ unknown = false, routedModel = null } = {}) {
   const calls = []; let turns = 0;
   const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: [] };
   const run = async (path, init = {}) => {
@@ -30,7 +30,8 @@ function fixture({ unknown = false } = {}) {
       }
       conversation.messages.push({ id: input.assistantMessageId, role: "assistant", content: "안녕하세요!", status: "normal" });
       const bytes = new TextEncoder().encode('안녕하세요!\u0000TOMVERSE_SEARCH_METADATA{"completion":{"status":"normal"}}');
-      return new Response(new ReadableStream({ start(controller) { for (const byte of bytes) controller.enqueue(new Uint8Array([byte])); controller.close(); } }));
+      return new Response(new ReadableStream({ start(controller) { for (const byte of bytes) controller.enqueue(new Uint8Array([byte])); controller.close(); } }),
+        routedModel ? { headers: { "X-Chat-Routed-Model": routedModel } } : undefined);
     }
     throw Error(`Unexpected request ${path}`);
   };
@@ -78,6 +79,19 @@ test("native send saves once, adopts the server message identity and streams spl
   assert.equal(f.calls.filter((call) => call.path.endsWith("/messages")).length, 1);
   const restored = await f.transport.load("conversation-a");
   assert.equal(restored.messages.at(-1).content, "안녕하세요!");
+});
+
+test("Auto's choice from the response header is attached to that answer after reload", async () => {
+  const routed = fixture({ routedModel: "claude-haiku-5-5" });
+  await routed.transport.send(routed.conversation, "A question", [], new AbortController().signal, () => {});
+  const answer = (await routed.transport.load("conversation-a")).messages.find((message) => message.role === "assistant");
+  assert.equal(answer.routedModelId, "claude-haiku-5-5");
+
+  // A turn Auto did not route carries no header and gets no badge field.
+  const manual = fixture();
+  await manual.transport.send(manual.conversation, "A question", [], new AbortController().signal, () => {});
+  const plain = (await manual.transport.load("conversation-a")).messages.find((message) => message.role === "assistant");
+  assert.equal(plain.routedModelId, undefined);
 });
 
 test("unknown chat execution is never resubmitted; restoration reads its durable checkpoint", async () => {

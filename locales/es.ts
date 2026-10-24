@@ -538,8 +538,6 @@ export const es = {
         artifactDownloadFailed: "No se pudo descargar el archivo. Inténtalo de nuevo.",
         artifactDownloadLocked: "Desbloquea esta conversación para descargar el archivo.",
         searchCitationsLabel: "Fuentes",
-        answerContextLabel: "Contexto de la respuesta",
-        answerContextMemory: "{count} memorias de la cuenta",
         answerContextKnowledge: "{count} extractos de conocimiento del perfil",
         modelsSelectedOne: "IA",
         modelsSelectedOther: "IAs",

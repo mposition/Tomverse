@@ -97,9 +97,11 @@ async function mockContextPreparation(page: Page, options: { bundle?: string | n
 }
 
 test.describe("chat memory context", () => {
-  test("an answer states how many memories it was given @ui-risk", async ({
+  test("an answer given memories does not state them @ui-risk", async ({
     page,
   }) => {
+    // The per-answer memory disclosure was removed (owner, 2026-10-24): the
+    // count still arrives, and nothing about it is rendered.
     await mockContextPreparation(page);
     await enterConversation(page, {
       theme: "light",
@@ -119,19 +121,16 @@ test.describe("chat memory context", () => {
     await submitComposer(page, "What do you know about me?", DESKTOP_VIEWPORT.width);
 
     await expect(panel(page, 0)).toContainText(ANSWER);
-    const disclosure = page.getByTestId("memory-usage-disclosure");
-    await expect(disclosure).toBeVisible();
-    // The server's number, rendered as the server sent it.
-    await expect(disclosure).toContainText("3");
+    await expect(page.getByTestId("memory-answer-feedback")).toBeVisible();
+    await expect(panel(page, 0)).not.toContainText("account memories");
+    await expect(page.getByTestId("knowledge-usage-disclosure")).toHaveCount(0);
   });
 
-  test("an answer names memory and profile knowledge separately @ui-risk", async ({
+  test("profile knowledge is stated on the answer's one row, memory is not @ui-risk", async ({
     page,
   }) => {
-    // docs/policy/external-conversation-import-and-memory.md §14.3. The two counts are
-    // different claims about where the answer came
-    // from, so the sentence has to carry both numbers rather than a sum --
-    // 2 and 3 are chosen so that a merged "5" fails this outright.
+    // docs/policy/external-conversation-import-and-memory.md §14.3. 2 and 3
+    // are chosen so that a merged "5" or a stray memory count fails outright.
     await mockContextPreparation(page);
     await enterConversation(page, {
       theme: "light",
@@ -152,44 +151,21 @@ test.describe("chat memory context", () => {
     await submitComposer(page, "What does my document say?", DESKTOP_VIEWPORT.width);
 
     await expect(panel(page, 0)).toContainText(ANSWER);
-    const disclosure = page.getByTestId("memory-usage-disclosure");
-    await expect(disclosure).toBeVisible();
-    await expect(disclosure).toContainText("2");
-    await expect(disclosure).toContainText("3");
-    await expect(disclosure).not.toContainText("5");
+    const knowledge = page.getByTestId("knowledge-usage-disclosure");
+    await expect(knowledge).toBeVisible();
+    await expect(knowledge).toContainText("3");
+    await expect(knowledge).not.toContainText("5");
+    await expect(panel(page, 0)).not.toContainText("account memories");
+
+    // One row: the report button and the knowledge count share a line.
+    const report = await page.getByTestId("memory-answer-feedback").boundingBox();
+    const stated = await knowledge.boundingBox();
+    expect(report).not.toBeNull();
+    expect(stated).not.toBeNull();
+    expect(Math.abs((report!.y + report!.height / 2) - (stated!.y + stated!.height / 2))).toBeLessThan(4);
   });
 
-  test("an answer given only profile knowledge says only that @ui-risk", async ({
-    page,
-  }) => {
-    // The header for memory is absent here, which is not the same as zero:
-    // the sentence must name knowledge and must not claim any memory.
-    await mockContextPreparation(page);
-    await enterConversation(page, {
-      theme: "light",
-      lang: "en",
-      viewport: DESKTOP_VIEWPORT,
-      selectedModels: [MODEL_A],
-      modelStub: {
-        [MODEL_A]: {
-          kind: "success",
-          chunks: [ANSWER],
-          intervalMs: 5,
-          knowledgeChunkCount: 4,
-        },
-      },
-    });
-    await page.setViewportSize(DESKTOP_VIEWPORT);
-    await submitComposer(page, "What does my document say?", DESKTOP_VIEWPORT.width);
-
-    await expect(panel(page, 0)).toContainText(ANSWER);
-    const disclosure = page.getByTestId("memory-usage-disclosure");
-    await expect(disclosure).toBeVisible();
-    await expect(disclosure).toContainText("4");
-    await expect(disclosure).not.toContainText("account memories");
-  });
-
-  test("an answer that used no memories says nothing at all", async ({
+  test("an answer given no context states nothing", async ({
     page,
   }) => {
     await mockContextPreparation(page);
@@ -198,8 +174,6 @@ test.describe("chat memory context", () => {
       lang: "en",
       viewport: DESKTOP_VIEWPORT,
       selectedModels: [MODEL_A],
-      // No header: the ordinary case, and the one a "0 memories used" line
-      // would misrepresent.
       modelStub: {
         [MODEL_A]: { kind: "success", chunks: [ANSWER], intervalMs: 5 },
       },
@@ -208,15 +182,10 @@ test.describe("chat memory context", () => {
     await submitComposer(page, "An ordinary question.", DESKTOP_VIEWPORT.width);
 
     await expect(panel(page, 0)).toContainText(ANSWER);
-    await expect(page.getByTestId("memory-usage-disclosure")).toHaveCount(0);
+    await expect(page.getByTestId("knowledge-usage-disclosure")).toHaveCount(0);
   });
 
-  test("reopening the conversation states it again", async ({ page }) => {
-    // The disclosure used to live only in the streaming response header, so
-    // it was true while the answer was being written and gone the next time
-    // the conversation was opened. This drives the other path: a stored
-    // answer, read back through the conversation endpoint, with nothing
-    // streaming at all.
+  test("a reopened answer does not state its stored memory count", async ({ page }) => {
     await mockAuthenticatedApi(page, {
       selectedModels: ["gpt-5-4-mini"],
       messages: [
@@ -234,31 +203,8 @@ test.describe("chat memory context", () => {
     await openRecentConversation(page);
 
     await expect(panel(page, 0)).toContainText(ANSWER);
-    const disclosure = page.getByTestId("memory-usage-disclosure");
-    await expect(disclosure).toBeVisible();
-    await expect(disclosure).toContainText("3");
-  });
-
-  test("a reopened answer with no stored count still says nothing", async ({
-    page,
-  }) => {
-    await mockAuthenticatedApi(page, {
-      selectedModels: ["gpt-5-4-mini"],
-      messages: [
-        { id: "stored-user", role: "user", content: "An ordinary question." },
-        {
-          id: "stored-answer",
-          role: "assistant",
-          content: ANSWER,
-          modelId: "gpt-5-4-mini",
-        },
-      ],
-    });
-    await page.goto("/review?lang=en");
-    await openRecentConversation(page);
-
-    await expect(panel(page, 0)).toContainText(ANSWER);
-    await expect(page.getByTestId("memory-usage-disclosure")).toHaveCount(0);
+    await expect(panel(page, 0)).not.toContainText("account memories");
+    await expect(page.getByTestId("knowledge-usage-disclosure")).toHaveCount(0);
   });
 
   test("a single-model send whose context went stale is retried once @ui-risk", async ({
