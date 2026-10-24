@@ -163,7 +163,8 @@ test("result codes survive a stream the validator already rejected", async () =>
     { type: "assistant", message: { role: "assistant", content: [
       { type: "tool_use", id: "read_1", name: "Read",
         input: { file_path: `${directory}/src/a.ts` } }] } },
-    // A failed tool result makes the validator stop parsing later lines.
+    // A failed tool result is counted and parsing goes on; the failed CLI
+    // result below is what refuses.
     { type: "user", message: { role: "user", content: [
       { type: "tool_result", tool_use_id: "read_1", is_error: true, content: "x" }] } },
     { type: "result", subtype: "success", is_error: true, num_turns: 3,
@@ -172,7 +173,7 @@ test("result codes survive a stream the validator already rejected", async () =>
     kind: "outcome_unknown", failureStage: "parser_rejected", childExitCode: null,
     cliError: { ...noCliError, resultIsError: true, terminalReason: "max_turns",
       permissionDenials: 0, turns: 3, toolUses: { Read: 1, Grep: 0, Glob: 0 } },
-    parserReason: { code: "stream_tool_result_error", also: ["usage_incomplete"], usageModels: [],
+    parserReason: { code: "stream_result_error", also: ["usage_incomplete"], usageModels: [],
       traceReason: null },
   });
 });
@@ -189,6 +190,27 @@ test("a diagnostic success also reports file tool counts; a normal one does not"
   const plain = observeAmuxTrackedCheckoutChild(normal, input);
   await send(normal);
   assert.deepEqual(plain.finish({ code: 0, signal: null, stopped: false }), verified);
+});
+
+test("an analysis that recovered from a failed Read still verifies and counts it", async () => {
+  // Staging 2026-10-25: a failed tool result refused a completed Max analysis.
+  const process = child();
+  const observed = observeAmuxTrackedCheckoutChild(process, input);
+  await send(process, [init,
+    { type: "assistant", message: { role: "assistant", content: [
+      { type: "tool_use", id: "read_big", name: "Read",
+        input: { file_path: `${directory}/src/a.ts` } }] } },
+    { type: "user", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "read_big", is_error: true,
+        content: "File content exceeds maximum allowed tokens" }] } },
+    ...events.slice(1)]);
+  const verified = observed.finish({ code: 0, signal: null, stopped: false });
+  assert.equal(verified.kind, "verified_success");
+  assert.deepEqual(verified.readFiles, ["src/a.ts"],
+    "only the later successful Read is in the manifest");
+  assert.deepEqual(verified.toolErrors, { Read: 1, Grep: 0, Glob: 0 });
+  assert.equal(JSON.stringify(verified).includes("exceeds"), false,
+    "the failed result's text is never kept");
 });
 
 test("stderr transport errors invalidate an otherwise complete result", async () => {
