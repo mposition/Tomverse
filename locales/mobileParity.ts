@@ -1,6 +1,7 @@
 import type { MobileLanguage } from "./mobile";
 
 const en = {
+  reviewDefaultsUnavailable: "Easy defaults could not be loaded. Reopen Review to retry or choose Professional.",
   settings: "Settings", general: "General", intelligence: "AI & personalization", security: "Device security", privacy: "Privacy & data",
   saved: "Saved", save: "Save changes", unavailable: "This feature is not available on the current server. Your conversation is unchanged.",
   timeZone: "Account time zone", timeZoneHint: "The account time zone controls daily limits. Changes follow the existing 30-day rule.",
@@ -18,6 +19,7 @@ const en = {
   imageDecision: "This question needs image generation. Review image generation requires a separate price confirmation.",
 };
 const ko: typeof en = {
+  reviewDefaultsUnavailable: "Easy 기본 설정을 불러오지 못했습니다. Review를 다시 열거나 Professional을 선택하세요.",
   settings: "설정", general: "일반", intelligence: "AI 및 개인화", security: "기기 보안", privacy: "개인정보 및 데이터",
   saved: "저장했습니다", save: "변경사항 저장", unavailable: "현재 서버에서 지원하지 않는 기능입니다. 대화는 변경되지 않았습니다.",
   timeZone: "계정 시간대", timeZoneHint: "계정 시간대는 일일 사용 한도에 적용됩니다. 기존 30일 변경 제한이 유지됩니다.",

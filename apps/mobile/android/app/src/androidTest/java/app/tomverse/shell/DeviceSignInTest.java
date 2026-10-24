@@ -3,6 +3,9 @@ package app.tomverse.shell;
 import static org.junit.Assert.*;
 
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import androidx.test.platform.app.InstrumentationRegistry;
 import android.content.ContextWrapper;
 import android.content.SharedPreferences;
 import androidx.test.core.app.ApplicationProvider;
@@ -36,13 +39,18 @@ import org.junit.runner.RunWith;
 public class DeviceSignInTest {
     private static int refreshes;
     private static int verifications;
+    private static int exchanges;
+    private static int revocations;
+    private static volatile boolean failRevocation;
+    private static volatile CountDownLatch verificationEntered;
+    private static volatile CountDownLatch verificationRelease;
     private final List<TestPlugin> plugins = new ArrayList<>();
     private Context context;
 
     @BeforeClass public static void isolateNetwork() {
         URL.setURLStreamHandlerFactory(protocol -> "https".equals(protocol) ? new URLStreamHandler() {
             @Override protected HttpURLConnection openConnection(URL url) {
-                if (!"tomverse.app".equals(url.getHost()) || !List.of("/api/auth/mobile/refresh", "/api/auth/mobile/email").contains(url.getPath())) {
+                if (!"tomverse.app".equals(url.getHost()) || !List.of("/api/auth/mobile/refresh", "/api/auth/mobile/email", "/api/auth/mobile/exchange", "/api/auth/mobile/logout").contains(url.getPath())) {
                     throw new AssertionError("External requests are forbidden in the native fixture");
                 }
                 return new HttpURLConnection(url) {
@@ -51,9 +59,18 @@ public class DeviceSignInTest {
                     @Override public void disconnect() {}
                     @Override public boolean usingProxy() { return false; }
                     @Override public OutputStream getOutputStream() { return body; }
-                    @Override public int getResponseCode() { return 200; }
+                    @Override public int getResponseCode() { if (url.getPath().endsWith("logout")) { revocations++; return failRevocation ? 503 : 204; } return 200; }
                     @Override public InputStream getInputStream() {
-                        if (url.getPath().endsWith("refresh")) refreshes++; else verifications++;
+                        if (url.getPath().endsWith("refresh")) refreshes++;
+                        else if (url.getPath().endsWith("exchange")) exchanges++;
+                        else {
+                            verifications++;
+                            if (verificationEntered != null) {
+                                verificationEntered.countDown();
+                                try { if (!verificationRelease.await(5, TimeUnit.SECONDS)) throw new AssertionError("Fixture release timed out"); }
+                                catch (InterruptedException error) { throw new AssertionError(error); }
+                            }
+                        }
                         return new ByteArrayInputStream(("{\"accessToken\":\"synthetic-access\",\"refreshToken\":\"synthetic-rotation-" + refreshes + "\",\"expiresIn\":600}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
                     }
                 };
@@ -70,7 +87,7 @@ public class DeviceSignInTest {
         };
         context.getSharedPreferences("tomverse-device-security", 0).edit().clear().commit();
         context.getSharedPreferences("tomverse.mobile.session.v1", 0).edit().clear().commit();
-        refreshes = 0; verifications = 0;
+        refreshes = 0; verifications = 0; exchanges = 0; revocations = 0; failRevocation = false; verificationEntered = null; verificationRelease = null;
     }
 
     @After public void finish() throws Exception {
@@ -98,6 +115,7 @@ public class DeviceSignInTest {
         private final Context context;
         TestPlugin(Context context) { this.context = context; }
         @Override public Context getContext() { return context; }
+        void callback(Intent intent) { handleOnNewIntent(intent); }
         void background() { handleOnPause(); }
         void resume() { handleOnResume(); }
     }
@@ -109,6 +127,34 @@ public class DeviceSignInTest {
         @Override public void resolve() { completed.countDown(); }
         @Override public void reject(String message, String errorCode, Exception exception, JSObject data) { code = errorCode; completed.countDown(); }
         Call waitForResult() throws Exception { assertTrue("Native callback timed out", completed.await(5, TimeUnit.SECONDS)); return this; }
+    }
+
+    @Test public void aLatePkceCallbackCannotResurrectTheSessionAfterSignOut() throws Exception {
+        TestPlugin plugin = plugin(); Call login = new Call(new JSObject()); Call logout = new Call(new JSObject());
+        field("pendingLogin").set(plugin, login); field("state").set(plugin, "fixture-state"); field("verifier").set(plugin, "fixture-verifier"); field("pendingGeneration").setLong(plugin, 0);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            plugin.signOut(logout);
+            plugin.callback(new Intent(Intent.ACTION_VIEW, Uri.parse("https://tomverse.app/auth/mobile/callback#state=fixture-state&grant=fixture-grant")));
+        });
+        logout.waitForResult(); login.waitForResult();
+        assertNull(logout.code); assertEquals("LOGIN_CANCELLED", login.code); assertEquals(0, exchanges);
+        Call session = new Call(new JSObject()); plugin.hasSession(session); session.waitForResult(); assertFalse(session.result.getBool("signedIn"));
+    }
+
+    @Test public void signOutDuringEmailVerificationDiscardsAndRevokesTheUnusedSession() throws Exception {
+        cancelledVerification(false);
+    }
+    @Test public void failedRevocationOfAnInflightLoginIsReportedAsUnconfirmedLogout() throws Exception {
+        cancelledVerification(true);
+    }
+    private void cancelledVerification(boolean refuseLogout) throws Exception {
+        TestPlugin plugin = plugin(); verificationEntered = new CountDownLatch(1); verificationRelease = new CountDownLatch(1); failRevocation = refuseLogout;
+        Call login = new Call(new JSObject().put("email", "fixture@example.invalid").put("code", "123456"));
+        plugin.verifyEmailCode(login); assertTrue(verificationEntered.await(5, TimeUnit.SECONDS));
+        Call logout = new Call(new JSObject()); plugin.signOut(logout); verificationRelease.countDown();
+        login.waitForResult(); logout.waitForResult();
+        assertEquals("LOGIN_CANCELLED", login.code); assertEquals(refuseLogout ? "LOGOUT_UNCONFIRMED" : null, logout.code); assertEquals(1, revocations);
+        Call session = new Call(new JSObject()); plugin.hasSession(session); session.waitForResult(); assertFalse(session.result.getBool("signedIn"));
     }
 
     @Test public void validSessionRestoresAcrossColdStartAndBackgroundWithoutDeviceProof() throws Exception {

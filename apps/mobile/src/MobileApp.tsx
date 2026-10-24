@@ -181,6 +181,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   async function send(text: string, files: MobileAttachment[], fromVoice = false) {
     if (streaming || uncertain) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return; }
     const current = ++requestEpoch.current;
+    const titleEpoch = epoch.current;
     const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial("");
     let item = conversation;
@@ -200,8 +201,8 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       setConversation(restored); setPartial(null);
       const list = await transport.list();
       if (current === requestEpoch.current) setChats(list);
-      void transport.generateTitle?.(restored).then(title => {
-        if (!title || current !== requestEpoch.current) return;
+      if (titleEpoch === epoch.current) void transport.generateTitle?.(restored).then(title => {
+        if (!title || titleEpoch !== epoch.current) return;
         setConversation(value => value?.id === restored.id && value.title === restored.title ? { ...value, title } : value);
         setChats(rows => rows.map(row => row.id === restored.id && row.title === restored.title ? { ...row, title } : row));
       }).catch(() => { /* The saved interim title remains usable. Never retry model work. */ });
@@ -223,7 +224,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
 
   return <main className="mobile-app">
     <header className="app-header">
-      <button className="menu-button" aria-label={copy.chats} onClick={() => setView(view === "list" ? "chat" : "list")} disabled={streaming || reviewBusy || !signedIn}><AppIcon name="menu" /><AppIcon name="menuDark" /></button>
+      <button className="menu-button" aria-label={copy.chats} onClick={() => setView(view === "list" ? "chat" : "list")} disabled={!signedIn}><AppIcon name="menu" /><AppIcon name="menuDark" /></button>
       <span className="brand-lockup"><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></span>
       {signedIn && <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || uncertain} onChange={event => { setProduct(event.target.value as "chat" | "review"); setView("chat"); }}><option value="chat">Chat</option><option value="review">Review</option></select>}
       {signedIn ? <button className="header-new-chat" aria-label={copy.newChat} disabled={streaming || reviewBusy || loading} onClick={newConversation}><AppIcon name="newChat" /></button> : <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}><AppIcon name="settings" /></button>}
@@ -247,9 +248,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <div className="welcome-mark"><AppIcon name="logo" /></div><h1>{copy.welcome}</h1><p>{copy.intro}</p>
       <button className="primary" onClick={() => { if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true); else void signIn(); }} disabled={loading}>{copy.signIn} <span aria-hidden="true">→</span></button>
     </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={() => setView("chat")} onBusyChange={setReviewBusy} historyFooter={accountFooter} newConversationRequest={newReviewRequest} /> : view === "list" ? <section className="conversation-list"><div className="history-scroll">
-      <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" onClick={newConversation}>{copy.newChat} +</button></div>
+      <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" disabled={streaming || loading} onClick={newConversation}>{copy.newChat} +</button></div>
       {chats.length === 0 && <p>{copy.emptyList}</p>}
-      {chats.map((chat) => <button className="conversation-row" key={chat.id} onClick={() => void open(chat.id)}>{chat.title}<span aria-hidden="true">↗</span></button>)}
+      {chats.map((chat) => <button className="conversation-row" key={chat.id} disabled={streaming || loading} onClick={() => void open(chat.id)}>{chat.title}<span aria-hidden="true">↗</span></button>)}
     </div>{accountFooter}</section> : <>
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {!conversation?.messages.length && !streaming && <div className="empty-chat"><AppIcon name="logo" /><h1>{copy.empty}</h1><p>{copy.hint}</p><span className="chat-product-pill"><AppIcon name="spark" />Tomverse Chat</span><div className="starters"><button onClick={() => { setDraft(copy.starterIdea); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="idea" />{copy.starterIdea}</button><button onClick={() => { setDraft(copy.starterFile); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="file" />{copy.starterFile}</button></div></div>}

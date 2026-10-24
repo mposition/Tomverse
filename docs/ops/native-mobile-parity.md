@@ -41,7 +41,11 @@ The OS owns fingerprint, Face ID, PIN, pattern and passcode entry. Tomverse rece
 none of those secrets. The preference persists across sign-out and gates the next
 fresh email-code verification or PKCE exchange, including after session expiry.
 Cancelling device authentication does not consume the email code or exchange grant.
-A concurrent sign-out invalidates a pending sign-in callback. A valid stored session
+A synchronous sign-out generation fence invalidates callbacks captured by an
+earlier sign-in, including callbacks queued before main-thread cleanup. It also
+cancels device prompts. An in-flight cancelled exchange cannot persist credentials;
+its unused refresh credential is revoked once, with an uncertain result reported
+as unconfirmed logout. A valid stored session
 restores without another prompt on cold restart, background return or token rotation.
 Android retains FLAG_SECURE while this preference is enabled. Server session expiry,
 revocation, account freshness and rotating-secret consumption are unchanged.
