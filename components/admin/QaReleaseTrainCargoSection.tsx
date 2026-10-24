@@ -13,6 +13,7 @@ import {
   qaReleaseTrainCargoPickable,
   type QaReleaseTrainCargoCandidate,
   type QaReleaseTrainCargoStatus,
+  type QaReleaseTrainCarryReason,
   type QaReleaseTrainSelection,
 } from "@/lib/qaReleaseTrainCargoCore";
 import type { QaReleaseTrainCargoCandidatesRead } from "@/lib/qaReleaseTrainCargoRead";
@@ -36,7 +37,9 @@ type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleas
  * The next release train's cargo (lib/qaReleaseTrainCargoCore.ts): merged
  * develop pull requests that are not yet on main, picked here and saved for
  * the next departure. Saving is owner or ops with a recent sign-in, audited;
- * the train reads the saved pick when it departs and spends it.
+ * the train reads the saved pick when it departs and spends it. What that
+ * train left out rides the next one, marked here with the develop pull
+ * requests a conflict needs first.
  */
 export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean; id?: string }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
@@ -135,6 +138,34 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
     }
   };
 
+  // What the last train left out, by number, and the develop pull requests a
+  // conflict needs first that are not released yet (unlisted ones are older
+  // than the window, or unknown, and are shown as such).
+  const lastTrain = view?.selection.lastTrain ?? null;
+  const carriedByNumber = new Map((lastTrain?.carried ?? []).map((carried) => [carried.number, carried]));
+  const candidateByNumber = new Map(candidates.map((candidate) => [candidate.number, candidate]));
+  const unreleased = (predecessors: readonly number[]) =>
+    predecessors.filter((number) => {
+      const status = candidateByNumber.get(number)?.status;
+      return status === undefined || status === "available" || status === "unchecked" || status === "changes_workflows";
+    });
+  const trainLabel = lastTrain ? (lastTrain.pullRequestNumber !== null ? `#${lastTrain.pullRequestNumber}` : lastTrain.slot) : "";
+  const leftOutText = (reason: QaReleaseTrainCarryReason) =>
+    ({ conflict: m.trainCargoLeftOutConflict, over_capacity: m.trainCargoLeftOutFull, train_failed: m.trainCargoLeftOutFailed })[reason].replace(
+      "{train}",
+      trainLabel,
+    );
+  const pickAlso = (numbers: readonly number[]) =>
+    setPicked((current) => {
+      const next = new Set(current);
+      for (const number of numbers) {
+        const candidate = candidateByNumber.get(number);
+        if (candidate && qaReleaseTrainCargoPickable(candidate.status) && next.size < QA_RELEASE_TRAIN_CARGO_MAX) next.add(number);
+      }
+      return next;
+    });
+  const carriedCount = view?.selection.departedWith && lastTrain?.slot === view.selection.departedWith ? view.selection.numbers.length : 0;
+
   const statusText = (candidate: QaReleaseTrainCargoCandidate) =>
     ({
       available: m.trainCargoAvailable,
@@ -161,7 +192,11 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       </div>
       <p className="mt-1 text-[13px] text-zinc-400">{m.trainCargoNote}</p>
       {view?.selection.departedWith ? (
-        <p className="mt-2 text-[13px] text-zinc-400">{m.trainCargoDeparted.replace("{slot}", view.selection.departedWith)}</p>
+        <p className="mt-2 text-[13px] text-zinc-400" data-testid="qa-release-train-cargo-departed">
+          {carriedCount > 0
+            ? m.trainCargoCarried.replace("{slot}", view.selection.departedWith).replace("{count}", String(carriedCount))
+            : m.trainCargoDeparted.replace("{slot}", view.selection.departedWith)}
+        </p>
       ) : null}
 
       {failed || view?.candidates.status === "unread" ? (
@@ -238,6 +273,8 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
             <ul className="mt-3 divide-y divide-zinc-800 rounded-lg border border-zinc-800" data-testid="qa-release-train-cargo-list">
               {shown.map((candidate) => {
                 const can = qaReleaseTrainCargoPickable(candidate.status);
+                const carried = can ? carriedByNumber.get(candidate.number) : undefined;
+                const needs = carried?.reason === "conflict" ? unreleased(carried.predecessors) : [];
                 return (
                   <li
                     key={candidate.number}
@@ -265,6 +302,34 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
                       <div className="text-xs text-zinc-500">
                         {m.trainCargoMerged.replace("{at}", aestStamp(candidate.mergedAt)).replace("{by}", candidate.author || "-")}
                       </div>
+                      {carried ? (
+                        <div className="mt-1 text-xs text-amber-300" data-testid={`qa-release-train-cargo-carried-${candidate.number}`}>
+                          <span>{leftOutText(carried.reason)}</span>
+                          {carried.reason === "conflict" && needs.length === 0 ? <span className="block text-zinc-400">{m.trainCargoNoPredecessor}</span> : null}
+                          {needs.length > 0 ? (
+                            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-zinc-300">
+                              {m.trainCargoNeedsFirst}
+                              {needs.map((number) => (
+                                <a key={number} href={`${PR_URL}${number}`} target="_blank" rel="noreferrer" className="font-mono hover:underline">
+                                  #{number}
+                                  {candidateByNumber.has(number) ? "" : ` (${m.trainCargoOutsideList})`}
+                                </a>
+                              ))}
+                              {canWrite && needs.some((number) => !picked.has(number) && candidateByNumber.has(number)) ? (
+                                <button
+                                  type="button"
+                                  className="font-medium text-zinc-100 underline disabled:opacity-50"
+                                  disabled={busy}
+                                  onClick={() => pickAlso(needs)}
+                                  data-testid={`qa-release-train-cargo-pick-needs-${candidate.number}`}
+                                >
+                                  {m.trainCargoPickPredecessors}
+                                </button>
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[candidate.status]}`}>{statusText(candidate)}</span>
                   </li>

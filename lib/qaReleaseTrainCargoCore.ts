@@ -143,31 +143,75 @@ export function parseQaReleaseTrainCargoPick(value: unknown): number[] | null {
   return new Set(value).size === value.length ? (value as number[]) : null;
 }
 
+/**
+ * Why a pull request the last train took rides the next one without a new
+ * pick (owner request 2026-10-24: a left-out pull request must not drop out
+ * of sight): it conflicted on main, the train was full, or the train failed
+ * before its pull request opened. A workflow change never rides a train and
+ * is not carried.
+ */
+export type QaReleaseTrainCarryReason = "conflict" | "over_capacity" | "train_failed";
+export type QaReleaseTrainCarried = { number: number; reason: QaReleaseTrainCarryReason; predecessors: number[] };
+export type QaReleaseTrainLastTrain = { slot: string; pullRequestNumber: number | null; carried: QaReleaseTrainCarried[] };
+
+/** The last train's report (its audit metadata) as what it carries forward; null when it does not parse. */
+export function qaReleaseTrainLastTrainFrom(report: unknown): QaReleaseTrainLastTrain | null {
+  const value = record(report);
+  if (!value || typeof value.slot !== "string" || typeof value.outcome !== "string" || !Array.isArray(value.picks)) return null;
+  const isNumber = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0 && (n as number) < 10_000_000;
+  const carried: QaReleaseTrainCarried[] = [];
+  for (const pick of list(value.picks)) {
+    if (!isNumber(pick.number) || carried.some((c) => c.number === pick.number)) continue;
+    const reason: QaReleaseTrainCarryReason | null =
+      pick.outcome === "conflict" || pick.outcome === "over_capacity"
+        ? pick.outcome
+        : pick.outcome === "included" && value.outcome !== "opened"
+          ? "train_failed"
+          : null;
+    if (reason === null) continue;
+    const predecessors = Array.isArray(pick.predecessors) ? pick.predecessors.filter(isNumber) : [];
+    carried.push({ number: pick.number, reason, predecessors });
+  }
+  return {
+    slot: value.slot,
+    pullRequestNumber: isNumber(value.pullRequestNumber) ? value.pullRequestNumber : null,
+    carried: carried.slice(0, QA_RELEASE_TRAIN_CARGO_MAX),
+  };
+}
+
 export type QaReleaseTrainSelection = {
-  /** The numbers the next train carries; empty when nothing is picked or the pick has departed. */
+  /** The numbers the next train carries: the newest pick, or once a train took it, what that train carried forward. */
   numbers: number[];
   savedAt: string | null;
   savedBy: string | null;
   /** The departure that took the newest pick, when one did. */
   departedWith: string | null;
+  /** The newest train's report, for Admin to name what it left out. */
+  lastTrain: QaReleaseTrainLastTrain | null;
 };
 
 /**
- * The selection from the newest saved pick and the newest admission: a pick
- * belongs to the first train admitted after it, and is spent then.
+ * The selection from the newest saved pick, the newest admission and the
+ * newest train report: a pick belongs to the first train admitted after it.
+ * Once that train reports, what it left out (above) is the next train's
+ * cargo until the operator saves a new pick; a train still running carries
+ * nothing yet.
  */
 export function qaReleaseTrainSelectionFrom(input: {
   pick: { numbers: unknown; at: Date; by: string | null } | null;
   admission: { slot: string; at: Date } | null;
+  lastTrain: QaReleaseTrainLastTrain | null;
 }): QaReleaseTrainSelection {
-  const { pick, admission } = input;
-  if (!pick) return { numbers: [], savedAt: null, savedBy: null, departedWith: null };
+  const { pick, admission, lastTrain } = input;
+  if (!pick) return { numbers: [], savedAt: null, savedBy: null, departedWith: null, lastTrain };
   const numbers = parseQaReleaseTrainCargoPick(pick.numbers) ?? [];
   const spent = admission !== null && admission.at.getTime() > pick.at.getTime();
+  const carried = spent && lastTrain?.slot === admission.slot ? lastTrain.carried.map((c) => c.number) : [];
   return {
-    numbers: spent ? [] : numbers,
+    numbers: spent ? carried : numbers,
     savedAt: pick.at.toISOString(),
     savedBy: pick.by,
     departedWith: spent ? admission.slot : null,
+    lastTrain,
   };
 }

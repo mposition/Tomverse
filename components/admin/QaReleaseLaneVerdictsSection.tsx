@@ -8,16 +8,17 @@ import { shouldIssueAdminPoll, type AdminPollTrigger } from "@/lib/adminPollTick
 import { card } from "@/components/admin/qaReleaseTabParts";
 import { adminQaReleaseLaneMessages } from "@/lib/adminMessages/qaReleaseLane";
 import { aestClock } from "@/lib/agentOffice/time";
+import { qaReleaseLaneLiveVerdicts } from "@/lib/qaReleaseLaneLiveCore";
 import type { QaReleaseLaneRoundVerdict, QaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 
 const REPO = "https://github.com/mposition/Tomverse";
 const REFRESH_MS = 20_000;
 
-type LaneRead = { rounds: QaReleaseLaneRounds; open: number[] | null };
+type LaneRead = { rounds: QaReleaseLaneRounds; github: { open: number[]; ciRunning: number[] } | null };
 
 /**
- * The lane's record and the pull requests open on GitHub now
- * (/api/admin/qa-release/lane), read at once and every 20 seconds while the
+ * The lane's record and what GitHub shows now -- the open pull requests and
+ * those whose CI runs (/api/admin/qa-release/lane) -- read at once and every 20 seconds while the
  * page is visible, on the console's refresh and when the tab comes back.
  * Null until the first answer.
  */
@@ -91,10 +92,9 @@ export function QaReleaseLaneVerdictsSection({ rounds: initial, latched }: { rou
   const read = useLaneRead();
   const rounds = read?.rounds ?? initial;
   const latest = rounds.rounds[0] ?? null;
-  // A pull request closed or merged since the lane judged it is gone from
-  // GitHub's open list: it leaves the page before the lane's next round.
-  const open = read?.open ? new Set(read.open) : null;
-  const list = (rounds.verdicts?.list ?? []).filter((verdict) => !open || open.has(verdict.number));
+  // Between the lane's rounds: closed or merged pull requests leave, and
+  // finished CI stops saying it runs (lib/qaReleaseLaneLiveCore.ts).
+  const list = qaReleaseLaneLiveVerdicts(rounds.verdicts?.list ?? [], read?.github ?? null);
   const by = (status: QaReleaseLaneRoundVerdict["status"][]) => list.filter((v) => status.includes(v.status));
   const human = by(["human"]);
   const fix = by(["fix"]);

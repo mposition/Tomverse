@@ -212,3 +212,24 @@ test("voice server refusal retains its cause and never submits the draft", async
   await expect(page.getByRole("alert")).toContainText("현재 서버에서 음성 입력을 사용할 수 없습니다");
   await expect(page.locator("article.user")).toHaveCount(0);
 });
+
+test("an answer can be reported from the app, and the report names that answer", async ({ page }) => {
+  await signIn(page); await send(page, "신고할 답변을 만들어 줘");
+  const report = page.getByTestId("answer-report").last();
+  await expect(report).toHaveText("해당 답변의 문제 신고");
+  await report.click();
+  const dialog = page.getByRole("dialog", { name: "해당 답변의 문제 신고" });
+  await dialog.getByRole("textbox").fill("짧음");
+  await dialog.getByRole("button", { name: "신고 보내기" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("5자 이상");
+  await dialog.getByRole("textbox").fill("카페인 설명이 틀렸습니다.");
+  await dialog.getByRole("button", { name: "신고 보내기" }).click();
+  await expect(dialog.getByRole("status")).toContainText("신고를 보냈습니다");
+  await expect(dialog.getByRole("status")).toContainText("접수 번호 TV-DEMO-1");
+  await page.screenshot({ path: resolve(output, "answer-report-dark.png") });
+  const reports = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo:reports") ?? "[]"));
+  expect(reports).toHaveLength(1);
+  expect(reports[0].message).toBe("카페인 설명이 틀렸습니다.");
+  const answers = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0].messages.filter((m: { role: string }) => m.role === "assistant").map((m: { id: string }) => m.id));
+  expect(answers).toContain(reports[0].messageId);
+});
