@@ -75,6 +75,10 @@ export function ConversationHistory({ transport, language, owner, chats, current
   const models = [...new Set(chats.filter(chat => chat.kind !== 'image').flatMap(chat => chat.selectedModels ?? []))];
   function item(label: string, work: () => void, blocked = false) { return <button disabled={busy || disabled || unknown || blocked || !history} onClick={work}>{label}</button>; }
   const close = () => { if (!busy) { setSelected(null); setValue(''); setLink(''); } };
+  async function copyLink() {
+    try { await navigator.clipboard.writeText(link); setCopied(true); }
+    catch { document.querySelector<HTMLInputElement>('.history-share-link')?.select(); setError(c.copyManually); }
+  }
   const report = <>{error && <p role="alert">{error}</p>}{unknown && <button disabled={busy} onClick={() => void run(async () => { await Promise.all([transport.list(), transport.listReview?.(), history?.projects()]); await refresh(); localStorage.removeItem(marker); setUnknown(false); setError(''); }, false)}>{c.check}</button>}</>;
   const form = (fields: ReactNode, work: () => Promise<unknown>, allowed = true, mutation = true, after?: () => void) => <form onSubmit={event => { event.preventDefault(); void run(work, mutation, after); }}>{fields}<button className="primary" disabled={busy || disabled || unknown || !allowed || !history}>{c.confirm}</button></form>;
   return <>
@@ -109,7 +113,7 @@ export function ConversationHistory({ transport, language, owner, chats, current
         {item(selected.isLocked ? c.unlock : c.lock, () => { setAction(selected.isLocked ? 'unlock' : 'lock'); setValue(''); })}
       </> : action === 'rename' ? form(<label>{c.title}<input value={value} maxLength={100} onChange={event => setValue(event.target.value)} /></label>, () => history!.rename(selected.id, value.trim()), Boolean(value.trim()), true, () => { onChanged(selected.id); close(); })
         : action === 'move' ? form(<label>{c.projects}<select aria-label={c.projects} value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">{c.noProject}</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>, () => history!.move(selected.id, projectId || null), true, true, close)
-        : action === 'share' ? link ? <><label>{c.link}<input value={link} readOnly /></label><button onClick={() => void navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => setError(c.error))}>{copied ? c.copied : c.copy}</button></> : form(<p>{c.shareNotice}</p>, async () => { const result = await history!.share(selected.id); setLink(result.url); })
+        : action === 'share' ? link ? <><label>{c.link}<input className="history-share-link" value={link} readOnly /></label><button onClick={() => void copyLink()}>{copied ? c.copied : c.copy}</button></> : form(<p>{c.shareNotice}</p>, async () => { const result = await history!.share(selected.id); setLink(result.url); })
         : action === 'remove' ? form(<p>{c.deleteNotice}</p>, () => history!.remove(selected.id), true, true, () => { onChanged(selected.id, true); close(); })
         : action === 'sourceDownload' ? form(<p>{c.sourceNotice}</p>, () => history!.export(selected.id, selected.title, true), true, false)
         : form(<label>{action === 'unlock' ? c.currentPassword : c.password}<input type="password" autoComplete="off" value={value} maxLength={128} onChange={event => setValue(event.target.value)} /></label>, () => action === 'open' ? history!.unlock(selected.id, value) : history!.password(selected.id, action === 'unlock' ? null : value, action === 'unlock' ? value : undefined), value.length >= (action === 'lock' ? 8 : 1), action !== 'open', () => { const id = selected.id; setValue(''); setSearch(null); onChanged(id, false, action === 'lock'); if (action === 'open' && !openAfterUnlock) { setAction('menu'); setRevision(n => n + 1); } else { close(); if (action === 'open') onOpen(id); } })}

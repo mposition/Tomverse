@@ -97,3 +97,8 @@ test('Review reuses history controls and never treats multi-model images as comp
   await menu(page,'Image alternatives');await expect(page.getByRole('button',{name:'Share',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Download TXT',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Rename',exact:true})).toBeVisible();await close(page);
   await filter(page,'Comparisons');await expect(page.locator('.conversation-row')).toHaveCount(1);await expect(page.locator('.conversation-row')).toContainText('Review perspectives');
 });
+
+test('a WebView without clipboard support leaves the public link selectable',async({page})=>{
+  await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:undefined,configurable:true}));await menu(page);await page.getByRole('button',{name:'Share',exact:true}).click();await page.getByRole('button',{name:'Confirm',exact:true}).click();await page.getByRole('button',{name:'Copy link',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Press and hold the link');await expect(page.getByLabel('Share link')).toHaveValue('https://tomverse.app/share/fixture-travel');await expect(page.getByRole('button',{name:'Copied',exact:true})).toHaveCount(0);
+});
