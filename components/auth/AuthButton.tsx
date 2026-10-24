@@ -2,6 +2,7 @@
 "use client";
 
 import { UsagePercentGauge } from "@/components/chat/UsagePercentGauge";
+import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
 import { PwaInstallMenuItem } from "@/components/chat/PwaInstallMenuItem";
 import { usePwaInstall } from "@/components/chat/usePwaInstall";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
@@ -1711,6 +1712,7 @@ export function AuthButton({
 
                                 {activeSettingsTab === "ai" && (
                                     <div className="space-y-4">
+                                        <ReviewProviderDefaultsSettings key={session.user.id} />
                                         {/*
                                           Three decisions about what the models
                                           are told, in the order they take

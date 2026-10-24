@@ -27,6 +27,7 @@ type World = {
   leadWrites: string[];
   rejectionCalls: Array<{ modelIds: readonly string[]; leadModelId?: string }>;
   audits: string[];
+  reviewWrites: string[][];
 };
 
 let world: World;
@@ -76,6 +77,12 @@ async function loadRoute(): Promise<{ PATCH: (request: Request) => Promise<Respo
     });
     const off = async () => false;
     const noop = async () => {};
+    mock.module(mod("lib/reviewProviderDefaults.ts"), {
+      namedExports: {
+        getAdminReviewProviderDefaults: async () => ({ reviewEasyDefaultProviders: ["openai"], reviewEasyProviderOptions: ["openai", "google", "anthropic"] }),
+        updatePlatformReviewProviderDefaults: async (providers: string[]) => { world.reviewWrites.push(providers); },
+      },
+    });
     mock.module(mod("lib/appSettings.ts"), {
       namedExports: {
         getMemoryExtractionRevokedPairs: async () => ({ kind: "none" }),
@@ -132,11 +139,40 @@ const reset = (overrides: Partial<World> = {}) => {
     leadWrites: [],
     rejectionCalls: [],
     audits: [],
+    reviewWrites: [],
     ...overrides,
   };
 };
 
 const LINEUP = ["gpt-6-luna", "claude-sonnet-5", "gemini-flash-lite-latest"];
+
+test("an accepted Review default save uses its own write path", async () => {
+  reset();
+  const { PATCH } = await loadRoute();
+  const response = await PATCH(patch({ reviewEasyDefaultProviders: ["google", "openai"] }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(world.reviewWrites, [["google", "openai"]]);
+  assert.deepEqual(world.lineupWrites, []);
+  assert.deepEqual(world.leadWrites, []);
+});
+
+test("Review defaults refuse unknown, duplicated and mixed settings writes", async () => {
+  reset();
+  const { PATCH } = await loadRoute();
+  for (const body of [
+    { reviewEasyDefaultProviders: ["unknown"] },
+    { reviewEasyDefaultProviders: ["openai", "openai"] },
+    { reviewEasyDefaultProviders: ["google"], guestDefaultModelId: "gpt-6-luna" },
+  ]) assert.equal((await PATCH(patch(body))).status, 400);
+  assert.deepEqual(world.reviewWrites, []);
+});
+
+test("Review defaults keep the existing administrator write permission", async () => {
+  reset({ canWrite: false });
+  const { PATCH } = await loadRoute();
+  assert.equal((await PATCH(patch({ reviewEasyDefaultProviders: ["google"] }))).status, 403);
+  assert.deepEqual(world.reviewWrites, []);
+});
 
 test("an accepted lineup is audited under its own action and stored with its lead", async () => {
   reset();

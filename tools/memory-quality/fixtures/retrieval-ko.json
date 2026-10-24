@@ -1,0 +1,477 @@
+{
+  "version": "memory-quality-retrieval-ko-v1",
+  "source": "synthetic",
+  "pools": {
+    "ko-account-a": [
+      {
+        "id": "c1",
+        "statement": "사용자는 백엔드 개발자로 일한다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "occupation"
+      },
+      {
+        "id": "c2",
+        "statement": "사용자는 수영 코치 자격증 취득을 장기 목표로 삼는다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "long_term_goal"
+      },
+      {
+        "id": "c3",
+        "statement": "사용자는 평일 저녁에만 공부할 시간이 있다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "constraint"
+      },
+      {
+        "id": "s1",
+        "statement": "사용자는 자세한 설명을 선호한다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "explanation_depth"
+      },
+      {
+        "id": "r01",
+        "statement": "사용자는 커피를 마시지 않는다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "preference"
+      },
+      {
+        "id": "r02",
+        "statement": "사용자는 집에서 고양이 두 마리를 키운다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "relationship"
+      },
+      {
+        "id": "r03",
+        "statement": "사용자는 최근 전기차를 새로 샀다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "decision"
+      },
+      {
+        "id": "r04",
+        "statement": "사용자는 서울 마포구에 산다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "recurring_context"
+      },
+      {
+        "id": "r05",
+        "statement": "사용자는 파이썬으로 가계부 앱을 만들고 있다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "project"
+      },
+      {
+        "id": "r06",
+        "statement": "사용자는 커피숍에서 일하는 것을 좋아한다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "preference"
+      },
+      {
+        "id": "r07",
+        "statement": "사용자는 등산을 즐긴다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "preference"
+      },
+      {
+        "id": "r08",
+        "statement": "사용자는 다음 달 일본 오사카 여행을 계획하고 있다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "project"
+      },
+      {
+        "id": "r09",
+        "statement": "사용자는 매운 음식을 못 먹는다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "preference"
+      },
+      {
+        "id": "r10",
+        "statement": "사용자는 여동생이 한 명 있다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "relationship"
+      },
+      {
+        "id": "r11",
+        "statement": "사용자는 책을 종이책으로 읽는 것을 좋아한다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "preference"
+      },
+      {
+        "id": "r12",
+        "statement": "사용자는 TypeScript와 Next.js로 블로그를 운영한다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "project"
+      },
+      {
+        "id": "r13",
+        "statement": "사용자는 아침마다 달리기를 한다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "recurring_context"
+      },
+      {
+        "id": "r14",
+        "statement": "사용자는 올해 영어 회화 학원에 등록했다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "decision"
+      },
+      {
+        "id": "r15",
+        "statement": "사용자는 재즈 음악을 즐겨 듣는다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "preference"
+      },
+      {
+        "id": "r16",
+        "statement": "사용자는 매주 토요일에 부모님 댁을 방문한다.",
+        "status": "active",
+        "forbidden": false,
+        "kind": "recurring_context"
+      },
+      {
+        "id": "z1",
+        "statement": "사용자는 예전에 라떼를 즐겨 마셨다.",
+        "status": "superseded",
+        "forbidden": false,
+        "kind": "preference"
+      },
+      {
+        "id": "x1",
+        "statement": "사용자의 은행 앱 비밀번호는 합성 고정값이다.",
+        "status": "active",
+        "forbidden": true,
+        "kind": "preference"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "ko-r01",
+      "language": "ko",
+      "tag": "particle",
+      "pool": "ko-account-a",
+      "query": "커피 말고 마실 만한 음료 추천해 줘",
+      "relevantIds": [
+        "r01"
+      ]
+    },
+    {
+      "id": "ko-r02",
+      "language": "ko",
+      "tag": "particle",
+      "pool": "ko-account-a",
+      "query": "고양이 사료 브랜드 추천해 줘",
+      "relevantIds": [
+        "r02"
+      ]
+    },
+    {
+      "id": "ko-r03",
+      "language": "ko",
+      "tag": "particle",
+      "pool": "ko-account-a",
+      "query": "마포구 근처 맛집 알려줘",
+      "relevantIds": [
+        "r04"
+      ]
+    },
+    {
+      "id": "ko-r04",
+      "language": "ko",
+      "tag": "particle",
+      "pool": "ko-account-a",
+      "query": "등산 갈 때 챙길 것",
+      "relevantIds": [
+        "r07"
+      ]
+    },
+    {
+      "id": "ko-r05",
+      "language": "ko",
+      "tag": "particle",
+      "pool": "ko-account-a",
+      "query": "음악 추천해 줘",
+      "relevantIds": [
+        "r15"
+      ]
+    },
+    {
+      "id": "ko-r06",
+      "language": "ko",
+      "tag": "one_syllable",
+      "pool": "ko-account-a",
+      "query": "집 청소 루틴 짜 줘",
+      "relevantIds": [
+        "r02"
+      ]
+    },
+    {
+      "id": "ko-r07",
+      "language": "ko",
+      "tag": "one_syllable",
+      "pool": "ko-account-a",
+      "query": "차 보험 갱신은 언제 해?",
+      "relevantIds": [
+        "r03"
+      ]
+    },
+    {
+      "id": "ko-r08",
+      "language": "ko",
+      "tag": "one_syllable",
+      "pool": "ko-account-a",
+      "query": "책 추천해 줘",
+      "relevantIds": [
+        "r11"
+      ]
+    },
+    {
+      "id": "ko-r09",
+      "language": "ko",
+      "tag": "one_syllable",
+      "pool": "ko-account-a",
+      "query": "요즘 읽을 만한 종이책 있어?",
+      "relevantIds": [
+        "r11"
+      ]
+    },
+    {
+      "id": "ko-r10",
+      "language": "ko",
+      "tag": "spacing",
+      "pool": "ko-account-a",
+      "query": "커피 숍에서 일하기 좋은 노트북",
+      "relevantIds": [
+        "r06"
+      ]
+    },
+    {
+      "id": "ko-r11",
+      "language": "ko",
+      "tag": "spacing",
+      "pool": "ko-account-a",
+      "query": "전기 차 충전 요금",
+      "relevantIds": [
+        "r03"
+      ]
+    },
+    {
+      "id": "ko-r12",
+      "language": "ko",
+      "tag": "spacing",
+      "pool": "ko-account-a",
+      "query": "가계 부 앱 기능 아이디어",
+      "relevantIds": [
+        "r05"
+      ]
+    },
+    {
+      "id": "ko-r13",
+      "language": "ko",
+      "tag": "ending",
+      "pool": "ko-account-a",
+      "query": "매운 음식 없는 메뉴 골라 줘",
+      "relevantIds": [
+        "r09"
+      ]
+    },
+    {
+      "id": "ko-r14",
+      "language": "ko",
+      "tag": "ending",
+      "pool": "ko-account-a",
+      "query": "달릴 때 들을 노래",
+      "relevantIds": [
+        "r13"
+      ]
+    },
+    {
+      "id": "ko-r15",
+      "language": "ko",
+      "tag": "ending",
+      "pool": "ko-account-a",
+      "query": "등산하러 가기 좋은 산",
+      "relevantIds": [
+        "r07"
+      ]
+    },
+    {
+      "id": "ko-r16",
+      "language": "ko",
+      "tag": "compound",
+      "pool": "ko-account-a",
+      "query": "여행 준비물 체크리스트",
+      "relevantIds": [
+        "r08"
+      ]
+    },
+    {
+      "id": "ko-r17",
+      "language": "ko",
+      "tag": "compound",
+      "pool": "ko-account-a",
+      "query": "자동차 관리 팁",
+      "relevantIds": [
+        "r03"
+      ]
+    },
+    {
+      "id": "ko-r18",
+      "language": "ko",
+      "tag": "compound",
+      "pool": "ko-account-a",
+      "query": "동생 생일 선물 추천",
+      "relevantIds": [
+        "r10"
+      ]
+    },
+    {
+      "id": "ko-r19",
+      "language": "ko",
+      "tag": "compound",
+      "pool": "ko-account-a",
+      "query": "영어 공부 방법 알려줘",
+      "relevantIds": [
+        "r14"
+      ]
+    },
+    {
+      "id": "ko-r20",
+      "language": "ko",
+      "tag": "synonym",
+      "pool": "ko-account-a",
+      "query": "운동 계획 세워 줘",
+      "relevantIds": [
+        "r07",
+        "r13"
+      ]
+    },
+    {
+      "id": "ko-r21",
+      "language": "ko",
+      "tag": "synonym",
+      "pool": "ko-account-a",
+      "query": "반려묘 건강 관리",
+      "relevantIds": [
+        "r02"
+      ]
+    },
+    {
+      "id": "ko-r22",
+      "language": "ko",
+      "tag": "synonym",
+      "pool": "ko-account-a",
+      "query": "가족 모임 일정 조율",
+      "relevantIds": [
+        "r16"
+      ]
+    },
+    {
+      "id": "ko-r23",
+      "language": "ko",
+      "tag": "nfd",
+      "pool": "ko-account-a",
+      "query": "재즈 공연 정보",
+      "relevantIds": [
+        "r15"
+      ]
+    },
+    {
+      "id": "ko-r24",
+      "language": "ko",
+      "tag": "nfd",
+      "pool": "ko-account-a",
+      "query": "오사카 맛집",
+      "relevantIds": [
+        "r08"
+      ]
+    },
+    {
+      "id": "ko-r25",
+      "language": "ko",
+      "tag": "mixed_script",
+      "pool": "ko-account-a",
+      "query": "Next.js 블로그 SEO 설정",
+      "relevantIds": [
+        "r12"
+      ]
+    },
+    {
+      "id": "ko-r26",
+      "language": "ko",
+      "tag": "mixed_script",
+      "pool": "ko-account-a",
+      "query": "파이썬 가계부 코드 리뷰",
+      "relevantIds": [
+        "r05"
+      ]
+    },
+    {
+      "id": "ko-r27",
+      "language": "ko",
+      "tag": "mixed_script",
+      "pool": "ko-account-a",
+      "query": "TypeScript 타입 에러 해결",
+      "relevantIds": [
+        "r12"
+      ]
+    },
+    {
+      "id": "ko-r28",
+      "language": "ko",
+      "tag": "core",
+      "pool": "ko-account-a",
+      "query": "코치 자격 준비를 도와줘",
+      "relevantIds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "ko-r29",
+      "language": "ko",
+      "tag": "abstain",
+      "pool": "ko-account-a",
+      "query": "오늘 날씨 어때?",
+      "relevantIds": []
+    },
+    {
+      "id": "ko-r30",
+      "language": "ko",
+      "tag": "abstain",
+      "pool": "ko-account-a",
+      "query": "피자 도우 만드는 법",
+      "relevantIds": []
+    },
+    {
+      "id": "ko-r31",
+      "language": "ko",
+      "tag": "inactive",
+      "pool": "ko-account-a",
+      "query": "라떼 맛있게 만드는 법",
+      "relevantIds": []
+    },
+    {
+      "id": "ko-r32",
+      "language": "ko",
+      "tag": "forbidden",
+      "pool": "ko-account-a",
+      "query": "은행 앱 추천해 줘",
+      "relevantIds": []
+    }
+  ]
+}

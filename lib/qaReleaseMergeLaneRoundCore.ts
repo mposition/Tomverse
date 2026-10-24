@@ -32,6 +32,15 @@ export type QaReleaseLaneRound =
   | { action: "idle" }
   | { action: "request_instruction"; pullRequest: QaReleaseLanePullRequest };
 
+/**
+ * Deployments that hold a new merge back (owner, 2026-10-23): those still
+ * waiting for CI, approval or a start. One already building or deploying has
+ * passed its CI and does not hold; the lane watches a failed one separately.
+ */
+export function qaReleaseHoldingDeployments<T extends { status: string }>(deployments: readonly T[]): T[] {
+  return (inFlightDeployments([...deployments]) as T[]).filter((deployment) => deployment.status !== "BUILDING" && deployment.status !== "DEPLOYING");
+}
+
 export function decideQaReleaseLaneRound(input: QaReleaseLaneRoundInput): QaReleaseLaneRound {
   if (input.latched === null || input.attemptOpen === null) return { action: "stop", reason: "state_unknown" };
   if (input.latched) return { action: "stop", reason: "latched" };
@@ -39,7 +48,7 @@ export function decideQaReleaseLaneRound(input: QaReleaseLaneRoundInput): QaRele
   // outcome is unknown, and both mean this round does nothing.
   if (input.attemptOpen) return { action: "stop", reason: "attempt_open" };
   if (!Array.isArray(input.developDeployments)) return { action: "stop", reason: "deployments_unknown" };
-  const inFlight = inFlightDeployments(input.developDeployments).length;
+  const inFlight = qaReleaseHoldingDeployments(input.developDeployments).length;
   if (inFlight > 0) return { action: "hold", reason: "deployment_in_flight", inFlight };
   if (input.selection.pick === null) return { action: "idle" };
   return { action: "request_instruction", pullRequest: input.selection.pick };
