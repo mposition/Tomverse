@@ -12,9 +12,7 @@ import { AMUX_V19_MAX_LAUNCHER_SECRET_ENV,
   "@/lib/amux/ideaSessionMaxLauncherAuth";
 import { AmuxTrackedCheckoutReadManifestError,
   prepareAmuxTrackedCheckoutReadManifest,
-  readAmuxMaxManifestIntentBinding,
-  readAmuxTrackedCheckoutReadManifestKeyIntentReceipt,
-  readAmuxTrackedCheckoutReadManifestReceipt,
+  readAmuxMaxManifestForClaim,
   recordAmuxTrackedCheckoutReadManifest } from
   "@/lib/amux/ideaTrackedCheckoutReadManifestStore";
 import { prisma } from "@/lib/prisma";
@@ -131,17 +129,11 @@ export async function GET(request: Request): Promise<Response> {
         SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
                set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
       `;
-      const intent = await readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(
-        tx, ideaId, referenceOrdinal);
-      if (!intent || !await readAmuxMaxManifestIntentBinding(tx, ideaId,
-        referenceOrdinal, intent.id, intent.auditLogId, claim)) return null;
-      const receipt = await readAmuxTrackedCheckoutReadManifestReceipt(tx,
-        ideaId, referenceOrdinal);
-      return { intent, receipt };
+      return readAmuxMaxManifestForClaim(tx, ideaId, referenceOrdinal, claim);
     }, { maxWait: 3_000, timeout: 10_000 });
     if (!readback) return amuxJsonNoStore({ status: "absent",
       ideaId, referenceOrdinal, retryWrite: false }, 404);
-    const { intent, receipt } = readback;
+    const { intent, manifest: receipt } = readback;
     if (!receipt) return amuxJsonNoStore({ status: "key_intent",
       manifestId: intent.id, ideaId, referenceOrdinal,
       pinnedCommitSha: intent.pinnedCommitSha,

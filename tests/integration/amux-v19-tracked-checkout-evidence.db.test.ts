@@ -236,8 +236,8 @@ test("verified CLI read paths persist encrypted with one canonical audit", async
     const receipt = await prisma.$transaction((tx) =>
       recordAmuxTrackedCheckoutReadManifest(tx, input, readKeys));
     assert.equal(receipt.fileCount, 2);
-    const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
-      where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
+    const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirstOrThrow({
+      where: { ideaId, referenceOrdinal: 0 },
     });
     const intent = await prisma.amuxIdeaReadManifestKeyIntent.findUniqueOrThrow({
       where: { id: manifestId },
@@ -433,8 +433,8 @@ test("database rejects mismatched canonical audit and mutation of stored evidenc
 });
 
 test("seven-day read-manifest purge clears paths and retires only its key", async () => {
-  const manifest = await prisma.amuxIdeaTrackedCheckoutReadManifest.findUniqueOrThrow({
-    where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal: 0 } },
+  const manifest = await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirstOrThrow({
+    where: { ideaId, referenceOrdinal: 0 },
   });
   assert.equal(await ownerMayReadManifest(authority.approvedByUserId,
     ideaId, manifest.id), true);

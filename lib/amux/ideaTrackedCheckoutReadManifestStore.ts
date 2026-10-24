@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import type { AmuxIdeaTrackedCheckoutReadManifest, Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "../adminAudit.ts";
 import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
@@ -49,9 +49,8 @@ function referenceAlreadyRecorded(error: unknown): boolean {
   return candidate.code === "P2002" &&
     candidate.meta?.modelName === "AmuxIdeaTrackedCheckoutReadManifest" &&
     Array.isArray(candidate.meta.target) &&
-    candidate.meta.target.length === 2 &&
-    candidate.meta.target[0] === "ideaId" &&
-    candidate.meta.target[1] === "referenceOrdinal";
+    candidate.meta.target.length === 1 &&
+    candidate.meta.target[0] === "id";
 }
 
 export function amuxTrackedCheckoutReadManifestKeyIdentity(
@@ -166,9 +165,17 @@ export async function recordAmuxTrackedCheckoutReadManifestKeyIntent(
     if (locked[0].pinnedCommitSha !== inspected.pinnedCommitSha) {
       throw new AmuxTrackedCheckoutReadManifestError("evidence_unavailable");
     }
+    // A Max claim is one analysis page and reserves one key per reference;
+    // the claimless writer keeps one per reference.
+    if (maxClaim
+      ? (await readMaxManifestIntentBindings(tx, inspected.ideaId,
+        inspected.referenceOrdinal, maxClaim.claimId)).length > 0
+      : await tx.amuxIdeaReadManifestKeyIntent.findFirst({
+        where: { ideaId: inspected.ideaId,
+          referenceOrdinal: inspected.referenceOrdinal }, select: { id: true },
+      })) throw new AmuxTrackedCheckoutReadManifestError("already_recorded");
     if (await tx.amuxIdeaReadManifestKeyIntent.findUnique({
-      where: { ideaId_referenceOrdinal: { ideaId: inspected.ideaId,
-        referenceOrdinal: inspected.referenceOrdinal } }, select: { id: true },
+      where: { id: inspected.manifestId }, select: { id: true },
     })) throw new AmuxTrackedCheckoutReadManifestError("already_recorded");
     const auditLogId = await writeSystemAuditLog({ tx,
       systemActor: AMUX_V19_READ_MANIFEST_AUDIT_ACTOR,
@@ -252,9 +259,12 @@ export async function recordAmuxTrackedCheckoutReadManifest(
     intent.auditLogId, maxClaim)) {
     throw new AmuxTrackedCheckoutReadManifestError("claim_unavailable");
   }
-  if (await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
-    where: { ideaId_referenceOrdinal: { ideaId: inspected.ideaId,
-      referenceOrdinal: inspected.referenceOrdinal } }, select: { id: true },
+  // The intent is this page's own (checked above for a Max claim), so its
+  // manifest is recorded once; the claimless writer keeps one per reference.
+  if (await tx.amuxIdeaTrackedCheckoutReadManifest.findFirst({
+    where: maxClaim ? { id: inspected.manifestId }
+      : { ideaId: inspected.ideaId, referenceOrdinal: inspected.referenceOrdinal },
+    select: { id: true },
   })) throw new AmuxTrackedCheckoutReadManifestError("already_recorded");
   const sealed = sealAmuxContent(inspected.plaintext,
     "repository_read_manifest", inspected.manifestId, keys);
@@ -338,17 +348,57 @@ export async function readAmuxMaxManifestIntentBinding(
     bound.keyIntentAuditLogId === keyIntentAuditLogId;
 }
 
-/** Content-free exact-reference readback for a worker whose POST outcome is
- * unknown. Never select ciphertext or the external content key here. */
+function readMaxManifestIntentBindings(tx: Prisma.TransactionClient,
+  ideaId: string, referenceOrdinal: number, claimId: string) {
+  return tx.adminAuditLog.findMany({ where: {
+    action: AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION,
+    targetType: AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET,
+    AND: [{ metadata: { path: ["claimId"], equals: claimId } },
+      { metadata: { path: ["ideaId"], equals: ideaId } },
+      { metadata: { path: ["referenceOrdinal"], equals: referenceOrdinal } }],
+  }, select: { targetId: true }, take: 2 });
+}
+
+const MANIFEST_RECEIPT = { id: true, ideaId: true, referenceOrdinal: true,
+  pinnedCommitSha: true, fileCount: true, digest: true,
+  digestKeyId: true, bodyPurgedAt: true } as const;
+const KEY_INTENT_RECEIPT = { id: true, ideaId: true, referenceOrdinal: true,
+  pinnedCommitSha: true, keyRetirementClaimedAt: true,
+  keyDeletedAt: true, auditLogId: true } as const;
+
+/** The one page a Max claim recorded for a reference: its key intent, proven
+ * by the intent's claim binding, and that intent's manifest once recorded.
+ * Null when the claim bound none; a second binding is an integrity failure. */
+export async function readAmuxMaxManifestForClaim(
+  tx: Prisma.TransactionClient, ideaId: string, referenceOrdinal: number,
+  claim: AmuxMaxCheckoutClaim,
+) {
+  const bindings = await readMaxManifestIntentBindings(tx, ideaId,
+    referenceOrdinal, claim.claimId);
+  if (bindings.length === 0) return null;
+  const intentId = bindings[0]?.targetId;
+  if (bindings.length !== 1 || !intentId) {
+    throw new Error("read_manifest_claim_ambiguous");
+  }
+  const intent = await tx.amuxIdeaReadManifestKeyIntent.findUnique({
+    where: { id: intentId }, select: KEY_INTENT_RECEIPT });
+  if (!intent || intent.ideaId !== ideaId ||
+      intent.referenceOrdinal !== referenceOrdinal ||
+      !await readAmuxMaxManifestIntentBinding(tx, ideaId, referenceOrdinal,
+        intent.id, intent.auditLogId, claim)) return null;
+  const manifest = await tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
+    where: { id: intent.id }, select: MANIFEST_RECEIPT });
+  return { intent, manifest };
+}
+
+/** Content-free exact-reference readback for a claimless worker whose POST
+ * outcome is unknown. Never select ciphertext or the external content key
+ * here. Max pages read by claim instead (readAmuxMaxManifestForClaim). */
 export async function readAmuxTrackedCheckoutReadManifestReceipt(
   tx: Prisma.TransactionClient, ideaId: string, referenceOrdinal: number,
 ) {
-  return tx.amuxIdeaTrackedCheckoutReadManifest.findUnique({
-    where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal } },
-    select: { id: true, ideaId: true, referenceOrdinal: true,
-      pinnedCommitSha: true, fileCount: true, digest: true,
-      digestKeyId: true, bodyPurgedAt: true },
-  });
+  return onlyRow(await tx.amuxIdeaTrackedCheckoutReadManifest.findMany({
+    where: { ideaId, referenceOrdinal }, select: MANIFEST_RECEIPT, take: 2 }));
 }
 
 /** A content-free pending-key receipt when the manifest write never reached
@@ -356,12 +406,14 @@ export async function readAmuxTrackedCheckoutReadManifestReceipt(
 export async function readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(
   tx: Prisma.TransactionClient, ideaId: string, referenceOrdinal: number,
 ) {
-  return tx.amuxIdeaReadManifestKeyIntent.findUnique({
-    where: { ideaId_referenceOrdinal: { ideaId, referenceOrdinal } },
-    select: { id: true, ideaId: true, referenceOrdinal: true,
-      pinnedCommitSha: true, keyRetirementClaimedAt: true,
-      keyDeletedAt: true, auditLogId: true },
-  });
+  return onlyRow(await tx.amuxIdeaReadManifestKeyIntent.findMany({
+    where: { ideaId, referenceOrdinal }, select: KEY_INTENT_RECEIPT, take: 2 }));
+}
+
+/** A reference with several pages has no single claimless receipt. */
+function onlyRow<T>(rows: T[]): T | null {
+  if (rows.length > 1) throw new Error("read_manifest_reference_ambiguous");
+  return rows[0] ?? null;
 }
 
 /** Database-clock access fence, shared by the Admin reader and DB test. */
@@ -384,15 +436,32 @@ export async function ownerMayReadManifest(
   return rows.length === 1 && rows[0].allowed === true;
 }
 
-/** Owner-scoped Admin read. Key retrieval happens after the read transaction,
- * since the external key store must not occupy a DB transaction. */
+/** Owner-scoped Admin read of every page's files for one reference, in page
+ * order and without repeats. Key retrieval happens after the read query, since
+ * the external key store must not occupy a DB transaction. */
 export async function readAmuxTrackedCheckoutReadManifestForOwner(
   actorUserId: string, ideaId: string, referenceOrdinal: number,
 ): Promise<{ pinnedCommitSha: string; files: string[] } | null> {
-  const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirst({
+  const rows = await prisma.amuxIdeaTrackedCheckoutReadManifest.findMany({
     where: { ideaId, referenceOrdinal, idea: { actorUserId } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
-  if (!row) return null;
+  if (rows.length === 0) return null;
+  const files = new Set<string>();
+  for (const row of rows) {
+    const page = await readOwnerManifestPage(actorUserId, ideaId, row);
+    if (!page) return null;
+    if (page.pinnedCommitSha !== rows[0]!.pinnedCommitSha) {
+      throw new Error("read_manifest_integrity_unavailable");
+    }
+    for (const file of page.files) files.add(file);
+  }
+  return { pinnedCommitSha: rows[0]!.pinnedCommitSha, files: [...files] };
+}
+
+async function readOwnerManifestPage(actorUserId: string, ideaId: string,
+  row: AmuxIdeaTrackedCheckoutReadManifest,
+): Promise<{ pinnedCommitSha: string; files: string[] } | null> {
   // The retention worker may be delayed. Its lag never extends Admin access
   // beyond the absolute seven-day deadline unless a valid hold is active.
   if (!await ownerMayReadManifest(actorUserId, ideaId, row.id)) return null;

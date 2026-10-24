@@ -122,9 +122,19 @@ export async function recordAmuxTrackedCheckoutEvidence(
       pinned[inspected.referenceOrdinal] !== inspected.pinnedCommitSha) {
     throw new AmuxTrackedCheckoutEvidenceError("reference_unpinned");
   }
-  if (await readAmuxTrackedCheckoutEvidence(tx, inspected.ideaId,
-    inspected.referenceOrdinal)) {
-    throw new AmuxTrackedCheckoutEvidenceError("already_recorded");
+  const existing = await readAmuxTrackedCheckoutEvidence(tx, inspected.ideaId,
+    inspected.referenceOrdinal);
+  if (existing) {
+    // A continuation page checks out the same pinned reference under its own
+    // claim. Its proof is the same checkout, so the recorded evidence is bound
+    // to that claim too; anything else is still a second recording.
+    if (!maxClaim || !sameCheckoutProof(existing, inspected) ||
+        (await readMaxClaimBindings(tx, existing.evidenceId, maxClaim.claimId))
+          .length > 0) {
+      throw new AmuxTrackedCheckoutEvidenceError("already_recorded");
+    }
+    await bindEvidenceToMaxClaim(tx, existing, maxClaim);
+    return existing;
   }
 
   const evidenceId = randomUUID();
@@ -154,23 +164,54 @@ export async function recordAmuxTrackedCheckoutEvidence(
   const stored = await readAmuxTrackedCheckoutEvidence(tx,
     inspected.ideaId, inspected.referenceOrdinal);
   if (!stored) throw new AmuxTrackedCheckoutEvidenceError("invalid_evidence");
-  if (maxClaim) {
-    await writeSystemAuditLog({ tx,
-      systemActor: AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
-      action: AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION,
-      targetType: AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET,
-      targetId: evidenceId,
-      summary: "Bound AMUX v19 checkout evidence to one Max analysis claim.",
-      metadata: { claimId: maxClaim.claimId,
-        requestId: maxClaim.requestId,
-        reservationId: maxClaim.reservationId,
-        invocationOrdinal: maxClaim.invocationOrdinal,
-        ideaId: inspected.ideaId,
-        referenceOrdinal: inspected.referenceOrdinal,
-        evidenceAuditLogId: auditLogId },
-    });
-  }
+  if (maxClaim) await bindEvidenceToMaxClaim(tx, stored, maxClaim);
   return stored;
+}
+
+type InspectedCheckoutEvidence =
+  NonNullable<ReturnType<typeof inspectAmuxTrackedCheckoutEvidence>>;
+
+/** The same pinned checkout yields the same aggregate proof on every page. */
+function sameCheckoutProof(stored: AmuxTrackedCheckoutEvidenceRead,
+  inspected: InspectedCheckoutEvidence): boolean {
+  return stored.pinnedCommitSha === inspected.pinnedCommitSha &&
+    stored.excludedCount === inspected.excludedCount &&
+    stored.excludedReasons.secret_path === inspected.excludedSecretPathCount &&
+    stored.excludedReasons.secret_content === inspected.excludedSecretContentCount &&
+    stored.excludedReasons.non_regular === inspected.excludedNonRegularCount &&
+    stored.excludedReasons.unscannable_content === inspected.excludedUnscannableCount &&
+    stored.excludedPathDigest === inspected.excludedPathDigest &&
+    stored.excludedPathDigestKeyId === inspected.excludedPathDigestKeyId;
+}
+
+async function bindEvidenceToMaxClaim(tx: Prisma.TransactionClient,
+  evidence: AmuxTrackedCheckoutEvidenceRead, maxClaim: AmuxMaxCheckoutClaim,
+): Promise<void> {
+  await writeSystemAuditLog({ tx,
+    systemActor: AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
+    action: AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION,
+    targetType: AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET,
+    targetId: evidence.evidenceId,
+    summary: "Bound AMUX v19 checkout evidence to one Max analysis claim.",
+    metadata: { claimId: maxClaim.claimId,
+      requestId: maxClaim.requestId,
+      reservationId: maxClaim.reservationId,
+      invocationOrdinal: maxClaim.invocationOrdinal,
+      ideaId: evidence.ideaId,
+      referenceOrdinal: evidence.referenceOrdinal,
+      evidenceAuditLogId: evidence.auditLogId },
+  });
+}
+
+/** One evidence row may carry one binding per claim (one per page). */
+function readMaxClaimBindings(tx: Prisma.TransactionClient, evidenceId: string,
+  claimId: string) {
+  return tx.adminAuditLog.findMany({ where: {
+    action: AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION,
+    targetType: AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET,
+    targetId: evidenceId,
+    metadata: { path: ["claimId"], equals: claimId },
+  }, take: 2 });
 }
 
 /** The audit lock precedes this claim lock, matching budget settlement. */
@@ -213,11 +254,8 @@ export async function readAmuxMaxTrackedCheckoutEvidence(tx: Prisma.TransactionC
   const evidence = await readAmuxTrackedCheckoutEvidence(tx, ideaId,
     referenceOrdinal);
   if (!evidence) return null;
-  const bindings = await tx.adminAuditLog.findMany({ where: {
-    action: AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION,
-    targetType: AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET,
-    targetId: evidence.evidenceId,
-  }, take: 2 });
+  const bindings = await readMaxClaimBindings(tx, evidence.evidenceId,
+    claim.claimId);
   const audit = bindings[0];
   const metadata = audit?.metadata;
   const bound = metadata && typeof metadata === "object" &&

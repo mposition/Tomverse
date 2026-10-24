@@ -156,11 +156,17 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           'nonRegular', e."excludedNonRegularCount",
           'unscannableContent', e."excludedUnscannableCount",
           'readFileCount', m."fileCount", 'readDigest', m."digest",
-          'readBodyPurged', m."bodyPurgedAt" IS NOT NULL)
+          'readBodyPurged', COALESCE(m."bodyPurged", false))
           ORDER BY e."referenceOrdinal")
         FROM "AmuxIdeaTrackedCheckoutEvidence" e
-        LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m
-          ON m."ideaId" = e."ideaId" AND m."referenceOrdinal" = e."referenceOrdinal"
+        -- One manifest per analysis page: files summed over the pages, the
+        -- first page's digest, purged once every page is.
+        LEFT JOIN LATERAL (SELECT SUM(p."fileCount")::int AS "fileCount",
+            (array_agg(p."digest" ORDER BY p."createdAt", p."id"))[1] AS "digest",
+            bool_and(p."bodyPurgedAt" IS NOT NULL) AS "bodyPurged"
+          FROM "AmuxIdeaTrackedCheckoutReadManifest" p
+          WHERE p."ideaId" = e."ideaId" AND p."referenceOrdinal" = e."referenceOrdinal") m
+          ON true
         WHERE e."ideaId" = n."id") AS "checkoutEvidence"
     FROM newest n
     ORDER BY n."submittedAt" DESC, n."id" ASC

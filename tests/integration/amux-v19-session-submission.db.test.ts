@@ -81,9 +81,12 @@ import { GET as readMaxCheckoutEvidenceRoute,
   "@/app/api/internal/amux/v19/max-checkout-evidence/route";
 import { GET as readMaxManifestRoute } from
   "@/app/api/internal/amux/v19/max-read-manifest/route";
-import { readAmuxMaxTrackedCheckoutEvidence } from
+import { AmuxTrackedCheckoutEvidenceError, readAmuxMaxTrackedCheckoutEvidence,
+  recordAmuxTrackedCheckoutEvidence } from
   "@/lib/amux/ideaTrackedCheckoutEvidenceStore";
-import { amuxTrackedCheckoutReadManifestKeyIdentity,
+import { AmuxTrackedCheckoutReadManifestError,
+  amuxTrackedCheckoutReadManifestKeyIdentity,
+  readAmuxMaxManifestForClaim,
   readAmuxMaxManifestIntentBinding,
   recordAmuxTrackedCheckoutReadManifestKeyIntent,
   recordAmuxTrackedCheckoutReadManifest } from
@@ -2328,4 +2331,175 @@ test("the owner's per-idea model choice is admitted only for an approved Frontie
   await prisma.$transaction((tx) =>
     commitFrontierCatalogDecision(tx, { session, request, decision: revoke.request }));
   assert.equal(await admitted("anthropic", chosenModelId, "max"), false);
+});
+
+test("a continuation page reuses the reference's checkout evidence and keeps its own read manifest", async () => {
+  // Earlier tests supersede the scope; this one runs under the current version.
+  const pageModelId = "synthetic-continuation-model-" + randomUUID();
+  const frontier = inspectFrontierCatalogWrite(JSON.stringify({
+    schemaVersion: 1, action: "approve", approvalId: randomUUID(),
+    provider: "anthropic", modelId: pageModelId, allowedEfforts: ["high"],
+    expectedPreviousVersion: 0, ownerConfirmedFrontierEligibility: true,
+  }));
+  if (!frontier.ok) throw new Error("Synthetic Max model rejected: " + frontier.code);
+  await prisma.$transaction((tx) =>
+    commitFrontierCatalogDecision(tx, { session, request, decision: frontier.request }));
+  const current = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
+  if (!current) throw new Error("No operating scope is stored");
+  await prisma.$transaction((tx) => commitAmuxOperatingScope(tx, {
+    session, request, id: randomUUID(), expectedPreviousVersion: current.version,
+    scope: { ...scope, model: { provider: "anthropic", modelId: pageModelId,
+      reasoningEffort: "high" } }, ownerConfirmed: true,
+  }));
+  const pageAuthority = await prisma.$transaction((tx) => readAmuxOperatingScopeAuthority(tx));
+  if (!pageAuthority) throw new Error("No operating scope is stored");
+  const latestBudget = await prisma.amuxIdeaAnalysisBudgetSetting.findFirst({
+    orderBy: { version: "desc" }, select: { version: true } });
+  await prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, {
+    session, request, id: randomUUID(),
+    expectedPreviousVersion: latestBudget?.version ?? 0,
+    monthlyUsd: "1000", ownerConfirmed: true,
+  }));
+  const priceVersionId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisPriceApproval(tx, {
+    session, request, approval: {
+      id: priceVersionId, provider: "anthropic", modelId: pageModelId,
+      mode: "subscription_cli", expectedPreviousVersion: 0,
+      inputTokensCap: 1000, outputTokensCap: 1000,
+      inputMicroUsdPerMillion: 1_000_000, outputMicroUsdPerMillion: 1_000_000,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      ownerConfirmedWorstTier: true,
+      verifiedAt: new Date(Date.now() - 60_000),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
+    },
+  }));
+  const ideaId = randomUUID();
+  const reservation = await prisma.$transaction(async (tx) => {
+    const submission = await commitAmuxIdeaSessionSubmission(tx, {
+      inspected: inspect(ideaId), expectedAuthority: pageAuthority, ideaId,
+      keys: keysFor(ideaId),
+    });
+    return commitAmuxSessionAnalysisReservation(tx, {
+      ideaId, requestId: submission.requestId,
+      submissionAuditId: submission.auditId, authority: pageAuthority,
+    });
+  });
+  const openPage = async (invocationOrdinal: number) => {
+    const page = { claimId: randomUUID(), requestId: randomUUID(),
+      reservationId: reservation.reservationId, invocationOrdinal };
+    await prisma.$transaction((tx) => commitAmuxSessionBudgetClaim(tx, {
+      ...page, priceVersionId,
+      maxLauncherIdentity: { ideaId, provider: "anthropic", modelId: pageModelId,
+        reasoningEffort: "high",
+        authEvidenceDigest: randomBytes(32).toString("hex") },
+      runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
+        maxSubscriptionAuthenticated: true },
+    }));
+    return page;
+  };
+  const first = await openPage(0);
+  const pin = await readAmuxSessionReferencePin({
+    reservationId: reservation.reservationId, ideaId, claimId: first.claimId,
+    referenceOrdinal: 0 });
+  const pinnedCommitSha = pin?.pinnedCommitSha;
+  if (!pinnedCommitSha) throw new Error("Reference pin missing");
+  assert.equal(pin.referenceCount, 1);
+  const proof = { ideaId, referenceOrdinal: 0, pinnedCommitSha,
+    excludedCount: 1, excludedPathDigest: "c".repeat(64),
+    excludedPathDigestKeyId: "synthetic-continuation-digest",
+    excludedReasons: { secret_path: 1, secret_content: 0, non_regular: 0,
+      unscannable_content: 0 } };
+  const recordPage = async (claim: typeof first, manifestId: string,
+    readFiles: string[]) => {
+    const input = { manifestId, ideaId, referenceOrdinal: 0, pinnedCommitSha,
+      observed: { kind: "verified_success" as const, readFiles } };
+    await prisma.$transaction((tx) =>
+      recordAmuxTrackedCheckoutReadManifestKeyIntent(tx, input, claim));
+    const keys = { masterKeyId: amuxContentUnitKeyId(
+      amuxTrackedCheckoutReadManifestKeyIdentity(ideaId, manifestId)),
+      masterKeyVersion: 1, masterKey: randomBytes(32),
+      digestKeyId: "synthetic-continuation-read-digest", digestKey: randomBytes(32) };
+    try {
+      return await prisma.$transaction((tx) =>
+        recordAmuxTrackedCheckoutReadManifest(tx, input, keys, claim));
+    } finally { keys.masterKey.fill(0); keys.digestKey.fill(0); }
+  };
+  const evidence = await prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, proof, first));
+  const firstManifestId = randomUUID();
+  await recordPage(first, firstManifestId, ["README.md"]);
+  await prisma.$transaction(async (tx) => {
+    await commitAmuxSessionBudgetOutcome(tx, { claimId: first.claimId,
+      outcome: "verified_success", inputTokens: 10, outputTokens: 1,
+      requiredBudgetMode: "max_shadow",
+      exactAgentClaim: { requestId: first.requestId,
+        reservationId: first.reservationId, ideaId, invocationOrdinal: 0 },
+      cliAttestation: { provider: "anthropic", modelAttestation: "served",
+        cliSha256: "e".repeat(64) } });
+    await tx.amuxIdeaSubmission.update({ where: { id: ideaId },
+      data: { state: "analyzing" } });
+  });
+
+  const second = await openPage(1);
+  const refused = (code: string) => (error: unknown) =>
+    error instanceof AmuxTrackedCheckoutEvidenceError && error.code === code;
+  // A different checkout is not the same proof, so it is still a second recording.
+  await assert.rejects(prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, { ...proof, excludedCount: 2,
+      excludedReasons: { ...proof.excludedReasons, secret_path: 2 } }, second)),
+  refused("already_recorded"));
+  // Without a claim there is no page to bind the existing proof to.
+  await assert.rejects(prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, proof)), refused("already_recorded"));
+  const reused = await prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, proof, second));
+  assert.equal(reused.evidenceId, evidence.evidenceId);
+  assert.equal(await prisma.amuxIdeaTrackedCheckoutEvidence.count({
+    where: { ideaId } }), 1);
+  await assert.rejects(prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, proof, second)),
+  refused("already_recorded"), "one binding per claim");
+  for (const page of [first, second]) {
+    assert.equal((await prisma.$transaction((tx) =>
+      readAmuxMaxTrackedCheckoutEvidence(tx, ideaId, 0, page)))?.evidenceId,
+    evidence.evidenceId, "each page reads the shared proof through its own binding");
+  }
+  assert.equal(await prisma.$transaction((tx) =>
+    readAmuxMaxTrackedCheckoutEvidence(tx, ideaId, 0,
+      { ...second, requestId: randomUUID() })), null);
+
+  // The continuation records the files its own CLI read under a new key.
+  const secondManifestId = randomUUID();
+  const saved = await recordPage(second, secondManifestId,
+    ["README.md", "lib/amux/ideaLocalMaxSessionCycle.mjs"]);
+  assert.equal(saved.manifestId, secondManifestId);
+  assert.equal(saved.fileCount, 2);
+  await assert.rejects(recordPage(second, randomUUID(), ["README.md"]),
+    (error: unknown) => error instanceof AmuxTrackedCheckoutReadManifestError &&
+      error.code === "already_recorded", "one manifest per claim and reference");
+  const pages = await prisma.$transaction(async (tx) => [
+    await readAmuxMaxManifestForClaim(tx, ideaId, 0, first),
+    await readAmuxMaxManifestForClaim(tx, ideaId, 0, second)]);
+  assert.deepEqual(pages.map((page) => page?.manifest?.id),
+    [firstManifestId, secondManifestId]);
+  assert.deepEqual(pages.map((page) => page?.intent.id),
+    [firstManifestId, secondManifestId]);
+  assert.equal(await prisma.$transaction((tx) => readAmuxMaxManifestForClaim(tx,
+    ideaId, 0, { ...second, requestId: randomUUID() })), null);
+
+  // The continuation's result may now be written: its own proof and its own page.
+  await prisma.$transaction((tx) => preflightAmuxMaxSessionResult(tx, {
+    ...second, ideaId, referenceOrdinal: 0, evidenceId: evidence.evidenceId,
+    manifestId: secondManifestId }));
+  await assert.rejects(prisma.$transaction((tx) => preflightAmuxMaxSessionResult(tx, {
+    ...second, ideaId, referenceOrdinal: 0, evidenceId: evidence.evidenceId,
+    manifestId: firstManifestId })),
+  (error: unknown) => error instanceof AmuxMaxSessionResultError &&
+    error.code === "not_ready", "a page cannot cite another page's manifest");
+
+  const progress = (await readAmuxIdeaProgressForOwner(ownerId)).find((row) =>
+    row.ideaId === ideaId);
+  assert.equal(progress?.checkoutEvidence.length, 1,
+    "pages do not repeat the reference in the progress read");
+  assert.equal(progress?.checkoutEvidence[0]?.readManifest?.fileCount, 3);
 });
