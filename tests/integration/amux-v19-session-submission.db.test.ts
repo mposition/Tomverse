@@ -2517,4 +2517,12 @@ test("a continuation page reuses the reference's checkout evidence and keeps its
     [page.manifestId, page.fileCount, page.bodyPurged]),
   [[firstManifestId, 1, false], [secondManifestId, 2, false]],
   "each page keeps its own count in page order");
+  // Settle the open page so later suites on this database can claim again.
+  await prisma.$transaction((tx) => commitAmuxSessionBudgetOutcome(tx, {
+    claimId: second.claimId, outcome: "verified_success", inputTokens: 10,
+    outputTokens: 1, requiredBudgetMode: "max_shadow",
+    exactAgentClaim: { requestId: second.requestId,
+      reservationId: second.reservationId, ideaId, invocationOrdinal: 1 },
+    cliAttestation: { provider: "anthropic", modelAttestation: "served",
+      cliSha256: "e".repeat(64) } }));
 });
