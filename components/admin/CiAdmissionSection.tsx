@@ -24,6 +24,7 @@ type View = CiAdmissionView;
 
 const RUNNER_REFRESH_MS = 20_000;
 const VIEW_REFRESH_MS = 20_000;
+const SLOW_ACTION_TIMEOUT_MS = 60_000;
 
 /**
  * Who holds GitHub runners right now (lib/ciRunnerUsage.ts), read again every
@@ -280,6 +281,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        // A stop waits for a round already running; "Run a round now" waits for its own.
+        timeoutMs: body.action === "stop" || body.action === "evaluate" ? SLOW_ACTION_TIMEOUT_MS : undefined,
       });
       const payload = (await response.json().catch(() => ({}))) as Partial<View> & {
         code?: unknown;
@@ -303,7 +306,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       }
       if (!response.ok || !payload.state) {
         restore();
-        setNotice(m.saveFailed);
+        // "The previous order is back" only where an order was put back.
+        setNotice(rollback ? m.saveFailed : fill(m.requestFailed, { status: response.status }));
         return;
       }
       setView(payload as View);
@@ -332,7 +336,14 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       }
     } catch {
       restore();
-      setNotice(m.saveFailed);
+      if (rollback) {
+        setNotice(m.saveFailed);
+      } else {
+        // No answer is not a failure: the server may still be stopping it.
+        // What it did shows in the line and the recent decisions.
+        setNotice(m.noAnswer);
+        await load();
+      }
     } finally {
       setBusy(false);
     }
