@@ -110,6 +110,9 @@ As implemented, that is:
 - ChatMessageList optimization is subordinate to composer usability.
 - An attachment chip, its filename, and any attachment error occupy their own
   rows; none of them may narrow, cover or shorten the textarea's row.
+- Optional current-location status occupies its own row above the textarea.
+  Its off action remains reachable at 320px and 200% text scaling. Coverage:
+  `tests/e2e/chat-location.spec.ts`.
 
 ## Scroll ownership and the visible viewport
 

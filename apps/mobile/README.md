@@ -49,6 +49,22 @@ npm --workspace @tomverse/mobile run preview
 
 ## Native projects are not committed
 
+### Foreground chat location
+
+The readiness screen can request an approximate foreground position through
+`@capacitor/geolocation`. It uses the same in-memory opt-in session and numeric
+request contract as web chat (`@tomverse/chat-core`). Each chat turn calls
+`readForTurn(identityKey)` and sends the result as `currentLocation`; no fix is
+saved in storage, and disabling or changing identity invalidates pending reads.
+The readiness screen only displays the local fix; the native chat surface is
+still pending and this diagnostic does not send API requests.
+
+After generating native projects, `cap:sync` runs `capacitor:sync:after` to add
+Android's `ACCESS_COARSE_LOCATION` and the iOS location usage descriptions.
+Neither background location nor precise Android location is requested. Native
+binary and real-device permission verification still require Android tooling
+or macOS/Xcode.
+
 `ios/` and `android/` are generated, not authored:
 
 ```bash

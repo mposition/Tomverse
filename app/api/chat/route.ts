@@ -1,5 +1,6 @@
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { parseChatLocation } from "@tomverse/chat-core";
 import {
     buildAttachmentPromptText,
     inertFilename,
@@ -1291,6 +1292,9 @@ async function handleChatPost(
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
         const body = await readChatJsonBody(req);
+        const currentLocation = parseChatLocation(
+            (body as { currentLocation?: unknown } | null)?.currentLocation
+        );
         const {
             messages,
             modelId,
@@ -3072,6 +3076,7 @@ async function handleChatPost(
             }
         }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
+            currentLocation,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             autoRouted,

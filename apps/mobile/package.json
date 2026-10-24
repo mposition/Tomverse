@@ -9,10 +9,12 @@
     "dev": "vite",
     "preview": "vite preview",
     "typecheck": "tsc --project tsconfig.json",
-    "cap:sync": "cap sync"
+    "cap:sync": "cap sync",
+    "capacitor:sync:after": "node scripts/configure-location-permissions.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.2",
+    "@capacitor/geolocation": "^8.2.4",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

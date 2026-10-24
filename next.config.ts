@@ -27,7 +27,9 @@ const securityHeaders = [
     // granting microphone access nor `feature.voiceInputEnabled` could reach
     // the recorder. Voice input (docs/policy/voice-input.md §8) needs the
     // document's own origin allowed, and nothing more: no `*`, no third-party
-    // origin, and every other feature here stays disabled.
+    // origin. Foreground chat location also needs this origin allowed, with
+    // an explicit in-product switch and browser permission before acquisition.
+    // Every other feature here stays disabled.
     //
     // The permissions-policy integration in the Media Capture and Streams
     // specification is what makes an empty list decisive rather than advisory:
@@ -38,7 +40,7 @@ const securityHeaders = [
     // the device API -- replacing it is exactly how this went unnoticed.
     key: "Permissions-Policy",
     value:
-      "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), browsing-topics=()",
+      "camera=(), microphone=(self), geolocation=(self), payment=(), usb=(), browsing-topics=()",
   },
   {
     key: "X-Frame-Options",
