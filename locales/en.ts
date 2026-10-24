@@ -1909,6 +1909,20 @@ export const en = {
         dataTabOpen: "Open AI assistants",
     },
     memoryReview: {
+        restoreGrounds: "Add new grounds",
+        restoreGroundsNotice: "Write your own grounds to return this memory to review. Approve it separately before it is used.",
+
+        reportAnswer: "Report a problem with this answer",
+        conflictReview: "Review related memories",
+        conflictChoose: "Choose an existing memory to compare",
+        conflictKeep: "Keep the existing memories",
+        conflictBoth: "Keep both",
+        conflictExpire: "Expire the existing memories",
+        conflictMerge: "Merge into one memory",
+        conflictMergedStatement: "Merged statement",
+        conflictMergeGrounds: "Explain why the merged statement is correct",
+        conflictLoading: "Loading related memories...",
+
         sourceDeleteDerivedImport:
             "{count} memories made from this import will be deleted too.",
         sourceDeleteDerivedConversation:
@@ -1961,8 +1975,7 @@ export const en = {
         sensitiveBadge: "Sensitive",
         pinnedBadge: "Pinned",
         expires: "Expires: {date}",
-        conflictNotice:
-            "An active memory already covers the same item. You can keep the existing memory or replace it with this one.",
+        conflictNotice: "These memories may cover the same topic. Review them and choose what to keep.",
         conflictReplace: "Replace the existing memory",
         activeTitle: "Memories in use",
         activeEmpty: "No memories are in use yet.",

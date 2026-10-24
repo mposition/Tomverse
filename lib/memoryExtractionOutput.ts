@@ -19,6 +19,7 @@
  * later slice.
  */
 
+import { isMemoryCanonicalKey } from "@/lib/memoryConflictCore";
 import {
     MEMORY_EXTRACTION_MAX_CANDIDATES_PER_CHUNK,
     MEMORY_EXTRACTION_MAX_EVIDENCE_PER_CANDIDATE,
@@ -41,6 +42,7 @@ export type ExtractionParseProblem =
     | "kind_unknown"
     | "polarity_invalid"
     | "statement_invalid"
+    | "canonical_key_invalid"
     | "statement_too_long"
     | "confidence_invalid"
     | "sensitivity_invalid"
@@ -56,6 +58,8 @@ export type ParsedExtractionCandidate = {
     /** Asserted or denied. Required from `mem-extract-v6` on. */
     polarity: MemoryPolarity;
     statement: string;
+    /** Absent on historical outputs; new extraction schemas request a nullable topic. */
+    canonicalKey?: string | null;
     confidence: number;
     sensitivity: "standard" | "sensitive";
     expiresAt: string | null;
@@ -85,6 +89,7 @@ const CANDIDATE_FIELDS = new Set([
     "kind",
     "polarity",
     "statement",
+    "canonicalKey",
     "confidence",
     "sensitivity",
     "expiresAt",
@@ -214,6 +219,10 @@ export function parseExtractionOutput(
             problems.push("statement_invalid");
             continue;
         }
+        if (entry.canonicalKey != null && !isMemoryCanonicalKey(entry.canonicalKey)) {
+            problems.push("canonical_key_invalid");
+            continue;
+        }
         const statement = normalizeExtractedStatement(entry.statement);
         if (statement.length === 0) {
             problems.push("statement_invalid");
@@ -321,6 +330,7 @@ export function parseExtractionOutput(
         }
 
         candidates.push({
+            ...(entry.canonicalKey !== undefined ? { canonicalKey: entry.canonicalKey as string | null } : {}),
             kind: entry.kind,
             polarity: entry.polarity as MemoryPolarity,
             statement,
