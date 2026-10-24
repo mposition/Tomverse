@@ -14,6 +14,7 @@ const isolatedRunner = ["127.0.0.1", "localhost", "::1"].includes(url.hostname) 
 if (!localFixture && !isolatedRunner) throw new Error("This suite requires the isolated local fixture or the dedicated loopback CI test database.");
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: 300, dailyMessageLimit: 300 }) } });
 const { prisma } = await import(mod("lib/prisma.ts"));
+const { getUserChatUsageKey, usagePeriodStart } = await import(mod("lib/chatSecurity.ts"));
 const { reserveVoiceConversationCredits, reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
 const { recordVoiceUsage, finalizeVoiceReservation, claimVoiceRecoveryLease, releaseVoiceRecoveryLease } = await import(mod("lib/voiceConversationRecovery.ts"));
 const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } = await import(mod("lib/voiceConversationTasks.ts"));
@@ -25,6 +26,18 @@ beforeEach(async () => {
 after(async () => { await prisma.$disconnect(); });
 const reserve = () => reserveVoiceConversationCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36, maxSeconds: 60 });
 
+test("the smaller viable startup window rolls back its refused larger hold and refunds unused credits", async () => {
+  const subjectKey = getUserChatUsageKey(userId);
+  await prisma.chatUsageBucket.createMany({ data: ["day", "month"].map(period => ({
+    key: subjectKey, period, periodStart: usagePeriodStart(period, new Date()), count: 267,
+  })) });
+  const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36 });
+  assert.equal(row.reservedCredits, 33); assert.equal(row.reservationPayload.maxSeconds, 55);
+  await finalizeVoiceReservation(row.id, 15);
+  const month = await prisma.chatUsageBucket.findFirst({ where: { key: subjectKey, period: "month" } });
+  assert.equal(Number(month.count), 276);
+});
+
 async function rollingDue() {
   const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36 });
   return prisma.chatCreditReservation.update({ where: { id: row.id }, data: {
@@ -32,6 +45,23 @@ async function rollingDue() {
     reservationPayload: { ...row.reservationPayload, closeAt: new Date(Date.now()+14_000).toISOString(), webLeaseUntil: new Date(Date.now()+30_000).toISOString() },
   } });
 }
+
+test("a purchased-credit lot without a purchase reference renews and settles its unused hold", async () => {
+  const row = await rollingDue();
+  await prisma.chatUsageBucket.updateMany({ where: { key: row.subjectKey, period: { in: ["day", "month"] } }, data: { count: 300 } });
+  const lot = await prisma.creditLot.create({ data: {
+    userId, source: "synthetic", purchaseId: null, originalCredits: 100, remainingCredits: 100,
+    originalFundedCostMicroUsd: 1_000_000n, remainingFundedCostMicroUsd: 1_000_000n, expiresAt: new Date(Date.now() + 3_600_000),
+  } });
+  await extendVoiceConversationCredits(row.id, userId);
+  const renewed = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(renewed.reservationPayload.funding[0].addOnEntries[0].purchaseId, null);
+  await finalizeVoiceReservation(row.id, 65);
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  const returned = await prisma.creditLot.findUniqueOrThrow({ where: { id: lot.id } });
+  assert.equal(saved.status, "settled"); assert.equal(saved.settledCredits, 39);
+  assert.equal(returned.remainingCredits, 97);
+});
 
 test("concurrent rolling renewals reserve exactly once and preserve concurrent task writes", async () => {
   const row = await rollingDue();

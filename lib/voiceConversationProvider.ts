@@ -6,9 +6,10 @@ import { VOICE_CONVERSATION_INSTRUCTIONS, VOICE_CONVERSATION_MODEL } from "@tomv
 const endpoint = "https://api.openai.com/v1/live/sessions";
 const headers = () => ({ Authorization: `Bearer ${process.env.VOICE_CONVERSATION_API_KEY}`, "Content-Type": "application/json" });
 
-export async function createVoiceProviderSession(sdp: string, history: Array<{ role: "user" | "assistant"; content: string }>) {
+export async function createVoiceProviderSession(sdp: string, history: Array<{ role: "user" | "assistant"; content: string }>, timeoutMs = 15_000) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 15_000) throw new Error("Invalid voice startup deadline.");
   const response = await fetch(endpoint, {
-    method: "POST", headers: headers(), signal: AbortSignal.timeout(15_000),
+    method: "POST", headers: headers(), signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       session: {
         model: VOICE_CONVERSATION_MODEL, instructions: VOICE_CONVERSATION_INSTRUCTIONS,
