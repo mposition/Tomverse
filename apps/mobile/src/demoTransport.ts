@@ -11,7 +11,7 @@ export function createDemoTransport(): ChatTransport {
     { id: "demo-b", name: "Local demo B", provider: "Synthetic B", minimumPlan: "Free" as const },
     { id: "demo-c", name: "Local demo C", provider: "Synthetic C", minimumPlan: "Free" as const },
   ];
-  const preferences = (): UserPreferences => JSON.parse(localStorage.getItem(key + ":preferences") ?? JSON.stringify({ theme: "system", language: "en", defaultModel: "demo", timeZone: "UTC", imageHandoffAutoGenerate: false }));
+  const preferences = (): UserPreferences => JSON.parse(localStorage.getItem(key + ":preferences") ?? JSON.stringify({ theme: "system", language: "en", defaultModel: "demo", timeZone: "UTC", imageHandoffAutoGenerate: false, reviewEasyEffectiveProviders: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyProviderOptions: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyMaxProviders: 3 }));
   const memory = (): MemoryPreferences => JSON.parse(localStorage.getItem(key + ":memory") ?? JSON.stringify({ masterEnabled: true, styleEnabled: true, defaultConversationMode: "on" }));
   return {
     mobileCapabilities: async () => ({ reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
@@ -36,7 +36,8 @@ export function createDemoTransport(): ChatTransport {
       }));
       return { failedModelIds: [] };
     },
-    account: async () => ({ id: "synthetic-demo", email: "demo@example.invalid", actionsEnabled: false }),
+    usage: async () => ({ plan: "Max", usage: { creditsMonth: 25 }, limits: { creditsMonth: 100 } }),
+    account: async () => ({ name: "Demo User", id: "synthetic-demo", email: "demo@example.invalid", actionsEnabled: false }),
     exportAccount: async () => { throw Error("Demo only"); },
     deleteAccount: async () => { throw Error("Demo only"); },
     downloadArtifact: async () => {},

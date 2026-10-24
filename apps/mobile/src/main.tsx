@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 
 import { MobileApp } from "./MobileApp";
 import { createApiTransport } from "./apiTransport";
-import { DeviceSecurityGate } from "./DeviceSecurityGate";
 import "./app.css";
 
 const container = document.getElementById("root");
@@ -15,6 +14,6 @@ const transport = demo
   : createApiTransport();
 createRoot(container).render(
   <StrictMode>
-    <DeviceSecurityGate transport={transport}><MobileApp transport={transport} demo={demo} /></DeviceSecurityGate>
+    <MobileApp transport={transport} demo={demo} />
   </StrictMode>
 );

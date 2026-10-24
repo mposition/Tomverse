@@ -5,8 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -46,7 +45,9 @@ export async function POST(
 ) {
   const traceId = randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Authentication required." },

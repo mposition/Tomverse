@@ -29,8 +29,9 @@ export type MobileImageGroup = {
   generations: Array<{ generationId: string; status: string; prompt: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
-export type UserPreferences = { theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
+export type MobileCapabilities = { conversationTitles?: boolean; accountUsage?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
+export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
 export type AssistantSummary = { id: string; name: string; description?: string | null };
 export type ChatSummary = Pick<Conversation, "id" | "title"> & { kind?: string };
@@ -55,6 +56,8 @@ export interface ChatTransport {
   routeReview?(input: { text: string; context: string; providers: string[]; hasImages: boolean }): Promise<import("../../../lib/reviewRoutingCore").ReviewRouteDecision>;
   sendReview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (modelId: string, text: string) => void): Promise<{ failedModelIds: string[] }>;
   mobileCapabilities?(refresh?: boolean): Promise<MobileCapabilities>;
+  usage?(): Promise<AccountUsage>;
+  generateTitle?(conversation: Conversation): Promise<string | null>;
   preferences?(): Promise<UserPreferences>;
   savePreferences?(input: Partial<UserPreferences> & { timeZoneSource?: "user" }): Promise<void>;
   memoryPreferences?(): Promise<MemoryPreferences>;
@@ -65,7 +68,7 @@ export interface ChatTransport {
   setDeviceLock?(enabled: boolean, reason: string): Promise<void>;
   unlockDevice?(reason: string): Promise<void>;
   imageGroup?(id: string): Promise<MobileImageGroup>;
-  account(): Promise<{ id: string; email?: string | null; actionsEnabled: boolean }>;
+  account(): Promise<{ id: string; name?: string | null; email?: string | null; actionsEnabled: boolean }>;
   exportAccount(): Promise<void>;
   deleteAccount(confirmationText: string): Promise<void>;
   downloadArtifact(artifact: import("../../../lib/generatedArtifactCore").ChatStreamArtifact): Promise<void>;
@@ -77,7 +80,7 @@ export interface ChatTransport {
   signOut(): Promise<void>;
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;
-  create(): Promise<Conversation>;
+  create(title?: string): Promise<Conversation>;
   models(): Promise<MobileModel[]>;
   capabilities(): Promise<{ offered: boolean }>;
   configure(id: string, modelId: string, auto: boolean): Promise<Conversation>;

@@ -40,12 +40,9 @@ public class MobileAuthPlugin extends Plugin {
     private String verifier;
     private String state;
     private PluginCall pendingLogin;
-    private volatile boolean deviceUnlocked;
-    private volatile boolean backgrounded;
-    private volatile long backgroundedAt;
+    private long signInGeneration;
     private final AtomicBoolean devicePrompt = new AtomicBoolean(false);
     private boolean lockEnabled() { return getContext().getSharedPreferences("tomverse-device-security", 0).getBoolean("enabled", false); }
-    private boolean locked() { return lockEnabled() && (!deviceUnlocked || backgrounded); }
     private boolean deviceAvailable() {
         KeyguardManager manager = (KeyguardManager) getContext().getSystemService(android.content.Context.KEYGUARD_SERVICE);
         return manager != null && manager.isDeviceSecure();
@@ -53,11 +50,9 @@ public class MobileAuthPlugin extends Plugin {
     private void protectScreen(boolean enabled) {
         main.post(() -> { if (enabled) getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE); else getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE); });
     }
-    @Override protected void handleOnPause() { backgrounded = true; backgroundedAt = android.os.SystemClock.elapsedRealtime(); }
-    @Override protected void handleOnResume() { if (backgroundedAt > 0 && android.os.SystemClock.elapsedRealtime() - backgroundedAt >= 30000) deviceUnlocked = false; backgrounded = false; }
     @PluginMethod public void getDeviceSecurity(PluginCall call) {
         queue.execute(() -> {
-            try { call.resolve(new JSObject().put("available", deviceAvailable()).put("enabled", lockEnabled()).put("locked", locked() && store.read() != null)); }
+            try { call.resolve(new JSObject().put("available", deviceAvailable()).put("enabled", lockEnabled()).put("locked", false)); }
             catch (Exception error) { call.reject("Device security unavailable", "DEVICE_SECURITY_UNAVAILABLE"); }
         });
     }
@@ -70,12 +65,11 @@ public class MobileAuthPlugin extends Plugin {
                 BiometricPrompt prompt = new BiometricPrompt(getActivity(), ContextCompat.getMainExecutor(getContext()), new BiometricPrompt.AuthenticationCallback() {
                     @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
                         devicePrompt.set(false);
-                        if (backgrounded) { call.reject("Authentication cancelled", "DEVICE_AUTH_CANCELLED"); return; }
                         success.run();
                     }
                     @Override public void onAuthenticationError(int code, CharSequence message) { devicePrompt.set(false); call.reject("Authentication cancelled", "DEVICE_AUTH_CANCELLED"); }
                 });
-                prompt.authenticate(new BiometricPrompt.PromptInfo.Builder().setTitle("Tomverse").setSubtitle(call.getString("reason", "Unlock your conversations")).setAllowedAuthenticators(authenticators).build());
+                prompt.authenticate(new BiometricPrompt.PromptInfo.Builder().setTitle("Tomverse").setSubtitle(call.getString("reason", "Verify your Tomverse sign-in")).setAllowedAuthenticators(authenticators).build());
             } catch (Exception error) { devicePrompt.set(false); call.reject("Device authentication unavailable", "DEVICE_SECURITY_UNAVAILABLE"); }
         });
     }
@@ -83,16 +77,27 @@ public class MobileAuthPlugin extends Plugin {
         queue.execute(() -> {
             try { if (store.read() == null) { call.reject("Sign in first", "SIGN_IN_REQUIRED"); return; } }
             catch (Exception error) { call.reject("Sign in first", "SIGN_IN_REQUIRED"); return; }
-            authenticateDevice(call, () -> {
-                boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled"));
-                if (!getContext().getSharedPreferences("tomverse-device-security", 0).edit().putBoolean("enabled", enabled).commit()) { call.reject("Could not save security preference", "DEVICE_SECURITY_UNAVAILABLE"); return; }
-                deviceUnlocked = true; protectScreen(enabled); call.resolve();
-            });
+            boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled"));
+            if (enabled && !deviceAvailable()) { call.reject("Configure device security first", "DEVICE_SECURITY_UNAVAILABLE"); return; }
+            if (!getContext().getSharedPreferences("tomverse-device-security", 0).edit().putBoolean("enabled", enabled).commit()) { call.reject("Could not save security preference", "DEVICE_SECURITY_UNAVAILABLE"); return; }
+            protectScreen(enabled); call.resolve();
         });
     }
     @PluginMethod public void unlockDevice(PluginCall call) {
-        if (!locked()) { call.resolve(); return; }
-        authenticateDevice(call, () -> { deviceUnlocked = true; call.resolve(); });
+        // Retained bridge method for compatibility; valid sessions do not relock.
+        call.resolve();
+    }
+
+    /** Device proof gates fresh sign-in, never a valid session or token rotation. */
+    private void runSignIn(PluginCall call, Runnable action) {
+        queue.execute(() -> {
+            long generation = ++signInGeneration;
+            if (!lockEnabled()) { action.run(); return; }
+            authenticateDevice(call, () -> queue.execute(() -> {
+                if (generation != signInGeneration) { call.reject("Sign-in cancelled", "LOGIN_CANCELLED"); return; }
+                action.run();
+            }));
+        });
     }
 
     @Override public void load() {
@@ -155,7 +160,6 @@ public class MobileAuthPlugin extends Plugin {
     }
     @PluginMethod public void getAccessToken(PluginCall call) {
         queue.execute(() -> {
-            if (locked()) { call.reject("Unlock with device authentication", "DEVICE_LOCKED"); return; }
             try {
                 String rejected = call.getString("rejectedAccessToken");
                 if (rejected != null && rejected.equals(accessToken)) { accessToken = null; expiresAt = 0; }
@@ -164,7 +168,6 @@ public class MobileAuthPlugin extends Plugin {
                     // Persist consumption BEFORE sending. An unknown outcome requires sign-in, never replay.
                     clear(); accept(post("/api/auth/mobile/refresh", new JSONObject().put("refreshToken", current)));
                 }
-                if (locked()) { call.reject("Unlock with device authentication", "DEVICE_LOCKED"); return; }
                 call.resolve(new JSObject().put("accessToken", accessToken).put("expiresAt", expiresAt));
             } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Sign-in required", "SIGN_IN_REQUIRED"); }
         });
@@ -209,13 +212,12 @@ public class MobileAuthPlugin extends Plugin {
         });
     }
     @PluginMethod public void verifyEmailCode(PluginCall call) {
-        queue.execute(() -> {
+        runSignIn(call, () -> {
             try {
                 String email = call.getString("email"); String code = call.getString("code");
                 if (email == null || email.length() > 320 || code == null || !code.matches("[0-9]{6}")) throw new AuthFailure("EMAIL_CODE_INVALID");
                 clear();
                 accept(post("/api/auth/mobile/email", new JSONObject().put("action", "verify").put("email", email).put("code", code).put("platform", "android").put("deviceLabel", android.os.Build.MODEL)));
-                deviceUnlocked = true;
                 call.resolve();
             } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Could not verify sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });
@@ -228,15 +230,16 @@ public class MobileAuthPlugin extends Plugin {
         if (returnedState == null || grant == null || state == null || !MessageDigest.isEqual(state.getBytes(StandardCharsets.UTF_8), returnedState.getBytes(StandardCharsets.UTF_8))) return;
         PluginCall call = pendingLogin; String codeVerifier = verifier;
         pendingLogin = null; verifier = null; state = null;
-        queue.execute(() -> {
-            try { clear(); accept(post("/api/auth/mobile/exchange", new JSONObject().put("grant", grant).put("codeVerifier", codeVerifier).put("platform", "android").put("deviceLabel", android.os.Build.MODEL))); deviceUnlocked = true; call.resolve(); }
+        runSignIn(call, () -> {
+            try { clear(); accept(post("/api/auth/mobile/exchange", new JSONObject().put("grant", grant).put("codeVerifier", codeVerifier).put("platform", "android").put("deviceLabel", android.os.Build.MODEL))); call.resolve(); }
             catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Sign-in failed. Start again.", "LOGIN_FAILED"); }
         });
     }
     @PluginMethod public void signOut(PluginCall call) {
-        getContext().getSharedPreferences("tomverse-device-security", 0).edit().remove("enabled").commit(); deviceUnlocked = false; protectScreen(false);
+        protectScreen(lockEnabled());
         main.post(() -> { if (pendingLogin != null) { pendingLogin.reject("Sign-in cancelled", "LOGIN_CANCELLED"); pendingLogin = null; verifier = null; state = null; } });
         queue.execute(() -> {
+            signInGeneration++;
             try { String current = store.read(); clear(); if (current != null) post("/api/auth/mobile/logout", new JSONObject().put("refreshToken", current)); call.resolve(); }
             catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Signed out locally; device revocation could not be confirmed", "LOGOUT_UNCONFIRMED"); }
         });

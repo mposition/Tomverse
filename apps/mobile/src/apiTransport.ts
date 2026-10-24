@@ -16,6 +16,7 @@ import type { ChatTransport, Conversation, MobileAttachment, MobileCapabilities 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type Attempt = { assistantMessageId: string; partialContent: string; status: string; actualModelId?: string; requestedModelId: string };
 export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth, saveFile = saveMobileResponse, uploadFile = uploadMobileFile): ChatTransport {
+  const requestedTitles = new Set<string>();
   const listeners = new Set<() => void>();
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
   let capabilityRequest: Promise<MobileCapabilities> | null = null;
@@ -162,6 +163,14 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }
     },
     mobileCapabilities: requireParity,
+    usage: async () => { if (!(await requireParity()).accountUsage) throw Error("NATIVE_USAGE_UNAVAILABLE"); return request("/api/user/usage"); },
+    generateTitle: async conversation => {
+      if (requestedTitles.has(conversation.id) || conversation.messages.filter(message => message.role === "user").length !== 1 || !conversation.messages.some(message => message.role === "assistant" && message.status === "normal")) return null;
+      requestedTitles.add(conversation.id);
+      if (!(await requireParity()).conversationTitles) return null;
+      const result = await request<{ updated: boolean; title?: string }>(`${pathFor(conversation.id)}/generate-title`, json("POST", { expectedTitle: conversation.title }));
+      return result.updated && typeof result.title === "string" ? result.title : null;
+    },
     preferences: async () => { await requireParity(); return request("/api/user/settings"); },
     savePreferences: async (input) => { await requireParity(); await request("/api/user/settings", json("POST", input)); },
     memoryPreferences: async () => { await requireParity(); return request("/api/memories/settings"); },
@@ -218,8 +227,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
-    create: async () => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", {}));
+    create: async (title) => {
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", title ? { title: title.slice(0, 30) } : {}));
       const detail = await load(item.id);
       return detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },
