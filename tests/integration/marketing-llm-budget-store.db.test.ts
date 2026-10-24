@@ -190,6 +190,22 @@ test("the monthly cap admits exactly up to the cap and counts every reservation 
   assert.equal((await reserve(5, exact)).status, "ok");
 });
 
+test("a settled call counts at its reported cost; one kept unknown counts at its reservation", async () => {
+  // Settled: 1,200 x 0.8 + 300 x 3.2 -> 1,920 micro-USD rather than 115,508.
+  const settledId = await reservedId(1);
+  await dispatch(settledId, 1, 1);
+  assert.equal((await settle(settledId, 1)).status, "ok");
+  // Over its bound: the cost is not known, so the whole reservation counts.
+  const unknown = await reservedId(2);
+  await dispatch(unknown, 2, 2);
+  const kept = await settle(unknown, 2, observation(2, { reportedOutputTokens: 4_097 }));
+  assert.equal(kept.status === "ok" && kept.value.state, "unknown_retained");
+
+  await cap("0.232936"); // 1,920 + two reservations
+  assert.equal((await reserve(3)).status, "ok");
+  assert.deepEqual(await reserve(4), { status: "refused", code: "budget_exhausted" });
+});
+
 test("two connections reserving the last slot of a month admit exactly one", async () => {
   await cap("0.2"); // room for one
   const env = OPEN;

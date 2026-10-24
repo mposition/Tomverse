@@ -5,9 +5,13 @@
  * to. No I/O. docs/policy/marketing-automation.md §5 (policy v4) approved the
  * table, the dedicated OpenAI key and the US$100 monthly cap.
  *
- * The app cannot see what the generator actually sent, so the ledger counts
- * every dispatched call at its reservation -- the most a pinned model can cost
- * for one request -- and keeps reported tokens as observations only.
+ * The app cannot see what the generator actually sent, so the ledger admits
+ * a call only when its reservation -- the most a pinned model can cost for one
+ * request -- fits under the cap. An open or unknown call counts at that
+ * reservation; a settled one counts at its reported tokens and the pinned
+ * worst rates, plus every search it could be billed for, never above its
+ * reservation (operator decision 2026-10-23;
+ * `MARKETING_LLM_COUNTED_MICRO_USD_SQL`).
  */
 
 import { createHash, createHmac } from "node:crypto";
@@ -70,9 +74,9 @@ export const MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD = 100_000_000;
 
 /** Row bounds the migration's CHECKs repeat; a pin outside them is unusable. */
 export const MARKETING_LLM_ROW_LIMITS = {
-  reservedInputTokensMax: 2_000_000,
+  reservedInputTokensMax: 10_000_000,
   reservedOutputTokensMax: 100_000,
-  reservedMicroUsdMax: 5_000_000,
+  reservedMicroUsdMax: MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD,
 } as const;
 
 export type MarketingLlmPricePin = {

@@ -186,9 +186,9 @@ test("a pin is usable only when every field is well formed and inside the row li
   assert.ok(marketingLlmPinProblems(pin({ tiers: ["flex"] })).includes("default_tier_missing"));
   assert.ok(marketingLlmPinProblems(pin({ expiresAt: pin().verifiedAt })).includes("expiry_not_after_verified"));
   assert.ok(marketingLlmPinProblems(pin({ source: "http://example.invalid" })).includes("source_format"));
-  assert.ok(marketingLlmPinProblems(pin({ contextWindowTokens: 2_000_001 })).includes("context_window_over_row_limit"));
+  assert.ok(marketingLlmPinProblems(pin({ contextWindowTokens: 10_000_001 })).includes("context_window_over_row_limit"));
   assert.ok(marketingLlmPinProblems(pin({ maxOutputTokens: 100_001 })).includes("output_cap_over_row_limit"));
-  assert.ok(marketingLlmPinProblems(pin({ worstInputMicroUsdPerMillion: 50_000_000 })).includes("reservation_over_row_limit"));
+  assert.ok(marketingLlmPinProblems(pin({ worstInputMicroUsdPerMillion: 1_000_000_000 })).includes("reservation_over_row_limit"));
   assert.ok(marketingLlmPinProblems(pin({ maxOutputTokens: 0 })).includes("maxOutputTokens_range"));
 });
 
