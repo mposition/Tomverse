@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { mobileCopy, mobileLanguages, type MobileLanguage } from "../../../locales/mobile";
-import type { ChatSummary, ChatTransport, Conversation, MobileAttachment } from "./chatTransport";
+import type { ChatSummary, ChatTransport, Conversation, MobileAttachment, ChatMessage } from "./chatTransport";
 import { SidebarAccount } from "./SidebarAccount";
 import { ConversationHistory } from "./ConversationHistory";
 import { ConversationListScreen } from "./ConversationListScreen";
@@ -25,6 +25,15 @@ import { AccountScreen } from "./AccountScreen";
 import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
 
 const LAST_CHAT = "tomverse-native-last-chat";
+function AnswerAttribution({ message, language }: { message: ChatMessage; language: MobileLanguage }) {
+  const modelId = message.routedModelId ?? message.modelId;
+  if (!modelId) return null;
+  const name = getModel(modelId)?.name ?? modelId;
+  return <span className="routed-badge" data-testid={message.routedModelId ? "auto-routed-by" : "answered-by"} title={name}>
+    {message.routedModelId && <AppIcon name="spark" />}<span>{message.routedModelId ? `${autoRoutingCopy[language].answeredBy} · ${name}` : name}</span>
+  </span>;
+}
+
 export function MobileApp({ transport, demo = false }: { transport: ChatTransport; demo?: boolean }) {
   const [language, setLanguage] = useState<MobileLanguage>(() => {
     const saved = localStorage.getItem("tomverse-language") ?? navigator.language.split("-")[0];
@@ -271,7 +280,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
           if (starter === "compareAnswers" || starter === "compareImageModels") { preserveNativeDraft(owner, "review:new", text); setProduct("review"); setView("chat"); }
           else { setDraft(text); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); if (starter === "sourcedAnswer" && conversation && conversation.webSearchMode !== "always") void configureTools({ webSearchMode: "always" }).catch(() => {}); }
         }} />}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{(message.routedModelId || message.modelId) && <span className="routed-badge" data-testid={message.routedModelId ? "auto-routed-by" : "answered-by"} title={`${autoRoutingCopy[language].answeredByTitle} · ${getModel(message.routedModelId ?? message.modelId!)?.name ?? message.routedModelId ?? message.modelId}`}><AppIcon name="spark" /><span>{autoRoutingCopy[language].answeredBy} · {getModel(message.routedModelId ?? message.modelId!)?.name ?? message.routedModelId ?? message.modelId}</span></span>}</div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />

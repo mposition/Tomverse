@@ -224,6 +224,20 @@ test("purchased credits still fund renewals after the plan daily guardrail is ex
   assert.equal(w.row.settledCredits, 39); assert.equal(w.addOnSettlements[0].settledCredits, 3);
 });
 
+test("small purchased-credit renewals fund both time and cost allowance and never issue free deltas", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  w.monthlyLimit = w.dailyLimit = 36; w.purchased = 3;
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  t.mock.timers.tick(15_000); lease(); await extendVoiceConversationCredits(row.id, "owner");
+  assert.equal(w.row.reservationPayload.maxSeconds, 65); assert.equal(w.row.reservedCredits, 39);
+  assert.equal(w.row.addOnReservedCredits, 3); assert.equal(w.purchased, 0);
+  const part = w.row.reservationPayload.funding[0];
+  assert.equal(part.addOnEntries[0].fundedCostMicroUsd, 4_167);
+  t.mock.timers.tick(5_000); lease();
+  await assert.rejects(extendVoiceConversationCredits(row.id, "owner"), e => e.code === "CREDIT_BALANCE_INSUFFICIENT");
+  assert.equal(w.row.reservedCredits, 39);
+});
+
 test("unknown final usage retains all funded provider exposure but bills only observed seconds", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const row = await reserveContinuousVoiceCredits(continuousInput());

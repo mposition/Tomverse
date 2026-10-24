@@ -151,9 +151,11 @@ export const isVoiceCapacityRefusal = (error: unknown): error is { code: string 
 
 export async function reserveContinuousVoiceCredits(input: { userId: string; requestId: string; conversationId: string | null; creditsPerMinute: number }) {
   const minimum = VOICE_CONVERSATION_INITIAL_SECONDS + VOICE_CONVERSATION_CLOSING_SECONDS;
-  for (let seconds = VOICE_CONVERSATION_RESERVATION_SECONDS; ; seconds = minimum + Math.floor((seconds - minimum) / 2)) {
+  const windows = [VOICE_CONVERSATION_RESERVATION_SECONDS, minimum + 5, minimum];
+  for (let index = 0; ; index++) {
+    const seconds = windows[index];
     try { return await reserveVoiceConversationCredits({ ...input, maxSeconds: seconds, sessionSeconds: seconds - VOICE_CONVERSATION_CLOSING_SECONDS, continuous: true }); }
-    catch (error) { if (!isVoiceCapacityRefusal(error) || seconds === minimum) throw error; }
+    catch (error) { if (!isVoiceCapacityRefusal(error) || index === windows.length - 1) throw error; }
   }
 }
 
@@ -175,7 +177,12 @@ function appendFunding(parts: VoiceFunding[], next: VoiceFunding): VoiceFunding[
 
 /** Account lock + row lock serialize funding with settlement and preserve concurrent task JSON writes. */
 export async function extendVoiceConversationCredits(id: string, userId: string) {
-  for (let seconds = VOICE_CONVERSATION_RESERVATION_SECONDS - VOICE_CONVERSATION_CLOSING_SECONDS; ; seconds = Math.floor(seconds / 2)) {
+  // Five-second quanta are exactly three credits at the approved rate. Even a
+  // small renewal therefore funds purchased-credit cost allowance atomically;
+  // no zero-credit delta can leave new provider exposure without its lot hold.
+  const windows = [VOICE_CONVERSATION_RESERVATION_SECONDS - VOICE_CONVERSATION_CLOSING_SECONDS, 15, 5];
+  for (let index = 0; ; index++) {
+    const seconds = windows[index];
     try {
       return await prisma.$transaction(async tx => {
         await lockCreditAccount(tx, userId);
@@ -198,7 +205,7 @@ export async function extendVoiceConversationCredits(id: string, userId: string)
         if (changed.count !== 1) throw new ApiSecurityError(409, "VOICE_SESSION_ENDED", "This voice session ended.");
         return { maxSeconds, closeAt };
       });
-    } catch (error) { if (!isVoiceCapacityRefusal(error) || seconds === 1) throw error; }
+    } catch (error) { if (!isVoiceCapacityRefusal(error) || index === windows.length - 1) throw error; }
   }
 }
 

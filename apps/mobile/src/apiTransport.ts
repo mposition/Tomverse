@@ -206,7 +206,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       },
       unlocked: id => Number(unlockGrants.get(id)?.split(".")[0] ?? 0) > Date.now() / 1000,
     },
-    voiceConfiguration: async () => (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number | null } }>("/api/products/chat/capabilities")).voiceConversation ?? { enabled: false, maxSeconds: 300 },
+    voiceConfiguration: async () => {
+      const config = (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number | null; continuous?: boolean } }>("/api/products/chat/capabilities")).voiceConversation;
+      return config ? { enabled: config.enabled, maxSeconds: config.continuous ? null : config.maxSeconds } : { enabled: false, maxSeconds: 300 };
+    },
     voiceRequest: (body, signal) => run("/api/chat/voice", { ...json("POST", body), signal }),
     sendVoice: async (conversation, text, signal, onProgress) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, [], signal);

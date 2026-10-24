@@ -54,6 +54,8 @@ native authentication plugin are not claimed as a verified iOS/Android release.
   Insufficient funding closes within the already reserved exposure. Refund unused
   credits after settlement, rounding cumulative session usage once. Durable funding
   segments retain their original bucket dates across day/month boundaries.
+  Renewal fallbacks use 30, 15 and 5 seconds. Five seconds is exactly three
+  credits, so even a small renewal reserves its purchased-credit cost allowance.
 - Voice reservations use `source=voice_conversation` in `ChatCreditReservation`.
   Their JSON contains accounting/session references, not transcript or audio.
   A delegated answer is queued temporarily for delivery and removed when sent,
@@ -142,6 +144,16 @@ same transport and returns the saved source-message receipt. Web and native
 render `@tomverse/chat-ui`'s voice panel. Native Chat omits settled session cards
 from the transcript and shows a compact notice only while billing is pending.
 The UI does not display the per-minute rate.
+
+Owner direction in this development conversation, 2026-10-24: default web
+search on new mobile conversations was explicitly requested ("기본적으로 웹 검색을 켜주세요").
+The ordinary model/search pipeline, its existing credit surcharges and user
+confirmation of Send are reused; no paid validation call is authorized by this
+implementation. Existing conversations retain their explicit search choice.
+The capabilities API keeps `maxSeconds: 300` for older APKs' reserve estimate
+and client timer and adds `continuous: true` for updated clients. Updated clients
+normalize that capability to an uncapped session; old APKs still need an update
+to remove their own client timer.
 
 Issued voice delegations retain an exact-question digest. A result must match
 that digest and an owned, durable source message. Ready results are claimed

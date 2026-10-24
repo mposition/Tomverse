@@ -7,6 +7,16 @@ import { mobileErrorText } from "../locales/mobileErrors.ts";
 
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
 
+test("voice configuration recognizes continuous funding while preserving older server capabilities", async () => {
+  let capability = { enabled: true, maxSeconds: 300, continuous: true };
+  const transport = createApiTransport(async path => {
+    assert.equal(path, "/api/products/chat/capabilities"); return Response.json({ voiceConversation: capability });
+  }, bridge);
+  assert.deepEqual(await transport.voiceConfiguration(), { enabled: true, maxSeconds: null });
+  capability = { enabled: true, maxSeconds: 900 };
+  assert.deepEqual(await transport.voiceConfiguration(), { enabled: true, maxSeconds: 900 });
+});
+
 test("a fresh transport restores actual answer models from durable attempts and preserves manual attribution", async () => {
   const transport = createApiTransport(async path => {
     assert.equal(path, "/api/conversations/saved");

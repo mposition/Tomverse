@@ -111,7 +111,7 @@ test("native voice delegates to the existing Chat and restores answers without c
   await page.reload(); await page.getByRole("button", { name: "대화", exact: true }).click(); await page.locator(".conversation-row").click();
   await expect(page.locator("article.user")).toContainText("기존 모델로 이 질문에 답해주세요");
   await expect(page.getByTestId("voice-session-summary")).toHaveCount(0);
-  await expect(page.locator("article.assistant .routed-badge")).toBeVisible();
+  await expect(page.locator("article.assistant .routed-badge")).toHaveText("demo");
   await page.screenshot({ path: resolve(process.cwd(), "../../.tmp/native-parity/voice-history-compact-model-attribution.png") });
 });
 
