@@ -59,6 +59,12 @@ saved in storage, and disabling or changing identity invalidates pending reads.
 The readiness screen only displays the local fix; the native chat surface is
 still pending and this diagnostic does not send API requests.
 
+Every chat turn carries the fixed location-use instructions, including when
+location is off, so the model can explain how to share a location when needed.
+These instructions count as input tokens. Comparison preflight conservatively
+reserves up to 160 additional input tokens even while location is off, because
+consent can change before dispatch; settlement uses actual provider usage.
+
 After generating native projects, `cap:sync` runs `capacitor:sync:after` to add
 Android's `ACCESS_COARSE_LOCATION` and the iOS location usage descriptions.
 Neither background location nor precise Android location is requested. Native
