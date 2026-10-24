@@ -1,0 +1,144 @@
+[
+  {
+    "title": "Memory staging: durable facts",
+    "conversation_id": "tv-mem-facts",
+    "id": "tv-mem-facts",
+    "create_time": 1792800000,
+    "update_time": 1792800360,
+    "current_node": "tv-mem-facts-node-5",
+    "mapping": {
+      "tv-mem-facts-root": {
+        "id": "tv-mem-facts-root",
+        "parent": null,
+        "children": [
+          "tv-mem-facts-node-0"
+        ],
+        "message": null
+      },
+      "tv-mem-facts-node-0": {
+        "id": "tv-mem-facts-node-0",
+        "parent": "tv-mem-facts-root",
+        "children": [
+          "tv-mem-facts-node-1"
+        ],
+        "message": {
+          "id": "tv-mem-facts-msg-0",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1792800000,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "저는 백엔드 개발자로 일하고 있고, 주로 TypeScript와 PostgreSQL을 씁니다."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-mem-facts-node-1": {
+        "id": "tv-mem-facts-node-1",
+        "parent": "tv-mem-facts-node-0",
+        "children": [
+          "tv-mem-facts-node-2"
+        ],
+        "message": {
+          "id": "tv-mem-facts-msg-1",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1792800060,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "알겠습니다. 백엔드 작업 위주로 도와드릴게요."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-mem-facts-node-2": {
+        "id": "tv-mem-facts-node-2",
+        "parent": "tv-mem-facts-node-1",
+        "children": [
+          "tv-mem-facts-node-3"
+        ],
+        "message": {
+          "id": "tv-mem-facts-msg-2",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1792800120,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "참고로 저는 커피를 전혀 마시지 않아요. 카페인이 몸에 안 맞아서요."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-mem-facts-node-3": {
+        "id": "tv-mem-facts-node-3",
+        "parent": "tv-mem-facts-node-2",
+        "children": [
+          "tv-mem-facts-node-4"
+        ],
+        "message": {
+          "id": "tv-mem-facts-msg-3",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1792800180,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "그렇군요. 카페인 없는 음료 위주로 추천드리겠습니다."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-mem-facts-node-4": {
+        "id": "tv-mem-facts-node-4",
+        "parent": "tv-mem-facts-node-3",
+        "children": [
+          "tv-mem-facts-node-5"
+        ],
+        "message": {
+          "id": "tv-mem-facts-msg-4",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1792800240,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "그리고 서울 마포구에 살고 있어서 그 근처 장소면 좋겠어요."
+            ]
+          },
+          "metadata": {}
+        }
+      },
+      "tv-mem-facts-node-5": {
+        "id": "tv-mem-facts-node-5",
+        "parent": "tv-mem-facts-node-4",
+        "children": [],
+        "message": {
+          "id": "tv-mem-facts-msg-5",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1792800300,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "마포구 근처로 찾아보겠습니다. 아마 망원동 쪽을 좋아하실 것 같네요."
+            ]
+          },
+          "metadata": {}
+        }
+      }
+    }
+  }
+]
