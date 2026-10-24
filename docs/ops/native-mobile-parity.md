@@ -47,6 +47,11 @@ cancels device prompts. An in-flight cancelled exchange cannot persist credentia
 its unused refresh credential is revoked once, with an uncertain result reported
 as unconfirmed logout. A valid stored session
 restores without another prompt on cold restart, background return or token rotation.
+If the one-shot revocation of a cancelled exchange cannot be confirmed, its
+unused secret is discarded; the server family may remain valid until expiry.
+The client never replays that secret. The conservative unconfirmed-revocation
+flag is reported at the next logout, even if a newer sign-in caused the original
+cancellation. iOS race handling still requires Mac/device acceptance.
 Android retains FLAG_SECURE while this preference is enabled. Server session expiry,
 revocation, account freshness and rotating-secret consumption are unchanged.
 
