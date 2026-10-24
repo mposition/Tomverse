@@ -1,5 +1,7 @@
 # Voice Recovery deployment
 
+[한국어 설정 안내](voice-recovery-setup.ko.md)
+
 The worker is `scripts/voice-conversation-watchdog.mjs`; its package script is
 `npm run voice:watchdog`. Run it from the repository root, alongside `package.json`,
 not from `apps/mobile`, `scripts`, or the Android folder.
