@@ -3,6 +3,7 @@ import { VoiceConversationPanel, VoiceSessionSummary, voiceConversationCopy, typ
 import { createVoiceConversationClient, type VoiceAnswerReceipt, type VoiceConversationView } from "../../../components/chat/voiceConversationClient";
 import { monitorVoiceAudioLevels } from "../../../components/chat/voiceAudioLevels";
 import type { ChatTransport } from "./chatTransport";
+import { AppIcon } from "./AppIcon";
 
 export function VoiceConversation({ transport, language, conversationId, scopeKey, disabled, selectionLabel, searchEnabled, onRequest, onSessionEnded }: {
   transport: ChatTransport; language: string; conversationId: string | null; scopeKey: string; disabled: boolean;
@@ -37,7 +38,7 @@ export function VoiceConversation({ transport, language, conversationId, scopeKe
     void client.current.start(conversationId);
   };
   if (!config.enabled || !transport.voiceRequest || !transport.sendVoice) return null;
-  return <><button type="button" data-testid="native-voice-open" className="native-voice-trigger" aria-label={c.title} disabled={disabled} onClick={() => setOpen(true)}>≋</button>
+  return <><button type="button" data-testid="native-voice-open" className="send native-voice-trigger" aria-label={c.title} disabled={disabled} onClick={() => setOpen(true)}><AppIcon name="voice" /></button>
     {open && <dialog ref={dialog} className="native-voice-dialog" aria-labelledby="voice-conversation-title" onCancel={event => { event.preventDefault(); close(); }}><VoiceConversationPanel language={language} state={state} selectionLabel={selectionLabel} searchEnabled={searchEnabled} reservedCredits={Math.ceil((config.maxSeconds + 30) * 36 / 60)} onStart={start} onClose={close} onStop={() => void client.current?.stop()} onToggleMicrophone={() => client.current?.toggleMicrophone()} onResumeAudio={() => void client.current?.resumeAudio()} /></dialog>}
   </>;
 }

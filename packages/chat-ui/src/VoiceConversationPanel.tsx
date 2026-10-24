@@ -27,8 +27,8 @@ export function VoiceConversationPanel({ language, state, selectionLabel, search
   const finished = state?.status === "ended" || state?.status === "error";
   const speaking = active && (state?.outputLevel ?? 0) > .025;
   const level = Math.min(1, Math.max(0, speaking ? state?.outputLevel ?? 0 : state?.muted ? 0 : state?.inputLevel ?? 0));
-  const status = !state ? c.ready : state.status === "connecting" ? c.connecting : state.status === "closing" ? c.finishing : finished ? c.ended : speaking ? c.speaking : state.working ? c.working : c.listening;
-  const error = state?.error === "CREDIT_BALANCE_INSUFFICIENT" ? c.insufficient : /VOICE_OPERATIONAL_LIMIT_REACHED|PLAN_DAILY_CREDIT_LIMIT_REACHED/.test(state?.error ?? "") ? c.limited : /NotAllowedError|PermissionDeniedError/.test(state?.error ?? "") ? c.permission : c.error;
+  const status = !state ? c.ready : state.status === "connecting" ? c.connecting : state.status === "closing" ? c.finishing : state.status === "error" ? c.failed : finished ? c.ended : speaking ? c.speaking : state.working ? c.working : c.listening;
+  const error = state?.error === "CREDIT_BALANCE_INSUFFICIENT" ? c.insufficient : /VOICE_OPERATIONAL_LIMIT_REACHED|PLAN_DAILY_CREDIT_LIMIT_REACHED/.test(state?.error ?? "") ? c.limited : /NotAllowedError|PermissionDeniedError/.test(state?.error ?? "") ? c.permission : /^(VOICE_CONVERSATION_DISABLED|SECURITY_NOT_CONFIGURED)$/.test(state?.error ?? "") ? c.unavailable : state?.error === "VOICE_RECOVERY_UNAVAILABLE" ? c.recovering : /^(VOICE_PROVIDER_UNAVAILABLE|PROVIDER_BUDGET_EXHAUSTED)$/.test(state?.error ?? "") ? c.serviceUnavailable : c.error;
   return <section className="voice-conversation-panel" data-testid="voice-conversation-panel" data-voice-phase={!state ? "ready" : speaking ? "speaking" : state.status}>
     <header><h2 id="voice-conversation-title">{c.title}</h2><button type="button" onClick={onClose} aria-label={c.close}><Icon kind="close" /></button></header>
     <div className="voice-conversation-settings"><span>{selectionLabel}</span><span>{searchEnabled ? c.searchOn : c.searchOff}</span></div>
@@ -43,7 +43,7 @@ export function VoiceConversationPanel({ language, state, selectionLabel, search
         </div>
         {state.audioBlocked && <button type="button" onClick={onResumeAudio}>{c.audio}</button>}
         {state.error && <p role="alert" className="voice-conversation-error">{error}</p>}
-        {finished && <p className="voice-conversation-billing-note">{state.billingPending ? c.unknown : state.confirmed ? c.saved : state.seconds > 0 ? c.adjusted : c.saved}</p>}
+        {finished && (state.billingPending || state.confirmed || state.seconds > 0 || state.captions.length > 0) && <p className="voice-conversation-billing-note">{state.billingPending ? c.unknown : state.confirmed ? c.saved : state.seconds > 0 ? c.adjusted : c.saved}</p>}
       </>}
       {!state && <div className="voice-conversation-price-details"><p>{c.reserve.replace("{credits}", String(reservedCredits))}</p></div>}
     </div>

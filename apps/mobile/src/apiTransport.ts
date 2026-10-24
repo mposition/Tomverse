@@ -254,7 +254,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     setDeviceLock: async (enabled, reason) => { await bridge.setDeviceLock({ enabled, reason }); window.dispatchEvent(new Event("tomverse-device-security-changed")); },
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
     listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => row.surface === "workspace" && ["chat", "image"].includes(row.kind)),
-    createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models })); return load(value.id); },
+    createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
     reviewPreview: async (id, mode = "balanced", synthesis = false) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`); },
@@ -301,7 +301,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
     create: async (title) => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", title ? { title: title.slice(0, 30) } : {}));
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(title ? { title: title.slice(0, 30) } : {}) }));
       const detail = await load(item.id);
       return detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },

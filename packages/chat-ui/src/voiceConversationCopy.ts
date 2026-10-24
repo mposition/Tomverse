@@ -12,6 +12,10 @@ const en = {
   insufficient: "There are not enough available credits to start voice. Your existing chat is saved.",
   limited: "Voice has reached its current usage limit. You can continue in this chat.",
   permission: "Allow microphone access in your device settings, then start voice again.",
+  failed: "Voice could not complete the conversation",
+  unavailable: "Voice is currently unavailable. Try again later or continue in chat.",
+  recovering: "Your voice connection is being recovered safely. Try again shortly or continue in chat.",
+  serviceUnavailable: "The voice service could not be reached. Try again shortly or continue in chat.",
 };
 const ko: typeof en = {
   title: "음성 대화", start: "음성 대화 시작", close: "닫기", stop: "대화 종료",
@@ -27,6 +31,10 @@ const ko: typeof en = {
   insufficient: "음성을 시작할 수 있는 크레딧이 부족해요. 기존 대화는 이 채팅에 남아 있어요.",
   limited: "현재 음성 사용 한도에 도달했어요. 이 채팅에서 계속 대화할 수 있습니다.",
   permission: "기기 설정에서 마이크 사용을 허용한 뒤 다시 시작해 주세요.",
+  failed: "음성 대화를 완료하지 못했어요",
+  unavailable: "현재 음성 대화를 사용할 수 없어요. 잠시 후 다시 시도하거나 채팅을 이용해 주세요.",
+  recovering: "음성 연결을 안전하게 복구하고 있어요. 잠시 후 다시 시작하거나 채팅을 이용해 주세요.",
+  serviceUnavailable: "음성 서비스에 연결하지 못했어요. 잠시 후 다시 시도하거나 채팅을 이용해 주세요.",
 };
 export type VoiceConversationCopy = typeof en;
 export const voiceConversationCopy = (language: string): VoiceConversationCopy => language.startsWith("ko") ? ko : en;

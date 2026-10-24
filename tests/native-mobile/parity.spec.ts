@@ -19,6 +19,9 @@ test("Smart Adaptive, settings and composer tools use the existing account and c
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "파일 첨부", exact: true }).click();
   await expect(page.getByRole("button", { name: "사진 선택" })).toBeVisible();
+  await expect(page.getByRole("switch", { name: /웹 검색/ })).toBeChecked();
+  await page.getByRole("switch", { name: /웹 검색/ }).uncheck();
+  await expect(page.getByRole("switch", { name: /웹 검색/ })).not.toBeChecked();
   await page.getByRole("switch", { name: /웹 검색/ }).check(); await expect(page.getByRole("switch", { name: /웹 검색/ })).toBeChecked();
   await page.getByLabel("어시스턴트", { exact: true }).selectOption("demo-assistant");
   await page.screenshot({ path: resolve(output, "composer-tools-dark.png") });
@@ -40,7 +43,8 @@ test("Review provider tabs never resubmit, follow-ups and reopening restore the 
   const geometry = await page.evaluate(() => ({ height: innerHeight, conversation: document.querySelector(".review-transcript")!.getBoundingClientRect().height, composer: document.querySelector(".composer-area")!.getBoundingClientRect().height }));
   expect(geometry.conversation / geometry.height).toBeGreaterThan(0.72); expect(geometry.composer / geometry.height).toBeLessThan(0.11);
   await page.screenshot({ path: resolve(output, "review-conversation-dark-v2.png") });
-  await page.reload(); await page.getByTestId("product-switcher").selectOption("review"); await expect(page.locator("article.user")).toHaveCount(2);
+  await page.reload(); await page.getByTestId("product-switcher").selectOption("review"); await expect(page.getByTestId("review-landing")).toBeVisible();
+  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.locator(".conversation-row").click(); await expect(page.locator("article.user")).toHaveCount(2);
   saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]); expect(saved.messages).toHaveLength(8);
 });
 

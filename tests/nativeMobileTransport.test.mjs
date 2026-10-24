@@ -6,6 +6,25 @@ import { nativeChatBearerRoute } from "../lib/nativeBearerGate.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
 
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
+
+test("new mobile Chat and Review conversations enable web search without rewriting an existing choice", async () => {
+  const calls = []; let webSearchMode = "off";
+  const transport = createApiTransport(async (path, init = {}) => {
+    calls.push({ path, ...init });
+    if (path === "/api/products/mobile/capabilities") return Response.json({ reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" });
+    if (path === "/api/products/chat/conversations" || path === "/api/products/review/conversations") {
+      webSearchMode = JSON.parse(init.body).webSearchMode; return Response.json({ id: "conversation-a" });
+    }
+    if (path === "/api/conversations/conversation-a") return Response.json({ id: "conversation-a", selectedModels: ["fixture-model"], messages: [], webSearchMode });
+    throw Error(`Unexpected request ${path}`);
+  }, bridge);
+  assert.equal((await transport.load("conversation-a")).webSearchMode, "off");
+  assert.equal((await transport.create("New question")).webSearchMode, "always");
+  assert.equal((await transport.createReview(["fixture-model"])).webSearchMode, "always");
+  assert.deepEqual(calls.filter(call => call.method === "POST").map(call => JSON.parse(call.body)), [
+    { webSearchMode: "always", title: "New question" }, { selectedModels: ["fixture-model"], webSearchMode: "always" },
+  ]);
+});
 function fixture({ unknown = false, routedModel = null } = {}) {
   const calls = []; let turns = 0;
   const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: [] };
