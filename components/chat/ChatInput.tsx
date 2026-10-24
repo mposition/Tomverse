@@ -4635,7 +4635,7 @@ export function ChatInput({
                       already in.
                     */}
                     <Link
-                      href={settingsSectionHref("assistants")}
+                      href={settingsSectionHref("assistants", currentProduct ?? "review")}
                       data-testid="assistant-manage-cta"
                       onClick={() => closeMenu(false)}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 dark:hover:bg-zinc-800 ${

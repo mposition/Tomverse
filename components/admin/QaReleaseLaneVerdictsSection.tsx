@@ -1,12 +1,63 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
+import { shouldIssueAdminPoll, type AdminPollTrigger } from "@/lib/adminPollTick";
 import { card } from "@/components/admin/qaReleaseTabParts";
 import { adminQaReleaseLaneMessages } from "@/lib/adminMessages/qaReleaseLane";
 import { aestClock } from "@/lib/agentOffice/time";
 import type { QaReleaseLaneRoundVerdict, QaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 
 const REPO = "https://github.com/mposition/Tomverse";
+const REFRESH_MS = 20_000;
+
+type LaneRead = { rounds: QaReleaseLaneRounds; open: number[] | null };
+
+/**
+ * The lane's record and the pull requests open on GitHub now
+ * (/api/admin/qa-release/lane), read at once and every 20 seconds while the
+ * page is visible, on the console's refresh and when the tab comes back.
+ * Null until the first answer.
+ */
+function useLaneRead(): LaneRead | null {
+  const [read, setRead] = useState<LaneRead | null>(null);
+  useEffect(() => {
+    let stopped = false;
+    // One request at a time, none from a background tab's timer
+    // (docs/ui-contracts/admin-console-ia.md rule 11).
+    let inFlight = false;
+    const poll = async (trigger: AdminPollTrigger) => {
+      if (!shouldIssueAdminPoll({ inFlight, documentVisible: document.visibilityState === "visible", trigger })) return;
+      inFlight = true;
+      try {
+        const response = await adminFetch("/api/admin/qa-release/lane", { cache: "no-store" });
+        if (response.ok && !stopped) setRead((await response.json()) as LaneRead);
+      } catch {
+        // The next tick tries again; what is on screen stays.
+      } finally {
+        inFlight = false;
+      }
+    };
+    const first = setTimeout(() => void poll("event"), 0);
+    const timer = setInterval(() => void poll("interval"), REFRESH_MS);
+    const onRefresh = () => void poll("event");
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void poll("event");
+    };
+    window.addEventListener("admin:refresh", onRefresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(first);
+      clearInterval(timer);
+      window.removeEventListener("admin:refresh", onRefresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+  return read;
+}
 
 const fill = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce((text, [key, value]) => text.replace(`{${key}}`, String(value)), template);
@@ -35,10 +86,15 @@ const BAR: Record<Tone, string> = {
  * which ones are theirs without asking (owner, 2026-10-23). Read only; the
  * lane writes the record each round (lib/qaReleaseMergeLaneRoundStore.ts).
  */
-export function QaReleaseLaneVerdictsSection({ rounds, latched }: { rounds: QaReleaseLaneRounds; latched: boolean }) {
+export function QaReleaseLaneVerdictsSection({ rounds: initial, latched }: { rounds: QaReleaseLaneRounds; latched: boolean }) {
   const m = useAdminMessages(adminQaReleaseLaneMessages);
+  const read = useLaneRead();
+  const rounds = read?.rounds ?? initial;
   const latest = rounds.rounds[0] ?? null;
-  const list = rounds.verdicts?.list ?? [];
+  // A pull request closed or merged since the lane judged it is gone from
+  // GitHub's open list: it leaves the page before the lane's next round.
+  const open = read?.open ? new Set(read.open) : null;
+  const list = (rounds.verdicts?.list ?? []).filter((verdict) => !open || open.has(verdict.number));
   const by = (status: QaReleaseLaneRoundVerdict["status"][]) => list.filter((v) => status.includes(v.status));
   const human = by(["human"]);
   const fix = by(["fix"]);

@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
     settingsBackTarget,
     settingsEntryHierarchy,
+    settingsHrefForProduct,
     type SettingsHierarchy,
     type SettingsSectionId,
 } from "@/lib/settingsNavigation";
@@ -54,11 +56,19 @@ export function SettingsDetailNav({
     backTestId: string;
 }) {
     const { t } = useLanguage();
+    const product = useSettingsReturnProduct();
     // One of the two is always supplied; `section` is the common case and
     // `hierarchy` is the general one. Preferring the explicit list means a
     // caller that passes both cannot get a trail that disagrees with it.
-    const trail: SettingsHierarchy =
-        hierarchy ?? (section ? settingsEntryHierarchy(section) : []);
+    // The settings list lives on the product the panel was opened from, so its
+    // crumbs point there rather than at Review.
+    const trail: SettingsHierarchy = (
+        hierarchy ?? (section ? settingsEntryHierarchy(section) : [])
+    ).map((ancestor) =>
+        ancestor.href
+            ? { ...ancestor, href: settingsHrefForProduct(ancestor.href, product) }
+            : ancestor
+    );
     // The nearest ancestor that is actually somewhere -- not simply the last
     // crumb, which may be a naming step like the tab a row lives in.
     const parent = settingsBackTarget(trail);
