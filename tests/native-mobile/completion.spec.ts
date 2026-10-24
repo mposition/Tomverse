@@ -35,7 +35,8 @@ test("answers render Markdown, citations and generated files with a real browser
   await expect(page.getByRole("heading", { name: "Answer", exact: true })).toBeVisible(); await expect(page.locator("table")).toBeVisible(); await expect(page.locator("pre code")).toContainText("const value");
   await expect(page.getByRole("link", { name: "Source", exact: true })).toHaveAttribute("rel", "noopener noreferrer");
   const downloaded = page.waitForEvent("download"); await page.getByRole("button", { name: "Save file", exact: true }).click(); expect((await downloaded).suggestedFilename()).toBe("answer.txt");
-  await page.reload(); await expect(page.getByRole("button", { name: "Save file", exact: true })).toBeVisible();
+  await page.reload(); await page.getByRole("button", { name: "Conversations", exact: true }).click(); await page.locator(".conversation-row").click();
+  await expect(page.getByRole("button", { name: "Save file", exact: true })).toBeVisible();
 });
 test("unsent native drafts survive reload and model selection without a dispatch", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Keep this draft"); await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("Keep this draft");

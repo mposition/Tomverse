@@ -66,7 +66,8 @@ test("native voice delegates to the existing Chat and restores answers and sessi
   await page.getByRole("button", { name: "채팅으로 돌아가기", exact: true }).click();
   await expect(page.getByTestId("voice-session-summary")).toContainText("6");
   await expect(page.locator("article.user")).toContainText("기존 모델로 이 질문에 답해주세요");
-  await page.reload(); await expect(page.locator("article.user")).toContainText("기존 모델로 이 질문에 답해주세요");
+  await page.reload(); await page.getByRole("button", { name: "대화", exact: true }).click(); await page.locator(".conversation-row").click();
+  await expect(page.locator("article.user")).toContainText("기존 모델로 이 질문에 답해주세요");
   await expect(page.getByTestId("voice-session-summary")).toContainText("00:10");
 });
 

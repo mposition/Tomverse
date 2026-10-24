@@ -94,11 +94,6 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         const list = await transport.list();
         if (!isCurrent()) return;
         setChats(list);
-        const last = localStorage.getItem(LAST_CHAT);
-        if (last && list.some((chat) => chat.id === last)) {
-          const restored = await transport.load(last);
-          if (isCurrent()) { setConversation(restored); setUncertain(restored.activeAttempt === true); }
-        }
       } catch { if (isCurrent()) setError(initializationError.current); }
       finally { if (isCurrent()) setLoading(false); }
     })();
