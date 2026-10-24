@@ -1618,9 +1618,6 @@ export const de = {
         statusExpired: "Abgelaufen",
         expiredCardNotice: "Abgelaufen — er muss neu gestartet werden.",
         abandonImport: "Diesen Import verlassen",
-        memoryNotice: "Wenn Sie diesen Import abschließen, erstellt Tomverse automatisch Erinnerungen aus den importierten Unterhaltungen, ohne Credits abzubuchen. Dazu wird ihr Inhalt an einen KI-Anbieter übermittelt; sensible Inhalte wie Gesundheitsangaben werden nicht als Erinnerung gespeichert.",
-        memoryNoticeSettings: "Memory-Einstellungen",
-        memoryNoticePrivacy: "Datenschutzerklärung",
     },
     accountDataExport: {
         ...en.accountDataExport,
@@ -2021,6 +2018,9 @@ export const de = {
         organisingNotice: "Erinnerungen aus Ihren importierten Unterhaltungen werden erstellt.",
         organisingView: "Fortschritt ansehen",
         restoreConflict: "Eine Erinnerung zum selben Thema ist bereits in Gebrauch. Löschen Sie sie und versuchen Sie es erneut.",
+        importNotice: "Wenn Sie diesen Import abschließen, erstellt Tomverse automatisch Erinnerungen aus den importierten Unterhaltungen, ohne Credits abzubuchen. Dazu wird ihr Inhalt an einen KI-Anbieter übermittelt; sensible Inhalte wie Gesundheitsangaben werden nicht als Erinnerung gespeichert.",
+        importNoticeSettings: "Memory-Einstellungen",
+        importNoticePrivacy: "Datenschutzerklärung",
     },
     // Start der Extraktion (Release B, §11 Bestätigung vorab, §21).
     memoryExtraction: {

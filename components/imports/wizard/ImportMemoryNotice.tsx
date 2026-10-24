@@ -56,19 +56,19 @@ export function ImportMemoryNotice() {
         >
             <Brain className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
             <p>
-                {t("externalImport.memoryNotice")}{" "}
+                {t("memoryReview.importNotice")}{" "}
                 <Link
                     href="/settings/memory"
                     className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                 >
-                    {t("externalImport.memoryNoticeSettings")}
+                    {t("memoryReview.importNoticeSettings")}
                 </Link>
                 {" · "}
                 <Link
                     href="/privacy"
                     className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                 >
-                    {t("externalImport.memoryNoticePrivacy")}
+                    {t("memoryReview.importNoticePrivacy")}
                 </Link>
             </p>
         </div>

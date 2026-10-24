@@ -1615,9 +1615,6 @@ export const fr = {
         statusExpired: "Expiré",
         expiredCardNotice: "Expiré : il faut recommencer.",
         abandonImport: "Quitter cet import",
-        memoryNotice: "À la fin de cette importation, Tomverse tire automatiquement des souvenirs des conversations importées, sans débit de crédits. Pour cela, leur contenu est envoyé à un fournisseur d'IA, et les contenus sensibles, comme les informations de santé, ne sont pas enregistrés comme souvenirs.",
-        memoryNoticeSettings: "Réglages de mémoire",
-        memoryNoticePrivacy: "Politique de confidentialité",
     },
     accountDataExport: {
         ...en.accountDataExport,
@@ -2017,6 +2014,9 @@ export const fr = {
         organisingNotice: "Création de souvenirs à partir de vos conversations importées en cours.",
         organisingView: "Voir la progression",
         restoreConflict: "Un souvenir sur le même sujet est déjà utilisé. Supprimez-le puis réessayez.",
+        importNotice: "À la fin de cette importation, Tomverse tire automatiquement des souvenirs des conversations importées, sans débit de crédits. Pour cela, leur contenu est envoyé à un fournisseur d'IA, et les contenus sensibles, comme les informations de santé, ne sont pas enregistrés comme souvenirs.",
+        importNoticeSettings: "Réglages de mémoire",
+        importNoticePrivacy: "Politique de confidentialité",
     },
     // Lancement de l'extraction (Release B, §11 confirmation préalable, §21).
     memoryExtraction: {

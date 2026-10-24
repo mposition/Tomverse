@@ -1615,9 +1615,6 @@ export const pt = {
         statusExpired: "Expirada",
         expiredCardNotice: "Expirou e precisa ser começada de novo.",
         abandonImport: "Sair desta importação",
-        memoryNotice: "Ao concluir esta importação, a Tomverse organiza automaticamente memórias a partir das conversas importadas, sem desconto de créditos. Para isso, o conteúdo delas é enviado a um provedor de IA, e conteúdo sensível, como informações de saúde, não é salvo como memória.",
-        memoryNoticeSettings: "Configurações de memória",
-        memoryNoticePrivacy: "Política de privacidade",
     },
     accountDataExport: {
         ...en.accountDataExport,
@@ -2017,6 +2014,9 @@ export const pt = {
         organisingNotice: "Organizando memórias a partir das suas conversas importadas.",
         organisingView: "Ver progresso",
         restoreConflict: "Já há uma memória em uso sobre o mesmo assunto. Exclua-a e tente de novo.",
+        importNotice: "Ao concluir esta importação, a Tomverse organiza automaticamente memórias a partir das conversas importadas, sem desconto de créditos. Para isso, o conteúdo delas é enviado a um provedor de IA, e conteúdo sensível, como informações de saúde, não é salvo como memória.",
+        importNoticeSettings: "Configurações de memória",
+        importNoticePrivacy: "Política de privacidade",
     },
     // Início da extração (Release B, §11 confirmação prévia, §21).
     memoryExtraction: {

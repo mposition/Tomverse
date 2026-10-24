@@ -1617,9 +1617,6 @@ export const en = {
         statusExpired: "Expired",
         expiredCardNotice: "This expired and has to be started again.",
         abandonImport: "Leave this import",
-        memoryNotice: "When you finish this import, Tomverse automatically organises memories from the imported conversations, at no credit cost. To do this, their content is sent to an AI provider, and sensitive content such as health information is not saved as a memory.",
-        memoryNoticeSettings: "Memory settings",
-        memoryNoticePrivacy: "Privacy Policy",
     },
     // Account long-term memory review (Release B, slice B3). The list,
     // delete and settings stay reachable regardless of the rollout flag;
@@ -2030,6 +2027,9 @@ export const en = {
         organisingNotice: "Organising memories from your imported conversations.",
         organisingView: "View progress",
         restoreConflict: "A memory on the same topic is already in use. Delete it and try again.",
+        importNotice: "When you finish this import, Tomverse automatically organises memories from the imported conversations, at no credit cost. To do this, their content is sent to an AI provider, and sensitive content such as health information is not saved as a memory.",
+        importNoticeSettings: "Memory settings",
+        importNoticePrivacy: "Privacy Policy",
     },
     // Extraction run launch (Release B, §11 pre-run confirmation, §21).
     memoryExtraction: {

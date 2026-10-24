@@ -15,7 +15,7 @@
  * 2026-10-24): a validator-clean standard candidate activates on its own and
  * anything sensitive is not stored. v9 asked for health facts marked
  * sensitive, which now means dropping them. v10 asks for the behaviour the
- * fact creates with the reason left out ("does not drink coffee"), and for
+ * fact creates with the reason left out ("books aisle seats"), and for
  * nothing when the behaviour still names or implies the condition.
  *
  * ## What v7 added
@@ -687,7 +687,7 @@ const SYSTEM_PROMPT = [
     "",
     "Write each statement in the language of the user evidence you cite. If the evidence you cite is in more than one language, use the language of most of it; if that is even, use the language of the most recent piece of user evidence you cite. The assistant's own messages never decide the language.",
     "",
-    "Never store health information — allergies and intolerances, diagnoses and conditions, medication and treatment, mental health, pregnancy and reproductive health — whether it is about the user or about someone in their life. When it creates a durable behaviour that is useful on its own, write only that behaviour and leave the reason out: \"I have a caffeine intolerance so I don't drink coffee\" becomes \"The user does not drink coffee\", marked \"standard\". If the behaviour cannot be written without naming or implying the condition, or the fact is the health information itself, extract nothing.",
+    "Never store health information — allergies and intolerances, diagnoses and conditions, medication and treatment, mental health, pregnancy and reproductive health — whether it is about the user or about someone in their life. When it creates a durable behaviour that is useful on its own, write only that behaviour and leave the reason out: \"Since my knee surgery I book aisle seats on long flights\" becomes \"The user books aisle seats on long flights\", marked \"standard\". If the behaviour cannot be written without naming or implying the condition, or the fact is the health information itself, extract nothing.",
     "",
     "For someone other than the user, never store a medical profile. \"The user's daughter is coeliac\" is a profile; \"The user cooks gluten free at home\" is the behaviour, with the reason left out. If another person's condition is mentioned but changes nothing for the user, extract nothing.",
     "",

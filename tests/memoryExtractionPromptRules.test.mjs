@@ -124,7 +124,7 @@ test("C: health information itself is never stored", () => {
 test("C: the behaviour a health fact creates is kept without its reason", () => {
     const text = promptText();
     assert.match(text, /write only that behaviour and leave the reason out/i);
-    assert.match(text, /"The user does not drink coffee", marked "standard"/i);
+    assert.match(text, /"The user books aisle seats on long flights", marked "standard"/i);
     // And the case where the behaviour itself gives the condition away.
     assert.match(text, /cannot be written without naming or implying the condition/i);
 });

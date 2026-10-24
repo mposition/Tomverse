@@ -1610,9 +1610,6 @@ export const ko = {
         statusExpired: "만료됨",
         expiredCardNotice: "만료되어 다시 시작해야 합니다.",
         abandonImport: "가져오기 그만두기",
-        memoryNotice: "가져오기를 완료하면 Tomverse가 가져온 대화에서 기억을 자동으로 정리하며, 크레딧은 차감되지 않습니다. 이를 위해 대화 내용이 AI 공급자에게 전송되고, 건강 정보처럼 민감한 내용은 기억으로 저장하지 않습니다.",
-        memoryNoticeSettings: "기억 설정",
-        memoryNoticePrivacy: "개인정보 처리방침",
     },
     // 계정 장기 기억 검토 (Release B, slice B3). 목록·삭제·설정은 flag와
     // 무관하게 항상 접근 가능하고, 검토·작성 동작만 rollout flag를 따릅니다.
@@ -2017,6 +2014,9 @@ export const ko = {
         organisingNotice: "가져온 대화에서 기억을 정리하고 있습니다.",
         organisingView: "진행 상태 보기",
         restoreConflict: "같은 주제의 기억이 이미 사용 중입니다. 그 기억을 삭제한 뒤 다시 시도하세요.",
+        importNotice: "가져오기를 완료하면 Tomverse가 가져온 대화에서 기억을 자동으로 정리하며, 크레딧은 차감되지 않습니다. 이를 위해 대화 내용이 AI 공급자에게 전송되고, 건강 정보처럼 민감한 내용은 기억으로 저장하지 않습니다.",
+        importNoticeSettings: "기억 설정",
+        importNoticePrivacy: "개인정보 처리방침",
     },
     // 기억 추출 실행 (Release B, §11 사전 확인 계약 · §21 UI 경로).
     // 실행 전 모델·묶음 수·크레딧을 보여주고 사용자가 명시적으로 확인해야

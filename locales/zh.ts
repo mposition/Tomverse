@@ -1607,9 +1607,6 @@ export const zh = {
         statusExpired: "已过期",
         expiredCardNotice: "已过期，需要重新开始。",
         abandonImport: "退出此次导入",
-        memoryNotice: "完成导入后，Tomverse 会自动从导入的对话中整理记忆，不扣除额度。为此，对话内容会发送给 AI 提供方，健康信息等敏感内容不会保存为记忆。",
-        memoryNoticeSettings: "记忆设置",
-        memoryNoticePrivacy: "隐私政策",
     },
     accountDataExport: {
         ...en.accountDataExport,
@@ -2003,6 +2000,9 @@ export const zh = {
         organisingNotice: "正在从导入的对话中整理记忆。",
         organisingView: "查看进度",
         restoreConflict: "同一主题的记忆已在使用中。请先删除它再重试。",
+        importNotice: "完成导入后，Tomverse 会自动从导入的对话中整理记忆，不扣除额度。为此，对话内容会发送给 AI 提供方，健康信息等敏感内容不会保存为记忆。",
+        importNoticeSettings: "记忆设置",
+        importNoticePrivacy: "隐私政策",
     },
     // 记忆提取执行（Release B，§11 运行前确认，§21）。
     memoryExtraction: {
