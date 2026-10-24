@@ -86,7 +86,14 @@ export const EXPECTED_TRIGGER_FUNCTIONS = Object.freeze({
 /** pg_trigger.tgenabled for a trigger that fires in an ordinary session. */
 export const TRIGGER_ENABLED = "O";
 
-/** Every pg_constraint row of the own tables, as name: contype. */
+/**
+ * pg_constraint.contype of a column NOT NULL. PostgreSQL 18 records each one
+ * as a constraint row (17 kept them only in pg_attribute); they are not
+ * compared, so the check reads the same rules on either version.
+ */
+export const NOT_NULL_CONSTRAINT_TYPE = "n";
+
+/** Every pg_constraint row of the own tables except NOT NULLs, as name: contype. */
 export const EXPECTED_CONSTRAINTS = Object.freeze({
   OpsObserverGenesis: {
     OpsObserverGenesis_pkey: "p",
@@ -221,7 +228,7 @@ export function catalogProblems({ triggers, constraints, indexes }) {
 
   for (const table of own) {
     const tableTriggers = byTable(triggers, table);
-    const tableConstraints = byTable(constraints, table);
+    const tableConstraints = byTable(constraints, table).filter((row) => row.type !== NOT_NULL_CONSTRAINT_TYPE);
     exactSet(problems, `${table} trigger`, EXPECTED_TRIGGERS[table], tableTriggers.map((r) => r.name));
     exactSet(problems, `${table} constraint`, Object.keys(EXPECTED_CONSTRAINTS[table]), tableConstraints.map((r) => r.name));
     exactSet(problems, `${table} index`, EXPECTED_INDEXES[table], byTable(indexes, table).map((r) => r.name));
