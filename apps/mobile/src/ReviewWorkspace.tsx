@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ConversationHistory } from "./ConversationHistory";
 import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
 import { mobileErrorText } from "../../../locales/mobileErrors";
@@ -15,8 +16,9 @@ import type { ImagePreset } from "../../../lib/imageGenerationPricing";
 import { Sheet } from "./Sheet";
 import { useDeviceDraft, preserveNativeDraft } from "./useDeviceDraft";
 
-export function ReviewWorkspace({ transport, language, owner, historyOpen, onCloseHistory, onBusyChange }: {
+export function ReviewWorkspace({ transport, language, owner, historyOpen, onCloseHistory, onBusyChange, historyFooter, newConversationRequest = 0 }: {
   transport: ChatTransport; language: MobileLanguage; owner: string | null; historyOpen: boolean;
+  historyFooter?: ReactNode; newConversationRequest?: number;
   onCloseHistory: () => void; onBusyChange: (busy: boolean) => void;
 }) {
   const c = mobileParityCopy(language); const copy = mobileCopy[language];
@@ -24,17 +26,22 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const [models, setModels] = useState<MobileModel[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
-  const { mode, setMode, providers, setProviders } = useReviewWorkspace(owner, capability?.reviewEasy ?? false, conversation?.id ?? null);
+  const { mode, setMode, providers: manualProviders, providersConfigured, setProviders, clearProviders } = useReviewWorkspace(owner, capability?.reviewEasy ?? false, conversation?.id ?? null);
+  const [defaults, setDefaults] = useState<string[]>([]);
+  const [providerOptions, setProviderOptions] = useState<string[]>([]);
+  const providers = providersConfigured ? manualProviders : defaults;
   const [crossReview, setCrossReview] = useState(false); const [actionBusy, setActionBusy] = useState(false);
   const [image, setImage] = useState<{ prompt: string; modelIds: string[]; preset: ImagePreset; unsupported: boolean } | null>(null);
   const [imageHistory, setImageHistory] = useState<string | null>(null); const [imageOpen, setImageOpen] = useState(false);
   const reviewCopy = mobileReviewCopy(language);
-  const [chats, setChats] = useState<ChatSummary[]>([]); const [query, setQuery] = useState("");
+  const [chats, setChats] = useState<ChatSummary[]>([]);
   const [picker, setPicker] = useState(false);
   const [activeModel, setActiveModel] = useState(""); const [partial, setPartial] = useState<Record<string, string>>({});
   const [streaming, setStreaming] = useState(false); const [loading, setLoading] = useState(true);
   const [uncertain, setUncertain] = useState(false); const [error, setError] = useState("");
   const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? "review:new");
+  const titleScope = useRef(0);
+  useEffect(() => () => { titleScope.current++; }, [owner, transport]);
   const request = useRef(0); const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null); const followOutput = useRef(true);
   useEffect(() => { if (followOutput.current) end.current?.scrollIntoView({ block: "end" }); }, [conversation?.messages.length, partial, activeModel]);
@@ -46,22 +53,28 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     return () => controller.abort();
   }, [researchKey, streaming, transport]); // eslint-disable-line react-hooks/exhaustive-deps -- Job identity controls one restoration watcher.
   const initializationError = useRef(c.reviewUnavailable);
+  const defaultsError = useRef(c.reviewDefaultsUnavailable);
+  useEffect(() => { defaultsError.current = c.reviewDefaultsUnavailable; }, [c.reviewDefaultsUnavailable]);
   useEffect(() => { initializationError.current = c.reviewUnavailable; }, [c.reviewUnavailable]);
   const lastKey = `tomverse-native-last-review:${owner ?? ""}`;
-  useEffect(() => { onBusyChange(streaming || uncertain || actionBusy); return () => onBusyChange(false); }, [streaming, uncertain, actionBusy, onBusyChange]);
+  useEffect(() => { onBusyChange(loading || streaming || uncertain || actionBusy); return () => onBusyChange(false); }, [loading, streaming, uncertain, actionBusy, onBusyChange]);
   useEffect(() => {
     const current = ++request.current;
     void (async () => {
       try {
         if (!transport.mobileCapabilities || !transport.listReview) throw Error("REVIEW_UNAVAILABLE");
-        const [cap, catalog, history] = await Promise.all([transport.mobileCapabilities(), transport.models(), transport.listReview()]);
+        const [cap, catalog, history, preferences] = await Promise.all([transport.mobileCapabilities(), transport.models(), transport.listReview(), transport.preferences?.().catch(() => null)]);
         if (current !== request.current) return;
         setCapability(cap); setModels(catalog.filter(model => canUseModelWithPlan(cap.plan, model))); setChats(history);
         const eligible = catalog.filter(model => canUseModelWithPlan(cap.plan, model));
         setSelected(eligible.slice(0, Math.min(cap.maxModels, 2)).map(model => model.id));
-        setProviders([...new Set(eligible.map(model => model.provider))].slice(0, Math.min(cap.maxModels, 3)));
+        const available = new Set(eligible.map(model => model.provider));
+        const options = preferences?.reviewEasyProviderOptions?.filter(provider => available.has(provider)) ?? [];
+        setProviderOptions(options);
+        setDefaults((preferences?.reviewEasyEffectiveProviders ?? []).filter(provider => options.includes(provider)).slice(0, Math.min(cap.maxModels, preferences?.reviewEasyMaxProviders ?? 3)));
+        if (cap.reviewEasy && !preferences?.reviewEasyEffectiveProviders) setError(defaultsError.current);
         const last = localStorage.getItem(lastKey);
-        if (last && history.some(chat => chat.id === last && chat.kind !== "image")) {
+        if (last && history.some(chat => chat.id === last && chat.kind !== "image" && (!chat.isLocked || transport.history?.unlocked(chat.id)))) {
           const item = await transport.load(last);
           if (current !== request.current) return;
           setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true);
@@ -71,6 +84,14 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     })();
     return () => { request.current++; abort.current?.abort(); }; // eslint-disable-line react-hooks/exhaustive-deps -- Invalidate outstanding requests on unmount.
   }, [transport, lastKey, setProviders]);
+  const previousNewRequest = useRef(newConversationRequest);
+  function newReview() {
+    request.current++; setConversation(null); setPartial({}); setError(""); setUncertain(false); clearProviders(); localStorage.removeItem(lastKey); onCloseHistory();
+  }
+  useEffect(() => {
+    if (previousNewRequest.current === newConversationRequest) return;
+    previousNewRequest.current = newConversationRequest; newReview();
+  }, [newConversationRequest]); // eslint-disable-line react-hooks/exhaustive-deps -- Header action identity.
   async function open(id: string) {
     if (chats.find(row => row.id === id)?.kind === "image") { setImageHistory(id); setImage(null); setImageOpen(true); onCloseHistory(); return; }
     const current = ++request.current; setLoading(true); setError("");
@@ -100,6 +121,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   async function send(text: string, files: MobileAttachment[]) {
     if (streaming || uncertain || !capability) return false;
     if (!(mode === "easy" ? providers : selected).length) { setError(c.noParticipants); return false; }
+    const titleEpoch = titleScope.current;
     const current = ++request.current; const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial({});
     let item = conversation; let dispatched = false;
@@ -131,6 +153,11 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       if (!outcome.failedModelIds.length) setDraft(""); else setError(copy.disconnected);
       const history = await transport.listReview!();
       if (current === request.current) setChats(history);
+      if (titleEpoch === titleScope.current) void transport.generateTitle?.(saved).then(title => {
+        if (!title || titleEpoch !== titleScope.current) return;
+        setConversation(value => value?.id === saved.id && value.title === saved.title ? { ...value, title } : value);
+        setChats(rows => rows.map(row => row.id === saved.id && row.title === saved.title ? { ...row, title } : row));
+      }).catch(() => { /* Preserve the stored title on background generation failure. */ });
     } catch (error) {
       const beforePersistence = (error as { questionPersisted?: boolean }).questionPersisted === false;
       if (current === request.current) { setError(mobileErrorText(error, language, copy.error)); setUncertain(dispatched && !beforePersistence); if (beforePersistence) setConversation(item); }
@@ -156,10 +183,14 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       { label: reviewCopy.images, disabled: !capability?.images?.enabled, onSelect: () => { setImage(null); setImageHistory(null); setImageOpen(true); } },
     ]} />
     {picker && <Sheet title={mode === "easy" ? c.providers : c.models} closeLabel={copy.close} onClose={() => setPicker(false)}><div className="segmented" role="group" aria-label="Review mode">{(["easy", "professional"] as const).map(value => <button key={value} aria-pressed={mode === value} disabled={streaming || uncertain || (value === "easy" && !capability?.reviewEasy)} onClick={() => setMode(value)}>{value === "easy" ? "Easy" : "Professional"}</button>)}</div><p>{mode === "easy" ? c.easy : c.professional}</p><div className="review-model-options">
-      {mode === "easy" ? [...new Set(models.map(model => model.provider))].map(provider => <label key={provider}>{provider}<input type="checkbox" checked={providers.includes(provider)} disabled={!providers.includes(provider) && providers.length >= Math.min(3, capability?.maxModels ?? 1)} onChange={event => { const checked = event.currentTarget.checked; setProviders(checked ? [...providers, provider] : providers.filter(value => value !== provider)); }} /></label>) : models.map(model => <label key={model.id}><span>{model.name}<small>{model.provider}</small></span><input type="checkbox" checked={selected.includes(model.id)} disabled={!selected.includes(model.id) && selected.length >= (capability?.maxModels ?? 1)} onChange={event => { const checked = event.currentTarget.checked; setSelected(previous => checked ? [...previous, model.id] : previous.filter(value => value !== model.id)); }} /></label>)}
+      {mode === "easy" ? providerOptions.map(provider => <label key={provider}>{provider}<input type="checkbox" checked={providers.includes(provider)} disabled={!providers.includes(provider) && providers.length >= Math.min(3, capability?.maxModels ?? 1)} onChange={event => { const checked = event.currentTarget.checked; setProviders(checked ? [...providers, provider] : providers.filter(value => value !== provider)); }} /></label>) : models.map(model => <label key={model.id}><span>{model.name}<small>{model.provider}</small></span><input type="checkbox" checked={selected.includes(model.id)} disabled={!selected.includes(model.id) && selected.length >= (capability?.maxModels ?? 1)} onChange={event => { const checked = event.currentTarget.checked; setSelected(previous => checked ? [...previous, model.id] : previous.filter(value => value !== model.id)); }} /></label>)}
     </div></Sheet>}
     {crossReview && conversation && <CrossReview id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setCrossReview(false)} onBusy={setActionBusy} onSource={messageId => { const source = conversation.messages.find(message => message.id === messageId); if (source?.modelId) setActiveModel(source.modelId); setCrossReview(false); setTimeout(() => document.getElementById(`review-message-${messageId}`)?.scrollIntoView({ block: "center" }), 50); }} />}
     {imageOpen && <NativeImageWorkspace owner={owner} transport={transport} language={language} initial={image ?? undefined} historyId={imageHistory ?? undefined} onBusy={setActionBusy} onClose={() => setImageOpen(false)} onCreated={id => { setImageHistory(id); void transport.listReview!().then(setChats).catch(() => setError(copy.unavailable)); }} />}
-    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" onClick={() => { request.current++; setConversation(null); setPartial({}); setError(""); setUncertain(false); localStorage.removeItem(lastKey); onCloseHistory(); }}>{c.newReview}</button><input type="search" aria-label={c.history} value={query} onChange={event => setQuery(event.target.value)} />{chats.filter(chat => chat.title.toLowerCase().includes(query.toLowerCase())).map(chat => <button className="conversation-row" key={chat.id} onClick={() => void open(chat.id)}>{chat.title}</button>)}</Sheet>}
+    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" disabled={loading || streaming || uncertain || actionBusy} onClick={newReview}>{c.newReview}</button><div className="history-scroll"><ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={loading || streaming || uncertain || actionBusy} onOpen={id => void open(id)} onRefresh={async () => {
+      const scope = request.current; const rows = await transport.listReview!();
+      if (scope !== request.current) throw Error("REVIEW_SCOPE_CHANGED");
+      setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
+    }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { request.current++; setConversation(null); setPartial({}); setUncertain(false); localStorage.removeItem(lastKey); } }} /></div>{historyFooter}</Sheet>}
   </section>;
 }

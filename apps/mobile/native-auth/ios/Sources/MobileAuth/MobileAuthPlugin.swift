@@ -31,31 +31,32 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     private var state: String?
     private var observer: NSObjectProtocol?
     private var authentication: ASWebAuthenticationSession?
-    private var deviceUnlocked = false
+    private let signInLock = NSLock()
+    private var signInGeneration = 0
+    private var pendingGeneration = 0
+    private var devicePromptGeneration = 0
+    private var cancelledRevocationUnconfirmed = false
     private var securityObserver: NSObjectProtocol?
-    private var foregroundObserver: NSObjectProtocol?
-    private var backgroundedAt: Date?
-    private var backgrounded = false
     private var devicePrompt: LAContext?
     private var lockEnabled: Bool { UserDefaults.standard.bool(forKey: service + ".deviceLock") }
-    private var deviceLocked: Bool { lockEnabled && (!deviceUnlocked || backgrounded) }
 
     @objc public func getDeviceSecurity(_ call: CAPPluginCall) {
         queue.async { [self] in
             let context = LAContext()
-            call.resolve(["available": context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil), "enabled": lockEnabled, "locked": deviceLocked && (try? read()) != nil])
+            call.resolve(["available": context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil), "enabled": lockEnabled, "locked": false])
         }
     }
-    private func authenticateDevice(_ call: CAPPluginCall, success: @escaping () -> Void) {
+    private func authenticateDevice(_ call: CAPPluginCall, generation: Int, success: @escaping () -> Void) {
         DispatchQueue.main.async { [self] in
+            guard currentSignIn(generation) else { call.reject("Sign-in cancelled", "LOGIN_CANCELLED"); return }
             guard devicePrompt == nil else { call.reject("Authentication already open", "DEVICE_AUTH_BUSY"); return }
             let context = LAContext()
             guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { call.reject("Configure device security first", "DEVICE_SECURITY_UNAVAILABLE"); return }
-            devicePrompt = context
-            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: call.getString("reason") ?? "Unlock your Tomverse conversations") { [weak self] allowed, _ in
+            devicePrompt = context; devicePromptGeneration = generation
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: call.getString("reason") ?? "Verify your Tomverse sign-in") { [weak self] allowed, _ in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    self.devicePrompt = nil
+                    if self.devicePrompt === context { self.devicePrompt = nil }
                     guard allowed && UIApplication.shared.applicationState == .active else { call.reject("Authentication cancelled", "DEVICE_AUTH_CANCELLED"); return }
                     self.queue.async { success() }
                 }
@@ -65,16 +66,47 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     @objc public func setDeviceLock(_ call: CAPPluginCall) {
         queue.async { [self] in
             guard (try? read()) != nil else { call.reject("Sign in first", "SIGN_IN_REQUIRED"); return }
-            authenticateDevice(call) { [self] in
-                UserDefaults.standard.set(call.getBool("enabled") ?? false, forKey: service + ".deviceLock")
-                deviceUnlocked = true; call.resolve()
-            }
+            let enabled = call.getBool("enabled") ?? false
+            guard !enabled || LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { call.reject("Configure device security first", "DEVICE_SECURITY_UNAVAILABLE"); return }
+            UserDefaults.standard.set(enabled, forKey: service + ".deviceLock")
+            call.resolve()
         }
     }
     @objc public func unlockDevice(_ call: CAPPluginCall) {
+        // Retained bridge method for compatibility; valid sessions do not relock.
+        call.resolve()
+    }
+
+    /// Device proof gates fresh sign-in, never a valid session or token rotation.
+    private func nextSignIn() -> Int {
+        signInLock.lock(); defer { signInLock.unlock() }
+        signInGeneration += 1; return signInGeneration
+    }
+    private func currentSignIn(_ generation: Int) -> Bool {
+        signInLock.lock(); defer { signInLock.unlock() }
+        return generation == signInGeneration
+    }
+    private func acceptSignIn(_ body: [String: Any], generation: Int) throws {
+        signInLock.lock()
+        if generation == signInGeneration {
+            defer { signInLock.unlock() }
+            try accept(body); return
+        }
+        signInLock.unlock()
+        if let secret = body["refreshToken"] as? String, !secret.isEmpty {
+            do { _ = try post("/api/auth/mobile/logout", ["refreshToken": secret]) }
+            catch { cancelledRevocationUnconfirmed = true }
+        }
+        throw Failure.refused("LOGIN_CANCELLED")
+    }
+    private func runSignIn(_ call: CAPPluginCall, generation: Int, action: @escaping () -> Void) {
         queue.async { [self] in
-            guard deviceLocked else { call.resolve(); return }
-            authenticateDevice(call) { [self] in deviceUnlocked = true; call.resolve() }
+            guard currentSignIn(generation) else { call.reject("Sign-in cancelled", "LOGIN_CANCELLED"); return }
+            guard lockEnabled else { action(); return }
+            authenticateDevice(call, generation: generation) { [self] in
+                guard currentSignIn(generation) else { call.reject("Sign-in cancelled", "LOGIN_CANCELLED"); return }
+                action()
+            }
         }
     }
 
@@ -90,14 +122,9 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         securityObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.devicePrompt?.invalidate()
-            self.queue.async { self.backgroundedAt = Date(); self.backgrounded = true }
-        }
-        foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            self.queue.async { if let time = self.backgroundedAt, Date().timeIntervalSince(time) >= 30 { self.deviceUnlocked = false }; self.backgrounded = false }
         }
     }
-    deinit { if let observer { NotificationCenter.default.removeObserver(observer) }; if let securityObserver { NotificationCenter.default.removeObserver(securityObserver) }; if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) } }
+    deinit { if let observer { NotificationCenter.default.removeObserver(observer) }; if let securityObserver { NotificationCenter.default.removeObserver(securityObserver) } }
     private func query() -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
          kSecAttrAccount as String: "current", kSecAttrSynchronizable as String: false]
@@ -169,7 +196,6 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     }
     @objc public func getAccessToken(_ call: CAPPluginCall) {
         queue.async { [self] in
-            guard !deviceLocked else { call.reject("Unlock with device authentication", "DEVICE_LOCKED"); return }
             do {
                 if let rejected = call.getString("rejectedAccessToken"), rejected == accessToken { accessToken = nil; expiresAt = 0 }
                 if accessToken == nil || expiresAt <= Date().timeIntervalSince1970 * 1000 + 30000 {
@@ -177,7 +203,6 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
                     // Unknown outcomes never replay a single-use rotating secret.
                     try clear(); try accept(post("/api/auth/mobile/refresh", ["refreshToken": current]))
                 }
-                guard !deviceLocked else { call.reject("Unlock with device authentication", "DEVICE_LOCKED"); return }
                 call.resolve(["accessToken": accessToken!, "expiresAt": expiresAt])
             } catch { try? clear(); call.reject("Sign-in required", "SIGN_IN_REQUIRED") }
         }
@@ -190,10 +215,11 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
     }
     private func encode(_ data: Data) -> String { data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") }
     @objc public func signIn(_ call: CAPPluginCall) {
+        let generation = nextSignIn()
         queue.async { [self] in
             do {
                 guard try request("/api/auth/mobile/email", nil)["browserSignIn"] as? Bool == true else { throw Failure.invalid }
-                openBrowser(call)
+                openBrowser(call, generation: generation)
             } catch { call.reject("Sign-in is not available on this server", "MOBILE_LOGIN_UNAVAILABLE") }
         }
     }
@@ -216,28 +242,29 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         }
     }
     @objc public func verifyEmailCode(_ call: CAPPluginCall) {
-        queue.async { [self] in
+        let generation = nextSignIn()
+        runSignIn(call, generation: generation) { [self] in
             do {
                 guard let email = call.getString("email"), email.count <= 320, let code = call.getString("code"), code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { throw Failure.refused("EMAIL_CODE_INVALID") }
                 try clear()
-                try accept(post("/api/auth/mobile/email", ["action": "verify", "email": email, "code": code, "platform": "ios", "deviceLabel": UIDevice.current.model]))
-                deviceUnlocked = true
+                try acceptSignIn(post("/api/auth/mobile/email", ["action": "verify", "email": email, "code": code, "platform": "ios", "deviceLabel": UIDevice.current.model]), generation: generation)
                 call.resolve()
             } catch Failure.refused(let code) { try? clear(); call.reject("Could not verify sign-in code", code) }
             catch { try? clear(); call.reject("Could not verify sign-in code", "MOBILE_LOGIN_FAILED") }
         }
     }
-    private func openBrowser(_ call: CAPPluginCall) {
+    private func openBrowser(_ call: CAPPluginCall, generation: Int) {
         DispatchQueue.main.async { [self] in
+            guard currentSignIn(generation) else { call.reject("Sign-in cancelled", "LOGIN_CANCELLED"); return }
             guard pending == nil else { call.reject("Sign-in already in progress", "LOGIN_IN_PROGRESS"); return }
             do {
-                try validateOrigin(); let value = try random(); let nonce = try random(); verifier = value; state = nonce; pending = call
+                try validateOrigin(); let value = try random(); let nonce = try random(); verifier = value; state = nonce; pending = call; pendingGeneration = generation
                 var url = URLComponents(string: origin + "/auth/mobile")!
                 url.queryItems = [URLQueryItem(name: "code_challenge", value: encode(Data(SHA256.hash(data: Data(value.utf8))))), URLQueryItem(name: "state", value: nonce)]
                 guard #available(iOS 17.4, *) else { throw Failure.invalid }
                 let session = ASWebAuthenticationSession(url: url.url!, callback: .https(host: url.host!, path: "/auth/mobile/callback")) { [weak self] callback, _ in
                     DispatchQueue.main.async {
-                        guard let self else { return }
+                        guard let self, self.pending === call, self.currentSignIn(generation) else { return }
                         self.authentication = nil
                         if let callback { self.receive(callback) }
                         else if self.pending === call { self.pending = nil; self.verifier = nil; self.state = nil; call.reject("Sign-in cancelled", "LOGIN_CANCELLED") }
@@ -262,17 +289,22 @@ public final class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthentic
         guard parts.url?.absoluteString == origin + "/auth/mobile/callback" else { return }
         let params = URLComponents(string: "https://callback.invalid/?" + (fragment ?? ""))?.queryItems ?? []
         guard params.first(where: { $0.name == "state" })?.value == state, let grant = params.first(where: { $0.name == "grant" })?.value else { return }
+        let generation = pendingGeneration
         pending = nil; self.verifier = nil; self.state = nil
-        queue.async { [self] in
-            do { try clear(); try accept(post("/api/auth/mobile/exchange", ["grant": grant, "codeVerifier": verifier, "platform": "ios", "deviceLabel": UIDevice.current.model])); deviceUnlocked = true; call.resolve() }
+        runSignIn(call, generation: generation) { [self] in
+            do { try clear(); try acceptSignIn(post("/api/auth/mobile/exchange", ["grant": grant, "codeVerifier": verifier, "platform": "ios", "deviceLabel": UIDevice.current.model]), generation: generation); call.resolve() }
+            catch Failure.refused(let code) { try? clear(); call.reject("Sign-in failed. Start again.", code) }
             catch { try? clear(); call.reject("Sign-in failed. Start again.", "LOGIN_FAILED") }
         }
     }
     @objc public func signOut(_ call: CAPPluginCall) {
-        UserDefaults.standard.removeObject(forKey: service + ".deviceLock")
-        DispatchQueue.main.async { [self] in pending?.reject("Sign-in cancelled", "LOGIN_CANCELLED"); pending = nil; verifier = nil; state = nil; authentication?.cancel(); authentication = nil }
+        let cancelledGeneration = nextSignIn()
+        DispatchQueue.main.async { [self] in
+            if devicePromptGeneration < cancelledGeneration { devicePrompt?.invalidate(); devicePrompt = nil }
+            if pendingGeneration < cancelledGeneration { pending?.reject("Sign-in cancelled", "LOGIN_CANCELLED"); pending = nil; verifier = nil; state = nil; authentication?.cancel(); authentication = nil }
+        }
         queue.async { [self] in
-            do { let current = try read(); try clear(); if let current { _ = try post("/api/auth/mobile/logout", ["refreshToken": current]) }; call.resolve() }
+            do { let current = try read(); try clear(); if let current { _ = try post("/api/auth/mobile/logout", ["refreshToken": current]) }; if cancelledRevocationUnconfirmed { cancelledRevocationUnconfirmed = false; throw Failure.network }; call.resolve() }
             catch { try? clear(); call.reject("Signed out locally; device revocation could not be confirmed", "LOGOUT_UNCONFIRMED") }
         }
     }

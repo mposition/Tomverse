@@ -1,8 +1,7 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { z } from "zod";
 
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   apiSecurityResponse,
@@ -81,7 +80,9 @@ export async function PUT(
   context: RouteContext<"/api/conversations/[conversationId]/pin">
 ) {
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }

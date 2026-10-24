@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { mobileCopy, mobileLanguages, type MobileLanguage } from "../../../locales/mobile";
 import type { ChatSummary, ChatTransport, Conversation, MobileAttachment } from "./chatTransport";
+import { SidebarAccount } from "./SidebarAccount";
+import { ConversationHistory } from "./ConversationHistory";
 import { Composer } from "./Composer";
 import { VoiceConversation, VoiceHistory } from "./VoiceConversation";
 import type { ToolChange } from "./ComposerTools";
@@ -39,6 +41,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [product, setProduct] = useState<"chat" | "review">("chat");
   const [error, setError] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [newReviewRequest, setNewReviewRequest] = useState(0);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [partial, setPartial] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
@@ -92,11 +95,6 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         const list = await transport.list();
         if (!isCurrent()) return;
         setChats(list);
-        const last = localStorage.getItem(LAST_CHAT);
-        if (last && list.some((chat) => chat.id === last)) {
-          const restored = await transport.load(last);
-          if (isCurrent()) { setConversation(restored); setUncertain(restored.activeAttempt === true); }
-        }
       } catch { if (isCurrent()) setError(initializationError.current); }
       finally { if (isCurrent()) setLoading(false); }
     })();
@@ -179,11 +177,12 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   async function send(text: string, files: MobileAttachment[], fromVoice = false) {
     if (streaming || uncertain) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return; }
     const current = ++requestEpoch.current;
+    const titleEpoch = epoch.current;
     const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial("");
     let item = conversation;
     try {
-      item ??= await transport.create();
+      item ??= await transport.create((text.trim() || files[0]?.name || copy.newChat).slice(0, 30));
       if (current !== requestEpoch.current) return;
       setConversation({ ...item, messages: [...item.messages, { id: "pending-user", role: "user", content: text }] });
       localStorage.setItem(LAST_CHAT, item.id);
@@ -198,6 +197,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       setConversation(restored); setPartial(null);
       const list = await transport.list();
       if (current === requestEpoch.current) setChats(list);
+      if (titleEpoch === epoch.current) void transport.generateTitle?.(restored).then(title => {
+        if (!title || titleEpoch !== epoch.current) return;
+        setConversation(value => value?.id === restored.id && value.title === restored.title ? { ...value, title } : value);
+        setChats(rows => rows.map(row => row.id === restored.id && row.title === restored.title ? { ...row, title } : row));
+      }).catch(() => { /* The saved interim title remains usable. Never retry model work. */ });
       return receipt;
     } catch (error) {
       if (current !== requestEpoch.current) return;
@@ -206,12 +210,20 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     } finally { if (current === requestEpoch.current) setStreaming(false); }
   }
 
+  function newConversation() {
+    if (streaming || reviewBusy || loading) return;
+    if (product === "review") setNewReviewRequest(value => value + 1);
+    else { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
+    setView("chat");
+  }
+  const accountFooter = <SidebarAccount transport={transport} language={language} onSettings={() => { setView("chat"); setSettings(true); }} />;
+
   return <main className="mobile-app">
     <header className="app-header">
-      <button className="menu-button" aria-label={copy.chats} onClick={() => setView(view === "list" ? "chat" : "list")} disabled={streaming || reviewBusy || !signedIn}><AppIcon name="menu" /><AppIcon name="menuDark" /></button>
+      <button className="menu-button" aria-label={copy.chats} onClick={() => setView(view === "list" ? "chat" : "list")} disabled={!signedIn}><AppIcon name="menu" /><AppIcon name="menuDark" /></button>
       <span className="brand-lockup"><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></span>
       {signedIn && <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || uncertain} onChange={event => { setProduct(event.target.value as "chat" | "review"); setView("chat"); }}><option value="chat">Chat</option><option value="review">Review</option></select>}
-      <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}><AppIcon name="settings" /></button>
+      {signedIn ? <button className="header-new-chat" aria-label={copy.newChat} disabled={streaming || reviewBusy || loading} onClick={newConversation}><AppIcon name="newChat" /></button> : <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}><AppIcon name="settings" /></button>}
     </header>
     {demo && <div className="demo-label">{copy.demo}</div>}
     {offline && <p role="status" className="notice">{mobileCompletionCopy(language).offline}</p>}
@@ -231,11 +243,14 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     {!signedIn ? <section className="welcome">
       <div className="welcome-mark"><AppIcon name="logo" /></div><h1>{copy.welcome}</h1><p>{copy.intro}</p>
       <button className="primary" onClick={() => { if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true); else void signIn(); }} disabled={loading}>{copy.signIn} <span aria-hidden="true">→</span></button>
-    </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={() => setView("chat")} onBusyChange={setReviewBusy} /> : view === "list" ? <section className="conversation-list">
-      <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" onClick={() => { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); setView("chat"); }}>{copy.newChat} +</button></div>
-      {chats.length === 0 && <p>{copy.emptyList}</p>}
-      {chats.map((chat) => <button className="conversation-row" key={chat.id} onClick={() => void open(chat.id)}>{chat.title}<span aria-hidden="true">↗</span></button>)}
-    </section> : <>
+    </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={() => setView("chat")} onBusyChange={setReviewBusy} historyFooter={accountFooter} newConversationRequest={newReviewRequest} /> : view === "list" ? <section className="conversation-list"><div className="history-scroll">
+      <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" disabled={streaming || loading} onClick={newConversation}>{copy.newChat} +</button></div>
+      <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
+        const scope = epoch.current; const rows = await transport.list();
+        if (scope !== epoch.current) throw Error("SIGN_IN_REQUIRED");
+        setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
+      }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }} />
+    </div>{accountFooter}</section> : <>
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {!conversation?.messages.length && !streaming && <div className="empty-chat"><AppIcon name="logo" /><h1>{copy.empty}</h1><p>{copy.hint}</p><span className="chat-product-pill"><AppIcon name="spark" />Tomverse Chat</span><div className="starters"><button onClick={() => { setDraft(copy.starterIdea); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="idea" />{copy.starterIdea}</button><button onClick={() => { setDraft(copy.starterFile); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="file" />{copy.starterFile}</button></div></div>}
         {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label">{message.modelId ?? "Tomverse"}</span>}<AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}

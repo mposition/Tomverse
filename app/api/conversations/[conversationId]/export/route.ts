@@ -1,8 +1,7 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
-import { authOptions } from "@/lib/auth";
 import { isMemoryInjectionEnabled } from "@/lib/appSettings";
 import { conversationExportPersonalizationNotice } from "@/lib/memorySharingNotice";
 import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
@@ -140,7 +139,9 @@ export async function GET(
     context: { params: Promise<{ conversationId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
         const userId = (session?.user as { id?: string } | undefined)?.id;
 
         if (!userId) {

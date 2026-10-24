@@ -19,11 +19,32 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(async ({ page }) => { expect(pageErrors.get(page)).toEqual([]); });
 
-test("first answer, follow-up and tab termination restore the saved conversation", async ({ page, context }) => {
+test("startup stays on new Chat after delayed history restore; saved conversations open explicitly", async ({ page, context }) => {
   await signIn(page); await send(page, "첫 질문입니다"); await send(page, "후속 질문입니다");
   await expect(page.locator("article.user")).toHaveCount(2);
   await expect(page.locator("article.assistant")).toHaveCount(2);
-  await page.close(); const reopened = await context.newPage(); await reopened.goto("/");
+  await page.close();
+  await context.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    const injection = `
+      const startupQa = window.__startupQa = { loads: 0, release: null };
+      const originalList = transport.list, originalLoad = transport.load;
+      transport.list = async () => { await new Promise(resolve => { startupQa.release = resolve; }); return originalList(); };
+      transport.load = async id => { startupQa.loads++; return originalLoad(id); };
+    `;
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
+  });
+  const reopened = await context.newPage(); await reopened.goto("/");
+  await expect(reopened.locator(".empty-chat")).toBeVisible();
+  await expect.poll(() => reopened.evaluate(() => typeof (window as unknown as { __startupQa: { release: unknown } }).__startupQa.release)).toBe("function");
+  await reopened.evaluate(() => (window as unknown as { __startupQa: { release: () => void } }).__startupQa.release());
+  await expect(reopened.locator(".header-new-chat")).toBeEnabled();
+  await expect(reopened.locator(".empty-chat")).toBeVisible();
+  await expect(reopened.locator("article")).toHaveCount(0);
+  expect(await reopened.evaluate(() => (window as unknown as { __startupQa: { loads: number } }).__startupQa.loads)).toBe(0);
+  await reopened.getByRole("button", { name: "대화", exact: true }).click();
+  await expect(reopened.locator(".conversation-row")).toHaveCount(1);
+  await reopened.locator(".conversation-row").click();
   await expect(reopened.locator("article.user")).toHaveCount(2);
   await expect(reopened.locator("article.assistant")).toHaveCount(2);
 });
@@ -79,6 +100,7 @@ test("file selection is not a send and its reference survives a reload", async (
   await expect(page.getByRole("button", { name: "첨부파일 제거: synthetic.txt" })).toBeVisible();
   await expect(page.locator("article.user")).toHaveCount(0);
   await send(page, "첨부를 읽어 주세요"); await page.reload();
+  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.locator(".conversation-row").click();
   await expect(page.locator("article.user").getByText("synthetic.txt", { exact: true })).toBeVisible();
 });
 
@@ -100,7 +122,7 @@ test("microphone refusal leaves typed input usable", async ({ page }) => {
 
 test("sign-out removes previous account drafts and saved conversations", async ({ page }) => {
   await signIn(page); await send(page, "이전 계정의 질문"); await page.getByRole("textbox").fill("비공개 초안");
-  await page.getByRole("button", { name: "설정", exact: true }).click(); await page.getByRole("button", { name: "개인정보 및 데이터", exact: true }).click(); await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.getByRole("button", { name: "설정", exact: true }).click(); await page.getByRole("button", { name: "개인정보 및 데이터", exact: true }).click(); await page.getByRole("button", { name: "로그아웃", exact: true }).click();
   await page.getByRole("button", { name: "Tomverse로 계속" }).click();
   await expect(page.locator("article")).toHaveCount(0); await expect(page.getByRole("textbox")).toHaveValue("");
 });
@@ -111,6 +133,8 @@ for (const width of [320, 390, 768, 1024, 1440]) test(`light/dark layout and con
     await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
     await expect(page.getByRole("button", { name: "파일 첨부", exact: true })).toBeInViewport();
+    await expect(page.locator(".header-new-chat")).toBeInViewport();
+    expect(await page.locator(".icon-newChat").evaluate(node => getComputedStyle(node).filter)).toBe(theme === "dark" ? "brightness(0) invert(1)" : "brightness(0)");
     await expect(page.locator(".empty-chat .icon-logo")).toBeVisible();
     expect(await page.locator(".empty-chat .icon-logo").evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   }
