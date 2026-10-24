@@ -39,10 +39,13 @@ export function AutoRoutedByBadge({
   return (
     <span
       data-testid="auto-routed-by"
-      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+      title={`${copy.answeredByTitle} · ${modelName}`}
+      className="inline-flex min-w-0 items-center gap-1.5 overflow-hidden rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
     >
-      <Sparkles aria-hidden="true" className="h-3 w-3" />
-      <span>
+      <Sparkles aria-hidden="true" className="h-3 w-3 shrink-0" />
+      {/* Short label so the full model name fits beside the report button;
+          a name that still does not fit is truncated, never wrapped. */}
+      <span className="truncate">
         {copy.answeredBy} · {modelName}
       </span>
     </span>

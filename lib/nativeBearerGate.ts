@@ -178,6 +178,9 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   if (path === "/api/user/settings") return ["GET", "POST"].includes(method);
   if (path === "/api/memories/settings") return ["GET", "PUT"].includes(method);
   if (path === "/api/assistant-profiles") return method === "GET";
+  // Reporting a problem with one answer (owner approval, 2026-10-24). The
+  // route attributes the report only to an assistant message the caller owns.
+  if (path === "/api/feedback") return method === "POST";
   if (path === "/api/products/review/conversations" || path === "/api/review/route") return method === "POST";
   if (path === "/api/images/generations") return ["GET", "POST"].includes(method);
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path)) return method === "GET";

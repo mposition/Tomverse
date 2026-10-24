@@ -3,6 +3,8 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   modelId?: string;
+  /** Set only on a turn Auto routed, from the response header; kept for this session. */
+  routedModelId?: string;
   status?: string;
   pendingJobId?: string | null;
   artifacts?: import("../../../lib/generatedArtifactCore").ChatStreamArtifact[];
@@ -78,6 +80,8 @@ export interface ChatTransport {
   usage?(): Promise<AccountUsage>;
   generateTitle?(conversation: Conversation): Promise<string | null>;
   preferences?(): Promise<UserPreferences>;
+  /** Reports a problem with one answer; the server links it only to the caller's own message. */
+  reportAnswer?(input: { messageId: string; modelId?: string; message: string; language: string }): Promise<{ reference?: string }>;
   savePreferences?(input: Partial<UserPreferences> & { timeZoneSource?: "user" }): Promise<void>;
   memoryPreferences?(): Promise<MemoryPreferences>;
   saveMemoryPreferences?(input: MemoryPreferences): Promise<void>;

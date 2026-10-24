@@ -680,9 +680,9 @@ memory·knowledge·imported content는 untrusted data입니다. 고정 system ru
 - **규칙은 항상 블록 앞에 옵니다.** 뒤에 놓으면 주입 payload가 규칙보다 먼저
   읽힙니다.
 - **선택된 memory가 0이면 블록 자체를 만들지 않습니다**(`text: null`). 빈
-  "account memory" 제목은 §13.4가 금지하는 오해 유발 표시입니다.
-- §13.4의 "이 응답에 memory N개 사용"의 N은 이 모듈이 실제로 렌더한 줄 수이며,
-  client 주장 값이 아닙니다.
+  "account memory" 제목은 오해를 부르는 표시입니다.
+- 서버가 세는 기억 사용 개수(`usedCount`)는 이 모듈이 실제로 렌더한 줄 수이며,
+  client 주장 값이 아닙니다. 화면에는 표시하지 않습니다(§13.4).
 
 ## 10. Context bundle 계약
 
@@ -1188,31 +1188,16 @@ locale이 없고 header가 이미 영문입니다).
 - 필드는 optional이라 이전 snapshot은 그대로 parse되고 부재는 false로 읽힙니다
   — 주입이 존재하기 전 모든 snapshot에 대해 맞는 답입니다.
 
-### 13.4 memory 사용 투명성
+### 13.4 memory 사용 투명성 — 삭제됨 [확정 · 2026-10-24 @mposition]
 
-memory 사용 응답에는 소유자 본인에게 "이 응답에 memory N개 사용"을 표시합니다.
-N은 서버 계산이며 client 주장 count를 쓰지 않습니다. 0이면 오해 유발 표시를
-하지 않고, 상세 열람 시 인증·소유권·source lock을 재검증하며, 표시는 mobile
-composer·comparison rail contract를 침범하지 않습니다.
+답변마다 "이 응답에 memory N개 사용"을 표시하던 요구는 삭제했습니다. 매 답변의
+표시는 사용자에게 의미보다 잡음이 컸습니다. 사용자는 기억 설정 화면에서 저장된
+기억을 보고 지울 수 있습니다.
 
-구현: 표시는 `ChatMessageList`의 `memory-usage-disclosure`이고, 값의 출처는
-두 곳입니다 — 생성 중에는 `/api/chat`의 `X-Chat-Memory-Used` header, 다시
-열었을 때는 `GET /api/conversations/[conversationId]`가 돌려주는
-`Message.memoryUsedCount`입니다.
-
-- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 주입 자체가
-  불가능했던 요청이고 `0`은 bundle은 있었지만 retrieval이 아무것도 고르지 않은
-  경우이며, §13.4는 둘 다 표시를 금지합니다. 둘 다 필드를 **빼서** 보냅니다 —
-  받은 숫자를 안 보여줘야 하는 renderer는 한 번의 수정으로 보여주게 됩니다.
-- **재조회가 없으면 이 계약은 절반만 참입니다.** header만 있던 동안 표시는
-  답변이 쓰이는 중에만 참이었고 다음 방문에는 조용히 사라졌습니다.
-- **읽는 쪽은 소유자 자신의 조회뿐입니다.** 같은 route가 소유권과 lock grant를
-  먼저 확인하며, share snapshot과 conversation export는 각자의 select를 쓰고
-  이 컬럼을 이름조차 대지 않습니다(§13.3). `memoryTokens`는 §22의 집계용이라
-  어디서도 이 경로에 실리지 않습니다.
-- 검증: `tests/integration/memory-usage-disclosure-route.db.test.ts`(읽기),
-  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
-  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+서버는 개수를 계속 계산합니다(`X-Chat-Memory-Used` header, `Message.memoryUsedCount`).
+§22 관측(`lib/memoryMetrics.ts`)과 기억 모드 신호(`lib/memoryModeSignals.ts`)가
+그 값을 쓰기 때문이며, 화면에는 표시하지 않습니다. 소유자 이외의 경로(share, export)가 이 값을 싣지 않는다는 §13.3의
+규칙은 그대로입니다. profile knowledge 발췌 개수 표시는 §14.3이 정합니다.
 
 ### 13.5 imported data export의 잠긴 snapshot
 
@@ -1449,12 +1434,11 @@ profile 이름도 revision 번호도 지시문도 남지 않습니다.
 
 ### 14.3 Knowledge 사용 투명성 — 답변별 귀속
 
-§13.4가 memory에 대해 정한 것과 같은 계약을 profile knowledge에 적용합니다.
-**두 개의 다른 사실이므로 하나의 숫자로 합치지 않습니다** — 사용자 자신이 올린
-파일에서 나온 답과 저장된 기억에서 나온 답은 다른 주장이고, 합친 count는 둘 중
-어느 것도 말하지 않습니다.
+profile knowledge 발췌를 받은 답변은 소유자에게 그 개수를 표시합니다. account
+memory 개수는 표시하지 않으므로(§13.4) 두 숫자를 합치는 일도 없습니다 — 사용자
+자신이 올린 파일에서 나온 답과 저장된 기억에서 나온 답은 다른 주장입니다.
 
-- 값의 출처는 두 곳이며 §13.4와 대칭입니다. 생성 중에는 `/api/chat`의
+- 값의 출처는 두 곳입니다. 생성 중에는 `/api/chat`의
   `X-Chat-Knowledge-Used` header, 다시 열었을 때는
   `GET /api/conversations/[conversationId]`가 돌려주는
   `Message.knowledgeChunkCount`입니다.
@@ -1476,10 +1460,9 @@ profile 이름도 revision 번호도 지시문도 남지 않습니다.
 - **client 직렬화 allowlist에 넣지 않습니다.** `lib/chatMessageSerialization.ts`의
   `pickTransportFields()`가 allowlist이므로 이 필드는 요청 transcript와 guest
   localStorage에 실리지 않습니다. 거기 실린 값은 stale한 주장일 수밖에 없습니다.
-- 표시는 §13.4의 memory 표시와 한 문장을 공유합니다
-  (`ChatMessageList`의 `memory-usage-disclosure`). 판정은
-  `lib/answerContextDisclosure.ts`의 `decideAnswerContextDisclosure()` 한 곳이며,
-  memory가 먼저 오는 순서는 §9.1 system block이 조립되는 순서와 같습니다.
+- 표시는 답변 하단 한 줄(신고 버튼, 자동 선택 배지와 같은 줄)의
+  `knowledge-usage-disclosure`입니다. 판정은
+  `lib/answerContextDisclosure.ts`의 `knowledgeExcerptCountToShow()` 한 곳입니다.
 - 검증: `tests/answerContextDisclosure.test.mjs`(판정 행렬),
   `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
   `tests/chatMessageSerialization.test.ts`(allowlist 배제),
@@ -1664,7 +1647,7 @@ entitlement(`CREDIT_*`, `PLAN_*`)와 guardrail(`OPERATIONAL_*`, `PROVIDER_*`)
 | prompt injection → memory 오염 | 서술형 정규화(§8.2), deterministic validator(§8.4), bulk-safe 차단, untrusted 경계(§9.1), eval 범주 ④ |
 | assistant 추측의 사용자 사실화 | user-role evidence 요구, validator 패턴 차단, eval 범주 ② 0건 기준 |
 | secret·credential의 memory 유입 | validator 패턴 차단, sensitive 강등, eval 범주 ③ 0건 기준 |
-| client 위조 (fingerprint·count·memory 선택·retrieval 결과) | 서버 digest 재계산(§4.1), 서버 주도 retrieval(§8.1-3), 서버 계산 투명성 count(§13.4) |
+| client 위조 (fingerprint·count·memory 선택·retrieval 결과) | 서버 digest 재계산(§4.1), 서버 주도 retrieval(§8.1-3), 서버 계산 투명성 count(§14.3) |
 | cross-user IDOR (import·memory·profile·knowledge·lock grant) | owner scope 전면 적용, resource type 결속 grant(§7), IDOR 테스트 |
 | context bundle replay·변조 | 서명·nonce·expiry·subject/conversation 결속, admission과 역할 분리(§10) |
 | staging 자원 노출 | 일반 목록·검색·export 비노출, TTL·cleanup |

@@ -353,7 +353,7 @@ test("the badge names the model that answered", () => {
   assert.equal(findProp(rendered, "data-testid"), "auto-routed-by");
   assert.equal(
     textOf(rendered).replace(/\s+/g, " ").trim(),
-    "Auto selected · DeepSeek V4 Flash"
+    "Auto · DeepSeek V4 Flash"
   );
 });
 
@@ -375,8 +375,10 @@ test("selection reasons do not change the neutral answering-model badge", () => 
 
     assert.equal(
       textOf(rendered).replace(/\s+/g, " ").trim(),
-      "자동 선택 · Qwen 3.8 Flash"
+      "자동 · Qwen 3.8 Flash"
     );
+    // The full phrase moves to the hover title, never into the reason.
+    assert.equal(findProp(rendered, "title"), "자동 선택 · Qwen 3.8 Flash");
   }
 });
 

@@ -165,6 +165,7 @@ test("every supported language carries the whole control vocabulary", () => {
       "turnedOn",
       "turnedOff",
       "answeredBy",
+      "answeredByTitle",
       "variableCreditLabel",
     ]) {
       assert.equal(typeof copy[key], "string", `${language}.${key} missing`);
