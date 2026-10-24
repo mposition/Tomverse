@@ -14,6 +14,18 @@ for git_dir in "$root"/*/*/.git; do
   test ! -L "$repo" && test ! -L "$git_dir"
   timeout 120 /usr/bin/git -C "$repo" -c core.hooksPath=/dev/null \
     fetch --quiet --prune --no-tags origin
+  # The app pins a repository that has develop at its develop head, so its
+  # mirror carries that branch too. A remote without develop (ls-remote
+  # exit 2) keeps the default branch only; any other failure stops the cycle.
+  if timeout 60 /usr/bin/git -C "$repo" -c core.hooksPath=/dev/null \
+      ls-remote --exit-code --heads origin refs/heads/develop >/dev/null; then
+    timeout 120 /usr/bin/git -C "$repo" -c core.hooksPath=/dev/null \
+      fetch --quiet --no-tags origin \
+      "+refs/heads/develop:refs/remotes/origin/develop"
+  else
+    status=$?
+    test "$status" -eq 2 || exit "$status"
+  fi
   count=$((count + 1))
 done
 test "$count" -gt 0
