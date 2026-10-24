@@ -10,6 +10,7 @@ import { MARKETING_COMPETITOR_ACTIONS } from "@/lib/marketingCompetitorCore";
 import { createApprovedMarketingCompetitor } from "@/lib/marketingCompetitorStore";
 import { marketingGeneratorContextAllowed } from "@/lib/marketingGeneratorContext";
 import { createMarketingChannel, insertMarketingReport, runMarketingTransaction } from "@/lib/marketingStore";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { clearMarketingLlmSettings, setMarketingLlmSettings } from "./marketingLlmSettingsFixture";
 import { resetTestFixture } from "./resetTestFixture";
@@ -252,12 +253,17 @@ test("the context carries the model selected in the Admin Console with its catal
     };
     try {
       assert.deepEqual(await llm(), { model: null, pin: null });
+      // The context reads the registry rows; seed them the way the app does.
+      await getRuntimeModels();
       await setMarketingLlmSettings(prisma, "gpt-5.4-mini", "5");
       const selected = await llm();
       assert.equal(selected.model, "gpt-5.4-mini");
       assert.equal(selected.pin?.model, "gpt-5.4-mini");
-      // A model the catalog cannot price within the ledger's limits is no selection at all.
+      // A 1.05M-window catalog model fits the ledger's row limits.
       await setMarketingLlmSettings(prisma, "gpt-6-luna", "5");
+      assert.equal((await llm()).pin?.model, "gpt-6-luna");
+      // A catalog model the generator cannot call is no selection at all.
+      await setMarketingLlmSettings(prisma, "claude-haiku-5-5", "5");
       assert.deepEqual(await llm(), { model: null, pin: null });
     } finally {
       await clearMarketingLlmSettings(prisma);

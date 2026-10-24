@@ -2,6 +2,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { marketingLlmCatalogPinsIn } from "@/lib/marketingLlmModelCatalog";
 import {
   MARKETING_LLM_SETTINGS_KEY,
   marketingLlmSettingsValue,
@@ -10,7 +11,6 @@ import {
   type MarketingLlmPricePin,
   type MarketingLlmSettings,
 } from "@/lib/marketingLlmBudgetCore";
-import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import {
   MARKETING_LLM_SETTINGS_ACTION,
   MarketingLlmSettingsRefusedError,
@@ -62,7 +62,9 @@ export async function writeMarketingLlmSettings(
     readonly pins?: readonly MarketingLlmPricePin[];
   },
 ): Promise<MarketingLlmSettingsRead> {
-  const pins = input.pins ?? marketingLlmCatalogPins();
+  // The catalog through this transaction's own connection: no second
+  // connection or registry seeding while the audit chain lock is held.
+  const pins = input.pins ?? (await marketingLlmCatalogPinsIn(tx));
   if (input.model !== null && !pins.some((pin) => pin.model === input.model)) {
     throw new MarketingLlmSettingsRefusedError("model_not_pinned", "That model cannot be priced within the ledger's limits");
   }

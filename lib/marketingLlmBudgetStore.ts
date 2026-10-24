@@ -44,6 +44,8 @@ import {
   marketingLlmReservePayloadDigest,
   marketingLlmSettleOutcome,
   MARKETING_LLM_SETTINGS_KEY,
+  MARKETING_LLM_WEB_SEARCH_PROFILE,
+  MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE,
   parseMarketingLlmMonthlyCap,
   parseMarketingLlmSettings,
   resolveMarketingLlmPin,
@@ -54,7 +56,6 @@ import {
   type MarketingLlmReservePayload,
   type MarketingLlmTerminalState,
 } from "@/lib/marketingLlmBudgetCore";
-import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import { MARKETING_RETENTION_ACTIONS, MarketingStoreRefusedError } from "@/lib/marketingStore";
 
 export const MARKETING_LLM_SYSTEM_ACTOR = "marketing-generator";
@@ -67,6 +68,28 @@ export const MARKETING_LLM_ACTIONS = {
   released: "marketing_llm.released",
 } as const;
 
+/**
+ * What one ledger row counts against the monthly cap, in micro-USD (operator
+ * decision 2026-10-23: a finished call counts at its cost, not its
+ * reservation). A settled call reported its tokens, so it counts at them and
+ * the pinned worst rates, plus every search its request could be billed for
+ * (the provider does not report searches per call), never more than it
+ * reserved. A released call never reached the provider and counts nothing.
+ * Any other row -- reserved, dispatched, or kept unknown -- may have cost up
+ * to its reservation, so it counts at that.
+ */
+export const MARKETING_LLM_COUNTED_MICRO_USD_SQL = Prisma.sql`CASE "state"
+  WHEN 'released' THEN 0
+  WHEN 'settled' THEN LEAST("reservedMicroUsd", ceil(
+    ("reportedInputTokens"::numeric * ("configSnapshot"->'pin'->>'worstInputMicroUsdPerMillion')::numeric
+     + "reportedOutputTokens"::numeric * ("configSnapshot"->'pin'->>'worstOutputMicroUsdPerMillion')::numeric)
+    / 1000000)
+    + CASE WHEN "configSnapshot"->>'adapterProfile' = ${MARKETING_LLM_WEB_SEARCH_PROFILE}
+        THEN (COALESCE(("configSnapshot"->'pin'->>'maxWebSearchCalls')::numeric, 0) + ${MARKETING_OPENAI_SEARCH_OVERSHOOT_ALLOWANCE})
+             * COALESCE(("configSnapshot"->'pin'->>'webSearchMicroUsdPerCall')::numeric, 0)
+        ELSE 0 END)
+  ELSE "reservedMicroUsd" END`;
+
 /** The most one ledger transaction may take; the timer is armed to it. */
 export const MARKETING_LLM_TRANSACTION_MS = 10_000;
 const STATEMENT_TIMEOUT_MS = 5_000;
@@ -78,6 +101,11 @@ type Tx = Prisma.TransactionClient;
 export type MarketingLlmBudgetEnvironment = {
   /** `null` when the kill switch cannot be read; that refuses like `true`. */
   readonly killSwitchOn: boolean | null;
+  /**
+   * The catalog's pins, read by the caller before its transaction: the
+   * catalog read takes another connection and may seed the registry, so it
+   * never runs while this one holds the audit chain lock. None, none pinned.
+   */
   readonly pins?: readonly MarketingLlmPricePin[];
   readonly adapterVersion?: string;
 };
@@ -204,7 +232,7 @@ export async function reserveMarketingLlmCall(
   if (settings === null || cap === null) return refused("cap_unreadable");
   if (settings.model !== input.payload.model) return refused("model_not_selected");
   const pin = resolveMarketingLlmPin(
-    env.pins ?? marketingLlmCatalogPins(),
+    env.pins ?? [],
     input.payload.model,
     new Date(`${reserveAt}Z`),
   );
@@ -213,13 +241,13 @@ export async function reserveMarketingLlmCall(
   if (!marketingLlmPinAllows(pin.pin, profile)) return refused("adapter_profile_unknown");
 
   const reservation = marketingLlmReservation(pin.pin, profile);
-  // The month's committed sum, and -- the last reading of the database clock
+  // The month's counted sum, and -- the last reading of the database clock
   // before the audit row -- whether the deadline has passed.
   const sum = await tx.$queryRaw<Array<{ total: bigint; inTime: boolean }>>(Prisma.sql`
-    SELECT COALESCE(SUM("reservedMicroUsd"), 0)::bigint AS "total",
+    SELECT COALESCE(SUM(${MARKETING_LLM_COUNTED_MICRO_USD_SQL}), 0)::bigint AS "total",
            clock_timestamp() < ${input.deadlineAt}::timestamptz AS "inTime"
     FROM "MarketingLlmCall"
-    WHERE "monthStart" = (${monthKey} || '-01')::date::timestamp AND "state" <> 'released'
+    WHERE "monthStart" = (${monthKey} || '-01')::date::timestamp
   `);
   if (Number(sum[0]?.total ?? 0) + reservation.reservedMicroUsd > cap) return refused("budget_exhausted");
   if (sum[0]?.inTime !== true) return refused("deadline_too_close");

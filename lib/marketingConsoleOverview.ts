@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { MARKETING_LLM_COUNTED_MICRO_USD_SQL } from "@/lib/marketingLlmBudgetStore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -26,7 +27,8 @@ export type MarketingConsoleOverview = {
   pending: { count: number; oldestAt: string | null } | null;
   /**
    * This UTC month's ledger. `countedMicroUsd` is what the monthly cap counts
-   * (every reservation not released); `tokenMicroUsd` is the settled calls'
+   * (`MARKETING_LLM_COUNTED_MICRO_USD_SQL`: settled calls at their cost, open
+   * and unknown ones at their reservation); `tokenMicroUsd` is the settled calls'
    * reported tokens at their pinned rates -- web search fees are not reported
    * per call and are not in it.
    */
@@ -67,7 +69,7 @@ export async function readMarketingConsoleOverview(): Promise<MarketingConsoleOv
     settle(async () => {
       const rows = await prisma.$queryRaw<Array<{ calls: number; counted: bigint; tokens: bigint }>>(Prisma.sql`
         SELECT count(*)::int AS "calls",
-               COALESCE(sum("reservedMicroUsd") FILTER (WHERE "state" <> 'released'), 0)::bigint AS "counted",
+               COALESCE(sum(${MARKETING_LLM_COUNTED_MICRO_USD_SQL}), 0)::bigint AS "counted",
                COALESCE(sum(ceil(
                  (COALESCE("reportedInputTokens", 0) * ("configSnapshot"->'pin'->>'worstInputMicroUsdPerMillion')::numeric
                   + COALESCE("reportedOutputTokens", 0) * ("configSnapshot"->'pin'->>'worstOutputMicroUsdPerMillion')::numeric)

@@ -175,6 +175,17 @@ test("a web-search reservation adds every search the pin allows, and a pin witho
   );
   assert.deepEqual(refused, { status: "refused", code: "adapter_profile_unknown" });
   assert.equal(await prisma.marketingLlmCall.count(), 1);
+
+  // The settled call counts at its tokens (400,000 x 0.8 + 300 x 3.2 ->
+  // 320,960) plus the four searches it could be billed for (40,000), so one
+  // more web-search reservation fits under exactly that sum.
+  await cap("0.926068");
+  const webReserve = (n: number) =>
+    tx((client) =>
+      reserveMarketingLlmCall(client, { payload: { ...webPayload, requestKey: uuid(n) }, deadlineAt: deadline() }, webEnv),
+    );
+  assert.equal((await webReserve(3)).status, "ok");
+  assert.deepEqual(await webReserve(4), { status: "refused", code: "budget_exhausted" });
 });
 
 test("new reservations are refused without a switch, cap, pin or time, and leave nothing behind", async () => {
@@ -225,6 +236,22 @@ test("the monthly cap admits exactly up to the cap and counts every reservation 
   assert.equal((await tx((client) => releaseMarketingLlmCall(client, { callId: first, deadlineAt: deadline() }, OPEN))).status, "ok");
   await cap("0.231016");
   assert.equal((await reserve(5, exact)).status, "ok");
+});
+
+test("a settled call counts at its reported cost; one kept unknown counts at its reservation", async () => {
+  // Settled: 1,200 x 0.8 + 300 x 3.2 -> 1,920 micro-USD rather than 115,508.
+  const settledId = await reservedId(1);
+  await dispatch(settledId, 1, 1);
+  assert.equal((await settle(settledId, 1)).status, "ok");
+  // Over its bound: the cost is not known, so the whole reservation counts.
+  const unknown = await reservedId(2);
+  await dispatch(unknown, 2, 2);
+  const kept = await settle(unknown, 2, observation(2, { reportedOutputTokens: 4_097 }));
+  assert.equal(kept.status === "ok" && kept.value.state, "unknown_retained");
+
+  await cap("0.232936"); // 1,920 + two reservations
+  assert.equal((await reserve(3)).status, "ok");
+  assert.deepEqual(await reserve(4), { status: "refused", code: "budget_exhausted" });
 });
 
 test("two connections reserving the last slot of a month admit exactly one", async () => {
