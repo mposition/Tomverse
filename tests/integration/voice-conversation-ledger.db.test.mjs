@@ -33,6 +33,23 @@ async function rollingDue() {
   } });
 }
 
+test("a purchased-credit lot without a purchase reference renews and settles its unused hold", async () => {
+  const row = await rollingDue();
+  await prisma.chatUsageBucket.updateMany({ where: { key: row.subjectKey, period: { in: ["day", "month"] } }, data: { count: 300 } });
+  const lot = await prisma.creditLot.create({ data: {
+    userId, source: "synthetic", purchaseId: null, originalCredits: 100, remainingCredits: 100,
+    originalFundedCostMicroUsd: 1_000_000n, remainingFundedCostMicroUsd: 1_000_000n, expiresAt: new Date(Date.now() + 3_600_000),
+  } });
+  await extendVoiceConversationCredits(row.id, userId);
+  const renewed = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(renewed.reservationPayload.funding[0].addOnEntries[0].purchaseId, null);
+  await finalizeVoiceReservation(row.id, 65);
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  const returned = await prisma.creditLot.findUniqueOrThrow({ where: { id: lot.id } });
+  assert.equal(saved.status, "settled"); assert.equal(saved.settledCredits, 39);
+  assert.equal(returned.remainingCredits, 97);
+});
+
 test("concurrent rolling renewals reserve exactly once and preserve concurrent task writes", async () => {
   const row = await rollingDue();
   await Promise.all([
