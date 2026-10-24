@@ -591,8 +591,6 @@ export const en = {
         artifactDownloadFailed: "The file could not be downloaded. Please try again.",
         artifactDownloadLocked: "Unlock this conversation to download the file.",
         searchCitationsLabel: "Sources",
-        answerContextLabel: "Answer context",
-        answerContextMemory: "{count} account memories",
         answerContextKnowledge: "{count} profile knowledge excerpts",
         modelsSelectedOne: "AI",
         modelsSelectedOther: "AIs",

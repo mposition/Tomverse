@@ -20,8 +20,8 @@ renew that timestamp.
 The additional scope covers account preferences and memory settings, reading
 assistant profiles, creating Review conversations and routing Easy questions,
 reading generated-image groups/history, explicitly requested Studio generation,
-AI cross-review and item feedback/verification, and polling existing Deep Research
-jobs, reading the existing account usage totals and generating conversation titles
+AI cross-review and item feedback/verification, reporting a problem with one
+answer (`POST /api/feedback`), polling existing Deep Research jobs, reading the existing account usage totals and generating conversation titles
 through the existing owner-scoped service. The client calls title generation at
 most once after the first successful answer, retaining the saved interim title on
 failure. Compare-and-set preserves subsequent web renames. Title/usage capability

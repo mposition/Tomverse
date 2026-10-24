@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
@@ -184,7 +183,13 @@ const resolveTraceReport = async (body: {
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    // The web sends its cookie session; the mobile app sends its bearer, which
+    // resolveChatRouteSession verifies against the native parity allowlist
+    // (lib/nativeBearerGate.ts). Without either, the caller is a guest and
+    // passes the Turnstile check below.
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     // Per-caller, not a single shared "guest" bucket: one anonymous client must
     // not be able to exhaust the daily allowance for every other visitor.
     const subject = session?.user?.id || `guest:${getAnonymousClientKey(req)}`;
