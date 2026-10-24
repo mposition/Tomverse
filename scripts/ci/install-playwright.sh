@@ -102,10 +102,17 @@ else
   DEADLINE="${PLAYWRIGHT_INSTALL_DEADLINE:-$DEADLINE_LIGHT_DEFAULT}"
 fi
 
-# Held back from the apt half so the browser download always gets a turn. Without
-# it a slow mirror spends the whole deadline and the CDN half reports "out of
-# budget" for a download that was never tried -- a true statement about the wrong
-# half.
+# The most the browser download may take. It runs first and the apt half gets
+# everything it leaves. Without a cap a stalled CDN would spend the whole
+# deadline and apt would report "out of budget" for a fetch that was never tried
+# -- a true statement about the wrong half.
+#
+# The order used to be the other way round, with this much held back from apt
+# instead. On 2026-10-23 (#2938) a 39 kB/s mirror needed 664s for the whole
+# fetch and apt was given 675s, so it was killed while setting up its last
+# package, with 225s reserved for a browser download that is a no-op on a cache
+# hit and a fast CDN fetch otherwise. Downloading first spends only what the
+# download actually takes.
 DOWNLOAD_RESERVE=$((DEADLINE / 4))
 
 # The absolute second the half currently running must stop by. Set before each
@@ -215,7 +222,9 @@ APT_FINISHED_ALONE=0
 
 # How long the one confirming attempt below may take. It reruns install-deps
 # against packages that are already installed, which is an apt update and
-# nothing else, so a minute is generous. It comes out of DOWNLOAD_RESERVE.
+# nothing else, so a minute is generous. apt is the last half, so this runs past
+# the deadline: it is paid from the slack every install step keeps above the
+# deadline (STEP_SLACK_MINUTES in tests/ciPlaywrightInstall.test.mjs).
 CONFIRM_WINDOW=60
 
 # Backoff, not a tight loop: the failure being retried is a mirror or CDN
@@ -246,9 +255,9 @@ retry() {
       # xvfb, the last package, five seconds before this reported "out of
       # budget" for an install that had in fact completed. So when it exited on
       # its own, confirm its result once instead of reporting a mirror failure.
-      if [ -n "$recover" ] && [ "$APT_FINISHED_ALONE" -eq 1 ] && [ $((ENDS_AT - $(date +%s))) -gt "$CONFIRM_WINDOW" ]; then
+      if [ -n "$recover" ] && [ "$APT_FINISHED_ALONE" -eq 1 ]; then
         APT_FINISHED_ALONE=0
-        echo "The abandoned apt run finished on its own; confirming its result with up to ${CONFIRM_WINDOW}s from the download reserve."
+        echo "The abandoned apt run finished on its own; confirming its result with up to ${CONFIRM_WINDOW}s."
         if timeout --signal=TERM --kill-after=10s "$CONFIRM_WINDOW" "$@"; then
           return 0
         fi
@@ -275,6 +284,22 @@ retry() {
   done
 }
 
+prefer_ubuntu_archive() {
+  local mirrors="$1"
+  [ "${GITHUB_ACTIONS:-false}" = "true" ] || return 0
+  [ -f "$mirrors" ] || return 0
+  if grep -Eq '^[[:blank:]]*https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$mirrors"; then
+    # Change only the hosted runner's slow Azure endpoint. Package lists,
+    # signing keys and third-party repositories keep their existing settings.
+    if sudo sed -b -Ei 's#^([[:blank:]]*)https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/?)([[:space:]]|$)#\1https://archive.ubuntu.com/ubuntu\2\3#' "$mirrors"; then
+      echo "Using archive.ubuntu.com for Ubuntu CI dependencies."
+    else
+      echo "::warning::Could not select the Ubuntu archive mirror; keeping the existing retry budget."
+    fi
+  fi
+}
+prefer_ubuntu_archive /etc/apt/apt-mirrors.txt
+
 # Applies to the apt-get calls Playwright makes for us, which is the only way
 # to reach them -- `install-deps` takes no apt flags. Written before the first
 # attempt so even a single-attempt run benefits.
@@ -284,15 +309,16 @@ if [ -d /etc/apt/apt.conf.d ]; then
     echo "::warning::Could not write apt retry config; continuing without it."
 fi
 
-ENDS_AT=$(($(date +%s) + DEADLINE))
+STARTED_AT="$(date +%s)"
+ENDS_AT=$((STARTED_AT + DEADLINE))
 echo "Installing ${BROWSERS[*]} with a ${DEADLINE}s budget (${ATTEMPTS} attempts of up to ${ATTEMPT_TIMEOUT}s per half)."
 
-DEADLINE_AT=$((ENDS_AT - DOWNLOAD_RESERVE))
-retry "playwright install-deps" release_dpkg_lock npx playwright install-deps "${BROWSERS[@]}" || exit 1
-# Second, and separately: on a cache hit this is a no-op that costs a second,
-# which is the whole reason the two are not one command. It gets whatever the
-# apt half left, which the reserve keeps from being nothing.
-DEADLINE_AT="$ENDS_AT"
+# Browsers first, capped by DOWNLOAD_RESERVE: on a cache hit this is a no-op
+# that costs a second, which is the whole reason the two are not one command.
+DEADLINE_AT=$((STARTED_AT + DOWNLOAD_RESERVE))
 retry "playwright install" "" npx playwright install "${BROWSERS[@]}" || exit 1
+# Then apt, with everything the download did not use.
+DEADLINE_AT="$ENDS_AT"
+retry "playwright install-deps" release_dpkg_lock npx playwright install-deps "${BROWSERS[@]}" || exit 1
 
 echo "Playwright ready: ${BROWSERS[*]}"

@@ -26,30 +26,7 @@ import {
   type SourceGroundingLevel,
 } from "@/lib/sourceGrounding";
 
-type ReviewMode = "balanced" | "evidence" | "action";
-
-type ReviewSetup = {
-  available: boolean;
-  reason?: string;
-  promptMessageId?: string;
-  assistantMessageIds?: string[];
-  responses?: Array<{
-    messageId: string;
-    modelId: string;
-    modelName: string;
-  }>;
-  estimatedCredits?: number;
-  dualReview?: boolean;
-  reviewerClass?: string;
-  freeMonthlyReviews?: number | null;
-  disclaimer?: string;
-  /** Guest-only fields, all server-computed. Never sent back on the run. */
-  guest?: boolean;
-  guestTrial?: { limit: number; used: number; remaining: number };
-  creditsAvailable?: number;
-  webVerificationAvailable?: boolean;
-  persisted?: boolean;
-};
+import type { ReviewMode, ReviewSetup, GroundedClaim, ComparisonReview } from "../../packages/chat-core/src/review";
 
 /**
  * The locally-held turn a guest reviews.
@@ -64,77 +41,6 @@ export type GuestReviewSource = {
   question: string;
   responses: Array<{ messageId: string; modelId: string; content: string }>;
   language: string;
-};
-
-type Citation = { responseId: "A" | "B" | "C"; quote: string; verified: boolean };
-type GroundedClaim = { text: string; citations: Citation[]; verified: boolean };
-
-type SingleReviewResult = {
-  consensus: GroundedClaim[];
-  differences: Array<{
-    issue: string;
-    positions: Array<{
-      responseId: "A" | "B" | "C";
-      position: string;
-      quote: string;
-      verified: boolean;
-    }>;
-  }>;
-  contradictions: GroundedClaim[];
-  missingPoints: string[];
-  verificationNeeded: string[];
-  modelAssessments: Array<{
-    responseId: "A" | "B" | "C";
-    strengths: string[];
-    cautions: string[];
-  }>;
-  synthesis: string;
-  confidence: "low" | "medium" | "high";
-  limitations: string[];
-  groundingStats: { totalCitations: number; verifiedCitations: number };
-};
-
-type ReviewAgreement = {
-  confidenceMatches: boolean;
-  primaryConfidence: "low" | "medium" | "high";
-  secondaryConfidence: "low" | "medium" | "high";
-  sharedVerifiedQuoteCount: number;
-};
-
-type ComparisonReview = {
-  id: string;
-  result: {
-    primary: { reviewerModelId: string; result: SingleReviewResult };
-    secondary: { reviewerModelId: string; result: SingleReviewResult } | null;
-    agreement: ReviewAgreement | null;
-  };
-  responseMap: Array<{
-    responseId: "A" | "B" | "C";
-    messageId: string;
-    modelId: string;
-    modelName: string;
-  }>;
-  reviewerModelId: string;
-  usageCredits: number;
-  originalUsageCredits?: number;
-  cached: boolean;
-  disclaimer: string;
-  /**
-   * Per-claim identifiers for the feedback control, derived on the server
-   * (lib/comparisonReviewItemFeedback.ts) and never recomputed here: the
-   * derivation hashes, and a second implementation in the browser would be a
-   * second place for the two to stop agreeing. Absent on a guest review,
-   * which is not stored and therefore has nothing to attach a verdict to.
-   */
-  reviewItems?: Array<{
-    id: string;
-    reviewer: "primary" | "secondary";
-    section: string;
-    ordinal: number;
-  }>;
-  guest?: boolean;
-  persisted?: boolean;
-  webVerificationAvailable?: boolean;
 };
 
 const modeKeys: Array<{

@@ -517,10 +517,17 @@ gates:
     status: pending
     approvedBy: []
     approvedAt: null
-    evidenceRefs: []
+    evidenceRefs:
+      # A baseline, not a pass: 20/29 = 69% on the product retrieval path over
+      # a synthetic Korean set. The target stays 85%; status stays pending.
+      - "docs/release-gates/evidence/memory01-product-retrieval-baseline-2026-10-23.md"
+      - "commit:ffe0a5fb71a1fda239add0b80087dee57d7f50d4"
+      - "dataset:memory-quality-retrieval-ko-v1@3d85612d432cbcd5d8feb42bb9d833dc83f24dc42ced8bab2b9bcc6980f88b9e"
     category: memory
     title: Korean memory retrieval reaches the target recall
-    blocking: true
+    # Owner decision in chat, 2026-10-23: memory launches at current quality and
+    # the memory quality agent improves it daily, so 85% is a target, not a gate.
+    blocking: false
     owner: backend-ai
     appliesWhen: memory-release-b-enabled
     criteria:

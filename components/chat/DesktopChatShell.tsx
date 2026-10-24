@@ -968,7 +968,7 @@ export function DesktopChatShell({
         onReview={() => onProductSwitch?.("review") ?? false} /> : sidebarElement}
 
       <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding}
+        {review && <ReviewCommandBar review={review} showModeSwitcher={false} locked={productSwitchDisabled || isAnyModelResponding}
           view={studioView} setView={studio ? setStudioView : undefined} />}
         {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
         <div className={studio ? "review-studio-body" : "contents"}>

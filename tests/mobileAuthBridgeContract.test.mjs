@@ -38,6 +38,9 @@ const withoutComments = SOURCE.replace(/\/\*[\s\S]*?\*\//g, "").replace(
 
 test("the bridge exposes sign-in and the existing credential-safe session methods", () => {
   assert.deepEqual([...MOBILE_AUTH_BRIDGE_METHODS], [
+    "getDeviceSecurity",
+    "setDeviceLock",
+    "unlockDevice",
     "signIn",
     "requestEmailCode",
     "verifyEmailCode",

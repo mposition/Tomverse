@@ -93,8 +93,11 @@ test("a free lane merges the oldest clear candidate with the head pinned and rep
 test("a latch, a dev deployment in flight or no candidate merges nothing", async () => {
   const latched = ports({ state: { dbNowMs: NOW, latched: true, openAttempt: null } });
   assert.equal((await runQaReleaseMergeLaneRound(ENV, latched.ports)).outcome, "latched");
-  const busy = ports({ deployments: [{ serviceId: "web", serviceName: "web", status: "BUILDING", createdAt: "2026-10-04T23:00:00Z" }] });
+  // A deploy still waiting for its CI holds the lane; one already building does not (owner, 2026-10-23).
+  const busy = ports({ deployments: [{ serviceId: "web", serviceName: "web", status: "WAITING", createdAt: "2026-10-04T23:00:00Z" }] });
   assert.equal((await runQaReleaseMergeLaneRound(ENV, busy.ports)).outcome, "hold");
+  const building = ports({ deployments: [{ serviceId: "web", serviceName: "web", status: "BUILDING", createdAt: "2026-10-04T23:00:00Z" }] });
+  assert.notEqual((await runQaReleaseMergeLaneRound(ENV, building.ports)).outcome, "hold");
   const none = ports({ pulls: [pull(7, { isDraft: true })] });
   assert.equal((await runQaReleaseMergeLaneRound(ENV, none.ports)).outcome, "idle");
   for (const run of [latched, busy, none]) assert.equal(names(run.calls).includes("merge"), false);
@@ -184,10 +187,14 @@ test("an attempt awaiting deploy is judged by deploymentOutcome, with the observ
     ]);
     assert.equal(names(calls).includes("issue"), false);
   }
-  // A deploy in progress inside its limit is a wait: no report.
-  const waiting = ports({ state: awaiting(), deployments: [deployment("BUILDING")] });
+  // A deploy still waiting for CI inside its limit is a wait: no report.
+  const waiting = ports({ state: awaiting(), deployments: [deployment("WAITING")] });
   assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, waiting.ports), { exitCode: 0, outcome: "waiting" });
   assert.deepEqual(reports(waiting.calls), []);
+  // Building means Railway saw the merge's CI pass: the attempt closes as deployed and the lane moves on.
+  const building = ports({ state: awaiting(), deployments: [deployment("BUILDING")] });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, building.ports), { exitCode: 0, outcome: "reported", report: "deploy", detail: "ci_passed" });
+  assert.equal(reports(building.calls)[0].outcome, "succeeded");
   // Not seen past fifteen minutes is a wait exceeded.
   const unseen = ports({ state: awaiting({ mergeNotBeforeMs: NOW - 16 * 60 * 1000 }), deployments: [] });
   await runQaReleaseMergeLaneRound(ENV, unseen.ports);
@@ -324,7 +331,7 @@ test("a skipped deployment of the merge is handed to a person at once, not waite
 
 test("a latched lane does not repeat the same wait report every round, but still reports a new outcome", async () => {
   const over = { ...awaiting({ mergeNotBeforeMs: NOW - 3 * 60 * 60 * 1000 }), latched: true };
-  const stuck = ports({ state: over, deployments: [deployment("BUILDING")] });
+  const stuck = ports({ state: over, deployments: [deployment("WAITING")] });
   assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, stuck.ports), { exitCode: 0, outcome: "waiting" });
   assert.deepEqual(reports(stuck.calls), []);
   const skipped = ports({ state: { ...awaiting(), latched: true }, deployments: [deployment("SKIPPED")] });
@@ -333,4 +340,24 @@ test("a latched lane does not repeat the same wait report every round, but still
   const done = ports({ state: over, deployments: [deployment("SUCCESS")] });
   await runQaReleaseMergeLaneRound(ENV, done.ports);
   assert.deepEqual(reports(done.calls).map((r) => r.outcome), ["succeeded"]);
+});
+
+test("CI passed means every service that deploys develop is past CI on the merge, not only those already showing it", async () => {
+  const worker = (status, minutesAgo, sha) => ({ ...deployment(status, minutesAgo, sha), serviceId: "worker", serviceName: "worker" });
+  const OLD = "c".repeat(40);
+  // The web service builds the merge; the worker still serves an older commit and has no deployment of the merge yet.
+  const partial = ports({ state: awaiting(), deployments: [deployment("BUILDING"), worker("SUCCESS", 60, OLD)] });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, partial.ports), { exitCode: 0, outcome: "waiting" });
+  assert.deepEqual(reports(partial.calls), []);
+  // Both past CI on the merge: closed as ci_passed.
+  const both = ports({ state: awaiting(), deployments: [deployment("BUILDING"), worker("DEPLOYING", 4, MERGE), worker("SUCCESS", 60, OLD)] });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, both.ports), { exitCode: 0, outcome: "reported", report: "deploy", detail: "ci_passed" });
+});
+
+test("a failed newest develop deploy stops new merges until a later deploy succeeds", async () => {
+  const broken = ports({ deployments: [deployment("FAILED", 3, "d".repeat(40))] });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, broken.ports), { exitCode: 1, outcome: "dev_deploy_failed" });
+  assert.equal(names(broken.calls).includes("issue"), false);
+  const healed = ports({ deployments: [deployment("SUCCESS", 1, "e".repeat(40)), deployment("FAILED", 3, "d".repeat(40))] });
+  assert.notEqual((await runQaReleaseMergeLaneRound(ENV, healed.ports)).outcome, "dev_deploy_failed");
 });

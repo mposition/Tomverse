@@ -50,10 +50,22 @@ test("invalid, expired and revoked session responses never fall back to a cookie
   account = "active"; assert.equal(cookies, before);
 });
 test("unregistered operations cannot borrow an enrolled credential", async () => {
-  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/conversations/c1/share", "POST"], ["/api/products/review/conversations", "POST"]]) {
+  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/conversations/c1/share", "POST"], ["/api/user/settings/extra", "POST"]]) {
     assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, path, method))).response?.status, 401);
   }
   delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
+});
+
+test("additional mobile routes require their own flag and always use bearer identity", async () => {
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  const before = cookies;
+  for (const [path, method] of [["/api/chat/preflight", "POST"], ["/api/images/generations?requestKey=synthetic", "GET"]]) {
+    delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
+    assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, path, method))).response.status, 503);
+    process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "true";
+    assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner", cookie: "another-account" }, path, method))).session.user.id, "bearer-owner");
+  }
+  assert.equal(cookies, before); delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
 });
 
 const { hasRecentAccountAuthentication } = await import("../../lib/adminReauthentication.ts");
@@ -75,4 +87,21 @@ test("only the actual family sign-in time can satisfy account reauthentication",
   familyAvailable = false; result = await resolveAccountRouteSession(request);
   assert.equal(result.response.status, 401); familyAvailable = true;
   delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; delete process.env.TOMVERSE_NATIVE_ACCOUNT_ENABLED;
+});
+
+
+test("parity additions stay unavailable until both flags are enabled; account actions keep their own gate", async () => {
+  const before = cookies;
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
+  const request = req({ authorization: "Bearer valid-owner", origin: "https://localhost" }, "/api/user/settings", "POST");
+  assert.equal((await resolveChatRouteSession(request)).response.status, 503);
+  process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "true";
+  assert.equal((await resolveChatRouteSession(request)).session.user.id, "bearer-owner");
+  tokenState = "revoked";
+  assert.equal((await resolveChatRouteSession(request)).response.status, 401);
+  tokenState = "valid";
+  assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner", origin: "https://evil.invalid" }, "/api/images/generations", "POST"))).response.status, 401);
+  assert.equal(cookies, before);
+  delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
 });

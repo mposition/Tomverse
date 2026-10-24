@@ -138,7 +138,7 @@ async function loadRoutes() {
     mock.module(mod("lib/billingEntitlements.ts"), {
       namedExports: {
         ...realBilling,
-        getUserBillingPlan: async () => ({ tier: world.planTier }),
+        getUserBillingPlan: async () => ({ tier: world.planTier, maxModels: world.planTier === "Free" ? 2 : 3 }),
       },
     });
 
@@ -246,6 +246,29 @@ const quiet = async <T>(run: () => Promise<T>): Promise<T> => {
 
 test.beforeEach(() => {
   world = freshWorld();
+});
+
+test("Easy provider defaults save independently of the model combination", async () => {
+  const { settings } = await loadRoutes();
+  const previousModels = world.settingsRow!.newConversationModelIds;
+  const response = await settings.POST(postRequest("/api/user/settings", { reviewEasyDefaultProviders: ["openai"] }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(world.settingsRow!.reviewEasyDefaultProviders, ["openai"]);
+  assert.deepEqual(world.settingsRow!.newConversationModelIds, previousModels);
+  const read = await settings.GET(new Request("http://localhost/api/user/settings"));
+  assert.equal(read.status, 200);
+  const body = await readJson(read);
+  assert.deepEqual(body.reviewEasyDefaultProviders, ["openai"]);
+  assert.deepEqual(body.reviewEasyEffectiveProviders, ["openai"]);
+});
+
+test("Easy defaults reject unknown providers and duplicate choices without writing", async () => {
+  const { settings } = await loadRoutes();
+  for (const providers of [["unknown-provider"], ["openai", "openai"], []]) {
+    const response = await settings.POST(postRequest("/api/user/settings", { reviewEasyDefaultProviders: providers }));
+    assert.equal(response.status, 400);
+  }
+  assert.equal(world.upserts.length, 0);
 });
 
 test("a user time-zone change locks the credit account before moving usage under the subject lock",async()=>{
