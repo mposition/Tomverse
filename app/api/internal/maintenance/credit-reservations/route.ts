@@ -232,6 +232,7 @@ export async function POST(request: Request) {
     const memoryExtractionDispatch =
       await dispatchPendingMemoryExtractionRuns().catch(() => ({
         reclaimedRuns: 0,
+        autoStartedRuns: 0,
         dispatchedRuns: 0,
         chunksProcessed: 0,
         skippedForTime: 0,
