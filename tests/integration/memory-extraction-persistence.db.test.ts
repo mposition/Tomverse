@@ -276,9 +276,28 @@ test("nothing is stored once the account has turned memory off", async () => {
     const result = await persist(user.id, [
         decision("the user prefers formal Korean", "store_candidate", message),
     ]);
+    // Reported as memory off, not as an ordinary empty chunk, so the chunk
+    // is not recorded done and runs again once memory is back on.
+    assert.equal(result.memoryOff, true);
     assert.equal(result.stored, 0);
-    assert.equal(result.withheld, 1);
     assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 0);
+});
+
+test("a retry does not store a second copy beside a row that was suspended since", async () => {
+    const { user, message } = await seed();
+    await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ]);
+    await prisma.memoryItem.updateMany({
+        where: { userId: user.id },
+        data: { status: "suspended_by_source_lock" },
+    });
+    const retry = await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ]);
+    assert.equal(retry.stored, 0);
+    assert.equal(retry.outranked, 1);
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 1);
 });
 
 test("the provenance columns are set together or not at all", async () => {

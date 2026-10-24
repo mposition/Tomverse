@@ -327,6 +327,21 @@ test("accounts that cannot start never hold up the ones that can", async () => {
     );
 });
 
+test("an account whose suspension has expired is picked up again", async () => {
+    await setFlag(true);
+    const user = await createUser();
+    await seedConversations(user.id, 1);
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            accountStatus: "suspended",
+            accountSuspendedUntil: new Date(Date.now() - 60_000),
+        },
+    });
+    const started = await startAwaitingAutomaticExtractions({ register: REGISTER });
+    assert.equal(started, 1);
+});
+
 test("a restricted account's refusal is a coded skip, not a thrown error", async () => {
     await setFlag(true);
     const user = await createUser();

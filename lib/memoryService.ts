@@ -811,10 +811,16 @@ export async function putMemorySettings(
         defaultConversationMode: "on" | "off";
     }
 ) {
-    await prisma.userMemorySettings.upsert({
-        where: { userId },
-        create: { userId, ...input },
-        update: input,
+    // Under the account's memory lock, like every memory write: extraction
+    // storage re-reads the switch under the same lock, so a memory-off that
+    // commits is never followed by a memory stored on the old reading.
+    await prisma.$transaction(async (tx) => {
+        await acquireUserMemoryLock(tx, userId);
+        await tx.userMemorySettings.upsert({
+            where: { userId },
+            create: { userId, ...input },
+            update: input,
+        });
     });
     return getMemorySettings(userId);
 }

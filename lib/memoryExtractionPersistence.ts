@@ -42,11 +42,15 @@ import { memoryStatementKey } from "@/lib/memoryValidatorCore";
  * transaction commits and before the chunk is reported, and the bounded
  * retry then re-runs that chunk. Nothing the first attempt stored is deleted
  * -- it may already be suspended, superseded or relied on -- and a candidate
- * repeating it is a duplicate, which the topic rule below does not store.
+ * repeating a statement this chunk already stored, in whatever status, is
+ * not stored again.
  *
- * **Memory off stores nothing.** The account switch is re-read here, under
- * the memory lock, because a run started before the user turned memory off
- * can still be answering.
+ * **Memory off stores nothing, and says so.** The account switch is re-read
+ * here, under the memory lock that `putMemorySettings` also takes, because a
+ * run started before the user turned memory off can still be answering. The
+ * result is `memoryOff` rather than an ordinary empty result, so the chunk
+ * is not recorded as done and its conversations are extracted once memory is
+ * back on.
  *
  * **Evidence is re-verified here, not only at analysis time.** The label map
  * the analysis used was built when the chunk was claimed; the provider call
@@ -69,6 +73,8 @@ export type PersistExtractionChunkInput = {
 };
 
 export type PersistExtractionChunkResult = {
+    /** True when the account had memory off: nothing was read or written. */
+    memoryOff: boolean;
     /** Memories this attempt made active. */
     stored: number;
     /** Older active memories those replaced on the same topic. */
@@ -192,18 +198,39 @@ export async function persistExtractionChunkDecisions(
         where: { userId: input.userId },
         select: { masterEnabled: true },
     });
-    const memoryOn = settings?.masterEnabled !== false;
-    const keep = memoryOn
-        ? input.decisions.filter(
-              (decision) =>
-                  decision.outcome === "store_candidate" &&
-                  decision.validation.bulkSafe
-          )
-        : [];
-    const discarded = memoryOn
-        ? input.decisions.filter((decision) => decision.outcome === "discard")
-              .length
-        : 0;
+    if (settings?.masterEnabled === false) {
+        return {
+            memoryOff: true,
+            stored: 0,
+            superseded: 0,
+            withheld: 0,
+            discarded: 0,
+            unsourced: 0,
+            outranked: 0,
+        };
+    }
+    const keep = input.decisions.filter(
+        (decision) =>
+            decision.outcome === "store_candidate" && decision.validation.bulkSafe
+    );
+    const discarded = input.decisions.filter(
+        (decision) => decision.outcome === "discard"
+    ).length;
+    // What this chunk already stored, in any status: a retry must not store
+    // the same statement again beside a row that has since been suspended,
+    // superseded or expired.
+    const ownStatements = new Set(
+        (
+            await tx.memoryItem.findMany({
+                where: {
+                    userId: input.userId,
+                    extractionRunId: input.runId,
+                    extractionChunkIndex: input.chunkIndex,
+                },
+                select: { kind: true, statement: true },
+            })
+        ).map((row) => `${row.kind}:${memoryStatementKey(row.statement)}`)
+    );
 
     // One query for the whole chunk rather than one per candidate: the same
     // message is normally cited by several of them, and the answer depends on
@@ -254,6 +281,11 @@ export async function persistExtractionChunkDecisions(
         }
 
         const { kind, statement } = decision.candidate;
+        const ownKey = `${kind}:${memoryStatementKey(statement)}`;
+        if (ownStatements.has(ownKey)) {
+            outranked += 1;
+            continue;
+        }
         const conflictKey = memoryConflictKey(
             kind,
             statement,
@@ -291,6 +323,7 @@ export async function persistExtractionChunkDecisions(
         }
 
         stored += 1;
+        ownStatements.add(ownKey);
         const item = await tx.memoryItem.create({
             data: {
                 userId: input.userId,
@@ -337,6 +370,7 @@ export async function persistExtractionChunkDecisions(
     }
 
     return {
+        memoryOff: false,
         stored,
         superseded,
         withheld: input.decisions.length - keep.length - discarded,

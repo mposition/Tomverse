@@ -48,7 +48,7 @@ export type ExtractionCommitResult =
            */
           unsourced: number;
       }
-    | { committed: false; reason: "fenced_out" };
+    | { committed: false; reason: "fenced_out" | "memory_off" };
 
 /**
  * Writes a chunk's memories under the lease that produced them.
@@ -110,6 +110,11 @@ export async function commitExtractionChunk(input: {
             decisions: input.decisions,
             now: input.now,
         });
+        if (persisted.memoryOff) {
+            // Nothing was written, and the chunk must not be reported done:
+            // the account turned memory off while this call was answering.
+            return { committed: false as const, reason: "memory_off" as const };
+        }
         return {
             committed: true as const,
             stored: persisted.stored,

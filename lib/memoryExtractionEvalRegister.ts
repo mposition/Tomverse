@@ -183,8 +183,10 @@ export const MEMORY_OWNER_LAUNCH_MAX_DAYS = 30;
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
         {
-            // The pair automatic extraction uses: the first approved entry
-            // wins (lib/memoryExtractionAuto.ts), so it stays at the top.
+            // The pair automatic extraction uses: the approved entry for the
+            // prompt this build sends (lib/memoryExtractionAuto.ts). v10 is
+            // new in the change that approves it, so its text and this
+            // approval land together.
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v10",
             status: "approved",

@@ -635,3 +635,49 @@ test("an answer that arrived after its source was locked is kept like any other 
     const calls = await providerCallsFor(run.id);
     assert.equal(calls[0]?.callIssued, true, "the call really did go out");
 });
+
+test("memory turned off while the provider answered leaves the chunk to run again", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await claimFirstChunk(run.id);
+
+    const result = await handleMemoryExtractionChunk({
+        lease,
+        chunk,
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            afterIssue: async () => {
+                await prisma.userMemorySettings.upsert({
+                    where: { userId: user.id },
+                    create: { userId: user.id, masterEnabled: false },
+                    update: { masterEnabled: false },
+                });
+            },
+        }),
+    });
+
+    // A failed attempt, not a completed chunk: its conversations are still
+    // owed an extraction once memory is back on.
+    assert.deepEqual(result, { outcome: "failed", code: "memory_off" });
+    assert.equal(await prisma.memoryItem.count(), 0);
+});
+
+test("a run parked by memory off does not take a dispatcher slot", async () => {
+    const parked = await seedRun(1);
+    await prisma.userMemorySettings.create({
+        data: { userId: parked.user.id, masterEnabled: false },
+    });
+    const waiting = await seedRun(1);
+
+    const result = await dispatchPendingMemoryExtractionRuns(new Date(), 1, {
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(result.dispatchedRuns, 1);
+    const [parkedRow, waitingRow] = await Promise.all(
+        [parked.run.id, waiting.run.id].map((id) =>
+            prisma.memoryExtractionRun.findUniqueOrThrow({ where: { id } })
+        )
+    );
+    assert.equal(parkedRow.status, "pending");
+    assert.notEqual(waitingRow.status, "pending");
+});

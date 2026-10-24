@@ -324,7 +324,7 @@ test.describe("memory settings", () => {
             },
           ],
         }),
-        // A row left over from the review queue is not shown anywhere.
+        // Left over from the review queue: archived, never used, deletable.
         memoryRow("legacy-candidate", { status: "candidate", approvedAt: null }),
         memoryRow("old-1", {
           status: "superseded",
@@ -339,11 +339,15 @@ test.describe("memory settings", () => {
     await expect(
       page.getByTestId("memory-evidence-source-link")
     ).toHaveAttribute("href", "/settings/imports/conversations/ext-conv-1");
-    await expect(page.getByTestId("memory-archived-row")).toHaveCount(1);
-    await expect(page.getByTestId("memory-archived-row")).toContainText(
-      "교체됨"
-    );
-    await expect(page.getByText("QA memory statement legacy-candidate")).toHaveCount(0);
+    const archived = page.getByTestId("memory-archived-row");
+    await expect(archived).toHaveCount(2);
+    await expect(archived.filter({ hasText: "QA superseded memory" })).toContainText("교체됨");
+    const legacy = archived.filter({ hasText: "QA memory statement legacy-candidate" });
+    await expect(legacy).toContainText("이전 후보 · 사용 안 함");
+    await legacy.getByTestId("memory-delete").click();
+    await legacy.getByTestId("memory-delete").click();
+    await expect(archived).toHaveCount(1);
+    expect(api.deletes).toEqual(["legacy-candidate"]);
     await expect(page.getByTestId("memory-organising-notice")).toHaveCount(0);
 
     const master = page.getByTestId("memory-master-toggle");

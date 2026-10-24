@@ -151,7 +151,10 @@ async function accountsAwaitingExtraction(
         LEFT JOIN "UserMemorySettings" s ON s."userId" = c."userId"
         WHERE ${awaitingExtraction(now)}
           AND COALESCE(s."masterEnabled", true)
-          AND u."accountStatus" = 'active'
+          AND (u."accountStatus" = 'active'
+               OR (u."accountStatus" = 'suspended'
+                   AND u."accountSuspendedUntil" IS NOT NULL
+                   AND u."accountSuspendedUntil" <= ${now}))
           AND (u."aiUsageRestricted" = false
                OR (u."aiUsageRestrictedUntil" IS NOT NULL
                    AND u."aiUsageRestrictedUntil" <= ${now}))

@@ -516,7 +516,7 @@ export async function handleMemoryExtractionChunk({
         promptVersion: lease.promptVersion,
         decisions: analysis.decisions,
     });
-    await closeCost(commit.committed ? undefined : "fenced_out");
+    await closeCost(commit.committed ? undefined : commit.reason);
 
     if (commit.committed && commit.unsourced > 0) {
         // Recorded after the transaction, never inside it: a counter written
@@ -553,7 +553,11 @@ export async function handleMemoryExtractionChunk({
         })
     );
 
-    if (!commit.committed) return failed("lease_lost");
+    if (!commit.committed) {
+        // Memory off: the attempt failed and the chunk stays pending, behind
+        // the memory_off dispatch block, until memory is back on.
+        return failed(commit.reason === "memory_off" ? "memory_off" : "lease_lost");
+    }
     return { outcome: "completed" };
 }
 
@@ -718,7 +722,17 @@ export async function dispatchPendingMemoryExtractionRuns(
     });
 
     const pending = await prisma.memoryExtractionRun.findMany({
-        where: { status: "pending" },
+        // A run parked because its account turned memory off would only be
+        // blocked again, and five of them would fill every pass.
+        where: {
+            status: "pending",
+            user: {
+                OR: [
+                    { memorySettings: null },
+                    { memorySettings: { masterEnabled: true } },
+                ],
+            },
+        },
         // Oldest first: a run that has been waiting longest is the one whose
         // owner has been waiting longest, and it keeps a busy account from
         // starving the queue behind it.
