@@ -114,11 +114,6 @@ export const SHARED_STRING_ALLOWLIST = [
     locales: ["fr"],
     reason: "'{count} conversations' is identical in French.",
   },
-  {
-    key: "memoryExtraction.conversationMeta",
-    locales: ["fr"],
-    reason: "'{messages} messages · {size}' is identical in French.",
-  },
 ];
 
 /** `{ "a.b": value }` for a nested locale object. */
