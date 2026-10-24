@@ -39,6 +39,8 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const [streaming, setStreaming] = useState(false); const [loading, setLoading] = useState(true);
   const [uncertain, setUncertain] = useState(false); const [error, setError] = useState("");
   const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? "review:new");
+  const titleScope = useRef(0);
+  useEffect(() => () => { titleScope.current++; }, [owner, transport]);
   const request = useRef(0); const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null); const followOutput = useRef(true);
   useEffect(() => { if (followOutput.current) end.current?.scrollIntoView({ block: "end" }); }, [conversation?.messages.length, partial, activeModel]);
@@ -50,6 +52,8 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     return () => controller.abort();
   }, [researchKey, streaming, transport]); // eslint-disable-line react-hooks/exhaustive-deps -- Job identity controls one restoration watcher.
   const initializationError = useRef(c.reviewUnavailable);
+  const defaultsError = useRef(c.reviewDefaultsUnavailable);
+  useEffect(() => { defaultsError.current = c.reviewDefaultsUnavailable; }, [c.reviewDefaultsUnavailable]);
   useEffect(() => { initializationError.current = c.reviewUnavailable; }, [c.reviewUnavailable]);
   const lastKey = `tomverse-native-last-review:${owner ?? ""}`;
   useEffect(() => { onBusyChange(loading || streaming || uncertain || actionBusy); return () => onBusyChange(false); }, [loading, streaming, uncertain, actionBusy, onBusyChange]);
@@ -67,7 +71,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
         const options = preferences?.reviewEasyProviderOptions?.filter(provider => available.has(provider)) ?? [];
         setProviderOptions(options);
         setDefaults((preferences?.reviewEasyEffectiveProviders ?? []).filter(provider => options.includes(provider)).slice(0, Math.min(cap.maxModels, preferences?.reviewEasyMaxProviders ?? 3)));
-        if (cap.reviewEasy && !preferences?.reviewEasyEffectiveProviders) setError(initializationError.current);
+        if (cap.reviewEasy && !preferences?.reviewEasyEffectiveProviders) setError(defaultsError.current);
         const last = localStorage.getItem(lastKey);
         if (last && history.some(chat => chat.id === last && chat.kind !== "image")) {
           const item = await transport.load(last);
@@ -116,6 +120,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   async function send(text: string, files: MobileAttachment[]) {
     if (streaming || uncertain || !capability) return false;
     if (!(mode === "easy" ? providers : selected).length) { setError(c.noParticipants); return false; }
+    const titleEpoch = titleScope.current;
     const current = ++request.current; const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial({});
     let item = conversation; let dispatched = false;
@@ -147,8 +152,8 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       if (!outcome.failedModelIds.length) setDraft(""); else setError(copy.disconnected);
       const history = await transport.listReview!();
       if (current === request.current) setChats(history);
-      void transport.generateTitle?.(saved).then(title => {
-        if (!title || current !== request.current) return;
+      if (titleEpoch === titleScope.current) void transport.generateTitle?.(saved).then(title => {
+        if (!title || titleEpoch !== titleScope.current) return;
         setConversation(value => value?.id === saved.id && value.title === saved.title ? { ...value, title } : value);
         setChats(rows => rows.map(row => row.id === saved.id && row.title === saved.title ? { ...row, title } : row));
       }).catch(() => { /* Preserve the stored title on background generation failure. */ });
@@ -181,6 +186,6 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     </div></Sheet>}
     {crossReview && conversation && <CrossReview id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setCrossReview(false)} onBusy={setActionBusy} onSource={messageId => { const source = conversation.messages.find(message => message.id === messageId); if (source?.modelId) setActiveModel(source.modelId); setCrossReview(false); setTimeout(() => document.getElementById(`review-message-${messageId}`)?.scrollIntoView({ block: "center" }), 50); }} />}
     {imageOpen && <NativeImageWorkspace owner={owner} transport={transport} language={language} initial={image ?? undefined} historyId={imageHistory ?? undefined} onBusy={setActionBusy} onClose={() => setImageOpen(false)} onCreated={id => { setImageHistory(id); void transport.listReview!().then(setChats).catch(() => setError(copy.unavailable)); }} />}
-    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" onClick={newReview}>{c.newReview}</button><div className="history-scroll"><input type="search" aria-label={c.history} value={query} onChange={event => setQuery(event.target.value)} />{chats.filter(chat => chat.title.toLowerCase().includes(query.toLowerCase())).map(chat => <button className="conversation-row" key={chat.id} onClick={() => void open(chat.id)}>{chat.title}</button>)}</div>{historyFooter}</Sheet>}
+    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" disabled={loading || streaming || uncertain || actionBusy} onClick={newReview}>{c.newReview}</button><div className="history-scroll"><input type="search" aria-label={c.history} value={query} onChange={event => setQuery(event.target.value)} />{chats.filter(chat => chat.title.toLowerCase().includes(query.toLowerCase())).map(chat => <button className="conversation-row" key={chat.id} disabled={loading || streaming || uncertain || actionBusy} onClick={() => void open(chat.id)}>{chat.title}</button>)}</div>{historyFooter}</Sheet>}
   </section>;
 }

@@ -77,3 +77,68 @@ test("account footer and one-tap new chat remain reachable on a short narrow scr
   await page.evaluate(() => { document.documentElement.style.fontSize = ""; document.documentElement.dataset.theme = "dark"; });
   await page.screenshot({ path: resolve(process.cwd(), "../../.tmp/native-parity/followups-sidebar-dark.png") });
 });
+
+test("a delayed generated title reaches the history after starting another chat", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    const fixture = `transport.generateTitle=async conversation=>new Promise(resolve=>{window.finishTitle=()=>{const key='tomverse-native-synthetic-demo';const rows=JSON.parse(localStorage.getItem(key));localStorage.setItem(key,JSON.stringify(rows.map(row=>row.id===conversation.id?{...row,title:'Generated first title'}:row)));resolve('Generated first title');};});`;
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", fixture + "createRoot(container).render(") });
+  });
+  await page.reload(); await page.getByRole("textbox").fill("An interim question");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("button", { name: "Conversations", exact: true }).click();
+  await page.evaluate(() => (window as unknown as { finishTitle: () => void }).finishTitle());
+  await expect(page.locator(".conversation-row")).toContainText("Generated first title");
+});
+
+test("settings and sign-out remain reachable during an active response", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    const fixture = `transport.send=async(_conversation,_text,_files,signal,progress)=>{progress('Working');await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Stopped','AbortError')),{once:true}));};`;
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", fixture + "createRoot(container).render(") });
+  });
+  await page.reload(); await page.getByRole("textbox").fill("A held response");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
+  await page.getByRole("button", { name: "Conversations", exact: true }).click();
+  await page.getByTestId("sidebar-account").getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Privacy & data", exact: true }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Continue with Tomverse" })).toBeVisible();
+});
+
+test("a failed Easy defaults read leaves Professional Review usable", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", `transport.preferences=async()=>{throw Error('Temporary settings failure');};createRoot(container).render(`) });
+  });
+  await page.reload(); await page.getByTestId("product-switcher").selectOption("review");
+  await expect(page.getByRole("alert")).toContainText("Easy defaults could not be loaded");
+  await page.getByRole("button", { name: /Choose participants/ }).click();
+  await page.getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("textbox").fill("Professional still works");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Local demo A", exact: true })).toBeVisible();
+});
+
+test("a list read completing after sign-out never starts background title generation", async ({ page }) => {
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch(); const source = await response.text();
+    const fixture = `let listReads=0;const priorList=transport.list;transport.list=async()=>{if(++listReads===1)return priorList();return new Promise(resolve=>{window.finishList=async()=>resolve(await priorList());});};window.titleCalls=0;transport.generateTitle=async()=>{window.titleCalls++;return 'Unwanted late title';};`;
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", fixture + "createRoot(container).render(") });
+  });
+  await page.reload(); await page.getByRole("textbox").fill("A pending history read");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => typeof (window as unknown as { finishList?: unknown }).finishList)).toBe("function");
+  await page.getByRole("button", { name: "Conversations", exact: true }).click();
+  await page.getByTestId("sidebar-account").getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Privacy & data", exact: true }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.evaluate(async () => { await (window as unknown as { finishList: () => Promise<void> }).finishList(); });
+  await expect(page.getByRole("button", { name: "Continue with Tomverse" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { titleCalls: number }).titleCalls)).toBe(0);
+});
