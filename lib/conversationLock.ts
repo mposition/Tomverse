@@ -336,7 +336,14 @@ const validUnlockGrantExpiry = (
     storedPassword: string
 ): number | null => {
     const conversationId = resourceId;
-    const token = readCookie(request, unlockCookieName(resourceType, resourceId));
+    // Native fetch omits cookies. Its owner-bound grants stay in app memory;
+    // a bearer request never borrows an ambient browser unlock cookie.
+    const nativeHeader = request.headers.get("x-tomverse-conversation-unlocks");
+    const token = request.headers.has("authorization")
+        ? resourceType === NATIVE_RESOURCE && nativeHeader && nativeHeader.length <= 8192
+            ? nativeHeader.split(";").map(value => value.trim()).find(value => value.startsWith(`${resourceId}=`))?.slice(resourceId.length + 1)
+            : null
+        : readCookie(request, unlockCookieName(resourceType, resourceId));
     if (!token) return null;
 
     const [expiresValue, fingerprint, signature, ...extra] = token.split(".");

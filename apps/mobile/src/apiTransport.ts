@@ -16,13 +16,29 @@ import type { ChatTransport, Conversation, MobileAttachment, MobileCapabilities 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 type Attempt = { assistantMessageId: string; partialContent: string; status: string; actualModelId?: string; requestedModelId: string };
 export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth, saveFile = saveMobileResponse, uploadFile = uploadMobileFile): ChatTransport {
+  const requestedTitles = new Set<string>();
   const listeners = new Set<() => void>();
+  const unlockGrants = new Map<string, string>();
+  const pinSequences = new Map<string, number>();
+  let sessionRevision = 0;
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
   let capabilityRequest: Promise<MobileCapabilities> | null = null;
   const routedModelByMessage = new Map<string, string>();
-  const notifySessionLost = () => { capabilityCache = null; for (const listener of listeners) listener(); };
+  const clearSessionState = () => { sessionRevision++; capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
+  const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
   const run: ApiFetch = async (path, init) => {
-    try { const response = await source(path, init); if (response.status === 401) notifySessionLost(); return response; }
+    try {
+      for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
+      if (unlockGrants.size && /^\/api\/conversations(?:\/|\?)/.test(path)) {
+        const headers = new Headers(init?.headers);
+        headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
+        init = { ...init, headers };
+      }
+      const response = await source(path, init);
+      if (response.status === 401) notifySessionLost();
+      if (response.status === 423) { const id = path.match(/^\/api\/conversations\/([A-Za-z0-9_-]+)/)?.[1]; if (id) unlockGrants.delete(id); }
+      return response;
+    }
     catch (error) { if ((error as { code?: string }).code === "SIGN_IN_REQUIRED") notifySessionLost(); throw error; }
   };
   const client = createApiClient(run);
@@ -38,6 +54,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   }
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const pathFor = (id: string) => `/api/conversations/${encodeURIComponent(id)}`;
+  const historySupport = async () => {
+    const capability = await requireParity();
+    if (!capability.historyActions) throw Object.assign(Error("NATIVE_HISTORY_UNAVAILABLE"), { code: "NATIVE_HISTORY_UNAVAILABLE" });
+  };
+  const historyWrite = async (path: string, method: string, body?: unknown) => {
+    await historySupport(); await request(path, body === undefined ? { method } : json(method, body));
+  };
   type ConversationReply = Conversation & { responseAttempts?: Attempt[]; assistantProfile?: { profileId: string } | null; messagePage?: { hasMore: boolean; nextCursor: string | null } };
   async function readConversation(id: string) {
     const first = await request<ConversationReply>(pathFor(id));
@@ -138,6 +161,47 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     } finally { watchdog.stop(); signal.removeEventListener("abort", abort); }
   }
   return {
+    history: {
+      projects: async () => { await historySupport(); return (await request<{ projects: import("./chatTransport").HistoryProject[] }>("/api/projects")).projects; },
+      saveProject: (id, name) => historyWrite(id ? `/api/projects/${encodeURIComponent(id)}` : "/api/projects", id ? "PATCH" : "POST", { name }),
+      deleteProject: id => historyWrite(`/api/projects/${encodeURIComponent(id)}`, "DELETE"),
+      search: async (query, signal) => {
+        await historySupport(); return request(`/api/conversations/search?q=${encodeURIComponent(query)}`, { signal, headers: { "X-Tomverse-Time-Zone": Intl.DateTimeFormat().resolvedOptions().timeZone }, cache: "no-store" });
+      },
+      rename: (id, title) => historyWrite(pathFor(id), "PATCH", { title }),
+      pin: async (chat, pinned) => {
+        const revision = sessionRevision; await historySupport();
+        const profile = await request<{ id: string }>("/api/user/account");
+        if (revision !== sessionRevision) throw Error("SIGN_IN_REQUIRED");
+        const seq = Math.max(Date.now(), (chat.pinSeq ?? 0) + 1, (pinSequences.get(chat.id) ?? 0) + 1);
+        pinSequences.set(chat.id, seq);
+        await request(`${pathFor(chat.id)}/pin`, json("PUT", { pinned, seq, ownerId: profile.id }));
+      },
+      move: (id, projectId) => historyWrite(pathFor(id), "PATCH", { projectId }),
+      share: async id => {
+        await historySupport(); const result = await request<{ url: string }>(`${pathFor(id)}/share`, json("POST", {}));
+        const url = new URL(result.url);
+        if (url.protocol !== "https:" || !["tomverse.app", "dev.tomverse.app", "staging.tomverse.app"].includes(url.hostname) || !url.pathname.startsWith("/share/") || url.username || url.password || url.port) throw Error("INVALID_SHARE_URL");
+        return { url: url.toString() };
+      },
+      revokeShare: id => historyWrite(`${pathFor(id)}/share`, "DELETE"),
+      export: async (id, title, includeSource) => {
+        await historySupport(); const response = await run(`${pathFor(id)}/export${includeSource ? "?include=source" : ""}`, { headers: { "X-Tomverse-Time-Zone": Intl.DateTimeFormat().resolvedOptions().timeZone } });
+        if (!response.ok) { const body = await response.json().catch(() => ({})); throw new ApiClientError(response.status, body.code ?? "MOBILE_REQUEST_FAILED"); }
+        await saveFile(response, `${title}.txt`);
+      },
+      remove: async id => { await historyWrite(pathFor(id), "DELETE"); unlockGrants.delete(id); },
+      password: async (id, password, currentPassword) => { await historyWrite(pathFor(id), "PATCH", { password, ...(currentPassword ? { currentPassword } : {}) }); unlockGrants.delete(id); },
+      unlock: async (id, password) => {
+        const revision = sessionRevision; await historySupport();
+        const reply = await request<{ unlockToken: string }>(`${pathFor(id)}/verify`, json("POST", { password }));
+        if (revision !== sessionRevision) throw Error("SIGN_IN_REQUIRED");
+        if (typeof reply.unlockToken !== "string" || reply.unlockToken.length > 200 || !/^\d+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(reply.unlockToken)) throw Error("INVALID_UNLOCK_GRANT");
+        if (unlockGrants.size >= 32 && !unlockGrants.has(id)) unlockGrants.delete(unlockGrants.keys().next().value!);
+        unlockGrants.set(id, reply.unlockToken);
+      },
+      unlocked: id => Number(unlockGrants.get(id)?.split(".")[0] ?? 0) > Date.now() / 1000,
+    },
     voiceConfiguration: async () => (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number } }>("/api/products/chat/capabilities")).voiceConversation ?? { enabled: false, maxSeconds: 300 },
     voiceRequest: (body, signal) => run("/api/chat/voice", { ...json("POST", body), signal }),
     sendVoice: async (conversation, text, signal, onProgress) => {
@@ -168,6 +232,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }
     },
     mobileCapabilities: requireParity,
+    usage: async () => {
+      if (!(await requireParity(true)).accountUsage) throw Object.assign(Error("NATIVE_USAGE_UNAVAILABLE"), { code: "NATIVE_USAGE_UNAVAILABLE" });
+      return request("/api/user/usage");
+    },
+    generateTitle: async conversation => {
+      if (requestedTitles.has(conversation.id) || conversation.messages.filter(message => message.role === "user").length !== 1 || !conversation.messages.some(message => message.role === "assistant" && message.status === "normal")) return null;
+      requestedTitles.add(conversation.id);
+      if (!(await requireParity()).conversationTitles) return null;
+      const result = await request<{ updated: boolean; title?: string }>(`${pathFor(conversation.id)}/generate-title`, json("POST", { expectedTitle: conversation.title }));
+      return result.updated && typeof result.title === "string" ? result.title : null;
+    },
     preferences: async () => { await requireParity(); return request("/api/user/settings"); },
     reportAnswer: async ({ messageId, modelId, message, language }) => { await requireParity(); const result = await request<{ reference?: unknown }>("/api/feedback", json("POST", { type: "bug", message, messageId, answerSignal: "needs_improvement", language, ...(modelId ? { modelId } : {}) })); return typeof result?.reference === "string" ? { reference: result.reference } : {}; },
     savePreferences: async (input) => { await requireParity(); await request("/api/user/settings", json("POST", input)); },
@@ -178,7 +253,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     deviceSecurity: () => bridge.getDeviceSecurity?.() ?? Promise.resolve({ available: false, enabled: false, locked: false }),
     setDeviceLock: async (enabled, reason) => { await bridge.setDeviceLock({ enabled, reason }); window.dispatchEvent(new Event("tomverse-device-security-changed")); },
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
-    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string; isLocked: boolean }>>("/api/conversations")).filter(row => row.surface === "workspace" && ["chat", "image"].includes(row.kind) && !row.isLocked),
+    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => row.surface === "workspace" && ["chat", "image"].includes(row.kind)),
     createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
@@ -216,17 +291,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     signIn: async () => { await bridge.signIn(); },
     requestEmailCode: (email, language) => bridge.requestEmailCode({ email, language }),
     verifyEmailCode: (email, code) => bridge.verifyEmailCode({ email, code }),
-    signOut: () => { capabilityCache = null; return bridge.signOut(); },
+    signOut: () => { clearSessionState(); return bridge.signOut(); },
     list: async () => {
       const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean }>>("/api/conversations");
-      return rows.filter((row) => row.surface === "chat" && row.kind === "chat" && !row.isLocked);
+      return rows.filter((row) => row.surface === "chat" && row.kind === "chat");
     },
     load,
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
-    create: async () => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", {}));
+    create: async (title) => {
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", title ? { title: title.slice(0, 30) } : {}));
       const detail = await load(item.id);
       return detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },

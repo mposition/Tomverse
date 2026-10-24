@@ -6,7 +6,8 @@ import { mock, test } from "node:test";
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const ideaId = "a3eb94f2-c3b2-4e2a-93b4-902ce0e43f15";
-const url = `https://tomverse.test/api/admin/amux/ideas/read-manifest?ideaId=${ideaId}&referenceOrdinal=0`;
+const manifestId = "9b7e4b8e-2d34-48b2-95a5-333360b10816";
+const url = `https://tomverse.test/api/admin/amux/ideas/read-manifest?ideaId=${ideaId}&manifestId=${manifestId}`;
 let session: { user: { id: string } } | null = null;
 let role = "viewer";
 let adminSession = false;
@@ -40,12 +41,12 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), {
   namedExports: { readAmuxTrackedCheckoutReadManifestForOwner: async (
-    actorUserId: string, requestedIdeaId: string, referenceOrdinal: number,
+    actorUserId: string, requestedIdeaId: string, requestedManifestId: string,
   ) => {
     reads += 1;
     assert.equal(actorUserId, "owner");
     assert.equal(requestedIdeaId, ideaId);
-    assert.equal(referenceOrdinal, 0);
+    assert.equal(requestedManifestId, manifestId);
     return available ? { pinnedCommitSha: "a".repeat(40),
       files: ["README.md", "src/read.ts"] } : null;
   } },
@@ -70,8 +71,8 @@ test("read paths require owner, recent authentication, and rate admission", asyn
   assert.equal((await GET(new Request(url))).status, 429);
   assert.equal(reads, 0);
   rateLimited = false;
-  for (const invalid of [`${url}&extra=1`, url.replace("referenceOrdinal=0",
-    "referenceOrdinal=00"), url.replace(ideaId, "not-an-id")]) {
+  for (const invalid of [`${url}&extra=1`, url.replace(manifestId, "0"),
+    url.replace(`manifestId=${manifestId}`, "referenceOrdinal=0"), url.replace(ideaId, "not-an-id")]) {
     assert.equal((await GET(new Request(invalid))).status, 400);
   }
   assert.equal(reads, 0);

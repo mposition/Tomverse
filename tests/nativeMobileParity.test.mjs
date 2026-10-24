@@ -3,30 +3,14 @@ import test from "node:test";
 import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { nativeParityBearerRoute } from "../lib/nativeBearerGate.ts";
 import { validateMobileUpload } from "../apps/mobile/src/nativeUpload.ts";
-import { deviceAccessGrant } from "../apps/mobile/src/deviceUnlock.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
 const bridge = { hasSession: async () => ({ signedIn: true }), signOut: async () => {} };
 const capability = { reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" };
 
-test("a native lock waits before HTTP dispatch and only resumes after native unlock", async () => {
-  let locked = true; let grants = 0; const events = new EventTarget();
-  const bridge = { getAccessToken: async () => { grants++; if (locked) throw { code: "DEVICE_LOCKED" }; return { accessToken: "synthetic", expiresAt: Date.now()+600000 }; }, getDeviceSecurity: async () => ({ locked, enabled: true, available: true }) };
-  let sent = false;
-  const pending = deviceAccessGrant(bridge, {}, undefined, events).then(() => { sent = true; });
-  await new Promise(resolve => setImmediate(resolve)); assert.equal(sent, false); assert.equal(grants, 1);
-  events.dispatchEvent(new Event("tomverse-device-unlocked")); await new Promise(resolve => setImmediate(resolve)); assert.equal(sent, false);
-  locked = false; events.dispatchEvent(new Event("tomverse-device-unlocked")); await pending; assert.equal(sent,true); assert.equal(grants,2);
-});
-test("aborting while locally locked never requests a second grant", async () => {
-  let grants = 0; const events = new EventTarget(); const controller = new AbortController();
-  const pending = deviceAccessGrant({ getAccessToken: async () => { grants++; throw {code:"DEVICE_LOCKED"}; }, getDeviceSecurity: async () => ({locked:true,enabled:true,available:true}) }, {}, controller.signal, events);
-  await new Promise(resolve => setImmediate(resolve)); controller.abort(); await assert.rejects(pending, {name:"AbortError"}); events.dispatchEvent(new Event("tomverse-device-unlocked")); assert.equal(grants,1);
-});
-
 test("parity enrollment is default-off and never includes adjacent administrative or publishing operations", () => {
   const allowed = [["/api/products/mobile/capabilities", "GET"], ["/api/user/settings", "POST"], ["/api/memories/settings", "PUT"], ["/api/images/groups/g1", "GET"], ["/api/images/generations", "POST"], ["/api/conversations/c1/comparison-reviews", "POST"], ["/api/conversations/c1/comparison-reviews/item-feedback", "PUT"], ["/api/conversations/c1/comparison-reviews/item-feedback", "DELETE"], ["/api/feedback", "POST"]];
   for (const [path, method] of allowed) { assert.equal(nativeParityBearerRoute(path, method), false); assert.equal(nativeParityBearerRoute(path, method, true), true); }
-  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/conversations/c1/comparison-reviews/item-feedback", "POST"], ["/api/admin/users", "GET"], ["/api/user/settings/extra", "POST"], ["/api/assistant-profiles", "POST"], ["/api/conversations/c1/share", "POST"], ["/api/images/groups/g1", "DELETE"], ["/api/conversations/%2Fadmin/comparison-reviews", "POST"], ["/api/feedback", "GET"], ["/api/feedback/export", "POST"], ["/api/admin/feedback", "POST"]]) assert.equal(nativeParityBearerRoute(path, method, true), false);
+  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/conversations/c1/comparison-reviews/item-feedback", "POST"], ["/api/admin/users", "GET"], ["/api/user/settings/extra", "POST"], ["/api/assistant-profiles", "POST"], ["/api/conversations/c1/share", "GET"], ["/api/images/groups/g1", "DELETE"], ["/api/conversations/%2Fadmin/comparison-reviews", "POST"], ["/api/feedback", "GET"], ["/api/feedback/export", "POST"], ["/api/admin/feedback", "POST"]]) assert.equal(nativeParityBearerRoute(path, method, true), false);
 });
 test("legacy servers never receive cookie-only parity requests or invalidate a valid mobile session", async () => {
   const calls = []; let lost = 0;

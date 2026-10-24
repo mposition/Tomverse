@@ -79,7 +79,7 @@ test("invalid, expired and revoked session responses never fall back to a cookie
   account = "active"; assert.equal(cookies, before);
 });
 test("unregistered operations cannot borrow an enrolled credential", async () => {
-  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/conversations/c1/share", "POST"], ["/api/user/settings/extra", "POST"]]) {
+  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/conversations/c1/share", "GET"], ["/api/user/settings/extra", "POST"]]) {
     assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, path, method))).response?.status, 401);
   }
   delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
@@ -88,7 +88,7 @@ test("unregistered operations cannot borrow an enrolled credential", async () =>
 test("additional mobile routes require their own flag and always use bearer identity", async () => {
   process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
   const before = cookies;
-  for (const [path, method] of [["/api/chat/preflight", "POST"], ["/api/images/generations?requestKey=synthetic", "GET"]]) {
+  for (const [path, method] of [["/api/user/usage", "GET"], ["/api/conversations/c1/generate-title", "POST"], ["/api/chat/preflight", "POST"], ["/api/images/generations?requestKey=synthetic", "GET"], ["/api/conversations/c1", "DELETE"], ["/api/conversations/c1/share", "POST"], ["/api/conversations/c1/share", "DELETE"], ["/api/conversations/c1/pin", "PUT"], ["/api/conversations/c1/export", "GET"], ["/api/conversations/c1/verify", "POST"], ["/api/conversations/search?q=fixture", "GET"], ["/api/projects", "GET"], ["/api/projects", "POST"], ["/api/projects/p1", "PATCH"], ["/api/projects/p1", "DELETE"]]) {
     delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
     assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, path, method))).response.status, 503);
     process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "true";

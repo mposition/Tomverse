@@ -21,7 +21,11 @@ The additional scope covers account preferences and memory settings, reading
 assistant profiles, creating Review conversations and routing Easy questions,
 reading generated-image groups/history, explicitly requested Studio generation,
 AI cross-review and item feedback/verification, reporting a problem with one
-answer (`POST /api/feedback`), and polling existing Deep Research jobs. No administration, sharing, publishing, profile creation or bulk deletion
+answer (`POST /api/feedback`), polling existing Deep Research jobs, reading the existing account usage totals and generating conversation titles
+through the existing owner-scoped service. The client calls title generation at
+most once after the first successful answer, retaining the saved interim title on
+failure. Compare-and-set preserves subsequent web renames. Title/usage capability
+fields prevent calling older cookie-only deployments. No administration, sharing, publishing, profile creation or bulk deletion
 route is enrolled.
 
 An old or inactive server answers the capability probe without invalidating an
@@ -31,19 +35,26 @@ separate from local implementation and require the applicable owner approval.
 
 ## Device authentication and files
 
-Device lock is opt-in after account sign-in. Android uses BiometricPrompt with
-device credentials; iOS uses LocalAuthentication's deviceOwnerAuthentication.
-The OS owns fingerprint, Face ID, PIN, pattern and passcode entry. The app has no
-custom PIN database and receives none of those secrets. Cold restart and thirty
-seconds in the background require authentication before native access-token
-issuance. Cancelling the prompt keeps the session locked without consuming its
-rotating credential. Android enables FLAG_SECURE while this option is enabled.
-
-Already opened UI state is hidden and inert while locked; it is retained so that
-a long system file selection does not discard the draft. A native DEVICE_LOCKED
-refusal waits before HTTP dispatch and resumes after native unlock. It does not
-replay an HTTP mutation. Signing out from the lock screen discards drafts and
-remounts the account UI.
+Device authentication is opt-in after account sign-in. Android uses BiometricPrompt
+with device credentials; iOS uses LocalAuthentication's deviceOwnerAuthentication.
+The OS owns fingerprint, Face ID, PIN, pattern and passcode entry. Tomverse receives
+none of those secrets. The preference persists across sign-out and gates the next
+fresh email-code verification or PKCE exchange, including after session expiry.
+Cancelling device authentication does not consume the email code or exchange grant.
+A synchronous sign-out generation fence invalidates callbacks captured by an
+earlier sign-in, including callbacks queued before main-thread cleanup. It also
+cancels device prompts. An in-flight cancelled exchange cannot persist credentials;
+its unused refresh credential is revoked once, with an uncertain result reported
+as unconfirmed logout. A valid stored session
+restores without another prompt on cold restart, background return or token rotation.
+If the one-shot revocation of a cancelled exchange cannot be confirmed, its
+unused secret is discarded; the server family may remain valid until expiry.
+The client never replays that secret. The conservative unconfirmed-revocation
+flag is reported at the next logout, even if a newer sign-in caused the original
+cancellation. iOS race handling still requires Mac/device acceptance.
+Device sign-in verification does not block Android screenshots or screen recording.
+Server session expiry,
+revocation, account freshness and rotating-secret consumption are unchanged.
 
 The Android system document picker grants access to user-selected files. No broad
 storage or media permission is added. A selected upload still follows the server's
@@ -129,3 +140,60 @@ live paid model/image/research calls, full seven-language parity for new copy,
 store review, and complete web workspace/account-management parity are not claimed
 by local fixture verification. New copy currently has English/Korean versions and
 uses English fallback for the other supported languages.
+
+## Follow-up regression checks
+
+The history list uses flat rows with a 48px minimum height, 4px spacing, a two-line
+title clamp and a separate 44px-wide context-menu target. Chat and Review reuse the
+same list component. Internal conversation rows do not use an external-link arrow.
+The account footer stays below the independently scrolling list.
+
+History actions reuse the web endpoints for rename, ordered pinning, project
+management, public snapshot sharing/revocation, TXT export with the optional imported
+original, deletion and password locks. Title and message search reuse the server
+search route, including its locked-source checks, result expiry and incomplete-search
+signals. Filters match the web's locked, shared, comparison, model and project filters;
+pins precede the same calendar-date groups as the web. Public share and export
+visibility also use the server's plan capabilities. Creation of a public share,
+irreversible conversation deletion and source-inclusive export require explicit UI
+confirmation. Unknown mutations are never automatically repeated: a marker scoped
+to the signed-in account requires a read of saved state before another change.
+
+These additional bearer routes remain behind the existing default-off native parity
+deployment flag. The exact enrollment includes only their documented methods, not
+bulk conversation deletion/export, arbitrary share reads or administrative paths.
+The handlers use the verified bearer owner even if a different browser cookie is
+present, while retaining their existing ownership, lock, plan and operational checks.
+
+Native fetch still omits cookies. A successful password verification returns the
+existing signed, owner/conversation/password-bound unlock grant instead of setting a
+browser cookie. At most 32 grants are held in app memory and sent through
+`X-Tomverse-Conversation-Unlocks` only to conversation APIs. They retain the existing
+30-minute expiry; a native bearer never borrows a browser unlock cookie or an
+external-resource grant. Logout/session loss clears them, and an in-flight proof
+cannot reinsert one after logout. Passwords and grants are not persisted in WebView
+storage. The cookie-only web proof format and behavior remain unchanged.
+
+Usage reads refresh capability support before calling `/api/user/usage`, so retry
+can recover immediately after server activation. An older server does not receive
+that cookie-only request and cannot accidentally log out a valid native session.
+Unavailable usage never renders a fabricated zero. The usage route enrollment and
+capability declaration must be deployed together for production totals to load.
+
+Chat startup restores the signed-in account and history list while staying on the
+new-conversation screen. It never opens the last Chat automatically. Selecting a
+history row restores its saved messages, files, images and voice session receipts;
+unsent drafts remain scoped to their original conversation.
+
+`tests/native-mobile/followups.spec.ts` covers newline-only Enter, the header new
+conversation action in Chat and Review, server-derived Easy defaults, explicit
+empty selection, and the account footer at a short viewport.
+
+From `apps/mobile/android`, with Java 21 and Android SDK configured, run
+`./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=app.tomverse.shell.DeviceSignInTest`
+(`gradlew.bat` in PowerShell, with the `-P...` argument quoted). The test uses real
+Android Keystore and the native serial queue, isolated preference namespaces and
+an in-process HTTPS fixture; no production or provider request is dispatched.
+It covers cold restore, a 31-second background return, fresh sign-in proof
+refusal before email-code consumption, and a missing-session sign-in requirement.
+This does not replace physical fingerprint/PIN or iOS Face ID acceptance.

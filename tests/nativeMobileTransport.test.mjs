@@ -161,3 +161,48 @@ test("a non-JSON server refusal preserves its status without exposing HTML", asy
   const transport = createApiTransport(async () => new Response("<html>Unavailable</html>", { status: 503 }), bridge);
   await assert.rejects(transport.list(), (error) => error.status === 503 && error.code === "MOBILE_REQUEST_FAILED");
 });
+
+
+test("first-turn title generation uses the server CAS once and never reruns for a follow-up", async () => {
+  const calls = [];
+  const transport = createApiTransport(async (path, init) => {
+    calls.push({path, init});
+    if (path === "/api/products/mobile/capabilities") return Response.json({reviewEasy:true,assistants:true,maxModels:3,plan:"Max",conversationTitles:true});
+    assert.equal(path, "/api/conversations/c1/generate-title");
+    assert.deepEqual(JSON.parse(init.body), {expectedTitle:"Interim title"});
+    return Response.json({updated:true,title:"Generated title"});
+  }, bridge);
+  const conversation = {id:"c1",title:"Interim title",selectedModels:[],messages:[{id:"u1",role:"user",content:"First question"},{id:"a1",role:"assistant",content:"Answer",status:"normal"}]};
+  assert.equal(await transport.generateTitle(conversation), "Generated title");
+  assert.equal(await transport.generateTitle(conversation), null);
+  assert.equal(await transport.generateTitle({...conversation,id:"c2",messages:[...conversation.messages,{id:"u2",role:"user",content:"Follow-up"}]}), null);
+  assert.equal(calls.length,2);
+});
+
+test("title conflict, failed answers and old capability versions never change names or discard sessions", async () => {
+  for (const supported of [true,false]) {
+    let requests=0; let lost=0;
+    const transport=createApiTransport(async path=>{
+      if(path==="/api/products/mobile/capabilities")return Response.json({reviewEasy:true,assistants:true,maxModels:3,plan:"Max",conversationTitles:supported});
+      requests++; return Response.json({updated:false,title:"Would overwrite rename"});
+    },bridge);
+    transport.onSessionLost(()=>lost++);
+    const conversation={id:"c1",title:"Interim",selectedModels:[],messages:[{id:"u",role:"user",content:"Question"},{id:"a",role:"assistant",content:"Answer",status:"failed"}]};
+    assert.equal(await transport.generateTitle(conversation),null); assert.equal(requests,0);
+    conversation.messages[1].status="normal";
+    assert.equal(await transport.generateTitle(conversation),null); assert.equal(requests,supported?1:0); assert.equal(lost,0);
+    if(!supported) await assert.rejects(transport.usage(),/NATIVE_USAGE_UNAVAILABLE/);
+  }
+});
+
+test("usage retry refreshes server support before any cookie-only endpoint is called", async () => {
+  let enabled=false;let reads=0;let lost=0;
+  const transport=createApiTransport(async path=>{
+    if(path==="/api/products/mobile/capabilities")return Response.json({reviewEasy:true,assistants:true,maxModels:3,plan:"Max",accountUsage:enabled});
+    assert.equal(path,"/api/user/usage");reads++;return Response.json({plan:"Max",usage:{creditsMonth:25},limits:{creditsMonth:100}});
+  },bridge);
+  transport.onSessionLost(()=>lost++);
+  await assert.rejects(transport.usage(),error=>error.code==="NATIVE_USAGE_UNAVAILABLE");
+  assert.equal(reads,0);assert.equal(lost,0);enabled=true;
+  assert.equal((await transport.usage()).usage.creditsMonth,25);assert.equal(reads,1);
+});

@@ -46,28 +46,23 @@ mock.module(mod("lib/amux/ideaTrackedCheckoutReadManifestStore.ts"), {
       stored = true;
       return { manifestId, fileCount: input.observed.readFiles.length };
     },
-    readAmuxTrackedCheckoutReadManifestKeyIntentReceipt: async () => {
+    readAmuxMaxManifestForClaim: async (_tx: unknown,
+      receivedIdeaId: string, ordinal: number, givenClaim: unknown) => {
       reads += 1;
-      return stored ? { id: manifestId, ideaId, referenceOrdinal: 0,
-        pinnedCommitSha: "a".repeat(40), auditLogId: "audit-id",
-        keyRetirementClaimedAt: null, keyDeletedAt: null } : null;
-    },
-    readAmuxMaxManifestIntentBinding: async (_tx: unknown,
-      receivedIdeaId: string, ordinal: number, receivedManifestId: string,
-      auditId: string, givenClaim: unknown) => {
       assert.equal(receivedIdeaId, ideaId);
       assert.equal(ordinal, 0);
-      assert.equal(receivedManifestId, manifestId);
-      assert.equal(auditId, "audit-id");
       assert.deepEqual(givenClaim, claim);
-      return bound;
+      // Only the page this claim's binding names is readable.
+      return stored && bound ? {
+        intent: { id: manifestId, ideaId, referenceOrdinal: 0,
+          pinnedCommitSha: "a".repeat(40), auditLogId: "audit-id",
+          keyRetirementClaimedAt: null, keyDeletedAt: null },
+        manifest: { id: manifestId, ideaId, referenceOrdinal: 0,
+          pinnedCommitSha: "a".repeat(40), fileCount: 1,
+          digest: "d".repeat(64), digestKeyId: "digest-key",
+          bodyPurgedAt: null },
+      } : null;
     },
-    readAmuxTrackedCheckoutReadManifestReceipt: async () => stored ? {
-      id: manifestId, ideaId, referenceOrdinal: 0,
-      pinnedCommitSha: "a".repeat(40), fileCount: 1,
-      digest: "d".repeat(64), digestKeyId: "digest-key",
-      bodyPurgedAt: null,
-    } : null,
   },
 });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {

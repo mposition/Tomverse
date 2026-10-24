@@ -279,6 +279,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // model predicate and the submission and reservation guard bodies; no
   // commit-deadline marker, classifier or deferred trigger changes.
   "20261023090000_amux_v19_session_model_choice",
+  // Intake v19 per-page read manifests, owner decision 2026-10-24: the manifest
+  // and key-intent unique indexes become plain indexes and the key-intent guard
+  // body pairs an intent with its own manifest; no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261024010000_amux_v19_read_manifest_per_page",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

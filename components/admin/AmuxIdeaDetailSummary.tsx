@@ -116,20 +116,25 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
                       </li>)}
                   </ul>
                 ) : null}
-                {evidence.readManifest ? (
-                  <div className="mt-2 space-y-1 border-t border-zinc-800 pt-2 text-xs text-zinc-300"
+                {evidence.readManifests.map((manifest, page) => (
+                  <div key={manifest.manifestId}
+                    className="mt-2 space-y-1 border-t border-zinc-800 pt-2 text-xs text-zinc-300"
                     data-testid="amux-checkout-read-manifest">
-                    <p>{m.checkoutReadFiles(evidence.readManifest.fileCount)}</p>
-                    <p>{evidence.readManifest.bodyPurged ? m.checkoutReadPurged : m.checkoutReadEncrypted}</p>
+                    {/* A continued analysis keeps the files each page read. */}
+                    {evidence.readManifests.length > 1 ? (
+                      <p className="font-medium text-zinc-200">{m.checkoutReadPage(page + 1)}</p>
+                    ) : null}
+                    <p>{m.checkoutReadFiles(manifest.fileCount)}</p>
+                    <p>{manifest.bodyPurged ? m.checkoutReadPurged : m.checkoutReadEncrypted}</p>
                     <p>{m.checkoutReadDigest}: <code className="break-all text-zinc-100">
-                      {evidence.readManifest.digest}</code></p>
-                    {!evidence.readManifest.bodyPurged ? (
+                      {manifest.digest}</code></p>
+                    {!manifest.bodyPurged ? (
                       <AmuxReadManifestPathsPanel ideaId={row.ideaId}
-                        referenceOrdinal={evidence.referenceOrdinal}
-                        fileCount={evidence.readManifest.fileCount} />
+                        manifestId={manifest.manifestId}
+                        fileCount={manifest.fileCount} />
                     ) : null}
                   </div>
-                ) : null}
+                ))}
               </li>
             ))}
           </ol>

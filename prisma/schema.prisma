@@ -10189,8 +10189,8 @@ model AmuxIdeaTrackedCheckoutEvidence {
 
   idea  AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   audit AdminAuditLog      @relation("AmuxIdeaTrackedCheckoutAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  readManifest AmuxIdeaTrackedCheckoutReadManifest?
-  readManifestKeyIntent AmuxIdeaReadManifestKeyIntent?
+  readManifests AmuxIdeaTrackedCheckoutReadManifest[]
+  readManifestKeyIntents AmuxIdeaReadManifestKeyIntent[]
   sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
 
   @@unique([ideaId, referenceOrdinal])
@@ -10198,7 +10198,8 @@ model AmuxIdeaTrackedCheckoutEvidence {
 }
 
 /// Encrypted CLI-observed read paths for one pinned reference. The verified
-/// host result is recorded once; plaintext paths never enter audit metadata.
+/// host result is recorded once per analysis page (one Max claim each);
+/// plaintext paths never enter audit metadata.
 model AmuxIdeaTrackedCheckoutReadManifest {
   id                 String   @id @db.Uuid
   ideaId             String
@@ -10219,7 +10220,7 @@ model AmuxIdeaTrackedCheckoutReadManifest {
   audit    AdminAuditLog @relation("AmuxIdeaTrackedCheckoutReadManifestAudit", fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   sessionAnalysisResults AmuxIdeaSessionAnalysisResult[]
 
-  @@unique([ideaId, referenceOrdinal])
+  @@index([ideaId, referenceOrdinal])
   @@index([ideaId, createdAt])
   @@index([bodyPurgedAt, createdAt])
 }
@@ -10244,7 +10245,7 @@ model AmuxIdeaReadManifestKeyIntent {
   claimAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyClaimAudit", fields: [claimAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyDeleteAudit AdminAuditLog? @relation("AmuxIdeaReadManifestKeyDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
-  @@unique([ideaId, referenceOrdinal])
+  @@index([ideaId, referenceOrdinal])
   @@index([keyDeletedAt, createdAt])
 }
 

@@ -14,9 +14,7 @@ import { amuxContentUnitKeyId } from "./ideaKeyStore.ts";
 import { readAmuxMaxTrackedCheckoutEvidence,
   requireActiveMaxCheckoutClaim,
   type AmuxMaxCheckoutClaim } from "./ideaTrackedCheckoutEvidenceStore.ts";
-import { readAmuxMaxManifestIntentBinding,
-  readAmuxTrackedCheckoutReadManifestKeyIntentReceipt,
-  readAmuxTrackedCheckoutReadManifestReceipt } from
+import { readAmuxMaxManifestForClaim } from
   "./ideaTrackedCheckoutReadManifestStore.ts";
 import { commitAmuxSessionBudgetOutcome } from
   "./ideaSessionAnalysisBudgetSettlementService.ts";
@@ -119,16 +117,13 @@ export async function preflightAmuxMaxSessionResult(tx: Tx,
     for (let ordinal = 0; ordinal < pins.length; ordinal += 1) {
       const evidence = await readAmuxMaxTrackedCheckoutEvidence(tx,
         input.ideaId, ordinal, input);
-      const manifest = await readAmuxTrackedCheckoutReadManifestReceipt(tx,
-        input.ideaId, ordinal);
-      const intent = await readAmuxTrackedCheckoutReadManifestKeyIntentReceipt(tx,
-        input.ideaId, ordinal);
+      // This claim's own page: the manifest is the one its binding names.
+      const page = await readAmuxMaxManifestForClaim(tx, input.ideaId,
+        ordinal, input);
+      const manifest = page?.manifest;
       if (!evidence || !manifest || manifest.bodyPurgedAt ||
           evidence.pinnedCommitSha !== pins[ordinal] ||
           manifest.pinnedCommitSha !== pins[ordinal] ||
-          !intent || intent.id !== manifest.id ||
-          !await readAmuxMaxManifestIntentBinding(tx, input.ideaId,
-            ordinal, manifest.id, intent.auditLogId, input) ||
           (ordinal === input.referenceOrdinal &&
             (evidence.evidenceId !== input.evidenceId ||
              manifest.id !== input.manifestId))) {
