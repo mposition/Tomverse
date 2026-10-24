@@ -12,6 +12,20 @@
   (규칙은 `docs/ops/staging-verification-records/README.md`와 같습니다. 실행·판정·서명은 사람이 하고,
   관측 옮겨 적기는 에이전트가 해도 됩니다).
 
+## dev에서 실행할 때
+
+같은 항목을 dev(`dev.tomverse.app`, `develop` 자동 배포)에서도 실행할 수 있습니다. 메모리 경로에는
+환경별 분기가 없고, flag는 환경마다 자기 DB에 있으므로 dev에서 켠 것은 Test·production에 닿지 않습니다.
+달라지는 것은 셋입니다.
+
+| 단계 | Test | dev |
+|---|---|---|
+| 1. 올리기 | `npm run promote:test` | 건너뜁니다. `https://dev.tomverse.app/api/build-info`의 `commitSha`만 기록합니다 |
+| SQL 실행 위치 | Railway staging Postgres shell | **Neon 대시보드 SQL Editor**, dev project branch. 먼저 Railway `Tomverse` 프로젝트 → 환경 `dev` → `Tomverse` 서비스 Variables에서 `DIRECT_DATABASE_URL`의 **host만** 보고, Neon에서 그 host가 dev branch인지 확인합니다. production·staging host이면 멈춥니다 |
+| 기록 | 이름에 Test SHA | 이름에 dev SHA, 본문 첫 줄에 `환경: dev` |
+
+SQL 문장과 A~E 항목, 시료는 그대로입니다. dev에서도 extraction flag를 켜면 실제 provider 호출이 나갑니다.
+
 ## 0. 준비
 
 | 필요한 것 | 확인 방법 |
