@@ -14,7 +14,14 @@ import { promisify } from "node:util";
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint } from "./qaReleaseDigestEndpointCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
-import { QA_RELEASE_TRAIN_BRANCH_PREFIX, type QaReleaseTrainCandidate, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
+import { QA_RELEASE_TRAIN_CANDIDATE_DAYS } from "./qaReleaseTrainCargoCore.ts";
+import {
+  QA_RELEASE_TRAIN_BRANCH_PREFIX,
+  QA_RELEASE_TRAIN_MAX_PREDECESSORS,
+  qaReleaseTrainMergedPullNumber,
+  type QaReleaseTrainCandidate,
+  type QaReleaseTrainPick,
+} from "./qaReleaseTrainCore.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
 
 const REPOSITORY = "mposition/Tomverse";
@@ -109,6 +116,16 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
       throw new Error(`git_${args[0] === "clone" ? "clone" : args[0] === "push" ? "push" : "failed"}`);
     }
   };
+  // Develop pull requests merged before this one, within the Admin window, that
+  // changed a file the pick conflicted on: what main most likely lacks. The
+  // fetch of the merge commit brought develop's history; a failed read names none.
+  const predecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<number[]> => {
+    if (files.length === 0) return [];
+    const since = new Date(Date.parse(pull.mergedAt) - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const log = await git(["log", "--first-parent", `--since=${since}`, "--format=%s", `${pull.mergeCommitSha}^1`, "--", ...files], { allowFail: true });
+    const numbers = log.stdout.split("\n").map(qaReleaseTrainMergedPullNumber).filter((n): n is number => n !== null && n !== pull.number);
+    return [...new Set(numbers)].slice(0, QA_RELEASE_TRAIN_MAX_PREDECESSORS);
+  };
   return {
     async assemble(branch, cargo, capacity) {
       dir = await mkdtemp(join(tmpdir(), "qa-release-train-"));
@@ -153,7 +170,8 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
           picks.push({ number: pull.number, outcome: "already_in_main" });
         } else {
           await git(["cherry-pick", "--abort"]);
-          picks.push({ number: pull.number, outcome: "conflict" });
+          const conflicted = unmerged.split("\n").filter((file) => file !== "");
+          picks.push({ number: pull.number, outcome: "conflict", predecessors: await predecessors(pull, conflicted) });
         }
       }
       const headSha = (await git(["rev-parse", "HEAD"])).stdout;

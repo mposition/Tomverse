@@ -54,7 +54,8 @@ test("assemble picks in order, leaves a conflict out, skips what main has, and p
       assert.equal(result.mainSha, mainSha);
       assert.deepEqual(result.picks, [
         { number: 1, outcome: "included" },
-        { number: 2, outcome: "conflict" },
+        // Merge subjects here are not GitHub's, so no predecessor is named.
+        { number: 2, outcome: "conflict", predecessors: [] },
         { number: 3, outcome: "already_in_main" },
       ]);
       assert.notEqual(result.headSha, mainSha);
@@ -83,6 +84,51 @@ test("assemble picks in order, leaves a conflict out, skips what main has, and p
       ]);
     } finally {
       await second.cleanup();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A conflict names the develop pull requests merged before it that changed a
+// conflicted file, newest first, read from GitHub's merge commit subjects:
+// here #11 needs #10, which main never got; #12 touched another file.
+test("a conflict names the earlier develop pull requests that changed its conflicted files", async () => {
+  const root = mkdtempSync(join(tmpdir(), "train-git-pred-test-"));
+  try {
+    const repo = join(root, "origin");
+    const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", repo]);
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "shared.txt"), "line\n");
+    writeFileSync(join(repo, "other.txt"), "other\n");
+    git("add", ".");
+    git("commit", "--quiet", "-m", "base");
+    git("switch", "--quiet", "-c", "develop");
+    const mergePull = (number, file, text) => {
+      git("switch", "--quiet", "-c", `feature-${number}`, "develop");
+      writeFileSync(join(repo, file), text);
+      git("add", ".");
+      git("commit", "--quiet", "-m", `change ${number}`);
+      git("switch", "--quiet", "develop");
+      git("merge", "--quiet", "--no-ff", "-m", `Merge pull request #${number} from mposition/feature-${number}`, `feature-${number}`);
+      return git("rev-parse", "HEAD");
+    };
+    mergePull(10, "shared.txt", "ten\n");
+    mergePull(12, "other.txt", "twelve\n");
+    const eleven = mergePull(11, "shared.txt", "eleven\n");
+    git("switch", "--quiet", "main");
+
+    const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo });
+    try {
+      const result = await ports.assemble("release/train-20261024-1100", [
+        { number: 11, title: "eleven", mergeCommitSha: eleven, mergedAt: new Date().toISOString() },
+      ], 30);
+      assert.deepEqual(result.picks, [{ number: 11, outcome: "conflict", predecessors: [10] }]);
+    } finally {
+      await ports.cleanup();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

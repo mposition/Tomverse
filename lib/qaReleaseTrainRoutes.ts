@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
+import { QA_RELEASE_TRAIN_MAX_PREDECESSORS } from "@/lib/qaReleaseTrainCore";
 import { admitQaReleaseTrain, readQaReleaseTrainSelection, reportQaReleaseTrain } from "@/lib/qaReleaseTrainStore";
 
 /**
@@ -28,7 +29,15 @@ const body = z.union([
       rcSha: SHA.nullable(),
       failure: z.string().regex(/^[a-z_]{1,40}$/).nullable(),
       picks: z
-        .array(z.object({ number: PR, outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows"]) }).strict())
+        .array(
+          z
+            .object({
+              number: PR,
+              outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows"]),
+              predecessors: z.array(PR).max(QA_RELEASE_TRAIN_MAX_PREDECESSORS).optional(),
+            })
+            .strict(),
+        )
         .max(100),
     })
     .strict(),
