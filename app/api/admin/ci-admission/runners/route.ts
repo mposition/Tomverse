@@ -9,9 +9,10 @@ import { authOptions } from "@/lib/auth";
 import { readCiRunnerUsage } from "@/lib/ciRunnerUsage";
 
 /**
- * Admin › Agent digests: GitHub Actions runner usage right now
- * (lib/ciRunnerUsage.ts), polled by the CI admission section. Any
- * administrator may read it; the answer is shared and cached server-side.
+ * Admin › Agent digests: who holds GitHub Actions runners right now, per pull
+ * request, deploy and workflow (lib/ciRunnerUsage.ts), polled by the CI
+ * admission section's running panel. Any administrator may read it; the
+ * answer is shared and cached server-side.
  */
 export async function GET(req: Request) {
   try {

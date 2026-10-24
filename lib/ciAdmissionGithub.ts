@@ -1,6 +1,13 @@
 import { createSign } from "node:crypto";
 
-import { ciRunKey, type CiAdmissionCheck, type CiAdmissionDeploy, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
+import {
+  ciRunKey,
+  ciRunnerOwnerKey,
+  type CiAdmissionCheck,
+  type CiAdmissionDeploy,
+  type CiAdmissionPull,
+  type CiRunnerOwner,
+} from "@/lib/ciAdmissionCore";
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
@@ -88,6 +95,20 @@ const runPulls = (run: Json): { number: number; base: string | null }[] =>
   });
 const runPullNumbers = (run: Json): number[] => runPulls(run).map((pr) => pr.number);
 
+/** Whose runners an active run holds, with no jobs counted yet: its pull request, its deploy, or its workflow. */
+const runnerOwner = (run: Json): CiRunnerOwner => {
+  const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+  const sha = SHA.test(text(run.head_sha, 40)) ? text(run.head_sha, 40) : null;
+  const shared = { title: text(run.display_title, 200), sha, running: 0, queued: 0, startedAt: text(run.run_started_at, 30) || text(run.created_at, 30) };
+  const pull = run.event === "pull_request" ? runPulls(run)[0] : undefined;
+  if (pull) return { ...shared, key: ciRunnerOwnerKey.pull(pull.number), number: pull.number, base: pull.base };
+  if (run.event === "push" && sha && (run.head_branch === "develop" || run.head_branch === "main")) {
+    return { ...shared, key: ciRunnerOwnerKey.deploy(run.head_branch, sha), number: null, base: run.head_branch };
+  }
+  const workflow = text(run.name, 100) || "workflow";
+  return { ...shared, key: `other:${workflow}`, title: workflow, number: null, base: null };
+};
+
 const toPull = (item: unknown): CiAdmissionPull | null => {
   const pull = record(item);
   const head = record(pull.head);
@@ -133,15 +154,13 @@ export type CiAdmissionGithub = {
    * the operator's stop, not admission's own holds.
    */
   cancelRuns(pull: CiAdmissionPull, options?: { force?: boolean }): Promise<number>;
-  /** Jobs holding or waiting for a runner right now, repository-wide, split by GitHub-hosted and Ubicloud. */
-  runnerUsage(): Promise<CiRunnerUsageCounts>;
+  /** Who holds or waits for a GitHub-hosted runner right now, repository-wide: each pull request, deploy and other workflow. */
+  runnerUsage(): Promise<CiRunnerOwner[]>;
   /** The `CI admission` commit status on the pull request's head. */
   setStatus(sha: string, state: "pending" | "success", description: string): Promise<void>;
 };
 
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
-
-export type CiRunnerUsageCounts = { githubRunning: number; githubQueued: number; ubicloudRunning: number; ubicloudQueued: number };
 
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
   const call = async (method: "GET" | "POST", url: string, auth: string, body?: Json) => {
@@ -314,41 +333,38 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       if (record(record(data.markPullRequestReadyForReview).pullRequest).isDraft !== false) throw new Error("github_still_draft");
     },
     async runnerUsage() {
-      const runIds = new Set<number>();
+      const runs = new Map<number, Json>();
       for (const status of ACTIVE_RUN_STATUSES) {
         for (let page = 1; page <= 3; page += 1) {
-          const runs = list(record(await get(`${REPO}/actions/runs?status=${status}&per_page=100&page=${page}`)).workflow_runs);
-          for (const run of runs) {
-            const id = record(run).id;
-            if (typeof id === "number") runIds.add(id);
-          }
-          if (runs.length < 100) break;
+          const batch = list(record(await get(`${REPO}/actions/runs?status=${status}&per_page=100&page=${page}`)).workflow_runs).map(record);
+          for (const run of batch) if (typeof run.id === "number") runs.set(run.id, run);
+          if (batch.length < 100) break;
         }
       }
-      const counts: CiRunnerUsageCounts = { githubRunning: 0, githubQueued: 0, ubicloudRunning: 0, ubicloudQueued: 0 };
       // Bounded, so a busy repository still answers within a few seconds: at
       // most RUNNER_USAGE_MAX_RUNS runs, RUNNER_USAGE_PARALLEL job reads at a time.
-      const ids = [...runIds].slice(0, RUNNER_USAGE_MAX_RUNS);
-      const jobLists: unknown[][] = [];
-      for (let index = 0; index < ids.length; index += RUNNER_USAGE_PARALLEL) {
-        const batch = ids.slice(index, index + RUNNER_USAGE_PARALLEL);
-        jobLists.push(
-          ...(await Promise.all(batch.map(async (id) => list(record(await get(`${REPO}/actions/runs/${id}/jobs?filter=latest&per_page=100`)).jobs)))),
-        );
+      const owners = new Map<string, CiRunnerOwner>();
+      const active = [...runs.values()].slice(0, RUNNER_USAGE_MAX_RUNS);
+      for (let index = 0; index < active.length; index += RUNNER_USAGE_PARALLEL) {
+        const batch = active.slice(index, index + RUNNER_USAGE_PARALLEL);
+        const jobLists = await Promise.all(batch.map(async (run) => list(record(await get(`${REPO}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`)).jobs)));
+        batch.forEach((run, at) => {
+          const owner = runnerOwner(run);
+          const entry = owners.get(owner.key) ?? owner;
+          if (entry.startedAt < owner.startedAt) entry.startedAt = owner.startedAt;
+          for (const item of jobLists[at]) {
+            const job = record(item);
+            const status = String(job.status);
+            const labels = Array.isArray(job.labels) ? job.labels.map(String) : [];
+            // Ubicloud jobs are outside GitHub's limit.
+            if (!ACTIVE_RUN_STATUSES.has(status) || labels.some((label) => label.startsWith("ubicloud"))) continue;
+            if (status === "in_progress") entry.running += 1;
+            else entry.queued += 1;
+          }
+          owners.set(entry.key, entry);
+        });
       }
-      for (const jobs of jobLists) {
-        for (const item of jobs) {
-          const job = record(item);
-          const status = String(job.status);
-          if (!ACTIVE_RUN_STATUSES.has(status)) continue;
-          const labels = Array.isArray(job.labels) ? job.labels.map(String) : [];
-          const ubicloud = labels.some((label) => label.startsWith("ubicloud"));
-          const running = status === "in_progress";
-          if (ubicloud) counts[running ? "ubicloudRunning" : "ubicloudQueued"] += 1;
-          else counts[running ? "githubRunning" : "githubQueued"] += 1;
-        }
-      }
-      return counts;
+      return [...owners.values()];
     },
     async cancelRuns(pull, options = {}) {
       // Every queued or running pull_request run of this pull request, on any

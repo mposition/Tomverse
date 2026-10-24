@@ -12,10 +12,14 @@
  *   default, set in Admin (owner, 2026-10-23: runners, not slots). Each kind
  *   of CI needs the runners its peak used (measured 2026-10-23): a pull
  *   request into develop 15, into main (release or hotfix) 34, push CI on
- *   develop 18 and on main 19 (what Railway waits for; never held). A CI that
- *   runs is counted at its need, not at the jobs it holds now, since its jobs
- *   start in waves; runners GitHub shows in use beyond that (other workflows)
- *   count too.
+ *   develop 18 and on main 19 (what Railway waits for; never held).
+ * - A CI that runs is counted at the jobs it holds or waits on right now, as
+ *   GitHub lists them per pull request (owner, 2026-10-24: live runners, not
+ *   the peak for the whole run). A run lists its jobs as soon as it starts and
+ *   each job that finishes gives its runner back, so the line moves as soon as
+ *   there is room. For CI_ADMISSION_RAMP_MS after a run starts it counts at its
+ *   need at least, while GitHub is still listing its jobs. Without that reading
+ *   every CI counts at its need. Other workflows' jobs count too.
  * - Runners go from the top of the line down. A ready pull request whose CI is
  *   running keeps its slots while they fit; one further down whose CI runs
  *   past the budget goes back to draft and its runs are cancelled. A draft
@@ -44,6 +48,10 @@ export const CI_ADMISSION_MAX_CAPACITY = 200;
 /** Runners each kind of CI needs: the peak measured on recent runs, 2026-10-23. */
 export const CI_ADMISSION_DEFAULT_NEEDS = Object.freeze({ develop: 15, main: 34, developPush: 18, mainPush: 19 });
 export type CiAdmissionNeeds = { develop: number; main: number; developPush: number; mainPush: number };
+/** How long after a run starts its CI counts at its need at least: GitHub is still listing its jobs. */
+export const CI_ADMISSION_RAMP_MS = 2 * 60 * 1000;
+/** How often a round runs while a draft waits for runners: a job finishing sends no webhook. */
+export const CI_ADMISSION_WAIT_RECHECK_MS = 60_000;
 /** How long a released pull request is reserved before GitHub shows its runs. */
 export const CI_ADMISSION_RELEASE_GRACE_MS = 5 * 60 * 1000;
 /** A pull request with this label is never marked ready by admission. */
@@ -83,6 +91,38 @@ export function ciAdmissionUnits(pull: Pick<CiAdmissionPull, "base" | "fork">, n
   return null;
 }
 
+/**
+ * One holder of GitHub-hosted runners right now: a pull request's runs, a
+ * deploy's (push CI on develop or main), or another workflow's. Ubicloud jobs
+ * are left out: they are outside GitHub's limit.
+ */
+export type CiRunnerOwner = {
+  /** ciRunnerOwnerKey, or `other:<workflow>`. */
+  key: string;
+  title: string;
+  /** The pull request's number; null for a deploy or another workflow. */
+  number: number | null;
+  /** The pull request's base or the deploy's branch; null for another workflow. */
+  base: string | null;
+  sha: string | null;
+  running: number;
+  queued: number;
+  /** When its newest active run started. */
+  startedAt: string;
+};
+
+export const ciRunnerOwnerKey = {
+  pull: (number: number) => `pull:${number}`,
+  deploy: (branch: string, sha: string) => `deploy:${branch}@${sha}`,
+};
+
+/** Runners a CI is counted at: the jobs it holds or waits on now, and its need at least while its run is starting. */
+export function ciRunnerCount(need: number, owner: Pick<CiRunnerOwner, "running" | "queued" | "startedAt"> | undefined, nowMs: number): number {
+  if (!owner) return need;
+  const live = owner.running + owner.queued;
+  return nowMs - Date.parse(owner.startedAt) < CI_ADMISSION_RAMP_MS ? Math.max(live, need) : live;
+}
+
 /** What GitHub says about a draft before it is marked ready; null where it could not tell. */
 export type CiAdmissionCheck = { conflict: boolean | null; behind: boolean | null };
 
@@ -117,6 +157,8 @@ const deploySchema = z
     sha: z.string().max(40),
     /** The run's title: the merge commit's first line. */
     title: z.string().max(200),
+    /** Runners it was counted at (ciRunnerCount). */
+    runners: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -153,16 +195,28 @@ const stateSchema = z
      */
     pendingStatus: z.array(z.object({ number: z.number().int().positive(), headSha: z.string().regex(SHA) }).strict()).max(MAX_QUEUE),
     events: z.array(eventSchema).max(MAX_EVENTS),
-    /** The latest round: when, how many slots were in use after it, and by which pull requests. */
+    /** The latest round: when, how many runners were in use after it, and by whom. */
     lastRound: z
       .object({
         at: z.string().max(30),
         used: z.number().int().nonnegative(),
         running: z
-          .array(z.object({ number: z.number().int().positive(), title: z.string().max(200), base: z.string().max(100) }).strict())
+          .array(
+            z
+              .object({
+                number: z.number().int().positive(),
+                title: z.string().max(200),
+                base: z.string().max(100),
+                /** Runners it was counted at (ciRunnerCount). */
+                runners: z.number().int().nonnegative().optional(),
+              })
+              .strict(),
+          )
           .max(MAX_QUEUE),
         /** Push runs on develop and main (the deploy CI Railway waits for), one per commit. */
         deploys: z.array(deploySchema).max(MAX_QUEUE).default([]),
+        /** Runners other workflows held. */
+        others: z.number().int().nonnegative().default(0),
       })
       .strict()
       .nullable(),
@@ -297,8 +351,8 @@ export function evaluateCiAdmission(input: {
   deploys?: readonly CiAdmissionDeploy[];
   /** What GitHub said about drafts (ciAdmissionDraftsToCheck); a draft missing here is "checking". */
   checks?: ReadonlyMap<number, CiAdmissionCheck>;
-  /** GitHub-hosted jobs running or queued right now, repository-wide; null when unread. */
-  liveRunners?: number | null;
+  /** Who holds GitHub-hosted runners right now; null when unread (every CI then counts at its need). */
+  runners?: readonly CiRunnerOwner[] | null;
   nowMs: number;
   shadow: boolean;
 }): CiAdmissionEvaluation {
@@ -327,19 +381,34 @@ export function evaluateCiAdmission(input: {
 
   const needs = state.needs;
   const unitsOf = (pull: Pick<CiAdmissionPull, "base" | "fork">) => ciAdmissionUnits(pull, needs);
+  // What each CI is counted at: its live jobs when GitHub listed them, else its need.
+  const owners = new Map((input.runners ?? []).map((owner) => [owner.key, owner]));
+  const counted = new Set<string>();
+  const countOf = (key: string, need: number) => {
+    counted.add(key);
+    return ciRunnerCount(need, owners.get(key), nowMs);
+  };
   // Runners nobody here can give back: deploy CI and runs of closed pull requests.
-  const closedRunning = [...runningNumbers].filter((number) => !open.has(number));
-  const closedUnits = closedRunning.reduce((sum, number) => sum + (unitsOf({ base: input.runningBases?.get(number) ?? "", fork: false }) ?? 0), 0);
-  const deploys = input.deploys ?? [];
-  const knownFixed = closedUnits + deploys.reduce((sum, deploy) => sum + ciAdmissionDeployUnits(deploy.branch, needs), 0);
-  const knownUsed = knownFixed + line.reduce((sum, pull) => (occupying(pull) ? sum + unitsOf(pull)! : sum), 0);
-  // Runners GitHub shows in use beyond what the known CI needs: other
-  // workflows (nightly, CodeQL, scheduled jobs). They cannot be given back either.
-  const others = typeof input.liveRunners === "number" ? Math.max(0, input.liveRunners - knownUsed) : 0;
-  const fixedUnits = knownFixed + others;
+  const closedRunning = [...runningNumbers]
+    .filter((number) => !open.has(number))
+    .flatMap((number) => {
+      const base = input.runningBases?.get(number) ?? "";
+      const need = unitsOf({ base, fork: false });
+      return need === null ? [] : [{ number, base, runners: countOf(ciRunnerOwnerKey.pull(number), need) }];
+    });
+  const deploys = (input.deploys ?? []).map((deploy) => ({
+    ...deploy,
+    runners: countOf(ciRunnerOwnerKey.deploy(deploy.branch, deploy.sha), ciAdmissionDeployUnits(deploy.branch, needs)),
+  }));
+  const pullRunners = new Map(line.filter(occupying).map((pull) => [pull.number, countOf(ciRunnerOwnerKey.pull(pull.number), unitsOf(pull)!)]));
+  // Runners other workflows hold (nightly, scheduled jobs, a stacked pull
+  // request's CI): they cannot be given back either.
+  const others = (input.runners ?? []).reduce((sum, owner) => (counted.has(owner.key) ? sum : sum + owner.running + owner.queued), 0);
+  const fixedUnits =
+    closedRunning.reduce((sum, closed) => sum + closed.runners, 0) + deploys.reduce((sum, deploy) => sum + deploy.runners, 0) + others;
   // Runners in use now, by every run GitHub shows: a cancellation asked for
   // frees nothing until the runs stop.
-  let used = knownUsed + others;
+  let used = fixedUnits + [...pullRunners.values()].reduce((sum, runners) => sum + runners, 0);
 
   const status = new Map<number, CiAdmissionEntryStatus>();
   const actions: CiAdmissionAction[] = [];
@@ -347,14 +416,16 @@ export function evaluateCiAdmission(input: {
   let allotted = 0;
   let draftsBlocked = false;
   let waitingOnRuns = false;
+  let waitingOnRunners = false;
   for (const pull of line) {
     // A CI that needs more than the whole budget still runs alone, never waits forever.
     const units = Math.min(unitsOf(pull)!, state.capacity);
     if (!pull.draft) {
+      const runners = Math.min(pullRunners.get(pull.number) ?? 0, state.capacity);
       if (!occupying(pull)) {
         status.set(pull.number, "done");
-      } else if (allotted + units <= budget) {
-        allotted += units;
+      } else if (allotted + runners <= budget) {
+        allotted += runners;
         status.set(pull.number, "running");
       } else {
         actions.push({ kind: "hold", pull });
@@ -372,6 +443,7 @@ export function evaluateCiAdmission(input: {
       continue;
     }
     if (draftsBlocked || allotted + units > budget) {
+      waitingOnRunners ||= !draftsBlocked;
       draftsBlocked = true;
       status.set(pull.number, "waiting");
       continue;
@@ -454,20 +526,25 @@ export function evaluateCiAdmission(input: {
         used,
         running: line
           .filter((pull) => occupying(pull) || releasing.has(pull.number))
-          .map((pull) => ({ number: pull.number, title: pull.title.slice(0, 200), base: pull.base }))
-          .concat(
-            closedRunning
-              .filter((number) => unitsOf({ base: input.runningBases?.get(number) ?? "", fork: false }) !== null)
-              .map((number) => ({ number, title: "", base: input.runningBases?.get(number) ?? "" })),
-          ),
+          .map((pull) => ({
+            number: pull.number,
+            title: pull.title.slice(0, 200),
+            base: pull.base,
+            runners: pullRunners.get(pull.number) ?? unitsOf(pull)!,
+          }))
+          .concat(closedRunning.map((closed) => ({ number: closed.number, title: "", base: closed.base, runners: closed.runners }))),
         deploys: deploys.slice(0, MAX_QUEUE).map((deploy) => ({ ...deploy, title: deploy.title.slice(0, 200) })),
+        others,
       },
     },
     actions,
     used,
     nextCheckInMs:
-      waitingOnRuns || released.length > 0
-        ? released.reduce((soonest, entry) => Math.min(soonest, Math.max(1_000, entry.atMs + CI_ADMISSION_RELEASE_GRACE_MS - nowMs)), 60_000)
+      waitingOnRuns || waitingOnRunners || released.length > 0
+        ? released.reduce(
+            (soonest, entry) => Math.min(soonest, Math.max(1_000, entry.atMs + CI_ADMISSION_RELEASE_GRACE_MS - nowMs)),
+            CI_ADMISSION_WAIT_RECHECK_MS,
+          )
         : null,
   };
 }
