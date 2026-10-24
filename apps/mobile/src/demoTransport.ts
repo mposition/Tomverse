@@ -38,7 +38,7 @@ export function createDemoTransport(): ChatTransport {
     assistants: async () => [{ id: "demo-assistant", name: "Synthetic writing assistant" }],
     configureTools: async (id, input) => { const items = read(); const item = items.find(value => value.id === id)!; Object.assign(item, input); write(items); return item; },
     listReview: async () => read().filter(item => item.surface === "workspace"),
-    createReview: async models => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", selectedModels: models, selectionMode: "manual", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
+    createReview: async models => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
     configureReview: async (id, models) => { const items = read(); const item = items.find(value => value.id === id)!; item.selectedModels = models; write(items); return item; },
     routeReview: async input => ({ kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
     sendReview: async (conversation, text, files, signal, progress) => {
@@ -63,7 +63,7 @@ export function createDemoTransport(): ChatTransport {
     list: async () => read().filter(item => item.surface !== "workspace"),
     load: async (id) => { const item = read().find((c) => c.id === id); if (!item) throw Error("Conversation unavailable"); return item; },
     create: async () => {
-      const item: Conversation = { id: crypto.randomUUID(), title: "New chat", selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, surface: "chat", messages: [] };
+      const item: Conversation = { id: crypto.randomUUID(), title: "New chat", selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, webSearchMode: "always", surface: "chat", messages: [] };
       write([item, ...read()]); return item;
     },
     models: async () => catalog,

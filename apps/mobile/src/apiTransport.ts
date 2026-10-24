@@ -98,7 +98,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       messages.push({ id: attempt.assistantMessageId, role: "assistant", content: attempt.partialContent,
         modelId: attempt.actualModelId ?? attempt.requestedModelId, status: attempt.status });
     }
-    const withRouting = messages.map((message) => routedModelByMessage.has(message.id) ? { ...message, routedModelId: routedModelByMessage.get(message.id) } : message);
+    const withRouting = messages.map(message => {
+      const attempt = item.responseAttempts?.find(value => value.assistantMessageId === message.id);
+      const modelId = attempt?.actualModelId ?? message.modelId;
+      return { ...message, ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
+    });
     return { ...item, messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
@@ -202,7 +206,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       },
       unlocked: id => Number(unlockGrants.get(id)?.split(".")[0] ?? 0) > Date.now() / 1000,
     },
-    voiceConfiguration: async () => (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number } }>("/api/products/chat/capabilities")).voiceConversation ?? { enabled: false, maxSeconds: 300 },
+    voiceConfiguration: async () => {
+      const config = (await request<{ voiceConversation?: { enabled: boolean; maxSeconds: number | null; continuous?: boolean } }>("/api/products/chat/capabilities")).voiceConversation;
+      return config ? { enabled: config.enabled, maxSeconds: config.continuous ? null : config.maxSeconds } : { enabled: false, maxSeconds: 300 };
+    },
     voiceRequest: (body, signal) => run("/api/chat/voice", { ...json("POST", body), signal }),
     sendVoice: async (conversation, text, signal, onProgress) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, [], signal);
@@ -254,7 +261,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     setDeviceLock: async (enabled, reason) => { await bridge.setDeviceLock({ enabled, reason }); window.dispatchEvent(new Event("tomverse-device-security-changed")); },
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
     listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => row.surface === "workspace" && ["chat", "image"].includes(row.kind)),
-    createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models })); return load(value.id); },
+    createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
     reviewPreview: async (id, mode = "balanced", synthesis = false) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`); },
@@ -301,7 +308,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
     create: async (title) => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", title ? { title: title.slice(0, 30) } : {}));
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(title ? { title: title.slice(0, 30) } : {}) }));
       const detail = await load(item.id);
       return detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },

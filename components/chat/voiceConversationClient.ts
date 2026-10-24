@@ -123,9 +123,21 @@ export function createVoiceConversationClient(options: {
       reservationId = event.reservationId;
       await peer?.setRemoteDescription({ type: "answer", sdp: event.sdp });
       if (owner !== epoch) return;
-      const seconds = typeof event.maxSeconds === "number" && event.maxSeconds >= 15 && event.maxSeconds <= 900 ? event.maxSeconds : 300;
-      mediaReady = true; closingDeadline = Date.now() + (seconds + 30) * 1_000;
-      durationTimer = setTimeout(() => { void stop(); }, seconds * 1_000);
+      mediaReady = true;
+      if (event.continuous === true) {
+        const remaining = typeof event.closeAfterSeconds === "number" && Number.isFinite(event.closeAfterSeconds) && event.closeAfterSeconds >= 0 ? event.closeAfterSeconds : 0;
+        closingDeadline = Date.now() + (remaining + 30) * 1_000;
+      } else {
+        // Compatibility with an older server, without imposing a cap on new sessions.
+        const seconds = typeof event.maxSeconds === "number" && event.maxSeconds >= 15 && Number.isFinite(event.maxSeconds) ? event.maxSeconds : 300;
+        closingDeadline = Date.now() + (seconds + 30) * 1_000;
+        durationTimer = setTimeout(() => { void stop(); }, seconds * 1_000);
+      }
+    } else if (event.type === "funding" && typeof event.closeAfterSeconds === "number" && Number.isFinite(event.closeAfterSeconds) && event.closeAfterSeconds >= 0) {
+      closingDeadline = Date.now() + (event.closeAfterSeconds + 30) * 1_000;
+    } else if (event.type === "limit") {
+      // The server drains already funded time before closing; do not reconnect.
+      patch({ error: typeof event.code === "string" ? event.code : "VOICE_OPERATIONAL_LIMIT_REACHED" });
     } else if (event.type === "started") {
       if (view.status === "connecting") patch({ status: "listening" });
     } else if (event.type === "transcript" && isVoiceTranscriptEvent(event.event)) {

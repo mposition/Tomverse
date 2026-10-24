@@ -66,6 +66,27 @@ test("durable usage is monotonic and final receipts survive late interim events"
   await recordVoiceUsage("voice-1", 15, true); await recordVoiceUsage("voice-1", 20);
   assert.deepEqual(w.rows[0].providerUsageSnapshot, { seconds: 15, confirmed: true });
 });
+
+test("a long-lived observer uses renewed funding instead of its original deadline and usage bound", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: Date.now() });
+  w.allowReceiver = true; w.commands = []; const current = w.rows[0];
+  current.expiresAt = new Date(Date.now()+60_000);
+  current.reservationPayload = { maxSeconds: 60, closeAt: new Date(Date.now()+30_000).toISOString(), webLeaseUntil: new Date(Date.now()+30_000).toISOString() };
+  await observeActiveVoiceConversations(); const original = w.socket;
+  // Funding commits on the primary; the worker refreshes the same observer.
+  t.mock.timers.tick(15_000);
+  current.expiresAt = new Date(Date.now()+180_000);
+  current.reservationPayload = { ...current.reservationPayload, maxSeconds: 1020, closeAt: new Date(Date.now()+150_000).toISOString(), webLeaseUntil: new Date(Date.now()+180_000).toISOString() };
+  await observeActiveVoiceConversations();
+  t.mock.timers.tick(60_000); await observeActiveVoiceConversations();
+  assert.equal(w.socket, original); assert.equal(w.hangs.length, 0); assert.deepEqual(w.commands, []);
+  w.socket.emit("message", JSON.stringify({ type: "session.usage.updated", usage: { seconds: 960 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(current.providerUsageSnapshot.seconds, 960);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 961 } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.charges[0].seconds, 961);
+});
 test("restart reconciliation settles a persisted final receipt without contacting the provider twice", async () => {
   w.rows[0].providerUsageSnapshot = { seconds: 12, confirmed: true };
   await reconcileVoiceConversations(); await reconcileVoiceConversations();

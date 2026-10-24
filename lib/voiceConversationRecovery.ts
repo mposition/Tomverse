@@ -12,6 +12,8 @@ const epoch = new Date(0);
 const receivers = new Map<string, () => void>();
 const receiverClosers = new Map<string, () => Promise<void>>();
 const receiverEmergencyClosers = new Map<string, () => void>();
+// A receiver outlives individual funding windows. Never capture its first deadline.
+const receiverBounds = new Map<string, { closeAt: number; expiresAt: number; webLeaseUntil: number }>();
 const retryAfter = new Map<string, number>();
 const hangupRetryAfter = new Map<string, number>();
 
@@ -42,12 +44,17 @@ export async function observeActiveVoiceConversations() {
   const rows = await prisma.chatCreditReservation.findMany({ where: { source: VOICE_CONVERSATION_SOURCE, OR: [{ status: "reserved" }, { lastError: "VOICE_PROVIDER_STOP_PENDING" }], providerRequestId: { not: null } } });
   for (const id of retryAfter.keys()) if (!rows.some(row => row.id === id)) retryAfter.delete(id);
   for (const id of hangupRetryAfter.keys()) if (!rows.some(row => row.id === id)) hangupRetryAfter.delete(id);
+  for (const id of receiverBounds.keys()) if (!rows.some(row => row.id === id)) receiverBounds.delete(id);
   for (const [id, release] of receivers) if (!rows.some(row => row.id === id)) release();
   for (const row of rows) {
     let payload;
     try { payload = readVoiceCreditPayload(row.reservationPayload); } catch { continue; }
+    receiverBounds.set(row.id, { closeAt: Date.parse(payload.closeAt ?? row.expiresAt.toISOString()), expiresAt: row.expiresAt.getTime(), webLeaseUntil: Date.parse(payload.webLeaseUntil ?? "") });
     const webHealthy = Date.parse(payload.webLeaseUntil ?? "") > Date.now();
-    const urgent = () => webHealthy && (Date.parse(payload.closeAt ?? row.expiresAt.toISOString()) <= Date.now() || Boolean(process.env.VOICE_CONVERSATION_KILL_SWITCH));
+    const urgent = () => {
+      const latest = receiverBounds.get(row.id);
+      return Boolean(latest && latest.webLeaseUntil > Date.now() && (latest.closeAt <= Date.now() || process.env.VOICE_CONVERSATION_KILL_SWITCH));
+    };
     const hangup = () => {
       if ((hangupRetryAfter.get(row.id) ?? 0) > Date.now()) return;
       hangupRetryAfter.set(row.id, Date.now() + 10_000);
@@ -72,7 +79,11 @@ export async function observeActiveVoiceConversations() {
     let finalizationTimer: ReturnType<typeof setTimeout> | undefined;
     let leaseTimer: ReturnType<typeof setInterval> | undefined;
     const close = () => { if (lease && !closeRequested && socket.readyState === socket.OPEN) { socket.send(JSON.stringify({ type: "session.close" })); closeRequested = true; } };
-    const expiryTimer = setTimeout(() => { if (finalizing) return; if (lease) void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {}); release(); }, Math.max(0, row.expiresAt.getTime() - Date.now()));
+    const expiryTimer = setInterval(() => {
+      if (finalizing || (receiverBounds.get(row.id)?.expiresAt ?? 0) > Date.now()) return;
+      if (lease) void hangupVoiceProviderSession(row.providerRequestId!).catch(() => {});
+      release();
+    }, 2_000);
     let released = false;
     const emergencyClose = () => { if (socket.readyState === socket.OPEN && urgent()) hangup(); };
     async function takeOver() {
@@ -90,8 +101,8 @@ export async function observeActiveVoiceConversations() {
     }
     function release() {
       if (released) return; released = true;
-      clearTimeout(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer);
-      receivers.delete(row.id); receiverClosers.delete(row.id); receiverEmergencyClosers.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
+      clearInterval(expiryTimer); clearTimeout(finalizationTimer); clearInterval(leaseTimer);
+      receivers.delete(row.id); receiverClosers.delete(row.id); receiverEmergencyClosers.delete(row.id); receiverBounds.delete(row.id); retryAfter.set(row.id, Date.now() + 10_000);
       socket.close(); if (lease) void releaseVoiceRecoveryLease(row.id, lease).catch(() => {});
     }
     receivers.set(row.id, release);
@@ -104,7 +115,8 @@ export async function observeActiveVoiceConversations() {
       let event; try { event = JSON.parse(data.toString()); } catch { return; }
       const seconds = event.usage?.seconds;
       if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return;
-      if (seconds > payload.maxSeconds) { void takeOver().catch(() => {}); return; }
+      // Durable usage/finalization below validate against the latest funded bound,
+      // including renewals committed since this observer's last sweep.
       if (event.type === "session.usage.updated") {
         void recordVoiceUsage(row.id, seconds).catch(() => close());
       } else if (event.type === "session.closed") {
@@ -123,7 +135,7 @@ export async function observeActiveVoiceConversations() {
   }
 }
 
-export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); retryAfter.clear(); hangupRetryAfter.clear(); }
+export function stopVoiceRecoveryReceivers() { for (const release of receivers.values()) release(); receiverBounds.clear(); retryAfter.clear(); hangupRetryAfter.clear(); }
 
 export async function renewVoiceWebLease(id: string) {
   const until = new Date(Date.now() + 30_000).toISOString();

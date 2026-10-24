@@ -7,11 +7,16 @@ const en = {
   ended: "Conversation ended", saved: "Your questions and answers are saved in this chat.", unknown: "Final voice usage is still being confirmed.", adjusted: "Voice usage was adjusted after the connection ended. Unobserved time was not charged.",
   mute: "Mute microphone", unmute: "Unmute microphone", audio: "Play assistant audio", error: "Voice could not complete this request. Your chat remains available.",
   estimated: "Estimated voice credits", charged: "Voice credits", user: "You", assistant: "Tomverse", back: "Back to chat",
+  continuousReserve: "Credits are reserved in short windows (initially up to {credits}). Continue within your plan and usage limits; unused credits are returned after settlement.",
   reserve: "Up to {credits} credits are temporarily reserved; unused credits are returned after confirmed settlement.",
   searchOn: "Web search on", searchOff: "Web search off", working: "Preparing your answer with your current model and tools…",
   insufficient: "There are not enough available credits to start voice. Your existing chat is saved.",
   limited: "Voice has reached its current usage limit. You can continue in this chat.",
   permission: "Allow microphone access in your device settings, then start voice again.",
+  failed: "Voice could not complete the conversation",
+  unavailable: "Voice is currently unavailable. Try again later or continue in chat.",
+  recovering: "Your voice connection is being recovered safely. Try again shortly or continue in chat.",
+  serviceUnavailable: "The voice service could not be reached. Try again shortly or continue in chat.",
 };
 const ko: typeof en = {
   title: "음성 대화", start: "음성 대화 시작", close: "닫기", stop: "대화 종료",
@@ -22,11 +27,16 @@ const ko: typeof en = {
   ended: "대화가 종료됐어요", saved: "질문과 답변은 이 채팅에 남아 있어요.", unknown: "최종 음성 사용량을 확인하고 있어요.", adjusted: "연결 종료 후 음성 사용량을 조정했어요. 확인되지 않은 시간은 청구하지 않았습니다.",
   mute: "마이크 끄기", unmute: "마이크 켜기", audio: "음성 답변 재생", error: "음성 요청을 완료하지 못했어요. 기존 채팅에서 이어갈 수 있습니다.",
   estimated: "음성 예상 크레딧", charged: "음성 크레딧", user: "나", assistant: "Tomverse", back: "채팅으로 돌아가기",
+  continuousReserve: "짧은 구간씩 크레딧을 예약해요(처음에는 최대 {credits}크레딧). 기존 요금제와 사용 한도 내에서 계속 대화하고, 미사용 크레딧은 정산 후 돌려드려요.",
   reserve: "최대 {credits}크레딧을 임시 예약하고, 정산이 확인되면 사용하지 않은 크레딧을 돌려드려요.",
   searchOn: "웹 검색 켜짐", searchOff: "웹 검색 꺼짐", working: "선택한 모델과 도구로 답변을 준비하고 있어요…",
   insufficient: "음성을 시작할 수 있는 크레딧이 부족해요. 기존 대화는 이 채팅에 남아 있어요.",
   limited: "현재 음성 사용 한도에 도달했어요. 이 채팅에서 계속 대화할 수 있습니다.",
   permission: "기기 설정에서 마이크 사용을 허용한 뒤 다시 시작해 주세요.",
+  failed: "음성 대화를 완료하지 못했어요",
+  unavailable: "현재 음성 대화를 사용할 수 없어요. 잠시 후 다시 시도하거나 채팅을 이용해 주세요.",
+  recovering: "음성 연결을 안전하게 복구하고 있어요. 잠시 후 다시 시작하거나 채팅을 이용해 주세요.",
+  serviceUnavailable: "음성 서비스에 연결하지 못했어요. 잠시 후 다시 시도하거나 채팅을 이용해 주세요.",
 };
 export type VoiceConversationCopy = typeof en;
 export const voiceConversationCopy = (language: string): VoiceConversationCopy => language.startsWith("ko") ? ko : en;
