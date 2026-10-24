@@ -11,7 +11,7 @@ import { monitorVoiceAudioLevels } from "./voiceAudioLevels";
 import "./voice-conversation.css";
 
 export function VoiceConversationControl({ conversationId, scopeKey, maxSeconds, disabled, selectionLabel, searchEnabled, onRequest, onSessionEnded }: {
-  conversationId: string | null; scopeKey: string; disabled: boolean; maxSeconds: number;
+  conversationId: string | null; scopeKey: string; disabled: boolean; maxSeconds: number | null;
   selectionLabel: string; searchEnabled: boolean; onRequest: (text: string) => Promise<VoiceAnswerReceipt>; onSessionEnded?: () => void;
 }) {
   const { lang } = useLanguage(); const c = voiceConversationCopy(lang);
@@ -42,7 +42,7 @@ export function VoiceConversationControl({ conversationId, scopeKey, maxSeconds,
   return <>
     <button ref={triggerRef} type="button" data-testid="voice-conversation-open" className="voice-conversation-trigger" disabled={disabled} title={c.title} aria-label={c.title} onClick={() => setOpen(true)}><AudioLines size={21} aria-hidden="true" /></button>
     {open && createPortal(<div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="voice-conversation-title" className="voice-conversation-overlay">
-      <VoiceConversationPanel language={lang} state={state} selectionLabel={selectionLabel} searchEnabled={searchEnabled} reservedCredits={Math.ceil((maxSeconds + 30) * 36 / 60)} onStart={start} onClose={close} onStop={() => void clientRef.current?.stop()} onToggleMicrophone={() => clientRef.current?.toggleMicrophone()} onResumeAudio={() => void clientRef.current?.resumeAudio()} />
+      <VoiceConversationPanel language={lang} state={state} selectionLabel={selectionLabel} searchEnabled={searchEnabled} continuous={maxSeconds === null} reservedCredits={maxSeconds === null ? 36 : Math.ceil((maxSeconds + 30) * 36 / 60)} onStart={start} onClose={close} onStop={() => void clientRef.current?.stop()} onToggleMicrophone={() => clientRef.current?.toggleMicrophone()} onResumeAudio={() => void clientRef.current?.resumeAudio()} />
     </div>, document.body)}
   </>;
 }

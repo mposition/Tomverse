@@ -14,7 +14,7 @@ const isolatedRunner = ["127.0.0.1", "localhost", "::1"].includes(url.hostname) 
 if (!localFixture && !isolatedRunner) throw new Error("This suite requires the isolated local fixture or the dedicated loopback CI test database.");
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: { getUserBillingPlan: async () => ({ monthlyMessageLimit: 300, dailyMessageLimit: 300 }) } });
 const { prisma } = await import(mod("lib/prisma.ts"));
-const { reserveVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
+const { reserveVoiceConversationCredits, reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
 const { recordVoiceUsage, finalizeVoiceReservation, claimVoiceRecoveryLease, releaseVoiceRecoveryLease } = await import(mod("lib/voiceConversationRecovery.ts"));
 const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } = await import(mod("lib/voiceConversationTasks.ts"));
 let userId;
@@ -24,6 +24,50 @@ beforeEach(async () => {
 });
 after(async () => { await prisma.$disconnect(); });
 const reserve = () => reserveVoiceConversationCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36, maxSeconds: 60 });
+
+async function rollingDue() {
+  const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36 });
+  return prisma.chatCreditReservation.update({ where: { id: row.id }, data: {
+    createdAt: new Date(Date.now()-15_000),
+    reservationPayload: { ...row.reservationPayload, closeAt: new Date(Date.now()+14_000).toISOString(), webLeaseUntil: new Date(Date.now()+30_000).toISOString() },
+  } });
+}
+
+test("concurrent rolling renewals reserve exactly once and preserve concurrent task writes", async () => {
+  const row = await rollingDue();
+  await Promise.all([
+    ...Array.from({ length: 6 }, () => extendVoiceConversationCredits(row.id, userId)),
+    registerVoiceTask(row.id, "rolling-task", "Question"),
+  ]);
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(saved.reservedCredits, 54); assert.equal(saved.reservedCostMicroUsd, 75_000n);
+  assert.equal(saved.reservationPayload.maxSeconds, 90); assert.equal(saved.reservationPayload.funding.length, 1);
+  assert.equal(saved.reservationPayload.tasks[0].id, "rolling-task");
+  await Promise.all(Array.from({ length: 6 }, () => finalizeVoiceReservation(row.id, 65)));
+  const month = await prisma.chatUsageBucket.findFirst({ where: { key: saved.subjectKey, period: "month" } });
+  assert.equal(Number(month.count), 39);
+});
+
+test("a renewal racing settlement cannot grow a settled hold or duplicate a refund", async () => {
+  const row = await rollingDue();
+  const results = await Promise.allSettled([extendVoiceConversationCredits(row.id, userId), finalizeVoiceReservation(row.id, 10)]);
+  assert.ok(results.some(result => result.status === "fulfilled"));
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(saved.status, "settled"); assert.equal(saved.settledCredits, 6);
+  const month = await prisma.chatUsageBucket.findFirst({ where: { key: saved.subjectKey, period: "month" } });
+  assert.equal(Number(month.count), 6);
+  await assert.rejects(extendVoiceConversationCredits(row.id, userId), error => error.code === "VOICE_SESSION_ENDED");
+});
+
+test("completed task tombstones permit a long conversation without allowing a replay", async () => {
+  const row = await reserve();
+  const completed = Array.from({ length: 80 }, (_, n) => ({ id: `done-${n}`, textHash: "a".repeat(64), state: "sent", sourceId: randomUUID() }));
+  await prisma.chatCreditReservation.update({ where: { id: row.id }, data: { reservationPayload: { ...row.reservationPayload, tasks: completed } } });
+  await registerVoiceTask(row.id, "next-task", "Next question");
+  await registerVoiceTask(row.id, "done-0", "Next question");
+  const saved = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(saved.reservationPayload.tasks.length, 81); assert.equal(saved.reservationPayload.tasks[0].state, "sent");
+});
 
 test("real concurrent finalizers charge and refund wallet and voice budgets once", async () => {
   const row = await reserve();

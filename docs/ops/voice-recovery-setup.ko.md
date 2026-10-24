@@ -16,24 +16,21 @@
 
 | Railway 위치 | 담당 기능 | 입력할 주요 변수 |
 | --- | --- | --- |
-| Tomverse 프로젝트 → production → **Tomverse** → Variables | 앱의 음성 시작 요청, 시간 제한, 크레딧 예약 | `VOICE_CONVERSATION_ENABLED`, `VOICE_CONVERSATION_MAX_SECONDS`, `VOICE_CONVERSATION_API_KEY` |
+| Tomverse 프로젝트 → production → **Tomverse** → Variables | 앱의 음성 시작 요청과 크레딧 예약 | `VOICE_CONVERSATION_ENABLED`, `VOICE_CONVERSATION_API_KEY` |
 | Tomverse 프로젝트 → production → **Voice Recovery** → Variables | 연결이 끊긴 세션 종료·정산 복구, 생존 신호 기록 | `VOICE_CONVERSATION_WATCHDOG_ENABLED`, 같은 운영 DB·서명키·음성키·예산 참조 |
 
 같은 프로젝트 안에서도 **서비스별·환경별 Variables는 다릅니다**. 웹 서비스에 넣은 값이 worker에 자동으로 생기지 않습니다.
 앱 내부 설정, Android Studio, `apps/mobile`, Windows 환경변수에 넣어도 Railway 운영 서버 설정은 바뀌지 않습니다.
 
-## 2. VOICE_CONVERSATION_MAX_SECONDS가 필요한 이유
+## 2. 900초 제한 제거와 크레딧 예약
 
-음성 시작부터 종료까지 **한 번의 연결 세션**에 적용하는 최대 시간입니다. 한 질문의 길이나 대화방의 누적 사용 시간 제한이 아닙니다.
+연속 음성 대화 버전은 `VOICE_CONVERSATION_MAX_SECONDS`를 사용하지 않습니다. **이 버전의 서버와 Voice Recovery 배포가 완료된 뒤** production → Tomverse → Variables에서 기존 변수를 삭제할 수 있습니다. 이전 서버에서는 변수를 삭제해도 기본 300초가 적용되므로 제한이 없어지지 않습니다.
 
-- `300`이면 한 세션이 최대 5분이며, 그 안에 여러 질문과 답변이 들어갈 수 있습니다.
-- 세션 종료 후 다시 시작하면 새 세션 시간 제한이 적용됩니다. 사용자·공급자의 일/월 누적 예산은 계속 합산합니다.
-- 사용자가 종료하지 않거나 앱·통신에 문제가 생겼을 때 서버가 종료를 시도할 기준이 됩니다.
-- 서버는 이 상한을 기준으로 크레딧과 공급자 예산을 먼저 예약합니다. 값을 늘리면 시작에 필요한 예약량도 늘어납니다. 최종 확정 사용량으로 정산합니다.
-- 변수 생략 시 기본값은 **300초**, 현재 허용 범위는 **15~900초의 정수**입니다. 범위를 벗어나면 음성 설정이 유효하지 않아 새 세션을 시작할 수 없습니다.
-- 종료 처리용 **30초**가 예약량에 추가됩니다. 사용자에게 30초를 더 제공한다는 뜻은 아닙니다.
-
-입력 위치는 **production → Tomverse → Variables**입니다. 시간 제한 변경은 이후 새로 시작하는 세션에 적용되며, 이미 예약된 세션의 상한은 바뀌지 않습니다.
+- 한 연결의 총 시간을 제한하는 대신 짧은 구간씩 크레딧과 공급자 예산을 추가 예약합니다. 최초 예약은 종료 여유 30초를 포함해 최대 60초·36크레딧이며, 잔액이 적으면 더 작은 구간으로 시작합니다.
+- 기존 요금제·구매 크레딧과 사용자·공급자의 일/월 시간 및 비용 한도를 그대로 적용합니다. 갱신할 예산이 없으면 이미 예약한 범위 안에서 종료합니다.
+- 정상 연결에서는 같은 세션을 유지합니다. 공급자의 세션 만료나 연결 끊김이 발생했을 때 새 유료 세션을 자동으로 시작하지 않습니다.
+- 사용하지 않은 크레딧은 정산 후 반환하며, 세션 누적 시간으로 한 번 반올림합니다. 분당 36크레딧 요율은 바뀌지 않습니다.
+- 앱·웹 프로세스가 끊기면 Voice Recovery가 DB의 최신 예약 마감 시각을 읽어 종료·정산합니다.
 
 ## 3. Voice Recovery 서비스를 먼저 준비합니다
 
@@ -105,7 +102,6 @@ worker를 먼저 실행하고 생존 신호를 확인한 뒤, **음성 운영 �
 
 ```dotenv
 VOICE_CONVERSATION_ENABLED=true
-VOICE_CONVERSATION_MAX_SECONDS=300
 ```
 
 `VOICE_CONVERSATION_API_KEY`에는 전용 음성 공급자 키를 Railway의 비밀값 입력란으로 등록합니다.

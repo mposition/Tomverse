@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ConversationHistory } from "./ConversationHistory";
+import { ConversationListScreen } from "./ConversationListScreen";
+import { WorkspaceWelcome } from "./WorkspaceWelcome";
 import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
 import { mobileErrorText } from "../../../locales/mobileErrors";
@@ -56,7 +58,6 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const defaultsError = useRef(c.reviewDefaultsUnavailable);
   useEffect(() => { defaultsError.current = c.reviewDefaultsUnavailable; }, [c.reviewDefaultsUnavailable]);
   useEffect(() => { initializationError.current = c.reviewUnavailable; }, [c.reviewUnavailable]);
-  const lastKey = `tomverse-native-last-review:${owner ?? ""}`;
   useEffect(() => { onBusyChange(loading || streaming || uncertain || actionBusy); return () => onBusyChange(false); }, [loading, streaming, uncertain, actionBusy, onBusyChange]);
   useEffect(() => {
     const current = ++request.current;
@@ -73,20 +74,14 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
         setProviderOptions(options);
         setDefaults((preferences?.reviewEasyEffectiveProviders ?? []).filter(provider => options.includes(provider)).slice(0, Math.min(cap.maxModels, preferences?.reviewEasyMaxProviders ?? 3)));
         if (cap.reviewEasy && !preferences?.reviewEasyEffectiveProviders) setError(defaultsError.current);
-        const last = localStorage.getItem(lastKey);
-        if (last && history.some(chat => chat.id === last && chat.kind !== "image" && (!chat.isLocked || transport.history?.unlocked(chat.id)))) {
-          const item = await transport.load(last);
-          if (current !== request.current) return;
-          setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true);
-        }
       } catch { if (current === request.current) setError(initializationError.current); }
       finally { if (current === request.current) setLoading(false); }
     })();
     return () => { request.current++; abort.current?.abort(); }; // eslint-disable-line react-hooks/exhaustive-deps -- Invalidate outstanding requests on unmount.
-  }, [transport, lastKey, setProviders]);
+  }, [transport, owner, setProviders]);
   const previousNewRequest = useRef(newConversationRequest);
   function newReview() {
-    request.current++; setConversation(null); setPartial({}); setError(""); setUncertain(false); clearProviders(); localStorage.removeItem(lastKey); onCloseHistory();
+    request.current++; setConversation(null); setPartial({}); setError(""); setUncertain(false); clearProviders(); onCloseHistory();
   }
   useEffect(() => {
     if (previousNewRequest.current === newConversationRequest) return;
@@ -98,7 +93,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     try {
       const item = await transport.load(id);
       if (current !== request.current) return;
-      setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true); setPartial({}); localStorage.setItem(lastKey, id); onCloseHistory();
+      setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true); setPartial({}); onCloseHistory();
     } catch { if (current === request.current) setError(copy.unavailable); }
     finally { if (current === request.current) setLoading(false); }
   }
@@ -107,7 +102,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     if (!transport.createReview) throw Error("REVIEW_UNAVAILABLE");
     const item = await transport.createReview(modelIds);
     if (epoch !== request.current || abort.current?.signal.aborted) throw new DOMException("Stopped", "AbortError");
-    preserveNativeDraft(owner, item.id, draft); setConversation(item); localStorage.setItem(lastKey, item.id); return item;
+    preserveNativeDraft(owner, item.id, draft); setConversation(item); return item;
   }
   async function configureTools(input: ToolChange) {
     if (!transport.configureTools) throw Error("NATIVE_TOOLS_UNAVAILABLE");
@@ -167,17 +162,24 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const visibleModels = conversation?.selectedModels.length ? conversation.selectedModels : selected;
   const name = (id: string) => models.find(model => model.id === id)?.name ?? id;
   const messages = conversation?.messages.filter(message => message.role === "user" || message.modelId === activeModel || (message.imageTurn?.modelIds.includes(activeModel)) || (!message.modelId && activeModel === visibleModels[0])) ?? [];
+  if (historyOpen) return <ConversationListScreen title={copy.chats} newLabel={c.newReview} disabled={loading || streaming || uncertain || actionBusy} onNew={newReview} footer={historyFooter}>
+    <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={loading || streaming || uncertain || actionBusy} onOpen={id => void open(id)} onRefresh={async () => {
+      const scope = request.current; const rows = await transport.listReview!();
+      if (scope !== request.current) throw Error("REVIEW_SCOPE_CHANGED");
+      setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
+    }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { request.current++; setConversation(null); setPartial({}); setUncertain(false); } }} />
+  </ConversationListScreen>;
   return <section className="review-workspace">
-    <div className="review-context-bar">
-      <button className="review-setup-trigger" aria-label={`${c.choose} · ${mode === "easy" ? "Easy" : "Professional"}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}>{mode === "easy" ? "Easy" : "Professional"}<span className="participant-count">{mode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>
-      {conversation?.messages.length ? <select className="review-response-select" aria-label={c.models} value={activeModel} onChange={event => { followOutput.current = true; setActiveModel(event.target.value); }}>{visibleModels.map(id => <option value={id} key={id}>{name(id)}{streaming ? " ···" : ""}</option>)}</select> : <span className="review-context-hint">{c.review}</span>}
-    </div>
     {error && <p role="alert" className="notice error">{error}</p>}{loading && <p role="status">{copy.loading}</p>}
-    {!conversation?.messages.length && !streaming ? <div className="review-intro"><h1>{c.reviewEmpty}</h1><p>{mode === "easy" ? c.easy : c.professional}</p><div className="review-participants">{(mode === "easy" ? providers : selected).map(value => <span key={value}>{mode === "easy" ? value : name(value)}</span>)}</div></div> : <>
+    {!conversation?.messages.length && !streaming ? <div className="review-intro" data-testid="review-landing"><WorkspaceWelcome product="review" language={language} transport={transport} capability={capability} onSeed={(text, starter) => { setDraft(text); document.querySelector<HTMLTextAreaElement>(".review-workspace textarea")?.focus(); if (starter === "sourcedAnswer" && conversation && conversation.webSearchMode !== "always") void configureTools({ webSearchMode: "always" }).catch(() => {}); }} /></div> : <>
 
       <div className="transcript review-transcript" aria-live="off" aria-busy={streaming} onScroll={event => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}>{messages.map(message => <article className={`message ${message.role}`} id={`review-message-${message.id}`} key={message.id}>{message.role === "assistant" && <span className="message-label">{name(message.modelId ?? activeModel)}</span>}<AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} /></article>)}{partial[activeModel] !== undefined && <article className="message assistant"><span className="message-label">{name(activeModel)}</span><AnswerContent content={partial[activeModel] || copy.waiting} transport={transport} language={language} /></article>}<div ref={end} /></div>
     </>}
     {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore}</button>}
+    <div className="review-context-bar">
+      <button className="review-setup-trigger" aria-label={`${c.choose} · ${mode === "easy" ? "Easy" : "Professional"}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}>{mode === "easy" ? "Easy" : "Professional"}<span className="participant-count">{mode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>
+      {conversation?.messages.length ? <select className="review-response-select" aria-label={c.models} value={activeModel} onChange={event => { followOutput.current = true; setActiveModel(event.target.value); }}>{visibleModels.map(id => <option value={id} key={id}>{name(id)}{streaming ? " ···" : ""}</option>)}</select> : <span className="review-context-hint">{c.review}</span>}
+    </div>
     <Composer copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || !capability || uncertain} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} extraTools={[
       { label: reviewCopy.crossReview, disabled: !conversation?.messages.some(message => message.role === "assistant"), onSelect: () => setCrossReview(true) },
       { label: reviewCopy.images, disabled: !capability?.images?.enabled, onSelect: () => { setImage(null); setImageHistory(null); setImageOpen(true); } },
@@ -187,10 +189,5 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     </div></Sheet>}
     {crossReview && conversation && <CrossReview id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setCrossReview(false)} onBusy={setActionBusy} onSource={messageId => { const source = conversation.messages.find(message => message.id === messageId); if (source?.modelId) setActiveModel(source.modelId); setCrossReview(false); setTimeout(() => document.getElementById(`review-message-${messageId}`)?.scrollIntoView({ block: "center" }), 50); }} />}
     {imageOpen && <NativeImageWorkspace owner={owner} transport={transport} language={language} initial={image ?? undefined} historyId={imageHistory ?? undefined} onBusy={setActionBusy} onClose={() => setImageOpen(false)} onCreated={id => { setImageHistory(id); void transport.listReview!().then(setChats).catch(() => setError(copy.unavailable)); }} />}
-    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" disabled={loading || streaming || uncertain || actionBusy} onClick={newReview}>{c.newReview}</button><div className="history-scroll"><ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={loading || streaming || uncertain || actionBusy} onOpen={id => void open(id)} onRefresh={async () => {
-      const scope = request.current; const rows = await transport.listReview!();
-      if (scope !== request.current) throw Error("REVIEW_SCOPE_CHANGED");
-      setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
-    }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { request.current++; setConversation(null); setPartial({}); setUncertain(false); localStorage.removeItem(lastKey); } }} /></div>{historyFooter}</Sheet>}
   </section>;
 }

@@ -35,11 +35,11 @@ test("startup stays on new Chat after delayed history restore; saved conversatio
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
   const reopened = await context.newPage(); await reopened.goto("/");
-  await expect(reopened.locator(".empty-chat")).toBeVisible();
+  await expect(reopened.locator(".chat-welcome")).toBeVisible();
   await expect.poll(() => reopened.evaluate(() => typeof (window as unknown as { __startupQa: { release: unknown } }).__startupQa.release)).toBe("function");
   await reopened.evaluate(() => (window as unknown as { __startupQa: { release: () => void } }).__startupQa.release());
   await expect(reopened.locator(".header-new-chat")).toBeEnabled();
-  await expect(reopened.locator(".empty-chat")).toBeVisible();
+  await expect(reopened.locator(".chat-welcome")).toBeVisible();
   await expect(reopened.locator("article")).toHaveCount(0);
   expect(await reopened.evaluate(() => (window as unknown as { __startupQa: { loads: number } }).__startupQa.loads)).toBe(0);
   await reopened.getByRole("button", { name: "대화", exact: true }).click();
@@ -76,7 +76,7 @@ test("stopping requires a server read and never silently resends", async ({ page
 test("Chat draft stays with Chat when viewing Review modes", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Chat에만 남을 초안");
   await page.getByTestId("product-switcher").selectOption("review");
-  await expect(page.getByRole("heading", { name: "하나의 질문, 다양한 관점." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "질문은 한 번. 관점은 세 가지." })).toBeVisible();
   await page.getByRole("button", { name: /참여 모델 선택/ }).click();
   await page.getByRole("button", { name: "Professional", exact: true }).click();
   await expect(page.getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -135,7 +135,7 @@ for (const width of [320, 390, 768, 1024, 1440]) test(`light/dark layout and con
     await expect(page.getByRole("button", { name: "파일 첨부", exact: true })).toBeInViewport();
     await expect(page.locator(".header-new-chat")).toBeInViewport();
     expect(await page.locator(".icon-newChat").evaluate(node => getComputedStyle(node).filter)).toBe(theme === "dark" ? "brightness(0) invert(1)" : "brightness(0)");
-    await expect(page.locator(".empty-chat .icon-logo")).toBeVisible();
-    expect(await page.locator(".empty-chat .icon-logo").evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await expect(page.locator(".app-header .wordmark")).toBeVisible();
+    expect(await page.locator(".app-header .icon-logo").evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   }
 });

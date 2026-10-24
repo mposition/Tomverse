@@ -59,7 +59,7 @@ export type MobileAttachment = { uploadId: string; name: string; mediaType: stri
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
   history?: HistoryTransport;
-  voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number }>;
+  voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number | null }>;
   voiceRequest?(body: unknown, signal?: AbortSignal): Promise<Response>;
   sendVoice?(conversation: Conversation, text: string, signal: AbortSignal, progress: (text: string) => void): Promise<{ conversationId: string; sourceUserMessageId: string }>;
   resumeResearch?(conversation: Conversation, signal: AbortSignal, update: (conversation: Conversation) => void): Promise<void>;

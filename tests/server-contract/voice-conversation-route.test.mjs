@@ -40,7 +40,9 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   perplexityAsyncJob: { findFirst: async ({ where }) => { w.researchFilter = where; return w.researchAnswer ? { resultText: "Stored research answer" } : null; } },
 } } });
 mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
-  reserveVoiceConversationCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", reservationPayload: {} }; },
+  reserveContinuousVoiceCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", reservationPayload: { maxSeconds: 60, closeAt: new Date(Date.now()+30_000).toISOString() } }; },
+  extendVoiceConversationCredits: async () => { if (w.renewError) throw w.renewError; w.renewals = (w.renewals ?? 0) + 1; return { maxSeconds: 60 + w.renewals * 30, closeAt: new Date(Date.now()+45_000).toISOString() }; },
+  isVoiceCapacityRefusal: error => ['CREDIT_BALANCE_INSUFFICIENT', 'VOICE_OPERATIONAL_LIMIT_REACHED', 'PROVIDER_BUDGET_EXHAUSTED'].includes(error?.code),
   settleVoiceConversationCredits: settleCredits,
   readVoiceCreditPayload: value => value,
 } });
@@ -148,6 +150,33 @@ test("trusted provider final duration settles once and existing Chat history see
   const body = await text;
   assert.match(body, /"confirmed":true/); assert.match(body, /"credits":6/);
   assert.deepEqual(w.refunds.map(r => r.seconds), [10]);
+});
+
+test("continuous renewal keeps the same provider past 900 seconds with no fixed session timeout", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: Date.now() });
+  const response = await POST(request(start())); const text = response.text();
+  try {
+    for (let n = 0; n < 32; n++) {
+      t.mock.timers.tick(n ? 30_000 : 15_000);
+      for (let step=0; step<10; step++) await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(w.renewals, 32); assert.equal(w.providerCalls.length, 1); assert.equal(w.sent?.length ?? 0, 0);
+  } finally { w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 950 } })); }
+  const body = await text;
+  assert.match(body, /"continuous":true/); assert.match(body, /"maxSeconds":null/); assert.match(body, /"confirmed":true/);
+  assert.equal(w.refunds[0].seconds, 950);
+});
+
+test("exhausted funding closes within its existing exposure without another paid start", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: Date.now() });
+  w.renewError = new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient");
+  const response = await POST(request(start())); const text = response.text();
+  t.mock.timers.tick(15_000); for (let n=0;n<10;n++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.sent?.length ?? 0, 0);
+  t.mock.timers.tick(15_000); for (let n=0;n<10;n++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(w.sent, [{ type: "session.close" }]);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 30 } }));
+  assert.match(await text, /"type":"limit"/); assert.equal(w.providerCalls.length, 1); assert.equal(w.refunds[0].seconds, 30);
 });
 
 test("lost connection retains an unconfirmed reservation and requests hangup", async () => {

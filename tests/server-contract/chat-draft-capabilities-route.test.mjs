@@ -64,6 +64,10 @@ mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), {
 const { GET } = await import(mod("app/api/products/chat/capabilities/route.ts"));
 
 test.beforeEach(() => {
+  delete process.env.VOICE_CONVERSATION_ENABLED;
+  delete process.env.VOICE_CONVERSATION_API_KEY;
+  delete process.env.VOICE_CONVERSATION_KILL_SWITCH;
+  delete process.env.VOICE_CONVERSATION_MAX_SECONDS;
   session = { user: { id: "owner-a" } };
   availability = {
     offered: true,
@@ -92,8 +96,22 @@ test("signed-in blank Chat receives server-owned routing and voice capabilities"
   const response = await GET(new Request("https://tomverse.test/api/products/chat/capabilities"));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
-  assert.deepEqual(await response.json(), { autoSelection: { offered: true }, voiceConversation: { enabled: false, maxSeconds: 300 } });
+  assert.deepEqual(await response.json(), { autoSelection: { offered: true }, voiceConversation: { enabled: false, maxSeconds: 300, continuous: false, reservationSeconds: 60 } });
   assert.deepEqual(reads, [["owner-a"]]);
+});
+
+test("enabled voice advertises continuous funding with an old-APK-compatible duration estimate", async () => {
+  process.env.VOICE_CONVERSATION_ENABLED = "true";
+  process.env.VOICE_CONVERSATION_API_KEY = "fixture-key-never-dispatched";
+  process.env.VOICE_CONVERSATION_MAX_SECONDS = "1000";
+  const response = await GET(new Request("https://tomverse.test/api/products/chat/capabilities"));
+  assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const { voiceConversation } = await response.json();
+  assert.deepEqual(voiceConversation, { enabled: true, maxSeconds: 300, continuous: true, reservationSeconds: 60 });
+  assert.equal(Math.ceil((voiceConversation.maxSeconds + 30) * 36 / 60), 198);
+  process.env.VOICE_CONVERSATION_KILL_SWITCH = "stop";
+  const disabled = await GET(new Request("https://tomverse.test/api/products/chat/capabilities"));
+  assert.equal((await disabled.json()).voiceConversation.continuous, false);
 });
 
 test("guest blank Chat receives a subject and exact-release bound text-only authority", async () => {

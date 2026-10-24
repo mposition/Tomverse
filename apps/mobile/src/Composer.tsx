@@ -75,8 +75,11 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
       <textarea ref={input} maxLength={40000} aria-label={copy.placeholder} placeholder={copy.placeholder} rows={1} value={draft} disabled={disabled || streaming || voiceBusy}
         onChange={event => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} />
       <div className="composer-actions">
-        {voiceConversation?.(disabled || offline || streaming || uploading || voiceBusy || !!draft.trim() || files.length > 0)}
-        {voiceBusy ? <><span className="voice-clock" role="status">{voice.state.status === "transcribing" ? voiceCopy.transcribing : `${voiceCopy.recording} ${voice.elapsedSeconds}s`}</span><button type="button" onClick={voice.cancel} aria-label={copy.cancelVoice}>×</button><button type="button" className="send" onClick={voice.stop} disabled={voice.state.status !== "recording"} aria-label={copy.finishVoice}>■</button></> : <><button type="button" aria-label={copy.voice} disabled={disabled || offline || streaming || uploading} onClick={voice.start}><AppIcon name="mic" /></button>{streaming ? <button type="button" className="send" aria-label={copy.stop} onClick={onStop}>■</button> : <button type="submit" className="send" aria-label={copy.send} disabled={disabled || offline || uploading || (!draft.trim() && !files.length)}><AppIcon name="send" /></button>}</>}
+        {voiceBusy ? <><span className="voice-clock" role="status">{voice.state.status === "transcribing" ? voiceCopy.transcribing : `${voiceCopy.recording} ${voice.elapsedSeconds}s`}</span><button type="button" onClick={voice.cancel} aria-label={copy.cancelVoice}>×</button></> : <button type="button" aria-label={copy.voice} disabled={disabled || offline || streaming || uploading} onClick={voice.start}><AppIcon name="mic" /></button>}
+        <div className="composer-primary-action" data-voice-default={!draft.trim() && !files.length && !streaming && !voiceBusy}>
+          {voiceConversation?.(disabled || offline || streaming || uploading || voiceBusy || !!draft.trim() || files.length > 0)}
+          {voiceBusy ? <button type="button" className="send" onClick={voice.stop} disabled={voice.state.status !== "recording"} aria-label={copy.finishVoice}>■</button> : streaming ? <button type="button" className="send" aria-label={copy.stop} onClick={onStop}>■</button> : <button type="submit" className="send" aria-label={copy.send} disabled={disabled || offline || uploading || (!draft.trim() && !files.length)}><AppIcon name="send" /></button>}
+        </div>
       </div>
     </form>
     {voiceBusy && <p className="voice-privacy">{mobileVoicePrivacy(language)}</p>}
