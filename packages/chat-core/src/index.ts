@@ -21,3 +21,4 @@ export {
   type ChatIncompleteReason,
 } from "./completionStatus";
 export { chatStreamDisplayText } from "./streamText";
+export * from "./voiceConversation";

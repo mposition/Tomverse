@@ -36,6 +36,8 @@ on:
       # Deep research reserves credits in one request and settles them in a
       # later one, so its routes are covered by these scenarios too.
       - "app/api/chat/route.ts"
+      - "app/api/chat/voice/**"
+      - "lib/voiceConversation*.ts"
       - "app/api/chat/deep-research/**"
       - "lib/perplexityDeepResearch.ts"
       # The suite outgrew its name: it also runs the feedback lifecycle, the

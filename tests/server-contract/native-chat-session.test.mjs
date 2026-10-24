@@ -20,6 +20,20 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { mobileTokenFamily:
 const { resolveChatRouteSession, resolveAccountRouteSession } = await import("../../lib/chatRouteSession.ts");
 const req = (headers = {}, path = "/api/chat", method = "POST") => new Request(`https://tomverse.app${path}`, { method, headers });
 
+test("native voice independently verifies the bearer, account and exact method without cookie fallback", async () => {
+  const before = cookies; delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
+  const request = req({ authorization: "Bearer valid-owner", origin: "https://localhost" }, "/api/chat/voice");
+  assert.equal((await resolveChatRouteSession(request)).response.status, 401);
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
+  assert.equal((await resolveChatRouteSession(request)).session.user.id, "bearer-owner");
+  tokenState = "revoked";
+  assert.equal((await resolveChatRouteSession(request)).response.status, 401);
+  tokenState = "valid";
+  assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, "/api/chat/voice/extra"))).response.status, 401);
+  assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, "/api/chat/voice", "DELETE"))).response.status, 401);
+  assert.equal(cookies, before); delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
+});
+
 test("cookie path is unchanged and does not consult bearer verification", async () => {
   delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
   const before = bearerChecks;

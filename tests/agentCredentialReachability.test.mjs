@@ -830,7 +830,9 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // CLI and became workflow_dispatch only. The propose job and the chained-event
 // reason left the baseline (publish stays, reached by no agent event), so its
 // two exclusions were removed rather than re-pinned. Nothing was added.
-const POSTURE_DIGEST = "81a4d32c337f";
+// The voice release preserves that reduced posture and its exact-blob
+// exclusions, adding only the two reviewed voice finance-CI path patterns.
+const POSTURE_DIGEST = "a2999e874657";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
   const workflows = committedWorkflows();

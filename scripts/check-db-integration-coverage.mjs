@@ -10,7 +10,7 @@ import { auditDbIntegrationCoverage } from "./check-db-integration-coverage-core
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const suiteFiles = readdirSync(join(repoRoot, "tests", "integration"))
-    .filter((name) => name.endsWith(".db.test.ts"))
+    .filter((name) => /\.db\.test\.(?:ts|mjs)$/.test(name))
     .sort();
 
 const { failures, referenced } = auditDbIntegrationCoverage({
