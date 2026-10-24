@@ -23,6 +23,8 @@ import { amuxSessionPageKeyIdentities } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
 import { amuxV19SystemRegistrationEnabled } from
   "@/lib/amux/ideaSystemRegistrationCore";
+import { amuxV19RegistrationFailureLog } from
+  "@/lib/amux/ideaSystemRegistrationFailureLogCore";
 import { AmuxV19SystemRegistrationError,
   registerCompletedAmuxIdeaFromSystem } from
   "@/lib/amux/ideaSystemRegistrationService";
@@ -167,6 +169,8 @@ async function registerSessionPlan(ideaId: string): Promise<{ state: string }> {
     const registered = await registerCompletedAmuxIdeaFromSystem(ideaId);
     return { state: registered.state };
   } catch (error) {
+    // The runner only learns a closed state; the cause is kept here, as codes.
+    console.error(JSON.stringify(amuxV19RegistrationFailureLog(ideaId, error)));
     return { state: error instanceof AmuxV19SystemRegistrationError
       ? error.code : "outcome_unknown" };
   }
