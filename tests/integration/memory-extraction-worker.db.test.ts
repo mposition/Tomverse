@@ -4,7 +4,10 @@ import { after, beforeEach, test } from "node:test";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
-import { MEMORY_EXTRACTION_LEASE_TTL_MS } from "@/lib/memoryExtractionCore";
+import {
+    MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS,
+    MEMORY_EXTRACTION_LEASE_TTL_MS,
+} from "@/lib/memoryExtractionCore";
 import {
     claimMemoryExtractionRun,
     claimNextExtractionChunk,
@@ -12,6 +15,7 @@ import {
 } from "@/lib/memoryExtractionService";
 import {
     dispatchPendingMemoryExtractionRuns,
+    driveMemoryExtractionRun,
     handleMemoryExtractionChunk,
     type ExtractionAdapterFactory,
 } from "@/lib/memoryExtractionWorker";
@@ -509,7 +513,8 @@ const titleOf = async (id: string) =>
 const providerCallsFor = (runId: string) =>
     prisma.memoryExtractionProviderCall.findMany({
         where: { chunk: { runId } },
-        select: { callIssued: true },
+        select: { callIssued: true, failureCode: true },
+        orderBy: { attemptCount: "asc" },
     });
 
 test("a source locked after the run was created never reaches the provider", async () => {
@@ -680,4 +685,43 @@ test("a run parked by memory off does not take a dispatcher slot", async () => {
     );
     assert.equal(parkedRow.status, "pending");
     assert.notEqual(waitingRow.status, "pending");
+});
+
+test("a chunk paused by memory off on its last attempt resumes through the real worker and ledger", async () => {
+    const { user, run } = await seedRun(1);
+    await prisma.memoryExtractionChunk.updateMany({
+        where: { runId: run.id },
+        data: { attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 1 },
+    });
+    const paused = await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-pause",
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            afterIssue: async () => {
+                await prisma.userMemorySettings.create({
+                    data: { userId: user.id, masterEnabled: false },
+                });
+            },
+        }),
+    });
+    assert.equal(paused.outcome, "blocked");
+    assert.equal(paused.reason, "memory_off");
+    const calls = await providerCallsFor(run.id);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].failureCode, "memory_off");
+
+    await prisma.userMemorySettings.update({
+        where: { userId: user.id },
+        data: { masterEnabled: true },
+    });
+    const resumed = await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-resume",
+        register: APPROVED_REGISTER,
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+    });
+    assert.equal(resumed.outcome, "completed");
+    assert.equal((await providerCallsFor(run.id)).length, 2, "a second, distinct ledger row");
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id, status: "active" } }), 1);
 });

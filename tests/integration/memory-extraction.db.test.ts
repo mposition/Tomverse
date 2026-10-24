@@ -493,7 +493,8 @@ test("memory off on a chunk's last attempt pauses the run, and turning it back o
         where: { runId: run.id },
     });
     assert.equal(chunk.status, "pending");
-    assert.equal(chunk.attemptCount, MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 1, "the attempt was not spent");
+    // The attempt number still rises: it names the provider call in the ledger.
+    assert.equal(chunk.attemptCount, MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS);
     assert.equal(
         (await prisma.memoryExtractionRun.findUniqueOrThrow({ where: { id: run.id } })).status,
         "pending"

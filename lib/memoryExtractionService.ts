@@ -789,9 +789,17 @@ export async function completeExtractionChunk(
         }
         const chunk = await tx.memoryExtractionChunk.findUnique({
             where: { runId_chunkIndex: { runId: lease.runId, chunkIndex } },
-            select: { attemptCount: true },
+            select: { id: true, attemptCount: true },
         });
         if (!chunk) return { applied: false, runStatus: "unknown" };
+        // Attempts handed back because memory was off are not failures and
+        // do not spend the retry budget (pauseExtractionChunk).
+        const pausedAttempts =
+            result.outcome === "failed"
+                ? await tx.memoryExtractionProviderCall.count({
+                      where: { chunkId: chunk.id, failureCode: "memory_off" },
+                  })
+                : 0;
 
         /*
           `skipped` is terminal and never goes through `chunkFailureDisposition`.
@@ -805,7 +813,9 @@ export async function completeExtractionChunk(
                 ? ({ status: "completed" } as const)
                 : result.outcome === "skipped"
                   ? ({ status: "skipped" } as const)
-                  : chunkFailureDisposition({ attemptCount: chunk.attemptCount });
+                  : chunkFailureDisposition({
+                        attemptCount: Math.max(0, chunk.attemptCount - pausedAttempts),
+                    });
         const settledNow =
             disposition.status === "completed" || disposition.status === "skipped";
 
@@ -919,13 +929,16 @@ export async function completeExtractionChunk(
 }
 
 /**
- * Hands a claimed chunk back as if it had never been attempted.
+ * Hands a claimed chunk back to pending without recording a failure.
  *
  * For memory turned off while the provider was answering: that is the user's
- * choice, not a failure of the chunk, so it must not spend one of the
+ * choice, not a failure of the chunk, so it must not count against the
  * chunk's bounded attempts -- otherwise turning memory off on a chunk's last
- * attempt would end the whole run as failed. Fenced on the lease like every
- * other chunk write.
+ * attempt would end the whole run as failed. `attemptCount` itself keeps
+ * rising, because with the chunk it is the identity of each provider call
+ * in the ledger; the attempt is instead left out of the retry budget by its
+ * ledger row's `memory_off` failure code (`completeExtractionChunk`).
+ * Fenced on the lease like every other chunk write.
  */
 export async function pauseExtractionChunk(
     lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">,
@@ -936,7 +949,6 @@ export async function pauseExtractionChunk(
         UPDATE "MemoryExtractionChunk"
         SET "status" = 'pending',
             "leaseGeneration" = NULL,
-            "attemptCount" = GREATEST(0, "attemptCount" - 1),
             "updatedAt" = ${now}
         WHERE "runId" = ${lease.runId}
           AND "chunkIndex" = ${chunkIndex}
