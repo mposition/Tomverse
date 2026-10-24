@@ -54,7 +54,7 @@ export function readVoiceCreditPayload(value: unknown): VoiceCreditPayload {
     for (const part of p.funding) {
       if (part.startSeconds !== previous || !Number.isSafeInteger(part.endSeconds) || part.endSeconds <= previous ||
           !Number.isSafeInteger(part.planCredits) || part.planCredits < 0 || !Array.isArray(part.addOnEntries) ||
-          part.addOnEntries.some(entry => !entry.lotId || !entry.purchaseId || !Number.isSafeInteger(entry.credits) || entry.credits < 0 || !Number.isSafeInteger(entry.fundedCostMicroUsd) || entry.fundedCostMicroUsd < 0) ||
+          part.addOnEntries.some(entry => !entry.lotId || (entry.purchaseId !== null && (typeof entry.purchaseId !== "string" || !entry.purchaseId)) || !Number.isSafeInteger(entry.credits) || entry.credits < 0 || !Number.isSafeInteger(entry.fundedCostMicroUsd) || entry.fundedCostMicroUsd < 0) ||
           ![part.dayStart, part.monthStart, part.createdAt, part.providerCostHold?.dayStart, part.providerCostHold?.monthStart].every(value => typeof value === "string" && Number.isFinite(Date.parse(value)))) throw new Error("Invalid voice funding.");
       const expected = fundingPrice(part.startSeconds, part.endSeconds, p.creditsPerMinute);
       if (part.planCredits + part.addOnEntries.reduce((sum, entry) => sum + entry.credits, 0) !== expected.credits || part.providerCostHold.amount !== expected.costMicroUsd || restoreVoiceBudgets(part.budgets).subject.reservedSeconds !== part.endSeconds - part.startSeconds) throw new Error("Invalid voice funding.");
@@ -114,35 +114,39 @@ export async function reserveVoiceConversationCredits(input: {
   continuous?: boolean;
 }) {
   if (input.creditsPerMinute !== 36 || !Number.isSafeInteger(input.maxSeconds) || input.maxSeconds < 1) throw new Error("Invalid voice reservation.");
-  const now = new Date();
   const subjectKey = getUserChatUsageKey(input.userId);
   const price = voiceDurationCharge(input.maxSeconds, input.creditsPerMinute);
   return prisma.$transaction(async tx => {
     // Same wallet lock used by ordinary Chat, including purchased-credit lots.
     await lockCreditAccount(tx, input.userId);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${subjectKey}))`;
+    const now = new Date();
     const idempotencyKey = `voice-conversation:${input.userId}:${input.requestId}`;
     if (await tx.chatCreditReservation.findUnique({ where: { idempotencyKey }, select: { id: true } })) {
       throw new ApiSecurityError(409, "VOICE_START_ALREADY_ATTEMPTED", "This voice start was already attempted. Check its outcome before starting again.");
     }
     const reservationId = `voice:${input.requestId}:${subjectKey}`;
     const funding = await reserveFunding(tx, { ...input, reservationId }, 0, input.maxSeconds, now);
+    // Wallet-lock and funding latency must not consume the paid session window.
+    // This same durable anchor is used by subsequent rolling renewals.
+    const fundedAt = new Date();
     const payload: VoiceCreditPayload = {
       kind: VOICE_CONVERSATION_SOURCE, conversationId: input.conversationId,
       creditsPerMinute: input.creditsPerMinute, maxSeconds: input.maxSeconds,
       dayStart: funding.dayStart, dayReserved: funding.dayReserved, monthStart: funding.monthStart, addOnEntries: funding.addOnEntries,
       budgets: funding.budgets, providerCostHold: funding.providerCostHold,
       ...(input.continuous ? { funding: [funding] } : {}),
-      closeAt: new Date(now.getTime() + (input.sessionSeconds ?? input.maxSeconds) * 1_000).toISOString(),
+      closeAt: new Date(fundedAt.getTime() + (input.sessionSeconds ?? input.maxSeconds) * 1_000).toISOString(),
     };
     return tx.chatCreditReservation.create({ data: {
       id: reservationId, userId: input.userId, subjectKey, traceId: input.requestId,
       source: VOICE_CONVERSATION_SOURCE, provider: "openai", modelId: VOICE_CONVERSATION_MODEL,
       idempotencyKey, status: "reserved", reservationPayload: payload as unknown as Prisma.InputJsonValue,
+      createdAt: fundedAt,
       reservedCredits: price.credits, reservedCostMicroUsd: BigInt(price.costMicroUsd),
       planReservedCredits: funding.planCredits, addOnReservedCredits: price.credits - funding.planCredits,
       pricingSnapshot: { creditsPerMinute: input.creditsPerMinute, microUsdPerMinute: 50_000, version: VOICE_CONVERSATION_PRICING_VERSION },
-      expiresAt: new Date(now.getTime() + input.maxSeconds * 1_000 + 60_000),
+      expiresAt: new Date(fundedAt.getTime() + input.maxSeconds * 1_000 + 60_000),
     } });
   });
 }
@@ -150,8 +154,11 @@ export async function reserveVoiceConversationCredits(input: {
 export const isVoiceCapacityRefusal = (error: unknown): error is { code: string } => ["CREDIT_BALANCE_INSUFFICIENT", "PLAN_DAILY_CREDIT_LIMIT_REACHED", "PROVIDER_BUDGET_EXHAUSTED", "VOICE_OPERATIONAL_LIMIT_REACHED", "ADDON_CREDITS_INSUFFICIENT", "ADDON_COST_ALLOWANCE_INSUFFICIENT"].includes((error as { code?: string })?.code ?? "");
 
 export async function reserveContinuousVoiceCredits(input: { userId: string; requestId: string; conversationId: string | null; creditsPerMinute: number }) {
-  const minimum = VOICE_CONVERSATION_INITIAL_SECONDS + VOICE_CONVERSATION_CLOSING_SECONDS;
-  const windows = [VOICE_CONVERSATION_RESERVATION_SECONDS, minimum + 5, minimum];
+  // Include setup plus a commit margin: a 50-second hold has no margin above
+  // the required five-second dispatch budget. Shorter windows would be refunded
+  // before dispatch after even a small DB delay, rather than starting usefully.
+  const minimum = VOICE_CONVERSATION_INITIAL_SECONDS + VOICE_CONVERSATION_CLOSING_SECONDS + 10;
+  const windows = [VOICE_CONVERSATION_RESERVATION_SECONDS, minimum];
   for (let index = 0; ; index++) {
     const seconds = windows[index];
     try { return await reserveVoiceConversationCredits({ ...input, maxSeconds: seconds, sessionSeconds: seconds - VOICE_CONVERSATION_CLOSING_SECONDS, continuous: true }); }

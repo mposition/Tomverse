@@ -46,7 +46,13 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 - The existing credit-account and subject locks, usage buckets, debt offset,
   plan allocation and purchased-credit ledger are reused. Reserve only the next
   60 seconds (including 30 seconds of closing headroom), initially up to 36 credits.
-  Smaller available balances can fund an initial window down to 45 seconds.
+  Smaller available balances can fund an initial window down to 55 seconds
+  (33 temporarily reserved credits, with unused credits returned).
+  Its deadline is anchored after wallet locks and funding complete. Before paid
+  dispatch, reject and refund a window that has lost its startup headroom. Bound
+  provider creation by the remaining window, refusing setup budgets below five
+  seconds even after the dispatch marker is stored. Preserve at least 15 seconds for
+  sideband attachment and initial interaction, plus the existing closing headroom.
   Renew the same reservation and provider connection in short windows before its
   funded deadline. There is no Tomverse session-duration cap. Each renewal checks
   the existing plan/purchased wallet, daily/monthly voice seconds and provider cost
