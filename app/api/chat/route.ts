@@ -1,6 +1,7 @@
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
+import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
 import {
     buildAttachmentPromptText,
     inertFilename,
@@ -3904,6 +3905,7 @@ async function handleChatPost(
                 ],
             });
         }
+        appendChatLocationContext(formattedMessages, currentLocation);
         /*
           Fail closed on files that are gone and have not been acknowledged.
 

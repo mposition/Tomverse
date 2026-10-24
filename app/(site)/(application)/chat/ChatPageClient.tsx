@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
-import { chatLocationSession } from "@/lib/chatLocationClient";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
 import { askReviewRoute } from "@/lib/reviewRoutingClient";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
@@ -3429,7 +3428,6 @@ export function ChatPageClient({
             size: attachment.size,
           })),
           webSearchMode: requestedWebSearchMode ?? webSearchMode,
-          locationEnabled: chatLocationSession.isEnabled(identityKey),
         });
         const requestPreflight = () =>
           fetch("/api/chat/preflight", {
@@ -3637,7 +3635,7 @@ export function ChatPageClient({
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
-    }, [effectiveDisabledPanels, identityKey, selectedModels, showToast, t, webSearchMode]);
+    }, [effectiveDisabledPanels, selectedModels, showToast, t, webSearchMode]);
 
   useEffect(() => {
     return () => {

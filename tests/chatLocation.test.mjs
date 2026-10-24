@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createChatLocationSession, parseChatLocation, CHAT_LOCATION_OFF } from "../packages/chat-core/src/location.ts";
-import { buildChatLocationPrompt } from "../lib/chatLocationPrompt.ts";
+import { appendChatLocationContext, buildChatLocationContext, buildChatLocationPrompt } from "../lib/chatLocationPrompt.ts";
+import { splitProviderInstructions } from "../lib/chatProviderPrompt.ts";
 import { buildChatTurnSystemBlocks } from "../lib/chatTurnSystemBlocks.ts";
 import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 
@@ -81,13 +82,11 @@ test("a denied, timed out, or unavailable fix disables sharing instead of reusin
 });
 
 test("only a fresh numeric location reaches the provider prompt, with contextual-use instructions", () => {
-  const prompt = buildChatLocationPrompt(fix({ injection: "INJECT_ME" }));
+  const prompt = buildChatLocationContext(fix({ injection: "INJECT_ME" }));
   assert.ok(prompt.includes('"latitude":-27.47'));
-  assert.ok(prompt.includes("only when the user's question depends"));
+  assert.ok(buildChatLocationPrompt().includes("only when the user's question depends"));
   assert.ok(!prompt.includes("INJECT_ME"));
-  const missing = buildChatLocationPrompt(fix({ timestamp: Date.now() - 180_000 }));
-  assert.ok(missing.includes("No current device location"));
-  assert.ok(!missing.includes("-27.47"));
+  assert.equal(buildChatLocationContext(fix({ timestamp: Date.now() - 180_000 })), "");
 });
 
 test("comparison reservation covers maximum location input, including deep research", () => {
@@ -102,7 +101,31 @@ test("comparison reservation covers maximum location input, including deep resea
       assert.ok(quote.promptTokens >= actual.promptTokens);
       const textTokens = actual.systemMessages.reduce((sum, message) => sum + estimateTextTokens(message.content), 0);
       assert.ok(actual.promptTokens >= textTokens);
-      assert.ok(actual.systemMessages.some((message) => message.content.includes('"latitude"')));
+      assert.ok(actual.systemMessages.every((message) => !message.content.includes('"latitude"')));
     }
   }
+});
+
+test("location changes leave the cached instructions and history byte-identical, enriching only the current request", () => {
+  const history = [{ role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" }];
+  const source = { role: "user", content: "What is near me?" };
+  const build = (currentLocation) => {
+    const messages = [{ role: "system", content: buildChatLocationPrompt() }, ...history, source];
+    appendChatLocationContext(messages, currentLocation);
+    return splitProviderInstructions(messages);
+  };
+  const first = build(fix());
+  const moved = build(fix({ latitude: -33.8688, timestamp: Date.now() + 1 }));
+  assert.equal(first.instructions, moved.instructions);
+  assert.deepEqual(first.messages.slice(0, -1), moved.messages.slice(0, -1));
+  assert.deepEqual(first.messages.slice(0, -1), history);
+  assert.ok(first.messages.at(-1).content.includes('"latitude":-27.47'));
+  assert.ok(moved.messages.at(-1).content.includes('"latitude":-33.869'));
+  assert.equal(source.content, "What is near me?");
+  assert.equal(build(null).messages.at(-1), source);
+  const parts = [{ type: "text", text: "Find this place" }, { type: "file", data: "example", mediaType: "image/png" }];
+  const multipart = [{ role: "user", content: parts }];
+  appendChatLocationContext(multipart, fix());
+  assert.deepEqual(multipart[0].content.slice(0, -1), parts);
+  assert.equal(parts.length, 2);
 });

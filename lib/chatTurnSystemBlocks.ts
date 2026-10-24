@@ -59,7 +59,7 @@ import {
   APP_MANAGED_WEB_SEARCH_TOOL_DEFINITION_TOKENS,
 } from "@/lib/appManagedWebSearchPrompt";
 import type { TurnAttachmentDescriptor } from "@/lib/messageAttachmentCore";
-import { buildChatLocationPrompt, CHAT_LOCATION_INPUT_TOKEN_RESERVE } from "@/lib/chatLocationPrompt";
+import { buildChatLocationContext, buildChatLocationPrompt, CHAT_LOCATION_INPUT_TOKEN_RESERVE } from "@/lib/chatLocationPrompt";
 import type { ChatLocation } from "@tomverse/chat-core";
 
 export type ChatTurnSystemBlocksInput = {
@@ -175,8 +175,9 @@ const artifactStateOf = (plan: ArtifactToolPlan | null): ImageArtifactState => {
 export const buildChatTurnSystemBlocks = (
   input: ChatTurnSystemBlocksInput
 ): ChatTurnSystemBlocks => {
-  const locationPrompt = buildChatLocationPrompt(input.currentLocation);
+  const locationPrompt = buildChatLocationPrompt();
   const locationTokens = estimateTextTokens(locationPrompt) +
+    estimateTextTokens(buildChatLocationContext(input.currentLocation)) +
     (input.reserveLocationInput ? CHAT_LOCATION_INPUT_TOKEN_RESERVE : 0);
   if (input.isDeepResearchTurn) {
     return {

@@ -12,6 +12,9 @@ export const withAndroidLocationPermission = (xml) => {
 
 export const withIosLocationPermission = (xml) => {
   let result = xml;
+  // The plugin requires both description keys, including for foreground-only
+  // use: https://capacitorjs.com/docs/apis/geolocation#ios . This is disclosure,
+  // not an Always authorization request or a UIBackgroundModes entitlement.
   for (const key of ["NSLocationWhenInUseUsageDescription", "NSLocationAlwaysAndWhenInUseUsageDescription"]) {
     if (result.includes(`<key>${key}</key>`)) continue;
     if (!result.includes("</dict>")) throw new Error("iOS plist dictionary closing tag missing.");

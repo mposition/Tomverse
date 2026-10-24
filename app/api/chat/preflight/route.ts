@@ -81,7 +81,6 @@ const preflightSchema = z
             )
             .max(5),
         webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
-        locationEnabled: z.boolean().optional(),
     })
     .strict();
 
@@ -440,7 +439,9 @@ export async function POST(request: Request) {
                     searchBackendReadiness
                 );
             const turnSystemBlocks = buildChatTurnSystemBlocks({
-                reserveLocationInput: payload.locationEnabled === true,
+                // Consent may change while preflight is pending. Reserve the
+                // bounded optional context regardless; settlement uses actual input.
+                reserveLocationInput: true,
                 modelId: model.id,
                 provider: model.provider,
                 isDeepResearchTurn: model.usageClass === "deep-research",

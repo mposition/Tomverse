@@ -14,7 +14,8 @@ const send = async (page: Page, text: string) => {
   const request = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/chat" && r.method() === "POST");
   await page.getByTestId("chat-send-button").click();
   const payload = (await request).postDataJSON();
-  await expect(page.getByTestId("chat-send-button")).toBeEnabled();
+  await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+  await expect(page.getByTestId("chat-stop-all-button")).toHaveCount(0);
   return payload;
 };
 
