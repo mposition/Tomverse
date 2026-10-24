@@ -73,6 +73,8 @@ const ALLOWED_REQUEST_HEADERS = [
   // trace the client sent as `client_supplied`, which is not a credential.
   "X-Request-ID",
   "X-Tomverse-Trace-Id",
+  "X-Tomverse-Conversation-Unlocks",
+  "X-Tomverse-Time-Zone",
 ] as const;
 
 /**

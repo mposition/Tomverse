@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { mobileCopy, mobileLanguages, type MobileLanguage } from "../../../locales/mobile";
 import type { ChatSummary, ChatTransport, Conversation, MobileAttachment } from "./chatTransport";
 import { SidebarAccount } from "./SidebarAccount";
+import { ConversationHistory } from "./ConversationHistory";
 import { Composer } from "./Composer";
 import { VoiceConversation, VoiceHistory } from "./VoiceConversation";
 import type { ToolChange } from "./ComposerTools";
@@ -244,8 +245,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <button className="primary" onClick={() => { if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true); else void signIn(); }} disabled={loading}>{copy.signIn} <span aria-hidden="true">→</span></button>
     </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={() => setView("chat")} onBusyChange={setReviewBusy} historyFooter={accountFooter} newConversationRequest={newReviewRequest} /> : view === "list" ? <section className="conversation-list"><div className="history-scroll">
       <div className="list-heading"><h1>{copy.chats}</h1><button className="primary" disabled={streaming || loading} onClick={newConversation}>{copy.newChat} +</button></div>
-      {chats.length === 0 && <p>{copy.emptyList}</p>}
-      {chats.map((chat) => <button className="conversation-row" key={chat.id} disabled={streaming || loading} onClick={() => void open(chat.id)}>{chat.title}<span aria-hidden="true">↗</span></button>)}
+      <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
+        const scope = epoch.current; const rows = await transport.list();
+        if (scope !== epoch.current) throw Error("SIGN_IN_REQUIRED");
+        setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
+      }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }} />
     </div>{accountFooter}</section> : <>
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {!conversation?.messages.length && !streaming && <div className="empty-chat"><AppIcon name="logo" /><h1>{copy.empty}</h1><p>{copy.hint}</p><span className="chat-product-pill"><AppIcon name="spark" />Tomverse Chat</span><div className="starters"><button onClick={() => { setDraft(copy.starterIdea); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="idea" />{copy.starterIdea}</button><button onClick={() => { setDraft(copy.starterFile); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}><AppIcon name="file" />{copy.starterFile}</button></div></div>}

@@ -22,7 +22,6 @@ import java.util.concurrent.Executors;
 import org.json.JSONObject;
 import android.app.KeyguardManager;
 import android.os.Build;
-import android.view.WindowManager;
 import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
@@ -49,9 +48,6 @@ public class MobileAuthPlugin extends Plugin {
     private boolean deviceAvailable() {
         KeyguardManager manager = (KeyguardManager) getContext().getSystemService(android.content.Context.KEYGUARD_SERVICE);
         return manager != null && manager.isDeviceSecure();
-    }
-    private void protectScreen(boolean enabled) {
-        main.post(() -> { if (enabled) getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE); else getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE); });
     }
     @PluginMethod public void getDeviceSecurity(PluginCall call) {
         queue.execute(() -> {
@@ -85,7 +81,7 @@ public class MobileAuthPlugin extends Plugin {
             boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled"));
             if (enabled && !deviceAvailable()) { call.reject("Configure device security first", "DEVICE_SECURITY_UNAVAILABLE"); return; }
             if (!getContext().getSharedPreferences("tomverse-device-security", 0).edit().putBoolean("enabled", enabled).commit()) { call.reject("Could not save security preference", "DEVICE_SECURITY_UNAVAILABLE"); return; }
-            protectScreen(enabled); call.resolve();
+            call.resolve();
         });
     }
     @PluginMethod public void unlockDevice(PluginCall call) {
@@ -119,7 +115,6 @@ public class MobileAuthPlugin extends Plugin {
     @Override public void load() {
         store = new SecureSessionStore(getContext());
         origin = getConfig().getString("apiOrigin", "https://tomverse.app");
-        protectScreen(lockEnabled());
     }
     private void validateOrigin() throws Exception {
         Uri uri = Uri.parse(origin);

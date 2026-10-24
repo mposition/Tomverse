@@ -1,10 +1,9 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
-import { getServerSession } from "next-auth/next";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { continuationShareRefusal } from "@/lib/continuationSharingPolicy";
 import { prisma } from "@/lib/prisma";
-import { authOptions } from "@/lib/auth";
 import { isMemoryInjectionEnabled } from "@/lib/appSettings";
 import { createShareToken } from "@/lib/shareTokens";
 import {
@@ -57,7 +56,9 @@ export async function POST(
   req: Request,
   context: RouteContext<"/api/conversations/[conversationId]/share">
 ) {
-  const session = await getServerSession(authOptions);
+  const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
@@ -332,7 +333,9 @@ export async function DELETE(
   req: Request,
   context: RouteContext<"/api/conversations/[conversationId]/share">
 ) {
-  const session = await getServerSession(authOptions);
+  const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Login required" }, { status: 401 });
   }

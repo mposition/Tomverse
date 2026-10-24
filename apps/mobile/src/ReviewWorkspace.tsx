@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ConversationHistory } from "./ConversationHistory";
 import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
 import { mobileErrorText } from "../../../locales/mobileErrors";
@@ -33,7 +34,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const [image, setImage] = useState<{ prompt: string; modelIds: string[]; preset: ImagePreset; unsupported: boolean } | null>(null);
   const [imageHistory, setImageHistory] = useState<string | null>(null); const [imageOpen, setImageOpen] = useState(false);
   const reviewCopy = mobileReviewCopy(language);
-  const [chats, setChats] = useState<ChatSummary[]>([]); const [query, setQuery] = useState("");
+  const [chats, setChats] = useState<ChatSummary[]>([]);
   const [picker, setPicker] = useState(false);
   const [activeModel, setActiveModel] = useState(""); const [partial, setPartial] = useState<Record<string, string>>({});
   const [streaming, setStreaming] = useState(false); const [loading, setLoading] = useState(true);
@@ -186,6 +187,10 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     </div></Sheet>}
     {crossReview && conversation && <CrossReview id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setCrossReview(false)} onBusy={setActionBusy} onSource={messageId => { const source = conversation.messages.find(message => message.id === messageId); if (source?.modelId) setActiveModel(source.modelId); setCrossReview(false); setTimeout(() => document.getElementById(`review-message-${messageId}`)?.scrollIntoView({ block: "center" }), 50); }} />}
     {imageOpen && <NativeImageWorkspace owner={owner} transport={transport} language={language} initial={image ?? undefined} historyId={imageHistory ?? undefined} onBusy={setActionBusy} onClose={() => setImageOpen(false)} onCreated={id => { setImageHistory(id); void transport.listReview!().then(setChats).catch(() => setError(copy.unavailable)); }} />}
-    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" disabled={loading || streaming || uncertain || actionBusy} onClick={newReview}>{c.newReview}</button><div className="history-scroll"><input type="search" aria-label={c.history} value={query} onChange={event => setQuery(event.target.value)} />{chats.filter(chat => chat.title.toLowerCase().includes(query.toLowerCase())).map(chat => <button className="conversation-row" key={chat.id} disabled={loading || streaming || uncertain || actionBusy} onClick={() => void open(chat.id)}>{chat.title}</button>)}</div>{historyFooter}</Sheet>}
+    {historyOpen && <Sheet title={c.history} closeLabel={copy.close} onClose={onCloseHistory}><button className="primary" disabled={loading || streaming || uncertain || actionBusy} onClick={newReview}>{c.newReview}</button><div className="history-scroll"><ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={loading || streaming || uncertain || actionBusy} onOpen={id => void open(id)} onRefresh={async () => {
+      const scope = request.current; const rows = await transport.listReview!();
+      if (scope !== request.current) throw Error("REVIEW_SCOPE_CHANGED");
+      setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
+    }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { request.current++; setConversation(null); setPartial({}); setUncertain(false); localStorage.removeItem(lastKey); } }} /></div>{historyFooter}</Sheet>}
   </section>;
 }

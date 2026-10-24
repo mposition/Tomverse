@@ -52,7 +52,8 @@ unused secret is discarded; the server family may remain valid until expiry.
 The client never replays that secret. The conservative unconfirmed-revocation
 flag is reported at the next logout, even if a newer sign-in caused the original
 cancellation. iOS race handling still requires Mac/device acceptance.
-Android retains FLAG_SECURE while this preference is enabled. Server session expiry,
+Device sign-in verification does not block Android screenshots or screen recording.
+Server session expiry,
 revocation, account freshness and rotating-secret consumption are unchanged.
 
 The Android system document picker grants access to user-selected files. No broad
@@ -141,6 +142,43 @@ by local fixture verification. New copy currently has English/Korean versions an
 uses English fallback for the other supported languages.
 
 ## Follow-up regression checks
+
+The history list uses flat rows with a 48px minimum height, 4px spacing, a two-line
+title clamp and a separate 44px-wide context-menu target. Chat and Review reuse the
+same list component. Internal conversation rows do not use an external-link arrow.
+The account footer stays below the independently scrolling list.
+
+History actions reuse the web endpoints for rename, ordered pinning, project
+management, public snapshot sharing/revocation, TXT export with the optional imported
+original, deletion and password locks. Title and message search reuse the server
+search route, including its locked-source checks, result expiry and incomplete-search
+signals. Filters match the web's locked, shared, comparison, model and project filters;
+pins precede the same calendar-date groups as the web. Public share and export
+visibility also use the server's plan capabilities. Creation of a public share,
+irreversible conversation deletion and source-inclusive export require explicit UI
+confirmation. Unknown mutations are never automatically repeated: a marker scoped
+to the signed-in account requires a read of saved state before another change.
+
+These additional bearer routes remain behind the existing default-off native parity
+deployment flag. The exact enrollment includes only their documented methods, not
+bulk conversation deletion/export, arbitrary share reads or administrative paths.
+The handlers use the verified bearer owner even if a different browser cookie is
+present, while retaining their existing ownership, lock, plan and operational checks.
+
+Native fetch still omits cookies. A successful password verification returns the
+existing signed, owner/conversation/password-bound unlock grant instead of setting a
+browser cookie. At most 32 grants are held in app memory and sent through
+`X-Tomverse-Conversation-Unlocks` only to conversation APIs. They retain the existing
+30-minute expiry; a native bearer never borrows a browser unlock cookie or an
+external-resource grant. Logout/session loss clears them, and an in-flight proof
+cannot reinsert one after logout. Passwords and grants are not persisted in WebView
+storage. The cookie-only web proof format and behavior remain unchanged.
+
+Usage reads refresh capability support before calling `/api/user/usage`, so retry
+can recover immediately after server activation. An older server does not receive
+that cookie-only request and cannot accidentally log out a valid native session.
+Unavailable usage never renders a fabricated zero. The usage route enrollment and
+capability declaration must be deployed together for production totals to load.
 
 Chat startup restores the signed-in account and history list while staying on the
 new-conversation screen. It never opens the last Chat automatically. Selecting a
