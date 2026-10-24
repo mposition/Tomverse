@@ -98,7 +98,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
       { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, terminal: false, displayKey: "AMUX-ADM-002" }],
     checkoutEvidence: [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 2,
       secretPath: 1, secretContent: 1, nonRegular: 0, unscannableContent: 0,
-      readFileCount: 2, readDigest: "b".repeat(64), readBodyPurged: false }],
+      readManifests: [{ manifestId: "m1", fileCount: 2, digest: "b".repeat(64),
+        bodyPurged: false }] }],
     referencePins: ["a".repeat(40)], referencePinAuditStatus: "declared",
   }, {
     // An idea with no chunk and no card comes back with SQL NULL aggregates.
@@ -129,7 +130,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.ok(sql.includes(`a."metadata"->'pinnedCommitShas'`));
   assert.ok(sql.includes(`jsonb_typeof(a."metadata") = 'object'`));
   assert.ok(sql.includes(`NOT (a."metadata" ? 'pinnedCommitShas')`));
-  assert.ok(sql.includes(`LEFT JOIN "AmuxIdeaTrackedCheckoutReadManifest" m`));
+  assert.ok(sql.includes(`FROM "AmuxIdeaTrackedCheckoutReadManifest" m`));
+  assert.ok(sql.includes(`ORDER BY m."createdAt", m."id"`), "pages keep their order");
   assert.ok(sql.includes(`ORDER BY e."referenceOrdinal"`));
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests, row.submittedAt],
     ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }], "2026-10-15T00:00:00.123Z"]);
@@ -138,7 +140,8 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.deepEqual(row.checkoutEvidence, [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
     excludedCount: 2, excludedReasons: { secretPath: 1, secretContent: 1,
       nonRegular: 0, unscannableContent: 0 },
-    readManifest: { fileCount: 2, digest: "b".repeat(64), bodyPurged: false } }]);
+    readManifests: [{ manifestId: "m1", fileCount: 2, digest: "b".repeat(64),
+      bodyPurged: false }] }]);
   assert.deepEqual(row.referencePins, [{ referenceOrdinal: 0,
     pinnedCommitSha: "a".repeat(40) }]);
   assert.equal(row.referencePinsLegacy, false);

@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { AmuxIdeaTrackedCheckoutReadManifest, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "../adminAudit.ts";
 import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
@@ -436,32 +436,16 @@ export async function ownerMayReadManifest(
   return rows.length === 1 && rows[0].allowed === true;
 }
 
-/** Owner-scoped Admin read of every page's files for one reference, in page
- * order and without repeats. Key retrieval happens after the read query, since
- * the external key store must not occupy a DB transaction. */
+/** Owner-scoped Admin read of one page's manifest. Key retrieval happens after
+ * the read query, since the external key store must not occupy a DB
+ * transaction. */
 export async function readAmuxTrackedCheckoutReadManifestForOwner(
-  actorUserId: string, ideaId: string, referenceOrdinal: number,
+  actorUserId: string, ideaId: string, manifestId: string,
 ): Promise<{ pinnedCommitSha: string; files: string[] } | null> {
-  const rows = await prisma.amuxIdeaTrackedCheckoutReadManifest.findMany({
-    where: { ideaId, referenceOrdinal, idea: { actorUserId } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  const row = await prisma.amuxIdeaTrackedCheckoutReadManifest.findFirst({
+    where: { id: manifestId, ideaId, idea: { actorUserId } },
   });
-  if (rows.length === 0) return null;
-  const files = new Set<string>();
-  for (const row of rows) {
-    const page = await readOwnerManifestPage(actorUserId, ideaId, row);
-    if (!page) return null;
-    if (page.pinnedCommitSha !== rows[0]!.pinnedCommitSha) {
-      throw new Error("read_manifest_integrity_unavailable");
-    }
-    for (const file of page.files) files.add(file);
-  }
-  return { pinnedCommitSha: rows[0]!.pinnedCommitSha, files: [...files] };
-}
-
-async function readOwnerManifestPage(actorUserId: string, ideaId: string,
-  row: AmuxIdeaTrackedCheckoutReadManifest,
-): Promise<{ pinnedCommitSha: string; files: string[] } | null> {
+  if (!row) return null;
   // The retention worker may be delayed. Its lag never extends Admin access
   // beyond the absolute seven-day deadline unless a valid hold is active.
   if (!await ownerMayReadManifest(actorUserId, ideaId, row.id)) return null;

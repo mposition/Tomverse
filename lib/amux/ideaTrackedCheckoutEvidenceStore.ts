@@ -127,14 +127,16 @@ export async function recordAmuxTrackedCheckoutEvidence(
   if (existing) {
     // A continuation page checks out the same pinned reference under its own
     // claim. Its proof is the same checkout, so the recorded evidence is bound
-    // to that claim too; anything else is still a second recording.
+    // to that claim too, with the page's own path digest; anything else is
+    // still a second recording.
     if (!maxClaim || !sameCheckoutProof(existing, inspected) ||
         (await readMaxClaimBindings(tx, existing.evidenceId, maxClaim.claimId))
           .length > 0) {
       throw new AmuxTrackedCheckoutEvidenceError("already_recorded");
     }
-    await bindEvidenceToMaxClaim(tx, existing, maxClaim);
-    return existing;
+    await bindEvidenceToMaxClaim(tx, existing, maxClaim,
+      inspected.excludedPathDigest);
+    return { ...existing, excludedPathDigest: inspected.excludedPathDigest };
   }
 
   const evidenceId = randomUUID();
@@ -164,14 +166,17 @@ export async function recordAmuxTrackedCheckoutEvidence(
   const stored = await readAmuxTrackedCheckoutEvidence(tx,
     inspected.ideaId, inspected.referenceOrdinal);
   if (!stored) throw new AmuxTrackedCheckoutEvidenceError("invalid_evidence");
-  if (maxClaim) await bindEvidenceToMaxClaim(tx, stored, maxClaim);
+  if (maxClaim) await bindEvidenceToMaxClaim(tx, stored, maxClaim,
+    stored.excludedPathDigest);
   return stored;
 }
 
 type InspectedCheckoutEvidence =
   NonNullable<ReturnType<typeof inspectAmuxTrackedCheckoutEvidence>>;
 
-/** The same pinned checkout yields the same aggregate proof on every page. */
+/** The same pinned checkout yields the same aggregate proof on every page.
+ * The path digest is not compared: the runner keys it per claim, so two pages
+ * of one checkout never share it. Each binding keeps its page's digest. */
 function sameCheckoutProof(stored: AmuxTrackedCheckoutEvidenceRead,
   inspected: InspectedCheckoutEvidence): boolean {
   return stored.pinnedCommitSha === inspected.pinnedCommitSha &&
@@ -180,12 +185,12 @@ function sameCheckoutProof(stored: AmuxTrackedCheckoutEvidenceRead,
     stored.excludedReasons.secret_content === inspected.excludedSecretContentCount &&
     stored.excludedReasons.non_regular === inspected.excludedNonRegularCount &&
     stored.excludedReasons.unscannable_content === inspected.excludedUnscannableCount &&
-    stored.excludedPathDigest === inspected.excludedPathDigest &&
     stored.excludedPathDigestKeyId === inspected.excludedPathDigestKeyId;
 }
 
 async function bindEvidenceToMaxClaim(tx: Prisma.TransactionClient,
   evidence: AmuxTrackedCheckoutEvidenceRead, maxClaim: AmuxMaxCheckoutClaim,
+  pageDigest: string,
 ): Promise<void> {
   await writeSystemAuditLog({ tx,
     systemActor: AMUX_V19_TRACKED_CHECKOUT_AUDIT_ACTOR,
@@ -199,7 +204,8 @@ async function bindEvidenceToMaxClaim(tx: Prisma.TransactionClient,
       invocationOrdinal: maxClaim.invocationOrdinal,
       ideaId: evidence.ideaId,
       referenceOrdinal: evidence.referenceOrdinal,
-      evidenceAuditLogId: evidence.auditLogId },
+      evidenceAuditLogId: evidence.auditLogId,
+      excludedPathDigest: pageDigest },
   });
 }
 
@@ -269,5 +275,10 @@ export async function readAmuxMaxTrackedCheckoutEvidence(tx: Prisma.TransactionC
       bound.ideaId !== ideaId ||
       bound.referenceOrdinal !== referenceOrdinal ||
       bound.evidenceAuditLogId !== evidence.auditLogId) return null;
-  return evidence;
+  // The claim's own page digest; bindings written before pages kept their
+  // digest belong to the page that recorded the row.
+  if (bound.excludedPathDigest === undefined) return evidence;
+  if (typeof bound.excludedPathDigest !== "string" ||
+      !/^[a-f0-9]{64}$/.test(bound.excludedPathDigest)) return null;
+  return { ...evidence, excludedPathDigest: bound.excludedPathDigest };
 }

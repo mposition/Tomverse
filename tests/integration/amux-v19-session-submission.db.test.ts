@@ -2441,28 +2441,40 @@ test("a continuation page reuses the reference's checkout evidence and keeps its
   });
 
   const second = await openPage(1);
+  // The runner keys the excluded-path digest per claim, so the next page of the
+  // same checkout reports the same counts under a different digest.
+  const nextPage = { ...proof, excludedPathDigest: "d".repeat(64) };
   const refused = (code: string) => (error: unknown) =>
     error instanceof AmuxTrackedCheckoutEvidenceError && error.code === code;
   // A different checkout is not the same proof, so it is still a second recording.
   await assert.rejects(prisma.$transaction((tx) =>
-    recordAmuxTrackedCheckoutEvidence(tx, { ...proof, excludedCount: 2,
+    recordAmuxTrackedCheckoutEvidence(tx, { ...nextPage, excludedCount: 2,
       excludedReasons: { ...proof.excludedReasons, secret_path: 2 } }, second)),
+  refused("already_recorded"));
+  await assert.rejects(prisma.$transaction((tx) =>
+    recordAmuxTrackedCheckoutEvidence(tx, { ...nextPage,
+      excludedPathDigestKeyId: "another-digest-key" }, second)),
   refused("already_recorded"));
   // Without a claim there is no page to bind the existing proof to.
   await assert.rejects(prisma.$transaction((tx) =>
     recordAmuxTrackedCheckoutEvidence(tx, proof)), refused("already_recorded"));
   const reused = await prisma.$transaction((tx) =>
-    recordAmuxTrackedCheckoutEvidence(tx, proof, second));
+    recordAmuxTrackedCheckoutEvidence(tx, nextPage, second));
   assert.equal(reused.evidenceId, evidence.evidenceId);
+  assert.equal(reused.excludedPathDigest, nextPage.excludedPathDigest);
   assert.equal(await prisma.amuxIdeaTrackedCheckoutEvidence.count({
     where: { ideaId } }), 1);
   await assert.rejects(prisma.$transaction((tx) =>
-    recordAmuxTrackedCheckoutEvidence(tx, proof, second)),
+    recordAmuxTrackedCheckoutEvidence(tx, nextPage, second)),
   refused("already_recorded"), "one binding per claim");
-  for (const page of [first, second]) {
-    assert.equal((await prisma.$transaction((tx) =>
-      readAmuxMaxTrackedCheckoutEvidence(tx, ideaId, 0, page)))?.evidenceId,
-    evidence.evidenceId, "each page reads the shared proof through its own binding");
+  // Each page reads the shared proof through its own binding, with the digest
+  // that page reported (the runner compares it on a lost-reply readback).
+  for (const [page, digest] of [[first, proof.excludedPathDigest],
+    [second, nextPage.excludedPathDigest]] as const) {
+    const read = await prisma.$transaction((tx) =>
+      readAmuxMaxTrackedCheckoutEvidence(tx, ideaId, 0, page));
+    assert.equal(read?.evidenceId, evidence.evidenceId);
+    assert.equal(read?.excludedPathDigest, digest);
   }
   assert.equal(await prisma.$transaction((tx) =>
     readAmuxMaxTrackedCheckoutEvidence(tx, ideaId, 0,
@@ -2501,5 +2513,8 @@ test("a continuation page reuses the reference's checkout evidence and keeps its
     row.ideaId === ideaId);
   assert.equal(progress?.checkoutEvidence.length, 1,
     "pages do not repeat the reference in the progress read");
-  assert.equal(progress?.checkoutEvidence[0]?.readManifest?.fileCount, 3);
+  assert.deepEqual(progress?.checkoutEvidence[0]?.readManifests.map((page) =>
+    [page.manifestId, page.fileCount, page.bodyPurged]),
+  [[firstManifestId, 1, false], [secondManifestId, 2, false]],
+  "each page keeps its own count in page order");
 });

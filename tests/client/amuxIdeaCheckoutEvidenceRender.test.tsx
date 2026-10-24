@@ -46,7 +46,7 @@ test("Admin idea detail shows pinned SHA and exclusion reasons without private p
   const markup = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary, { row: row([{
     referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 2,
     excludedReasons: { secretPath: 1, secretContent: 1,
-      nonRegular: 0, unscannableContent: 0 }, readManifest: null,
+      nonRegular: 0, unscannableContent: 0 }, readManifests: [],
   }]) }));
   assert.match(markup, /data-testid="amux-checkout-evidence"/);
   assert.ok(markup.includes("a".repeat(40)));
@@ -73,7 +73,8 @@ test("Admin shows read-file count, digest and purge state without stored paths",
     referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 0,
     excludedReasons: { secretPath: 0, secretContent: 0,
       nonRegular: 0, unscannableContent: 0 },
-    readManifest: { fileCount: 2, digest: "b".repeat(64), bodyPurged: false },
+    readManifests: [{ manifestId: "9b7e4b8e-2d34-48b2-95a5-333360b10816",
+      fileCount: 2, digest: "b".repeat(64), bodyPurged: false }],
   };
   const active = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
     { row: row([evidence]) }));
@@ -85,11 +86,35 @@ test("Admin shows read-file count, digest and purge state without stored paths",
   assert.ok(active.includes(m.checkoutReadEncrypted));
   assert.ok(!active.includes(m.checkoutReadPurged));
   assert.ok(!active.includes("docs/private.md"));
+  assert.ok(!active.includes(m.checkoutReadPage(1)), "one page needs no page label");
   const purged = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
-    { row: row([{ ...evidence, readManifest: { ...evidence.readManifest!,
-      bodyPurged: true } }]) }));
+    { row: row([{ ...evidence, readManifests: [{ ...evidence.readManifests[0]!,
+      bodyPurged: true }] }]) }));
   assert.ok(purged.includes(m.checkoutReadPurged));
   assert.ok(!purged.includes(m.checkoutReadEncrypted));
+});
+
+test("Admin shows each analysis page's read files on its own", () => {
+  const evidence: AmuxIdeaProgressRow["checkoutEvidence"][number] = {
+    referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 0,
+    excludedReasons: { secretPath: 0, secretContent: 0,
+      nonRegular: 0, unscannableContent: 0 },
+    readManifests: [
+      { manifestId: "9b7e4b8e-2d34-48b2-95a5-333360b10816", fileCount: 1,
+        digest: "b".repeat(64), bodyPurged: true },
+      { manifestId: "2f0c3c1e-5b7a-4e8f-9d1a-0c6b5e4d3a21", fileCount: 3,
+        digest: "c".repeat(64), bodyPurged: false }],
+  };
+  const markup = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: row([evidence]) }));
+  const m = markup.includes(adminAmuxIdeaProgressMessages.en.checkoutEvidenceTitle)
+    ? adminAmuxIdeaProgressMessages.en : adminAmuxIdeaProgressMessages.ko;
+  assert.equal(markup.match(/data-testid="amux-checkout-read-manifest"/g)?.length, 2);
+  for (const text of [m.checkoutReadPage(1), m.checkoutReadPage(2),
+    m.checkoutReadFiles(1), m.checkoutReadFiles(3), "b".repeat(64), "c".repeat(64),
+    m.checkoutReadPurged, m.checkoutReadEncrypted]) assert.ok(markup.includes(text), text);
+  // Only the page whose paths are still stored offers to show them.
+  assert.equal(markup.split(m.checkoutReadShowPaths).length - 1, 1);
 });
 
 test("both Admin locales distinguish retained and deleted read-file paths", () => {

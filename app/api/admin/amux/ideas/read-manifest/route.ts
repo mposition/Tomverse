@@ -41,24 +41,18 @@ export async function GET(request: Request): Promise<Response> {
     if (session instanceof NextResponse) return session;
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v19-read-manifest", { minute: 10, day: 100 });
+    // One analysis page's manifest, named by its id.
     const params = new URL(request.url).searchParams;
     const ideaId = params.get("ideaId");
-    const ordinalText = params.get("referenceOrdinal");
+    const manifestId = params.get("manifestId");
     if (params.size !== 2 || params.getAll("ideaId").length !== 1 ||
-        params.getAll("referenceOrdinal").length !== 1 ||
-        !ideaId || !UUID.test(ideaId) ||
-        !/^(0|[1-9][0-9]*)$/.test(ordinalText ?? "")) {
-      return NextResponse.json({ error: "schema_rejected" },
-        { status: 400, headers: noStore });
-    }
-    const referenceOrdinal = Number(ordinalText);
-    if (!Number.isSafeInteger(referenceOrdinal) ||
-        referenceOrdinal > 2_147_483_647) {
+        params.getAll("manifestId").length !== 1 ||
+        !ideaId || !UUID.test(ideaId) || !manifestId || !UUID.test(manifestId)) {
       return NextResponse.json({ error: "schema_rejected" },
         { status: 400, headers: noStore });
     }
     const manifest = await readAmuxTrackedCheckoutReadManifestForOwner(
-      session.user!.id!, ideaId, referenceOrdinal);
+      session.user!.id!, ideaId, manifestId);
     if (!manifest) return NextResponse.json({ error: "not_found" },
       { status: 404, headers: noStore });
     return NextResponse.json({ manifest }, { headers: noStore });
