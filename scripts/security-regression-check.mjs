@@ -833,11 +833,14 @@ const checks = [
     },
   },
   {
-    // The refusal carries its own 403 and code. Falling through to the route's
-    // generic handler would tell a suspended account the server broke.
-    name: "The extraction route answers an account refusal with its own status",
-    file: "app/api/memories/extraction-runs/route.ts",
-    test: (source) => source.includes("chatErrorResponse(error)"),
+    // Runs are started by the server when an import finishes (2026-10-24),
+    // so an account refusal has no route to answer through: it is reported as
+    // a skip with its own code, never thrown as a server failure.
+    name: "Automatic extraction reports an account refusal as a coded skip",
+    file: "lib/memoryExtractionAuto.ts",
+    test: (source) =>
+      source.includes("error instanceof ApiSecurityError") &&
+      source.includes("reason: error.code"),
   },
   {
     // The route makes two unguarded Stripe calls and one catch handles both.

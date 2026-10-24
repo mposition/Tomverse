@@ -18,7 +18,6 @@ import {
     type MemoryEvidenceInput,
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
-import { allowsBulkApproval } from "@/lib/memoryExtractionEvalRegister";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { lockCreditAccount } from "@/lib/creditDebt";
@@ -149,7 +148,13 @@ export type SerializedMemory = ReturnType<typeof serializeMemory>;
 
 type ConflictSubject = { id?: string; kind: string; statement: string; conflictKey: string | null };
 
-async function activeMemoryConflicts(
+/**
+ * The active memories a statement would contradict or duplicate: the same
+ * conflict key, or the same kind with the same normalized statement. Shared
+ * with extraction persistence, which supersedes these when the new statement
+ * is the newer one (lib/memoryExtractionPersistence.ts).
+ */
+export async function activeMemoryConflicts(
     client: Prisma.TransactionClient | typeof prisma,
     userId: string,
     item: ConflictSubject,
@@ -520,9 +525,17 @@ export async function editMemory(input: {
             evidence: evidenceInputs(item.evidences),
         });
         assertNotHardRejected(result);
-
-        const stayActive =
-            item.status === "active" && result.disposition === "accepted";
+        // There is no review queue to park an active memory in (owner
+        // decision 2026-10-24), so an edit the validator would not accept as
+        // it stands goes back to the author to rewrite, the way a new
+        // user-authored memory does.
+        if (item.status === "active" && result.disposition !== "accepted") {
+            throw new ApiSecurityError(
+                422,
+                "MEMORY_VALIDATION_FAILED",
+                "The edited memory needs to be rewritten."
+            );
+        }
         await tx.memoryItem.update({
             where: { id: item.id },
             data: {
@@ -536,11 +549,6 @@ export async function editMemory(input: {
                 // the row findable by words it no longer contains.
                 searchTerms: memoryRetrievalTerms(statement),
                 retrievalVersion: MEMORY_RETRIEVAL_VERSION,
-                ...(stayActive
-                    ? {}
-                    : item.status === "active"
-                      ? { status: "manual_review_required", approvedAt: null }
-                      : {}),
             },
         });
     });
@@ -559,10 +567,16 @@ export async function restoreMemoryGrounds(input: { userId: string; memoryId: st
             confidence: item.confidence, sensitivity: item.sensitivity as "standard" | "sensitive",
             expiresAt: item.expiresAt?.toISOString() ?? null, evidence: [{ sourceType: "manual" }] });
         assertNotHardRejected(result);
+        // The user writing the grounds is the approval, as for a memory they
+        // author from scratch: there is no review queue to park it in.
+        if (result.disposition !== "accepted") {
+            throw new ApiSecurityError(422, "MEMORY_VALIDATION_FAILED", "The memory needs to be rewritten.");
+        }
+        await assertNoActiveConflict(tx, input.userId, item, undefined);
         await tx.memoryEvidence.create({ data: { memoryItemId: item.id, userId: input.userId,
             sourceType: "manual", manualContent: grounds, evidenceDigest: manualEvidenceDigest(grounds) } });
-        await tx.memoryItem.update({ where: { id: item.id }, data: { status: "manual_review_required",
-            approvedAt: null, suspendedReason: null, userEdited: true, revision: { increment: 1 }, sensitivity: result.sensitivity } });
+        await tx.memoryItem.update({ where: { id: item.id }, data: { status: "active",
+            approvedAt: new Date(), suspendedReason: null, userEdited: true, revision: { increment: 1 }, sensitivity: result.sensitivity } });
     });
 }
 
@@ -599,100 +613,6 @@ export async function deleteMemory(userId: string, memoryId: string) {
         await tx.memoryItem.delete({ where: { id: item.id } });
         return { outcome: "deleted" as const };
     });
-}
-
-/**
- * §8.4 bulk approval: standard-sensitivity candidates whose stored content
- * re-validates as cleanly accepted AND bulk-safe. Demoted, sensitive and
- * conflicting candidates are skipped — individually reviewable, never
- * silently included.
- */
-export async function bulkApproveMemories(userId: string) {
-    // Ids only. Everything the decision rests on -- status, statement,
-    // evidence -- is read again under the account's memory lock: a source
-    // deletion that removes a candidate's user-role evidence between an
-    // unlocked read and this approval would otherwise leave an assistant-only
-    // factual memory active (lib/memoryItemLock.ts).
-    const candidates = await prisma.memoryItem.findMany({
-        where: { userId, status: "candidate", sensitivity: "standard" },
-        select: { id: true },
-        orderBy: { createdAt: "asc" },
-    });
-
-    let approved = 0;
-    let skipped = 0;
-    for (const { id } of candidates) {
-        try {
-            const outcome = await prisma.$transaction(async (tx) => {
-                await acquireUserMemoryLock(tx, userId);
-                const item = await tx.memoryItem.findFirst({
-                    where: { id, userId, status: "candidate", sensitivity: "standard" },
-                    include: {
-                        evidences: {
-                            select: {
-                                id: true,
-                                sourceType: true,
-                                manualContent: true,
-                                externalMessage: {
-                                    select: { role: true, externalConversationId: true },
-                                },
-                            },
-                        },
-                    },
-                });
-                if (!item) return "skipped" as const;
-                // Only an evaluated pair has shown zero critical bulk-safe
-                // adoptions; any other pair's candidates are approved one by one.
-                const pair = item.extractionModelId || item.promptVersion
-                    ? { extractionModelId: item.extractionModelId ?? "", promptVersion: item.promptVersion ?? "" }
-                    : null;
-                if (!allowsBulkApproval(pair)) return "skipped" as const;
-                // Bulk approval must not choose a winner merely because one
-                // of several topic proposals happens to be visited first.
-                if (memoryCanonicalKey(item.conflictKey)) {
-                    const competing = await tx.memoryItem.findFirst({
-                        where: { userId, id: { not: item.id }, conflictKey: item.conflictKey,
-                            status: { in: [...REVIEWABLE_STATUSES] } }, select: { id: true },
-                    });
-                    if (competing) return "skipped" as const;
-                }
-                const result = validateMemoryCandidate({
-                    kind: item.kind,
-                    statement: item.statement,
-                    confidence: item.confidence,
-                    sensitivity: "standard",
-                    expiresAt: item.expiresAt?.toISOString() ?? null,
-                    evidence: evidenceInputs(item.evidences),
-                });
-                if (result.disposition !== "accepted" || !result.bulkSafe) {
-                    return "skipped" as const;
-                }
-                await assertNoActiveConflict(
-                    tx,
-                    userId,
-                    item,
-                    undefined
-                );
-                const updated = await tx.memoryItem.updateMany({
-                    where: { id: item.id, status: "candidate" },
-                    data: { status: "active", approvedAt: new Date() },
-                });
-                return updated.count === 1 ? ("approved" as const) : ("skipped" as const);
-            });
-            if (outcome === "approved") approved += 1;
-            else skipped += 1;
-        } catch (error) {
-            if (
-                error instanceof ApiSecurityError &&
-                error.code === "MEMORY_ITEM_CONFLICT"
-            ) {
-                skipped += 1;
-                continue;
-            }
-            throw error;
-        }
-    }
-    return { approved, skipped };
 }
 
 const EXPORT_PAGE_SIZE = 100;

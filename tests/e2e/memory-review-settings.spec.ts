@@ -2,15 +2,17 @@ import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
 /**
- * Release B memory review — /settings/memory and its Data-tab entry point
- * (docs/policy/external-conversation-import-and-memory.md §8, §21, slice B3).
+ * Saved memories — /settings/memory and its settings entry point
+ * (docs/policy/external-conversation-import-and-memory.md §8, §21).
+ *
+ * There is no review queue since 2026-10-24: extracted memories activate by
+ * themselves, and this page lists, edits, pins and deletes them.
  *
  * The database is off in E2E, so every memory endpoint is mocked. The mock
  * keeps a mutable row list and applies PATCH/DELETE/POST to it, which is what
- * lets the specs assert the UI's reload-after-mutation behaviour (a row
- * moving from the review queue to the in-use list) rather than just the
- * request bodies. The §15 split of authority is exercised directly: the list
- * and settings mocks never answer MEMORY_FEATURE_DISABLED, while the
+ * lets the specs assert the UI's reload-after-mutation behaviour rather than
+ * just the request bodies. The §15 split of authority is exercised directly:
+ * the list and settings mocks never answer MEMORY_FEATURE_DISABLED, while the
  * disabled-flag spec serves it from the gated mutation routes only.
  */
 
@@ -53,7 +55,7 @@ const memoryRow = (
   id,
   kind: "preference",
   statement: `QA memory statement ${id}`,
-  status: "candidate",
+  status: "active",
   sensitivity: "standard",
   confidence: 0.9,
   importance: 0,
@@ -66,7 +68,7 @@ const memoryRow = (
   extractionModelId: "gpt-5-6-luna",
   promptVersion: "mem-extract-v1",
   createdAt: "2026-08-01T00:00:00.000Z",
-  approvedAt: null,
+  approvedAt: "2026-08-02T00:00:00.000Z",
   evidence: [],
   ...overrides,
 });
@@ -77,7 +79,6 @@ type MemoryApiState = {
   settingsPuts: Array<Record<string, unknown>>;
   patches: Array<{ memoryId: string; body: Record<string, unknown> }>;
   deletes: string[];
-  bulkApproveCalls: number;
   createBodies: Array<Record<string, unknown>>;
   exportReads: number;
   deleteAllBodies: Array<Record<string, unknown>>;
@@ -91,9 +92,10 @@ async function mockMemoryApi(
     unauthenticated?: boolean;
     /** Gated mutation routes answer 403 MEMORY_FEATURE_DISABLED. */
     mutationsDisabled?: boolean;
-    /** The first approve PATCH per memory answers 409 MEMORY_ITEM_CONFLICT. */
-    conflictOnFirstApprove?: boolean;
-    bulkResult?: { approved: number; skipped: number };
+    /** An edit PATCH answers 422 MEMORY_VALIDATION_FAILED. */
+    editValidationFails?: boolean;
+    /** The open extraction run the settings page reports, if any. */
+    activeRunId?: string;
     /** GET /api/memories/export answers 428 (step-up required). */
     exportReauthRequired?: boolean;
     /** POST /api/memories/delete-all answers 428 (step-up required). */
@@ -106,7 +108,6 @@ async function mockMemoryApi(
     settingsPuts: [],
     patches: [],
     deletes: [],
-    bulkApproveCalls: 0,
     createBodies: [],
     exportReads: 0,
     deleteAllBodies: [],
@@ -124,7 +125,6 @@ async function mockMemoryApi(
       code: "MEMORY_FEATURE_DISABLED",
     }),
   };
-  const conflicted = new Set<string>();
 
   await page.route(
     (url) => url.pathname === "/api/memories/settings",
@@ -157,9 +157,9 @@ async function mockMemoryApi(
           memoryRow(id, {
             kind: String(body.kind),
             statement: String(body.statement),
-            status: "active",
             userEdited: true,
-            approvedAt: "2026-08-03T00:00:00.000Z",
+            extractionModelId: null,
+            promptVersion: null,
             evidence: [
               {
                 id: `${id}-evidence`,
@@ -184,22 +184,6 @@ async function mockMemoryApi(
           limit: 100,
           memories: state.rows,
         })
-      );
-    }
-  );
-
-  await page.route(
-    (url) => url.pathname === "/api/memories/bulk-approve",
-    (route) => {
-      if (options.mutationsDisabled) return route.fulfill(disabledResponse);
-      state.bulkApproveCalls += 1;
-      for (const row of state.rows) {
-        if (row.status === "candidate" && row.sensitivity === "standard") {
-          row.status = "active";
-        }
-      }
-      return route.fulfill(
-        json(options.bulkResult ?? { approved: 0, skipped: 0 })
       );
     }
   );
@@ -257,24 +241,21 @@ async function mockMemoryApi(
     }
   );
 
-  // The launcher mounted inside this page asks for both of these. Left
-  // unmocked they would fall through to the memory-id route below and be
-  // answered as if a run id were a memory id.
-  await page.route(
-    (url) => url.pathname === "/api/memories/extraction-models",
-    (route) => route.fulfill(json({ pairs: [] }))
-  );
-
+  // Left unmocked it would fall through to the memory-id route below and be
+  // answered as if "extraction-runs" were a memory id.
   await page.route(
     (url) => url.pathname === "/api/memories/extraction-runs",
-    (route) => route.fulfill(json({ runs: [], activeRunId: null }))
+    (route) =>
+      route.fulfill(
+        json({ runs: [], activeRunId: options.activeRunId ?? null })
+      )
   );
 
   // Registered last, so it would win over the fixed-path routes above — the
   // negative lookahead keeps every sibling collection out of its reach.
   await page.route(
     (url) =>
-      /^\/api\/memories\/(?!settings$|bulk-approve$|export$|delete-all$|extraction-models$|extraction-runs$)[^/]+$/.test(
+      /^\/api\/memories\/(?!settings$|export$|delete-all$|extraction-runs$)[^/]+$/.test(
         url.pathname
       ),
     (route) => {
@@ -287,47 +268,26 @@ async function mockMemoryApi(
         );
         return route.fulfill(json({ outcome: "deleted" }));
       }
-      if (route.request().method() === "GET") {
-        return route.fulfill(json({ memory: row, conflicts: state.rows.filter(peer => peer.id !== memoryId && peer.status === "active" && peer.conflictKey === row?.conflictKey) }));
-      }
       if (options.mutationsDisabled) return route.fulfill(disabledResponse);
       const body = route.request().postDataJSON() as Record<string, unknown>;
       state.patches.push({ memoryId, body });
-      if (
-        body.action === "approve" &&
-        options.conflictOnFirstApprove &&
-        !conflicted.has(memoryId) &&
-        body.resolveConflict !== "supersede_existing"
-      ) {
-        conflicted.add(memoryId);
+      if (body.action === "edit" && options.editValidationFails) {
         return route.fulfill({
-          status: 409,
+          status: 422,
           contentType: "application/json",
           body: JSON.stringify({
-            error: "Another active memory holds the same key.",
-            code: "MEMORY_ITEM_CONFLICT",
+            error: "The edited memory needs to be rewritten.",
+            code: "MEMORY_VALIDATION_FAILED",
           }),
         });
       }
       if (row) {
-        if (body.action === "resolve_conflict") {
-          const selected = body.expectedConflicts as Array<{ id: string }>;
-          for (const peer of state.rows.filter(peer => selected.some(value => value.id === peer.id))) {
-            if (body.resolution !== "keep_both" && body.resolution !== "keep_existing") peer.status = body.resolution === "expire_existing" ? "expired" : "superseded";
-          }
-          row.status = body.resolution === "keep_existing" ? "rejected" : "active";
-          if (body.resolution === "merge") row.statement = String(body.mergedStatement);
-        } else if (body.action === "approve") {
+        if (body.action === "restore_grounds") {
+          // Writing the grounds is the approval: no review queue.
           row.status = "active";
-          row.approvedAt = "2026-08-03T00:00:00.000Z";
-        } else if (body.action === "restore_grounds") {
-          row.status = "manual_review_required";
-        } else if (body.action === "reject") {
-          row.status = "rejected";
         } else if (body.action === "edit") {
           row.statement = String(body.statement ?? row.statement);
           row.revision += 1;
-          if (row.status === "active") row.status = "manual_review_required";
         } else if (body.action === "pin" || body.action === "unpin") {
           row.pinned = body.action === "pin";
         }
@@ -344,15 +304,17 @@ const openMemoryPage = async (page: Page) => {
   await expect(page.getByTestId("memory-settings-card")).toBeVisible();
 };
 
-test.describe("memory review settings", () => {
-  test("groups stored memories by review state and reflects the account toggles", async ({
+test.describe("memory settings", () => {
+  test("lists memories in use and archived, and reflects the account toggles", async ({
     page,
   }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
       rows: [
-        memoryRow("cand-1", {
+        memoryRow("active-1", {
+          pinned: true,
+          statement: "QA active pinned memory",
           evidence: [
             {
               id: "ev-1",
@@ -362,38 +324,27 @@ test.describe("memory review settings", () => {
             },
           ],
         }),
-        memoryRow("review-1", {
-          status: "manual_review_required",
-          sensitivity: "sensitive",
-          statement: "QA sensitive candidate",
-        }),
-        memoryRow("active-1", {
-          status: "active",
-          pinned: true,
-          statement: "QA active pinned memory",
-          approvedAt: "2026-08-02T00:00:00.000Z",
-        }),
+        // A row left over from the review queue is not shown anywhere.
+        memoryRow("legacy-candidate", { status: "candidate", approvedAt: null }),
         memoryRow("old-1", {
-          status: "rejected",
-          statement: "QA rejected memory",
+          status: "superseded",
+          statement: "QA superseded memory",
         }),
       ],
     });
     await openMemoryPage(page);
 
-    await expect(page.getByTestId("memory-review-row")).toHaveCount(2);
-    await expect(page.getByTestId("memory-individual-review-badge")).toBeVisible();
-    await expect(page.getByTestId("memory-sensitive-badge")).toBeVisible();
+    await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
+    await expect(page.getByTestId("memory-pinned-badge")).toBeVisible();
     await expect(
       page.getByTestId("memory-evidence-source-link")
     ).toHaveAttribute("href", "/settings/imports/conversations/ext-conv-1");
-
-    await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
-    await expect(page.getByTestId("memory-pinned-badge")).toBeVisible();
     await expect(page.getByTestId("memory-archived-row")).toHaveCount(1);
     await expect(page.getByTestId("memory-archived-row")).toContainText(
-      "거절됨"
+      "교체됨"
     );
+    await expect(page.getByText("QA memory statement legacy-candidate")).toHaveCount(0);
+    await expect(page.getByTestId("memory-organising-notice")).toHaveCount(0);
 
     const master = page.getByTestId("memory-master-toggle");
     await expect(master).toBeChecked();
@@ -409,105 +360,28 @@ test.describe("memory review settings", () => {
     await expect(master).not.toBeChecked();
   });
 
-  test("approving a candidate re-fetches the list and moves it to the in-use group", async ({
+  test("an extraction still running is announced with a link to its progress", async ({
     page,
   }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
-    const api = await mockMemoryApi(page, {
-      rows: [memoryRow("cand-1", { statement: "QA approvable statement" })],
-    });
+    await mockMemoryApi(page, { activeRunId: "run-qa-1" });
     await openMemoryPage(page);
 
-    await page.getByTestId("memory-approve").click();
-    await expect(page.getByTestId("memory-review-empty")).toBeVisible();
-    await expect(page.getByTestId("memory-active-row")).toContainText(
-      "QA approvable statement"
+    await expect(page.getByTestId("memory-organising-notice")).toContainText(
+      "가져온 대화에서 기억을 정리하고 있습니다"
     );
-    expect(api.patches).toEqual([
-      { memoryId: "cand-1", body: { action: "approve" } },
-    ]);
-  });
-
-  test("a conflicting approval asks the user and only supersedes on explicit confirmation", async ({
-    page,
-  }) => {
-    await prepareGuestPage(page, "ko");
-    await mockAuthenticatedApi(page);
-    const api = await mockMemoryApi(page, {
-      rows: [memoryRow("cand-1", { conflictKey: "topic:preference:user.theme" }), memoryRow("old-1", { status: "active", conflictKey: "topic:preference:user.theme" })],
-      conflictOnFirstApprove: true,
-    });
-    await openMemoryPage(page);
-
-    await page.getByTestId("memory-approve").click();
-    await expect(page.getByTestId("memory-conflict")).toBeVisible();
-    expect(api.patches).toHaveLength(1);
-
-    await page.getByTestId("memory-conflict-replace").click();
-    await expect(page.getByTestId("memory-review-empty")).toBeVisible();
-    expect(api.patches[1]).toEqual({
-      memoryId: "cand-1",
-      body: { action: "resolve_conflict", resolution: "replace_existing", expectedRevision: 1, expectedConflicts: [{ id: "old-1", revision: 1 }] },
-    });
-  });
-
-  test("rejecting a candidate archives it", async ({ page }) => {
-    await prepareGuestPage(page, "ko");
-    await mockAuthenticatedApi(page);
-    const api = await mockMemoryApi(page, {
-      rows: [memoryRow("cand-1")],
-    });
-    await openMemoryPage(page);
-
-    await page.getByTestId("memory-reject").click();
-    await expect(page.getByTestId("memory-review-empty")).toBeVisible();
-    await expect(page.getByTestId("memory-archived-row")).toHaveCount(1);
-    expect(api.patches).toEqual([
-      { memoryId: "cand-1", body: { action: "reject" } },
-    ]);
-  });
-
-  test("bulk approval reports the approved and skipped counts", async ({
-    page,
-  }) => {
-    await prepareGuestPage(page, "ko");
-    await mockAuthenticatedApi(page);
-    const api = await mockMemoryApi(page, {
-      rows: [
-        memoryRow("cand-1"),
-        memoryRow("cand-2", { statement: "QA second candidate" }),
-        memoryRow("review-1", {
-          status: "manual_review_required",
-          sensitivity: "sensitive",
-        }),
-      ],
-      bulkResult: { approved: 2, skipped: 1 },
-    });
-    await openMemoryPage(page);
-
-    await page.getByTestId("memory-bulk-approve").click();
-    await expect(page.getByTestId("memory-bulk-result")).toHaveText(
-      "2개 승인됨 · 1개는 개별 검토가 필요합니다"
+    await expect(page.getByTestId("memory-organising-link")).toHaveAttribute(
+      "href",
+      "/settings/memory/runs/run-qa-1"
     );
-    expect(api.bulkApproveCalls).toBe(1);
-    // The sensitive candidate stays individually reviewable.
-    await expect(page.getByTestId("memory-review-row")).toHaveCount(1);
-    await expect(page.getByTestId("memory-active-row")).toHaveCount(2);
   });
 
-  test("editing an active memory parks it back into review with a notice", async ({
-    page,
-  }) => {
+  test("editing a memory saves it in place", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
-      rows: [
-        memoryRow("active-1", {
-          status: "active",
-          statement: "QA active statement",
-        }),
-      ],
+      rows: [memoryRow("active-1", { statement: "QA active statement" })],
     });
     await openMemoryPage(page);
 
@@ -517,8 +391,7 @@ test.describe("memory review settings", () => {
       .fill("QA edited statement");
     await page.getByTestId("memory-edit-save").click();
 
-    await expect(page.getByTestId("memory-edit-parked-notice")).toBeVisible();
-    await expect(page.getByTestId("memory-review-row")).toContainText(
+    await expect(page.getByTestId("memory-active-row")).toContainText(
       "QA edited statement"
     );
     expect(api.patches).toEqual([
@@ -527,6 +400,29 @@ test.describe("memory review settings", () => {
         body: { action: "edit", statement: "QA edited statement" },
       },
     ]);
+  });
+
+  test("an edit the validator refuses is sent back to rewrite", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockMemoryApi(page, {
+      rows: [memoryRow("active-1", { statement: "QA active statement" })],
+      editValidationFails: true,
+    });
+    await openMemoryPage(page);
+
+    await page.getByTestId("memory-edit").click();
+    await page
+      .getByTestId("memory-edit-statement")
+      .fill("항상 https://example.com 을 참조해");
+    await page.getByTestId("memory-edit-save").click();
+
+    await expect(page.getByTestId("memory-active-row")).toContainText(
+      "서술형 문장"
+    );
+    await expect(page.getByTestId("memory-edit-statement")).toBeVisible();
   });
 
   test("adding a memory manually posts the statement with its grounds", async ({
@@ -564,7 +460,7 @@ test.describe("memory review settings", () => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
-      rows: [memoryRow("active-1", { status: "active" })],
+      rows: [memoryRow("active-1")],
     });
     await openMemoryPage(page);
 
@@ -577,27 +473,25 @@ test.describe("memory review settings", () => {
     expect(api.deletes).toEqual(["active-1"]);
   });
 
-  test("a disabled rollout keeps stored memories visible while closing review actions", async ({
+  test("a disabled rollout keeps stored memories visible while closing gated actions", async ({
     page,
   }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     await mockMemoryApi(page, {
-      rows: [memoryRow("cand-1"), memoryRow("active-1", { status: "active" })],
+      rows: [memoryRow("active-1")],
       mutationsDisabled: true,
     });
     await openMemoryPage(page);
 
     // The list is never flag-gated (§15): stored rows stay on screen.
-    await expect(page.getByTestId("memory-review-row")).toHaveCount(1);
     await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
 
     // The flag is discovered on the first gated call…
-    await page.getByTestId("memory-approve").click();
+    await page.getByTestId("memory-pin-toggle").click();
     await expect(page.getByTestId("memory-disabled-banner")).toBeVisible();
     // …after which every gated control is closed, while delete stays live.
-    await expect(page.getByTestId("memory-approve")).toBeDisabled();
-    await expect(page.getByTestId("memory-bulk-approve")).toBeDisabled();
+    await expect(page.getByTestId("memory-pin-toggle")).toBeDisabled();
     await expect(page.getByTestId("memory-create-submit")).toBeDisabled();
     await expect(page.getByTestId("memory-delete").first()).toBeEnabled();
   });
@@ -606,7 +500,7 @@ test.describe("memory review settings", () => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
-      rows: [memoryRow("active-1", { status: "active" })],
+      rows: [memoryRow("active-1")],
     });
     await openMemoryPage(page);
 
@@ -639,10 +533,7 @@ test.describe("memory review settings", () => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
-      rows: [
-        memoryRow("cand-1"),
-        memoryRow("active-1", { status: "active" }),
-      ],
+      rows: [memoryRow("active-1"), memoryRow("active-2")],
     });
     await openMemoryPage(page);
 
@@ -660,7 +551,6 @@ test.describe("memory review settings", () => {
       { confirm: true, confirmationText: "DELETE ALL MEMORIES" },
     ]);
     // The list is re-read, so the emptied store is what the page shows.
-    await expect(page.getByTestId("memory-review-row")).toHaveCount(0);
     await expect(page.getByTestId("memory-active-row")).toHaveCount(0);
   });
 
@@ -670,7 +560,7 @@ test.describe("memory review settings", () => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
-      rows: [memoryRow("active-1", { status: "active" })],
+      rows: [memoryRow("active-1")],
       deleteAllReauthRequired: true,
     });
     await openMemoryPage(page);
@@ -726,29 +616,7 @@ test.describe("memory review settings", () => {
   });
 });
 
-for (const [choice, resolution] of [["keep", "keep_existing"], ["both", "keep_both"], ["expire", "expire_existing"], ["merge", "merge"]] as const) {
-  test(`the conflict review supports ${resolution}`, async ({ page }) => {
-    await prepareGuestPage(page, "en");
-    await mockAuthenticatedApi(page);
-    const api = await mockMemoryApi(page, { rows: [memoryRow("candidate", { conflictKey: "topic:preference:user.drink" }),
-      memoryRow("existing", { status: "active", conflictKey: "topic:preference:user.drink" })] });
-    await openMemoryPage(page);
-    await page.getByTestId("memory-compare").click();
-    await expect(page.getByTestId("memory-conflict-peers")).toContainText("QA memory statement existing");
-    await page.getByTestId(`memory-conflict-${choice}`).click();
-    if (choice === "merge") {
-      await expect(page.getByTestId("memory-conflict-merge-save")).toBeDisabled();
-      await page.getByTestId("memory-conflict-merged-statement").fill("The user prefers tea at home and coffee at work");
-      await page.getByTestId("memory-conflict-grounds").fill("These preferences apply in different places");
-      await page.getByTestId("memory-conflict-merge-save").click();
-    }
-    await expect(page.getByTestId("memory-conflict")).toHaveCount(0);
-    expect(api.patches[0].body.resolution).toBe(resolution);
-    if (choice === "both") await expect(page.getByTestId("memory-active-row")).toHaveCount(2);
-  });
-}
-
-test("a retained source-deleted memory returns to review only after new grounds", async ({ page }) => {
+test("a retained source-deleted memory comes back in use on new grounds", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page);
   const api = await mockMemoryApi(page, { rows: [memoryRow("retained", { status: "suspended_by_source_delete" })] });
@@ -757,22 +625,7 @@ test("a retained source-deleted memory returns to review only after new grounds"
   await expect(page.getByTestId("memory-restore-save")).toBeDisabled();
   await page.getByTestId("memory-restore-grounds").fill("I confirm this preference myself");
   await page.getByTestId("memory-restore-save").click();
-  await expect(page.getByTestId("memory-review-row")).toHaveCount(1);
-  await expect(page.getByTestId("memory-active-row")).toHaveCount(0);
-  expect(api.patches[0].body).toEqual({ action: "restore_grounds", groundsText: "I confirm this preference myself" });
-  await page.getByTestId("memory-approve").click();
   await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
-});
-
-test("legacy memory comparison lets the user choose the related existing memory", async ({ page }) => {
-  await prepareGuestPage(page, "en");
-  await mockAuthenticatedApi(page);
-  const api = await mockMemoryApi(page, { rows: [memoryRow("candidate", { conflictKey: "preference:coffee" }),
-    memoryRow("existing", { status: "active", conflictKey: "preference:tea" })] });
-  await openMemoryPage(page);
-  await page.getByTestId("memory-compare").click();
-  await page.getByTestId("memory-conflict-other").selectOption("existing");
-  await page.getByTestId("memory-conflict-both").click();
-  await expect(page.getByTestId("memory-active-row")).toHaveCount(2);
-  expect(api.patches[0].body.otherMemoryId).toBe("existing");
+  await expect(page.getByTestId("memory-archived-row")).toHaveCount(0);
+  expect(api.patches[0].body).toEqual({ action: "restore_grounds", groundsText: "I confirm this preference myself" });
 });

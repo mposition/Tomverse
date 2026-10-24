@@ -9,7 +9,6 @@ import {
     claimMemoryExtractionRun,
     claimNextExtractionChunk,
     createMemoryExtractionRun,
-    estimateMemoryExtraction,
 } from "@/lib/memoryExtractionService";
 import {
     dispatchPendingMemoryExtractionRuns,
@@ -154,15 +153,10 @@ const seedRun = async (conversationCount = 1) => {
         userId: user.id,
         extractionModelId: "gpt-5-6-luna",
         promptVersion: "mem-extract-v1",
-        plan: "Free" as const,
         selectedConversationIds: conversationIds,
         register: APPROVED_REGISTER,
     };
-    const estimate = await estimateMemoryExtraction(input);
-    const run = await createMemoryExtractionRun({
-        ...input,
-        confirmedCredits: estimate.estimatedCredits,
-    });
+    const run = await createMemoryExtractionRun(input);
     await setExtractionFlag(true);
     return { user, run, conversationIds };
 };
@@ -222,7 +216,7 @@ test("a chunk's answer is stored with the pair that produced it", async () => {
     // be identified if the pair was written down here.
     assert.equal(stored[0].extractionModelId, "gpt-5-6-luna");
     assert.equal(stored[0].promptVersion, "mem-extract-v1");
-    assert.equal(stored[0].status, "candidate");
+    assert.equal(stored[0].status, "active");
 });
 
 test("a chunk reads only its own account's conversations", async () => {
@@ -604,19 +598,19 @@ test("a source locked while the request was being prepared stops it before it le
     assert.equal(await prisma.memoryItem.count(), 0);
 });
 
-test("an answer that arrived after its source was locked is kept as an ordinary candidate", async () => {
+test("an answer that arrived after its source was locked is kept like any other answer", async () => {
     // The request left while the source was open and the lock landed while
     // the provider was answering. The exposure has already happened and
     // cannot be undone; what is left to decide is what to do with the answer.
     //
-    // Kept, and kept as `candidate` -- not `suspended_by_source_lock`. That
-    // status is written only over `active` and restored to `active` on
-    // unlock (lib/memorySourceLock.ts), so storing a candidate in it would let
-    // unlocking promote something the user never approved. Nor does keeping it
-    // expose anything: retrieval excludes a memory whose evidence is all
-    // locked at read time, whatever its status says -- pinned by "a locked
-    // source's memory is excluded from retrieval even if its status was
-    // missed" in tests/integration/external-conversation-lock.db.test.ts.
+    // Kept, and stored active like every validator-clean answer since the
+    // review queue went (2026-10-24). Keeping it exposes nothing: retrieval
+    // excludes a memory whose evidence is all locked at read time, whatever
+    // its status says -- pinned by "a locked source's memory is excluded from
+    // retrieval even if its status was missed" in
+    // tests/integration/external-conversation-lock.db.test.ts -- and the §7.1
+    // reconciliation moves it to `suspended_by_source_lock`, from which the
+    // unlock restores it.
     const { run } = await seedRun(1);
     const { lease, chunk } = await claimFirstChunk(run.id);
 
@@ -636,8 +630,8 @@ test("an answer that arrived after its source was locked is kept as an ordinary 
         select: { status: true, approvedAt: true },
     });
     assert.equal(stored.length, 1);
-    assert.equal(stored[0].status, "candidate");
-    assert.equal(stored[0].approvedAt, null);
+    assert.equal(stored[0].status, "active");
+    assert.ok(stored[0].approvedAt);
     const calls = await providerCallsFor(run.id);
     assert.equal(calls[0]?.callIssued, true, "the call really did go out");
 });

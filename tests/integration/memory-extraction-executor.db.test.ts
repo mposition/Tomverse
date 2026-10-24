@@ -13,7 +13,6 @@ import {
     claimNextExtractionChunk,
     createMemoryExtractionRun,
     driveMemoryExtractionRunSlice,
-    estimateMemoryExtraction,
 } from "@/lib/memoryExtractionService";
 import { prisma } from "@/lib/prisma";
 
@@ -144,15 +143,10 @@ const seedRun = async () => {
         userId: user.id,
         extractionModelId: "gpt-5-6-luna",
         promptVersion: "mem-extract-v1",
-        plan: "Free" as const,
         selectedConversationIds: [conversation.id],
         register: APPROVED_REGISTER,
     };
-    const estimate = await estimateMemoryExtraction(base);
-    const run = await createMemoryExtractionRun({
-        ...base,
-        confirmedCredits: estimate.estimatedCredits,
-    });
+    const run = await createMemoryExtractionRun(base);
     await setFlag(true);
     return { user, run };
 };
@@ -249,7 +243,8 @@ test("the executor calls, stores and settles one chunk end to end (§11)", async
         where: { userId: user.id },
     });
     assert.equal(items.length, 1);
-    assert.equal(items[0].status, "candidate");
+    // No review queue: a validator-clean answer is stored active.
+    assert.equal(items[0].status, "active");
 
     const call = await prisma.memoryExtractionProviderCall.findFirstOrThrow({
         where: { chunk: { runId: run.id } },

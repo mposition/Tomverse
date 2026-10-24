@@ -9,6 +9,15 @@
  * a provider does so elsewhere, which is what keeps "is a model being called
  * yet?" answerable by reading imports rather than by tracing control flow.
  *
+ * ## What v10 changed
+ *
+ * Health. Extraction no longer has a review queue (owner decision
+ * 2026-10-24): a validator-clean standard candidate activates on its own and
+ * anything sensitive is not stored. v9 asked for health facts marked
+ * sensitive, which now means dropping them. v10 asks for the behaviour the
+ * fact creates with the reason left out ("does not drink coffee"), and for
+ * nothing when the behaviour still names or implies the condition.
+ *
  * ## What v7 added
  *
  * One block: `MEMORY_EXTRACTION_BOUNDARY_RULE`, spliced in beside the polarity
@@ -198,7 +207,7 @@ import {
  * `tests/memoryExtractionPromptFingerprint.test.mjs` pins a digest over all
  * four, so changing any of them without bumping this fails the build.
  */
-export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v9";
+export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v10";
 
 /** Bounds carried into the schema so the model is told them, not just checked. */
 export const MEMORY_EXTRACTION_MAX_CANDIDATES_PER_CHUNK = 25;
@@ -374,7 +383,7 @@ export const MEMORY_EXTRACTION_BOUNDARY_RULE = [
     "",
     "A hypothetical is not a memory. A present-tense statement yields no candidate when it only closes the hypothetical and does not independently establish a durable, future-useful fact. \"If I quit and studied abroad…\" followed by \"I was just imagining it, I'm still at my job\" leaves nothing to store: the second sentence exists to close the first.",
     "",
-    "When a user writes on someone else's behalf or asks about someone else, the relationship that surfaces is part of the question, not a fact about the user. \"Proofread my nephew's letter\" is a task, not a record that they have a nephew. Store such a relationship only when the user separately establishes it as an ongoing part of their own life. Health information about another person is never stored as that person's; at most it becomes a minimised constraint about the user, and it is sensitive.",
+    "When a user writes on someone else's behalf or asks about someone else, the relationship that surfaces is part of the question, not a fact about the user. \"Proofread my nephew's letter\" is a task, not a record that they have a nephew. Store such a relationship only when the user separately establishes it as an ongoing part of their own life. Health information about another person is never stored as that person's; at most it becomes the user's own behaviour, written without the condition.",
 ].join("\n");
 
 /**
@@ -678,9 +687,9 @@ const SYSTEM_PROMPT = [
     "",
     "Write each statement in the language of the user evidence you cite. If the evidence you cite is in more than one language, use the language of most of it; if that is even, use the language of the most recent piece of user evidence you cite. The assistant's own messages never decide the language.",
     "",
-    "Health information — allergies and intolerances, diagnoses and conditions, medication and treatment, mental health, pregnancy and reproductive health — is worth extracting, and you must mark it \"sensitive\". Mark it sensitive whether it is about the user or about someone in their life, and whether you state it plainly or only as the constraint it creates: \"The user needs step-free routes when travelling with a wheelchair-using relative\" is still sensitive.",
+    "Never store health information — allergies and intolerances, diagnoses and conditions, medication and treatment, mental health, pregnancy and reproductive health — whether it is about the user or about someone in their life. When it creates a durable behaviour that is useful on its own, write only that behaviour and leave the reason out: \"I have a caffeine intolerance so I don't drink coffee\" becomes \"The user does not drink coffee\", marked \"standard\". If the behaviour cannot be written without naming or implying the condition, or the fact is the health information itself, extract nothing.",
     "",
-    "For someone other than the user, never store a medical profile. Store only the minimum context the user needs, written as the user's own constraint. \"The user's daughter is coeliac\" is a profile; \"The user cooks gluten free at home because their daughter is coeliac\" is the constraint. If another person's condition is mentioned but changes nothing for the user, extract nothing.",
+    "For someone other than the user, never store a medical profile. \"The user's daughter is coeliac\" is a profile; \"The user cooks gluten free at home\" is the behaviour, with the reason left out. If another person's condition is mentioned but changes nothing for the user, extract nothing.",
     "",
     "Return JSON only, matching the requested schema. If the conversations support nothing durable, return an empty candidates array — an empty answer is correct and expected.",
 ].join("\n");
@@ -701,7 +710,7 @@ const KIND_GUIDE = [
     "Expertise includes a durable level of proficiency, including being a beginner or having no experience in a domain. Use explanation_depth when the user asks how much background, technical detail, or explanation an answer should provide. Do not infer an answer-style preference merely from a factual proficiency level.",
     "",
     "Among the factual kinds, three boundaries decide, and they apply in this order.",
-    "1. A functional health or accessibility limit is a constraint. A user who says a condition stops one way of presenting an answer from working for them has stated a constraint rather than an identity, and it is sensitive.",
+    "1. A functional health or accessibility limit is a constraint. A user who says a condition stops one way of presenting an answer from working for them has stated a constraint rather than an identity; write the presentation they need without the condition.",
     "2. identity is the residual: use it only when no more specific factual kind fits. Where the user lives and when they were born are identity because nothing more specific applies.",
     "3. At a family or household boundary, relationship beats identity. How many siblings a user has, or has none, is a relationship rather than a fact about who they are.",
     "",

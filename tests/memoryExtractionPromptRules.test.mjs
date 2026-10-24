@@ -38,8 +38,8 @@ const promptText = () => {
     return `${prompt.system}\n${prompt.user}`;
 };
 
-test("the shipped extraction contract is v9", () => {
-    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v9");
+test("the shipped extraction contract is v10", () => {
+    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v10");
 });
 
 /* ------------------------------------------------- A. output language -- */
@@ -108,36 +108,34 @@ test("B: decision means settled, and weighing up is extracted as nothing", () =>
 
 /* ------------------------------------------------------------ C. health -- */
 
-test("C: health is extracted and always marked sensitive", () => {
-    // Finding C: v2's strict schema made `sensitivity` required, the model
-    // began marking health sensitive, and the old scorer read that as a miss.
-    // The prompt now asks for the behaviour rather than tolerating it.
+test("C: health information itself is never stored", () => {
+    // v10: with no review queue a sensitive candidate is dropped, so the
+    // prompt stops asking for health facts and asks for what they change.
     const text = promptText();
     assert.match(text, /allergies and intolerances/i);
     assert.match(text, /diagnoses and conditions/i);
     assert.match(text, /medication and treatment/i);
     assert.match(text, /mental health/i);
     assert.match(text, /pregnancy and reproductive health/i);
-    assert.match(text, /worth extracting/i);
-    assert.match(text, /mark it "sensitive"/i);
+    assert.match(text, /Never store health information/i);
+    assert.doesNotMatch(text, /worth extracting/i);
 });
 
-test("C: minimising a health fact does not lower its sensitivity", () => {
-    // The rule batch 101 asked for: a statement derived from health is still
-    // health information, so the prompt says so rather than leaving it to the
-    // validator alone.
+test("C: the behaviour a health fact creates is kept without its reason", () => {
     const text = promptText();
-    assert.match(text, /whether you state it plainly or only as the constraint/i);
-    assert.match(text, /step-free routes.*still sensitive/i);
+    assert.match(text, /write only that behaviour and leave the reason out/i);
+    assert.match(text, /"The user does not drink coffee", marked "standard"/i);
+    // And the case where the behaviour itself gives the condition away.
+    assert.match(text, /cannot be written without naming or implying the condition/i);
 });
 
 test("C: a third party gets the minimum context, not a medical profile", () => {
     const text = promptText();
     assert.match(text, /never store a medical profile/i);
-    assert.match(text, /written as the user's own constraint/i);
     // Both sides of the worked example, so the contrast survives an edit.
     assert.match(text, /is a profile/i);
-    assert.match(text, /is the constraint/i);
+    assert.match(text, /is the behaviour, with the reason left out/i);
+    assert.doesNotMatch(text, /because their daughter is coeliac/i);
     // And the case where nothing should be stored at all.
     assert.match(text, /changes nothing for the user, extract nothing/i);
 });
@@ -434,7 +432,7 @@ test("G5: someone else's relationship belongs to the question, not to the user",
     // And the health carve-out keeps the earlier minimisation rule rather
     // than replacing it.
     assert.match(text, /never stored as that person's/i);
-    assert.match(text, /minimised constraint about the user, and it is sensitive/i);
+    assert.match(text, /becomes the user's own behaviour, written without the condition/i);
 });
 
 test("G: the boundary rule suppresses and never grants", () => {
@@ -477,13 +475,21 @@ test("G: the boundary rule is the recorded text, not a paraphrase of it", () => 
     );
     const start = audit.indexOf("BOUNDARY: some things a user says are not memories.");
     assert.ok(start > 0, "the recorded wording is no longer in the implementation audit");
+    // v10 (owner decision 2026-10-24, no review queue) rewrote the one health
+    // clause at the end; everything else is still the recorded wording.
     const approved = audit.slice(start, audit.indexOf("```", start)).trim();
     const unwrap = (value) =>
         value
             .split(/\n\s*\n/)
             .map((paragraph) => paragraph.split(/\s+/).join(" ").trim())
             .join("\n");
-    assert.equal(unwrap(boundary.MEMORY_EXTRACTION_BOUNDARY_RULE), unwrap(approved));
+    assert.equal(
+        unwrap(boundary.MEMORY_EXTRACTION_BOUNDARY_RULE),
+        unwrap(approved).replace(
+            "at most it becomes a minimised constraint about the user, and it is sensitive.",
+            "at most it becomes the user's own behaviour, written without the condition."
+        )
+    );
 });
 
 /* --------------------------------------------------------- unchanged -- */

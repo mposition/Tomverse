@@ -144,7 +144,6 @@ const baseInput = (userId: string, conversationIds: string[]) => ({
     userId,
     extractionModelId: "gpt-5-6-luna",
     promptVersion: "mem-extract-v1",
-    plan: "Free" as const,
     selectedConversationIds: conversationIds,
     register: APPROVED_REGISTER,
 });
@@ -166,13 +165,12 @@ test("the shipped register blocks run creation fail-closed (§12.1)", async () =
         createMemoryExtractionRun({
             ...baseInput(user.id, conversationIds),
             register: undefined, // the real code register: candidates only
-            confirmedCredits: 1,
         }),
         expectCode("MEMORY_EXTRACTION_PAIR_UNAVAILABLE")
     );
 });
 
-test("estimate → confirm → create, with one active run per user (§3, §11)", async () => {
+test("a free run is created, with one active run per user", async () => {
     const user = await createUser();
     const conversationIds = await seedConversations(user.id);
 
@@ -181,29 +179,19 @@ test("estimate → confirm → create, with one active run per user (§3, §11)"
     );
     assert.equal(estimate.conversationCount, 2);
     assert.ok(estimate.chunkCount >= 1);
-    assert.ok(estimate.estimatedCredits >= estimate.chunkCount);
+    // Free to the account (owner decision 2026-10-24); the provider cost is
+    // still estimated, because the budget is checked against it.
+    assert.equal(estimate.estimatedCredits, 0);
+    assert.ok(estimate.estimatedCostMicroUsd > 0);
 
-    // A confirmation that no longer matches the live estimate re-asks.
-    await assert.rejects(
-        createMemoryExtractionRun({
-            ...baseInput(user.id, conversationIds),
-            confirmedCredits: estimate.estimatedCredits + 1,
-        }),
-        expectCode("MEMORY_ESTIMATE_CHANGED")
+    const run = await createMemoryExtractionRun(
+        baseInput(user.id, conversationIds)
     );
-
-    const run = await createMemoryExtractionRun({
-        ...baseInput(user.id, conversationIds),
-        confirmedCredits: estimate.estimatedCredits,
-    });
     assert.equal(run.status, "pending");
     assert.equal(run.chunkTotal, estimate.chunkCount);
 
     await assert.rejects(
-        createMemoryExtractionRun({
-            ...baseInput(user.id, conversationIds),
-            confirmedCredits: estimate.estimatedCredits,
-        }),
+        createMemoryExtractionRun(baseInput(user.id, conversationIds)),
         expectCode("MEMORY_EXTRACTION_ALREADY_RUNNING")
     );
 
@@ -240,13 +228,9 @@ const completingHandler: ExtractionChunkHandler = async () => ({
 const seedRun = async (conversationCount: number) => {
     const user = await createUser();
     const conversationIds = await seedConversations(user.id, conversationCount);
-    const estimate = await estimateMemoryExtraction(
+    const run = await createMemoryExtractionRun(
         baseInput(user.id, conversationIds)
     );
-    const run = await createMemoryExtractionRun({
-        ...baseInput(user.id, conversationIds),
-        confirmedCredits: estimate.estimatedCredits,
-    });
     await setExtractionFlag(true);
     return { user, run };
 };
@@ -763,13 +747,9 @@ test("an expired lease is reclaimed to pending with progress intact (§3)", asyn
 test("cancel is a deterministic, idempotent release (§11)", async () => {
     const user = await createUser();
     const conversationIds = await seedConversations(user.id, 1);
-    const estimate = await estimateMemoryExtraction(
+    const run = await createMemoryExtractionRun(
         baseInput(user.id, conversationIds)
     );
-    const run = await createMemoryExtractionRun({
-        ...baseInput(user.id, conversationIds),
-        confirmedCredits: estimate.estimatedCredits,
-    });
 
     assert.deepEqual(await cancelMemoryExtractionRun(user.id, run.id), {
         outcome: "cancelled",
@@ -779,23 +759,18 @@ test("cancel is a deterministic, idempotent release (§11)", async () => {
     });
 
     // A cancelled run frees the per-user slot.
-    const next = await createMemoryExtractionRun({
-        ...baseInput(user.id, conversationIds),
-        confirmedCredits: estimate.estimatedCredits,
-    });
+    const next = await createMemoryExtractionRun(
+        baseInput(user.id, conversationIds)
+    );
     assert.notEqual(next.id, run.id);
 });
 
 test("the batch sub-budget refuses with the dedicated 503 semantics (§3)", async () => {
     const user = await createUser();
     const conversationIds = await seedConversations(user.id, 1);
-    const estimate = await estimateMemoryExtraction(
-        baseInput(user.id, conversationIds)
-    );
     await assert.rejects(
         createMemoryExtractionRun({
             ...baseInput(user.id, conversationIds),
-            confirmedCredits: estimate.estimatedCredits,
             environment: {
                 ...process.env,
                 MEMORY_EXTRACTION_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "10",

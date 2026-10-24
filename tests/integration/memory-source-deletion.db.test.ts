@@ -10,7 +10,6 @@ import {
 import { verifyExternalMessageEvidence } from "@/lib/memoryEvidenceValidation";
 import {
     approveMemory,
-    bulkApproveMemories,
     createManualMemory,
     deleteMemory,
     editMemory,
@@ -564,7 +563,6 @@ for (const [label, runWriter] of [
     ["deleteMemory", (userId: string, memoryId: string) => deleteMemory(userId, memoryId)],
     ["reconcileExpiredMemories", () => reconcileExpiredMemories(new Date("2030-01-01T00:00:00.000Z"))],
     ["approveMemory", (userId: string, memoryId: string) => approveMemory({ userId, memoryId })],
-    ["bulkApproveMemories", (userId: string) => bulkApproveMemories(userId)],
     [
         "createManualMemory",
         (userId: string) =>
@@ -595,7 +593,7 @@ for (const [label, runWriter] of [
 ] as const) {
     test(`${label} waits for the account memory lock`, async () => {
         const user = await createUser();
-        const status = ["rejectMemory", "approveMemory", "bulkApproveMemories"].includes(label)
+        const status = ["rejectMemory", "approveMemory"].includes(label)
             ? "candidate"
             : label === "reconcileSourceLockedMemories"
               ? "suspended_by_source_lock"
@@ -619,34 +617,6 @@ for (const [label, runWriter] of [
         await writer;
     });
 }
-
-test("bulk approval decides on the evidence as it is after the lock, not as it was before", async () => {
-    // The race the confirmation review found: bulk approval validated a
-    // candidate's evidence without the lock, a source deletion then removed
-    // that evidence, and the approval committed anyway on its stale reading.
-    // Here the holder removes the evidence while bulk approval waits.
-    const user = await createUser();
-    const importRow = await seedImport(user.id);
-    const conversation = await seedConversation(user.id, importRow.id);
-    const message = await seedMessage(user.id, conversation.id, 0);
-    const memory = await seedMemory(user.id, "사용자는 커피를 좋아한다", {
-        messageIds: [message.id],
-        status: "candidate",
-    });
-
-    const holder = holdMemoryLock(user.id, (tx) =>
-        tx.memoryEvidence.deleteMany({ where: { memoryItemId: memory.id } })
-    );
-    await holder.held;
-    const approval = bulkApproveMemories(user.id);
-    await untilTheMemoryLockIsAwaited(user.id);
-    holder.release();
-    await holder.committed;
-    const result = await approval;
-
-    assert.deepEqual(result, { approved: 0, skipped: 1 });
-    assert.equal(await statusOf(memory.id), "candidate", "no evidence, so not approved");
-});
 
 test("setExternalConversationLock waits for the account memory lock", async () => {
     const user = await createUser();

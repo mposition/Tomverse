@@ -1618,6 +1618,9 @@ export const de = {
         statusExpired: "Abgelaufen",
         expiredCardNotice: "Abgelaufen — er muss neu gestartet werden.",
         abandonImport: "Diesen Import verlassen",
+        memoryNotice: "Wenn Sie diesen Import abschließen, erstellt Tomverse automatisch Erinnerungen aus den importierten Unterhaltungen, ohne Credits abzubuchen. Dazu wird ihr Inhalt an einen KI-Anbieter übermittelt; sensible Inhalte wie Gesundheitsangaben werden nicht als Erinnerung gespeichert.",
+        memoryNoticeSettings: "Memory-Einstellungen",
+        memoryNoticePrivacy: "Datenschutzerklärung",
     },
     accountDataExport: {
         ...en.accountDataExport,
@@ -1897,18 +1900,9 @@ export const de = {
     },
     memoryReview: {
         restoreGrounds: "Neue Begründung hinzufügen",
-        restoreGroundsNotice: "Geben Sie eine eigene Begründung ein, um die Erinnerung erneut zu prüfen. Die Verwendung erfordert eine separate Freigabe.",
+        restoreGroundsNotice: "Diese Erinnerung wieder verwenden, begründet durch Ihren Text.",
 
         reportAnswer: "Problem mit dieser Antwort melden",
-        conflictReview: "Ähnliche Erinnerungen prüfen",
-        conflictChoose: "Bestehende Erinnerung zum Vergleich wählen",
-        conflictKeep: "Bestehende Erinnerungen behalten",
-        conflictBoth: "Beide behalten",
-        conflictExpire: "Bestehende Erinnerungen ablaufen lassen",
-        conflictMerge: "Zu einer Erinnerung zusammenführen",
-        conflictMergedStatement: "Zusammengeführte Aussage",
-        conflictMergeGrounds: "Begründen Sie die zusammengeführte Aussage",
-        conflictLoading: "Ähnliche Erinnerungen werden geladen…",
 
         sourceDeleteDerivedImport:
             "{count} Erinnerungen aus diesem Import werden ebenfalls gelöscht.",
@@ -1923,44 +1917,28 @@ export const de = {
         sourceLockBacked: "{count} Erinnerungen mit anderen Belegen werden weiterhin verwendet.",
         sourceLockRestoreNote: "Wird die Sperre aufgehoben, werden die wegen dieser Unterhaltung ausgesetzten Erinnerungen wieder verwendet.",
         dataTabTitle: "Konto-Langzeitgedächtnis",
-        dataTabDescription:
-            "Prüfen Sie aus importierten Unterhaltungen extrahierte Gedächtnis-Kandidaten und legen Sie fest, ob genehmigte Erinnerungen in neuen Chats verwendet werden.",
+        dataTabDescription: "Sehen Sie die automatisch aus importierten Unterhaltungen erstellten und die selbst hinzugefügten Erinnerungen und legen Sie fest, ob neue Chats sie verwenden.",
         dataTabOpen: "Gedächtnis verwalten",
         dataTabStatusOn: "Wird in neuen Chats verwendet",
         dataTabStatusOff: "Wird in neuen Chats nicht verwendet",
-        dataTabStatusPending: "{count} warten auf Prüfung",
         pageTitle: "Konto-Langzeitgedächtnis",
-        pageDescription:
-            "Genehmigen oder lehnen Sie wartende Gedächtnis-Kandidaten ab und bearbeiten, fixieren oder löschen Sie verwendete Erinnerungen.",
+        pageDescription: "Bearbeiten, fixieren oder löschen Sie automatisch aus importierten Unterhaltungen erstellte und selbst hinzugefügte Erinnerungen.",
         signInRequired:
             "Melden Sie sich an, um das Gedächtnis Ihres Kontos zu verwalten.",
-        privacyNote:
-            "Nur Erinnerungen, die Sie geprüft und genehmigt haben, werden in neuen Chats verwendet. Genehmigte Erinnerungen und Antwortstil-Präferenzen werden dem aktuell gewählten Tomverse-Modell als Referenz übergeben, und Sie können sie jederzeit einsehen, bearbeiten, deaktivieren oder löschen.",
-        disabledNotice:
-            "Prüfung und Erstellung von Erinnerungen sind derzeit nicht verfügbar. Bereits gespeicherte Erinnerungen bleiben einsehbar und löschbar.",
+        privacyNote: "Wenn Sie einen Import abschließen, erstellt Tomverse daraus über einen KI-Anbieter automatisch Erinnerungen, ohne Credits abzubuchen. Sensible Inhalte wie Gesundheitsangaben werden nicht als Erinnerung gespeichert. Verwendete Erinnerungen und Antwortstil-Präferenzen werden als Referenzmaterial an das antwortende Tomverse-Modell übergeben, und Sie können sie jederzeit einsehen, bearbeiten, deaktivieren oder löschen.",
+        disabledNotice: "Erinnerungen bearbeiten und hinzufügen ist gerade nicht verfügbar. Bereits gespeicherte Erinnerungen können Sie weiterhin einsehen und löschen.",
         settingsTitle: "Einstellungen zur Gedächtnisnutzung",
-        masterToggleLabel: "Genehmigte Erinnerungen in neuen Chats verwenden",
-        masterToggleDescription:
-            "Wenn ausgeschaltet, verwendet kein Chat Erinnerungen. Gespeicherte Erinnerungen werden nicht gelöscht.",
+        masterToggleLabel: "Erinnerungen in neuen Chats verwenden",
+        masterToggleDescription: "Ausgeschaltet verwendet kein Chat Erinnerungen, und aus importierten Unterhaltungen entstehen keine neuen. Gespeicherte Erinnerungen werden nicht gelöscht.",
         styleToggleLabel: "Antwortstil-Erinnerungen verwenden",
         styleToggleDescription:
             "Lässt Antworten die aus früheren Unterhaltungen abgeleiteten Vorlieben zu Ton, Länge und Aufbau berücksichtigen.",
         defaultModeLabel: "Standard für neue Chats",
         defaultModeOn: "Gedächtnis verwenden",
         defaultModeOff: "Gedächtnis nicht verwenden",
-        reviewTitle: "Erinnerungen zur Prüfung",
-        reviewDescription:
-            "Extrahierte Kandidaten werden erst nach Ihrer Genehmigung in neuen Chats verwendet. Sensible Kandidaten und solche mit Einzelprüfung sind nie Teil der Sammelgenehmigung.",
-        reviewEmpty: "Keine Erinnerungen warten auf Prüfung.",
-        bulkApprove: "Alle nicht sensiblen Kandidaten genehmigen",
-        bulkResult:
-            "{approved} genehmigt · {skipped} benötigen Einzelprüfung",
-        approve: "Genehmigen",
-        reject: "Ablehnen",
         edit: "Bearbeiten",
         save: "Speichern",
         cancel: "Abbrechen",
-        needsIndividualReview: "Einzelprüfung erforderlich",
         sensitiveBadge: "Sensibel",
         pinnedBadge: "Fixiert",
         expires: "Läuft ab: {date}",
@@ -1973,8 +1951,6 @@ export const de = {
         unpin: "Fixierung lösen",
         delete: "Löschen",
         deleteArmed: "Zum Löschen erneut drücken",
-        editParkedNotice:
-            "Ihre Änderung muss erneut geprüft werden; die Erinnerung wurde zurück in die Prüfliste verschoben.",
         validationFailed:
             "Dieser Inhalt kann nicht als Erinnerung gespeichert werden. Formulieren Sie ihn als beschreibenden Aussagesatz, z. B. „Der Nutzer bevorzugt knappe Antworten“.",
         errorGeneric: "Etwas ist schiefgelaufen. Bitte erneut versuchen.",
@@ -2042,48 +2018,15 @@ export const de = {
             citation_preference: "Zitierpräferenz",
             code_style: "Code-Stil",
         },
+        organisingNotice: "Erinnerungen aus Ihren importierten Unterhaltungen werden erstellt.",
+        organisingView: "Fortschritt ansehen",
+        restoreConflict: "Eine Erinnerung zum selben Thema ist bereits in Gebrauch. Löschen Sie sie und versuchen Sie es erneut.",
     },
     // Start der Extraktion (Release B, §11 Bestätigung vorab, §21).
     memoryExtraction: {
-        launchTitle: "Erinnerungen aus importierten Unterhaltungen gewinnen",
-        launchDescription:
-            "Wählen Sie importierte Unterhaltungen aus, aus denen Kandidaten gewonnen werden. Kandidaten werden erst in Antworten verwendet, wenn Sie sie geprüft und freigegeben haben.",
-        modelTitle: "Modell für die Extraktion",
-        modelUnavailable: "Zurzeit ist kein Extraktionsmodell verfügbar.",
-        modelUnavailableDescription:
-            "Ein Extraktionsmodell wird erst nach bestandener Qualitätsbewertung freigegeben. Danach können Sie es hier auswählen.",
-        modelCredits: "{credits} Credits pro Bündel",
-        conversationsTitle: "Unterhaltungen auswählen",
-        conversationsDescription:
-            "Nur die ausgewählten Unterhaltungen werden verwendet. Sie werden nach Größe gebündelt verarbeitet, und Credits zählen pro Bündel.",
-        conversationsEmpty: "Sie haben noch keine Unterhaltungen importiert.",
-        conversationsEmptyCta: "Unterhaltungen importieren",
-        selectAllVisible: "Alle angezeigten auswählen",
-        clearSelection: "Auswahl aufheben",
-        selectionSummary: "{count} ausgewählt · etwa {size}",
-        selectionHidden: "{count} ausgewählte Unterhaltungen sind in dieser Liste nicht sichtbar.",
-        selectionTooLarge: "Sie können höchstens {max} Unterhaltungen auf einmal auswählen.",
-        conversationMeta: "{messages} Nachrichten · {size}",
-        loadMore: "Mehr anzeigen",
         estimate: "Benötigte Credits prüfen",
-        estimating: "Wird berechnet…",
-        estimateResult: "{chunks} Bündel · etwa {credits} Credits",
-        estimateDescription:
-            "{conversations} Unterhaltungen werden in {chunks} Bündeln verarbeitet. Die endgültige Abrechnung erfolgt nach dem Lauf und übersteigt den bestätigten Betrag nie.",
-        estimateStale: "Die Auswahl hat sich geändert. Prüfen Sie die Credits erneut.",
         start: "Extraktion für {credits} Credits starten",
         starting: "Wird gestartet…",
-        runInProgress: "Es läuft bereits eine Extraktion.",
-        runInProgressOpen: "Fortschritt ansehen",
-        errorGeneric: "Etwas ist schiefgelaufen. Bitte erneut versuchen.",
-        errorEstimateChanged:
-            "Die ausgewählten Unterhaltungen haben sich geändert, die Schätzung passt nicht mehr. Bitte vor dem Start erneut prüfen.",
-        errorPairUnavailable: "Dieses Modell ist zurzeit nicht verfügbar.",
-        errorLocked:
-            "Eine der ausgewählten Unterhaltungen ist gesperrt, daher kann die Extraktion nicht starten. Bitte die Liste aktualisieren und erneut auswählen.",
-        lockedRowHint: "Gesperrte Unterhaltungen können nicht für die Extraktion verwendet werden.",
-        errorBudget:
-            "Die Extraktionskapazität ist vorübergehend erschöpft. Bitte kurz später erneut versuchen.",
         runTitle: "Fortschritt der Extraktion",
         runBack: "Zurück zu den Erinnerungseinstellungen",
         runNotFound: "Dieser Extraktionslauf wurde nicht gefunden.",
@@ -2107,8 +2050,6 @@ export const de = {
         cancel: "Extraktion abbrechen",
         cancelArmed: "Zum Abbrechen erneut drücken",
         cancelling: "Wird abgebrochen…",
-        recentRunsTitle: "Letzte Extraktionen",
-        recentRunOpen: "Details ansehen",
         status: {
             pending: "Wartet",
             running: "Läuft",
@@ -2240,7 +2181,7 @@ export const de = {
         externalImportTitle: "Aus anderen KI-Diensten importierte Unterhaltungen",
         externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT, Claude oder Gemini (Google Takeout) heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten.",
         memoryTitle: "Langzeitgedächtnis des Kontos",
-        memory: "Wenn Sie die Gedächtnisfunktion nutzen möchten, sendet Tomverse die von Ihnen ausgewählten Teile Ihrer importierten Unterhaltungen an den von Ihnen bestätigten KI-Anbieter, um daraus Gedächtnis-Kandidaten zu gewinnen. Für die Extraktion werden das Modell und der Credit-Betrag verwendet, die Ihnen vor der Ausführung angezeigt werden. Extrahierte Kandidaten werden erst zur Antworterzeugung genutzt, nachdem Sie sie geprüft und genehmigt haben. Als sensibel eingestufte Kandidaten sowie solche, die eine Einzelprüfung erfordern, sind von der Sammelgenehmigung ausgenommen und müssen einzeln bestätigt werden. Kandidaten, genehmigte Erinnerungen und deren Begründungen verbleiben in Ihrem Konto, bis Sie sie löschen oder Ihre Kontodaten gelöscht werden. Genehmigte Erinnerungen und Antwortstil-Präferenzen werden als Referenzmaterial an den KI-Anbieter übermittelt, der die jeweilige neue Antwort erzeugt — beim Vergleich mehrerer Modelle also an den Anbieter jedes Modells. Sie können gespeicherte Erinnerungen jederzeit einsehen, bearbeiten und deaktivieren, die vollständige Liste als Datei herunterladen oder alles auf einmal löschen. Wenn Sie das Gedächtnis ausschalten, wird es in neuen Chats nicht mehr verwendet.",
+        memory: "Wenn Sie importierte Unterhaltungen in Ihrem Tomverse-Konto speichern, erstellt Tomverse daraus automatisch Erinnerungen, solange die Gedächtnisfunktion eingeschaltet ist. Dazu wird der Inhalt dieser Unterhaltungen an einen von Tomverse gewählten KI-Anbieter übermittelt; dafür werden keine Credits abgebucht. Sensible Inhalte wie Gesundheitsangaben werden nicht als Erinnerung gespeichert; nur Inhalte, die die Prüfung bestehen, werden gespeichert und sofort verwendet. Zum selben Thema ersetzt der Inhalt einer neueren Unterhaltung die frühere Erinnerung. Erinnerungen und deren Begründungen verbleiben in Ihrem Konto, bis Sie sie löschen oder Ihre Kontodaten gelöscht werden. Erinnerungen und Antwortstil-Präferenzen werden als Referenzmaterial an den KI-Anbieter übermittelt, der die jeweilige neue Antwort erzeugt — beim Vergleich mehrerer Modelle also an den Anbieter jedes Modells. Sie können gespeicherte Erinnerungen jederzeit einsehen, bearbeiten und löschen, die vollständige Liste als Datei herunterladen oder alles auf einmal löschen. Wenn Sie das Gedächtnis ausschalten, wird es in neuen Chats nicht mehr verwendet, und aus importierten Unterhaltungen entstehen keine neuen Erinnerungen.",
         assistantProfilesTitle: "Eigene KI-Assistenten und Wissensdateien",
         assistantProfiles: "Wenn Sie einen KI-Assistenten anlegen, speichert Tomverse den eingegebenen Namen, die Beschreibung, die Anweisungen, die Modellwahl und die Gesprächseinstiege sowie jede veröffentlichte Revision, damit ein Gespräch zeigen kann, unter welcher es tatsächlich lief. Beigefügte Wissensdateien werden privat für Ihr Konto gespeichert; Tomverse extrahiert deren Text, teilt ihn in Abschnitte und legt einen Suchindex darüber an, um passende Auszüge zu finden. Wenn Sie mit einem Profil chatten, gehen seine Anweisungen und die zu Ihrer Nachricht passenden Auszüge als Referenzmaterial an den KI-Anbieter, der die Antwort erzeugt. Auszüge werden als Referenzmaterial behandelt und nie als Anweisungen an den Assistenten. Profile sind privat: Sie werden nicht mit anderen geteilt, nicht öffentlich gelistet und nicht verkauft. Beim Löschen eines Profils gehen seine Revisionen und Wissensdateien mit; die gespeicherten Dateien werden kurz darauf entfernt. Gespräche, die das Profil genutzt haben, bleiben in Ihrem Konto lesbar. Ein abgeschaltetes oder gelöschtes Profil wird in neuen Gesprächen nicht mehr verwendet. Wenn Sie einen Assistenten durch den Import eines Pakets anlegen, speichert Tomverse zusätzlich, was Sie vor dem Veröffentlichen zusammengestellt haben, die vom Paket oder von Ihnen angegebene Herkunft und den Zeitpunkt Ihrer Bestätigung. Tomverse öffnet keine Adresse, die ein Paket nennt. Ein abgebrochener Import läuft von selbst ab, und die dafür bereitgestellten Dateien gehen mit ihm.",
         emailTitle: "E-Mails, die wir Ihnen senden",

@@ -36,7 +36,9 @@ export type ExtractionCommitResult =
     | {
           committed: true;
           stored: number;
-          individualReview: number;
+          superseded: number;
+          withheld: number;
+          outranked: number;
           discarded: number;
           /**
            * Candidates whose evidence no longer verified at write time (§8.4).
@@ -49,7 +51,7 @@ export type ExtractionCommitResult =
     | { committed: false; reason: "fenced_out" };
 
 /**
- * Writes a chunk's candidates under the lease that produced them.
+ * Writes a chunk's memories under the lease that produced them.
  *
  * The fence is a locking read on the run row: a concurrent claim has to update
  * that row, so it waits for this transaction and then supersedes, rather than
@@ -111,7 +113,9 @@ export async function commitExtractionChunk(input: {
         return {
             committed: true as const,
             stored: persisted.stored,
-            individualReview: persisted.individualReview,
+            superseded: persisted.superseded,
+            withheld: persisted.withheld,
+            outranked: persisted.outranked,
             discarded: persisted.discarded,
             unsourced: persisted.unsourced,
         };
