@@ -187,6 +187,17 @@ dm_cli_source_needed() {
   [[ $action != same ]]
 }
 
+dm_cli_source_fits() {
+  [[ -f $1 && ! -L $1 && $(dm_sha256_of "$1") == "$2" ]]
+}
+
+# The check for one CLI: its destination is already §5a's file, or its source is.
+dm_cli_fits() {
+  local dest=$1 source=$2 wanted=$3
+  dm_cli_source_needed "$(dm_file_state "$dest")" "$wanted" || return 0
+  dm_cli_source_fits "$source" "$wanted"
+}
+
 # A directory, without following a link: absent | link | other | dir <uid> <mode>
 dm_directory_state() {
   local path=$1 meta
@@ -359,17 +370,6 @@ dm_manifest_fits() {
   done
   actual=${DM_RELEASE_SHA256[dm-output-schema-v1.json]}
   [[ $actual == "$DM_SCHEMA_SHA256" ]]
-}
-
-dm_cli_source_fits() {
-  [[ -f $1 && ! -L $1 && $(dm_sha256_of "$1") == "$2" ]]
-}
-
-# The check for one CLI: its destination is already §5a's file, or its source is.
-dm_cli_fits() {
-  local dest=$1 source=$2 wanted=$3
-  dm_cli_source_needed "$(dm_file_state "$dest")" "$wanted" || return 0
-  dm_cli_source_fits "$source" "$wanted"
 }
 
 dm_tools_present() {
