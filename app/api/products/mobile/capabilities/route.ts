@@ -19,6 +19,6 @@ export async function GET(request: Request) {
     id: model.id, name: model.name, provider: imageModelOwner(model), pricingVersion: model.pricingVersion,
     prices: model.prices.map(price => ({ quality: price.quality, size: price.size, credits: price.credits })),
   })) };
-  return Response.json({ reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json({ conversationTitles: true, accountUsage: true, reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }); }
 }

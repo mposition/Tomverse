@@ -2,7 +2,6 @@ import { registerPlugin } from "@capacitor/core";
 
 import { authenticatedFetch } from "./authenticatedFetch";
 import type { MobileAuthBridge } from "./authBridgeContract";
-import { deviceAccessGrant } from "./deviceUnlock";
 
 /**
  * The refusing implementation, used in a browser and by any platform that has
@@ -40,6 +39,6 @@ export const TOMVERSE_API_ORIGIN =
 
 export const mobileApiFetch = (path: string, init?: RequestInit) =>
   authenticatedFetch(path, init, {
-    bridge: { getAccessToken: options => deviceAccessGrant(MobileAuth, options, init?.signal) },
+    bridge: MobileAuth,
     apiOrigin: TOMVERSE_API_ORIGIN,
   });

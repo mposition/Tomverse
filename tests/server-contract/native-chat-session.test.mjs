@@ -73,7 +73,7 @@ test("unregistered operations cannot borrow an enrolled credential", async () =>
 test("additional mobile routes require their own flag and always use bearer identity", async () => {
   process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
   const before = cookies;
-  for (const [path, method] of [["/api/chat/preflight", "POST"], ["/api/images/generations?requestKey=synthetic", "GET"]]) {
+  for (const [path, method] of [["/api/user/usage", "GET"], ["/api/conversations/c1/generate-title", "POST"], ["/api/chat/preflight", "POST"], ["/api/images/generations?requestKey=synthetic", "GET"]]) {
     delete process.env.TOMVERSE_NATIVE_PARITY_ENABLED;
     assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner" }, path, method))).response.status, 503);
     process.env.TOMVERSE_NATIVE_PARITY_ENABLED = "true";

@@ -21,7 +21,11 @@ The additional scope covers account preferences and memory settings, reading
 assistant profiles, creating Review conversations and routing Easy questions,
 reading generated-image groups/history, explicitly requested Studio generation,
 AI cross-review and item feedback/verification, and polling existing Deep Research
-jobs. No administration, sharing, publishing, profile creation or bulk deletion
+jobs, reading the existing account usage totals and generating conversation titles
+through the existing owner-scoped service. The client calls title generation at
+most once after the first successful answer, retaining the saved interim title on
+failure. Compare-and-set preserves subsequent web renames. Title/usage capability
+fields prevent calling older cookie-only deployments. No administration, sharing, publishing, profile creation or bulk deletion
 route is enrolled.
 
 An old or inactive server answers the capability probe without invalidating an
@@ -31,19 +35,16 @@ separate from local implementation and require the applicable owner approval.
 
 ## Device authentication and files
 
-Device lock is opt-in after account sign-in. Android uses BiometricPrompt with
-device credentials; iOS uses LocalAuthentication's deviceOwnerAuthentication.
-The OS owns fingerprint, Face ID, PIN, pattern and passcode entry. The app has no
-custom PIN database and receives none of those secrets. Cold restart and thirty
-seconds in the background require authentication before native access-token
-issuance. Cancelling the prompt keeps the session locked without consuming its
-rotating credential. Android enables FLAG_SECURE while this option is enabled.
-
-Already opened UI state is hidden and inert while locked; it is retained so that
-a long system file selection does not discard the draft. A native DEVICE_LOCKED
-refusal waits before HTTP dispatch and resumes after native unlock. It does not
-replay an HTTP mutation. Signing out from the lock screen discards drafts and
-remounts the account UI.
+Device authentication is opt-in after account sign-in. Android uses BiometricPrompt
+with device credentials; iOS uses LocalAuthentication's deviceOwnerAuthentication.
+The OS owns fingerprint, Face ID, PIN, pattern and passcode entry. Tomverse receives
+none of those secrets. The preference persists across sign-out and gates the next
+fresh email-code verification or PKCE exchange, including after session expiry.
+Cancelling device authentication does not consume the email code or exchange grant.
+A concurrent sign-out invalidates a pending sign-in callback. A valid stored session
+restores without another prompt on cold restart, background return or token rotation.
+Android retains FLAG_SECURE while this preference is enabled. Server session expiry,
+revocation, account freshness and rotating-secret consumption are unchanged.
 
 The Android system document picker grants access to user-selected files. No broad
 storage or media permission is added. A selected upload still follows the server's
@@ -129,3 +130,18 @@ live paid model/image/research calls, full seven-language parity for new copy,
 store review, and complete web workspace/account-management parity are not claimed
 by local fixture verification. New copy currently has English/Korean versions and
 uses English fallback for the other supported languages.
+
+## Follow-up regression checks
+
+`tests/native-mobile/followups.spec.ts` covers newline-only Enter, the header new
+conversation action in Chat and Review, server-derived Easy defaults, explicit
+empty selection, and the account footer at a short viewport.
+
+From `apps/mobile/android`, with Java 21 and Android SDK configured, run
+`./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=app.tomverse.shell.DeviceSignInTest`
+(`gradlew.bat` in PowerShell, with the `-P...` argument quoted). The test uses real
+Android Keystore and the native serial queue, isolated preference namespaces and
+an in-process HTTPS fixture; no production or provider request is dispatched.
+It covers cold restore, a 31-second background return, fresh sign-in proof
+refusal before email-code consumption, and a missing-session sign-in requirement.
+This does not replace physical fingerprint/PIN or iOS Face ID acceptance.

@@ -12,7 +12,7 @@ async function send(page: Page, text: string) { await page.getByRole("textbox").
 
 test("Smart Adaptive, settings and composer tools use the existing account and conversation controls", async ({ page }) => {
   await signIn(page); await expect(page.getByRole("button", { name: "Smart Adaptive" })).toBeVisible();
-  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.getByRole("button", { name: "설정", exact: true }).click();
   await page.getByRole("button", { name: "AI 및 개인화", exact: true }).click(); await expect(page.getByRole("switch", { name: "메모리", exact: true })).toBeChecked();
   await page.getByRole("switch", { name: "메모리", exact: true }).uncheck(); await page.getByRole("button", { name: "변경사항 저장" }).click(); await expect(page.getByRole("status")).toContainText("저장했습니다");
   await page.screenshot({ path: resolve(output, "settings-dark.png") });
@@ -107,28 +107,19 @@ test("image quotes require fresh consent after a price change and never run auto
   await expect(consent).not.toBeChecked(); expect(await page.evaluate(() => (window as unknown as { imageRuns: number }).imageRuns)).toBe(1);
 });
 
-test("a long file selection preserves the draft behind the lock and resumes upload only after unlock", async ({ page }) => {
+test("returning from a long file selection never introduces a device unlock", async ({ page }) => {
   await page.route("**/src/main.tsx", async route => {
     const response = await route.fetch(); const source = await response.text();
-    const injection = `
-      transport.deviceSecurity=async()=>({enabled:true,available:true,locked:window.fixtureLocked===true});
-      transport.unlockDevice=async()=>{window.fixtureLocked=false;};
-      const priorSignOut=transport.signOut;transport.signOut=async()=>{await priorSignOut();window.fixtureLocked=false;};
-      const {deviceAccessGrant}=await import('/src/deviceUnlock.ts');
-      transport.upload=async file=>{await deviceAccessGrant({getAccessToken:async()=>{if(window.fixtureLocked)throw {code:'DEVICE_LOCKED'};return {accessToken:'synthetic',expiresAt:Date.now()+600000};},getDeviceSecurity:transport.deviceSecurity},{},undefined,window);window.uploadCompletions=(window.uploadCompletions||0)+1;return {uploadId:'receipt',name:file.name,mediaType:file.type,size:file.size};};`;
+    const injection = `transport.deviceSecurity=async()=>({enabled:true,available:true,locked:false});transport.unlockDevice=async()=>{throw Error("Unexpected unlock");};`;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
   await signIn(page); await page.getByRole("textbox").fill("Preserve my draft");
-  await page.evaluate(() => { (window as unknown as { fixtureLocked: boolean }).fixtureLocked = true; });
+  await page.evaluate(() => { document.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("tomverse-device-security-changed")); });
   await page.getByTestId("photo-picker").setInputFiles({ name: "long-selection.png", mimeType: "image/png", buffer: Buffer.from("synthetic") });
-  await expect(page.getByText("대화가 잠겨 있습니다", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => (window as unknown as { uploadCompletions?: number }).uploadCompletions ?? 0)).toBe(0);
-  await page.getByRole("button", { name: "Tomverse 잠금 해제" }).click();
-  await expect(page.getByRole("textbox")).toHaveValue("Preserve my draft"); await expect(page.getByRole("button", { name: "첨부파일 제거: long-selection.png" })).toBeVisible();
-  expect(await page.evaluate(() => (window as unknown as { uploadCompletions: number }).uploadCompletions)).toBe(1);
-  await page.evaluate(() => { (window as unknown as { fixtureLocked: boolean }).fixtureLocked = true; window.dispatchEvent(new Event("tomverse-device-security-changed")); });
-  await page.getByRole("button", { name: "로그아웃", exact: true }).click(); await expect(page.getByRole("button", { name: "Tomverse로 계속" })).toBeVisible();
-  await expect(page.locator("article")).toHaveCount(0);
+  await expect(page.getByRole("textbox")).toHaveValue("Preserve my draft");
+  await expect(page.getByRole("button", { name: "첨부파일 제거: long-selection.png" })).toBeVisible();
+  await expect(page.getByText("대화가 잠겨 있습니다", { exact: true })).toHaveCount(0);
+  await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("Preserve my draft");
 });
 
 for (const recovery of ["receipt", "same-request", 400, 401, 403, 409, 422, 429] as const) test(`lost image responses recover or explicitly close after ${recovery}`, async ({ page }) => {
