@@ -4,11 +4,15 @@ import test from "node:test";
 import {
   CI_ADMISSION_CHECK_LIMIT,
   CI_ADMISSION_HOLD_LABEL,
+  CI_ADMISSION_RAMP_MS,
+  CI_ADMISSION_WAIT_RECHECK_MS,
   CI_ADMISSION_RELEASE_GRACE_MS,
   ciAdmissionDraftsToCheck,
   ciAdmissionOrder,
   ciAdmissionUnits,
   ciRunKey,
+  ciRunnerCount,
+  ciRunnerOwnerKey,
   emptyCiAdmissionState,
   evaluateCiAdmission,
   moveCiAdmissionEntry,
@@ -263,15 +267,65 @@ test("in runners: two develop pull requests fit 40, a third waits; a develop dep
   assert.equal(deploying.used, 33);
 });
 
-test("runners other workflows hold count too, and a CI needing more than the budget still runs alone", () => {
+// A holder of runners as GitHub listed it: started long enough ago that its jobs are all listed.
+const owner = (key, running, queued = 0, startedAt = new Date(T0 - 10 * 60_000).toISOString()) => ({
+  key,
+  title: "",
+  number: null,
+  base: null,
+  sha: null,
+  running,
+  queued,
+  startedAt,
+});
+
+test("a running CI counts at its jobs right now; while its run is starting, at its need at least; unread, at its need", () => {
+  const started = new Date(T0 - 30_000).toISOString();
+  assert.equal(ciRunnerCount(15, owner("pull:1", 4, 1), T0), 5);
+  assert.equal(ciRunnerCount(15, owner("pull:1", 4, 1, started), T0), 15);
+  assert.equal(ciRunnerCount(15, owner("pull:1", 20, 0, started), T0), 20);
+  assert.equal(ciRunnerCount(15, owner("pull:1", 4, 0, started), T0 + CI_ADMISSION_RAMP_MS), 4);
+  assert.equal(ciRunnerCount(15, undefined, T0), 15);
+});
+
+test("in live runners: the next draft starts once finished jobs leave room for its need", () => {
+  const open = [pull(1, { draft: false }), pull(2, { base: "main", head: "release/x" }), pull(3)];
+  const base = { state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2, 3) }, openPulls: open, running: runs(open[0]), checks: checksFor(open) };
+  // 1 has 10 of its 15 jobs left: 30 free is not room for the release (34); 3 must not jump it.
+  const busy = judge({ ...base, runners: [owner(ciRunnerOwnerKey.pull(1), 9, 1)] });
+  assert.deepEqual(kinds(busy), []);
+  assert.deepEqual(statuses(busy), { 1: "running", 2: "waiting", 3: "waiting" });
+  assert.equal(busy.used, 10);
+  assert.equal(busy.state.lastRound.running[0].runners, 10);
+  assert.equal(busy.nextCheckInMs, CI_ADMISSION_WAIT_RECHECK_MS, "judged again while a draft waits: a finished job sends no webhook");
+  // Its jobs finish: 6 left, so the release fits.
+  const freed = judge({ ...base, runners: [owner(ciRunnerOwnerKey.pull(1), 6)] });
+  assert.deepEqual(kinds(freed), ["release:2"]);
+  assert.equal(freed.used, 40);
+  // Unread, it counts at its need: 25 free, nothing fits.
+  assert.deepEqual(kinds(judge({ ...base, runners: null })), []);
+});
+
+test("deploys count at their live jobs; other workflows' jobs count too", () => {
   const open = [pull(1), pull(2)];
-  // 22 runners in use by something admission does not know: 18 left, one develop PR fits.
-  const busy = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) }, openPulls: open, checks: checksFor(open), liveRunners: 22 });
-  assert.deepEqual(kinds(busy), ["release:1"]);
-  // Live usage below what the known CI needs changes nothing: needs are counted, not the jobs of the moment.
-  const quiet = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) }, openPulls: open, checks: checksFor(open), liveRunners: 0 });
-  assert.deepEqual(kinds(quiet), ["release:1", "release:2"]);
-  // A budget below one CI's need does not starve it.
+  const deploy = { branch: "develop", sha: "d".repeat(40), title: "Merge" };
+  const evaluation = judge({
+    state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) },
+    openPulls: open,
+    checks: checksFor(open),
+    deploys: [deploy],
+    runners: [owner(ciRunnerOwnerKey.deploy("develop", deploy.sha), 3), owner("other:CodeQL", 5, 2)],
+  });
+  // 3 + 7 in use: two develop pull requests fit (10 + 30 = 40).
+  assert.deepEqual(kinds(evaluation), ["release:1", "release:2"]);
+  assert.equal(evaluation.state.lastRound.deploys[0].runners, 3);
+  assert.equal(evaluation.state.lastRound.others, 7);
+  // Without the reading, the deploy counts at its need (18): only one fits.
+  const unread = judge({ state: { ...emptyCiAdmissionState(), queue: lineOf(1, 2) }, openPulls: open, checks: checksFor(open), deploys: [deploy] });
+  assert.deepEqual(kinds(unread), ["release:1"]);
+});
+
+test("a CI needing more than the budget still runs alone", () => {
   const main = [pull(9, { base: "main" })];
   const small = judge({ state: { ...emptyCiAdmissionState(), capacity: 20, queue: lineOf(9) }, openPulls: main, checks: checksFor(main) });
   assert.deepEqual(kinds(small), ["release:9"]);
