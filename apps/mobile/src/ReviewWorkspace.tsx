@@ -74,7 +74,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
         setDefaults((preferences?.reviewEasyEffectiveProviders ?? []).filter(provider => options.includes(provider)).slice(0, Math.min(cap.maxModels, preferences?.reviewEasyMaxProviders ?? 3)));
         if (cap.reviewEasy && !preferences?.reviewEasyEffectiveProviders) setError(defaultsError.current);
         const last = localStorage.getItem(lastKey);
-        if (last && history.some(chat => chat.id === last && chat.kind !== "image")) {
+        if (last && history.some(chat => chat.id === last && chat.kind !== "image" && (!chat.isLocked || transport.history?.unlocked(chat.id)))) {
           const item = await transport.load(last);
           if (current !== request.current) return;
           setConversation(item); setSelected(item.selectedModels); setActiveModel(item.selectedModels[0] ?? ""); setUncertain(item.activeAttempt === true);
