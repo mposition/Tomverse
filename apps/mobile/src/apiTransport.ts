@@ -169,6 +169,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     },
     mobileCapabilities: requireParity,
     preferences: async () => { await requireParity(); return request("/api/user/settings"); },
+    reportAnswer: async ({ messageId, modelId, message, language }) => { await requireParity(); await request("/api/feedback", json("POST", { type: "bug", message, messageId, answerSignal: "needs_improvement", language, ...(modelId ? { modelId } : {}) })); },
     savePreferences: async (input) => { await requireParity(); await request("/api/user/settings", json("POST", input)); },
     memoryPreferences: async () => { await requireParity(); return request("/api/memories/settings"); },
     saveMemoryPreferences: async (input) => { await requireParity(); await request("/api/memories/settings", json("PUT", input)); },

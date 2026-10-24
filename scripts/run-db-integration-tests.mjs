@@ -1181,6 +1181,21 @@ run(
   ],
   "Running the feedback lifecycle notification transaction scenarios"
 );
+// Its own process: it replaces next-auth and Turnstile and sets the native
+// mobile flags and signing keys to drive /api/feedback with an app bearer.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/feedback-native-bearer.db.test.ts",
+  ],
+  "Running the app-bearer answer report scenarios"
+);
 // Its own process for the same reason: it replaces next-auth to drive the
 // snapshot lock routes as a signed-in owner.
 run(
