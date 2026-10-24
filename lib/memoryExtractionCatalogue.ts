@@ -16,9 +16,9 @@ import { prisma } from "@/lib/prisma";
  * §12.1 authority — once per register entry and reports what survived, so the
  * list can never disagree with what a create request would accept.
  *
- * The expected answer today is an empty list. No pair has an eval approval
- * yet, so the screen shows the fail-closed state rather than an inert control
- * (§12.4).
+ * An empty list is the fail-closed state: no approved, unexpired pair, so the
+ * screen shows that rather than an inert control
+ * (docs/policy/external-conversation-import-and-memory.md §12.4, §12.4a).
  */
 
 export type AvailableExtractionPair = {

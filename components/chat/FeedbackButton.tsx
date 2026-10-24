@@ -98,6 +98,7 @@ export function FeedbackButton({
   triggerClassName,
   triggerTestId,
   respondsToOpenRequests = false,
+  sourceMessageId,
 }: {
   currentModelId?: string | null;
   currentPlan?: string | null;
@@ -124,6 +125,7 @@ export function FeedbackButton({
    * one request opens one dialog and never a per-message error report.
    */
   respondsToOpenRequests?: boolean;
+  sourceMessageId?: string;
 }) {
   const { t, lang } = useLanguage();
   const { status } = useSession();
@@ -286,7 +288,7 @@ export function FeedbackButton({
       // override a per-message value with a later panel's trace.
       setTraceId(
         errorReport?.traceId ||
-          window.localStorage.getItem("tomverse_last_error_trace_id") ||
+          (!sourceMessageId ? window.localStorage.getItem("tomverse_last_error_trace_id") : "") ||
           ""
       );
     }
@@ -442,7 +444,8 @@ export function FeedbackButton({
       const description =
         message.trim() || (isErrorReport ? errorReportDefaultMessage : "");
       const outcome = await submitFeedback({
-        type,
+        ...(sourceMessageId ? { messageId: sourceMessageId, answerSignal: "needs_improvement" as const } : {}),
+        type: sourceMessageId ? "bug" : type,
         message: composeFeedbackMessage({
           description,
           // Already sanitised, and possibly edited or removed by the user.
@@ -617,7 +620,7 @@ export function FeedbackButton({
                       : t("feedback.title")}
                   </legend>
 
-                  {!isErrorReport && (
+                  {!isErrorReport && !sourceMessageId && (
                     <label className="mt-4 block text-sm font-bold text-zinc-700 dark:text-zinc-200">
                       {t("feedback.typeLabel")}
                       <select

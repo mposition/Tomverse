@@ -103,6 +103,8 @@ const provenanceFilter = (
     OR: [
         // User-authored: no extraction pair, not subject to eval approval.
         { extractionModelId: null, promptVersion: null },
+        // Edits and new manual grounds preserve the original extraction pair.
+        // Individual approval cannot override an unapproved or revoked pair.
         ...approvedPairs.map((pair) => ({
             extractionModelId: pair.extractionModelId,
             promptVersion: pair.promptVersion,

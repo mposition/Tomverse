@@ -218,10 +218,12 @@ export const getMemoryReport = async ({
                 answers: bigint;
                 followups: bigint;
                 regenerates: bigint;
+                feedbacks: bigint;
             }>
         >`
             WITH ordered AS (
                 SELECT
+                    "id",
                     "role",
                     "createdAt",
                     "memoryUsedCount",
@@ -247,7 +249,12 @@ export const getMemoryReport = async ({
                 COUNT(*) FILTER (
                     WHERE next_role = 'assistant'
                       AND next_at <= "createdAt" + ${`${FOLLOWUP_WINDOW_SECONDS} seconds`}::interval
-                ) AS regenerates
+                ) AS regenerates,
+                COUNT(*) FILTER (WHERE EXISTS (
+                    SELECT 1 FROM "Feedback" f WHERE f."messageId" = ordered."id" AND f."answerSignal" = 'needs_improvement'
+                      AND f."createdAt" >= ordered."createdAt"
+                      AND f."createdAt" <= ordered."createdAt" + ${`${FOLLOWUP_WINDOW_SECONDS} seconds`}::interval
+                )) AS feedbacks
             FROM ordered
             WHERE "role" = 'assistant'
             GROUP BY 1
@@ -259,6 +266,7 @@ export const getMemoryReport = async ({
                 answers: Number(row.answers),
                 followups: Number(row.followups),
                 regenerates: Number(row.regenerates),
+                feedbacks: Number(row.feedbacks),
             }));
     } catch (error) {
         if (!isMissingDatabaseSchemaError(error)) throw error;

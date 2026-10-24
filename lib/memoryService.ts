@@ -1,4 +1,5 @@
 import "server-only";
+import { memoryCanonicalKey, memoryConflictKey, isMemoryCanonicalKey } from "@/lib/memoryConflictCore";
 
 import type { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
@@ -12,11 +13,12 @@ import {
     memoryRetrievalTerms,
 } from "@/lib/memoryRetrievalTerms";
 import {
-    memoryStatementKey,
     validateMemoryCandidate,
+    memoryStatementKey,
     type MemoryEvidenceInput,
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
+import { allowsBulkApproval } from "@/lib/memoryExtractionEvalRegister";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { lockCreditAccount } from "@/lib/creditDebt";
@@ -125,6 +127,7 @@ const serializeMemory = (
     importance: item.importance,
     pinned: item.pinned,
     conflictKey: item.conflictKey,
+    canonicalKey: memoryCanonicalKey(item.conflictKey),
     revision: item.revision,
     userEdited: item.userEdited,
     expiresAt: item.expiresAt?.toISOString() ?? null,
@@ -143,6 +146,36 @@ const serializeMemory = (
 });
 
 export type SerializedMemory = ReturnType<typeof serializeMemory>;
+
+type ConflictSubject = { id?: string; kind: string; statement: string; conflictKey: string | null };
+
+async function activeMemoryConflicts(
+    client: Prisma.TransactionClient | typeof prisma,
+    userId: string,
+    item: ConflictSubject,
+    otherMemoryId?: string
+) {
+    // Compare normalized assertions across legacy and topic key schemes. Do
+    // not truncate before comparing: a hidden peer would escape the snapshot.
+    const rows = await client.memoryItem.findMany({
+        where: { userId, status: "active", ...(item.id ? { id: { not: item.id } } : {}),
+            AND: [{ OR: [{ kind: item.kind }, ...(item.conflictKey ? [{ conflictKey: item.conflictKey }] : []),
+                ...(otherMemoryId ? [{ id: otherMemoryId }] : [])] },
+                { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }] },
+        select: { id: true, kind: true, statement: true, conflictKey: true, revision: true, sensitivity: true },
+        orderBy: { id: "asc" },
+    });
+    const statementKey = memoryStatementKey(item.statement);
+    return rows.filter(row => row.id === otherMemoryId ||
+        (item.conflictKey !== null && row.conflictKey === item.conflictKey) ||
+        (row.kind === item.kind && memoryStatementKey(row.statement) === statementKey));
+}
+
+export async function getMemoryConflictContext(userId: string, memoryId: string) {
+    const item = await loadOwnedMemory(userId, memoryId);
+    const conflicts = await activeMemoryConflicts(prisma, userId, item);
+    return { memory: serializeMemory(item), conflicts };
+}
 
 export async function listMemories(
     userId: string,
@@ -199,25 +232,15 @@ export async function listMemories(
 async function assertNoActiveConflict(
     tx: Prisma.TransactionClient,
     userId: string,
-    conflictKey: string | null,
-    excludeId: string | null,
+    item: ConflictSubject,
     resolveConflict: "supersede_existing" | undefined
 ) {
-    if (!conflictKey) return;
-    const conflicting = await tx.memoryItem.findFirst({
-        where: {
-            userId,
-            conflictKey,
-            status: "active",
-            ...(excludeId ? { id: { not: excludeId } } : {}),
-        },
-        select: { id: true },
-    });
-    if (!conflicting) return;
+    const conflicting = await activeMemoryConflicts(tx, userId, item);
+    if (!conflicting.length) return;
     if (resolveConflict === "supersede_existing") {
-        await tx.memoryItem.update({
-            where: { id: conflicting.id },
-            data: { status: "superseded" },
+        await tx.memoryItem.updateMany({
+            where: { userId, id: { in: conflicting.map(row => row.id) } },
+            data: { status: "superseded", revision: { increment: 1 } },
         });
         return;
     }
@@ -241,6 +264,7 @@ export async function createManualMemory(input: {
     sensitivity?: "standard" | "sensitive";
     expiresAt?: string | null;
     groundsText: string;
+    canonicalKey?: string | null;
     resolveConflict?: "supersede_existing";
 }) {
     const statement = input.statement.normalize("NFC").trim();
@@ -270,14 +294,16 @@ export async function createManualMemory(input: {
         );
     }
 
-    const conflictKey = `${input.kind}:${memoryStatementKey(statement)}`;
+    if (input.canonicalKey != null && !isMemoryCanonicalKey(input.canonicalKey)) {
+        throw new ApiSecurityError(422, "MEMORY_VALIDATION_FAILED", "Invalid memory topic.");
+    }
+    const conflictKey = memoryConflictKey(input.kind, statement, input.canonicalKey);
     return prisma.$transaction(async (tx) => {
         await acquireUserMemoryLock(tx, input.userId);
         await assertNoActiveConflict(
             tx,
             input.userId,
-            conflictKey,
-            null,
+            { kind: input.kind, statement, conflictKey },
             input.resolveConflict
         );
         const item = await tx.memoryItem.create({
@@ -345,8 +371,7 @@ export async function approveMemory(input: {
         await assertNoActiveConflict(
             tx,
             input.userId,
-            item.conflictKey,
-            item.id,
+            item,
             input.resolveConflict
         );
         const updated = await tx.memoryItem.updateMany({
@@ -366,6 +391,65 @@ export async function approveMemory(input: {
                 "MEMORY_ITEM_STATE",
                 "The memory changed during review."
             );
+        }
+    });
+}
+
+export async function resolveMemoryConflict(input: {
+    userId: string;
+    memoryId: string;
+    expectedRevision: number;
+    expectedConflicts: { id: string; revision: number }[];
+    otherMemoryId?: string;
+    resolution: "keep_existing" | "replace_existing" | "keep_both" | "expire_existing" | "merge";
+    mergedStatement?: string;
+    groundsText?: string;
+}) {
+    return prisma.$transaction(async (tx) => {
+        await acquireUserMemoryLock(tx, input.userId);
+        const item = await loadOwnedMemory(input.userId, input.memoryId, tx);
+        if (!(REVIEWABLE_STATUSES as readonly string[]).includes(item.status) || item.revision !== input.expectedRevision) {
+            throw new ApiSecurityError(409, "MEMORY_ITEM_STATE", "The memory changed during review.");
+        }
+        const peers = await activeMemoryConflicts(tx, input.userId, item, input.otherMemoryId);
+        const snapshot = (rows: { id: string; revision: number }[]) => JSON.stringify(rows.map(row => [row.id, row.revision]).sort());
+        if (!peers.length || (input.otherMemoryId && !peers.some(peer => peer.id === input.otherMemoryId)) || snapshot(peers) !== snapshot(input.expectedConflicts)) {
+            throw new ApiSecurityError(409, "MEMORY_ITEM_STATE", "The conflicting memories changed during review.");
+        }
+        if (input.resolution === "keep_existing") {
+            await tx.memoryItem.update({ where: { id: item.id }, data: { status: "rejected", revision: { increment: 1 } } });
+            return;
+        }
+        const statement = input.resolution === "merge" ? (input.mergedStatement ?? "").normalize("NFC").trim() : item.statement;
+        const grounds = (input.groundsText ?? "").normalize("NFC").trim();
+        if (input.resolution === "merge" && (!grounds || grounds.length > 2000)) {
+            throw new ApiSecurityError(422, "MEMORY_VALIDATION_FAILED", "Manual grounds are required for a merged memory.");
+        }
+        const sensitivity = item.sensitivity === "sensitive" || peers.some(peer => peer.sensitivity === "sensitive") ? "sensitive" : "standard";
+        const validation = validateMemoryCandidate({ kind: item.kind, statement, confidence: item.confidence,
+            sensitivity, expiresAt: item.expiresAt?.toISOString() ?? null,
+            evidence: [...evidenceInputs(item.evidences), ...(input.resolution === "merge" ? [{ sourceType: "manual" as const }] : [])] });
+        assertNotHardRejected(validation);
+        if (input.resolution !== "keep_both") {
+            await tx.memoryItem.updateMany({ where: { userId: input.userId, id: { in: peers.map(peer => peer.id) } },
+                data: { status: input.resolution === "expire_existing" ? "expired" : "superseded",
+                    ...(input.resolution === "expire_existing" ? { expiresAt: new Date() } : {}), revision: { increment: 1 } } });
+        }
+        const conflictKey = memoryConflictKey(item.kind, statement, memoryCanonicalKey(item.conflictKey));
+        if (input.resolution === "merge") {
+            // A rewritten legacy statement may now collide with a third row.
+            // Fail the whole transaction rather than superseding an unseen peer.
+            await assertNoActiveConflict(tx, input.userId, { ...item, statement, conflictKey }, undefined);
+        }
+        await tx.memoryItem.update({ where: { id: item.id }, data: {
+            status: "active", approvedAt: new Date(), revision: { increment: 1 }, sensitivity: validation.sensitivity,
+            ...(input.resolution === "merge" ? { statement, userEdited: true,
+                conflictKey,
+                searchTerms: memoryRetrievalTerms(statement), retrievalVersion: MEMORY_RETRIEVAL_VERSION } : {}),
+        } });
+        if (input.resolution === "merge") {
+            await tx.memoryEvidence.create({ data: { memoryItemId: item.id, userId: input.userId,
+                sourceType: "manual", manualContent: grounds, evidenceDigest: manualEvidenceDigest(grounds) } });
         }
     });
 }
@@ -447,7 +531,7 @@ export async function editMemory(input: {
                 expiresAt: expiresAt ? new Date(expiresAt) : null,
                 revision: { increment: 1 },
                 userEdited: true,
-                conflictKey: `${item.kind}:${memoryStatementKey(statement)}`,
+                conflictKey: memoryConflictKey(item.kind, statement, memoryCanonicalKey(item.conflictKey)),
                 // Re-indexed with the statement. Leaving the old terms would make
                 // the row findable by words it no longer contains.
                 searchTerms: memoryRetrievalTerms(statement),
@@ -459,6 +543,26 @@ export async function editMemory(input: {
                       : {}),
             },
         });
+    });
+}
+
+export async function restoreMemoryGrounds(input: { userId: string; memoryId: string; groundsText: string }) {
+    const grounds = input.groundsText.normalize("NFC").trim();
+    if (!grounds || grounds.length > 2000) throw new ApiSecurityError(422, "MEMORY_VALIDATION_FAILED", "Manual grounds are required.");
+    await prisma.$transaction(async tx => {
+        await acquireUserMemoryLock(tx, input.userId);
+        const item = await loadOwnedMemory(input.userId, input.memoryId, tx);
+        if (item.status !== "suspended_by_source_delete") {
+            throw new ApiSecurityError(409, "MEMORY_ITEM_STATE", "Only a memory suspended by source deletion can be restored this way.");
+        }
+        const result = validateMemoryCandidate({ kind: item.kind, statement: item.statement,
+            confidence: item.confidence, sensitivity: item.sensitivity as "standard" | "sensitive",
+            expiresAt: item.expiresAt?.toISOString() ?? null, evidence: [{ sourceType: "manual" }] });
+        assertNotHardRejected(result);
+        await tx.memoryEvidence.create({ data: { memoryItemId: item.id, userId: input.userId,
+            sourceType: "manual", manualContent: grounds, evidenceDigest: manualEvidenceDigest(grounds) } });
+        await tx.memoryItem.update({ where: { id: item.id }, data: { status: "manual_review_required",
+            approvedAt: null, suspendedReason: null, userEdited: true, revision: { increment: 1 }, sensitivity: result.sensitivity } });
     });
 }
 
@@ -537,6 +641,21 @@ export async function bulkApproveMemories(userId: string) {
                     },
                 });
                 if (!item) return "skipped" as const;
+                // Only an evaluated pair has shown zero critical bulk-safe
+                // adoptions; any other pair's candidates are approved one by one.
+                const pair = item.extractionModelId || item.promptVersion
+                    ? { extractionModelId: item.extractionModelId ?? "", promptVersion: item.promptVersion ?? "" }
+                    : null;
+                if (!allowsBulkApproval(pair)) return "skipped" as const;
+                // Bulk approval must not choose a winner merely because one
+                // of several topic proposals happens to be visited first.
+                if (memoryCanonicalKey(item.conflictKey)) {
+                    const competing = await tx.memoryItem.findFirst({
+                        where: { userId, id: { not: item.id }, conflictKey: item.conflictKey,
+                            status: { in: [...REVIEWABLE_STATUSES] } }, select: { id: true },
+                    });
+                    if (competing) return "skipped" as const;
+                }
                 const result = validateMemoryCandidate({
                     kind: item.kind,
                     statement: item.statement,
@@ -551,8 +670,7 @@ export async function bulkApproveMemories(userId: string) {
                 await assertNoActiveConflict(
                     tx,
                     userId,
-                    item.conflictKey,
-                    item.id,
+                    item,
                     undefined
                 );
                 const updated = await tx.memoryItem.updateMany({
