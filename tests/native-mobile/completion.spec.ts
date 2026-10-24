@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 async function signIn(page: import("@playwright/test").Page) { await page.goto("/"); await page.getByRole("button", { name: "Continue with Tomverse" }).click(); await expect(page.getByRole("textbox")).toBeVisible(); }
-async function account(page: import("@playwright/test").Page) { await page.getByRole("button", { name: "Language and appearance" }).click(); await page.getByRole("button", { name: "Account, export & deletion" }).click(); }
+async function account(page: import("@playwright/test").Page) { await page.getByRole("button", { name: "Settings" }).click(); await page.getByRole("button", { name: "Privacy & data", exact: true }).click(); await page.getByRole("button", { name: "Account, export & deletion" }).click(); }
 
 test("answers render Markdown, citations and generated files with a real browser download", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Make a file"); await page.getByRole("button", { name: "Send message", exact: true }).click();
@@ -39,7 +39,7 @@ test("answers render Markdown, citations and generated files with a real browser
 });
 test("unsent native drafts survive reload and model selection without a dispatch", async ({ page }) => {
   await signIn(page); await page.getByRole("textbox").fill("Keep this draft"); await page.reload(); await expect(page.getByRole("textbox")).toHaveValue("Keep this draft");
-  await page.getByRole("button", { name: "Choose model", exact: true }).click(); await page.getByRole("radio").check(); await page.getByRole("button", { name: "Apply selection", exact: true }).click();
+  await page.getByRole("button", { name: /Smart Adaptive|Choose model|demo/, exact: true }).click(); await page.getByRole("switch").uncheck(); await page.getByRole("radio").first().check(); await page.getByRole("button", { name: "Apply selection", exact: true }).click();
   await expect(page.getByRole("textbox")).toHaveValue("Keep this draft"); await expect(page.locator("article.user")).toHaveCount(0);
 });
 test("offline native typing persists without a send or upload", async ({ page, context }) => {

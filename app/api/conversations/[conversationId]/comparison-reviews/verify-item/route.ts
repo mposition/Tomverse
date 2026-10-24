@@ -3,9 +3,8 @@ export const dynamic = "force-dynamic";
 import { createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
 import { randomUUID } from "node:crypto";
 import { generateText, Output } from "ai";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
@@ -96,7 +95,9 @@ export async function POST(
   let leaseId: string | null = null;
   let providerUsageTraceId: string | null = null;
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401, traceId);
     }

@@ -299,9 +299,9 @@ function withMirrorFixture(action) {
 
 test("hosted CI selects the Ubuntu archive without changing custom mirror entries", { skip: noWindowsBash }, () => {
     withMirrorFixture((path, run) => {
-        writeFileSync(path, "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\n");
+        writeFileSync(path, "# http://azure.archive.ubuntu.com/ubuntu\nhttp://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n  https://azure.archive.ubuntu.com/ubuntu\r\n\thttps://azure.archive.ubuntu.com/ubuntu priority:2\nhttps://security.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu-other\n");
         run("true");
-        assert.equal(read(path), "https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\n");
+        assert.equal(read(path), "# http://azure.archive.ubuntu.com/ubuntu\nhttps://archive.ubuntu.com/ubuntu/\tpriority:1\n  https://archive.ubuntu.com/ubuntu\r\n\thttps://archive.ubuntu.com/ubuntu priority:2\nhttps://security.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu-other\n");
     });
 });
 
