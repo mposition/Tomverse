@@ -32,6 +32,7 @@ const imageTurnSchema = z
     assistantMessageId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
     modelId: z.string().trim().min(1).max(120),
     imageModelIds: z.array(z.string().trim().min(1).max(120)).max(8),
+    imageGroupModelIds: z.array(z.string().trim().min(1).max(120)).min(1).max(8).optional(),
     preset: z.enum(["draft", "standard", "final"]).nullable(),
     // A follow-up's prompt, rewritten by the image-intent call from the
     // previous image ("make it bluer"). The user's own text either way --
@@ -66,8 +67,10 @@ export async function POST(req: Request, { params }: Params) {
       assistantMessageId: body.assistantMessageId,
       modelId: body.modelId,
       imageModelIds: body.imageModelIds,
+      ...(body.imageGroupModelIds ? { imageGroupModelIds: body.imageGroupModelIds } : {}),
       preset: body.preset,
       prompt: body.prompt,
+      request: req,
     });
 
     // Post-response execution, as in POST /api/images/generations: a process

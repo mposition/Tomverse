@@ -29,6 +29,23 @@ Owner approved Concept B on 2026-10-20: Figma file
   supported providers retain the existing image execution/consent flow. An
   all-unsupported image request never substitutes a provider or calls text.
 
+## In-conversation image answers (owner direction, 2026-10-23)
+
+Image prompts stay in the current Review conversation, as in Chat. Easy routes
+once for the selected providers and gives each panel only its own image model;
+unsupported panels show their notice without a text or image provider call.
+Professional keeps explicit image-model choices in the composer. Its automatic
+image-intent check uses the existing Chat image-triage switch; text decisions
+retain the manually selected text models. When enabled, this adds one existing
+budgeted router call per eligible Professional prompt, as Chat's image triage
+does. Only an explicit `review` product identity grants Review image hosting;
+unclassified rows gain no image execution or retry exception. Image turns reuse Chat's transcript
+cards, saved-question path, image reservation and idempotent retry. Supported
+panels share one atomic group and workflow lease per question; each card and
+restored message shows only its own target. They neither
+open an image workspace nor change the conversation kind or product identity.
+The separate new-image launcher remains an explicit image-workspace entry.
+
 ## Chat Studio and interactive focus (owner approval, 2026-10-20)
 
 Chat reuses Studio's navigation, palette and rounded conversation canvas.

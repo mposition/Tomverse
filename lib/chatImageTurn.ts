@@ -2,9 +2,10 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
-import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
+import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { isChatConversationKind } from "@/lib/conversationKindGuard";
+import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
     IMAGE_QUALITY_BY_PRESET,
     type ImagePreset,
@@ -13,9 +14,9 @@ import { requestImageGeneration } from "@/lib/imageGenerationService";
 import { prisma } from "@/lib/prisma";
 
 /**
- * One Tomverse Chat turn answered with an image instead of text
+ * One Chat or Review turn answered with an image instead of text
  * (docs/policy/image-generation.md §13 ⑥, owner decision 2026-10-20: in
- * Chat the image appears in the conversation, no image workspace).
+ * Chat the image appears in the conversation; Review follows it on 2026-10-23).
  *
  * The user's message is already saved by the ordinary send. This reserves
  * the image through `requestImageGeneration` -- the same gates, reservation,
@@ -33,9 +34,11 @@ export type ChatImageTurnInput = {
     /** The panel's chat model, stored on the answer like any other. */
     modelId: string;
     imageModelIds: string[];
+    imageGroupModelIds?: string[];
     preset: ImagePreset | null;
     /** A follow-up's rewritten prompt; the saved question otherwise. */
     prompt?: string;
+    request?: Request;
 };
 
 export type ChatImageTurnResult = {
@@ -60,32 +63,23 @@ export const chatImageTurnContent = (prompt: string) =>
 export async function startChatImageTurn(
     input: ChatImageTurnInput
 ): Promise<ChatImageTurnResult> {
-    // The paid path exists only while the operator has it on. Checked here,
-    // not trusted from the client that decided to send an image turn.
-    if (!(await chatImageTriageModelId())) {
-        throw new ChatAccessError(
-            403,
-            "CHAT_IMAGE_TURN_DISABLED",
-            "Images in chat are not enabled."
-        );
-    }
-
     const conversation = await prisma.conversation.findFirst({
         where: { id: input.conversationId, userId: input.userId },
         select: {
             kind: true,
             productKey: true,
+            password: true,
             continuationBridge: { select: { id: true } },
         },
     });
     if (!conversation) {
         throw new ChatAccessError(404, "CONVERSATION_NOT_FOUND", "Conversation not found.");
     }
-    // Tomverse Chat only (policy §13 ⑥): Review and continued conversations
-    // are chat-kind too, and the exception does not extend to them.
+    // Only explicit product identities grant the in-conversation image host.
+    // Continued conversations and image-workspace rows are still excluded.
     if (
         !isChatConversationKind(conversation.kind) ||
-        conversation.productKey !== "chat" ||
+        !["chat", "review"].includes(conversation.productKey ?? "") ||
         conversation.continuationBridge !== null
     ) {
         throw new ChatAccessError(
@@ -93,6 +87,13 @@ export async function startChatImageTurn(
             "CONVERSATION_KIND_NOT_SUPPORTED",
             "This conversation does not support chat image turns."
         );
+    }
+    if (conversation.productKey === "chat" && !(await chatImageTriageModelId())) {
+        throw new ChatAccessError(403, "CHAT_IMAGE_TURN_DISABLED", "Images in chat are not enabled.");
+    }
+    if (conversation.password &&
+        (!input.request || !hasConversationUnlockGrant(input.request, input.userId, input.conversationId, conversation.password))) {
+        throw new ChatAccessError(403, "CONVERSATION_LOCKED", "Unlock this conversation before generating images.");
     }
 
     const source = await prisma.message.findFirst({
@@ -126,6 +127,12 @@ export async function startChatImageTurn(
         throw new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That answer id is taken.");
     }
 
+    const isReview = conversation.productKey === "review";
+    if (input.imageGroupModelIds && (!isReview || input.imageModelIds.length !== 1 ||
+        [...input.imageGroupModelIds].sort()[Number(input.assistantMessageId.split("_").at(-1))] !== input.imageModelIds[0] ||
+        chatImageTurnGroupKey(input.assistantMessageId) === input.assistantMessageId)) {
+        throw new ChatAccessError(400, "IMAGE_MODEL_SELECTION_INVALID", "Invalid comparison image selection.");
+    }
     const result = await requestImageGeneration({
         userId: input.userId,
         // The answer's text still names the question that was asked.
@@ -133,11 +140,15 @@ export async function startChatImageTurn(
         size: "1024x1024",
         quality: IMAGE_QUALITY_BY_PRESET[input.preset ?? "standard"],
         conversationId: input.conversationId,
-        idempotencyKey: input.assistantMessageId,
-        modelIds: input.imageModelIds.length > 0 ? input.imageModelIds : undefined,
+        idempotencyKey: input.imageGroupModelIds ? chatImageTurnGroupKey(input.assistantMessageId) : input.assistantMessageId,
+        modelIds: input.imageGroupModelIds ?? (input.imageModelIds.length > 0 ? input.imageModelIds : undefined),
         chatTurnHost: true,
     });
 
+    if (result.conversationId !== input.conversationId || (input.imageGroupModelIds &&
+        [...result.targets.map(target => target.modelId)].sort().join("\n") !== [...input.imageGroupModelIds].sort().join("\n"))) {
+        throw new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That image request belongs to another turn.");
+    }
     const content = existing?.content ?? chatImageTurnContent(prompt);
     if (!existing) {
         try {
@@ -167,7 +178,8 @@ export async function startChatImageTurn(
 
     return {
         groupId: result.groupId,
-        imageModelIds: result.targets.map((target) => target.modelId),
+        imageModelIds: result.targets.map((target) => target.modelId)
+            .filter(id => !input.imageGroupModelIds || input.imageModelIds.includes(id)),
         content,
         pendingGenerationIds: result.targets
             .filter((target) => target.status === "pending")

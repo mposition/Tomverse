@@ -4,6 +4,7 @@ import type { ReviewRouteDecision } from "@/lib/reviewRoutingCore";
 export async function askReviewRoute(input: {
   text: string; providers: string[]; context?: string; hasImages: boolean;
   requestedKind?: "image";
+  imageOnly?: boolean;
 }, fetchImpl: typeof fetch = fetch): Promise<ReviewRouteDecision | { kind: "blocked"; reason: "image" } | null> {
   try {
     const response = await fetchImpl("/api/review/route", {

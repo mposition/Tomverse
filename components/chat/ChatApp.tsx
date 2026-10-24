@@ -56,6 +56,8 @@ import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
 import { readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import type { ReviewImageTurns } from "@/lib/reviewImageTurn";
+import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import {
   answeringModelId,
   CHAT_WELCOME_MESSAGE_ID as WELCOME_MESSAGE_ID,
@@ -280,6 +282,7 @@ type ChatAppProps = {
      * the image-intent triage's models and preset.
      */
     imageTurn?: ChatImageTurnRequest;
+    imageTurnsByModel?: ReviewImageTurns;
   } | null;
   /**
    * Asks the shell for a context the whole run can share, after this panel's
@@ -490,7 +493,7 @@ function ChatAppComponent({
       ? { kind: "guest" }
       : { kind: "account", userId: sessionUserId }
   );
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
     // UX-021. Only used to name this panel's follow-up field. Three panels
     // render three of these, so a name that does not say *which* model is the
     // same as no name at all for anyone navigating by form field.
@@ -1475,7 +1478,7 @@ function ChatAppComponent({
     promptRefinerDecision?: PromptRefinerProductChatDecision,
     guestAutoCapability?: string,
     /** Answer with an image instead of text; see the branch below. */
-    imageTurn?: ChatImageTurnRequest
+    imageTurn?: ChatImageTurnRequest | null
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1578,7 +1581,8 @@ function ChatAppComponent({
     // A retried image turn keeps its first answer id: it is the image
     // group's idempotency key (lib/chatImageTurn.ts).
     let assistantMessageId =
-      imageTurn?.assistantMessageId ?? crypto.randomUUID();
+      imageTurn?.assistantMessageId ?? (imageTurn?.comparison
+        ? `${imageTurn.comparison.id}_${imageTurn.comparison.index}` : crypto.randomUUID());
     const assistantMessage: Message = {
 		id: assistantMessageId,
 		role: "assistant",
@@ -1759,6 +1763,7 @@ function ChatAppComponent({
             preset: request.preset,
             ...(request.prompt ? { prompt: request.prompt } : {}),
             assistantMessageId,
+            ...(request.comparison ? { comparison: request.comparison } : {}),
           },
         });
       }
@@ -1783,6 +1788,7 @@ function ChatAppComponent({
                 assistantMessageId,
                 modelId,
                 imageModelIds: request.modelIds,
+                ...(request.comparison ? { imageGroupModelIds: request.comparison.modelIds } : {}),
                 preset: request.preset,
                 ...(request.prompt ? { prompt: request.prompt } : {}),
               }),
@@ -1835,6 +1841,12 @@ function ChatAppComponent({
         );
       }
     };
+    if (imageTurn === null && !isGuestMode) {
+      setAssistantMessage(assistantMessageId, reviewWorkspaceCopy[lang].unsupported, "normal");
+      liveness.stop();
+      endChatRuntimeRun(runKey, controller);
+      return;
+    }
     if (imageTurn && !isGuestMode) {
       try {
         onDispatchStarted?.();
@@ -2644,6 +2656,7 @@ function ChatAppComponent({
     runGuestChatRequest,
     sessionUserId,
     t,
+    lang,
     webSearchMode,
     transcriptScope,
     reviewProvider,
@@ -2990,7 +3003,9 @@ function ChatAppComponent({
           },
           promptPayload.promptRefinerDecision,
           promptPayload.guestAutoCapability,
-          promptPayload.imageTurn
+          promptPayload.imageTurnsByModel
+            ? promptPayload.imageTurnsByModel[modelId]
+            : promptPayload.imageTurn
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

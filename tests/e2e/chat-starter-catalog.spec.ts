@@ -689,26 +689,28 @@ test.describe("Chat starter catalogue", () => {
 
     await page.locator('[data-starter-id="sourced-answer"]').click();
     await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+    const textarea = page.getByTestId("chat-textarea");
+    const sourcedSeed = await textarea.inputValue();
 
-    // The image workspace opened with the card's own sentence.
+    // Review answers images inside the conversation (docs/ui-contracts/
+    // review-studio.md), so the card arms the composer's image mode with its
+    // own sentence instead of opening the image workspace.
     await page.locator('[data-starter-id="compare-image-models"]').click();
-    const imagePrompt = page.getByTestId("image-generation-prompt");
-    await expect(imagePrompt).toBeVisible();
-    expect((await imagePrompt.inputValue()).trim().length).toBeGreaterThan(0);
+    await expect(page.getByTestId("review-image-mode")).toBeVisible();
+    await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+    const imageSeed = await textarea.inputValue();
+    expect(imageSeed.trim().length).toBeGreaterThan(0);
+    expect(imageSeed).not.toBe(sourcedSeed);
 
-    // The toggle is asked about back in the chat, never from the image
-    // workspace: over there the composer does not exist, so an absent chip
-    // would say nothing about whether search was disarmed. Asserted from the
-    // image side, this test passed against the very defect it is here to
-    // catch.
-    await page.getByTestId("image-generation-cancel-draft").click();
-    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    // The sourced card's toggle was withdrawn with its sentence. The chip is
+    // read from the same composer the image prompt is sent from, so an absent
+    // chip here does mean search is off for that send.
     await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 
-    // And the chat composer kept nothing: the sourced card's seed was
-    // withdrawn with its toggle, so what comes back is an empty box rather
-    // than either card's sentence.
-    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    // Leaving image mode does not bring the search back either.
+    await page.getByTestId("review-image-mode").getByRole("button").click();
+    await expect(page.getByTestId("review-image-mode")).toHaveCount(0);
+    await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
   });
 
   test("with the image flag off the image card is absent, not locked", { tag: "@ui-risk" }, async ({

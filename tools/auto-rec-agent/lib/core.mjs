@@ -12,7 +12,7 @@ import {
   classifyPath,
   compileManifestPattern,
   isCanonicalRepoPath,
-} from "../../../lib/agentAuthorityFiles.ts";
+} from "./agentAuthorityFiles.generated.mjs";
 import {
   BRANCH_PATTERN,
   BRANCH_PREFIX,

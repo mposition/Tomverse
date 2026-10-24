@@ -1224,7 +1224,7 @@ export function ChatMessageList({
                   {msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.
-                    <ChatImageTurnCard groupId={msg.imageTurn.groupId} />
+                    <ChatImageTurnCard groupId={msg.imageTurn.groupId} modelIds={msg.imageTurn.modelIds} />
                   ) : msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">

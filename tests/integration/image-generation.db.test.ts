@@ -871,6 +871,90 @@ test("a chat conversation takes an image group only through a Chat image turn", 
   assert.equal(await prisma.conversation.count(), 1);
 });
 
+test("Review image turns keep product identity, persist images and replay one reservation", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const review = await createChatConversation(user.id);
+  await prisma.conversation.update({ where: { id: review.id }, data: { productKey: "review" } });
+  const question = await prisma.message.create({ data: { conversationId: review.id, role: "user", content: "a mountain icon" } });
+  const input = { userId: user.id, conversationId: review.id, sourceUserMessageId: question.id,
+    assistantMessageId: randomUUID(), modelId: "gpt-6-luna", imageModelIds: ["gpt-image-2"], preset: "draft" as const };
+  const first = await startChatImageTurn(input);
+  const replay = await startChatImageTurn(input);
+  assert.equal(first.groupId, replay.groupId);
+  assert.equal(await prisma.imageCreditReservation.count(), 1);
+  assert.equal(await prisma.conversation.count(), 1);
+  assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: review.id } })).productKey, "review");
+  const messages = await prisma.message.findMany({ where: { conversationId: review.id }, orderBy: { createdAt: "asc" } });
+  const read = await attachChatImageTurns(user.id, review.id, messages);
+  assert.equal(read[1].imageTurn?.groupId, first.groupId);
+  const target = await prisma.imageGenerationTarget.findFirstOrThrow({ where: { groupId: first.groupId } });
+  await prisma.imageGeneration.update({ where: { id: target.currentGenerationId! }, data: { status: "failed" } });
+  // The failed executor releases the group's workflow lease.
+  await prisma.chatRequestLease.deleteMany({});
+  const retry = await retryImageGenerationTarget({ userId: user.id, targetId: target.id,
+    retryIdempotencyKey: "review-image-retry-abcdefgh" });
+  assert.equal(retry.conversationId, review.id);
+  assert.equal(retry.groupId, first.groupId);
+  await prisma.conversation.update({ where: { id: review.id }, data: { password: "locked-hash" } });
+  await assert.rejects(startChatImageTurn({ ...input, assistantMessageId: randomUUID() }),
+    (error: Error & { code?: string }) => error.code === "CONVERSATION_LOCKED");
+});
+
+test("unclassified image hosts cannot bypass the Chat image switch for starts or retries", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const chat = await createChatConversation(user.id);
+  await prisma.conversation.update({ where: { id: chat.id }, data: { productKey: null } });
+  const question = await prisma.message.create({ data: { conversationId: chat.id, role: "user", content: "a mountain icon" } });
+  await assert.rejects(startChatImageTurn({ userId: user.id, conversationId: chat.id, sourceUserMessageId: question.id,
+    assistantMessageId: randomUUID(), modelId: "gpt-6-luna", imageModelIds: ["gpt-image-2"], preset: "draft" }),
+    (error: Error & { code?: string }) => error.code === "CONVERSATION_KIND_NOT_SUPPORTED");
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
+  const generation = await createGeneration(user.id, chat.id);
+  await prisma.imageGeneration.update({ where: { id: generation.id }, data: { status: "failed" } });
+  await assert.rejects(retryImageGenerationTarget({ userId: user.id, targetId: generation.targetId!,
+    retryIdempotencyKey: "unclassified-retry-refused" }),
+    (error: Error & { code?: string }) => error.code === "CONVERSATION_KIND_NOT_SUPPORTED");
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
+});
+
+test("Review provider panels share one concurrent group, reservation set and durable target mapping", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const review = await createChatConversation(user.id);
+  await prisma.conversation.update({ where: { id: review.id }, data: { productKey: "review" } });
+  const question = await prisma.message.create({ data: { conversationId: review.id, role: "user", content: "a mountain icon" } });
+  const groupKey = randomUUID();
+  const imageGroupModelIds = ["fal-ai/nano-banana-2", "gpt-image-2"];
+  const inputs = imageGroupModelIds.map((id, index) => ({
+    userId: user.id, conversationId: review.id, sourceUserMessageId: question.id,
+    assistantMessageId: `${groupKey}_${index}`, modelId: index === 0 ? "gemini-3-6-flash" : "gpt-6-luna",
+    imageModelIds: [id], imageGroupModelIds, preset: "standard" as const,
+  }));
+  const turns = await withGroupMaxModels("3", () => Promise.all(inputs.map(startChatImageTurn)));
+  assert.equal(turns[0].groupId, turns[1].groupId);
+  assert.equal(await prisma.imageGenerationGroup.count(), 1);
+  assert.equal(await prisma.imageGenerationTarget.count(), 2);
+  assert.equal(await prisma.imageCreditReservation.count(), 2);
+  assert.equal(await prisma.conversation.count(), 1);
+  for (let index = 0; index < inputs.length; index++) {
+    assert.deepEqual(turns[index].imageModelIds, [imageGroupModelIds[index]]);
+    const replay = await startChatImageTurn(inputs[index]);
+    assert.equal(replay.groupId, turns[index].groupId);
+  }
+  assert.equal(await prisma.imageCreditReservation.count(), 2);
+  assert.equal(await readPreviousImagePrompt(user.id, review.id, new Request("http://127.0.0.1:3100/api/chat/image-intent")), "a mountain icon");
+  const messages = await prisma.message.findMany({ where: { conversationId: review.id } });
+  const read = await attachChatImageTurns(user.id, review.id, messages);
+  for (let index = 0; index < inputs.length; index++) {
+    assert.deepEqual(read.find(message => message.id === inputs[index].assistantMessageId)?.imageTurn,
+      { groupId: turns[index].groupId, modelIds: [imageGroupModelIds[index]] });
+  }
+  await assert.rejects(startChatImageTurn({ ...inputs[0], imageModelIds: [imageGroupModelIds[1]] }),
+    (error: Error & { code?: string }) => error.code === "IMAGE_MODEL_SELECTION_INVALID");
+});
+
 test("a Chat image turn answers in the chat conversation and replays without charging again", async () => {
   await enableImageGeneration();
   await prisma.appSetting.createMany({
