@@ -142,6 +142,11 @@ uses English fallback for the other supported languages.
 
 ## Follow-up regression checks
 
+Chat startup restores the signed-in account and history list while staying on the
+new-conversation screen. It never opens the last Chat automatically. Selecting a
+history row restores its saved messages, files, images and voice session receipts;
+unsent drafts remain scoped to their original conversation.
+
 `tests/native-mobile/followups.spec.ts` covers newline-only Enter, the header new
 conversation action in Chat and Review, server-derived Easy defaults, explicit
 empty selection, and the account footer at a short viewport.

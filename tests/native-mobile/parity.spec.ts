@@ -86,7 +86,8 @@ test("historical generated images renew an expired signed URL without exposing s
   expect(await image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByText("[Image generated]", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { imageReads: number }).imageReads)).toBe(2);
-  await page.reload(); await expect(image).toHaveAttribute("src", "https://fixture.invalid/image.png");
+  await page.reload(); await page.getByRole("button", { name: "대화", exact: true }).click(); await page.locator(".conversation-row").click();
+  await expect(image).toHaveAttribute("src", "https://fixture.invalid/image.png");
 });
 
 test("image quotes require fresh consent after a price change and never run automatically", async ({ page }) => {
