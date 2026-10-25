@@ -3,6 +3,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 /** Copy for the release train tab: its summary, the emergency train and the departure board. */
 export const adminQaReleaseTrainMessages = defineAdminMessages({
   en: {
+    summaryReload: "Read GitHub again",
     summaryNext: "Next departure",
     summaryNextUnknown: "Not reported yet",
     summaryRidingDetail: "{carried} carried · {fresh} new",
@@ -87,6 +88,7 @@ export const adminQaReleaseTrainMessages = defineAdminMessages({
     detailUnreported: "The train was admitted but never reported. Check the train service's log for this departure.",
   },
   ko: {
+    summaryReload: "GitHub 다시 읽기",
     summaryNext: "다음 출발",
     summaryNextUnknown: "아직 보고 없음",
     summaryRidingDetail: "이월 {carried} · 새로 고름 {fresh}",

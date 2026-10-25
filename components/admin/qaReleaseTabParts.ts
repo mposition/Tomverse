@@ -26,11 +26,15 @@ export type QaReleaseTrainView = {
 
 /**
  * A save on the release train tab (the cargo pick, an emergency request) says
- * so; QaReleaseTrainRefresher reads the tab again on the server, so its
- * summary is never older than what was just saved.
+ * so, and the tab's "Read again" asks for GitHub past the shared ten-minute
+ * read. QaReleaseTrainRefresher reads the tab again on the server on either,
+ * and the client sections read their own data again (useQaReleaseTrainReads),
+ * so nothing on the tab is older than what was just saved or asked for.
  */
 export const QA_RELEASE_TRAIN_CHANGED_EVENT = "qa-release-train-changed";
+export const QA_RELEASE_TRAIN_RELOAD_EVENT = "qa-release-train-reload";
 export const announceQaReleaseTrainChanged = () => window.dispatchEvent(new Event(QA_RELEASE_TRAIN_CHANGED_EVENT));
+export const announceQaReleaseTrainReload = () => window.dispatchEvent(new Event(QA_RELEASE_TRAIN_RELOAD_EVENT));
 
 /** The tab's card surface, shared by its sections. */
 export const card = "rounded-2xl border border-zinc-800 bg-zinc-900 p-4 sm:p-5";

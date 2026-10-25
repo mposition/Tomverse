@@ -28,6 +28,8 @@ const REPOSITORY = "mposition/Tomverse";
 const API = `https://api.github.com/repos/${REPOSITORY}`;
 const SHA = /^[0-9a-f]{40}$/;
 const PULL_READS_AT_ONCE = 8;
+/** Open main pull requests are read to this many pages of a hundred. */
+const OPEN_PAGE_CAP = 3;
 const run = promisify(execFile);
 
 type Json = Record<string, unknown>;
@@ -68,12 +70,20 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
       if (answer.status === 404) return false;
       throw new Error(`github_${answer.status}`);
     },
+    // Every open main pull request, page by page: a train past the first
+    // hundred still holds the next one. A list longer than the cap is a
+    // failed read, never "no open train".
     async openTrains() {
-      const answer = await request("GET", `${API}/pulls?state=open&base=main&per_page=100`);
-      if (answer.status !== 200) throw new Error(`github_${answer.status}`);
-      const list = answer.json();
-      if (!Array.isArray(list)) throw new Error("github_shape");
-      return list.filter((pull) => String(record(record(pull).head).ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX)).length;
+      let trains = 0;
+      for (let page = 1; page <= OPEN_PAGE_CAP; page += 1) {
+        const answer = await request("GET", `${API}/pulls?state=open&base=main&per_page=100&page=${page}`);
+        if (answer.status !== 200) throw new Error(`github_${answer.status}`);
+        const list = answer.json();
+        if (!Array.isArray(list)) throw new Error("github_shape");
+        trains += list.filter((pull) => String(record(record(pull).head).ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX)).length;
+        if (list.length < 100) return trains;
+      }
+      throw new Error("github_pages");
     },
     async cargo(numbers) {
       const ordered = [...new Set(numbers)];

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useQaReleaseTrainReads } from "@/components/admin/QaReleaseTrainRefresher";
 import { announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
@@ -42,16 +43,21 @@ export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
+  // Read again after any save on the tab or its "Read again": a request the
+  // train has since spent is not left showing as pending.
+  const reads = useQaReleaseTrainReads();
 
   useEffect(() => {
     let cancelled = false;
-    adminFetch(READ_API, { cache: "no-store" })
+    adminFetch(reads.fresh ? `${READ_API}?fresh=1` : READ_API, { cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
         return response.json() as Promise<View>;
       })
       .then((next) => {
-        if (!cancelled) setView(next);
+        if (cancelled) return;
+        setView(next);
+        setFailed(false);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -59,7 +65,7 @@ export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reads.key, reads.fresh]);
 
   const emergency = view?.selection.emergency ?? null;
   const candidates = view?.candidates.status === "ok" ? view.candidates.candidates.filter((c) => qaReleaseTrainCargoPickable(c.status)) : [];

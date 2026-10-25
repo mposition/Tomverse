@@ -134,3 +134,22 @@ test("the app port reads an emergency request and asks for an emergency admissio
     { phase: "admit", slot: "20261020-1100" },
   ]);
 });
+
+// Review r-20261025-064617: a train past the first hundred open main pull
+// requests still holds the next one, and a list past the cap is a failed read.
+test("open trains are counted across every page of open main pull requests", async () => {
+  const pages = (count) =>
+    Array.from({ length: count }, (_, i) => ({ number: 5000 + i, head: { ref: i === count - 1 ? "release/train-20261025-1400" : `feature/${i}` } }));
+  const answerWith = (byPage) =>
+    createQaReleaseTrainGithubPorts({
+      token: async () => "t",
+      http: async (request) => {
+        const page = Number(new URL(request.url).searchParams.get("page"));
+        return { status: 200, text: JSON.stringify(byPage[page - 1] ?? []) };
+      },
+    });
+  // 100 others, then a train on page two.
+  assert.equal(await answerWith([pages(100).map((p) => ({ ...p, head: { ref: "feature/x" } })), pages(3)]).openTrains(), 1);
+  assert.equal(await answerWith([pages(5)]).openTrains(), 1);
+  await assert.rejects(answerWith([pages(100), pages(100), pages(100)]).openTrains(), /github_pages/);
+});

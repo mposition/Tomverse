@@ -176,7 +176,12 @@ export async function runQaReleaseTrainRound(
   } catch (error) {
     return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure("admit", error) };
   }
-  if (!admission.admitted) return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
+  if (!admission.admitted) {
+    // A refused emergency (replaced, withdrawn, or this minute taken) takes
+    // no seat from a scheduled departure that is due.
+    if (departure.emergency && qaReleaseTrainDeparture(nowMs, hours) !== null) return runQaReleaseTrainRound(env, ports, nowMs, true);
+    return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
+  }
 
   const fail = async (failure: string, picks: QaReleaseTrainPick[] = [], rcSha: string | null = null, pushed = false): Promise<QaReleaseTrainOutcome> => {
     try {

@@ -304,3 +304,23 @@ test("an emergency that already left this minute, or left with nothing on board,
     ],
   );
 });
+
+test("a refused emergency admission hands the due scheduled departure its round", async () => {
+  const refused = ports({ emergency: [12] });
+  refused.p.app.admit = async (slot, emergencyRequestId) => {
+    refused.calls.push(["admitSlot", slot, emergencyRequestId ?? null]);
+    return emergencyRequestId ? { admitted: false, reason: "no_emergency" } : { admitted: true };
+  };
+  const outcome = await runQaReleaseTrainRound(env(), refused.p, NOW);
+  assert.equal(outcome.slot, "20261020-1100");
+  assert.deepEqual(
+    refused.calls.filter(([n]) => n === "admitSlot"),
+    [
+      ["admitSlot", "20261020-1105", "req-1"],
+      ["admitSlot", "20261020-1100", null],
+    ],
+  );
+  // Off the hours, the refusal is the round's answer.
+  const off = ports({ emergency: [12], admit: { admitted: false, reason: "no_emergency" } });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), off.p, Date.parse("2026-10-20T02:37:00Z")), { exitCode: 0, train: "not_admitted", reason: "no_emergency" });
+});

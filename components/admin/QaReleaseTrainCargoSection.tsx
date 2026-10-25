@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useQaReleaseTrainReads } from "@/components/admin/QaReleaseTrainRefresher";
 import { announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
@@ -61,10 +62,12 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
   const [query, setQuery] = useState("");
   // What cannot ride is counted, not listed, unless asked for (owner, 2026-10-23: the list ran to hundreds).
   const [showAll, setShowAll] = useState(false);
+  // On the train tab its own "Read again" (and the emergency panel's save) read it again.
+  const reads = useQaReleaseTrainReads();
 
   useEffect(() => {
     let cancelled = false;
-    adminFetch(reloadKey > 0 ? `${API}?fresh=1` : API, { cache: "no-store" })
+    adminFetch(reloadKey > 0 || reads.fresh ? `${API}?fresh=1` : API, { cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
         return response.json() as Promise<View>;
@@ -81,7 +84,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, reads.key, reads.fresh]);
 
   const saved = useMemo(() => new Set(view?.selection.numbers ?? []), [view]);
   const changed = picked.size !== saved.size || [...picked].some((number) => !saved.has(number));
