@@ -315,6 +315,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       revision이 최신 운영자 제어 revision과 같고 같은 출발을 전에 승인하지 않았을 때만이며(레인 latch는 보지 않습니다 —
       운영자 결정 2026-10-23, train은 레인과 독립), 승인과 결과를 병합 레인 actor의 시스템 감사
       행(`qa_release.train_admitted`, `qa_release.train_reported`)으로 남깁니다. 전용 테이블은 없습니다.
+      서비스는 돌 때마다 읽은 출발 시각(`QA_RELEASE_TRAIN_SLOTS`)을 본 앱에 알리고, Admin 다음 열차는 그 값으로 출발 시각과
+      다음 출발을 보입니다(운영자 2026-10-25). 표시용 AppSetting 한 행이며 감사 행이 아니고, 이 알림이 실패해도 열차는 그대로 돕니다.
     - **ruleset**: 7항의 update ruleset은 App의 develop 밖 브랜치 생성을 막으므로, 켜기 전에 운영자가 `refs/heads/release/train-*`를
       그 ruleset의 제외 목록에 더합니다. 이것은 보안 경계 변경이라 운영자의 승인 대상입니다.
 

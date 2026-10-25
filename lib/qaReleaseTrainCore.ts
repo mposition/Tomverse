@@ -55,6 +55,18 @@ export function qaReleaseTrainDeparture(nowMs: number, hours: readonly number[])
   return null;
 }
 
+/** The next departure after now (AEST hours), today's or tomorrow's; null with no hours. */
+export function qaReleaseTrainNextDepartureMs(nowMs: number, hours: readonly number[]): number | null {
+  const aest = new Date(nowMs + AEST_OFFSET_MS);
+  for (const day of [0, 1]) {
+    for (const hour of [...hours].sort((a, b) => a - b)) {
+      const departsAtMs = Date.UTC(aest.getUTCFullYear(), aest.getUTCMonth(), aest.getUTCDate() + day, hour) - AEST_OFFSET_MS;
+      if (departsAtMs > nowMs) return departsAtMs;
+    }
+  }
+  return null;
+}
+
 export const qaReleaseTrainBranch = (slot: string): string => {
   if (!SLOT.test(slot)) throw new Error("train slot");
   return `${QA_RELEASE_TRAIN_BRANCH_PREFIX}${slot}`;
