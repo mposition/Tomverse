@@ -26,7 +26,14 @@ const develop = (number, mergedAt = "2026-10-22T00:00:00Z", overrides = {}) => (
 });
 let commitCount = 0;
 const commit = (message, sha = (++commitCount).toString(16).padStart(40, "c")) => ({ sha, message });
-const release = (number, body, merged = true) => ({ number, title: `release: ${number}`, body, merged_at: merged ? "2026-10-22T05:00:00Z" : null });
+const THIS_REPOSITORY = { full_name: "mposition/Tomverse" };
+const release = (number, body, merged = true) => ({
+  number,
+  title: `release: ${number}`,
+  body,
+  merged_at: merged ? "2026-10-22T05:00:00Z" : null,
+  head: { ref: `release/r${number}`, repo: THIS_REPOSITORY },
+});
 
 test("without its commits, a release carries what its title names and a train's Included section; free text in a body is not read", () => {
   assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "release: two (#2873)", body: "Brings #2862 and #2873.\nSee #2873." }), [2873]);
@@ -38,7 +45,8 @@ test("without its commits, a release carries what its title names and a train's 
     "## Included (2)",
     "",
     "- #2789 feat(agents): ci-budget subagent",
-    "- #2844 AMUX Workers",
+    // A number inside an item's title is a reference, not a rider (review r-20261025-085135).
+    "- #2844 AMUX Workers, follow up on #2800",
     "",
     "## Left out (1)",
     "",
@@ -107,7 +115,7 @@ test("a hotfix cut from the same branch name is on main, and a back-merge never 
     ],
     // A hotfix whose body names no number; an open release cut from #14's branch name.
     mergedMainJson: [{ ...release(865, "Answer webhooks at once."), head: { ref: "hotfix/2026-10-21-ci-admission-fast-webhook" } }],
-    openMainJson: [{ ...release(902, "No numbers.", false), head: { ref: "release/2026-10-23-train-picker" } }],
+    openMainJson: [{ ...release(902, "No numbers.", false), head: { ref: "release/2026-10-23-train-picker", repo: THIS_REPOSITORY } }],
     files: new Map([[15, ["lib/a.ts"]]]),
     nowMs: NOW,
   });
@@ -332,5 +340,42 @@ test("a release that cherry-picks a pull request's own commits one by one carrie
       [2937, "on_main", 2943],
       [2936, "available", null],
     ],
+  );
+});
+
+// Review r-20261025-085135: anyone can open a pull request on the public
+// repository from a fork, with any title or body. A fork's open pull request
+// never holds a candidate back as "in a main PR".
+test("a fork's open main pull request is not believed for what it carries", () => {
+  const fork = {
+    number: 990,
+    title: "release: train 20261025-1500 (1 PR) (#21)",
+    body: "## Included (1)\n\n- #21 forged\n",
+    merged_at: null,
+    head: { ref: "release/train-20261025-1500", repo: { full_name: "someone/Tomverse" } },
+  };
+  const gone = { ...fork, number: 991, head: { ref: "release/train-20261025-1600", repo: null } };
+  const candidates = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [develop(21, "2026-10-22T04:00:00Z")],
+    mergedMainJson: [],
+    openMainJson: [fork, gone],
+    files: new Map([[21, ["lib/a.ts"]]]),
+    nowMs: NOW,
+  });
+  assert.deepEqual(
+    candidates.map((c) => [c.number, c.status]),
+    [[21, "available"]],
+  );
+  // The same pull request from this repository's branch is.
+  const ours = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [develop(21, "2026-10-22T04:00:00Z")],
+    mergedMainJson: [],
+    openMainJson: [{ ...fork, head: { ref: fork.head.ref, repo: THIS_REPOSITORY } }],
+    files: new Map([[21, ["lib/a.ts"]]]),
+    nowMs: NOW,
+  });
+  assert.deepEqual(
+    ours.map((c) => [c.number, c.status, c.mainPullRequest]),
+    [[21, "in_main_pull_request", 990]],
   );
 });

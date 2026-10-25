@@ -34,7 +34,7 @@ const TABS = adminNavItemTabs("qa-release");
  * owner or ops and a recent sign-in, checked by its route.
  */
 export default async function AdminQaReleasePage({ searchParams }: PageProps<"/admin/qa-release">) {
-  const { fresh, ...query } = await searchParams;
+  const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
   const session = await getServerSession(authOptions);
   // Whether this viewer may write travels with the payload, so a reader is not
@@ -66,8 +66,7 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
       {tab.id === "ci-admission" ? (
         <CiAdmissionSection key={tab.id} initial={admission} canWrite={canWrite} />
       ) : tab.id === "train" ? (
-        // `fresh` (the train tab's "Read GitHub again") is for this read only: tab links never carry it.
-        <TrainTab canWrite={canWrite} nowMs={now.getTime()} fresh={typeof fresh === "string"} />
+        <TrainTab canWrite={canWrite} nowMs={now.getTime()} />
       ) : tab.id === "lane" ? (
         <LaneTab rounds={laneRounds} canWrite={canWrite} />
       ) : (
@@ -94,9 +93,9 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
  * The release train (owner, 2026-10-25): where the next train stands, an
  * emergency departure, the next train's cargo and the departure board.
  */
-async function TrainTab({ canWrite, nowMs, fresh }: { canWrite: boolean; nowMs: number; fresh: boolean }) {
+async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number }) {
   const [board, next, schedule] = await Promise.all([
-    readQaReleaseTrainBoard(nowMs, fresh),
+    readQaReleaseTrainBoard(nowMs),
     readQaReleaseTrainSelection(),
     readQaReleaseTrainSchedule(),
   ]);

@@ -22,7 +22,7 @@ import { readQaReleaseTrainAdmissions, readQaReleaseTrainReports } from "@/lib/q
 const OPEN_CACHE_MS = 5 * 60 * 1000;
 const CLOSED_CACHE_MS = 30 * 60 * 1000;
 const FAILURE_CACHE_MS = 60 * 1000;
-/** "Read GitHub again" re-reads a cached read older than this; a newer one is reused, so clicks cannot spend the allowance. */
+/** "Read GitHub again" expires a cached read older than this; a newer one is kept, so clicks cannot spend the allowance. */
 const FRESH_MIN_MS = 30 * 1000;
 const BOARD_ROWS = 20;
 /** Open main pull requests beyond this many pages are not read: the open list is then unread, never partial. */
@@ -41,9 +41,19 @@ export type QaReleaseTrainBoard = {
 let openCache: { atMs: number; json: unknown[] | null } | null = null;
 const pullCache = new Map<number, { atMs: number; json: unknown | null; merged: boolean }>();
 
-async function readOpen(readJson: (path: string) => Promise<unknown>, nowMs: number, fresh: boolean): Promise<unknown[] | null> {
-  const keep = fresh ? FRESH_MIN_MS : openCache?.json === null ? FAILURE_CACHE_MS : OPEN_CACHE_MS;
-  if (openCache && nowMs - openCache.atMs < keep) return openCache.json;
+/**
+ * The train tab's "Read GitHub again" (through the cargo read's `fresh`): the
+ * next board read goes to GitHub for the open list and every train not
+ * merged, unless that read is younger than thirty seconds. A merged train
+ * cannot change and is kept.
+ */
+export function expireQaReleaseTrainBoardReads(nowMs: number): void {
+  if (openCache && nowMs - openCache.atMs >= FRESH_MIN_MS) openCache = null;
+  for (const [number, hit] of pullCache) if (!hit.merged && nowMs - hit.atMs >= FRESH_MIN_MS) pullCache.delete(number);
+}
+
+async function readOpen(readJson: (path: string) => Promise<unknown>, nowMs: number): Promise<unknown[] | null> {
+  if (openCache && nowMs - openCache.atMs < (openCache.json === null ? FAILURE_CACHE_MS : OPEN_CACHE_MS)) return openCache.json;
   let json: unknown[] | null = [];
   try {
     for (let page = 1; ; page += 1) {
@@ -60,10 +70,9 @@ async function readOpen(readJson: (path: string) => Promise<unknown>, nowMs: num
   return json;
 }
 
-async function readPull(readJson: (path: string) => Promise<unknown>, number: number, nowMs: number, fresh: boolean): Promise<unknown | null> {
+async function readPull(readJson: (path: string) => Promise<unknown>, number: number, nowMs: number): Promise<unknown | null> {
   const hit = pullCache.get(number);
-  const keep = fresh ? FRESH_MIN_MS : hit?.json === null ? FAILURE_CACHE_MS : CLOSED_CACHE_MS;
-  if (hit && (hit.merged || nowMs - hit.atMs < keep)) return hit.json;
+  if (hit && (hit.merged || nowMs - hit.atMs < (hit.json === null ? FAILURE_CACHE_MS : CLOSED_CACHE_MS))) return hit.json;
   let json: unknown | null;
   try {
     json = await readJson(`/pulls/${number}`);
@@ -75,13 +84,12 @@ async function readPull(readJson: (path: string) => Promise<unknown>, number: nu
   return json;
 }
 
-/** `fresh`: the tab's "Read GitHub again" -- past the shared read, except a merged train, which cannot change. */
-export async function readQaReleaseTrainBoard(nowMs = Date.now(), fresh = false): Promise<QaReleaseTrainBoard> {
+export async function readQaReleaseTrainBoard(nowMs = Date.now()): Promise<QaReleaseTrainBoard> {
   const readJson = createGithubRepoReader();
   const [admissions, reports, open, candidates] = await Promise.all([
     readQaReleaseTrainAdmissions(BOARD_ROWS),
     readQaReleaseTrainReports(BOARD_ROWS * 2),
-    readOpen(readJson, nowMs, fresh),
+    readOpen(readJson, nowMs),
     readQaReleaseTrainCargoCandidates(nowMs),
   ]);
   // Trains on the board that opened a pull request no longer open: their own state.
@@ -93,7 +101,7 @@ export async function readQaReleaseTrainBoard(nowMs = Date.now(), fresh = false)
       : [...new Set(reports.filter((r) => shown.has(r.slot) && r.report.pullRequestNumber !== null).map((r) => r.report.pullRequestNumber as number))].filter(
           (number) => !openNumbers.has(number),
         );
-  const settledJson = await Promise.all(settled.map((number) => readPull(readJson, number, nowMs, fresh)));
+  const settledJson = await Promise.all(settled.map((number) => readPull(readJson, number, nowMs)));
   const titles = new Map(candidates.status === "ok" ? candidates.candidates.map((c) => [c.number, c.title] as const) : []);
   const pullStates = qaReleaseTrainPullStates([...settledJson.filter((json) => json !== null), ...(open ?? [])]);
   return {

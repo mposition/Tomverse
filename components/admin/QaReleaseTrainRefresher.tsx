@@ -3,31 +3,31 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { QA_RELEASE_TRAIN_CHANGED_EVENT, QA_RELEASE_TRAIN_RELOAD_EVENT, QA_RELEASE_TRAIN_TAB_HREF } from "@/components/admin/qaReleaseTabParts";
+import { QA_RELEASE_TRAIN_CHANGED_EVENT, QA_RELEASE_TRAIN_RELOAD_EVENT } from "@/components/admin/qaReleaseTabParts";
+import { adminFetch } from "@/lib/adminFetch";
+
+const FRESH_READ = "/api/admin/agent-digests/qa-release/train-cargo?fresh=1";
 
 /**
- * Reads the release train tab again on the server after a save on it, and on
- * its "Read GitHub again" with `fresh` in the address, so the board reads
- * GitHub past its shared read too (qaReleaseTrainBoardRead.ts).
+ * Reads the release train tab again on the server after a save on it or its
+ * "Read GitHub again": first a fresh cargo read, which also expires the
+ * departure board's shared GitHub reads (qaReleaseTrainBoardRead.ts), then
+ * the page. Nothing goes in the address, so no reload, link or later visit
+ * reads past the shared read again.
  */
 export function QaReleaseTrainRefresher() {
   const router = useRouter();
-  // `fresh` is for the one read it asked for: kept in the address, a reload,
-  // a copied link, a later visit or a refresh after a save would keep reading
-  // GitHub past the shared read. Replaced through the router, so its own idea
-  // of the address drops it too (the read it causes uses the shared read just
-  // renewed).
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).has("fresh")) router.replace(QA_RELEASE_TRAIN_TAB_HREF, { scroll: false });
-  });
-  useEffect(() => {
-    const refresh = () => router.refresh();
-    const reload = () => router.replace(`${QA_RELEASE_TRAIN_TAB_HREF}&fresh=${Date.now()}`, { scroll: false });
-    window.addEventListener(QA_RELEASE_TRAIN_CHANGED_EVENT, refresh);
-    window.addEventListener(QA_RELEASE_TRAIN_RELOAD_EVENT, reload);
+    const again = () => {
+      void adminFetch(FRESH_READ, { cache: "no-store" })
+        .catch(() => undefined)
+        .then(() => router.refresh());
+    };
+    window.addEventListener(QA_RELEASE_TRAIN_CHANGED_EVENT, again);
+    window.addEventListener(QA_RELEASE_TRAIN_RELOAD_EVENT, again);
     return () => {
-      window.removeEventListener(QA_RELEASE_TRAIN_CHANGED_EVENT, refresh);
-      window.removeEventListener(QA_RELEASE_TRAIN_RELOAD_EVENT, reload);
+      window.removeEventListener(QA_RELEASE_TRAIN_CHANGED_EVENT, again);
+      window.removeEventListener(QA_RELEASE_TRAIN_RELOAD_EVENT, again);
     };
   }, [router]);
   return null;
