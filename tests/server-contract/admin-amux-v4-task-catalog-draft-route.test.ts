@@ -54,7 +54,8 @@ test("a draft takes only grade caps and has its own rate limit", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
   assert.deepEqual(drafts, [caps]);
-  assert.deepEqual(rateKeys, ["admin-amux-v4-task-cost-catalog-draft"]);
+  assert.deepEqual(rateKeys, ["admin-amux-v4-task-cost-catalog-draft"],
+    "a draft counts only against the draft limit");
 });
 
 test("a draft request cannot carry a price or an unknown grade", async () => {
@@ -69,8 +70,19 @@ test("a draft request cannot carry a price or an unknown grade", async () => {
     assert.equal((await post(body)).status, 400);
   }
   assert.deepEqual(drafts, []);
-  assert.ok(rateKeys.every((key) => key === "admin-amux-v4-task-cost-catalog"),
-    "a refused body counts against the write limit, not the draft limit");
+  assert.deepEqual(rateKeys, Array.from({ length: 4 }, () => [
+    "admin-amux-v4-task-cost-catalog-draft", "admin-amux-v4-task-cost-catalog"]).flat(),
+  "a refused body counts against both limits");
+});
+
+test("every request is limited before its body is read, even unreadable JSON", async () => {
+  rateKeys.length = 0;
+  const response = await (await route).POST(new Request(
+    "https://tomverse.test/api/admin/amux/task-cost-catalog", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: "{not json" }));
+  assert.equal(response.status, 400);
+  assert.deepEqual(rateKeys, ["admin-amux-v4-task-cost-catalog-draft",
+    "admin-amux-v4-task-cost-catalog"]);
 });
 
 test("a draft with no priced worker answers 409 with the skipped list", async () => {

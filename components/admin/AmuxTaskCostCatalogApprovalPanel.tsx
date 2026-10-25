@@ -15,7 +15,7 @@ const GRADES = ["routine", "advanced", "frontier"] as const;
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const grade = z.enum(GRADES);
 const skippedSchema = z.array(z.object({ workerName: z.string(), modelId: z.string(),
-  reason: z.enum(["price_missing", "grade_unknown"]) }).strict());
+  reason: z.enum(["price_missing", "grade_unknown", "roles_missing"]) }).strict());
 const draftSchema = z.object({ ok: z.literal(true),
   catalog: z.record(z.string(), z.unknown()), catalogDigest: digest, evidenceDigest: digest,
   routes: z.array(z.object({ workerName: z.string(), modelId: z.string(), grade,
@@ -79,6 +79,9 @@ export function AmuxTaskCostCatalogApprovalPanel({ approvalAvailable, current, i
   const [skipped, setSkipped] = useState<Skipped>([]);
   const [stale, setStale] = useState(false);
   const [approvalId, setApprovalId] = useState<string | null>(null);
+  // The digest that approval ID was sent with: a read-back compares to it,
+  // never to a later draft.
+  const [submittedDigest, setSubmittedDigest] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [unknown, setUnknown] = useState(false);
@@ -131,7 +134,8 @@ export function AmuxTaskCostCatalogApprovalPanel({ approvalAvailable, current, i
     if (!approvalAvailable || !draft || stale || busy || unknown || approved ||
         !confirmed) return;
     const id = crypto.randomUUID();
-    setApprovalId(id); setBusy(true); setError(null); setReauth(false);
+    setApprovalId(id); setSubmittedDigest(draft.catalogDigest);
+    setBusy(true); setError(null); setReauth(false);
     try {
       const response = await adminFetch(endpoint, { method: "POST", cache: "no-store",
         headers: { "Content-Type": "application/json" },
@@ -154,7 +158,7 @@ export function AmuxTaskCostCatalogApprovalPanel({ approvalAvailable, current, i
     finally { setBusy(false); }
   };
   const readBack = async () => {
-    if (!approvalId || busy) return;
+    if (!approvalId || !submittedDigest || busy) return;
     setBusy(true); setError(null);
     try {
       const response = await adminFetch(`${endpoint}/${approvalId}`, { cache: "no-store" });
@@ -165,7 +169,7 @@ export function AmuxTaskCostCatalogApprovalPanel({ approvalAvailable, current, i
       const value: unknown = await response.json();
       if (value && typeof value === "object" && "state" in value &&
           value.state === "approved" && "catalogDigest" in value &&
-          value.catalogDigest === draft?.catalogDigest) {
+          value.catalogDigest === submittedDigest) {
         setApproved(true); setUnknown(false); router.refresh();
       } else setUnknown(true);
     } catch { setUnknown(true); }
@@ -240,14 +244,14 @@ export function AmuxTaskCostCatalogApprovalPanel({ approvalAvailable, current, i
               <span className="text-zinc-400">{label}</span>
               <input type="number" inputMode="numeric" min={1} step={1}
                 data-testid={`amux-task-cost-catalog-cap-${key}-${field}`}
-                value={caps[key][field]} disabled={busy || approved}
+                value={caps[key][field]} disabled={busy || unknown || approved}
                 onChange={(event) => setCap(key, field, event.target.value)}
                 className="min-h-9 w-28 rounded border border-zinc-600 bg-transparent px-2 text-right tabular-nums" />
             </label>)}
         </fieldset>)}</div>
-      <button type="button" className={buttonClass} disabled={busy || approved}
+      <button type="button" className={buttonClass} disabled={busy || unknown || approved}
         data-testid="amux-task-cost-catalog-calculate"
-        onClick={() => void calculate(caps)}>{m.taskCatalogCalculate}</button>
+        onClick={() => { if (!unknown) void calculate(caps); }}>{m.taskCatalogCalculate}</button>
     </div>
 
     <div className={stepClass}>

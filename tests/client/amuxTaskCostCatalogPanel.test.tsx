@@ -39,7 +39,7 @@ test("an approved catalog shows its version, AEST times and priced workers", () 
   assert.match(html, />Approved</);
   assert.match(html, /Version 3 · approved 25\/10\/2026, 11:02 am AEST/);
   assert.match(html, /prices valid until 23\/01\/2027, 11:02 am AEST/);
-  assert.match(html, /claude-impl.*claude-sonnet-5.*Advanced.*\$3\.00.*\$15\.00/s);
+  assert.match(html, /claude-impl[^]*claude-sonnet-5[^]*Advanced[^]*\$3\.00[^]*\$15\.00/);
 });
 
 test("an unreadable catalog and a switched-off server say so", () => {

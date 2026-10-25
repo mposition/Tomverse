@@ -1,11 +1,15 @@
 import "server-only";
 
+import { randomBytes } from "node:crypto";
+
 import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
+import { resolveModelPricing } from "@/lib/modelPricing";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { scanAmuxV4Input } from "./localIntakeCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
@@ -15,8 +19,10 @@ import { calculateV4TaskCeilingFromCatalog,
   type V4TaskCostCatalog } from
   "./v4TaskCostCatalogCore.ts";
 import { readAmuxRegistryAndDerivedCatalog } from "./workerAssignmentCatalog.ts";
-import { AMUX_TASK_CATALOG_GRADES, draftAmuxV4TaskCostCatalog,
-  type AmuxTaskCatalogGradeCaps } from "./v4TaskCostCatalogDraftCore.ts";
+import { AMUX_TASK_CATALOG_GRADES, AMUX_TASK_CATALOG_VERSION,
+  amuxTaskCatalogCapsOf, amuxTaskCatalogVersion, draftAmuxV4TaskCostCatalog,
+  type AmuxTaskCatalogGradeCaps, type AmuxTaskCatalogResolvedPrice } from
+  "./v4TaskCostCatalogDraftCore.ts";
 import type { AmuxExecutionGrade } from "./executionGradeCore.ts";
 
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -72,6 +78,39 @@ async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {
   return rows[0].now;
 }
 
+/** Admin › Models prices resolved the way Chat bills them, at the prompt size
+ * given. A model id is matched exactly first; a model named only as another
+ * row's API model takes the dearest such row, so a duplicate never lowers it. */
+async function registryPriceFor() {
+  const models = (await getRuntimeModels()).filter((model) => model.provider === "anthropic");
+  return (modelId: string, inputTokens: number): AmuxTaskCatalogResolvedPrice | null => {
+    const exact = models.filter((model) => model.id === modelId);
+    const candidates = exact.length > 0 ? exact :
+      models.filter((model) => model.apiModel === modelId);
+    if (candidates.length === 0) return null;
+    const resolved = candidates.map((model) =>
+      resolveModelPricing(model, { estimatedPromptTokens: inputTokens }));
+    return {
+      inputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.inputUsdPerMillionTokens)),
+      outputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.outputUsdPerMillionTokens)),
+      cachedInputPriceMultiplier: Math.max(...resolved.map((row) => row.cachedInputPriceMultiplier)),
+    };
+  };
+}
+
+/** The v22 workers the catalog may price, each with its registered ceiling. */
+async function registryDraftWorkers(tx: Prisma.TransactionClient) {
+  const { registrations, derived } = await readAmuxRegistryAndDerivedCatalog(tx);
+  if (!registrations || !derived) {
+    throw new AmuxV4TaskCatalogApprovalError("worker_registry_unavailable");
+  }
+  const ceilings = new Map(registrations.map((registration) =>
+    [registration.workerName, registration.roleCeiling]));
+  return derived.v22.map((entry) => ({ workerName: entry.worker_name,
+    modelId: entry.model, roles: entry.routing_roles,
+    roleCeiling: ceilings.get(entry.worker_name) ?? null }));
+}
+
 /** Read-only cost evidence preview. Routes come from the worker registry and
  * prices from the model registry the owner manages (owner decision
  * 2026-10-25), never from a model's analysis text. */
@@ -121,6 +160,16 @@ export async function approveAmuxV4TaskCatalog(input: {
   if (!DIGEST.test(input.evidenceDigest)) {
     throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
   }
+  // Only a catalog the registries draft is approved (owner decision
+  // 2026-10-25): the server redrafts it at the same time and version and
+  // must reach the same digest, so no request can set its own rates.
+  const caps = amuxTaskCatalogCapsOf(catalog);
+  const draftedAt = [...new Set(catalog.routes.map((route) => route.pricingVerifiedAt))];
+  if (!caps || draftedAt.length !== 1 ||
+      !AMUX_TASK_CATALOG_VERSION.test(catalog.catalogVersion)) {
+    throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
+  }
+  const priceFor = await registryPriceFor();
   const approvalId = input.approvalId;
   let callbackReturned = false;
   try {
@@ -131,6 +180,13 @@ export async function approveAmuxV4TaskCatalog(input: {
       if (catalog.routes.some((route) => route.enabled &&
           (route.pricingVerifiedAt > now.toISOString() ||
             route.pricingExpiresAt <= now.toISOString()))) {
+        throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
+      }
+      const redrafted = draftAmuxV4TaskCostCatalog({
+        workers: await registryDraftWorkers(tx), priceFor, caps,
+        nowIso: draftedAt[0], catalogVersion: catalog.catalogVersion });
+      if (!redrafted.ok || redrafted.catalogDigest !== inspection.catalogDigest ||
+          redrafted.evidenceDigest !== input.evidenceDigest) {
         throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
       }
       if (AMUX_EXECUTION_GRADE_CODE_LATCH) {
@@ -192,36 +248,12 @@ export async function approveAmuxV4TaskCatalog(input: {
  * is written: approving the returned catalog is the existing audited step. */
 export async function draftAmuxV4TaskCatalog(
   caps: Readonly<Record<AmuxExecutionGrade, AmuxTaskCatalogGradeCaps>>) {
-  const inputs = await prisma.$transaction(async (tx) => {
-    const { registrations, derived } = await readAmuxRegistryAndDerivedCatalog(tx);
-    if (!registrations || !derived) {
-      throw new AmuxV4TaskCatalogApprovalError("worker_registry_unavailable");
-    }
-    const ceilings = new Map(registrations.map((registration) =>
-      [registration.workerName, registration.roleCeiling]));
-    const workers = derived.v22.map((entry) => ({ workerName: entry.worker_name,
-      modelId: entry.model,
-      roleCeiling: ceilings.get(entry.worker_name) ?? null }));
-    const models = [...new Set(workers.map((worker) => worker.modelId))];
-    const rows = models.length === 0 ? [] : await tx.modelRegistryEntry.findMany({
-      where: { catalogDeleted: false, provider: "anthropic",
-        OR: [{ id: { in: models } }, { apiModel: { in: models } }] },
-      select: { id: true, apiModel: true, inputUsdPerMillionTokens: true,
-        outputUsdPerMillionTokens: true, cachedInputPriceMultiplier: true },
-    });
-    // A worker names the provider's model id; the registry row may carry it
-    // as its id or as the API model it calls. An exact id match wins.
-    const prices = models.flatMap((modelId) => {
-      const row = rows.find((candidate) => candidate.id === modelId) ??
-        rows.find((candidate) => candidate.apiModel === modelId);
-      return row ? [{ modelId, inputUsdPerMillionTokens: row.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: row.outputUsdPerMillionTokens,
-        cachedInputPriceMultiplier: row.cachedInputPriceMultiplier }] : [];
-    });
-    return { workers, prices, now: await databaseNow(tx) };
-  });
-  const draft = draftAmuxV4TaskCostCatalog({ workers: inputs.workers,
-    prices: inputs.prices, caps, nowIso: inputs.now.toISOString() });
+  const priceFor = await registryPriceFor();
+  const { workers, now } = await prisma.$transaction(async (tx) => ({
+    workers: await registryDraftWorkers(tx), now: await databaseNow(tx) }));
+  const nowIso = now.toISOString();
+  const draft = draftAmuxV4TaskCostCatalog({ workers, priceFor, caps, nowIso,
+    catalogVersion: amuxTaskCatalogVersion(nowIso, randomBytes(4).toString("hex")) });
   if (!draft.ok) return draft;
   return { ...draft, preview: await previewAmuxV4TaskCatalog(draft.catalog) };
 }

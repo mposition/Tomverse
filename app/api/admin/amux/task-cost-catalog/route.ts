@@ -53,15 +53,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "content_type_refused" },
         { status: 415, headers: noStore });
     }
+    // Every request counts before its body is read. Changing a cap redrafts,
+    // so a draft counts only against this looser limit; anything else also
+    // counts against the write limit below.
+    await consumeApiRateLimit(request, session.user.id,
+      "admin-amux-v4-task-cost-catalog-draft", { minute: 10, day: 200 });
     let raw: unknown;
     try { raw = JSON.parse(await readLimitedText(request, 280_000)); }
-    catch { return NextResponse.json({ error: "schema_rejected" },
-      { status: 400, headers: noStore }); }
+    catch { raw = null; }
     const draft = draftBody.safeParse(raw);
-    // Changing a cap redrafts, so drafts have their own, looser limit.
-    await consumeApiRateLimit(request, session.user.id, draft.success ?
-      "admin-amux-v4-task-cost-catalog-draft" : "admin-amux-v4-task-cost-catalog",
-    draft.success ? { minute: 10, day: 200 } : { minute: 2, day: 20 });
+    if (!draft.success) {
+      await consumeApiRateLimit(request, session.user.id,
+        "admin-amux-v4-task-cost-catalog", { minute: 2, day: 20 });
+    }
+    if (raw === null) {
+      return NextResponse.json({ error: "schema_rejected" },
+        { status: 400, headers: noStore });
+    }
     if (draft.success) {
       const result = await draftAmuxV4TaskCatalog(draft.data.caps);
       return NextResponse.json(result, { status: result.ok ? 200 : 409,
