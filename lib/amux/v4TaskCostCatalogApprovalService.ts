@@ -9,6 +9,12 @@ import { deriveAmuxV4TaskAutoCatalog,
   type AmuxTaskCatalogResolvedPrice } from "./v4TaskCostAutoCatalogCore.ts";
 import { readAmuxRegistryAndDerivedCatalog } from "./workerAssignmentCatalog.ts";
 
+/** lib/modelPricing.ts reads these per model; any one may override a price. */
+const PRICE_ENV_SUFFIXES = ["INPUT_USD_PER_MILLION", "OUTPUT_USD_PER_MILLION",
+  "CACHED_INPUT_PRICE_MULTIPLIER"] as const;
+const priceEnvKey = (modelId: string, suffix: string) =>
+  `CHAT_MODEL_${modelId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}_${suffix}`;
+
 /** A Task's cost cannot be bounded right now; callers hold, never price at zero. */
 export class AmuxV4TaskCatalogApprovalError extends Error {
   constructor(readonly code: "evidence_unverified" | "unavailable" |
@@ -58,9 +64,13 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient,
     if (candidates.length === 0) return null;
     const resolved = candidates.map((model) =>
       resolveModelPricing(model, { estimatedPromptTokens: inputTokens, at: options.at }));
-    // An environment override replaces the price without moving the row's
-    // change time, so a past price under one cannot be proven: unpriced.
-    if (options.at && resolved.some((row) => row.costSource.endsWith("env_override"))) {
+    // An environment override replaces a price field without moving the
+    // row's change time, so a past price that may use one cannot be proven:
+    // unpriced. Checked per field, since a partial row override reports
+    // itself as a registry override while its other fields still read the
+    // environment.
+    if (options.at && candidates.some((model) => PRICE_ENV_SUFFIXES.some((suffix) =>
+      process.env[priceEnvKey(model.id, suffix)] !== undefined))) {
       return null;
     }
     const writes = resolved.flatMap((row) =>

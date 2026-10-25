@@ -67,3 +67,20 @@ test("a price under an environment override is not used for past usage", async (
   assert.equal((await readAmuxV4TaskAutoCatalog(tx as never,
     { at: new Date("2026-10-21T00:00:00.000Z") })).ok, true);
 });
+
+test("a row that overrides one price while the environment sets another is not used for past usage", async () => {
+  const { readAmuxV4TaskAutoCatalog } = await service;
+  const partial = { ...tx, modelRegistryEntry: { findMany: async () => [{
+    id: "claude-draft-test", apiModel: "claude-draft-test", provider: "anthropic",
+    updatedAt: CHANGED_AT, inputUsdPerMillionTokens: 3,
+    outputUsdPerMillionTokens: undefined, cachedInputPriceMultiplier: undefined }] } };
+  const key = "CHAT_MODEL_CLAUDE_DRAFT_TEST_OUTPUT_USD_PER_MILLION";
+  const saved = process.env[key];
+  process.env[key] = "1";
+  try {
+    assert.deepEqual(await readAmuxV4TaskAutoCatalog(partial as never,
+      { at: new Date("2026-10-21T00:00:00.000Z") }), { ok: false, code: "no_priced_worker" });
+  } finally {
+    if (saved === undefined) delete process.env[key]; else process.env[key] = saved;
+  }
+});
