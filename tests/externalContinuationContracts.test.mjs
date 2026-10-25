@@ -569,6 +569,9 @@ async function assertClientSurfaceRouting(client) {
                 conversations: scenario.rows?.map((row) => ({ ...row, id: row.id ?? id })) ??
                     (scenario.row ? [{ id, surface: scenario.row }] : []),
                 mountedSurface: scenario.mounted ?? "workspace",
+                // Navigation compares against the route this mount is at; the
+                // harness mounts each route with its own workspace.
+                routeSurface: scenario.mounted ?? "workspace",
                 pathname: scenario.pathname ?? "/continuations/other",
                 isGuestMode: scenario.guest ?? false,
                 // This harness exercises the initial/continuation routing
@@ -666,7 +669,7 @@ async function assertClientSurfaceRouting(client) {
                     trailing({ data: { surface }, id, currentChatIdRef: { current: currentId },
                         navigationAttempt,
                         conversationNavigationAttemptRef: { current: currentAttempt },
-                        mountedSurface, router: { push: (path) => {
+                        mountedSurface, routeSurface: mountedSurface, router: { push: (path) => {
                             departureEvents.push("push");
                             paths.push(path);
                         } },
@@ -820,9 +823,9 @@ const routingMutations = [
     ["identity namespace guard is bypassed", (f) => f.replaceRouting("identityKey === identityNamespaceKey(identityNamespaceRef.current)", "true"), /identity namespace/],
     ["origin conversation guard is bypassed", (f) => f.replaceRouting("originConversationId === currentChatIdRef.current", "true"), /origin conversation/],
     ["pre-fetch current-state guard is removed", (f) => f.replaceRouting(/if \(!lookupIsCurrent\(\)\) return;\s*(?=try \{)/, ""), /missing identity|initial identity namespace/],
-    ["trailing detail derives from kind", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", "data.kind !== mountedSurface"), /derived from kind/],
-    ["trailing detail derives from product", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", "data.productKey !== mountedSurface"), /derived from productKey/],
-    ["trailing detail derives from id prefix", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", 'id.startsWith("continuation_")'), /derived from startsWith/],
+    ["trailing detail derives from kind", (f) => f.replaceTrailingRouting("data.surface !== routeSurface", "data.kind !== routeSurface"), /derived from kind/],
+    ["trailing detail derives from product", (f) => f.replaceTrailingRouting("data.surface !== routeSurface", "data.productKey !== routeSurface"), /derived from productKey/],
+    ["trailing detail derives from id prefix", (f) => f.replaceTrailingRouting("data.surface !== routeSurface", 'id.startsWith("continuation_")'), /derived from startsWith/],
     ["trailing handoff argument derives from kind", (f) => f.replaceAnchor("trailingHandoff",
         "router.push(conversationHandoffHref(data.kind, id, REVIEW_WORKSPACE_PATH));"), /derived from kind/],
     ["trailing handoff drops the departure barrier", (f) => f.replaceTrailingRouting(
@@ -847,11 +850,11 @@ const routingMutations = [
     ["trailing allowlist is bypassed", (f) => f.replaceAnchor("trailingAllowlist", "true"), /trailing handoff rejects an invalid/],
     ["trailing origin check is bypassed", (f) => f.replaceAnchor("trailingOrigin", "true"), /trailing handoff rejects a stale/],
     ["trailing guard is changed from AND to OR", (f) => f.replaceAnchor("trailingCondition",
-        '(currentChatIdRef.current === id || ["chat", "workspace", "continuation"].includes(data.surface)) && data.surface !== mountedSurface'), /trailing handoff rejects an invalid|trailing handoff rejects a stale|newer locked or refused selection|A-to-B-to-A/],
-    ["trailing id substring infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface",
-        '(id.includes("continuation_") || data.surface !== mountedSurface)'), /trailing handoff follows the current owned server surface/],
-    ["trailing id regex infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface",
-        '(/^continuation_/.test(id) || data.surface !== mountedSurface)'), /trailing handoff follows the current owned server surface/],
+        '(currentChatIdRef.current === id || ["chat", "workspace", "continuation"].includes(data.surface)) && data.surface !== routeSurface'), /trailing handoff rejects an invalid|trailing handoff rejects a stale|newer locked or refused selection|A-to-B-to-A/],
+    ["trailing id substring infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== routeSurface",
+        '(id.includes("continuation_") || data.surface !== routeSurface)'), /trailing handoff follows the current owned server surface/],
+    ["trailing id regex infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== routeSurface",
+        '(/^continuation_/.test(id) || data.surface !== routeSurface)'), /trailing handoff follows the current owned server surface/],
     ["trailing allowlist drops a valid surface", (f) => f.replaceAnchor("trailingAllowlist",
         '(data.surface === "workspace" || data.surface === "continuation")'), /trailing handoff follows the current owned server surface/],
     ["trailing allowlist admits an unknown surface", (f) => f.replaceAnchor("trailingAllowlist",
@@ -874,9 +877,9 @@ test("equivalent trailing guard grouping and order preserve routing behavior", a
     // reversed/parenthesized origin or freshness comparison must preserve
     // behavior and the AST-backed guard-removal mutation.
     for (const condition of [
-        "navigationAttempt === conversationNavigationAttemptRef.current && (data.surface !== mountedSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)) && (currentChatIdRef.current === id)",
-        "(['chat', 'workspace', 'continuation'].includes(data.surface) && (((conversationNavigationAttemptRef.current) === (navigationAttempt)) && (((id) === (currentChatIdRef.current)) && (data.surface !== mountedSurface))))",
-        "(((currentChatIdRef.current) === (id)) && ((data.surface !== mountedSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)))) && ((navigationAttempt) === (conversationNavigationAttemptRef.current))",
+        "navigationAttempt === conversationNavigationAttemptRef.current && (data.surface !== routeSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)) && (currentChatIdRef.current === id)",
+        "(['chat', 'workspace', 'continuation'].includes(data.surface) && (((conversationNavigationAttemptRef.current) === (navigationAttempt)) && (((id) === (currentChatIdRef.current)) && (data.surface !== routeSurface))))",
+        "(((currentChatIdRef.current) === (id)) && ((data.surface !== routeSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)))) && ((navigationAttempt) === (conversationNavigationAttemptRef.current))",
     ]) {
         const regrouped = routingFixture(routingClient).replaceAnchor("trailingCondition", condition);
         assert.ok(routingFixture(regrouped).anchorText("trailingNavigationFreshness").length > 0,
@@ -975,19 +978,52 @@ test("every seed outcome is recorded, and the healthy ones are not logged", () =
 
 /* --- product identity (external-conversation-continuation.md §3.1, §10) */
 
-test("the service creates review conversations through the shared writer", () => {
-    // §3.1: a continuation is a Review conversation. Asked of the source
-    // because the substitutions this guards are textual -- a literal in place
-    // of the constant, or a direct `conversation.create` that skips the writer
-    // the product key is written by.
+test("the service writes the endpoint's product through the shared writer", () => {
+    // §3.1: the product is the endpoint's server decision -- Chat by default,
+    // Review when the owner compares -- and the service is told it rather
+    // than deriving it. Asked of the source because the substitutions this
+    // guards are textual: a body field in place of the input, or a direct
+    // `conversation.create` that skips the writer the product key is written by.
     const source = readFileSync("lib/externalContinuationService.ts", "utf8");
     assert.match(source, /createConversation\(/);
-    assert.match(source, /productKey: REVIEW_PRODUCT_KEY/);
-    assert.doesNotMatch(source, /CHAT_PRODUCT_KEY/);
+    assert.match(source, /productKey: input\.productKey/);
+    assert.match(source, /productKey: ContinuationProductKey;/);
     assert.doesNotMatch(source, /prisma\.conversation\.create/);
-    // Auto is Chat-only (`AUTO_SELECTION_PRODUCT`), and on a review row the
-    // database's own `Conversation_auto_only_chat_check` would refuse the pair.
-    assert.doesNotMatch(source, /selectionMode: "auto"/);
+    // Auto only on a Chat row: `Conversation_auto_only_chat_check` refuses
+    // `review + auto`, and the service never writes it.
+    assert.match(
+        source,
+        /selectionMode:\s*input\.productKey === CHAT_PRODUCT_KEY \? "auto" : "manual"/
+    );
+});
+
+test("the default continuation is Chat only where Chat is offered", () => {
+    // Owner decision 2026-10-25. The same surface-entry question
+    // `POST /api/products/chat/conversations` asks, failing to Review.
+    const helper = readFileSync("lib/externalContinuationCreateRoute.ts", "utf8");
+    assert.match(helper, /autoAvailabilityFor\(userId\)\.then\(chatSurfaceAvailable\)\.catch\(\(\) => false\)/);
+    assert.match(helper, /\?\s*"chat"\s*:\s*"review";/);
+    // The body still carries only the key; nothing the client sends picks it.
+    assert.match(helper, /idempotencyKey: z\.string\(\)\.uuid\(\),\s*\}\)\s*\.strict\(\)/);
+    const route = readFileSync(
+        "app/api/external-conversations/[conversationId]/continuations/route.ts",
+        "utf8"
+    );
+    assert.match(route, /productKey: await defaultContinuationProduct\(userId\)/);
+});
+
+test("comparing in Review forks the owned bridge's snapshot, never rewriting the product", () => {
+    const route = readFileSync(
+        "app/api/conversations/[conversationId]/continuation/review/route.ts",
+        "utf8"
+    );
+    // The snapshot comes from this conversation's own bridge, scoped by user:
+    // no external id on an account conversation URL or body.
+    assert.match(route, /getContinuationBridge\(\s*userId,/);
+    assert.match(route, /if \(!bridge\?\.externalConversationId\) throw continuationSourceNotFound\(\);/);
+    assert.match(route, /productKey: "review"/);
+    // A new conversation, not an update of the Chat one.
+    assert.doesNotMatch(route, /conversation\.update/);
 });
 
 test("the initial model combination is the account's, not one invented here", () => {
@@ -1247,9 +1283,14 @@ test("the viewer's continue card is wired to the flag, server-read", () => {
 test("hiding the card is not the boundary -- creation stays fail-closed", () => {
     // The server refuses regardless of what the browser was shown. The card
     // going away is a courtesy to the reader, never the gate.
-    const route = readFileSync(
+    const helper = readFileSync("lib/externalContinuationCreateRoute.ts", "utf8");
+    assert.match(helper, /await assertExternalContinuationEnabled\(\);/);
+    assert.match(helper, /EXTERNAL_CONTINUATION_DISABLED/);
+    // Both create endpoints go through it.
+    for (const path of [
         "app/api/external-conversations/[conversationId]/continuations/route.ts",
-        "utf8"
-    );
-    assert.match(route, /EXTERNAL_CONTINUATION_DISABLED/);
+        "app/api/conversations/[conversationId]/continuation/review/route.ts",
+    ]) {
+        assert.match(readFileSync(path, "utf8"), /respondToContinuationCreate\(req,/);
+    }
 });

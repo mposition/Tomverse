@@ -30,6 +30,8 @@ const json = (body: unknown, status = 200) => ({
 });
 
 const CONVERSATION_ID = "qa-continued-conversation";
+/** The Review fork "Compare in Review" creates from a Chat continuation. */
+const REVIEW_FORK_ID = "qa-continued-review-fork";
 const EXTERNAL_ID = "qa-external-conversation";
 
 /**
@@ -122,11 +124,19 @@ const mockContinuationApi = async (
          * Failing the route for one id is that lever, deterministically.
          */
         failModelIds?: string[];
+        /**
+         * The stored product of the continued conversation. Review unless a
+         * spec asks for the Chat default (owner decision 2026-10-25); the
+         * route reads it from a fixture cookie because there is no database.
+         */
+        product?: "chat" | "review";
     } = {}
 ) => {
     const selectedModels = options.selectedModels ?? [PRIMARY_MODEL];
+    const product = options.product ?? "review";
     const state = {
         createBodies: [] as { idempotencyKey: string }[],
+        reviewForkBodies: [] as { idempotencyKey: string }[],
         savedMessages: [] as { id: string; role: string; content: string }[],
         chatRequests: 0,
         /** Every `/api/chat` body, so a spec can assert what each one carried. */
@@ -156,6 +166,44 @@ const mockContinuationApi = async (
             },
         ]);
     }
+
+    if (product === "chat") {
+        await page.context().addCookies([
+            {
+                name: "__tomverse_e2e_chat_continuations",
+                value: CONVERSATION_ID,
+                url: "http://127.0.0.1:3100",
+            },
+        ]);
+        await page.route("**/api/products/chat/capabilities", (route) =>
+            route.fulfill(json({ autoSelection: { offered: true } }))
+        );
+    }
+
+    // "Compare in Review": a second fork of the same snapshot, found by the
+    // server from this conversation's own bridge.
+    await page.route(
+        `**/api/conversations/${CONVERSATION_ID}/continuation/review`,
+        async (route) => {
+            state.reviewForkBodies.push(
+                route.request().postDataJSON() as { idempotencyKey: string }
+            );
+            await route.fulfill(
+                json(
+                    {
+                        conversationId: REVIEW_FORK_ID,
+                        idempotentReplay: false,
+                        provider: "chatgpt",
+                        seedMessageCount: 2,
+                        seedTruncatedMessageCount: 1,
+                        seedOmittedMessageCount: 0,
+                        sourceMessageCount: 2,
+                    },
+                    201
+                )
+            );
+        }
+    );
 
     await page.route("**/api/auth/session**", (route) =>
         route.fulfill(
@@ -313,14 +361,15 @@ const mockContinuationApi = async (
                 id: CONVERSATION_ID,
                 title: "Continued from an imported chat",
                 kind: "chat",
-                // §3.1: a continuation is a Review conversation.
-                productKey: "review",
+                // §3.1: the stored product -- Chat by default, Review when
+                // the owner compares.
+                productKey: product,
                 selectedModels: state.selectedModels,
                 disabledPanels: [],
                 webSearchMode: "off",
                 memoryMode: "inherit",
-                selectionMode: "manual",
-                autoSelection: { offered: false },
+                selectionMode: product === "chat" ? "auto" : "manual",
+                autoSelection: { offered: product === "chat" },
                 assistantProfile: null,
                 isLocked: false,
                 shareEnabled: false,
@@ -2193,5 +2242,107 @@ test.describe("searching an imported original @ui-risk", () => {
         await results.getByTestId("message-search-toggle-all").click();
         await expect(results.getByTestId("message-search-result")).toHaveCount(6);
         await expect(results.getByText("일부 결과만 표시합니다.")).toBeVisible();
+    });
+});
+
+/*
+  Which workspace a continuation renders (owner report 2026-10-25).
+
+  Continuing an import used to open the legacy comparison screen -- neither
+  Tomverse Chat nor Tomverse Review -- because the continuation route was its
+  own "workspace". It now renders the stored product's workspace: Chat with
+  Smart Adaptive by default, and Review for a conversation the owner chose to
+  compare, reached from the Chat one by an explicit button.
+*/
+test.describe("a continuation opens in its product's workspace", () => {
+    const openContinuationAs = async (page: Page, product: "chat" | "review") => {
+        await mockAuthenticatedApi(page, { autoSelectionOffered: product === "chat" });
+        const api = await mockContinuationApi(page, { product });
+        await mockConversationList(page, [
+            {
+                id: CONVERSATION_ID,
+                title: "Continued from an imported chat",
+                surface: "continuation",
+                sourceTitle: SOURCE_CONVERSATION_TITLE,
+            },
+        ]);
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        return api;
+    };
+
+    /** The product switcher this viewport shows, opening the drawer on mobile. */
+    const productSwitcher = async (page: Page): Promise<Locator> => {
+        const composerSwitcher = page
+            .getByTestId("chat-input")
+            .getByTestId("chat-product-switcher");
+        if ((await composerSwitcher.count()) > 0 && (await composerSwitcher.isVisible())) {
+            return composerSwitcher;
+        }
+        const drawer = await openConversationList(page);
+        return drawer.getByTestId("chat-product-switcher").first();
+    };
+
+    test("a Chat continuation is the Chat workspace with Smart Adaptive", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuationAs(page, "chat");
+
+        // The imported half and the boundary are still in the timeline.
+        await expect(importedBubbles(page).first()).toBeVisible();
+        await expect(page.getByTestId("continuation-divider").first()).toBeVisible();
+        // Chat's own composer: one model and the Smart Adaptive switch.
+        await expect(page.getByTestId("composer-auto-routing-toggle")).toBeVisible();
+        await expect(page.getByTestId("continuation-compare-in-review")).toBeVisible();
+        await expect(page.getByTestId("continuation-compare-in-review")).toHaveText(
+            "Review에서 여러 모델로 비교"
+        );
+        const switcher = await productSwitcher(page);
+        await expect(switcher.getByTestId("chat-product-chat")).toHaveAttribute(
+            "aria-current",
+            "page"
+        );
+        // The legacy screen is absent, not hidden.
+        await expect(page.getByTestId("continued-conversation-workspace")).toHaveCount(0);
+        const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+        );
+        expect(overflow).toBeLessThanOrEqual(1);
+    });
+
+    test("Compare in Review forks the original into a new Review conversation", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        const api = await openContinuationAs(page, "chat");
+
+        const compare = page.getByTestId("continuation-compare-in-review");
+        await expect(compare).toBeVisible();
+        await compare.click();
+
+        await expect(page).toHaveURL(new RegExp(`/continuations/${REVIEW_FORK_ID}$`));
+        // One attempt, one key, and nothing written to the Chat conversation.
+        expect(api.reviewForkBodies).toHaveLength(1);
+        expect(api.reviewForkBodies[0]?.idempotencyKey).toMatch(
+            /^[0-9a-f-]{36}$/
+        );
+        expect(api.createBodies).toHaveLength(0);
+    });
+
+    test("a Review continuation is the Review workspace, with no Chat-only controls", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuationAs(page, "review");
+
+        await expect(importedBubbles(page).first()).toBeVisible();
+        await expect(page.getByTestId("composer-model-select")).toHaveCount(1);
+        await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveCount(0);
+        await expect(page.getByTestId("continuation-compare-in-review")).toHaveCount(0);
+        const switcher = await productSwitcher(page);
+        await expect(switcher.getByTestId("chat-product-review")).toHaveAttribute(
+            "aria-current",
+            "page"
+        );
     });
 });

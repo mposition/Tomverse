@@ -62,11 +62,27 @@ export type ContinuationLauncher = {
     cancel: () => void;
 };
 
-export function useContinuationLauncher({
-    externalConversationId,
-}: {
-    externalConversationId: string;
-}): ContinuationLauncher {
+/**
+ * What the attempt continues.
+ *
+ * An imported snapshot (the server picks Chat or Review), or a continuation
+ * being compared in Review -- a second fork of the same snapshot that the
+ * server finds from that conversation's own bridge, so no external id is ever
+ * sent on an account conversation URL.
+ */
+export type ContinuationLaunchSource =
+    | { externalConversationId: string }
+    | { reviewFromConversationId: string };
+
+const launchEndpoint = (source: ContinuationLaunchSource): string =>
+    "externalConversationId" in source
+        ? `/api/external-conversations/${encodeURIComponent(source.externalConversationId)}/continuations`
+        : `/api/conversations/${encodeURIComponent(source.reviewFromConversationId)}/continuation/review`;
+
+export function useContinuationLauncher(
+    source: ContinuationLaunchSource
+): ContinuationLauncher {
+    const endpoint = launchEndpoint(source);
     const { t } = useLanguage();
     const router = useRouter();
     const [status, setStatus] = useState<ContinuationLauncherStatus>("idle");
@@ -94,7 +110,7 @@ export function useContinuationLauncher({
         setErrorMessage(null);
         try {
             const response = await fetch(
-                `/api/external-conversations/${encodeURIComponent(externalConversationId)}/continuations`,
+                endpoint,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -123,7 +139,7 @@ export function useContinuationLauncher({
             setErrorMessage(t("continuation.createFailed"));
             return false;
         }
-    }, [externalConversationId, router, status, t]);
+    }, [endpoint, router, status, t]);
 
     const cancel = useCallback(() => {
         idempotencyKeyRef.current = null;

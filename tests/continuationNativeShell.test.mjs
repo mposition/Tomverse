@@ -48,6 +48,49 @@ test("the continuation route renders the workspace every other chat route render
     assert.doesNotMatch(source, /ChatInput/);
 });
 
+test("a continuation renders its stored product's workspace, never a third one", () => {
+    // Owner report 2026-10-25: continuing an import showed the legacy
+    // comparison screen -- neither Chat nor Review -- because the route surface
+    // and the workspace were one value.
+    const route = code(ROUTE);
+    // The product comes from the owned row, read on the server.
+    assert.match(route, /where: \{ id: conversationId, userId \}/);
+    assert.match(route, /row\?\.productKey === "chat" \? "chat" : "review"/);
+    assert.match(route, /continuationProduct=\{continuationProduct\}/);
+    assert.match(route, /key=\{continuationProduct\}/);
+
+    const client = code(CLIENT);
+    assert.match(client, /mountedSurface: routeSurface = "workspace",/);
+    assert.match(
+        client,
+        /routeSurface === "continuation"\s*\?\s*continuationProduct === "chat" \? "chat" : "workspace"\s*:\s*routeSurface/
+    );
+    // Nothing renders for a "continuation" workspace any more.
+    assert.doesNotMatch(client, /mountedSurface === "continuation"/);
+    // A new chat leaves the continuation's URL for its own product's root.
+    assert.match(
+        client,
+        /router\.push\(mountedSurface === "chat" \? CHAT_WORKSPACE_PATH : REVIEW_WORKSPACE_PATH\)/
+    );
+
+    const shell = code("components/chat/ReviewWorkspaceShell.tsx");
+    assert.match(shell, /productSurface === "chat" && !fixtureMode/);
+});
+
+test("only a Chat continuation offers Compare in Review", () => {
+    const client = code(CLIENT);
+    assert.match(client, /useContinuationLauncher\(\{\s*reviewFromConversationId:/);
+    assert.match(
+        client,
+        /routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode &&\s*shellConversationId && continuationSource\.timeline\?\.source\.status === "available"/
+    );
+    const list = code(MESSAGE_LIST);
+    assert.match(list, /data-testid="continuation-compare-in-review"/);
+    assert.match(list, /disabled=\{importedTranscript\.compareInReview\.pending\}/);
+    const launcher = code("components/imports/useContinuationLauncher.ts");
+    assert.match(launcher, /\/continuation\/review`/);
+});
+
 test("the standalone continuation screen is gone, not merely unused", () => {
     // Leaving the files behind would leave two implementations of the same
     // screen, and the dead one is the one nobody re-checks.
@@ -236,7 +279,8 @@ test("selecting a conversation on another surface navigates instead of swapping"
     // URL must be at it -- and only then whether the surface itself differs.
     assert.match(source, /const ownPath = conversationSurfaceHref\(targetSurface, id\)/);
     assert.match(source, /if \(pathname !== ownPath\) \{/);
-    assert.match(source, /targetSurface !== mountedSurface/);
+    // Against the route this mount is at, not the product workspace it renders.
+    assert.match(source, /targetSurface !== routeSurface/);
     // The clicked id travels with the navigation; dropping it is what let the
     // workspace's restore reopen the continuation the user had just left.
     assert.match(

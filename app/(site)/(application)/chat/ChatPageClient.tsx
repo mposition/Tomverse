@@ -130,6 +130,7 @@ import {
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
+import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import {
   clearContinuationFocus,
   continuationFocusSnapshot,
@@ -770,7 +771,8 @@ export function ChatPageClient({
   chatStarterEnabledFlagKeys = [],
   chatStarterCapabilities = [],
   initialConversationId = null,
-  mountedSurface = "workspace",
+  mountedSurface: routeSurface = "workspace",
+  continuationProduct,
 }: {
   guestDefaultModelId: string;
   /**
@@ -883,7 +885,26 @@ export function ChatPageClient({
    * conversation than the one on screen.
    */
   mountedSurface?: ConversationSurface;
+  /**
+   * The stored product of a continuation mount (its route reads the owned
+   * row). Ignored on every other surface.
+   */
+  continuationProduct?: "chat" | "review";
 }) {
+  /*
+    Two surfaces, kept apart on purpose.
+
+    `routeSurface` is the URL this mount is at, and it is what navigation
+    compares a row's server-owned surface against. `mountedSurface` is the
+    workspace it renders: a continuation is the Chat or the Review product with
+    an imported transcript above it, never a third workspace of its own. Before
+    2026-10-25 the two were one value, and a continuation rendered neither
+    product's workspace -- the legacy comparison screen.
+  */
+  const mountedSurface: ConversationSurface =
+    routeSurface === "continuation"
+      ? continuationProduct === "chat" ? "chat" : "workspace"
+      : routeSurface;
   const {
     models: AVAILABLE_MODELS,
     getModel,
@@ -4393,7 +4414,7 @@ export function ChatPageClient({
         const defaults = reviewDefaultProvidersRef.current;
         if (defaults?.userId === sessionUserId) reviewWorkspace.setProviders(defaults.providers.slice(0, Math.min(3, maxSelectableModels)));
         else reviewWorkspace.clearProviders();
-        if (mountedSurface === "continuation" && identityKey) {
+        if (routeSurface === "continuation" && identityKey) {
             // This route transition unmounts the continuation tree. Promote
             // accepted turns before changing the selection ticket so their
             // prompt-free receipt survives into the next mount.
@@ -4425,10 +4446,10 @@ export function ChatPageClient({
           arriving there with no conversation open is exactly its own new-chat
           state.
         */
-        if (mountedSurface === "continuation") {
+        if (routeSurface === "continuation") {
             // A fresh Chat entry re-runs the server's current offered gate.
             // Existing owned Chat remains readable independently of that gate.
-            router.push(REVIEW_WORKSPACE_PATH);
+            router.push(mountedSurface === "chat" ? CHAT_WORKSPACE_PATH : REVIEW_WORKSPACE_PATH);
             return;
         }
         if (mountedSurface === "chat") {
@@ -4832,7 +4853,7 @@ export function ChatPageClient({
                     router.push(ownPath);
                     return;
                 }
-            } else if (targetSurface !== mountedSurface) {
+            } else if (targetSurface !== routeSurface) {
                 // The workspace has no per-conversation URL, so the id travels
                 // as a parameter the workspace spends on arrival.
                 // Review has its own canonical workspace after the product
@@ -5000,7 +5021,7 @@ export function ChatPageClient({
         if (navigationAttempt === conversationNavigationAttemptRef.current &&
             currentChatIdRef.current === id &&
             ["chat", "workspace", "continuation"].includes(data.surface) &&
-            data.surface !== mountedSurface) {
+            data.surface !== routeSurface) {
           // The in-place selection above already made `id` current, but this
           // late server-owned surface answer still leaves the mounted tree.
           // Re-run the departure barrier so durable-but-undispatched turns are
@@ -5242,7 +5263,7 @@ export function ChatPageClient({
             ? conversations.find((conversation) => conversation.id === savedChatId)
             : undefined;
         const restorableChatId =
-            savedRow && (savedRow.surface ?? "workspace") === mountedSurface
+            savedRow && (savedRow.surface ?? "workspace") === routeSurface
                 ? savedRow.id
                 : null;
 
@@ -10050,10 +10071,44 @@ export function ChatPageClient({
         : [],
     [continuationSource.timeline]
   );
+  /*
+    "Compare in Review" (owner decision 2026-10-25). Only a Chat continuation
+    offers it, and only while its original is readable: the server forks the
+    same snapshot into a new Review conversation and this one stays Chat.
+  */
+  const {
+    start: startReviewFork,
+    status: reviewForkStatus,
+    errorMessage: reviewForkError,
+  } = useContinuationLauncher({
+    reviewFromConversationId: shellConversationId ?? "",
+  });
+  const compareInReview = useMemo(
+    () =>
+      routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode &&
+      shellConversationId && continuationSource.timeline?.source.status === "available"
+        ? {
+            onPress: () => void startReviewFork(),
+            pending: reviewForkStatus === "creating",
+            error: reviewForkError,
+          }
+        : undefined,
+    [
+      continuationSource.timeline,
+      isGuestMode,
+      mountedSurface,
+      reviewForkError,
+      reviewForkStatus,
+      startReviewFork,
+      routeSurface,
+      shellConversationId,
+    ]
+  );
   const importedTranscript = useMemo(
     () =>
       continuationSource.timeline
         ? {
+            compareInReview,
             status: continuationSource.timeline.source.status,
             provider: continuationSource.timeline.provider,
             importedAt: continuationSource.timeline.importedAt,
@@ -10088,6 +10143,7 @@ export function ChatPageClient({
       continuationSource.focusOutcome,
       continuationFocusRequest,
       consumeAppliedSearchHitFocus,
+      compareInReview,
     ]
   );
 

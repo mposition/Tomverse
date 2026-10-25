@@ -277,6 +277,7 @@ type MobileChatShellProps = {
     focusRequest?: { messageId: string; nonce: number } | null;
     /** Called once the requested message has been scrolled to and focused. */
     onFocusApplied?: (nonce: number) => void;
+    compareInReview?: { onPress: () => void; pending: boolean; error: string | null };
   };
   /**
    * Whether this conversation has content the panels cannot see.

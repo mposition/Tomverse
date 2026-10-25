@@ -87,7 +87,8 @@ Tomverse Code는 아직 `Conversation` 행을 쓰지 않으므로, 지금 `code`
 | `POST /api/conversations` | `review` | 호환 경로. URL이 Chat/Review를 구분하지 못하므로 Review로 고정 |
 | `POST /api/conversations/import-guest` | `review` | 게스트 대화는 멀티 모델 비교였음. import는 소유권을 옮길 뿐 제품을 바꾸지 않음 |
 | `lib/imageGenerationService.ts` | `studio` | 이미지 대화 |
-| `lib/externalContinuationService.ts` | `review` | 외부 대화 이어가기. 서버 상수. §5.3 |
+| `POST /api/external-conversations/[id]/continuations` | `chat`(Chat 진입 제공 시, Auto) 또는 `review` | 외부 대화 이어가기. 서버 판정, 본문은 key만. §5.3 |
+| `POST /api/conversations/[id]/continuation/review` | `review` | 같은 원본의 Review 비교 갈래. 서버 상수. §5.3 |
 
 **제품은 요청이 아니라 endpoint가 정합니다.** body 필드·`Referer`·임의 header는
 "어느 화면에서 왔다"는 클라이언트의 주장이고, 주장에서 유도한 제품 정체성은
@@ -129,14 +130,21 @@ Tomverse Code는 아직 `Conversation` 행을 쓰지 않으므로, 지금 `code`
 `app/api/admin/users/[userId]/route.ts`를 writer로 셌던 것이 정확히 그 오독이었고,
 두 파일은 대화를 만들지 않습니다.
 
-## 5.3 외부 대화 이어가기는 `review`입니다 (2026-09-01)
+## 5.3 외부 대화 이어가기는 기본 `chat`, 비교 갈래는 `review`입니다 (2026-10-25)
+
+운영자 결정 2026-10-25: 이어가기는 Chat(Smart Adaptive)으로 열리고, 그 화면의 버튼으로
+같은 원본의 Review 갈래를 새로 만듭니다. 두 endpoint가 `lib/externalContinuationService.ts`에
+제품을 넘기고, 서비스는 받은 값을 `createConversation()`에 씁니다. 기존 행은 바꾸지
+않으며(§5.3.1의 교정은 2026-09-01 기준 그대로), Chat 대화를 Review로 PATCH하는 경로는
+없습니다. 아래는 2026-09-01 개정 원문이고, Review 갈래에 그대로 적용됩니다.
+
 
 가져온 외부 원본을 **여러 모델에게 이어서 물어보는 것**은 Review 작업입니다.
 기능 계약은 `docs/policy/external-conversation-continuation.md` §3.1이고, 이
 문서가 정하는 것은 컬럼 쪽 규칙입니다.
 
 - **`lib/externalContinuationService.ts`는 `createConversation()`에
-  `REVIEW_PRODUCT_KEY`를 행과 같은 statement로 넘깁니다.** 다른 writer와 같은
+  endpoint가 정한 제품을 행과 같은 statement로 넘깁니다.** 다른 writer와 같은
   규칙이고, `npm run check:conversation-writers`가 이 파일도 검사합니다.
 - **bridge 존재는 provenance와 전용 surface를 정하지, `productKey`를 정하지
   않습니다.** `conversationSurface()`는 서버가 소유권을 확인한 행에서 **bridge를
