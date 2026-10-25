@@ -87,7 +87,7 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
  *
  * Both documents are effective 2026-11-16. The current-location disclosure
  * changed /privacy after the S10 approval: its observed digest is recorded
- * here, while the approved digest above remains the owner's original record.
+ * here, while the approved digest above retains main's approved memory rewrite.
  * Release notes therefore remain closed pending a separate approval of the
  * changed page. `/privacy` is here, not in the sitemap table, while that
  * date is in the future: a sitemap lastmod may not be a day that has not come
