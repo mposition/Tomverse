@@ -39,8 +39,10 @@ export function createGithubRepoReader(): (path: string) => Promise<unknown> {
   const github = createCiAdmissionGithub(config);
   return (path) =>
     github.readRepo(path).catch((error: unknown) => {
-      // No token for this path (the installation lacks the permission, or the
-      // App cannot be reached): read as before rather than not at all.
+      // GitHub refused a token for this path (the installation lacks the
+      // permission, or is not installed): read as before rather than not at
+      // all. A network failure or timeout is not retried here: it is shown as
+      // the read's failure, and the next read tries again.
       if (error instanceof Error && /^github_(token|installation)_/.test(error.message)) return readWithoutCredential(path);
       throw error;
     });
