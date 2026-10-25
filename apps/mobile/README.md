@@ -85,6 +85,16 @@ action uses the same native browser flow; it does not open a standalone website
 login that cannot return a session to the app. Cancelled, expired and unavailable
 browser sign-ins retain the email-code option and show an appropriate message.
 
+After web authentication, the completion page automatically requests one
+short-lived PKCE grant and navigates to the HTTPS callback. There is no extra
+confirmation or Open app button. Android uses AndroidX Auth Tab, which closes the
+authentication window and delivers the verified HTTPS result to the native
+plugin. It selects an Auth Tab-capable default browser, then installed Chrome;
+if neither supports Auth Tab, sign-in reports unavailable. iOS retains its
+ASWebAuthenticationSession callback and automatic dismissal. The native layer
+resolves sign-in only after exchanging and storing the session. Domain
+association verification and physical-device verification remain required.
+
 The email option signs existing accounts in using a six-digit code entered
 inside the app. The native plugin calls the exact
 `/api/auth/mobile/email` path; the server reuses the existing email delivery,

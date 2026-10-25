@@ -14,5 +14,5 @@ export default async function MobileLoginPage({ searchParams }: { searchParams: 
     const callback = `/auth/mobile?${new URLSearchParams({ code_challenge: challenge, state })}`;
     redirect(`/auth/signin?${new URLSearchParams({ callbackUrl: callback })}`);
   }
-  return <MobileLoginContent challenge={challenge} state={state} />;
+  return <MobileLoginContent key={`${challenge}:${state}`} challenge={challenge} state={state} />;
 }

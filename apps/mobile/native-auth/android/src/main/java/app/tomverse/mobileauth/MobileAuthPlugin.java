@@ -25,6 +25,9 @@ import android.os.Build;
 import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.browser.auth.AuthTabIntent;
+import androidx.browser.customtabs.CustomTabsClient;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** The serial queue is the sole owner of rotating credentials and access-token memory. */
@@ -39,6 +42,7 @@ public class MobileAuthPlugin extends Plugin {
     private String verifier;
     private String state;
     private PluginCall pendingLogin;
+    private ActivityResultLauncher<Intent> browserLauncher;
     private final AtomicLong signInGeneration = new AtomicLong();
     private long pendingGeneration;
     private BiometricPrompt devicePrompt;
@@ -115,6 +119,7 @@ public class MobileAuthPlugin extends Plugin {
     @Override public void load() {
         store = new SecureSessionStore(getContext());
         origin = getConfig().getString("apiOrigin", "https://tomverse.app");
+        browserLauncher = AuthTabIntent.registerActivityResultLauncher(getActivity(), this::handleBrowserResult);
     }
     private void validateOrigin() throws Exception {
         Uri uri = Uri.parse(origin);
@@ -133,7 +138,7 @@ public class MobileAuthPlugin extends Plugin {
         return status == 404 || status == 503 || "INVALID_REQUEST_ORIGIN".equals(code) ? "MOBILE_LOGIN_UNAVAILABLE" : "MOBILE_LOGIN_FAILED";
     }
     private JSONObject post(String path, JSONObject body) throws Exception { return request(path, body, null); }
-    private JSONObject request(String path, JSONObject body, String language) throws Exception {
+    JSONObject request(String path, JSONObject body, String language) throws Exception {
         validateOrigin();
         HttpURLConnection connection = (HttpURLConnection) new URL(origin + path).openConnection();
         connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(15000); connection.setReadTimeout(20000);
@@ -158,13 +163,13 @@ public class MobileAuthPlugin extends Plugin {
             }
         } finally { connection.disconnect(); }
     }
-    private void accept(JSONObject body) throws Exception {
+    void accept(JSONObject body) throws Exception {
         String nextAccess = body.getString("accessToken"); String nextSecret = body.getString("refreshToken");
         long ttl = body.getLong("expiresIn");
         if (nextAccess.isEmpty() || nextSecret.isEmpty() || ttl < 1 || ttl > 600) throw new Exception("INVALID_SESSION");
         store.write(nextSecret); accessToken = nextAccess; expiresAt = System.currentTimeMillis() + ttl * 1000;
     }
-    private void clear() throws Exception { accessToken = null; expiresAt = 0; store.clear(); }
+    void clear() throws Exception { accessToken = null; expiresAt = 0; store.clear(); }
     @PluginMethod public void hasSession(PluginCall call) {
         queue.execute(() -> { try { call.resolve(new JSObject().put("signedIn", store.read() != null)); }
             catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.resolve(new JSObject().put("signedIn", false)); } });
@@ -197,13 +202,36 @@ public class MobileAuthPlugin extends Plugin {
             if (!currentSignIn(generation)) { call.reject("Sign-in cancelled", "LOGIN_CANCELLED"); return; }
             if (pendingLogin != null) { call.reject("Sign-in already in progress", "LOGIN_IN_PROGRESS"); return; }
             try {
-                validateOrigin(); verifier = random(); state = random(); pendingLogin = call; pendingGeneration = generation;
+                validateOrigin();
+                String browser = browserPackage();
+                if (browser == null) { call.reject("Use a browser that supports secure app sign-in", "LOGIN_UNAVAILABLE"); return; }
+                verifier = random(); state = random(); pendingLogin = call; pendingGeneration = generation;
                 String challenge = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)), Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
                 Uri url = Uri.parse(origin + "/auth/mobile").buildUpon().appendQueryParameter("code_challenge", challenge).appendQueryParameter("state", state).build();
-                getActivity().startActivity(new Intent(Intent.ACTION_VIEW, url).addCategory(Intent.CATEGORY_BROWSABLE));
+                AuthTabIntent tab = new AuthTabIntent.Builder().build();
+                tab.intent.setPackage(browser);
+                tab.launch(browserLauncher, url, Uri.parse(origin).getHost(), "/auth/mobile/callback");
                 main.postDelayed(() -> { if (pendingLogin == call) { pendingLogin = null; verifier = null; state = null; call.reject("Sign-in expired", "LOGIN_EXPIRED"); } }, 180000);
             } catch (Exception e) { pendingLogin = null; verifier = null; state = null; call.reject("Could not open sign-in", "LOGIN_UNAVAILABLE"); }
         });
+    }
+    String browserPackage() {
+        String preferred = CustomTabsClient.getPackageName(getContext(), null);
+        if (preferred != null && CustomTabsClient.isAuthTabSupported(getContext(), preferred)) return preferred;
+        String chrome = CustomTabsClient.getPackageName(getContext(), Arrays.asList("com.android.chrome"), true);
+        return chrome != null && CustomTabsClient.isAuthTabSupported(getContext(), chrome) ? chrome : null;
+    }
+    void handleBrowserResult(AuthTabIntent.AuthResult result) {
+        if (pendingLogin == null) return;
+        if (result.resultCode != AuthTabIntent.RESULT_OK || result.resultUri == null) {
+            rejectBrowserSignIn(result.resultCode == AuthTabIntent.RESULT_CANCELED ? "LOGIN_CANCELLED" : "LOGIN_VERIFICATION_FAILED");
+            return;
+        }
+        receiveBrowserReturn(result.resultUri);
+    }
+    private void rejectBrowserSignIn(String code) {
+        PluginCall call = pendingLogin; pendingLogin = null; verifier = null; state = null;
+        if (call != null) call.reject("Browser sign-in could not finish", code);
     }
     private void requireEmailSupport() throws Exception {
         try {
@@ -236,12 +264,18 @@ public class MobileAuthPlugin extends Plugin {
             } catch (Exception e) { try { clear(); } catch (Exception ignored) {} call.reject("Could not verify sign-in code", e instanceof AuthFailure ? ((AuthFailure)e).code : "MOBILE_LOGIN_FAILED"); }
         });
     }
-    @Override protected void handleOnNewIntent(Intent intent) {
-        Uri url = intent.getData();
-        if (url == null || pendingLogin == null || !(origin + "/auth/mobile/callback").equals(url.buildUpon().clearQuery().fragment(null).build().toString())) return;
+    private void receiveBrowserReturn(Uri url) {
+        if (pendingLogin == null) return;
+        if (url.getQuery() != null || !(origin + "/auth/mobile/callback").equals(url.buildUpon().clearQuery().fragment(null).build().toString())) {
+            rejectBrowserSignIn("LOGIN_FAILED"); return;
+        }
         Uri fragment = Uri.parse("https://callback.invalid/?" + url.getEncodedFragment());
         String returnedState = fragment.getQueryParameter("state"); String grant = fragment.getQueryParameter("grant");
-        if (returnedState == null || grant == null || state == null || !MessageDigest.isEqual(state.getBytes(StandardCharsets.UTF_8), returnedState.getBytes(StandardCharsets.UTF_8))) return;
+        if (fragment.getQueryParameterNames().size() != 2 || fragment.getQueryParameters("state").size() != 1 || fragment.getQueryParameters("grant").size() != 1 ||
+            returnedState == null || grant == null || !grant.matches("[A-Za-z0-9_-]{43}") || state == null || verifier == null ||
+            !MessageDigest.isEqual(state.getBytes(StandardCharsets.UTF_8), returnedState.getBytes(StandardCharsets.UTF_8))) {
+            rejectBrowserSignIn("LOGIN_FAILED"); return;
+        }
         PluginCall call = pendingLogin; String codeVerifier = verifier; long generation = pendingGeneration;
         pendingLogin = null; verifier = null; state = null;
         runSignIn(call, generation, () -> {
