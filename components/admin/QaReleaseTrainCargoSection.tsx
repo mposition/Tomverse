@@ -274,7 +274,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
               {shown.map((candidate) => {
                 const can = qaReleaseTrainCargoPickable(candidate.status);
                 const carried = can ? carriedByNumber.get(candidate.number) : undefined;
-                const needs = carried?.reason === "conflict" ? unreleased(carried.predecessors) : [];
+                const needs = carried?.reason === "conflict" && carried.predecessors ? unreleased(carried.predecessors) : [];
                 return (
                   <li
                     key={candidate.number}
@@ -305,7 +305,11 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
                       {carried ? (
                         <div className="mt-1 text-xs text-amber-300" data-testid={`qa-release-train-cargo-carried-${candidate.number}`}>
                           <span>{leftOutText(carried.reason)}</span>
-                          {carried.reason === "conflict" && needs.length === 0 ? <span className="block text-zinc-400">{m.trainCargoNoPredecessor}</span> : null}
+                          {carried.reason === "conflict" && carried.predecessors === null ? (
+                            <span className="block text-zinc-400">{m.trainCargoPredecessorsUnknown}</span>
+                          ) : carried.reason === "conflict" && needs.length === 0 ? (
+                            <span className="block text-zinc-400">{m.trainCargoNoPredecessor}</span>
+                          ) : null}
                           {needs.length > 0 ? (
                             <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-zinc-300">
                               {m.trainCargoNeedsFirst}
