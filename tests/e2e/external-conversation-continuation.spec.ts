@@ -2345,4 +2345,144 @@ test.describe("a continuation opens in its product's workspace", () => {
             "page"
         );
     });
+
+    test("an attempt for one continuation is never replayed on another", async ({
+        page,
+    }) => {
+        /*
+          Independent review, 2026-10-25. Moving between two Chat continuations
+          keeps the same client mounted, so a launcher that held one key for
+          its whole life sent A's key to B -- answered by the server with A's
+          fork -- and A's late response could navigate B's screen.
+        */
+        const SECOND_ID = "qa-second-chat-continuation";
+        const SECOND_TITLE = "A second imported conversation";
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page, { autoSelectionOffered: true });
+        await mockContinuationApi(page, { product: "chat" });
+        await page.context().addCookies([
+            {
+                name: "__tomverse_e2e_chat_continuations",
+                value: `${CONVERSATION_ID},${SECOND_ID}`,
+                url: "http://127.0.0.1:3100",
+            },
+        ]);
+        await mockConversationList(page, [
+            {
+                id: CONVERSATION_ID,
+                title: "Continued from an imported chat",
+                surface: "continuation",
+                sourceTitle: SOURCE_CONVERSATION_TITLE,
+            },
+            {
+                id: SECOND_ID,
+                title: "Continued from an imported chat",
+                surface: "continuation",
+                sourceTitle: SECOND_TITLE,
+            },
+        ]);
+
+        // A's fork is held until B is on screen: the response that arrives
+        // after the user has left.
+        const forkKeys: Record<string, string[]> = { first: [], second: [] };
+        let releaseFirst: () => void = () => {};
+        const firstHeld = new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+        });
+        await page.route(
+            `**/api/conversations/${CONVERSATION_ID}/continuation/review`,
+            async (route) => {
+                forkKeys.first.push(
+                    (route.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey
+                );
+                await firstHeld;
+                await route
+                    .fulfill(json({ conversationId: REVIEW_FORK_ID, idempotentReplay: false }, 201))
+                    .catch(() => {});
+            }
+        );
+        await page.route(
+            `**/api/conversations/${SECOND_ID}/continuation/review`,
+            async (route) => {
+                forkKeys.second.push(
+                    (route.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey
+                );
+                await route.fulfill(
+                    json({ conversationId: "qa-second-review-fork", idempotentReplay: false }, 201)
+                );
+            }
+        );
+        await page.route(new RegExp(`.*/api/conversations/${SECOND_ID}(\\?.*)?$`), (route) =>
+            route.fulfill(
+                json({
+                    id: SECOND_ID,
+                    title: "Continued from an imported chat",
+                    kind: "chat",
+                    productKey: "chat",
+                    selectedModels: [PRIMARY_MODEL],
+                    disabledPanels: [],
+                    webSearchMode: "off",
+                    memoryMode: "inherit",
+                    selectionMode: "auto",
+                    autoSelection: { offered: true },
+                    assistantProfile: null,
+                    isLocked: false,
+                    shareEnabled: false,
+                    shareExpiresAt: null,
+                    messages: [],
+                    messagePage: { hasMore: false, nextCursor: null },
+                })
+            )
+        );
+        await page.route(`**/api/conversations/${SECOND_ID}/continuation*`, (route) =>
+            route.fulfill(
+                json({
+                    conversationId: SECOND_ID,
+                    provider: "claude",
+                    importedAt: "2026-07-02T00:00:00.000Z",
+                    contextSeedVersion: "ext-seed-v1",
+                    seed: {
+                        messageCount: 2,
+                        truncatedMessageCount: 0,
+                        omittedMessageCount: 0,
+                        fromOrdinal: 0,
+                        toOrdinal: 1,
+                    },
+                    source: {
+                        status: "available",
+                        externalConversationId: "qa-external-two",
+                        title: SECOND_TITLE,
+                        messageTotal: 2,
+                        offset: 0,
+                        limit: 100,
+                        messages: importedMessages(),
+                    },
+                })
+            )
+        );
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await page.getByTestId("continuation-compare-in-review").click();
+        await expect.poll(() => forkKeys.first.length).toBe(1);
+
+        const list = await openConversationList(page);
+        const row = list
+            .getByTestId("sidebar-conversation-item")
+            .filter({ hasText: SECOND_TITLE })
+            .last();
+        await row.click();
+        await expect(page).toHaveURL(new RegExp(`/continuations/${SECOND_ID}$`));
+
+        // A's answer lands now and must change nothing on B's screen.
+        releaseFirst();
+        const compare = page.getByTestId("continuation-compare-in-review");
+        await expect(compare).toBeEnabled();
+        await page.waitForTimeout(500);
+        await expect(page).toHaveURL(new RegExp(`/continuations/${SECOND_ID}$`));
+
+        await compare.click();
+        await expect(page).toHaveURL(/\/continuations\/qa-second-review-fork$/);
+        expect(forkKeys.second).toHaveLength(1);
+        expect(forkKeys.second[0]).not.toBe(forkKeys.first[0]);
+    });
 });

@@ -3414,7 +3414,8 @@ export function ChatPageClient({
   }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setFocusToken, setInputValue, showToast, t]);
 
   useEffect(() => {
-    if (mountedSurface !== "chat" || isGuestMode ||
+    // The /chat URL names its conversation; a continuation route already does.
+    if (routeSurface !== "chat" || isGuestMode ||
         !isInitialConversationResolved || !currentChatId) return;
     const url = new URL(window.location.href);
     // A not-yet-resolved owned read must not erase the id needed for reload.
@@ -3425,7 +3426,7 @@ export function ChatPageClient({
     // probe and the server would correctly answer 404.
     url.searchParams.set(CONVERSATION_HANDOFF_PARAM, currentChatId);
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  }, [currentChatId, isGuestMode, isInitialConversationResolved, mountedSurface]);
+  }, [currentChatId, isGuestMode, isInitialConversationResolved, routeSurface]);
 
   const runComparisonPreflight = useCallback(
     async ({
@@ -5180,7 +5181,7 @@ export function ChatPageClient({
               screen the user came from, not replay this selection. The
               continuation's own path carries no parameter and is left alone.
             */
-            if (mountedSurface !== "chat" && window.location.search.includes(CONVERSATION_HANDOFF_PARAM)) {
+            if (routeSurface !== "chat" && window.location.search.includes(CONVERSATION_HANDOFF_PARAM)) {
                 const url = new URL(window.location.href);
                 url.searchParams.delete(CONVERSATION_HANDOFF_PARAM);
                 window.history.replaceState(

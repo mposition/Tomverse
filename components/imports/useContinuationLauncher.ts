@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useLanguage } from "@/components/LanguageProvider";
@@ -87,24 +87,53 @@ export function useContinuationLauncher(
     const router = useRouter();
     const [status, setStatus] = useState<ContinuationLauncherStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const idempotencyKeyRef = useRef<string | null>(null);
+    /*
+      The attempt belongs to one endpoint.
+
+      The Compare-in-Review caller keeps this hook mounted while the open
+      continuation changes (`/continuations/[a]` to `[b]` is the same page),
+      so the source can change under a live attempt. A key minted for A sent
+      to B would be answered with A's conversation -- the server resolves by
+      `(userId, key)` alone -- and A's late response would navigate B's
+      screen. So the key is stored with its endpoint, the state resets when the
+      endpoint changes, and a response for an endpoint that is no longer
+      current changes nothing.
+    */
+    const attemptRef = useRef<{ endpoint: string; key: string } | null>(null);
+    const currentEndpointRef = useRef(endpoint);
+    const [stateEndpoint, setStateEndpoint] = useState(endpoint);
+    if (stateEndpoint !== endpoint) {
+        setStateEndpoint(endpoint);
+        setStatus("idle");
+        setErrorMessage(null);
+    }
+    useLayoutEffect(() => {
+        currentEndpointRef.current = endpoint;
+    }, [endpoint]);
+    const creating = status === "creating" && stateEndpoint === endpoint;
 
     const start = useCallback(async (): Promise<boolean> => {
         // Guards the double click at the source: the second press finds the
         // launcher already creating and returns before it can send anything.
         // The button is disabled too, but a disabled attribute is a rendering
         // detail and this is the invariant.
-        if (status === "creating") return false;
+        if (creating) return false;
 
         // `crypto.randomUUID` exists in every browser this application
         // supports; the fallback keeps a non-secure context (an http://
         // preview) failing by creating one conversation rather than by
         // throwing before the click does anything.
-        idempotencyKeyRef.current ??=
-            typeof crypto !== "undefined" && "randomUUID" in crypto
-                ? crypto.randomUUID()
-                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const idempotencyKey = idempotencyKeyRef.current;
+        if (attemptRef.current?.endpoint !== endpoint) {
+            attemptRef.current = {
+                endpoint,
+                key:
+                    typeof crypto !== "undefined" && "randomUUID" in crypto
+                        ? crypto.randomUUID()
+                        : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            };
+        }
+        const idempotencyKey = attemptRef.current.key;
+        const isCurrent = () => currentEndpointRef.current === endpoint;
 
         setStatus("creating");
         setErrorMessage(null);
@@ -117,6 +146,10 @@ export function useContinuationLauncher(
                     body: JSON.stringify({ idempotencyKey }),
                 }
             );
+            if (!isCurrent()) {
+                await discardResponseBody(response);
+                return false;
+            }
             if (!response.ok) {
                 await discardResponseBody(response);
                 setStatus("failed");
@@ -124,6 +157,7 @@ export function useContinuationLauncher(
                 return false;
             }
             const body = (await response.json()) as { conversationId?: string };
+            if (!isCurrent()) return false;
             if (!body.conversationId) {
                 setStatus("failed");
                 setErrorMessage(t("continuation.createFailed"));
@@ -132,6 +166,7 @@ export function useContinuationLauncher(
             router.push(continuationPath(body.conversationId));
             return true;
         } catch {
+            if (!isCurrent()) return false;
             // The attempt keeps its key, so pressing again resolves to
             // whatever the first request created rather than making a second
             // conversation.
@@ -139,10 +174,10 @@ export function useContinuationLauncher(
             setErrorMessage(t("continuation.createFailed"));
             return false;
         }
-    }, [endpoint, router, status, t]);
+    }, [creating, endpoint, router, t]);
 
     const cancel = useCallback(() => {
-        idempotencyKeyRef.current = null;
+        attemptRef.current = null;
         setStatus("idle");
         setErrorMessage(null);
     }, []);

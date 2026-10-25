@@ -1199,23 +1199,29 @@ test("a retry reuses the attempt's idempotency key and only cancel clears it", (
     // unconditionally there issued a *new* key on every retry, so a POST that
     // had already stored a conversation and only lost its response produced a
     // second one on the next press.
+    // The key is held per endpoint (independent review 2026-10-25): a source
+    // that changes under a mounted launcher gets its own attempt, never the
+    // previous one's key.
     assert.match(
         startBody,
-        /idempotencyKeyRef\.current\s*\?\?=/,
-        "start mints only when the launcher is holding no key"
+        /if \(attemptRef\.current\?\.endpoint !== endpoint\) \{\s*attemptRef\.current = \{/,
+        "start mints only when the launcher holds no key for this endpoint"
     );
-    assert.doesNotMatch(
-        startBody,
-        /idempotencyKeyRef\.current\s*=[^=?]/,
-        "no unconditional assignment"
+    assert.equal(
+        (startBody.match(/attemptRef\.current\s*=[^=]/g) ?? []).length,
+        1,
+        "no other assignment in start"
     );
+    // A response for an endpoint that is no longer current changes nothing.
+    assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*await discardResponseBody\(response\);\s*return false;/);
+    assert.match(startBody, /if \(!isCurrent\(\)\) return false;\s*if \(!body\.conversationId\)/);
 
     // Cancel is the one place the key is dropped, because that is the only
     // deliberate "start a second fork" in the product.
-    const clears = launcher.match(/idempotencyKeyRef\.current\s*=\s*null/g) ?? [];
+    const clears = launcher.match(/attemptRef\.current\s*=\s*null/g) ?? [];
     assert.equal(clears.length, 1);
     assert.ok(
-        launcher.indexOf("idempotencyKeyRef.current = null") >
+        launcher.indexOf("attemptRef.current = null") >
             launcher.indexOf("const cancel = useCallback"),
         "the only clear belongs to cancel"
     );
