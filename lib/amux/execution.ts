@@ -40,7 +40,7 @@ import {
 import { AmuxV4TaskCatalogApprovalError,
   calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
-import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
 import { classifyAmuxExecutionPath,
@@ -400,12 +400,16 @@ export async function startAmuxV22TaskExecution(input: {
         return { started: false as const,
           reason: "cost_unverified" as const };
       }
-      // Owner decision 2026-10-25: an ordinary run has no cost stop of its own;
-      // only an owner-approved recovery keeps the costs it was approved at.
+      // Owner decision 2026-10-25: a higher cost never stops an ordinary run;
+      // a route outside its confirmed receipt still does.
       // Policy v48: the FIRST Task retry's added route is reconfirmed by the
       // owner's final consent; that is checked once the recovery is read.
-      const ceilingAllowed = checkV4TaskApprovedCeiling(approved,
-        { ok: true, receipt: cost.receipt }).decision === "allow";
+      const ceilingAllowed = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approved,
+        { ok: true, receipt: cost.receipt }), !!assignment.recoveryApprovalId) === "allow";
+      if (!ceilingAllowed && !assignment.recoveryApprovalId) {
+        return { started: false as const,
+          reason: "cost_reconfirmation_required" as const };
+      }
       const route = cost.receipt.routes.find((candidate) =>
         candidate.routeId === assignment.routeId &&
         candidate.workerName === assignment.workerName &&
@@ -421,7 +425,7 @@ export async function startAmuxV22TaskExecution(input: {
         input.taskId, assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
       if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
         reason: "recovery_approval_unbound" as const };
-      if (!ceilingAllowed && recovery && !(recovery.riskAcceptanceId && recovery.routeId &&
+      if (!ceilingAllowed && !(recovery?.riskAcceptanceId && recovery.routeId &&
           recovery.routeId === assignment.routeId &&
           amuxV22RecoveryAddedRouteConsented(approved, cost.receipt, recovery.routeId)))
         return { started: false as const,

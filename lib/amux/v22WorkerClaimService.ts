@@ -20,7 +20,7 @@ import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
   "./autoPromotionService.ts";
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
-import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { amuxTaskRoutePrice } from "./v4TaskCostAutoCatalogCore.ts";
@@ -224,10 +224,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
         amuxV22RecoveryAddedRouteConsented(approvedCost, approved.receipt, recovery.routeId);
       if (reconfirmOnly && !addedRouteConsented)
         throw new BoardImportError("task_not_ready", 409);
-      // Owner decision 2026-10-25: only an owner-approved recovery keeps the
-      // cost it was approved at; an ordinary claim has no cost stop.
-      if (recovery && checkV4TaskApprovedCeiling(approvedCost,
-        { ok: true, receipt: approved.receipt }).decision !== "allow" && !addedRouteConsented) {
+      if (v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approvedCost,
+        { ok: true, receipt: approved.receipt }), !!recovery) !== "allow" && !addedRouteConsented) {
         throw new BoardImportError("cost_reconfirmation_required", 409);
       }
       const requiredTool = amuxV22RequiredTool(card.taskRole);

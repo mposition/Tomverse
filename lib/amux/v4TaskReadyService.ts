@@ -15,7 +15,7 @@ import type { AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
-import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
@@ -293,12 +293,9 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       try {
         const current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
           role, card.executionGrade);
-        const decision = checkV4TaskApprovedCeiling(
-          approvedCost, { ok: true,
-            receipt: current.receipt }).decision;
-        // Owner decision 2026-10-25: a higher cost is no stop for an ordinary
-        // Task. An owner-approved recovery is checked again at claim.
-        cost = decision === "reconfirm" ? "allow" : decision;
+        // A recovery is read and checked in full at claim.
+        cost = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(
+          approvedCost, { ok: true, receipt: current.receipt }), false);
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
         // retry, whose final consent is that reconfirmation, could never pass.
