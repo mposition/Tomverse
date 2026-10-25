@@ -15,7 +15,8 @@ import { ciAdmissionGithubConfig, createCiAdmissionGithub } from "@/lib/ciAdmiss
 export const CI_RUNNER_USAGE_CACHE_MS = 20_000;
 
 export type CiRunnerUsage =
-  | { status: "ok"; at: string; owners: CiRunnerOwner[] }
+  /** `failure`: set by the page when a later read failed and this one is still shown. */
+  | { status: "ok"; at: string; owners: CiRunnerOwner[]; failure?: string }
   | { status: "not_configured" }
   | { status: "unavailable"; at: string; failure: string };
 
