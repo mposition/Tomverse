@@ -131,6 +131,24 @@ export function ciRunnerCount(need: number, owner: Pick<CiRunnerOwner, "running"
   return nowMs - Date.parse(owner.startedAt) < CI_ADMISSION_RAMP_MS ? Math.max(live, need) : live;
 }
 
+/**
+ * Whether admission may bring a pull request's branch up to date: only one
+ * into develop from a working branch. Updating a branch merges its base into
+ * it, so a pull request into main (a release or hotfix) or from develop or
+ * main would merge one deploy branch into another -- the operator's merge
+ * and deploy, never admission's.
+ */
+export function ciAdmissionUpdatesBranchOf(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
+  return (
+    !pull.fork &&
+    pull.base === "develop" &&
+    pull.head !== "develop" &&
+    pull.head !== "main" &&
+    !pull.head.startsWith("release/") &&
+    !pull.head.startsWith("hotfix/")
+  );
+}
+
 /** What GitHub says about a draft before it is marked ready; null where it could not tell. */
 export type CiAdmissionCheck = { conflict: boolean | null; behind: boolean | null };
 
@@ -418,13 +436,17 @@ export function evaluateCiAdmission(input: {
     counted.add(key);
     return ciRunnerCount(need, owners.get(key), nowMs);
   };
-  // Runners nobody here can give back: deploy CI and runs of closed pull requests.
+  // Runners nobody here can give back: deploy CI, and runs of pull requests
+  // not in the line -- closed, or open with a ci:hold label -- counted at
+  // their need when GitHub's jobs are unread, like any other.
+  const inLineNumbers = new Set(line.map((pull) => pull.number));
   const closedRunning = [...runningNumbers]
-    .filter((number) => !open.has(number))
+    .filter((number) => !inLineNumbers.has(number))
     .flatMap((number) => {
-      const base = input.runningBases?.get(number) ?? "";
+      const base = open.get(number)?.base ?? input.runningBases?.get(number) ?? "";
       const need = unitsOf({ base, fork: false });
-      return need === null ? [] : [{ number, base, runners: countOf(ciRunnerOwnerKey.pull(number), need) }];
+      const title = open.get(number)?.title.slice(0, 200) ?? "";
+      return need === null ? [] : [{ number, base, title, runners: countOf(ciRunnerOwnerKey.pull(number), need) }];
     });
   const deploys = (input.deploys ?? []).map((deploy) => ({
     ...deploy,
@@ -485,12 +507,13 @@ export function evaluateCiAdmission(input: {
     }
     if (check.behind === true) {
       const asked = updating.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
-      if (input.updateBranches !== false && !asked) {
+      const updates = input.updateBranches !== false && ciAdmissionUpdatesBranchOf(pull);
+      if (updates && !asked) {
         actions.push({ kind: "update_branch", pull });
         updating.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs });
         event("updated", pull.number, null);
       }
-      status.set(pull.number, input.updateBranches !== false ? "updating" : "behind");
+      status.set(pull.number, updates ? "updating" : "behind");
       continue;
     }
     allotted += units;
@@ -566,7 +589,7 @@ export function evaluateCiAdmission(input: {
             base: pull.base,
             runners: pullRunners.get(pull.number) ?? unitsOf(pull)!,
           }))
-          .concat(closedRunning.map((closed) => ({ number: closed.number, title: "", base: closed.base, runners: closed.runners }))),
+          .concat(closedRunning.map((closed) => ({ number: closed.number, title: closed.title, base: closed.base, runners: closed.runners }))),
         deploys: deploys.slice(0, MAX_QUEUE).map((deploy) => ({ ...deploy, title: deploy.title.slice(0, 200) })),
         others,
       },

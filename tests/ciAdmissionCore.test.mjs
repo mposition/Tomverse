@@ -11,6 +11,7 @@ import {
   ciAdmissionDraftsToCheck,
   ciAdmissionOrder,
   ciAdmissionUnits,
+  ciAdmissionUpdatesBranchOf,
   ciRunKey,
   ciRunnerCount,
   ciRunnerOwnerKey,
@@ -367,4 +368,30 @@ test("shadow records the branch update it would ask for; a stored state from bef
   const { updating, ...before } = emptyCiAdmissionState();
   assert.deepEqual(updating, []);
   assert.deepEqual(parseCiAdmissionState(JSON.stringify(before)).updating, []);
+});
+
+test("a branch is brought up to date only for a pull request into develop from a working branch: never a deploy branch", () => {
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "claude/to-develop/x", fork: false }), true);
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false }), true);
+  for (const head of ["main", "develop", "release/2026-10-25", "hotfix/x"]) {
+    assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head, fork: false }), false, head);
+  }
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "main", head: "release/train-1", fork: false }), false);
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "x", fork: true }), false);
+  // A release behind main stays "behind": no update is asked for.
+  const release = [pull(1, { base: "main", head: "release/x" })];
+  const judged = judge({ state: state({ queue: lineOf(1) }), openPulls: release, checks: new Map([[1, { conflict: false, behind: true }]]) });
+  assert.deepEqual(kinds(judged), []);
+  assert.equal(statuses(judged)[1], "behind");
+});
+
+test("a ci:hold pull request out of the line still counts the runners its CI holds when GitHub's jobs are unread", () => {
+  const held = pull(1, { draft: false, labels: [CI_ADMISSION_HOLD_LABEL] });
+  const open = [held, pull(2), pull(3)];
+  const judged = judge({ state: state({ capacity: 2, queue: lineOf(2, 3) }), openPulls: open, running: runs(held), checks: checksFor(open), runners: null });
+  // 1 holds one of the two runners: only one more draft fits.
+  assert.deepEqual(kinds(judged), ["release:2"]);
+  assert.equal(judged.used, 2);
+  assert.deepEqual(judged.state.lastRound.running.map((r) => r.number).sort(), [1, 2]);
+  assert.equal(judged.state.lastRound.running.find((r) => r.number === 1).title, "Pull 1");
 });
