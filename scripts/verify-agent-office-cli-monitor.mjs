@@ -39,8 +39,9 @@ const server = createServer(async (req,res) => {
     return;
   }
   if(req.url==="/ui.js"||req.url==="/ui.css") {
-    res.setHeader("Content-Type", req.url.endsWith("css")?"text/css":"text/javascript");
-    res.end(await readFile(resolve(dir,"dist",req.url.slice(1)))); return;
+    const asset = req.url === "/ui.css" ? "ui.css" : "ui.js";
+    res.setHeader("Content-Type", asset === "ui.css" ? "text/css" : "text/javascript");
+    res.end(await readFile(resolve(dir,"dist",asset))); return;
   }
   res.setHeader("Content-Type","text/html");
   res.end('<!doctype html><html class="light"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui.css"><style>*{box-sizing:border-box}body{margin:0;--font-ui:Arial,sans-serif;--font-code:monospace}button,input,select{font:inherit}</style></head><body><div id="root"></div><script type="module" src="/ui.js"></script></body></html>');

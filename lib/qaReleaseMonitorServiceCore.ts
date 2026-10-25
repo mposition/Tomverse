@@ -11,10 +11,12 @@
 
 import { assertQaReleaseMonitorEndpoint, qaReleaseMonitorEndpoint } from "./qaReleaseDigestEndpointCore.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
-import { decideQaReleaseServiceStart } from "./qaReleaseServiceEnvCore.ts";
+import { decideQaReleaseServiceStart, isUnconfiguredAgentService,
+  QA_RELEASE_SERVICE_VARIABLES } from "./qaReleaseServiceEnvCore.ts";
 
 export type QaReleaseMonitorRunOutcome =
   | { exitCode: 0; outcome: "checked"; verdict: string }
+  | { exitCode: 0; outcome: "unconfigured" }
   | {
       exitCode: 1;
       outcome: "refused_to_start" | "destination_unknown" | "check_refused" | "check_outcome_unknown";
@@ -31,8 +33,9 @@ export async function runQaReleaseMonitorService(
   env: Readonly<Record<string, string | undefined>>,
   ports: QaReleaseMonitorServicePorts,
 ): Promise<QaReleaseMonitorRunOutcome> {
-  // The Monitor has no enable flag of its own: it is off when its cron is
-  // not declared, so the start decision is only "refuse" or "run".
+  // Staging may provision the cron before the operator configures it.
+  if (isUnconfiguredAgentService(env, QA_RELEASE_SERVICE_VARIABLES.monitor))
+    return { exitCode: 0, outcome: "unconfigured" };
   if (decideQaReleaseServiceStart("monitor", env) !== "run") return { exitCode: 1, outcome: "refused_to_start" };
 
   let url: string;
