@@ -98,9 +98,7 @@ const extractMemory = (userId: string) =>
     userId,
     extractionModelId: "gpt-5-6-luna",
     promptVersion: "mem-extract-v1",
-    plan: "Pro",
     selectedConversationIds: [randomUUID()],
-    confirmedCredits: 1,
   });
 
 const RESTRICTIONS = [

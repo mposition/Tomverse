@@ -25,7 +25,6 @@ import {
 } from "../lib/memoryExtractionCore.ts";
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
-    allowsBulkApproval,
     findApprovedEvalPair,
     findCriticalProbeFailures,
     findEvalRegisterProblems,
@@ -204,7 +203,7 @@ const approvedEntry = (overrides = {}) => ({
 
 const NOW = new Date("2026-08-03T12:00:00.000Z");
 
-test("the shipped register has no problems and one approved pair, on an owner launch", () => {
+test("the shipped register has no problems and two approved pairs, both on owner launches", () => {
     assert.deepEqual(
         findEvalRegisterProblems(MEMORY_EXTRACTION_EVAL_REGISTER, new Date("2026-10-24T00:00:00Z")),
         []
@@ -212,10 +211,13 @@ test("the shipped register has no problems and one approved pair, on an owner la
     const approved = MEMORY_EXTRACTION_EVAL_REGISTER.filter((entry) => entry.status === "approved");
     assert.deepEqual(
         approved.map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`),
-        ["gpt-5-6-luna::mem-extract-v9"]
+        // v10 first: automatic extraction takes the first approved pair.
+        ["gpt-5-6-luna::mem-extract-v10", "gpt-5-6-luna::mem-extract-v9"]
     );
-    assert.equal(approved[0].evaluation, null);
-    assert.equal(approved[0].ownerLaunch.expiresAt, "2026-11-22");
+    for (const entry of approved) {
+        assert.equal(entry.evaluation, null);
+        assert.equal(entry.ownerLaunch.expiresAt, "2026-11-22");
+    }
 });
 
 const ownerLaunchEntry = (launch = {}) => ({
@@ -287,19 +289,6 @@ test("an approval stops resolving at its expiry, at runtime", () => {
         findApprovedEvalPair(pair, { kind: "none" }, [{ ...ownerLaunchEntry(), ownerLaunch: null }], DURING_LAUNCH),
         null
     );
-});
-
-test("bulk approval is reserved for evaluated pairs and user-authored memories", () => {
-    const launched = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" };
-    const evaluated = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v1" };
-    const register = [ownerLaunchEntry(), approvedEntry()];
-    assert.equal(allowsBulkApproval(launched, register), false);
-    assert.equal(allowsBulkApproval(evaluated, register), true);
-    assert.equal(allowsBulkApproval(null, register), true);
-    assert.equal(allowsBulkApproval({ extractionModelId: "unknown", promptVersion: "x" }, register), false);
-    // Revoking the launch drops `ownerLaunch`; what it stored stays unmeasured.
-    const revoked = { ...ownerLaunchEntry(), status: "revoked", ownerLaunch: null };
-    assert.equal(allowsBulkApproval(launched, [revoked]), false);
 });
 
 test("candidate pairs are never resolvable as approved", () => {

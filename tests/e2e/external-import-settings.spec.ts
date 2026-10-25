@@ -606,6 +606,61 @@ test.describe("external import settings", () => {
     expect(api.finalizeBody?.expectedImportDigest).not.toBe("f".repeat(64));
   });
 
+  test("the confirmation screen says finishing starts free memory extraction, only when it will", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page);
+    let masterEnabled = true;
+    await page.route(
+      (url) => url.pathname === "/api/memories/extraction-runs",
+      (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ runs: [], activeRunId: null }),
+        })
+    );
+    await page.route(
+      (url) => url.pathname === "/api/memories/settings",
+      (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            masterEnabled,
+            styleEnabled: true,
+            defaultConversationMode: "on",
+          }),
+        })
+    );
+
+    const reachReview = async () => {
+      await page.goto("/settings/imports/new");
+      await page.getByTestId("external-import-guide-chatgpt").click();
+      await page.getByTestId("external-import-guide-has-file").click();
+      await page
+        .getByTestId("external-import-file-input")
+        .setInputFiles(chatgptExportFile(1));
+      await page.getByTestId("external-import-continue-to-review").click();
+      await expect(page.getByTestId("external-import-review")).toBeVisible();
+    };
+
+    await reachReview();
+    const notice = page.getByTestId("external-import-memory-notice");
+    await expect(notice).toContainText("크레딧은 차감되지 않습니다");
+    await expect(notice.getByRole("link", { name: "개인정보 처리방침" })).toHaveAttribute(
+      "href",
+      "/privacy"
+    );
+
+    // Memory turned off: no extraction will start, so nothing is promised.
+    masterEnabled = false;
+    await reachReview();
+    await expect(page.getByTestId("external-import-memory-notice")).toHaveCount(0);
+  });
+
   test("the raw archive is never sent over the network", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);

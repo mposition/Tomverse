@@ -65,7 +65,12 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
   // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
   // mposition on 2026-10-03: the email clause in seven languages, the terms
   // clause in en, ko and zh, both effective 2026-11-16.
-  "/privacy": ["5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7"],
+  //
+  // /privacy moved on 2026-10-24 with the memory-section rewrite (owner
+  // decision in chat: free automatic extraction, notice in the privacy
+  // policy). Only privacyPolicy.memory changed; the approved email clause and
+  // the effective date are byte-for-byte the 2026-10-03 version (5052379184eb).
+  "/privacy": ["eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8"],
   "/terms": ["5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709"],
 };
 
@@ -90,9 +95,10 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
 > = {
   // Here rather than in the sitemap's table while its effective date is in the
   // future (lib/sitemapContentDates.ts).
+  // Moved 2026-10-24 by the memory section rewrite (free automatic extraction).
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7",
+    contentSha256: "eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8",
   },
   "/terms": {
     date: "2026-11-16",

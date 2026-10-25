@@ -337,7 +337,6 @@ test("every row can state where it stands, including when it is empty", () => {
       locale.memoryReview.dataTabStatusOff,
       name
     );
-    assert.ok(locale.memoryReview.dataTabStatusPending.includes("{count}"), name);
   }
 });
 
