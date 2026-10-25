@@ -16,18 +16,22 @@ import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
 import { QA_RELEASE_TRAIN_CANDIDATE_DAYS } from "./qaReleaseTrainCargoCore.ts";
 import {
-  QA_RELEASE_TRAIN_BRANCH_PREFIX,
   QA_RELEASE_TRAIN_MAX_PREDECESSORS,
+  QA_RELEASE_TRAIN_REPOSITORY,
+  qaReleaseTrainIncludedNumbers,
+  qaReleaseTrainIsTrainPull,
   qaReleaseTrainMergedPullNumber,
   type QaReleaseTrainCandidate,
   type QaReleaseTrainPick,
 } from "./qaReleaseTrainCore.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
 
-const REPOSITORY = "mposition/Tomverse";
+const REPOSITORY = QA_RELEASE_TRAIN_REPOSITORY;
 const API = `https://api.github.com/repos/${REPOSITORY}`;
 const SHA = /^[0-9a-f]{40}$/;
 const PULL_READS_AT_ONCE = 8;
+/** Open main pull requests are read to this many pages of a hundred. */
+const OPEN_PAGE_CAP = 3;
 const run = promisify(execFile);
 
 type Json = Record<string, unknown>;
@@ -68,12 +72,27 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
       if (answer.status === 404) return false;
       throw new Error(`github_${answer.status}`);
     },
+    // Every open main pull request, page by page: a train past the first
+    // hundred still holds the next one. A list longer than the cap is a
+    // failed read, never "no open train". The riders are what each open train
+    // names under its Included heading; a fork's pull request is not a train.
     async openTrains() {
-      const answer = await request("GET", `${API}/pulls?state=open&base=main&per_page=100`);
-      if (answer.status !== 200) throw new Error(`github_${answer.status}`);
-      const list = answer.json();
-      if (!Array.isArray(list)) throw new Error("github_shape");
-      return list.filter((pull) => String(record(record(pull).head).ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX)).length;
+      let count = 0;
+      const riders = new Set<number>();
+      for (let page = 1; page <= OPEN_PAGE_CAP; page += 1) {
+        const answer = await request("GET", `${API}/pulls?state=open&base=main&per_page=100&page=${page}`);
+        if (answer.status !== 200) throw new Error(`github_${answer.status}`);
+        const list = answer.json();
+        if (!Array.isArray(list)) throw new Error("github_shape");
+        for (const pull of list) {
+          if (!qaReleaseTrainIsTrainPull(pull)) continue;
+          count += 1;
+          const body = record(pull).body;
+          for (const number of qaReleaseTrainIncludedNumbers(typeof body === "string" ? body : "")) riders.add(number);
+        }
+        if (list.length < 100) return { count, riders: [...riders] };
+      }
+      throw new Error("github_pages");
     },
     async cargo(numbers) {
       const ordered = [...new Set(numbers)];
@@ -128,6 +147,9 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
   };
   return {
     async assemble(branch, cargo, capacity) {
+      // A round that assembles twice (an empty emergency, then the scheduled
+      // train) keeps one clone: the first is removed before the second.
+      if (dir) await rm(dir, { recursive: true, force: true });
       dir = await mkdtemp(join(tmpdir(), "qa-release-train-"));
       await git(["clone", "--quiet", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", "main", input.remote ?? `https://github.com/${REPOSITORY}.git`, dir], { cwd: tmpdir() });
       await git(["config", "user.name", "tomverse-qa-release-train"]);
@@ -223,12 +245,19 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
     },
     async selection() {
       const answer = await call({ phase: "selection" });
+      const isNumbers = (value: unknown): value is number[] => Array.isArray(value) && value.every((n) => Number.isInteger(n) && n > 0);
       const numbers = answer.status === 200 ? answer.body.numbers : null;
-      if (!Array.isArray(numbers) || !numbers.every((n) => Number.isInteger(n) && n > 0)) throw new Error("app_selection_shape");
-      return numbers as number[];
+      if (!isNumbers(numbers)) throw new Error("app_selection_shape");
+      // An app older than emergency trains sends no `emergency`: none is waiting.
+      const emergency = (answer.body.emergency ?? null) as { id?: unknown; numbers?: unknown } | null;
+      if (emergency === null) return { numbers, emergency: null };
+      if (typeof emergency !== "object" || typeof emergency.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(emergency.id) || !isNumbers(emergency.numbers)) {
+        throw new Error("app_selection_shape");
+      }
+      return { numbers, emergency: { id: emergency.id, numbers: emergency.numbers } };
     },
-    async admit(slot) {
-      const answer = await call({ phase: "admit", slot });
+    async admit(slot, emergencyRequestId) {
+      const answer = await call({ phase: "admit", slot, ...(emergencyRequestId ? { emergencyRequestId } : {}) });
       return answer.status === 200 && answer.body.admitted === true
         ? { admitted: true }
         : { admitted: false, reason: typeof answer.body.reason === "string" ? answer.body.reason : "unknown" };

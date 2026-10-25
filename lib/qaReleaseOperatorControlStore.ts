@@ -57,7 +57,8 @@ export type QaReleaseOperatorControlRecord = QaReleaseOperatorControlInput & {
 };
 
 export class QaReleaseOperatorControlRefusedError extends Error {
-  constructor(readonly code: "iac_commit_invalid" | "revision_taken") {
+  /** `emergency_changed`: the release train's emergency request is no longer the one the operator saw. */
+  constructor(readonly code: "iac_commit_invalid" | "revision_taken" | "emergency_changed") {
     super(code);
     this.name = "QaReleaseOperatorControlRefusedError";
   }
