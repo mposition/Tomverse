@@ -16,8 +16,10 @@ import {
  *
  * Writes, and nothing else: convert a pull request to draft, mark one ready
  * for review, cancel a pull_request workflow run of a held pull request, a
- * draft or one the operator stops in Admin, and one commit status (context `CI admission`) on a pull request's
- * head telling sessions it waits in line. No merge, push, label or comment. Every failure is a short
+ * draft or one the operator stops in Admin, one commit status (context `CI admission`) on a pull request's
+ * head telling sessions it waits in line, and GitHub's update-branch for a
+ * draft behind its base (develop merged into its branch: Contents write, owner
+ * 2026-10-25). No merge into a base, no other push, label or comment. Every failure is a short
  * code; no token, key or body is ever returned or logged. The webhook
  * signature check is in lib/ciAdmissionWebhookCore.ts.
  */
@@ -147,6 +149,8 @@ export type CiAdmissionGithub = {
   check(pull: CiAdmissionPull): Promise<CiAdmissionCheck>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
+  /** Merges the base into the pull request's branch (GitHub's update-branch), only while its head is still the one judged. */
+  updateBranch(pull: CiAdmissionPull): Promise<void>;
   /**
    * Cancels the pull request's own queued and running pull_request runs (never
    * another pull request's on the same commit); returns how many. `force` is
@@ -163,7 +167,7 @@ export type CiAdmissionGithub = {
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
 
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
-  const call = async (method: "GET" | "POST", url: string, auth: string, body?: Json) => {
+  const call = async (method: "GET" | "POST" | "PUT", url: string, auth: string, body?: Json) => {
     const response = await fetch(url, {
       method,
       headers: {
@@ -331,6 +335,18 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         pull.nodeId,
       );
       if (record(record(data.markPullRequestReadyForReview).pullRequest).isDraft !== false) throw new Error("github_still_draft");
+    },
+    async updateBranch(pull) {
+      // Only this write needs Contents write; every other token stays without it.
+      const answer = await call(
+        "PUT",
+        `${REPO}/pulls/${pull.number}/update-branch`,
+        await installationToken({ contents: "write", pull_requests: "write", metadata: "read" }),
+        { expected_head_sha: pull.headSha },
+      );
+      // 422: the head moved meanwhile, a conflict, or GitHub refused (a
+      // workflow file change needs the Workflows permission too).
+      if (answer.status !== 202) throw new Error(`github_update_branch_${answer.status}`);
     },
     async runnerUsage() {
       const runs = new Map<number, Json>();
