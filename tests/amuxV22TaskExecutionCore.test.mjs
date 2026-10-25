@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
-  v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from
@@ -37,19 +36,6 @@ test("settlement refuses a patch inserted, removed, or changed after decrypt", (
   assert.equal(matches({ ...readPatch, taskId: "task-2" }, storedPatch), false);
 });
 
-test("each attempt fits the assigned route and cumulative owner ceiling", () => {
-  const base = { assignedMicroUsd: 1_000n,
-    currentMicroUsd: 800n, approvedCeilingMicroUsd: 5_000n,
-    priorReservedMicroUsd: 4_000n };
-  assert.equal(v22ExecutionCostWithinAssignment(base), true);
-  assert.equal(v22ExecutionCostWithinAssignment({ ...base,
-    currentMicroUsd: 1_001n }), false);
-  assert.equal(v22ExecutionCostWithinAssignment({ ...base,
-    priorReservedMicroUsd: 4_001n }), false);
-  assert.equal(v22ExecutionCostWithinAssignment({ ...base,
-    assignedMicroUsd: 0n }), false);
-});
-
 test("v22 settlement accepts only its one preallocated invocation receipt", () => {
   const base = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
     outcome: "succeeded", resultStored: true, reservedCostMicrousd: 1_000n,
@@ -81,8 +67,18 @@ test("v22 settlement accepts only its one preallocated invocation receipt", () =
     events: [{ ...base.events[0], actualModelId: null }] }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...base,
     events: [{ ...base.events[0], actualModelId: "claude-sonnet-5" }] }), false);
-  assert.equal(v22ExecutionReceiptVerified({ ...base,
-    events: [{ ...base.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
+  // Owner decision 2026-10-25: an ordinary CLI run settles on its observed
+  // usage, whatever it cost and even when it could not be priced.
+  for (const projectedApiCostMicrousd of [1_001n, null]) {
+    assert.equal(v22ExecutionReceiptVerified({ ...base,
+      events: [{ ...base.events[0], projectedApiCostMicrousd }] }), true);
+  }
+  // The read-only API retry keeps the cap its recovery was approved at.
+  const api = { ...base, expectedExecutionSource: "anthropic_messages_api",
+    events: [{ ...base.events[0], cli: "anthropic_api", source: "anthropic_messages_api" }] };
+  assert.equal(v22ExecutionReceiptVerified(api), true);
+  assert.equal(v22ExecutionReceiptVerified({ ...api,
+    events: [{ ...api.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
 });
 
 test("read-only API receipt must exactly match its content-free usage event", () => {

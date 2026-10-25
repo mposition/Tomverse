@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD,
   AMUX_TASK_CATALOG_CAPS,
   amuxTaskRoutePrice,
   deriveAmuxV4TaskAutoCatalog,
@@ -24,7 +22,7 @@ const workers = [
   { workerName: "claude-contract", modelId: "claude-opus-4-8",
     roles: ["design", "implement", "investigate"], roleCeiling: "contract" },
 ];
-// Verified five-minute write rates are 1.25x input; the one-hour rate is 2x.
+// Verified five-minute write rates are 1.25x input.
 const flat = {
   "claude-haiku-4-5": { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 5,
     cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 1.25 },
@@ -83,17 +81,15 @@ test("prices round up to whole micro-USD and tool cost is capped at zero", () =>
   assert.equal(route.uncachedInputMicroUsdPerMillion, 2);
   assert.equal(route.outputMicroUsdPerMillion, 1_000_000);
   assert.equal(route.cacheReadMicroUsdPerMillion, 1, "cached input uses the multiplier");
-  assert.equal(route.cacheWriteMicroUsdPerMillion, 4, "the one-hour rate, twice the input");
+  assert.equal(route.cacheWriteMicroUsdPerMillion, 3, "the verified five-minute rate");
   assert.equal(route.toolCostCapMicroUsdPerAttempt, 0);
   assert.equal(route.pricingSource, "model-registry:claude-haiku-4-5");
 });
 
-test("a cache write is priced at the one-hour rate, or the verified rate if dearer", () => {
+test("a cache write is priced at the verified five-minute rate the CLI is charged", () => {
   const { catalog } = derive();
-  assert.equal(routeOf(catalog, "claude-sonnet-5").cacheWriteMicroUsdPerMillion, 6_000_000);
-  const dear = derive({ workers: [workers[1]], priceFor: () => ({
-    ...flat["claude-sonnet-5"], cacheWriteUsdPerMillionTokens: 7 }) });
-  assert.equal(dear.catalog.routes[0].cacheWriteMicroUsdPerMillion, 7_000_000);
+  assert.equal(routeOf(catalog, "claude-sonnet-5").cacheWriteMicroUsdPerMillion, 3_750_000);
+  assert.equal(routeOf(catalog, "claude-opus-4-8").cacheWriteMicroUsdPerMillion, 6_250_000);
 });
 
 test("a model with no verified cache-write rate is not priced", () => {
@@ -131,7 +127,7 @@ test("an assignment records exactly its route's prices, and only that shape read
   const price = amuxTaskRoutePrice(catalog, "v22:claude-impl");
   assert.deepEqual(price, { pricingVersion: catalog.pricingVersion,
     modelId: "claude-sonnet-5", uncachedInputMicroUsdPerMillion: 3_000_000,
-    cacheReadMicroUsdPerMillion: 300_000, cacheWriteMicroUsdPerMillion: 6_000_000,
+    cacheReadMicroUsdPerMillion: 300_000, cacheWriteMicroUsdPerMillion: 3_750_000,
     outputMicroUsdPerMillion: 12_000_000 });
   assert.deepEqual(parseAmuxTaskRoutePrice(price), price);
   assert.equal(amuxTaskRoutePrice(catalog, "v22:nobody"), null);
@@ -174,26 +170,11 @@ test("the same prices give the same digest; a real change gives a new one", () =
     "a price change never asks a Task to reconfirm its route");
 });
 
-test("a route dearer than one attempt's launch budget is left out, not assigned", () => {
+test("a dear model is priced, not left out: the reservation is the budget", () => {
   const dear = derive({ workers: [workers[2]], priceFor: () => ({
     inputUsdPerMillionTokens: 10, outputUsdPerMillionTokens: 50,
     cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 12.5 }) });
-  assert.deepEqual(dear, { ok: false, code: "no_priced_worker" });
-  const { catalog } = derive();
-  for (const grade of ["routine", "advanced", "frontier"]) {
-    const role = grade === "routine" ? "investigate" : grade === "advanced" ? "implement" : "design";
-    const result = ceiling(catalog, role, grade);
-    for (const route of result.receipt.routes) {
-      assert.ok(BigInt(route.perAttemptMicroUsd) <= BigInt(AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD),
-        `${grade} ${route.modelId}: ${route.perAttemptMicroUsd}`);
-    }
-  }
-});
-
-test("the one-shot launcher and this catalog agree on one attempt's budget", () => {
-  const sidecar = readFileSync(new URL("../lib/amux/v22OneShotSidecar.mjs", import.meta.url), "utf8");
-  assert.match(sidecar, /const MAX_BUDGET_MICROUSD = 5_000_000;/);
-  assert.equal(AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD, 5_000_000);
-  const delivery = readFileSync(new URL("../lib/amux/delivery.ts", import.meta.url), "utf8");
-  assert.match(delivery, /budgetMicrousd > AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD/);
+  assert.equal(dear.ok, true);
+  assert.ok(BigInt(ceiling(dear.catalog, "design", "frontier").receipt.routes[0].perAttemptMicroUsd) >
+    BigInt(5_000_000));
 });

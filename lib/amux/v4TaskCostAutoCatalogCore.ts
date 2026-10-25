@@ -15,16 +15,17 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   the same roles, so a Task no worker can run gets no ceiling;
  * - prices: the chat model registry (Admin › Models) resolved the way Chat
  *   bills it, at the tier the grade's input cap reaches. Cache reads use the
- *   resolved multiplier. A cache write is priced at Anthropic's one-hour
- *   rate (twice the input rate), or the verified write rate if dearer: usage
- *   receipts do not split write lifetimes. A model with no verified write
- *   rate is not priced at all. Tool costs are capped at zero;
+ *   resolved multiplier; cache writes use the verified five-minute write rate,
+ *   the lifetime the app and the one-shot CLI cache with (no one-hour TTL is
+ *   set), so the CLI's dollar budget and the settled rates agree. A model with
+ *   no verified write rate is not priced at all. Tool costs are capped at
+ *   zero;
  * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code. They bound
  *   cache reads and writes as well, because the Claude CLI reports them
  *   apart from input, so the reservation covers what an attempt settles.
- *   One attempt may reserve at most AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD,
- *   the budget the one-shot launcher hands the CLI; a route dearer than that
- *   at its grade's caps is left out rather than assigned and then refused.
+ *   One attempt's reservation is the dollar budget the one-shot launcher
+ *   hands the CLI; there is no fixed cap above it (owner decision
+ *   2026-10-25).
  *
  * Deterministic: the same prices give the same catalog digest, so a Task
  * reconfirms only when a worker or a price actually changed. The catalog
@@ -49,15 +50,9 @@ export type AmuxTaskCatalogGradeCaps = {
   maxAttempts: number;
 };
 
-/** The one-shot launcher's per-attempt CLI budget (lib/amux/delivery.ts,
- * lib/amux/v22OneShotSidecar.mjs). */
-export const AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD = 5_000_000;
-
 /** The most one Task attempt of each grade may use. A CLI session rereads its
  * context every turn, so cache reads run to ten times the fresh input; each
- * prompt is written to the cache at most once. Sized so the grade's usual
- * model fits one attempt's budget: Haiku at routine, Sonnet at advanced,
- * Opus at frontier. */
+ * prompt is written to the cache at most once. */
 export const AMUX_TASK_CATALOG_CAPS: Readonly<Record<AmuxExecutionGrade,
   AmuxTaskCatalogGradeCaps>> = Object.freeze({
   routine: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 2_000_000,
@@ -133,14 +128,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const multiplier = price.cachedInputPriceMultiplier;
     const cacheRead = Number.isFinite(multiplier) && multiplier > 0
       ? Math.ceil(uncached * multiplier) : uncached;
-    const cacheWrite = Math.max(verifiedWrite, uncached * 2);
-    const attempt = caps[grade];
-    // Each term rounds up on its own, as the ceiling calculation does.
-    const term = (tokens: number, rate: number) =>
-      (BigInt(tokens) * BigInt(rate) + BigInt(999_999)) / BigInt(1_000_000);
-    if (term(attempt.inputTokens, uncached) + term(attempt.cacheReadTokens, cacheRead) +
-        term(attempt.cacheWriteTokens, cacheWrite) + term(attempt.outputTokens, output) >
-        BigInt(AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD)) continue;
+    const cacheWrite = verifiedWrite;
     const identity = { workerName: worker.workerName, provider: "anthropic",
       modelId: worker.modelId, roles, grade };
     routes.push({

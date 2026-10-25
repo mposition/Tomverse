@@ -38,21 +38,6 @@ export function v22SettlementPatchMatches(input: {
     storedPatch.bodyPurgedAt === null;
 }
 
-export function v22ExecutionCostWithinAssignment(input: {
-  assignedMicroUsd: bigint;
-  currentMicroUsd: bigint;
-  approvedCeilingMicroUsd: bigint;
-  priorReservedMicroUsd: bigint;
-}) {
-  return input.assignedMicroUsd > BigInt(0) &&
-    input.currentMicroUsd >= BigInt(0) &&
-    input.priorReservedMicroUsd >= BigInt(0) &&
-    input.approvedCeilingMicroUsd > BigInt(0) &&
-    input.currentMicroUsd <= input.assignedMicroUsd &&
-    input.priorReservedMicroUsd + input.assignedMicroUsd <=
-      input.approvedCeilingMicroUsd;
-}
-
 /** One supervised CLI process is the whole v22 attempt. Its invocation ID is
  * the durable attempt ID, allocated before dispatch. A caller-supplied subset
  * of receipts cannot turn an unobserved second call into a successful run. */
@@ -85,8 +70,12 @@ export function v22ExecutionReceiptVerified(input: {
     event.cli === expectedExecutor && event.source === expectedSource &&
     event.actualModelId !== null &&
     event.actualModelId === event.selectedModelId &&
-    event.projectedApiCostMicrousd !== null &&
-    event.projectedApiCostMicrousd <= input.reservedCostMicrousd &&
+    // Owner decision 2026-10-25: an ordinary CLI run settles on its observed
+    // usage without a cost check; the read-only API retry keeps the cap its
+    // recovery was approved at.
+    (expectedSource === "claude_result" ||
+      (event.projectedApiCostMicrousd !== null &&
+       event.projectedApiCostMicrousd <= input.reservedCostMicrousd)) &&
     (input.outcome === "succeeded" ? event.status === "succeeded" :
       event.status === "succeeded" || event.status === "failed");
 }

@@ -13,6 +13,7 @@ let authoritativeFrame: unknown = null;
 let authorityCalls = 0;
 let priceReads = 0;
 let routeCacheWrite = 400_000;
+let legacyAssignment = false;
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   writeSystemAuditLog: async (input: Record<string, unknown>) => {
@@ -124,7 +125,8 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
         task: { sourceSystem: "admin-idea-v4",
           v22AssignmentId: "assignment-one",
           v22AcceptedAssignment: { id: "assignment-one",
-            authorizationAuditLogId: "assignment-audit", workerName: "worker-one",
+            authorizationAuditLogId: "assignment-audit",
+            catalogApprovalId: "legacy-approval", routeId: "route-one", workerName: "worker-one",
             provider: "anthropic", modelId: frame.modelId } },
       }) },
       // The assignment recorded the prices it reserved against (owner
@@ -134,12 +136,21 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
         return query.where.id !== "assignment-audit" ? null : {
           action: "amux.v22.worker.assigned", targetType: "AmuxV22WorkerAssignment",
           targetId: "assignment-one", entryHash: "a".repeat(64),
-          metadata: { routePrice: { pricingVersion: "price-v2", modelId: frame.modelId,
+          metadata: legacyAssignment ? { routeId: "route-one" } :
+            { routePrice: { pricingVersion: "price-v2", modelId: frame.modelId,
             uncachedInputMicroUsdPerMillion: 2_000_000,
             cacheReadMicroUsdPerMillion: 200_000,
             cacheWriteMicroUsdPerMillion: routeCacheWrite,
             outputMicroUsdPerMillion: 4_000_000 } } };
       } },
+      // An assignment from before prices were recorded with it reserved
+      // against an owner-approved catalog, kept immutable.
+      amuxV4TaskCostCatalogApproval: { findUnique: async (query: { where: { id: string } }) =>
+        query.where.id !== "legacy-approval" ? null : { status: "approved", catalogDigest,
+          catalog: { pricingVersion: "legacy-price", routes: [{ routeId: "route-one",
+            modelId: frame.modelId, uncachedInputMicroUsdPerMillion: 2_000_000,
+            cacheReadMicroUsdPerMillion: 200_000, cacheWriteMicroUsdPerMillion: 400_000,
+            outputMicroUsdPerMillion: 4_000_000 }] } } },
       $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
         inserts += 1;
         insertedValues.push(values);
@@ -292,4 +303,15 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
     assert.equal(insertedValues[4]?.[29], BigInt(6),
       "a run with no cache writes is still priced");
     routeCacheWrite = 400_000;
+
+    // A legacy assignment without a recorded price settles at its approved
+    // catalog's price, not unpriced.
+    legacyAssignment = true;
+    await recordAmuxCliUsage(tx as never, { ...ordinaryReceipt,
+      invocationId: "00000000-0000-4000-8000-00000000000a",
+      binding: { kind: "task_attempt" as const,
+        attemptId: "00000000-0000-4000-8000-00000000000a" } });
+    assert.equal(insertedValues[5]?.[28], "legacy-price");
+    assert.equal(insertedValues[5]?.[29], BigInt(6));
+    legacyAssignment = false;
   });
