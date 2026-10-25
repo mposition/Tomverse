@@ -232,7 +232,7 @@ test("a consent copy version that makes no promise has changed the promise in ev
 
 test("the changed privacy page is observed separately from the original amendment approval", () => {
   // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
-  // mposition on 2026-10-03.
+  // mposition on 2026-10-03, with main's approved memory-section rewrite.
   assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], ["eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8"]);
   assert.equal(APPROVED_AMENDED_DIGESTS["/privacy"].includes(AMENDED_DOCUMENT_EVIDENCE["/privacy"].contentSha256), false);
   assert.deepEqual(APPROVED_AMENDED_DIGESTS["/terms"], [AMENDED_DOCUMENT_EVIDENCE["/terms"].contentSha256]);
