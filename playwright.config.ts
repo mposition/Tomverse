@@ -109,6 +109,13 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+    // The chat shell registers public/chat-sw.js and claims the page. Once a
+    // service worker controls it, WebKit sends the page's fetches past
+    // page.route and context.route, so every mocked API after the claim hit
+    // the real server (401) and mobile-safari chat specs failed en masse.
+    // No spec exercises the worker itself; the offline shell is fetched
+    // directly in chat-studio.spec.ts.
+    serviceWorkers: "block",
   },
   webServer: {
     command: "npm run start:e2e",
