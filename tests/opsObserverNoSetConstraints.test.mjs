@@ -59,7 +59,10 @@ test("no source outside tests mentions SET CONSTRAINTS beyond the reviewed comme
   for (const file of sourceFiles()) {
     const rel = file.slice(root.length).split(sep).join("/");
     scanned.add(rel);
-    const n = count(readFileSync(file, "utf8"));
+    let source;
+    try { source = readFileSync(file, "utf8"); }
+    catch (cause) { throw new Error(`Source inventory file is unavailable: ${rel}`, { cause }); }
+    const n = count(source);
     if (n > 0) found[rel] = n;
   }
   // The sweep must actually have read the places a statement could hide.

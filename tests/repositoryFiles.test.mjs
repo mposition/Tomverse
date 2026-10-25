@@ -44,3 +44,9 @@ test("deleting a tracked SQL file cannot hide it from the migration guards", (t)
   assert.ok(repositoryFiles(root).includes(path));
   assert.throws(() => readMigrationSqlFiles(root), { code: "ENOENT" });
 });
+
+test("a source archive without Git metadata reports the missing inventory boundary", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tomverse-no-git-inventory-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.throws(() => repositoryFiles(root), /requires a readable Git checkout and the Git executable/);
+});
