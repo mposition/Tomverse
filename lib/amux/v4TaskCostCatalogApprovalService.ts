@@ -44,15 +44,20 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
     [registration.workerName, registration.roleCeiling]));
   const rows = await tx.modelRegistryEntry.findMany({
     where: { provider: "anthropic", catalogDeleted: false } });
+  const unreadable = new Set<string>();
   const models = rows.flatMap((row) => {
-    try { return [registryRowToModel(row)]; } catch { return []; }
+    try { return [registryRowToModel(row)]; } catch { unreadable.add(row.id); return []; }
   });
   const priceFor = (modelId: string, inputTokens: number):
     AmuxTaskCatalogResolvedPrice | null => {
-    const exact = models.filter((model) => model.id === modelId);
-    const candidates = exact.length > 0 ? exact :
-      models.filter((model) => model.apiModel === modelId);
-    if (candidates.length === 0) return null;
+    const exactRows = rows.filter((row) => row.id === modelId);
+    const pool = exactRows.length > 0 ? exactRows :
+      rows.filter((row) => row.apiModel === modelId);
+    // A row that cannot be read might be the dearest: price nothing rather
+    // than fall through to a cheaper one.
+    if (pool.length === 0 || pool.some((row) => unreadable.has(row.id))) return null;
+    const ids = new Set(pool.map((row) => row.id));
+    const candidates = models.filter((model) => ids.has(model.id));
     const resolved = candidates.map((model) =>
       resolveModelPricing(model, { estimatedPromptTokens: inputTokens }));
     const writes = resolved.flatMap((row) =>

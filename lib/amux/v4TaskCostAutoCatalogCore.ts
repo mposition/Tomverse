@@ -15,9 +15,13 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   the same roles, so a Task no worker can run gets no ceiling;
  * - prices: the chat model registry (Admin › Models) resolved the way Chat
  *   bills it, at the tier the grade's input cap reaches. Cache reads use the
- *   resolved multiplier; cache writes use the verified write rate, and 0
- *   marks a model with none. Tool costs are capped at zero;
- * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code.
+ *   resolved multiplier. A cache write is priced at Anthropic's one-hour
+ *   rate (twice the input rate), or the verified write rate if dearer: usage
+ *   receipts do not split write lifetimes. A model with no verified write
+ *   rate is not priced at all. Tool costs are capped at zero;
+ * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code. They bound
+ *   cache reads and writes as well, because the Claude CLI reports them
+ *   apart from input, so the reservation covers what an attempt settles.
  *
  * Deterministic: the same prices give the same catalog digest, so a Task
  * reconfirms only when a worker or a price actually changed. The catalog
@@ -36,6 +40,8 @@ const PRICES_UNTIL = "2100-01-01T00:00:00.000Z";
 
 export type AmuxTaskCatalogGradeCaps = {
   inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   maxAttempts: number;
 };
@@ -43,9 +49,14 @@ export type AmuxTaskCatalogGradeCaps = {
 /** The most one Task of each grade may use, every attempt included. */
 export const AMUX_TASK_CATALOG_CAPS: Readonly<Record<AmuxExecutionGrade,
   AmuxTaskCatalogGradeCaps>> = Object.freeze({
-  routine: Object.freeze({ inputTokens: 300_000, outputTokens: 30_000, maxAttempts: 2 }),
-  advanced: Object.freeze({ inputTokens: 600_000, outputTokens: 60_000, maxAttempts: 2 }),
-  frontier: Object.freeze({ inputTokens: 1_000_000, outputTokens: 128_000, maxAttempts: 3 }),
+  // A CLI session rereads its context every turn, so reads run to ten times
+  // the fresh input; each prompt is written to the cache at most once.
+  routine: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 3_000_000,
+    cacheWriteTokens: 300_000, outputTokens: 30_000, maxAttempts: 2 }),
+  advanced: Object.freeze({ inputTokens: 600_000, cacheReadTokens: 6_000_000,
+    cacheWriteTokens: 600_000, outputTokens: 60_000, maxAttempts: 2 }),
+  frontier: Object.freeze({ inputTokens: 1_000_000, cacheReadTokens: 10_000_000,
+    cacheWriteTokens: 1_000_000, outputTokens: 128_000, maxAttempts: 3 }),
 });
 
 export type AmuxTaskCatalogWorker = {
@@ -60,7 +71,7 @@ export type AmuxTaskCatalogResolvedPrice = {
   inputUsdPerMillionTokens: number;
   outputUsdPerMillionTokens: number;
   cachedInputPriceMultiplier: number;
-  /** Null when no write rate was verified for the model. */
+  /** The verified five-minute write rate; null when none was verified. */
   cacheWriteUsdPerMillionTokens: number | null;
 };
 
@@ -107,8 +118,9 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const price = input.priceFor(worker.modelId, caps[grade].inputTokens);
     const uncached = microUsd(price?.inputUsdPerMillionTokens);
     const output = microUsd(price?.outputUsdPerMillionTokens);
+    const verifiedWrite = microUsd(price?.cacheWriteUsdPerMillionTokens);
     // A zero or missing price never becomes a free route.
-    if (!price || uncached === null || output === null) continue;
+    if (!price || uncached === null || output === null || verifiedWrite === null) continue;
     const multiplier = price.cachedInputPriceMultiplier;
     const identity = { workerName: worker.workerName, provider: "anthropic",
       modelId: worker.modelId, roles, grade };
@@ -130,7 +142,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       outputMicroUsdPerMillion: output,
       cacheReadMicroUsdPerMillion: Number.isFinite(multiplier) && multiplier > 0
         ? Math.ceil(uncached * multiplier) : uncached,
-      cacheWriteMicroUsdPerMillion: microUsd(price.cacheWriteUsdPerMillionTokens) ?? 0,
+      cacheWriteMicroUsdPerMillion: Math.max(verifiedWrite, uncached * 2),
       toolCostCapMicroUsdPerAttempt: 0,
     });
   }
@@ -139,7 +151,8 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     AMUX_TASK_CATALOG_GRADES.map((grade) => ({ role, grade, caps: {
       uncachedInputTokens: caps[grade].inputTokens,
       outputTokens: caps[grade].outputTokens,
-      cacheReadTokens: 0, cacheWriteTokens: 0,
+      cacheReadTokens: caps[grade].cacheReadTokens,
+      cacheWriteTokens: caps[grade].cacheWriteTokens,
       maxAttempts: caps[grade].maxAttempts } })));
   const pricingVersion = `model-registry-${sha256("amux-v4-task-auto-prices-v1",
     routes).slice(0, 16)}`;

@@ -22,13 +22,14 @@ const workers = [
   { workerName: "claude-contract", modelId: "claude-opus-4-8",
     roles: ["design", "implement", "investigate"], roleCeiling: "contract" },
 ];
+// Verified five-minute write rates are 1.25x input; the one-hour rate is 2x.
 const flat = {
-  "claude-haiku-4-5": { inputUsdPerMillionTokens: 0.5, outputUsdPerMillionTokens: 1,
-    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.625 },
+  "claude-haiku-4-5": { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 5,
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 1.25 },
   "claude-sonnet-5": { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 12,
-    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: null },
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 3.75 },
   "claude-opus-4-8": { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25,
-    cachedInputPriceMultiplier: 1, cacheWriteUsdPerMillionTokens: 6.25 },
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 6.25 },
 };
 const asked = [];
 const priceFor = (modelId, inputTokens) => {
@@ -38,6 +39,7 @@ const priceFor = (modelId, inputTokens) => {
 const derive = (overrides = {}) => deriveAmuxV4TaskAutoCatalog({ workers, priceFor, ...overrides });
 const ceiling = (catalog, role, grade, asOfIso = NOW) =>
   calculateV4TaskCeilingFromCatalog({ rawCatalog: catalog, role, grade, asOfIso });
+const routeOf = (catalog, modelId) => catalog.routes.find((route) => route.modelId === modelId);
 
 test("the derived catalog passes the catalog and grade checks", () => {
   const result = derive();
@@ -79,26 +81,40 @@ test("prices round up to whole micro-USD and tool cost is capped at zero", () =>
   assert.equal(route.uncachedInputMicroUsdPerMillion, 2);
   assert.equal(route.outputMicroUsdPerMillion, 1_000_000);
   assert.equal(route.cacheReadMicroUsdPerMillion, 1, "cached input uses the multiplier");
-  assert.equal(route.cacheWriteMicroUsdPerMillion, 3, "the verified write rate");
+  assert.equal(route.cacheWriteMicroUsdPerMillion, 4, "the one-hour rate, twice the input");
   assert.equal(route.toolCostCapMicroUsdPerAttempt, 0);
   assert.equal(route.pricingSource, "model-registry:claude-haiku-4-5");
 });
 
-test("the ceiling is the grade caps times the dearest route at the grade", () => {
+test("a cache write is priced at the one-hour rate, or the verified rate if dearer", () => {
   const { catalog } = derive();
-  // frontier: 1M input x $5 + 128k output x $25, three attempts.
-  assert.equal(ceiling(catalog, "design", "frontier").receipt.ceilingMicroUsd,
-    String(3 * (5_000_000 + 3_200_000)));
-  assert.deepEqual(AMUX_TASK_CATALOG_CAPS.frontier,
-    { inputTokens: 1_000_000, outputTokens: 128_000, maxAttempts: 3 });
+  assert.equal(routeOf(catalog, "claude-sonnet-5").cacheWriteMicroUsdPerMillion, 6_000_000);
+  const dear = derive({ workers: [workers[1]], priceFor: () => ({
+    ...flat["claude-sonnet-5"], cacheWriteUsdPerMillionTokens: 7 }) });
+  assert.equal(dear.catalog.routes[0].cacheWriteMicroUsdPerMillion, 7_000_000);
 });
 
-test("a cache write without a verified rate is never invented", () => {
+test("a model with no verified cache-write rate is not priced", () => {
+  assert.deepEqual(derive({ workers: [workers[1]], priceFor: () => ({
+    ...flat["claude-sonnet-5"], cacheWriteUsdPerMillionTokens: null }) }),
+  { ok: false, code: "no_priced_worker" });
+});
+
+test("the reservation covers a Claude-shaped run that uses every cap", () => {
   const { catalog } = derive();
-  const route = catalog.routes.find((entry) => entry.modelId === "claude-sonnet-5");
-  assert.equal(route.cacheWriteMicroUsdPerMillion, 0, "0 marks no verified write rate");
-  assert.equal(catalog.routes.find((entry) => entry.modelId === "claude-opus-4-8")
-    .cacheWriteMicroUsdPerMillion, 6_250_000);
+  const caps = AMUX_TASK_CATALOG_CAPS.frontier;
+  const route = routeOf(catalog, "claude-opus-4-8");
+  const result = ceiling(catalog, "design", "frontier");
+  assert.equal(result.ok, true);
+  // Cache reads and writes are reported apart from input and settled at the
+  // route rates; one attempt at every cap must fit its reservation.
+  const fullAttempt = Math.ceil((caps.inputTokens * route.uncachedInputMicroUsdPerMillion +
+    caps.cacheReadTokens * route.cacheReadMicroUsdPerMillion +
+    caps.cacheWriteTokens * route.cacheWriteMicroUsdPerMillion +
+    caps.outputTokens * route.outputMicroUsdPerMillion) / 1_000_000);
+  const perAttempt = BigInt(result.receipt.routes[0].perAttemptMicroUsd);
+  assert.ok(BigInt(fullAttempt) <= perAttempt, `${fullAttempt} <= ${perAttempt}`);
+  assert.equal(BigInt(result.receipt.ceilingMicroUsd), perAttempt * BigInt(caps.maxAttempts));
 });
 
 test("live prices hold whenever the catalog is derived", () => {
@@ -113,7 +129,7 @@ test("an assignment records exactly its route's prices, and only that shape read
   const price = amuxTaskRoutePrice(catalog, "v22:claude-impl");
   assert.deepEqual(price, { pricingVersion: catalog.pricingVersion,
     modelId: "claude-sonnet-5", uncachedInputMicroUsdPerMillion: 3_000_000,
-    cacheReadMicroUsdPerMillion: 300_000, cacheWriteMicroUsdPerMillion: 0,
+    cacheReadMicroUsdPerMillion: 300_000, cacheWriteMicroUsdPerMillion: 6_000_000,
     outputMicroUsdPerMillion: 12_000_000 });
   assert.deepEqual(parseAmuxTaskRoutePrice(price), price);
   assert.equal(amuxTaskRoutePrice(catalog, "v22:nobody"), null);
@@ -141,7 +157,7 @@ test("no priced worker, or a zero price, is a hold rather than a free route", ()
   { ok: false, code: "no_priced_worker" });
 });
 
-test("the same registries give the same digest; a real change gives a new one", () => {
+test("the same prices give the same digest; a real change gives a new one", () => {
   const first = derive();
   assert.equal(derive().catalogDigest, first.catalogDigest, "no clock, no nonce");
   const repriced = derive({ priceFor: (modelId) => modelId === "claude-sonnet-5"

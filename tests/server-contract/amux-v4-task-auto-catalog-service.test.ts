@@ -14,14 +14,16 @@ const NOW = new Date("2026-10-25T00:00:00.000Z");
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
   readAmuxRegistryAndDerivedCatalog: async () => ({
     registrations: [{ workerName: "claude-impl", roleCeiling: "implementation" }],
-    derived: { v22: [{ worker_name: "claude-impl", model: "claude-draft-test",
+    derived: { v22: [{ worker_name: "claude-impl", model: "claude-sonnet-5",
       routing_roles: ["implement", "investigate"] }] },
   }),
 } });
 mock.module(mod("lib/modelRegistry.ts"), { namedExports: {
-  registryRowToModel: (row: Record<string, unknown>) => ({ ...row,
-    usageClass: "standard", maxOutputTokens: undefined,
-    reservationOutputTokens: undefined }),
+  registryRowToModel: (row: Record<string, unknown>) => {
+    if (row.broken) throw new Error("invalid registry row");
+    return { ...row, usageClass: "standard", maxOutputTokens: undefined,
+      reservationOutputTokens: undefined };
+  },
 } });
 
 let rows: Array<Record<string, unknown>> = [];
@@ -29,8 +31,9 @@ const tx = {
   modelRegistryEntry: { findMany: async () => rows },
   $queryRaw: async () => [{ now: NOW }],
 };
-const row = (overrides: Record<string, unknown> = {}) => ({ id: "claude-draft-test",
-  apiModel: "claude-draft-test", provider: "anthropic",
+// A real model id, so its verified cache-write rate comes from lib/modelPricing.ts.
+const row = (overrides: Record<string, unknown> = {}) => ({ id: "claude-sonnet-5",
+  apiModel: "claude-sonnet-5", provider: "anthropic",
   inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15,
   cachedInputPriceMultiplier: 0.1, ...overrides });
 const service = import(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"));
@@ -39,8 +42,15 @@ test("a Task's ceiling comes from the registry price and reproduces at a pinned 
   rows = [row()];
   const { calculateCurrentApprovedAmuxV4TaskCost } = await service;
   const live = await calculateCurrentApprovedAmuxV4TaskCost(tx as never, "implement", "advanced");
-  // advanced: 600k input x $3 + 60k output x $15, two attempts.
-  assert.equal(live.receipt.ceilingMicroUsd, String(2 * (1_800_000 + 900_000)));
+  // Two attempts, each covering every advanced cap at the route's rates.
+  const [route] = live.catalog.routes as Array<Record<string, number>>;
+  assert.equal(route.uncachedInputMicroUsdPerMillion, 3_000_000);
+  assert.equal(route.outputMicroUsdPerMillion, 15_000_000);
+  assert.ok(route.cacheWriteMicroUsdPerMillion >= 6_000_000, "at least the one-hour rate");
+  const perAttempt = BigInt(live.receipt.routes[0]!.perAttemptMicroUsd);
+  assert.ok(perAttempt >= BigInt(Math.ceil((600_000 * 3_000_000 + 6_000_000 * 300_000 +
+    600_000 * route.cacheWriteMicroUsdPerMillion! + 60_000 * 15_000_000) / 1_000_000)));
+  assert.equal(live.receipt.ceilingMicroUsd, String(perAttempt * BigInt(2)));
   assert.match(live.approvalId, /^registry:[a-f0-9]{32}$/);
   const pinned = await calculateCurrentApprovedAmuxV4TaskCost(tx as never,
     "implement", "advanced", { asOf: new Date("2026-10-20T00:00:00.000Z") });
@@ -65,11 +75,28 @@ test("no worker for the role, or no model in the registry, is a hold", async () 
 
 test("an API-model match takes the dearest row, so a duplicate never lowers the price", async () => {
   const { readAmuxV4TaskAutoCatalog } = await service;
-  rows = [row({ id: "row-cheap", inputUsdPerMillionTokens: 1 }),
-    row({ id: "row-dear", inputUsdPerMillionTokens: 5 })];
+  // Two real model profiles (each with a verified write rate) both calling
+  // the API model the worker names; neither row has its id.
+  rows = [row({ id: "claude-opus-4-8", inputUsdPerMillionTokens: 1 }),
+    row({ id: "claude-fable-5", inputUsdPerMillionTokens: 5 })].map((entry) =>
+    ({ ...entry, apiModel: "claude-sonnet-5" }));
+  for (const entry of rows) assert.notEqual(entry.id, "claude-sonnet-5");
   const result = await readAmuxV4TaskAutoCatalog(tx as never);
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const routes = result.catalog.routes as Array<Record<string, unknown>>;
   assert.equal(routes[0]?.uncachedInputMicroUsdPerMillion, 5_000_000);
+});
+
+test("an unreadable row that might be the dearest prices nothing", async () => {
+  const { readAmuxV4TaskAutoCatalog } = await service;
+  rows = [row({ id: "claude-opus-4-8", inputUsdPerMillionTokens: 1 }),
+    row({ id: "row-broken", broken: true })].map((entry) =>
+    ({ ...entry, apiModel: "claude-sonnet-5" }));
+  assert.deepEqual(await readAmuxV4TaskAutoCatalog(tx as never),
+    { ok: false, code: "no_priced_worker" });
+  rows = [row({ broken: true }), row({ id: "claude-opus-4-8", apiModel: "claude-sonnet-5",
+    inputUsdPerMillionTokens: 1 })];
+  assert.deepEqual(await readAmuxV4TaskAutoCatalog(tx as never),
+    { ok: false, code: "no_priced_worker" }, "an unreadable exact row never falls through");
 });
