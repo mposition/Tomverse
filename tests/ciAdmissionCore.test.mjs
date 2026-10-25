@@ -7,6 +7,7 @@ import {
   CI_ADMISSION_RAMP_MS,
   CI_ADMISSION_WAIT_RECHECK_MS,
   CI_ADMISSION_RELEASE_GRACE_MS,
+  CI_ADMISSION_UPDATE_RETRY_MS,
   ciAdmissionDraftsToCheck,
   ciAdmissionOrder,
   ciAdmissionUnits,
@@ -125,7 +126,8 @@ test("a draft with a conflict, behind its base, or not checked yet is passed ove
     [6, { conflict: false, behind: null }],
   ]);
   const queue = lineOf(1, 2, 3, 4, 5, 6).map((entry) => ({ ...entry, title: `Pull ${entry.number}` }));
-  const evaluation = judge({ state: state({ queue }), openPulls: open, checks });
+  // Branch updates off: a draft behind its base is only passed over.
+  const evaluation = judge({ state: state({ queue }), openPulls: open, checks, updateBranches: false });
   assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "behind", 4: "checking", 5: "next", 6: "next" });
   // Left the line while open: not recorded as closed.
   assert.equal(evaluation.state.events.filter((e) => e.kind === "dropped").length, 0);
@@ -334,4 +336,35 @@ test("a CI needing more than the budget still runs alone", () => {
   const main = [pull(9, { base: "main" })];
   const small = judge({ state: { ...emptyCiAdmissionState(), capacity: 20, queue: lineOf(9) }, openPulls: main, checks: checksFor(main) });
   assert.deepEqual(kinds(small), ["release:9"]);
+});
+
+test("a draft the slots reach that is behind its base has its branch updated once per head, then is released on its new head", () => {
+  const behind = [pull(1), pull(2)];
+  const checks = new Map([[1, { conflict: false, behind: true }], [2, clean]]);
+  const first = judge({ state: state({ queue: lineOf(1, 2) }), openPulls: behind, checks });
+  assert.deepEqual(kinds(first), ["update_branch:1", "release:2"]);
+  assert.deepEqual(statuses(first), { 1: "updating", 2: "next" });
+  assert.equal(first.state.events.find((e) => e.number === 1).kind, "updated");
+  assert.notEqual(first.nextCheckInMs, null, "judged again while GitHub merges");
+  // GitHub has not moved the head yet: not asked again.
+  const again = judge({ state: first.state, openPulls: [behind[0], { ...behind[1], draft: false }], checks, nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(again).filter((k) => k.startsWith("update_branch")), []);
+  assert.equal(statuses(again)[1], "updating");
+  // Long enough without a new head: asked again.
+  const retry = judge({ state: first.state, openPulls: [behind[0]], checks, nowMs: T0 + CI_ADMISSION_UPDATE_RETRY_MS });
+  assert.deepEqual(kinds(retry), ["update_branch:1"]);
+  // The new head is up to date: released like any draft.
+  const updated = { ...behind[0], headSha: "a".repeat(40) };
+  const done = judge({ state: first.state, openPulls: [updated], checks: new Map([[1, clean]]), nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(done), ["release:1"]);
+  assert.deepEqual(done.state.updating, []);
+});
+
+test("shadow records the branch update it would ask for; a stored state from before has no updates", () => {
+  const open = [pull(1)];
+  const shadow = judge({ state: state(), openPulls: open, checks: new Map([[1, { conflict: false, behind: true }]]), shadow: true });
+  assert.equal(shadow.state.events.at(-1).shadow, true);
+  const { updating, ...before } = emptyCiAdmissionState();
+  assert.deepEqual(updating, []);
+  assert.deepEqual(parseCiAdmissionState(JSON.stringify(before)).updating, []);
 });
