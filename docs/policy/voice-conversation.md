@@ -44,10 +44,24 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 - Results are read from the owned, completed `ChatResponseAttempt`; the browser
   supplies only an answer receipt, never trusted answer text or usage seconds.
 - The existing credit-account and subject locks, usage buckets, debt offset,
-  plan allocation and purchased-credit ledger are reused. Reserve the bounded
-  session and 30 seconds of closing headroom before the paid initialization.
-  The default 300-second session temporarily holds **198 credits**. Insufficient
-  available credits refuses Start; unused credits return after known settlement.
+  plan allocation and purchased-credit ledger are reused. Reserve only the next
+  60 seconds (including 30 seconds of closing headroom), initially up to 36 credits.
+  Smaller available balances can fund an initial window down to 55 seconds
+  (33 temporarily reserved credits, with unused credits returned).
+  Its deadline is anchored after wallet locks and funding complete. Before paid
+  dispatch, reject and refund a window that has lost its startup headroom. Bound
+  provider creation by the remaining window, refusing setup budgets below five
+  seconds even after the dispatch marker is stored. Preserve at least 15 seconds for
+  sideband attachment and initial interaction, plus the existing closing headroom.
+  Renew the same reservation and provider connection in short windows before its
+  funded deadline. There is no Tomverse session-duration cap. Each renewal checks
+  the existing plan/purchased wallet, daily/monthly voice seconds and provider cost
+  budgets; none of their ceilings or the 36-credit/minute rate are increased.
+  Insufficient funding closes within the already reserved exposure. Refund unused
+  credits after settlement, rounding cumulative session usage once. Durable funding
+  segments retain their original bucket dates across day/month boundaries.
+  Renewal fallbacks use 30, 15 and 5 seconds. Five seconds is exactly three
+  credits, so even a small renewal reserves its purchased-credit cost allowance.
 - Voice reservations use `source=voice_conversation` in `ChatCreditReservation`.
   Their JSON contains accounting/session references, not transcript or audio.
   A delegated answer is queued temporarily for delivery and removed when sent,
@@ -103,9 +117,12 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 `VOICE_CONVERSATION_ENABLED=true` and a dedicated
 `VOICE_CONVERSATION_API_KEY` are required. A nonempty
 `VOICE_CONVERSATION_KILL_SWITCH` disables new starts and closes running sessions.
-`VOICE_CONVERSATION_MAX_SECONDS` defaults to 300 and accepts integers 15–900.
-Existing voice subject/provider seconds budgets also apply. These settings are
-not changed by this implementation.
+`VOICE_CONVERSATION_MAX_SECONDS` is obsolete and ignored by the continuous-session
+implementation; remove the variable when that server version is deployed. Existing
+voice subject/provider seconds and cost budgets still apply. The watchdog uses the
+latest funded deadline, not the session's initial funding window. Provider expiry,
+disconnects, Stop and the kill switch can still end a session; this change does not
+automatically create a new paid connection. Legacy reservations remain settleable.
 
 Run `npm run voice:watchdog` as an independently supervised process with
 `VOICE_CONVERSATION_WATCHDOG_ENABLED=true`, the dedicated provider credential,
@@ -130,8 +147,19 @@ require the repository's independent finished-diff review.
 The Android APK reuses the existing native MVP, its reviewed native bearer
 authentication and canonical Chat transport. `sendVoice` persists through that
 same transport and returns the saved source-message receipt. Web and native
-render `@tomverse/chat-ui`'s voice panel; both show persisted session usage in
-Chat after closing and reopening. The UI does not display the per-minute rate.
+render `@tomverse/chat-ui`'s voice panel. Native Chat omits settled session cards
+from the transcript and shows a compact notice only while billing is pending.
+The UI does not display the per-minute rate.
+
+Owner direction in this development conversation, 2026-10-24: default web
+search on new mobile conversations was explicitly requested ("기본적으로 웹 검색을 켜주세요").
+The ordinary model/search pipeline, its existing credit surcharges and user
+confirmation of Send are reused; no paid validation call is authorized by this
+implementation. Existing conversations retain their explicit search choice.
+The capabilities API keeps `maxSeconds: 300` for older APKs' reserve estimate
+and client timer and adds `continuous: true` for updated clients. Updated clients
+normalize that capability to an uncapped session; old APKs still need an update
+to remove their own client timer.
 
 Issued voice delegations retain an exact-question digest. A result must match
 that digest and an owned, durable source message. Ready results are claimed

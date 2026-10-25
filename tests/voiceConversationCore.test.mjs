@@ -6,9 +6,9 @@ test("voice is default-off and requires a dedicated provider credential", () => 
   assert.equal(voiceConversationConfig({}), null);
   assert.equal(voiceConversationConfig({ VOICE_CONVERSATION_ENABLED: "true" }), null);
   const env = { VOICE_CONVERSATION_ENABLED: "true", VOICE_CONVERSATION_API_KEY: "test-not-a-live-key" };
-  assert.deepEqual(voiceConversationConfig(env), { creditsPerMinute: 36, maxSeconds: 300 });
+  assert.deepEqual(voiceConversationConfig(env), { creditsPerMinute: 36, maxSeconds: null, reservationSeconds: 60 });
   assert.equal(voiceConversationConfig({ ...env, VOICE_CONVERSATION_KILL_SWITCH: "stop" }), null);
-  for (const value of ["0", "NaN", "901", "20.5"]) assert.equal(voiceConversationConfig({ ...env, VOICE_CONVERSATION_MAX_SECONDS: value }), null);
+  for (const value of ["0", "NaN", "901", "20.5"]) assert.equal(voiceConversationConfig({ ...env, VOICE_CONVERSATION_MAX_SECONDS: value }).maxSeconds, null);
 });
 
 test("the approved price rounds the cumulative session once, not each delta or minute", () => {

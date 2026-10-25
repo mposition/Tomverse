@@ -1,3 +1,4 @@
+import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -239,7 +240,7 @@ export const ko = {
         imageGenerationRestoreOptionsUnavailable: "직전 비교의 품질·크기를 복원하지 못해 기본값으로 두었습니다.",
         modelSelectionNotice: "저장된 기본 조합의 일부 모델을 사용할 수 없어 대체 조합으로 시작합니다. 설정에서 조합을 다시 저장하면 확정됩니다.",
         welcome: "안녕하세요! 무엇을 도와드릴까요?",
-        welcomeBack: "다시 만나 반가워요. 무엇을 도와드릴까요?",
+        welcomeBack: workspaceWelcomeCopy.ko.greeting,
         guestWelcome: "안녕하세요! 현재 게스트 모드입니다. 질문을 입력해 주세요.",
         inputPlaceholder: "무엇을 도와드릴까요?",
         aiDisclaimer: "AI 답변에는 오류가 있을 수 있습니다. 중요한 정보는 반드시 확인하세요. 질문과 첨부 내용은 답변 생성을 위해 선택한 AI 공급자에 전송될 수 있으니, 불필요한 민감정보 입력은 피해 주세요.",
@@ -2288,61 +2289,7 @@ export const ko = {
         providerSource: "근거",
         back: "Tomverse로 돌아가기",
     },
-    chatStarter: {
-        title: "여기서 할 수 있는 일",
-        hint: "하나를 고르면 아래 입력란이 채워집니다. 보내기를 누르기 전에는 아무것도 전송되지 않습니다.",
-        lockedSignIn: "로그인하면 사용할 수 있습니다",
-        lockedPlan: "{plan} 플랜이 필요합니다",
-        lockedSignInShort: "로그인 필요",
-        lockedPlanShort: "{plan} 필요",
-        cards: {
-            compareAnswers: {
-                label: "세 모델 답 나란히 비교",
-                outcome: "질문 하나를 세 모델에게 보내고 답을 나란히 읽기",
-                seed: "벡터 데이터베이스가 어떤 문제를 푸는지 쉬운 말로 200자 정도로 설명해 주세요.",
-            },
-            documentQuestions: {
-                label: "PDF 붙여 여러 모델에 질문",
-                outcome: "18페이지 PDF를 붙여 여러 모델에게 같은 질문 하기",
-                seed: "문서를 첨부했습니다. 제가 무엇을 결정해야 하는지 요약하고, 문서에 나오는 기한을 모두 뽑아 주세요.",
-            },
-            sourcedAnswer: {
-                label: "출처 링크 붙은 답 받기",
-                outcome: "출처 링크가 함께 붙은 답 받기",
-                seed: "올해 EU AI 법 집행에서 달라진 점은 무엇인가요? 참고한 출처도 함께 알려 주세요.",
-            },
-            debugStackTrace: {
-                label: "스택 트레이스로 오류 찾기",
-                outcome: "스택 트레이스를 붙여 실패한 줄과 고칠 방법 받기",
-                seed: "빌드에서 나온 스택 트레이스입니다. 어느 줄에서 실패했는지와 무엇을 바꿔야 하는지 알려 주세요.",
-            },
-            spreadsheetFromAnswer: {
-                label: ".xlsx 파일로 받기",
-                outcome: "답변을 내려받을 수 있는 .xlsx 파일로 만들기",
-                seed: "항목, 계획 금액, 실제 금액이 들어간 월별 예산표를 만들어 스프레드시트 파일로 저장해 주세요.",
-            },
-            readAScreenshot: {
-                label: "화면 캡처 속 오류 묻기",
-                outcome: "화면 캡처를 붙여 그 오류가 무슨 뜻인지 묻기",
-                seed: "오류 대화상자를 캡처해서 첨부했습니다. 무슨 뜻이고 다음에 무엇을 해야 하는지 알려 주세요.",
-            },
-            translateAndCompare: {
-                label: "두 모델 번역 나란히 비교",
-                outcome: "초안을 번역하고 두 모델의 결과를 나란히 읽기",
-                seed: "아래 문장을 격식 있는 어조를 유지하면서 영어로 번역해 주세요:",
-            },
-            compareImageModels: {
-                label: "이미지 모델 결과 비교",
-                outcome: "문장 하나를 여러 이미지 모델에 보내고 결과를 비교하기",
-                seed: "새벽의 조용한 열람실, 높은 창으로 들어오는 따뜻한 빛, 사진 느낌.",
-            },
-            speakAQuestion: {
-                label: "말로 질문하고 글로 고치기",
-                outcome: "긴 질문을 말로 입력하고 보내기 전에 글로 고치기",
-                seed: "지금부터 말하는 내용을 짧고 분명한 지시 목록으로 정리해 주세요.",
-            },
-        },
-    },
+    chatStarter: workspaceWelcomeCopy.ko.starter,
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "하고 싶은 작업 찾기",

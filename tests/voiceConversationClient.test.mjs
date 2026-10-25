@@ -72,6 +72,28 @@ test("denied microphone access makes no paid request", async () => {
   assert.equal(calls, 0); assert.equal(states.at(-1).status, "error"); client.destroy();
 });
 
+test("continuous funding preserves one connection beyond 900 seconds and drains a limit without reconnecting", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: 1_000_000 });
+  const w = world(); const running = w.client.start("chat-1");
+  await until(() => w.requests.length === 1);
+  w.send({ type: "ready", reservationId: "voice-1", sdp: "answer", continuous: true, maxSeconds: null, closeAfterSeconds: 30 });
+  w.send({ type: "started" }); await until(() => w.states.at(-1).status === "listening");
+  for (let n = 0; n < 32; n++) {
+    w.send({ type: "funding", closeAfterSeconds: 45 });
+    w.send({ type: "heartbeat" }); await tick();
+    t.mock.timers.tick(30_000); await tick();
+  }
+  assert.equal(w.states.at(-1).status, "listening");
+  assert.equal(w.requests.filter(r => r.action === "start").length, 1);
+  assert.equal(w.requests.filter(r => r.action === "stop").length, 0);
+  w.send({ type: "limit", code: "PLAN_DAILY_CREDIT_LIMIT_REACHED" }); await tick();
+  assert.equal(w.states.at(-1).status, "listening");
+  assert.equal(w.states.at(-1).error, "PLAN_DAILY_CREDIT_LIMIT_REACHED");
+  w.send({ type: "closed", confirmed: true, settled: true, seconds: 960, credits: 576 }); w.endStream(); await running;
+  assert.equal(w.states.at(-1).credits, 576); assert.equal(w.states.at(-1).status, "ended");
+  assert.equal(w.requests.filter(r => r.action === "start").length, 1);
+});
+
 test("a late microphone grant after unmount is immediately released", async () => {
   let grant, stopped = 0, calls = 0;
   const client = createVoiceConversationClient({ deps: {

@@ -23,7 +23,8 @@ export function registerVoiceTask(id: string, delegationId: string, text: string
   return change(id, payload => {
     const tasks = payload.tasks ??= [];
     if (tasks.some(task => task.id === delegationId)) return;
-    if (tasks.length >= 64) throw new ApiSecurityError(409, "VOICE_TASK_LIMIT", "Start another voice session to continue.");
+    // Completed IDs remain as replay tombstones; only outstanding work is bounded.
+    if (tasks.filter(task => task.state !== "sent" && task.state !== "failed").length >= 64) throw new ApiSecurityError(409, "VOICE_TASK_LIMIT", "Wait for the pending voice questions to finish.");
     tasks.push({ id: delegationId, textHash: textHash(text), state: "issued" });
   });
 }

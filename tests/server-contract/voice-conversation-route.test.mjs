@@ -32,7 +32,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   message: { findFirst: async () => ({ content: "Saved voice question" }), findMany: async () => [{ role: "assistant", content: "Existing answer" }, { role: "user", content: "Existing question" }] },
   chatCreditReservation: {
     findFirst: async ({ where }) => where.userId === w.owner ? { id: "reservation", providerRequestId: "live_test", status: "reserved", createdAt: new Date(0), expiresAt: new Date(Date.now() + 100_000), reservationPayload: { conversationId: "chat-1" } } : null,
-    update: async args => { w.updates.push(args); if (w.linkError && args.data.providerRequestId) { w.linkError = false; throw new Error("Lost DB response"); } return {}; },
+    update: async args => { w.updates.push(args); if (args.data.reservationPayload?.dispatchStartedAt) await w.onDispatchWrite?.(); if (w.linkError && args.data.providerRequestId) { w.linkError = false; throw new Error("Lost DB response"); } return {}; },
     updateMany: async args => { w.updates.push(args); return { count: 1 }; },
     findMany: async () => [],
   },
@@ -40,7 +40,9 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   perplexityAsyncJob: { findFirst: async ({ where }) => { w.researchFilter = where; return w.researchAnswer ? { resultText: "Stored research answer" } : null; } },
 } } });
 mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
-  reserveVoiceConversationCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", reservationPayload: {} }; },
+  reserveContinuousVoiceCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", reservationPayload: { maxSeconds: 60, closeAt: new Date(Date.now()+(w.initialWindowMs ?? 30_000)).toISOString() } }; },
+  extendVoiceConversationCredits: async () => { if (w.renewError) throw w.renewError; w.renewals = (w.renewals ?? 0) + 1; return { maxSeconds: 60 + w.renewals * 30, closeAt: new Date(Date.now()+45_000).toISOString() }; },
+  isVoiceCapacityRefusal: error => ['CREDIT_BALANCE_INSUFFICIENT', 'VOICE_OPERATIONAL_LIMIT_REACHED', 'PROVIDER_BUDGET_EXHAUSTED'].includes(error?.code),
   settleVoiceConversationCredits: settleCredits,
   readVoiceCreditPayload: value => value,
 } });
@@ -62,7 +64,7 @@ mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   settleVoiceBudgets: async input => w.settlements.push(input.basis),
 } });
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
-  createVoiceProviderSession: async (sdp, history) => { w.providerCalls.push({ sdp, history }); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "malformed-sdp") return { ok: false, rejected: false, sessionId: "live_known" }; if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
+  createVoiceProviderSession: async (sdp, history, timeoutMs) => { w.providerCalls.push({ sdp, history, timeoutMs }); await w.onProviderCreate?.(); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "malformed-sdp") return { ok: false, rejected: false, sessionId: "live_known" }; if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
   attachVoiceProviderSession: () => { const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 0; socket.send = value => (w.sent ??= []).push(JSON.parse(value)); socket.close = () => { socket.readyState = 3; socket.emit("close"); }; w.socket = socket; queueMicrotask(() => { socket.readyState = 1; socket.emit("open"); }); return socket; },
   hangupVoiceProviderSession: async id => { w.hangs.push(id); },
   closeVoiceProviderSession: async id => { assert.ok(w.updates.some(update => update.data.providerRequestId === id)); return w.closingSeconds ?? null; },
@@ -72,6 +74,38 @@ const { POST } = await import(mod("app/api/chat/voice/route.ts"));
 const request = body => new Request("http://localhost/api/chat/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const start = () => ({ action: "start", requestId: "91a27fea-6ceb-4c92-92e4-4fd77ac5a901", conversationId: "chat-1", sdp: "offer" });
 test.beforeEach(reset);
+
+test("an expired or depleted pre-dispatch window refunds everything without a provider call", async () => {
+  for (const remaining of [-1, 0, 14_000, 15_001, 19_999]) {
+    reset(); w.initialWindowMs = remaining;
+    const response = await POST(request(start()));
+    assert.equal(response.status, 409); assert.equal((await response.json()).code, "VOICE_START_WINDOW_EXPIRED");
+    assert.equal(w.providerCalls.length, 0); assert.deepEqual(w.refunds, [{ id: "reservation", seconds: 0 }]);
+    assert.equal(w.updates.length, 0);
+  }
+});
+
+test("a slow dispatch write is checked again before any paid provider call", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  for (const delay of [10_001, 14_999, 20_000]) {
+    reset(); w.onDispatchWrite = () => { t.mock.timers.tick(delay); };
+    assert.equal((await POST(request(start()))).status, 409);
+    assert.equal(w.providerCalls.length, 0); assert.deepEqual(w.refunds, [{ id: "reservation", seconds: 0 }]);
+  }
+});
+
+test("a short funded window bounds setup and still leaves time for attachment and interaction", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: Date.now() });
+  w.initialWindowMs = 20_000;
+  w.onProviderCreate = () => { t.mock.timers.tick(5_000); };
+  const response = await POST(request(start())); const text = response.text();
+  assert.equal(w.providerCalls[0].timeoutMs, 5_000);
+  t.mock.timers.tick(4_000);
+  assert.equal(w.sent?.length ?? 0, 0);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 9 } }));
+  const body = await text;
+  assert.match(body, /"closeAfterSeconds":15/); assert.match(body, /"confirmed":true/);
+});
 
 test("malformed provider SDP is durably linked before collecting and settling final usage", async () => {
   w.provider = "malformed-sdp"; w.closingSeconds = 15;
@@ -148,6 +182,33 @@ test("trusted provider final duration settles once and existing Chat history see
   const body = await text;
   assert.match(body, /"confirmed":true/); assert.match(body, /"credits":6/);
   assert.deepEqual(w.refunds.map(r => r.seconds), [10]);
+});
+
+test("continuous renewal keeps the same provider past 900 seconds with no fixed session timeout", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: Date.now() });
+  const response = await POST(request(start())); const text = response.text();
+  try {
+    for (let n = 0; n < 32; n++) {
+      t.mock.timers.tick(n ? 30_000 : 15_000);
+      for (let step=0; step<10; step++) await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(w.renewals, 32); assert.equal(w.providerCalls.length, 1); assert.equal(w.sent?.length ?? 0, 0);
+  } finally { w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 950 } })); }
+  const body = await text;
+  assert.match(body, /"continuous":true/); assert.match(body, /"maxSeconds":null/); assert.match(body, /"confirmed":true/);
+  assert.equal(w.refunds[0].seconds, 950);
+});
+
+test("exhausted funding closes within its existing exposure without another paid start", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"], now: Date.now() });
+  w.renewError = new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient");
+  const response = await POST(request(start())); const text = response.text();
+  t.mock.timers.tick(15_000); for (let n=0;n<10;n++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.sent?.length ?? 0, 0);
+  t.mock.timers.tick(15_000); for (let n=0;n<10;n++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(w.sent, [{ type: "session.close" }]);
+  w.socket.emit("message", JSON.stringify({ type: "session.closed", usage: { seconds: 30 } }));
+  assert.match(await text, /"type":"limit"/); assert.equal(w.providerCalls.length, 1); assert.equal(w.refunds[0].seconds, 30);
 });
 
 test("lost connection retains an unconfirmed reservation and requests hangup", async () => {

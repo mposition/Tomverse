@@ -9,8 +9,8 @@ import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { VoiceBudgetError } from "@/lib/voiceInputBudget";
 import { assertVoiceWatchdogReady, finalizeVoiceReservation, recordVoiceUsage, renewVoiceWebLease } from "@/lib/voiceConversationRecovery";
-import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE } from "@tomverse/chat-core";
-import { reserveVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload } from "@/lib/voiceConversationCredits";
+import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, VOICE_CONVERSATION_SOURCE, VOICE_CONVERSATION_CLOSING_SECONDS } from "@tomverse/chat-core";
+import { reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload, isVoiceCapacityRefusal } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession, closeVoiceProviderSession } from "@/lib/voiceConversationProvider";
 import { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } from "@/lib/voiceConversationTasks";
 
@@ -101,14 +101,27 @@ export async function POST(request: Request) {
       if (bytes + size > 7_500) break;
       bytes += size; history.unshift({ role: message.role as "user" | "assistant", content: message.content });
     }
-    // Reserve closing headroom too. The server, not a browser timer, enforces duration.
-    const reservedSeconds = config.maxSeconds + 30;
-    const reservation = await reserveVoiceConversationCredits({ userId, requestId: body.requestId, conversationId: body.conversationId, creditsPerMinute: config.creditsPerMinute, maxSeconds: reservedSeconds, sessionSeconds: config.maxSeconds });
+    // Fund the next window, including shutdown exposure, on this same connection.
+    const reservation = await reserveContinuousVoiceCredits({ userId, requestId: body.requestId, conversationId: body.conversationId, creditsPerMinute: config.creditsPerMinute });
+    const initialFunding = readVoiceCreditPayload(reservation.reservationPayload);
+    let reservedSeconds = initialFunding.maxSeconds;
+    let fundedCloseAt = Date.parse(initialFunding.closeAt!);
+    // Reserve at least 15 seconds after HTTP setup for the existing 10-second
+    // sideband handshake and a usable initial window. Never dispatch after a
+    // slow commit has consumed that headroom; no provider call means full refund.
+    const startupTimeout = () => Math.min(15_000, Math.floor(fundedCloseAt - Date.now() - 15_000));
+    const refuseExpiredStart = async () => {
+      await settleVoiceConversationCredits(reservation.id, 0);
+      return json("VOICE_START_WINDOW_EXPIRED", 409, { reservationId: reservation.id });
+    };
+    if (!Number.isFinite(fundedCloseAt) || startupTimeout() < 5_000 || request.signal.aborted) return await refuseExpiredStart();
     let providerResult;
     await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { reservationPayload: {
       ...readVoiceCreditPayload(reservation.reservationPayload), dispatchStartedAt: new Date().toISOString(), webLeaseUntil: new Date(Date.now() + 30_000).toISOString(),
     } } });
-    try { providerResult = await createVoiceProviderSession(body.sdp, history); }
+    const providerTimeoutMs = startupTimeout();
+    if (providerTimeoutMs < 5_000 || request.signal.aborted) return await refuseExpiredStart();
+    try { providerResult = await createVoiceProviderSession(body.sdp, history, providerTimeoutMs); }
     catch {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
       return json("VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });
@@ -191,12 +204,32 @@ export async function POST(request: Request) {
         const seen = new Set<string>();
         const send = (value: unknown) => { try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`)); } catch { /* Client left; the provider still needs finalization. */ } };
         const keepalive = setInterval(() => send({ type: "heartbeat" }), 15_000);
-        const durationTimer = setTimeout(() => stop(), config.maxSeconds * 1_000);
-        const killTimer = setInterval(() => { if (!voiceConversationConfig(process.env)) stop(); else if (!closing && !finished) void renewVoiceWebLease(reservation.id).catch(stop); }, 5_000);
+        const fundingState = () => ({ closeAfterSeconds: Math.max(0, (fundedCloseAt - Date.now()) / 1_000), closingSeconds: VOICE_CONVERSATION_CLOSING_SECONDS });
+        const durationTimer = setInterval(() => { if (Date.now() >= fundedCloseAt) stop(); }, 1_000);
+        let renewing = false; let fundingBlocked = false;
+        const killTimer = setInterval(() => {
+          if (!voiceConversationConfig(process.env)) { stop(); return; }
+          if (closing || finished || renewing) return;
+          renewing = true;
+          void (async () => {
+            await renewVoiceWebLease(reservation.id);
+            if (fundingBlocked || fundedCloseAt - Date.now() > 15_000) return;
+            await assertUserOperationalAccess(userId);
+            await assertVoiceWatchdogReady(userId);
+            const next = await extendVoiceConversationCredits(reservation.id, userId);
+            reservedSeconds = next.maxSeconds; fundedCloseAt = Date.parse(next.closeAt);
+            if (!closing && !finished) send({ type: "funding", ...fundingState() });
+          })().catch(error => {
+            if (isVoiceCapacityRefusal(error)) {
+              fundingBlocked = true;
+              send({ type: "limit", code: error.code });
+            } else stop();
+          }).finally(() => { renewing = false; });
+        }, 5_000);
         let closeTimer: ReturnType<typeof setTimeout> | undefined;
         const finish = async (seconds: number | null) => {
           if (finished) return; finished = true;
-          clearInterval(keepalive); clearInterval(killTimer); clearTimeout(durationTimer); clearTimeout(closeTimer);
+          clearInterval(keepalive); clearInterval(killTimer); clearInterval(durationTimer); clearTimeout(closeTimer);
           clearInterval(resultTimer); clearTimeout(delegationTimer);
           request.signal.removeEventListener("abort", stop);
           try {
@@ -223,7 +256,7 @@ export async function POST(request: Request) {
         request.signal.addEventListener("abort", stop, { once: true });
         socket.on("open", () => {
           if (request.signal.aborted || closing) { closing = false; stop(); return; }
-          send({ type: "ready", reservationId: reservation.id, sdp: providerSession.sdp, creditsPerMinute: config.creditsPerMinute, maxSeconds: config.maxSeconds });
+          send({ type: "ready", reservationId: reservation.id, sdp: providerSession.sdp, creditsPerMinute: config.creditsPerMinute, continuous: true, maxSeconds: null, ...fundingState() });
         });
         socket.on("message", data => {
           let event: Record<string, unknown>; try { event = JSON.parse(data.toString()); } catch { return; }
@@ -241,12 +274,11 @@ export async function POST(request: Request) {
             } else if (typeof delegation?.id !== "string" || typeof event.offset_ms !== "number" || !Number.isFinite(event.offset_ms) || event.offset_ms < 0) { send({ type: "error", code: "VOICE_DELEGATION_INVALID" }); stop(); }
           } else if (event.type === "session.usage.updated") {
             const seconds = (event.usage as { seconds?: unknown } | undefined)?.seconds;
-            if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= latestSeconds) {
+            if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= latestSeconds && seconds <= reservedSeconds) {
               latestSeconds = seconds;
               void recordVoiceUsage(reservation.id, seconds).catch(() => { send({ type: "error", code: "VOICE_USAGE_RECORDING_FAILED" }); stop(); });
               send({ type: "usage", seconds, credits: voiceDurationCharge(seconds, config.creditsPerMinute).credits });
-              if (seconds >= config.maxSeconds) stop();
-            }
+            } else if (typeof seconds === "number" && seconds > reservedSeconds) { send({ type: "error", code: "VOICE_USAGE_OUTSIDE_RESERVATION" }); stop(); }
           } else if (event.type === "session.closed") {
             const seconds = (event.usage as { seconds?: unknown } | undefined)?.seconds;
             void finish(typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0 ? seconds : null);

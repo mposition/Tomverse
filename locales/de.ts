@@ -1,3 +1,4 @@
+import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -261,7 +262,7 @@ export const de = {
         quickSummaryNoVerificationItems: "Es wurde kein konkreter Prüfpunkt festgestellt.",
         quickSummaryDisclaimer: "Diese KI-Analyse vergleicht nur die bereitgestellten Antworten. Sie durchsucht nicht das Web, prüft Fakten nicht extern und garantiert keine richtige Antwort.",
         welcome: "Hallo! Wie kann ich Ihnen heute helfen?",
-        welcomeBack: "Schön, dich wiederzusehen. Womit kann ich helfen?",
+        welcomeBack: workspaceWelcomeCopy.de.greeting,
         guestWelcome: "Hallo! Sie nutzen den Gastmodus. Stellen Sie Ihre Frage.",
         inputPlaceholder: "Fragen Sie alles...",
         aiDisclaimer: "KI-Antworten können Fehler enthalten. Bitte überprüfen Sie wichtige Informationen. Ihre Eingabe und Anhänge können an die ausgewählten KI-Anbieter gesendet werden, um eine Antwort zu erzeugen -- vermeiden Sie unnötige sensible Informationen.",
@@ -2292,61 +2293,7 @@ export const de = {
         providerSource: "Quelle",
         back: "Zurück zu Tomverse",
     },
-    chatStarter: {
-        title: "Was hier möglich ist",
-        hint: "Wählen Sie eine Karte, um das Feld unten zu füllen. Gesendet wird erst, wenn Sie auf Senden klicken.",
-        lockedSignIn: "Zum Verwenden anmelden",
-        lockedPlan: "Erfordert den Tarif {plan}",
-        lockedSignInShort: "Anmeldung nötig",
-        lockedPlanShort: "{plan} nötig",
-        cards: {
-            compareAnswers: {
-                label: "Drei Antworten nebeneinander lesen",
-                outcome: "Eine Frage stellen und die Antworten von drei Modellen nebeneinander lesen",
-                seed: "Erklären Sie in einfachen Worten, wofür eine Vektordatenbank gedacht ist, in etwa 200 Wörtern.",
-            },
-            documentQuestions: {
-                label: "Mehrere Modelle zu einem PDF fragen",
-                outcome: "Ein PDF mit 18 Seiten anhängen und mehreren Modellen dieselbe Frage dazu stellen",
-                seed: "Ich habe ein Dokument angehängt. Fassen Sie zusammen, worüber ich entscheiden soll, und nennen Sie alle Fristen darin.",
-            },
-            sourcedAnswer: {
-                label: "Antwort mit Quellen erhalten",
-                outcome: "Eine Antwort mit den Quellenlinks erhalten, auf denen sie beruht",
-                seed: "Was hat sich dieses Jahr bei der Durchsetzung des EU-KI-Gesetzes geändert? Nennen Sie die verwendeten Quellen.",
-            },
-            debugStackTrace: {
-                label: "Fehlerzeile im Stacktrace finden",
-                outcome: "Einen Stacktrace einfügen und die fehlerhafte Zeile samt Lösungsvorschlag erhalten",
-                seed: "Hier ist ein Stacktrace aus meinem Build. Sagen Sie mir, welche Zeile fehlgeschlagen ist und was ich ändern soll.",
-            },
-            spreadsheetFromAnswer: {
-                label: ".xlsx-Datei erhalten",
-                outcome: "Eine Antwort in eine herunterladbare .xlsx-Datei verwandeln",
-                seed: "Erstellen Sie eine Monatsbudget-Tabelle mit Kategorie, geplantem Betrag und tatsächlichem Betrag und speichern Sie sie als Tabellendatei.",
-            },
-            readAScreenshot: {
-                label: "Fehler auf einem Screenshot erklären",
-                outcome: "Einen Screenshot anhängen und fragen, was die Fehlermeldung bedeutet",
-                seed: "Ich habe einen Screenshot eines Fehlerdialogs angehängt. Sagen Sie mir, was er bedeutet und was ich als Nächstes tun soll.",
-            },
-            translateAndCompare: {
-                label: "Zwei Übersetzungen vergleichen",
-                outcome: "Einen Entwurf übersetzen und die Fassungen zweier Modelle vergleichen",
-                seed: "Übersetzen Sie den folgenden Text ins Englische und behalten Sie einen förmlichen Ton bei:",
-            },
-            compareImageModels: {
-                label: "Bildmodelle vergleichen",
-                outcome: "Einen Satz an mehrere Bildmodelle schicken und die Ergebnisse vergleichen",
-                seed: "Ein ruhiger Lesesaal im Morgengrauen, warmes Licht durch hohe Fenster, fotografisch.",
-            },
-            speakAQuestion: {
-                label: "Frage diktieren, Text bearbeiten",
-                outcome: "Eine lange Frage diktieren statt tippen und den Text vor dem Senden bearbeiten",
-                seed: "Verwandeln Sie das, was ich gleich sage, in eine kurze und klare Anleitung.",
-            },
-        },
-    },
+    chatStarter: workspaceWelcomeCopy.de.starter,
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "Anleitung finden",

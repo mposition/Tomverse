@@ -91,8 +91,7 @@ operation. Any nonempty string, including `false`, activates the kill switch.
    ```
 
 4. On the Tomverse web service, set `VOICE_CONVERSATION_ENABLED=true`, register the
-   same dedicated `VOICE_CONVERSATION_API_KEY`, and optionally set
-   `VOICE_CONVERSATION_MAX_SECONDS=300`. Deploy those web variable changes.
+   same dedicated `VOICE_CONVERSATION_API_KEY`. Deploy those web variable changes.
 5. Verify the authenticated `/api/products/chat/capabilities` response contains
    `voiceConversation.enabled: true`. A guest response does not establish this.
 6. Fully close and reopen the updated native APK to refresh its capability read.
@@ -101,11 +100,13 @@ The worker polls every two seconds and does not create new paid sessions. It can
 close and reconcile existing sessions. Actual voice Start creates a paid provider
 session and remains a separately approved verification action.
 
-`VOICE_CONVERSATION_MAX_SECONDS` caps one voice session, including its multiple
-turns, not one question and not a conversation's lifetime. A new session gets a new
-duration cap; account, provider-time and provider-cost budgets remain cumulative.
-The extra 30-second reservation in the route is closing headroom, not extra user
-conversation time.
+The continuous-session server ignores the obsolete `VOICE_CONVERSATION_MAX_SECONDS`.
+Remove it after deploying that server and the matching recovery worker; deleting it
+on an older server merely restores its 300-second default. The new server renews
+short funding windows on the same connection, within existing account, provider-time
+and provider-cost budgets. Its initial exposure is up to 60 seconds / 36 credits,
+including 30 seconds of closing headroom. Unused credits return after settlement.
+Provider expiry and disconnects do not automatically start another paid session.
 
 Repeated `Voice recovery cycle deferred.` logs indicate that the recovery cycle
 could not finish. Check the database connection, schema, dedicated provider key
