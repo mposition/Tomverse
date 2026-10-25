@@ -5,6 +5,7 @@ import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
 
+
 /**
  * Built rather than sent, so the standard lane can render the same bytes at
  * drain time that it would have rendered at enqueue time.
@@ -27,8 +28,8 @@ type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
 type DeletionCopy = {
   subject: string;
-  stopped: (date: string) => string;
   renewal: string;
+  stopped: (date: string) => string;
   cancel: string;
   notYou: string;
 };
@@ -37,65 +38,58 @@ const SUPPORT = "support@tomverse.app";
 
 const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
   en: {
+    renewal: "Deleting your Tomverse account stops renewal only for subscriptions billed directly by Tomverse. App Store and Google Play subscriptions must be cancelled separately in that store; deleting the account does not stop store billing.",
     subject: "Tomverse account deletion scheduled",
     stopped: (date) =>
       `Your Tomverse account access has been stopped immediately, and permanent deletion (including all data) is scheduled for ${date}.`,
-    renewal:
-      "If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending.",
     cancel: `Cancelling this request is not self-service. Contact ${SUPPORT} before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored.`,
     notYou: `If you did not request this, contact ${SUPPORT} immediately.`,
   },
   ko: {
+    renewal: "계정 삭제 시 Tomverse에서 직접 결제한 구독의 자동 갱신만 중지됩니다. App Store와 Google Play 구독은 해당 스토어에서 별도로 취소해야 하며, 계정을 삭제해도 스토어 결제는 중지되지 않습니다.",
     subject: "Tomverse 계정 삭제가 예정되었습니다",
     stopped: (date) =>
       `Tomverse 계정 접근이 즉시 중지되었으며, 모든 데이터를 포함한 영구 삭제가 ${date}에 예정되어 있습니다.`,
-    renewal:
-      "유료 플랜을 사용 중이셨다면 자동 갱신이 중지되었습니다. 삭제가 진행되는 동안에는 어느 경우에도 접근이 차단됩니다.",
     cancel: `이 요청은 직접 취소하실 수 없습니다. 해당 날짜 이전에 ${SUPPORT}로 연락하시면 계정을 복구해 드립니다. 복구되면 플랜은 원래 만료일까지만 유지되며 자동 갱신은 복구되지 않습니다.`,
     notYou: `요청하신 적이 없다면 즉시 ${SUPPORT}로 연락해 주십시오.`,
   },
   zh: {
+    renewal: "删除 Tomverse 账户只会停止通过 Tomverse 直接付费的订阅续订。App Store 和 Google Play 订阅必须在相应商店单独取消，删除账户不会停止商店扣款。",
     subject: "您的 Tomverse 账户已安排删除",
     stopped: (date) =>
       `您的 Tomverse 账户访问已立即停止，包含全部数据的永久删除安排在 ${date}。`,
-    renewal:
-      "如果您使用付费方案，自动续订已停止；在删除处理期间，访问都会保持关闭。",
     cancel: `此请求无法自助取消。请在该日期之前联系 ${SUPPORT}，我们的团队会为您恢复账户。恢复后，方案仅保留至原到期日，自动续订不会恢复。`,
     notYou: `如果这不是您本人的请求，请立即联系 ${SUPPORT}。`,
   },
   fr: {
+    renewal: "La suppression du compte arrête uniquement le renouvellement des abonnements facturés directement par Tomverse. Les abonnements App Store et Google Play doivent être annulés séparément dans la boutique concernée ; supprimer le compte ne met pas fin à leur facturation.",
     subject: "Suppression de votre compte Tomverse programmée",
     stopped: (date) =>
       `L'accès à votre compte Tomverse a été interrompu immédiatement, et la suppression définitive (données comprises) est programmée pour le ${date}.`,
-    renewal:
-      "Si vous aviez une formule payante, le renouvellement automatique a été arrêté ; dans tous les cas, l'accès reste bloqué pendant la procédure.",
     cancel: `Cette demande ne peut pas être annulée en libre-service. Contactez ${SUPPORT} avant cette date et notre équipe rétablira votre compte. En cas de rétablissement, la formule reprend jusqu'à sa date d'expiration initiale uniquement ; le renouvellement automatique n'est pas rétabli.`,
     notYou: `Si vous n'êtes pas à l'origine de cette demande, contactez ${SUPPORT} immédiatement.`,
   },
   de: {
+    renewal: "Die Kontolöschung beendet nur die Verlängerung direkt über Tomverse abgerechneter Abonnements. App Store- und Google Play-Abonnements müssen separat im jeweiligen Store gekündigt werden; die Kontolöschung beendet deren Abrechnung nicht.",
     subject: "Löschung Ihres Tomverse-Kontos geplant",
     stopped: (date) =>
       `Der Zugang zu Ihrem Tomverse-Konto wurde sofort gesperrt, und die endgültige Löschung einschließlich aller Daten ist für den ${date} vorgesehen.`,
-    renewal:
-      "Bei einem kostenpflichtigen Tarif wurde die automatische Verlängerung beendet; der Zugang bleibt während des Löschvorgangs in jedem Fall gesperrt.",
     cancel: `Diese Anfrage lässt sich nicht selbst zurücknehmen. Wenden Sie sich vor diesem Datum an ${SUPPORT}, dann stellt unser Team Ihr Konto wieder her. Nach einer Wiederherstellung läuft der Tarif nur bis zum ursprünglichen Ablaufdatum weiter; die automatische Verlängerung wird nicht wiederhergestellt.`,
     notYou: `Wenn diese Anfrage nicht von Ihnen stammt, wenden Sie sich sofort an ${SUPPORT}.`,
   },
   es: {
+    renewal: "Eliminar la cuenta solo detiene la renovación de las suscripciones facturadas directamente por Tomverse. Las suscripciones de App Store y Google Play deben cancelarse por separado en la tienda correspondiente; eliminar la cuenta no detiene esos cobros.",
     subject: "Eliminación programada de su cuenta de Tomverse",
     stopped: (date) =>
       `El acceso a su cuenta de Tomverse se ha detenido de inmediato y la eliminación permanente, incluidos todos los datos, está prevista para el ${date}.`,
-    renewal:
-      "Si tenía un plan de pago, la renovación automática se ha detenido; en cualquier caso, el acceso permanece bloqueado mientras la eliminación esté pendiente.",
     cancel: `Esta solicitud no se puede cancelar por su cuenta. Escriba a ${SUPPORT} antes de esa fecha y nuestro equipo restaurará su cuenta. Si se restaura, el plan continúa solo hasta su fecha de vencimiento original; la renovación automática no se restablece.`,
     notYou: `Si usted no solicitó esto, escriba a ${SUPPORT} de inmediato.`,
   },
   pt: {
+    renewal: "Excluir a conta interrompe apenas a renovação de assinaturas cobradas diretamente pela Tomverse. Assinaturas da App Store e do Google Play devem ser canceladas separadamente na respectiva loja; excluir a conta não interrompe essas cobranças.",
     subject: "Exclusão da sua conta Tomverse agendada",
     stopped: (date) =>
       `O acesso à sua conta Tomverse foi interrompido imediatamente, e a exclusão permanente, incluindo todos os dados, está agendada para ${date}.`,
-    renewal:
-      "Se você tinha um plano pago, a renovação automática foi interrompida; de qualquer forma, o acesso permanece bloqueado enquanto a exclusão estiver pendente.",
     cancel: `Esta solicitação não pode ser cancelada por conta própria. Entre em contato com ${SUPPORT} antes dessa data e nossa equipe restaurará a sua conta. Se restaurada, o plano segue apenas até a data de expiração original; a renovação automática não é restabelecida.`,
     notYou: `Se você não fez esta solicitação, entre em contato com ${SUPPORT} imediatamente.`,
   },

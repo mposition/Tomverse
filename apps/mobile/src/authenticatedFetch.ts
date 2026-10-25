@@ -178,7 +178,7 @@ const withBearer = (init: RequestInit | undefined, token: string) => {
  */
 export const authenticatedFetch = async (
   path: string,
-  init: RequestInit | undefined,
+  init: RequestInit | (() => RequestInit) | undefined,
   options: AuthenticatedFetchOptions
 ): Promise<Response> => {
   const run = options.fetchImpl ?? fetch;
@@ -195,7 +195,7 @@ export const authenticatedFetch = async (
   }
 
   const response = await run(input, {
-    ...withBearer(init, first.accessToken),
+    ...withBearer(typeof init === "function" ? init() : init, first.accessToken),
     credentials: "omit",
     // A redirect on an authenticated API call is a bug, not a flow. Browsers
     // strip `Authorization` across origins, but a same-origin hop to another
@@ -213,7 +213,7 @@ export const authenticatedFetch = async (
   }
 
   return run(input, {
-    ...withBearer(init, second.accessToken),
+    ...withBearer(typeof init === "function" ? init() : init, second.accessToken),
     credentials: "omit",
     redirect: "error",
   });

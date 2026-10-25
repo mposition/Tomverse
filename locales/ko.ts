@@ -1252,7 +1252,7 @@ export const ko = {
         deleteAllChatsFailed: "대화를 삭제하지 못했습니다.",
         deleting: "삭제 중...",
         deleteAccountImmediateTitle: "계정 삭제에는 7일의 안전 유예기간이 적용됩니다.",
-        deleteAccountImmediateDescription: "즉시 로그아웃되며 삭제가 대기 중인 동안 계정 접근이 계속 차단됩니다. 유료 플랜이 있다면 자동 갱신은 중지되지만 환불되지는 않습니다. 영구 삭제(모든 데이터 포함)는 7일 후 진행됩니다. 이 요청 취소는 셀프서비스가 아니며, 그 전에 support@tomverse.app으로 문의해야 합니다 — 복구되더라도 플랜 이용은 기존 만료일까지만 유지되며 자동 갱신은 복원되지 않습니다.",
+        deleteAccountImmediateDescription: "즉시 로그아웃되며 삭제가 대기 중인 동안 계정 접근이 계속 차단됩니다. Tomverse에서 직접 결제한 유료 플랜이 있다면 자동 갱신은 중지되지만 환불되지는 않습니다. 영구 삭제(모든 데이터 포함)는 7일 후 진행됩니다. 이 요청 취소는 셀프서비스가 아니며, 그 전에 support@tomverse.app으로 문의해야 합니다 — 복구되더라도 플랜 이용은 기존 만료일까지만 유지되며 자동 갱신은 복원되지 않습니다.",
         deleteAccountConsent: "모든 대화 및 설정 정보가 영구 삭제되며 복구할 수 없다는 점에 동의합니다.",
         deleteAccountConsentRequired: "계정 삭제 전 모든 대화, 설정, 계정 정보가 삭제됨에 동의해 주세요.",
         deleteAccountConfirmationPrompt: "확인하려면 DELETE MY ACCOUNT를 입력하세요.",

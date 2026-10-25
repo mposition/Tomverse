@@ -280,10 +280,11 @@ export function proxy(request: NextRequest) {
   const nativeChat = process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" &&
     (nativeChatBearerRoute(request.nextUrl.pathname, request.method, true) ||
       nativeParityBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true"));
+  const nativeBilling = process.env.MOBILE_BILLING_ENABLED === "true" && request.method === "POST" && request.nextUrl.pathname === "/api/mobile/billing";
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),
-    registeredRoutes: nativeChat ? [...N1B_BEARER_ROUTES, request.nextUrl.pathname] : N1B_BEARER_ROUTES,
+    registeredRoutes: [...N1B_BEARER_ROUTES, ...(nativeChat || nativeBilling ? [request.nextUrl.pathname] : [])],
     verify: (token) => {
       const verdict = verifyMobileAccessTokenString(token);
       return verdict.ok
@@ -295,7 +296,7 @@ export function proxy(request: NextRequest) {
     return withNativeCors(blockedBearerResponse(), request);
   }
   if (bearer.kind === "yes") {
-    if (nativeChat && request.headers.get("origin") && !isNativeAppOrigin(request.headers.get("origin"))) {
+    if ((nativeChat || nativeBilling) && request.headers.get("origin") && !isNativeAppOrigin(request.headers.get("origin"))) {
       return withNativeCors(blockedBearerResponse(), request);
     }
     applyMobileIdentityHeaders(requestHeaders, bearer.identity);

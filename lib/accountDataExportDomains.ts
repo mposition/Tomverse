@@ -1104,6 +1104,21 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Which promotion was redeemed, for what plan, and the access period it bought. The client IP and payment-method fingerprint hashes and the risk flags are abuse signals: handing a user their own fraud assessment teaches whoever is abusing the promotion how the control works.",
   },
   {
+    domain: "mobileStoreTransaction",
+    publicName: "store_credit_purchases",
+    prismaModel: "MobileStoreTransaction",
+    state: "included_filtered",
+    withheldReason:
+      "The store, product, credits, purchase time and refund state belong to the user. Store transaction identifiers and Tomverse's funded cost basis are withheld.",
+  },
+  {
+    domain: "mobileStorePurchaseAuthorization",
+    publicName: "pending_store_credit_purchases",
+    prismaModel: "MobileStorePurchaseAuthorization",
+    state: "included_filtered",
+    withheldReason: "The store, product and authorization time belong to the user; internal authorization identifiers are withheld.",
+  },
+  {
     domain: "creditLot",
     publicName: "credit_lots",
     prismaModel: "CreditLot",

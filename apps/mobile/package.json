@@ -12,13 +12,16 @@
     "cap:sync": "cap sync",
     "brand:assets": "node brand-assets.mjs",
     "test:ui": "playwright test --config playwright.config.ts",
-    "build:android": "node build-android.mjs"
+    "build:android": "node build-android.mjs",
+    "capacitor:sync:after": "node scripts/configure-store-billing.mjs"
   },
   "dependencies": {
     "@tomverse/mobile-auth": "file:./native-auth",
     "@capacitor/core": "^8.5.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@revenuecat/purchases-capacitor": "13.7.6",
+    "@capacitor/browser": "^8.0.5"
   },
   "devDependencies": {
     "@capacitor/android": "^8.5.3",
