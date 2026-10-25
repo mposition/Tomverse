@@ -29,7 +29,7 @@ const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "vendor"
 ];
 const CONVENTION_VERSIONS = {
-  next: "16.3.8",
+  next: "16.4.2",
   typescript: "6.0.3"
 };
 const CONTROL_PLANE_NAME_TOKENS = [

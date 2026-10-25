@@ -152,10 +152,10 @@ test("header and composer report the same active model count", async ({ page }) 
   await seedGuestConversation(page, MODELS);
   await openSeededConversation(page);
 
-  // "3 models" up top must mean the same three models the composer is about
+  // "3 models" up top must mean the same three models the composer ("3 AIs") is about
   // to send to.
   await expect(modelCount(page)).toHaveText("3 models");
-  await expect(composerCount(page)).toHaveText("3 models");
+  await expect(composerCount(page)).toHaveText("3 AIs");
 });
 
 test("a paused panel drops out of both the header count and the composer", async ({
@@ -166,7 +166,7 @@ test("a paused panel drops out of both the header count and the composer", async
   await showPanel(page, MODELS[0]);
 
   await expect(modelCount(page)).toHaveText("2 models");
-  await expect(composerCount(page)).toHaveText("2 models");
+  await expect(composerCount(page)).toHaveText("2 AIs");
   await expect(summary(page)).toHaveAttribute(
     "aria-label",
     `${MODEL_NAMES[MODELS[0]]} and 1 more model selected. 2 active models total. 1 model paused. Open model picker.`
@@ -273,7 +273,7 @@ for (const viewport of VIEWPORTS) {
 
     await expect(modelCount(page)).toBeVisible();
     await expect(modelCount(page)).toHaveText("3 models");
-    await expect(composerCount(page)).toHaveText("3 models");
+    await expect(composerCount(page)).toHaveText("3 AIs");
 
     // The header's own controls must survive next to the summary.
     await expect(page.getByTestId("mobile-sidebar-open")).toBeVisible();
