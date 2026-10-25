@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   checkAmuxIdeaActualModel,
+  checkAmuxIdeaFrontierModel,
   checkAmuxIdeaFrontierSelection,
 } from "../lib/amux/ideaFrontierSelectionCore.ts";
 
@@ -84,4 +85,31 @@ test("actual CLI substitution is a halt, not a model downgrade", () => {
     assert.deepEqual(checkAmuxIdeaActualModel(selected(), observed),
       { decision: "halt", reason: "model_substituted" });
   }
+});
+
+test("Copilot and Cursor are CLI channels whose model IDs are the CLI's own names", () => {
+  for (const [provider, modelId] of [["github-copilot", "claude-sonnet-4.5"], ["cursor", "gpt-5"]]) {
+    const row = { ...approval(), id: "approval_00009", provider, modelId };
+    assert.deepEqual(checkAmuxIdeaFrontierSelection({ provider, modelId, reasoningEffort: "high" },
+      [approval(), row], now), { decision: "selection_current", approvalId: "approval_00009",
+      approvalVersion: 1 });
+    // The same model name on another channel is a different approval.
+    assert.deepEqual(checkAmuxIdeaFrontierSelection({ provider: "openai", modelId,
+      reasoningEffort: "high" }, [row], now), { decision: "reject", reason: "model_not_approved" });
+  }
+});
+
+test("a subscription price checks one exact model at any approved effort", () => {
+  assert.deepEqual(checkAmuxIdeaFrontierModel({ provider: "openai", modelId: "frontier-v1" },
+    [approval()], now), { decision: "model_current", approvalId: "approval_00001", approvalVersion: 1 });
+  assert.deepEqual(checkAmuxIdeaFrontierModel({ provider: "cursor", modelId: "frontier-v1" },
+    [approval()], now), { decision: "reject", reason: "model_not_approved" });
+  assert.deepEqual(checkAmuxIdeaFrontierModel({ provider: "xai", modelId: "frontier-v1" },
+    [approval()], now), { decision: "reject", reason: "model_selection_unsupported" });
+  const revoked = { ...approval(), id: "approval_00002", version: 2, status: "revoked",
+    revokedAt: new Date("2026-09-30T02:00:00.000Z") };
+  assert.deepEqual(checkAmuxIdeaFrontierModel({ provider: "openai", modelId: "frontier-v1" },
+    [approval(), revoked], now), { decision: "reject", reason: "model_not_approved" });
+  assert.deepEqual(checkAmuxIdeaFrontierModel({ provider: "openai", modelId: "frontier-v1" },
+    [approval(), approval()], now), { decision: "hold", reason: "model_catalog_unverified" });
 });

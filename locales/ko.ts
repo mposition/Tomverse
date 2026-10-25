@@ -1,3 +1,4 @@
+import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -166,9 +167,6 @@ export const ko = {
         imageGenerationBackToChat: "채팅으로 돌아가기",
         toolsImageGeneration: "이미지 생성",
         toolsImageGenerationDescription: "여러 모델의 이미지를 비교합니다",
-        imageIntentSuggestionTitle: "이미지로도 만들어 볼까요?",
-        imageIntentSuggestionAccept: "이미지 생성 열기",
-        imageIntentSuggestionDismiss: "나중에",
         imageGenerationModelLabel: "모델",
         imageGenerationModelCount: "모델 {count}개",
         // Catalogue image tab (policy v2 section 13)
@@ -233,6 +231,7 @@ export const ko = {
         imageGenerationErrorBudget: "이미지 생성이 일시적으로 중단되었습니다. 잠시 후 다시 시도해 주세요.",
         imageGenerationErrorConflict: "예약 중에 크레딧 잔액이 바뀌었습니다. 다시 시도해 주세요.",
         imageGenerationErrorGeneric: "이미지 생성을 시작하지 못했습니다. 다시 시도해 주세요.",
+        imageGenerationErrorPriceChanged: "이 페이지를 연 뒤 가격이 바뀌었습니다. 차감된 크레딧은 없습니다. 새로고침하면 현재 가격을 볼 수 있습니다.",
         imageGenerationRestoreExcluded: "{models}은(는) 지금 사용할 수 없어 복원된 선택에서 제외했습니다.",
         imageGenerationSelectionCount: "모델 {count}/{max}개",
         imageGenerationModelLimitNotice: "한 번에 최대 {max}개 모델을 비교할 수 있습니다. 선택한 모델 하나를 해제한 뒤 다시 선택해 주세요.",
@@ -241,7 +240,7 @@ export const ko = {
         imageGenerationRestoreOptionsUnavailable: "직전 비교의 품질·크기를 복원하지 못해 기본값으로 두었습니다.",
         modelSelectionNotice: "저장된 기본 조합의 일부 모델을 사용할 수 없어 대체 조합으로 시작합니다. 설정에서 조합을 다시 저장하면 확정됩니다.",
         welcome: "안녕하세요! 무엇을 도와드릴까요?",
-        welcomeBack: "다시 만나 반가워요. 무엇을 도와드릴까요?",
+        welcomeBack: workspaceWelcomeCopy.ko.greeting,
         guestWelcome: "안녕하세요! 현재 게스트 모드입니다. 질문을 입력해 주세요.",
         inputPlaceholder: "무엇을 도와드릴까요?",
         aiDisclaimer: "AI 답변에는 오류가 있을 수 있습니다. 중요한 정보는 반드시 확인하세요. 질문과 첨부 내용은 답변 생성을 위해 선택한 AI 공급자에 전송될 수 있으니, 불필요한 민감정보 입력은 피해 주세요.",
@@ -284,6 +283,9 @@ export const ko = {
         stopThisResponse: "이 응답 중지",
         stop: "중지",
         responseGenerating: "응답을 생성하고 있습니다.",
+        imageTurnGenerating: "이미지를 만들고 있습니다…",
+        imageTurnFailed: "이미지를 만들지 못했습니다. 다시 시도해 주세요.",
+        imageTurnRetry: "다시 시도",
         responseComplete: "응답이 완료되었습니다.",
         responseIncomplete: "출력 길이 제한으로 답변이 중단되었습니다.",
         responseIncompleteNotice: "출력 길이 제한으로 답변이 중단되었습니다. 후속 질문으로 이어서 요청할 수 있습니다.",
@@ -603,8 +605,6 @@ export const ko = {
         artifactDownloadFailed: "파일을 다운로드하지 못했습니다. 다시 시도해 주세요.",
         artifactDownloadLocked: "파일을 다운로드하려면 대화 잠금을 해제하세요.",
         searchCitationsLabel: "출처",
-        answerContextLabel: "답변 컨텍스트",
-        answerContextMemory: "계정 기억 {count}개",
         answerContextKnowledge: "프로필 지식 발췌 {count}개",
         modelsSelectedOne: "개 모델",
         modelsSelectedOther: "개 모델",
@@ -1905,6 +1905,11 @@ export const ko = {
         dataTabOpen: "AI 어시스턴트 열기",
     },
     memoryReview: {
+        restoreGrounds: "새 근거 추가",
+        restoreGroundsNotice: "직접 작성한 근거로 이 기억을 다시 사용합니다.",
+
+        reportAnswer: "해당 답변의 문제 신고",
+
         sourceDeleteDerivedImport:
             "이 가져오기에서 만들어진 기억 {count}개도 함께 삭제됩니다.",
         sourceDeleteDerivedConversation:
@@ -1918,47 +1923,31 @@ export const ko = {
         sourceLockBacked: "다른 근거가 남아 있는 기억 {count}개는 그대로 사용됩니다.",
         sourceLockRestoreNote: "잠금을 해제하면 이 대화 때문에 중지됐던 기억이 다시 사용됩니다.",
         dataTabTitle: "계정 장기 기억",
-        dataTabDescription:
-            "가져온 대화에서 추출한 기억 후보를 검토하고, 승인한 기억을 새 대화에서 사용할지 설정합니다.",
+        dataTabDescription: "가져온 대화에서 자동으로 정리된 기억과 직접 추가한 기억을 보고, 새 대화에서 사용할지 설정합니다.",
         dataTabOpen: "기억 관리",
         dataTabStatusOn: "새 대화에서 사용 중",
         dataTabStatusOff: "새 대화에서 사용 안 함",
-        dataTabStatusPending: "검토 대기 {count}개",
         pageTitle: "계정 장기 기억",
-        pageDescription:
-            "검토를 기다리는 기억 후보를 승인하거나 거절하고, 사용 중인 기억을 수정·고정·삭제할 수 있습니다.",
+        pageDescription: "가져온 대화에서 자동으로 정리된 기억과 직접 추가한 기억을 수정·고정·삭제할 수 있습니다.",
         signInRequired: "계정 장기 기억을 관리하려면 로그인하세요.",
-        privacyNote:
-            "기억은 사용자가 검토하고 승인한 것만 새 대화에서 사용됩니다. 승인한 기억과 답변 스타일은 현재 선택한 Tomverse 모델의 답변 생성에 참고 자료로 전달되며, 언제든지 조회·수정·비활성화·삭제할 수 있습니다.",
-        disabledNotice:
-            "기억 검토·작성은 지금 사용할 수 없습니다. 이미 저장된 기억은 계속 조회하고 삭제할 수 있습니다.",
+        privacyNote: "가져오기를 완료하면 Tomverse가 AI 공급자를 통해 그 대화에서 기억을 자동으로 정리하며, 크레딧은 차감되지 않습니다. 건강 정보처럼 민감한 내용은 기억으로 저장하지 않습니다. 사용 중인 기억과 답변 스타일은 현재 선택한 Tomverse 모델의 답변 생성에 참고 자료로 전달되며, 언제든지 조회·수정·비활성화·삭제할 수 있습니다.",
+        disabledNotice: "기억 수정·작성은 지금 사용할 수 없습니다. 이미 저장된 기억은 계속 조회하고 삭제할 수 있습니다.",
         settingsTitle: "기억 사용 설정",
-        masterToggleLabel: "새 대화에서 승인된 기억 사용",
-        masterToggleDescription:
-            "끄면 모든 대화에서 기억을 사용하지 않습니다. 저장된 기억이 삭제되지는 않습니다.",
+        masterToggleLabel: "새 대화에서 기억 사용",
+        masterToggleDescription: "끄면 모든 대화에서 기억을 사용하지 않고, 가져온 대화에서 새 기억도 만들지 않습니다. 저장된 기억이 삭제되지는 않습니다.",
         styleToggleLabel: "답변 스타일 기억 사용",
         styleToggleDescription:
             "과거 대화에서 추정한 어조·길이·구성 선호를 답변에 참고합니다.",
         defaultModeLabel: "새 대화 기본값",
         defaultModeOn: "기억 사용",
         defaultModeOff: "기억 사용 안 함",
-        reviewTitle: "검토 대기 중인 기억",
-        reviewDescription:
-            "추출된 후보는 사용자가 승인해야 새 대화에서 사용됩니다. 민감하거나 개별 검토가 필요한 후보는 일괄 승인에 포함되지 않습니다.",
-        reviewEmpty: "검토를 기다리는 기억이 없습니다.",
-        bulkApprove: "비민감 후보 일괄 승인",
-        bulkResult: "{approved}개 승인됨 · {skipped}개는 개별 검토가 필요합니다",
-        approve: "승인",
-        reject: "거절",
         edit: "수정",
         save: "저장",
         cancel: "취소",
-        needsIndividualReview: "개별 검토 필요",
         sensitiveBadge: "민감",
         pinnedBadge: "고정됨",
         expires: "만료: {date}",
-        conflictNotice:
-            "같은 항목의 기억이 이미 사용 중입니다. 기존 기억을 유지하거나 이 내용으로 교체할 수 있습니다.",
+        conflictNotice: "같은 주제와 관련된 기억입니다. 내용을 검토하고 유지할 방법을 선택하세요.",
         conflictReplace: "기존 기억을 교체",
         activeTitle: "사용 중인 기억",
         activeEmpty: "아직 사용 중인 기억이 없습니다.",
@@ -1967,8 +1956,6 @@ export const ko = {
         unpin: "고정 해제",
         delete: "삭제",
         deleteArmed: "한 번 더 누르면 삭제됩니다",
-        editParkedNotice:
-            "수정한 내용은 다시 검토가 필요해 검토 대기 목록으로 이동했습니다.",
         validationFailed:
             "이 내용은 기억으로 저장할 수 없습니다. \"사용자는 간결한 답변을 선호한다\"처럼 사실을 설명하는 서술형 문장으로 적어주세요.",
         errorGeneric: "문제가 발생했습니다. 다시 시도해 주세요.",
@@ -2005,14 +1992,14 @@ export const ko = {
         deleteAllSubmit: "모든 기억 삭제",
         deleteAllDone: "모든 기억이 삭제되었습니다.",
         status: {
-            candidate: "검토 대기",
+            candidate: "이전 후보 · 사용 안 함",
             active: "사용 중",
             rejected: "거절됨",
             superseded: "교체됨",
             expired: "만료됨",
             suspended_by_source_lock: "출처 잠금으로 일시중지",
             suspended_by_source_delete: "출처 삭제로 일시중지",
-            manual_review_required: "개별 검토 필요",
+            manual_review_required: "이전 후보 · 사용 안 함",
         },
         kind: {
             identity: "정체성",
@@ -2035,50 +2022,20 @@ export const ko = {
             citation_preference: "출처 표기 선호",
             code_style: "코드 스타일",
         },
+        organisingNotice: "가져온 대화에서 기억을 정리하고 있습니다.",
+        organisingView: "진행 상태 보기",
+        restoreConflict: "같은 주제의 기억이 이미 사용 중입니다. 그 기억을 삭제한 뒤 다시 시도하세요.",
+        importNotice: "가져오기를 완료하면 Tomverse가 가져온 대화에서 기억을 자동으로 정리하며, 크레딧은 차감되지 않습니다. 이를 위해 대화 내용이 AI 공급자에게 전송되고, 건강 정보처럼 민감한 내용은 기억으로 저장하지 않습니다.",
+        importNoticeSettings: "기억 설정",
+        importNoticePrivacy: "개인정보 처리방침",
     },
     // 기억 추출 실행 (Release B, §11 사전 확인 계약 · §21 UI 경로).
     // 실행 전 모델·묶음 수·크레딧을 보여주고 사용자가 명시적으로 확인해야
     // 시작합니다. 승인된 pair가 없으면 시작 자체가 열리지 않습니다.
     memoryExtraction: {
-        launchTitle: "가져온 대화에서 기억 추출",
-        launchDescription:
-            "가져온 대화를 골라 기억 후보를 추출합니다. 추출된 후보는 검토해서 승인하기 전까지 답변에 사용되지 않습니다.",
-        modelTitle: "추출에 사용할 모델",
-        modelUnavailable: "지금은 사용할 수 있는 추출 모델이 없습니다.",
-        modelUnavailableDescription:
-            "추출 모델은 품질 평가를 통과한 뒤에만 열립니다. 열리면 이 화면에서 선택할 수 있습니다.",
-        modelCredits: "묶음당 {credits} 크레딧",
-        conversationsTitle: "추출할 대화 선택",
-        conversationsDescription:
-            "선택한 대화의 내용만 추출에 사용됩니다. 대화는 크기에 따라 여러 묶음으로 나뉘어 처리되고, 크레딧은 묶음 수로 계산합니다.",
-        conversationsEmpty: "가져온 대화가 아직 없습니다.",
-        conversationsEmptyCta: "대화 가져오기",
-        selectAllVisible: "보이는 대화 모두 선택",
-        clearSelection: "선택 해제",
-        selectionSummary: "{count}개 선택 · 약 {size}",
-        selectionHidden: "선택한 {count}개는 지금 목록에 보이지 않습니다.",
-        selectionTooLarge: "한 번에 최대 {max}개까지 선택할 수 있습니다.",
-        conversationMeta: "메시지 {messages}개 · {size}",
-        loadMore: "더 보기",
         estimate: "필요한 크레딧 확인",
-        estimating: "계산하는 중…",
-        estimateResult: "묶음 {chunks}개 · 약 {credits} 크레딧",
-        estimateDescription:
-            "대화 {conversations}개를 묶음 {chunks}개로 나눠 처리합니다. 실제 차감액은 실행 후 정산되며 확인한 금액을 넘지 않습니다.",
-        estimateStale: "선택이 바뀌었습니다. 크레딧을 다시 확인해 주세요.",
         start: "{credits} 크레딧으로 추출 시작",
         starting: "시작하는 중…",
-        runInProgress: "이미 진행 중인 추출이 있습니다.",
-        runInProgressOpen: "진행 상태 보기",
-        errorGeneric: "문제가 발생했습니다. 다시 시도해 주세요.",
-        errorEstimateChanged:
-            "선택한 대화가 바뀌어 견적이 달라졌습니다. 다시 확인한 뒤 시작해 주세요.",
-        errorPairUnavailable: "선택한 모델은 지금 사용할 수 없습니다.",
-        errorLocked:
-            "선택한 대화 중 잠긴 대화가 있어 시작할 수 없습니다. 목록을 새로 고친 뒤 다시 선택해 주세요.",
-        lockedRowHint: "잠긴 대화는 기억 추출에 쓸 수 없습니다.",
-        errorBudget:
-            "추출 용량이 일시적으로 가득 찼습니다. 잠시 후 다시 시도해 주세요.",
         runTitle: "기억 추출 진행 상태",
         runBack: "기억 설정으로 돌아가기",
         runNotFound: "이 추출 작업을 찾을 수 없습니다.",
@@ -2101,8 +2058,6 @@ export const ko = {
         cancel: "추출 취소",
         cancelArmed: "한 번 더 누르면 취소됩니다",
         cancelling: "취소하는 중…",
-        recentRunsTitle: "최근 추출 작업",
-        recentRunOpen: "자세히 보기",
         status: {
             pending: "대기 중",
             running: "진행 중",
@@ -2236,7 +2191,7 @@ export const ko = {
         externalImportTitle: "다른 AI 서비스에서 가져온 대화",
         externalImport: "사용자는 ChatGPT, Claude, Gemini(Google Takeout) 등 다른 AI 서비스에서 내려받은 내보내기 파일에서 선택한 과거 대화를 Tomverse 계정에 저장할 수 있습니다. 내보내기 파일은 사용자의 브라우저에서만 열리며, 원본 파일은 Tomverse 서버나 저장소에 업로드·보관되지 않습니다. 사용자가 선택한 대화의 정규화된 텍스트와 출처 정보(서비스명, 원래 시간, 표시용 모델명)만 계정 전용 자료로 저장되고, 이미지·음성·첨부파일은 가져오지 않습니다. 가져온 대화에는 다른 사람의 개인정보가 포함될 수 있으므로, 해당 데이터를 가져올 권한이 있는지 확인할 책임은 사용자에게 있습니다. 가져온 자료는 언제든지 조회·삭제·내보내기 할 수 있으며, 계정 삭제 시 함께 삭제됩니다. Tomverse에서 삭제해도 원래 서비스에 있는 데이터는 삭제되지 않습니다.",
         memoryTitle: "계정 장기 기억",
-        memory: "사용자가 기억 기능을 사용하기로 선택하면, Tomverse는 사용자가 지정한 가져온 대화의 일부를 기억 후보를 추출하기 위해 사용자가 확인한 AI 공급자에게 전송합니다. 추출에는 실행 전에 표시된 모델과 크레딧이 사용됩니다. 추출된 후보는 사용자가 검토해 승인하기 전에는 답변 생성에 사용되지 않습니다. 민감한 정보로 분류된 후보와 개별 검토가 필요한 후보는 일괄 승인에서 제외되어 하나씩 확인해야 합니다. 후보와 승인된 기억, 그 근거는 사용자가 삭제하거나 계정 데이터가 삭제될 때까지 계정에 보관됩니다. 승인된 기억과 답변 스타일 선호는 새 대화의 답변을 생성할 때 참고 자료로 해당 답변을 생성하는 AI 공급자에게 전송되며, 여러 모델을 비교하는 경우 각 모델의 공급자에게 전송됩니다. 사용자는 저장된 기억을 언제든지 조회·수정·비활성화할 수 있고, 전체 목록을 파일로 내려받거나 한 번에 모두 삭제할 수 있습니다. 기억 사용을 끄면 새 대화에서 기억이 사용되지 않습니다.",
+        memory: "가져온 대화를 Tomverse 계정에 저장하면, Tomverse는 기억 기능이 켜져 있는 동안 그 대화에서 기억을 자동으로 정리합니다. 이를 위해 가져온 대화의 내용이 Tomverse가 정한 AI 공급자에게 전송되며, 이 처리에는 크레딧이 차감되지 않습니다. 건강 정보처럼 민감한 내용은 기억으로 저장하지 않고, 검증을 통과한 내용만 기억으로 저장되어 바로 사용됩니다. 같은 주제에 대해서는 더 최근 대화의 내용이 이전 기억을 대신합니다. 기억과 그 근거는 사용자가 삭제하거나 계정 데이터가 삭제될 때까지 계정에 보관됩니다. 기억과 답변 스타일 선호는 새 대화의 답변을 생성할 때 참고 자료로 해당 답변을 생성하는 AI 공급자에게 전송되며, 여러 모델을 비교하는 경우 각 모델의 공급자에게 전송됩니다. 사용자는 저장된 기억을 언제든지 조회·수정·삭제할 수 있고, 전체 목록을 파일로 내려받거나 한 번에 모두 삭제할 수 있습니다. 기억 사용을 끄면 새 대화에서 기억이 사용되지 않고, 가져온 대화에서 새 기억도 만들어지지 않습니다.",
         assistantProfilesTitle: "사용자 정의 AI 어시스턴트과 지식 파일",
         assistantProfiles: "AI 어시스턴트를 만들면 Tomverse는 입력한 이름·설명·지시문·모델 선택·대화 시작 문구를 저장하고, 게시된 모든 개정을 보관해 각 대화가 실제로 어떤 개정으로 실행됐는지 확인할 수 있게 합니다. 첨부한 지식 파일은 계정 전용으로 저장되며, Tomverse가 텍스트를 추출해 구절로 나누고 검색 색인을 만들어 관련 발췌를 찾을 수 있게 합니다. 어시스턴트로 대화하면 그 지시문과 메시지에 해당하는 발췌가 답변을 생성하는 AI 제공자에게 참고 자료로 전송됩니다. 발췌는 참고 자료로만 취급되며 어시스턴트에 대한 지시로 취급되지 않습니다. 어시스턴트는 비공개입니다. 다른 사람과 공유되지 않고, 공개 목록에 노출되지 않으며, 판매되지 않습니다. 어시스턴트를 삭제하면 개정과 지식 파일이 함께 삭제되고 저장된 파일은 곧이어 지워지며, 그 어시스턴트를 사용한 대화는 계정에 그대로 남습니다. 어시스턴트 사용을 끄거나 삭제하면 새 대화에서 더 이상 사용되지 않습니다. 패키지를 가져와 어시스턴트를 만들면, 게시 전에 구성한 내용과 패키지 또는 사용자가 밝힌 출처, 확인한 시각도 함께 저장합니다. 패키지가 적어 둔 주소는 열지 않습니다. 중단한 가져오기는 기한이 지나면 만료되고, 그때 올려 둔 파일도 함께 사라집니다.",
         emailTitle: "보내 드리는 이메일",
@@ -2288,61 +2243,7 @@ export const ko = {
         providerSource: "근거",
         back: "Tomverse로 돌아가기",
     },
-    chatStarter: {
-        title: "여기서 할 수 있는 일",
-        hint: "하나를 고르면 아래 입력란이 채워집니다. 보내기를 누르기 전에는 아무것도 전송되지 않습니다.",
-        lockedSignIn: "로그인하면 사용할 수 있습니다",
-        lockedPlan: "{plan} 플랜이 필요합니다",
-        lockedSignInShort: "로그인 필요",
-        lockedPlanShort: "{plan} 필요",
-        cards: {
-            compareAnswers: {
-                label: "세 모델 답 나란히 비교",
-                outcome: "질문 하나를 세 모델에게 보내고 답을 나란히 읽기",
-                seed: "벡터 데이터베이스가 어떤 문제를 푸는지 쉬운 말로 200자 정도로 설명해 주세요.",
-            },
-            documentQuestions: {
-                label: "PDF 붙여 여러 모델에 질문",
-                outcome: "18페이지 PDF를 붙여 여러 모델에게 같은 질문 하기",
-                seed: "문서를 첨부했습니다. 제가 무엇을 결정해야 하는지 요약하고, 문서에 나오는 기한을 모두 뽑아 주세요.",
-            },
-            sourcedAnswer: {
-                label: "출처 링크 붙은 답 받기",
-                outcome: "출처 링크가 함께 붙은 답 받기",
-                seed: "올해 EU AI 법 집행에서 달라진 점은 무엇인가요? 참고한 출처도 함께 알려 주세요.",
-            },
-            debugStackTrace: {
-                label: "스택 트레이스로 오류 찾기",
-                outcome: "스택 트레이스를 붙여 실패한 줄과 고칠 방법 받기",
-                seed: "빌드에서 나온 스택 트레이스입니다. 어느 줄에서 실패했는지와 무엇을 바꿔야 하는지 알려 주세요.",
-            },
-            spreadsheetFromAnswer: {
-                label: ".xlsx 파일로 받기",
-                outcome: "답변을 내려받을 수 있는 .xlsx 파일로 만들기",
-                seed: "항목, 계획 금액, 실제 금액이 들어간 월별 예산표를 만들어 스프레드시트 파일로 저장해 주세요.",
-            },
-            readAScreenshot: {
-                label: "화면 캡처 속 오류 묻기",
-                outcome: "화면 캡처를 붙여 그 오류가 무슨 뜻인지 묻기",
-                seed: "오류 대화상자를 캡처해서 첨부했습니다. 무슨 뜻이고 다음에 무엇을 해야 하는지 알려 주세요.",
-            },
-            translateAndCompare: {
-                label: "두 모델 번역 나란히 비교",
-                outcome: "초안을 번역하고 두 모델의 결과를 나란히 읽기",
-                seed: "아래 문장을 격식 있는 어조를 유지하면서 영어로 번역해 주세요:",
-            },
-            compareImageModels: {
-                label: "이미지 모델 결과 비교",
-                outcome: "문장 하나를 여러 이미지 모델에 보내고 결과를 비교하기",
-                seed: "새벽의 조용한 열람실, 높은 창으로 들어오는 따뜻한 빛, 사진 느낌.",
-            },
-            speakAQuestion: {
-                label: "말로 질문하고 글로 고치기",
-                outcome: "긴 질문을 말로 입력하고 보내기 전에 글로 고치기",
-                seed: "지금부터 말하는 내용을 짧고 분명한 지시 목록으로 정리해 주세요.",
-            },
-        },
-    },
+    chatStarter: workspaceWelcomeCopy.ko.starter,
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "하고 싶은 작업 찾기",

@@ -131,7 +131,8 @@ test("every record link names a page and section the console has", () => {
 
 test("a record link is kept only while the console has its page and tab", () => {
   assert.equal(consoleHasRecord("/admin/agent-digests"), true);
-  assert.equal(consoleHasRecord("/admin/agent-digests?tab=qa-release"), true);
+  assert.equal(consoleHasRecord("/admin/qa-release"), true);
+  assert.equal(consoleHasRecord("/admin/qa-release?tab=ci-admission"), true);
   assert.equal(consoleHasRecord("/admin/agent-digests?tab=no-such-section"), false);
   assert.equal(consoleHasRecord("/admin/no-such-page"), false);
   // The teams whose screens every branch carries stay linked; a team whose
@@ -1234,7 +1235,7 @@ test("the routing room's colour and lines follow the latest optimizer cycle and 
 test("the office reads the optimizer's cycle status and spend, never its guidance, cases or summary", () => {
   const routing = readFunction("readRouting");
   assert.match(routing, /prisma\.autoRouterOptimizerCycle\.findFirst\(\{\s*orderBy: \{ createdAt: "desc" \}/);
-  assert.match(routing, /select: \{ status: true, failure: true, createdAt: true, finishedAt: true \}/);
+  assert.match(routing, /select: \{ target: true, status: true, failure: true, createdAt: true, finishedAt: true \}/);
   assert.match(routing, /select: \{ createdAt: true, spentMicroUsd: true \}/);
   assert.match(routing, /promotedAt: \{ not: null \}/);
   assert.doesNotMatch(routing, /guidance|candidateGuidance|incumbentGuidance|cases|summary|Guidance/);

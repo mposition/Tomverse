@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "602910857d524185834a7602acd540c7aa5530e8ea78a634d3a7a22cfd173722",
+  "replacedChecks": [
+    {
+      "table": "ProductResearchObservation",
+      "constraint": "ProductResearchObservation_outcome_shape_check",
+      "previousDefinitionSha256": "025a703753cdae8ae00fbc50c7c9a4d8855585ae61d28061c5262af2b56808a4"
+    }
+  ]
+}

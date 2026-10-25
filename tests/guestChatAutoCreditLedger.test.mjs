@@ -193,10 +193,13 @@ test("Guest Auto conversion reuses the hold and ordinary exact settlement", () =
   assert.match(security, /canonical\.guestAuto\?\.requestKey/);
   assert.match(security, /heldCredits: guestAutoPrehold\.heldCredits/);
   assert.match(security, /exactCredits: budget\.usageCredits/);
-  assert.match(
-    security,
-    /status: "reserved",[\s\S]{0,120}?clientTurnId: null,[\s\S]{0,120}?expiresAt: \{ lte: now \}/,
-  );
+  const expiredReservations = security.slice(
+    security.indexOf("export const reconcileExpiredChatCreditReservations"),
+  ).split("orderBy:")[0];
+  assert.match(expiredReservations, /status: "reserved"/);
+  assert.match(expiredReservations, /clientTurnId: null/);
+  assert.match(expiredReservations, /source: \{ not: "voice_conversation" \}/);
+  assert.match(expiredReservations, /expiresAt: \{ lte: now \}/);
   assert.doesNotMatch(
     security.slice(
       security.indexOf("reconcileExpiredChatCreditReservations"),

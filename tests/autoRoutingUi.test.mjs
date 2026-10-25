@@ -19,8 +19,9 @@ import {
 } from "../lib/autoRoutingCopy.ts";
 import { SELECTION_REASONS } from "../lib/routerSelection.ts";
 import { SELECTION_MODES } from "../lib/conversationSelectionMode.ts";
-const { mintChatRefinerInitialAutoRouterAuthority } =
-  createRequire(import.meta.url)("../lib/chatRefinerInitialAutoRouterAuthority.ts");
+const { mintChatRefinerInitialAutoRouterAuthority } = createRequire(import.meta.url)(
+  "../lib/chatRefinerInitialAutoRouterAuthority.ts"
+);
 
 // The UI is the last step of the rollout and the first thing a user reads as a
 // promise. These tests are mostly about not making one the product cannot keep.
@@ -164,6 +165,7 @@ test("every supported language carries the whole control vocabulary", () => {
       "turnedOn",
       "turnedOff",
       "answeredBy",
+      "answeredByTitle",
       "variableCreditLabel",
     ]) {
       assert.equal(typeof copy[key], "string", `${language}.${key} missing`);

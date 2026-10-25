@@ -1,9 +1,8 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
-import { resolveChatRequestSession } from "@/lib/chatRequestSession";
-import { isNativeChatPayload, MOBILE_CHAT_PATH } from "@/lib/mobileChatContract";
 import {
     buildAttachmentPromptText,
     inertFilename,
@@ -60,7 +59,10 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
+import { detectChatTurnImage } from "@/lib/chatImageIntent";
+import { latestUserTurnHasAttachments } from "@/lib/chatImageIntentCore";
+import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
+import { autoLlmRouterCandidates, previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -667,7 +669,9 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = session?.user?.id;
     if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -842,7 +846,9 @@ export async function PUT(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = session?.user?.id;
     if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -1294,13 +1300,10 @@ async function handleChatPost(
     } | null = null;
     try {
         assertChatRequestSize(req);
-        const requestSession = await resolveChatRequestSession(req);
-        if (!requestSession.ok) return requestSession.response;
-        const session = requestSession.session;
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         const body = await readChatJsonBody(req);
-        if (new URL(req.url).pathname === MOBILE_CHAT_PATH && !isNativeChatPayload(body)) {
-            return Response.json({ code: "INVALID_NATIVE_CHAT_REQUEST" }, { status: 400 });
-        }
         const currentLocation = parseChatLocation(
             (body as { currentLocation?: unknown } | null)?.currentLocation
         );
@@ -2036,9 +2039,84 @@ async function handleChatPost(
             requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
                 .maxOutputTokens,
         });
+        /*
+          An Auto Chat turn that asks for a picture is answered with an image
+          (lib/chatImageTurn.ts). The decision is made here, beside the router
+          call and at the same time, instead of in a call the composer makes
+          before sending -- so the turn waits for the longer of the two, not
+          both in a row. Every signed-in single-panel turn of a stored Auto Chat
+          conversation is asked -- routed or not, since the composer no longer
+          asks on Auto turns -- unless it carries an attachment, a Refiner
+          proposal or deep research; everything else is a chat turn as before.
+        */
+        // An answer id an image turn already used is never a text answer: a
+        // re-sent request under it would pay a provider for an answer the
+        // stored image answer can never become.
+        // A failed read is no answer: the guard never fails a turn on its own.
+        if (session?.user?.id && assistantMessageId) {
+            const answered = await Promise.resolve()
+                .then(() =>
+                    prisma.message.findUnique({
+                        where: { id: assistantMessageId },
+                        select: {
+                            role: true,
+                            content: true,
+                            conversation: { select: { userId: true } },
+                        },
+                    })
+                )
+                .catch(() => null);
+            // Only the caller's own answer counts: whether another account's
+            // id is an image answer is nobody else's to learn.
+            if (
+                answered?.conversation.userId === session.user.id &&
+                answered.role === "assistant" &&
+                answered.content.startsWith(CHAT_IMAGE_TURN_CONTENT_PREFIX)
+            ) {
+                return tracedJsonError(
+                    "This answer is an image.",
+                    "ASSISTANT_MESSAGE_CONFLICT",
+                    409,
+                    traceId
+                );
+            }
+        }
+        const autoImageTurnEligible =
+            conversationRouting?.selectionMode === "auto" &&
+            !guestAutoSelection?.routed &&
+            Boolean(session?.user?.id && conversationId && assistantMessageId) &&
+            conversationRouting?.productKey === "chat" &&
+            !admissionToken &&
+            !deepResearchDepth &&
+            !promptRefinerDecision &&
+            // This message's own attachments, not the conversation's.
+            !latestUserTurnHasAttachments(autoRoutingMessages);
+        const autoImageDecisionPromise = autoImageTurnEligible
+            ? detectChatTurnImage({
+                  userId: session!.user!.id!,
+                  conversationId: conversationId!,
+                  text: profileTextFor(autoRoutingMessages),
+                  plan: accountPlan,
+                  traceId,
+                  request: req,
+              })
+            : Promise.resolve({ image: false } as const);
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
-        // model; any failure keeps the deterministic choice.
+        // model; a missing decision keeps the ordinary Auto choice and recovery.
+        const fileRoutingContext = {
+            isAuthenticated: Boolean(session?.user?.id),
+            canPersist: Boolean(session?.user?.id && conversationId && assistantMessageId),
+            webSearchRequested: webSearchMode === "always",
+        };
+        const fileCapableModelIds = deterministicAutoSelection.routed
+            ? autoLlmRouterCandidates(
+                deterministicAutoSelection.record.eligibleModelIds,
+                routerCandidateInputs.models,
+                deterministicAutoSelection.candidateCreditsByModelId,
+                fileRoutingContext
+            ).filter(candidate => candidate.canCreateFiles).map(candidate => candidate.id)
+            : [];
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2054,11 +2132,28 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       traceId,
                       rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
+                      fileContext: fileRoutingContext,
+                      // An image turn is not a routing decision a chat model
+                      // answered; its row would teach the router the wrong thing.
+                      recordDecision: (pick) => pick?.requiresFileGeneration
+                          ? Promise.resolve(true)
+                          : autoImageDecisionPromise.then((decision) => !decision.image),
                   })
             : null;
+        const detectedImageDecision = await autoImageDecisionPromise;
+        // A document about images is still a file request, not an image turn.
+        const autoImageDecision = llmPick?.requiresFileGeneration
+            ? { image: false as const } : detectedImageDecision;
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
-            llmPick?.modelId ?? null
+            llmPick?.modelId ?? null,
+            {
+                // Restrict capabilities only for an identified file request.
+                // A missing semantic decision retains ordinary Auto recovery;
+                // offering file tools to every turn would disable that recovery.
+                required: llmPick?.requiresFileGeneration === true,
+                capableModelIds: fileCapableModelIds,
+            }
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;
@@ -2815,9 +2910,41 @@ async function handleChatPost(
         // it cannot authorize shadow work or a provider call. Revalidate the
         // exact view and consume it only after deterministic plan, selection,
         // and recoverable context-bundle refusals have all passed.
+        /*
+          The image decision ends the request here: after every ownership,
+          lock, kind and context check, and before anything is consumed or
+          reserved -- no Refiner consumption, no durable attempt, no context
+          bundle use, no credit, lease or usage hold -- so there is nothing to
+          return. The client makes the image under this turn's answer id.
+        */
+        if (autoImageDecision.image) {
+            console.info(JSON.stringify({ event: "chat_auto_image_turn", traceId }));
+            return new Response(
+                JSON.stringify({
+                    imageTurn: {
+                        modelIds: autoImageDecision.modelId ? [autoImageDecision.modelId] : [],
+                        preset: autoImageDecision.preset,
+                        ...(autoImageDecision.prompt ? { prompt: autoImageDecision.prompt } : {}),
+                    },
+                }),
+                {
+                    status: 200,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Cache-Control": "no-store",
+                        "X-Request-ID": traceId,
+                        "X-Chat-Response-Mode": "image-turn",
+                    },
+                }
+            );
+        }
         await consumeRefinerPreview();
         recordAutoSelection();
 
+        if (modelConfig.usageClass === "deep-research" && session?.user?.id && conversationId && persistenceSourceUserMessageId) {
+            await verifyDurableChatSourceMessage({ userId: session.user.id, conversationId,
+                sourceUserMessageId: persistenceSourceUserMessageId, messages });
+        }
         const isDurableStoredChat = Boolean(
             session?.user?.id &&
                 conversationId &&
@@ -3103,10 +3230,6 @@ async function handleChatPost(
                 nativeSearchEnabled && webSearchCapability.canForceExecution,
             appManagedSearchEnabled,
             turnAttachments: turnAttachmentDescriptors,
-            promptText:
-                typeof latestMessage?.content === "string"
-                    ? latestMessage.content
-                    : "",
             imageGenerationFlagEnabled,
             planAllowsImageGeneration: Boolean(
                 accountPlan && planAllowsImageGeneration(accountPlan.tier)
@@ -4248,6 +4371,7 @@ async function handleChatPost(
                     });
                     await tx.perplexityAsyncJob.create({
                         data: {
+                            ...(persistenceSourceUserMessageId ? { sourceUserMessageId: persistenceSourceUserMessageId } : {}),
                             perplexityJobId,
                             conversationId,
                             assistantMessageId,
@@ -5934,7 +6058,6 @@ async function handleChatPost(
                     ]),
                     ...attemptDispatchOptions(plan),
                 });
-                await recordDispatched(nextRecord);
             } catch (dispatchError) {
                 nextAttemptAbortController.abort(dispatchError);
                 if (nextStream) {
@@ -5966,6 +6089,23 @@ async function handleChatPost(
             if (!nextStream) {
                 await abandonFallback("dispatch_failed");
                 return streamState !== "open" || req.signal.aborted;
+            }
+
+            try {
+                await recordDispatched(nextRecord);
+            } catch (recordError) {
+                // `streamText` has crossed the provider invocation boundary.
+                // Its SDK work is scheduled independently of reading the
+                // returned stream, so a recording error cannot prove that the
+                // provider was never called. Keep the hold and continue the
+                // actual fallback: its ordinary two-attempt settlement still
+                // accounts for the provider work and charges the user once.
+                logRequestError(
+                    "chat_fallback_dispatch_record_failed",
+                    traceId,
+                    recordError,
+                    plan.modelId
+                );
             }
 
             // From here the swap is committed, and only from here.

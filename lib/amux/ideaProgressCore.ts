@@ -29,10 +29,12 @@ export const AMUX_IDEA_PROGRESS_STAGES = [
 ] as const;
 export type AmuxIdeaProgressStage = typeof AMUX_IDEA_PROGRESS_STAGES[number] | "cancelled";
 /** What a person must do next, when anything. */
-export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_input" | "plan_approval";
+export type AmuxIdeaWaitingFor = "execution_approval" | "continuation" | "owner_input" | "plan_approval" |
+  "session_review";
 
 export type AmuxIdeaProgressFacts = {
   state: string;
+  submissionOrigin?: "owner" | "session";
   cancelled: boolean;
   chunks: Array<{
     chunkIndex: number; state: string; coverageStatus: string | null;
@@ -82,6 +84,17 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     (latest.holdStatus !== null && ACTIVE_HOLD.has(latest.holdStatus)))) {
     return at("analysis");
   }
+  if (facts.submissionOrigin === "session") {
+    // v19 session pages need no approval: the queue claims the next page on
+    // its own while the idea is analysing (item 4).
+    if (facts.state === "analyzing") return at("analysis");
+    // An answer that could not become a page leaves the queue with no plan
+    // rows for that page; the operator decides what to do with the idea.
+    if (facts.state === "awaiting_owner" &&
+        (latest === null || latest.state === "pending")) {
+      return at("analysis", "session_review");
+    }
+  }
   if (latest?.coverageStatus === "needs_owner_input") return at("execution_approval", "owner_input");
   if (latest?.coverageStatus === "more") return at("execution_approval", "continuation");
   if (latest && latest.chunkIndex > 0 && NOT_YET_SENT.has(latest.state)) {
@@ -99,6 +112,11 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
   // An analysis that finished with nothing left to decide (rejected, or every
   // proposal refused or expired) waits for nobody.
   if (latest && FINISHED.has(latest.state)) return at("plan_approval");
+  // v19 session submissions have no per-idea execution approval. Their
+  // append-only reservation waits for automatic analysis, not a human step.
+  if (facts.submissionOrigin === "session" && facts.state === "submitted") {
+    return at("analysis");
+  }
   return at("execution_approval", "execution_approval");
 }
 

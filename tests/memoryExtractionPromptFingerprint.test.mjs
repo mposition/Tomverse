@@ -32,6 +32,8 @@ import {
 } from "../lib/memoryValidatorCore.ts";
 
 const FINGERPRINTS = {
+    "mem-extract-v10": "7f1519b9c7075c86e5c9f6348a4c9bd54e45d5ca369e2c02a10fcb519d931b22",
+    "mem-extract-v9": "e9a50521db68e628fa47b72d252fe2388ca50f9141d80f36e9ca56a4b494b585",
     "mem-extract-v2":
         "600af30a3047faec36d786e1b049e1d72ab59d4f4ce39ce8a4e3a58aa608428a",
     "mem-extract-v3": "fdba01bfe18f2cf29a656cc255aad57df7e041360d717cf6aa824e625698eec7",

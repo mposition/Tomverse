@@ -10,6 +10,11 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
 수명주기, 운영 gate의 단일 기준이다. 코드 상수의 출처는
 `lib/imageGenerationPricing.ts`와 `lib/imageGenerationAccess.ts`이고,
 `npm run check:image-pricing`이 PR Fast Gate에서 fail-closed로 강제한다.
+운영 중 변경(2026-10-19부터): 모델의 켜기·보류와 가격은 동적 카탈로그
+(`ModelCatalogEntry`, 가격은 append-only `ModelCatalogPriceRevision`)에서 바뀌며,
+코드 registry는 기본값과 DB를 읽지 못할 때의 fallback이다. 켜기는 §12 조건을
+`judgeImageModel`(`lib/modelCatalogCore.ts`)이 다시 판정하고, 요청은 화면이 견적한
+`pricingVersion`과 다르면 `IMAGE_PRICE_CHANGED`(409)로 아무것도 예약하지 않는다.
 이 계약을 어기는 변경은 릴리스 차단 사유다.
 
 ## 1. 범위 (v2)
@@ -197,6 +202,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **provider budget은 경로별 실발생 원가로 정산한다**: 성공 = 실비,
   moderation 차단·provider 오류 = 발생한 원가를 budget에 기록(사용자는
   전액 환급, 차액은 Tomverse 부담), provider 미호출 실패 = 예약 전액 해제.
+  성공의 thinking 몫은 예약이 고정한 cap이다. 요청당 고정 할증(fal high
+  thinking)은 응답이 thinking을 보고하지 않아도 cap으로, 그 밖의 provider는
+  thinking이 보고됐을 때만 cap으로 기록한다(`settledThinkingCostMicroUsd`).
 - 사용자 응답에 원시 내부 USD를 노출하지 않고, 모든 limit 오류의
   `resetAt`은 생성 시점보다 미래여야 한다.
 
@@ -471,7 +479,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 ## 12. 이미지 모델 registry와 가격 검증 (v2)
 
 - 이미지 모델은 채팅 catalogue와 분리된 **이미지 모델 registry**로
-  관리한다. 모델 profile: provider, API model ID, stable/preview 상태,
+  관리한다. 코드 registry 위에 동적 카탈로그 행이 겹쳐지며(머리말 참고),
+  같은 adapter를 쓰는 provider의 새 모델은 전체 profile 행과 가격 revision으로
+  배포 없이 추가할 수 있다. 모델 profile: provider, API model ID, stable/preview 상태,
   지원 해상도·화면비, 기능(문자 렌더링 등), 크레딧 표, latency 등급,
   provenance 종류(C2PA/SynthID), MIME 처리.
 - **가격 검증은 텍스트 모델의 `PENDING_VERIFIED_PRICE_REGISTER`를
@@ -590,6 +600,21 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 세 모델은 `worst_case_cost_unbounded`를 유지한다. 재검토 조건은 Google이 thinking
 토큰 상한을 거는 요청 파라미터를 제공하거나, 공식 문서가 과금 대상의 상한을
 명시하는 경우다.
+
+**상한인지 아닌지는 데이터가 아니라 코드가 정한다 (2026-10-21).** 동적 카탈로그의
+가격 개정은 `thinkingCapMicroUsd`에 숫자를 적을 수 있지만, 그 숫자가 상한이 되려면
+우리가 보내는 요청이 그것을 지킬 수 있어야 한다. `imageThinkingCapEnforced`
+(`lib/imageModelRegistry.ts`)가 provider별로 답한다 — OpenAI·xAI는 이미지 요청에
+thinking 과금이 없고, fal은 요청이 고정한 `thinking_level: "high"`에 대한 요청당
+고정 할증(`FAL_HIGH_THINKING_SURCHARGE_MICRO_USD` = 2,000)이라 cap이 그 이상일
+때만 상한이며, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. 그래서 cap을
+적은 Google 개정과 cap이 할증보다 작은 fal 개정은 판정·최악 원가·어댑터 dispatch에서
+모두 거절된다. Google을 여는 것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
+
+2026-10-14 갱신된 thinking 가이드(`https://ai.google.dev/gemini-api/docs/thinking`)는
+`max_output_tokens`가 thought 토큰을 포함한 hard cutoff라고 적는다. 이미지 모델에 대한
+문장이 아니고 위 2026-08-14 실측과 반대다. 재검토 조건의 문서 쪽이 충족됐을 수 있지만,
+상한으로 쓰려면 새 실측(유료, §15 예산 승인 필요)이 먼저다.
 
 #### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 절차 (2026-08-14 실행 완료, 판정 부정)
 
@@ -781,17 +806,21 @@ blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴
 ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두 문서가 어긋나면
 이 정책이 우선한다.
 
-- 진입점은 다섯 곳이다: ① 데스크톱 사이드바 **split-button**(기본 클릭 =
+- 진입점은 네 곳이다: ① 데스크톱 사이드바 **split-button**(기본 클릭 =
   새 채팅, 펼침 메뉴에 이미지 생성), ② 모바일 **"새로 만들기" bottom
   sheet**(split-button을 축소하지 않는다), ③ 채팅 컴포저 도구 메뉴의
   **이미지 생성**(서버 행 없이 image draft로 전환), ④ 모델 카탈로그의
-  **`채팅 | 이미지` 분리 탭**, ⑤ 채팅의 **이미지 요청 인계 제안
-  칩**(아래 — 작성 중과 답변 이후 두 시점에 걸치는 하나의 컨트롤). v1의 별도 "새 이미지" 버튼은 대체·제거한다.
-- **⑤ 제안 칩은 진입점이지 실행이 아니다.** 사용자가 그림을 원하는 요청을
-  하고 있다고 판정되면 컴포저 위에 한 줄로 제안을 띄우되, 다음을 절대
-  조건으로 한다.
-  - **사용자가 눌러야** image draft로 이동한다. 확인 없는 자동 draft 전환은
-    금지다.
+  **`채팅 | 이미지` 분리 탭**. v1의 별도 "새 이미지" 버튼은 대체·제거한다.
+- **⑤ 이미지 요청 인계 제안 칩은 2026-10-20에 LLM 판정(⑥)으로 대체되어
+  삭제됐다.** 규칙 기반 분류기(삭제된 `imageIntentSignals`)가 컴포저의 칩과
+  서버의 이미지 capability 시스템 블록에서 같은 판정을 하던 구조였고, 이제
+  판정은 보내는 순간 LLM이 한다(⑥). 분류기·칩 컴포넌트·칩 문구·칩 E2E 스펙을
+  지웠고, 시스템 블록은 더 이상 입력 문구나 첨부로 갈라지지 않는다
+  (`buildImageCapabilitySystemPrompt`는 인계 상태와 파일 도구 가용성만 본다).
+  분석 이벤트 이름 `image_intent_suggestion_*`와 `image_intent_*` 속성은 DB
+  CHECK 제약이 묶고 있어 스키마에만 남으며 어디서도 발화하지 않는다. 칩을 쓰던
+  `imageHandoffAutoGenerate` 규칙은 **글로 쓴 요청에서 시작한 인계**
+  (`fromImageRequest`, 현재는 Review Easy의 이미지 판정)에만 남는다.
   - **확인 없는 generation 제출은 금지**다. 가격·모델 선택은 계속 제출 전에
     표시한다(§3·§11). 예외는 하나 —
     `UserSettings.imageHandoffAutoGenerate`를 켠 계정이며, 그 스위치는
@@ -800,7 +829,7 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     떨어지고, "제출 전 가격 표시"가 그 선택에 대해 참이 아니게 된다.
     - **계정 설정이지 브라우저 설정이 아니다.** 클릭 하나가 크레딧을 쓸지
       정하므로, 기기별 저장은 공용 PC에서 남의 크레딧을 쓰게 만든다.
-    - **채팅 인계만 이 설정을 쓴다.** 런처·드로어·도구 메뉴·카탈로그 탭은
+    - **글로 쓴 요청에서 시작한 인계만 이 설정을 쓴다.** 런처·드로어·도구 메뉴·카탈로그 탭은
       작성하러 워크스페이스를 여는 행위이고, 열었다고 생성하는 워크스페이스는
       이동에 크레딧을 쓰는 것이다.
     - **거절을 우회하지 않는다.** 버튼이 활성일 때만 제출하므로 보류된 가격,
@@ -810,30 +839,73 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       사용자가 이미 바꿔 놓은 prompt에 대해 나중에 발화한다.
     - **작동하는 화면에서 계속 보이고 끌 수 있다**(생성 중에도). 켠 자리에서
       끌 수 있어야 하고, 생성할 수 없는 뷰어에게는 렌더링하지 않는다.
-  - 칩이 떠 있어도 **일반 채팅 제출을 막지 않는다**. 제안은 무시할 수 있어야
-    한다.
-  - **Guest·Free 잠금 조건은 클릭 전에 칩 안에서 표시**한다(아래 잠금 노출
-    규칙과 동일).
-  - flag가 꺼져 있으면 칩은 **존재하지 않는다**.
-- **⑥ LLM 판정 인계(운영자 결정 2026-10-20, 기본 꺼짐).** Admin Console ›
-  Routing에서 Auto router 모델(`auto.llmRouterModelId`)이 지정되고 "이미지 요청
-  Triage" 스위치(`auto.llmRouterImageTriage`, 감사 기록)가 켜져야 동작한다. 채팅
-  전송마다 유료 호출이 하나 늘기 때문에 router 모델과 별개로 켠다. 이미지
-  생성을 쓸 수 있는 계정의 composer 제출은 먼저 `POST /api/chat/image-intent`
-  (`lib/chatImageIntent.ts`)에서 그 router 모델에 이미지 요청인지 묻고, 같은
-  호출에서 Auto처럼 triage한다: 활성 이미지 모델과 정사각 크레딧 목록을 보고
-  복잡한 이미지는 상위 모델·높은 preset, 간단한 이미지는 하위 모델·낮은
-  preset을 고른다. 목록 밖의 모델이나 그 모델이 제공하지 않는 preset은 버리고
-  워크스페이스 기본값을 쓴다. 이미지 요청이면 채팅으로 보내지 않고 ⑤와 같은
-  인계(서버 행 없음, 취소 시 draft 복원)를 그 모델·preset을 초기값으로
-  **사용자 대신** 수행한다. ⑤의 "사용자가 눌러야 draft로 이동" 조건은 이
-  경로에 적용하지 않는다. **generation 제출 조건은 그대로다**: `imageHandoffAutoGenerate`를
-  켠 계정만 착륙 즉시 생성하고, 나머지는 가격이 보이는 워크스페이스에서 한 번
-  누른다. 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을
-  hold한 뒤 나가며, 실패·시간 초과·거절은 모두 일반 채팅 전송으로 떨어진다.
-  Chat composer 제출에서만 이 endpoint를 쓰며, 첨부와 override 전송
-  (Deep Research 확장 등)은 묻지 않는다. 판정을 기다리는 동안 초안이 바뀌면
-  인계도 전송도 하지 않는다.
+- **⑥ Chat 대화 안 이미지 답변(운영자 결정 2026-10-20, 기본 꺼짐).** Admin
+  Console › Routing에서 Auto router 모델(`auto.llmRouterModelId`)이 지정되고
+  "이미지 요청 Triage" 스위치(`auto.llmRouterImageTriage`, 감사 기록)가 켜져야
+  동작한다. 채팅 전송마다 유료 호출이 하나 늘기 때문에 router 모델과 별개로
+  켠다. 이미지 생성을 쓸 수 있는 계정의 Chat composer 제출은 먼저
+  `POST /api/chat/image-intent`(`lib/chatImageIntent.ts`)에서 그 router 모델에
+  이미지 요청인지 묻고, 같은 호출에서 Auto처럼 triage한다: 활성 이미지 모델과
+  정사각 크레딧 목록을 보고 복잡한 이미지는 상위 모델·높은 preset, 간단한
+  이미지는 하위 모델·낮은 preset을 고른다. 목록 밖의 모델이나 그 모델이
+  제공하지 않는 preset은 버리고 기본값(기본 모델, standard)을 쓴다.
+  - **Review도 같은 대화 안에서 이미지로 답한다**(운영자 결정 2026-10-23).
+    Easy는 기존 공급자별 판정 결과를 각 답변 패널에 하나씩 전달하며, 미지원
+    공급자는 해당 패널에 안내하고 호출하지 않는다. Professional의 명시적 이미지
+    모델 선택은 컴포저에 유지되며, 자동 이미지 판정은 기존 이미지 Triage 스위치가
+    켜져 있을 때만 실행한다. 텍스트 판정은 직접 고른 텍스트 모델을 바꾸지 않는다.
+    이미지 제출은 아래 Chat과 같이 확인을 다시 묻지 않고 현재 대화에 저장한다.
+    `productKey=review`와 legacy null Review를 허용하되 continuation·다른 kind·
+    다른 소유자·잠긴 대화는 허용하지 않는다. 모델별 이미지 요청은 기존 예약·
+    예산·플랜·가격·재시도 경로를 쓰며 비교용 텍스트 preflight를 예약하지 않는다.
+  - **이미지 요청이면 그 Chat 대화 안에서 답한다. 이미지 워크스페이스로 가지
+    않고, 확인도 묻지 않는다.** 질문은 일반 전송과 똑같이 저장되고(새 대화
+    생성 포함), 답변만 `/api/chat` 대신
+    `POST /api/conversations/[id]/image-turn`(`lib/chatImageTurn.ts`)이 만든다.
+    이 route는 `requestImageGeneration`을 서버 전용 옵션 `chatTurnHost`로
+    불러 **그 채팅 대화에** 이미지 그룹을 붙인다. 예약·정산·환급·provider
+    예산·동시 실행 lease는 워크스페이스와 같다. 그룹의 idempotency key는
+    assistant 메시지 id이므로 재시도는 같은 그룹을 다시 보여 줄 뿐 다시
+    과금하지 않고, 대화 조회는 이 규칙으로 메시지에 `imageTurn.groupId`를
+    붙인다. 프롬프트는 저장된 질문이다. 예외는 후속 수정 하나다.
+  - **후속 수정**("더 파랗게 해줘", 2026-10-21). 판정 호출은 그 대화의 최근 6개
+    메시지 안에 이미지 답변이 있으면, 그 이미지를 만든 프롬프트를 DB에서 읽어
+    "Previous image"로 함께 본다. 그 이미지를 바꾸는 요청이면 `prompt`에 변경을
+    반영한 완결된 새 프롬프트를 돌려준다. 이전 이미지가 없을 때 돌려준 재작성은
+    버린다. 이미지 턴은 이 프롬프트로 생성하지만, 답변 문장
+    (`[Image generated] <질문>`)은 사용자가 쓴 질문 그대로다. 재작성된 프롬프트는
+    요청 body로 오지만 사용자가 워크스페이스에 직접 입력할 수 있는 텍스트와 같은
+    권한이므로 경계를 넓히지 않는다. 첨부 이미지를 참조하는 진짜 편집은 여전히
+    범위 밖이다(§1).
+  - **확인 없는 과금은 운영자 결정이다**(2026-10-20). Chat의 텍스트 턴처럼
+    제출 즉시 생성하며, 위 §3·§11의 "제출 전 가격 표시"와 ⑤의
+    `imageHandoffAutoGenerate` 조건은 이 경로에 적용하지 않는다. 크레딧
+    표시는 계정의 사용량 표시로 옮겨 가는 중이다.
+  - assistant 메시지의 `content`는 `[Image generated] <질문>`이다. 이후 턴의
+    문맥, 공유·export는 이 문장만 담고 이미지 바이트는 담지 않는다(artifact
+    §12와 같은 처리). 대화·계정 삭제는 대화 id로 이미지 asset을 정리하는 기존
+    경로가 그대로 처리한다.
+  - 대화 종류 경계의 예외는 이것 하나다. 공개 `POST /api/images/generations`는
+    `chatTurnHost`를 받지 않으므로 채팅 대화 id를 계속 거절한다.
+  - **Auto 턴은 `/api/chat` 안에서 판정한다**(2026-10-21). Chat이 Auto(스마트 자동)이면
+    composer는 판정 호출을 미리 하지 않는다. `/api/chat`이 router 호출과 **동시에**
+    `detectChatTurnImage`를 실행하므로, 대기 시간은 두 호출의 합이 아니라 긴 쪽이다.
+    대상은 저장된 대화가 Auto(`selectionMode = auto`)인 로그인 단일 패널 Chat 턴이다.
+    router가 routed했는지와 관계없이 판정하고(fallback 턴 포함), 보내는 메시지 자체에
+    첨부·Refiner 제안·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
+    스위치). 이미지면 소유권·잠금·kind·context 검사를 모두 통과한 뒤, Refiner 소비·durable
+    attempt·context bundle 사용·크레딧/lease/usage hold가 일어나기 **전에**
+    `X-Chat-Response-Mode: image-turn`으로 끝난다. 그래서 반납할 것이 없다. 클라이언트는 같은
+    답변 id로 이미지 턴을 만든다. 이미지 턴의 router 결정 행(`AutoRouterDecision`)은 쓰지 않는다.
+    routing 학습 데이터, optimizer 표본, 세션 메모리에는 채팅 모델이 답한 턴만 남는다. 이미지
+    답변으로 쓰인 답변 id로 `/api/chat`이 다시 들어오면 provider 호출 전에 409
+    `ASSISTANT_MESSAGE_CONFLICT`로 거절한다(호출자 자신의 답변일 때만). manual 모드 대화는
+    composer 판정 경로를 그대로 쓴다. 이미지 턴은 router 호출 비용과 판정 호출 비용을 함께
+    낸다. 두 호출은 병렬이라 대기 시간은 줄지만 호출 수는 그대로다.
+  - 판정 호출은 Auto router와 같은 provider 운영 예산에 최악 비용을 hold한 뒤
+    나가며, 실패·시간 초과·거절은 모두 일반 텍스트 전송으로 떨어진다. 첨부가
+    있는 제출과 override 전송(Deep Research 확장 등)은 묻지 않는다. 판정을
+    기다리는 동안 초안이 바뀌면 아무것도 보내지 않는다.
   - **Review Easy (운영자 승인 2026-10-20)**는 별도 `POST /api/review/route`를
     사용한다. `REVIEW_EASY_ENABLED=true`인 로그인 계정에만 제공하며 기본은 꺼짐이다.
     Chat의 `auto.llmRouterModelId`, 활성 routing guidance와 이미지 triage 판단 기준을
@@ -846,32 +918,10 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     기존 실행 경로를 재사용한다. 새 이미지 prompt는 다시 모델을 선택하며,
     선택이나 preset이 바뀌면 새 견적을 확인한 뒤 생성한다. timeout/잘못된 선택은
     draft를 보존하고 멈춘다. Professional은 카탈로그에서 모델을 직접 고른다.
-  - 첨부 이미지 편집·참조 요청과 첨부 이미지 분석 요청은 **칩 대상이 아니다**.
-    workspace는 텍스트에서 시작하므로 둘 다 거기서 답할 수 없다.
-- **칩은 전송 이후에도 남는다**(2026-08-25). 컴포저에 이미지 요청이 있으면
-  그 초안에 대한 제안이고, 컴포저가 비면 **그 대화에서 마지막으로 물은 질문**에
-  대한 제안이며, 누르면 빈 입력이 아니라 그 질문을 들고 간다. 대화 단위로
-  범위를 잡아 다른 대화로 따라가지 않고, 거절은 질문의 텍스트에 붙으므로
-  전송 전 "나중에"는 전송 후에도 "나중에"다.
-  - 이유는 사람이 결정하는 시점이 다르기 때문이다. 인포그래픽을 요청하고,
-    채팅이 무엇을 줄 수 있는지 읽고, **그제서야** 그림을 원한다.
-  - 칩은 **한 곳에 하나**다. 답변마다 렌더링하면 비교에서 한 질문에 N개가
-    생기고, 제안은 특정 모델의 답변이 아니라 질문에 속한다.
-- **텍스트 밀집 도표·인포그래픽은 이제 칩 대상이다**(2026-08-25 결정).
-  이전 규칙은 이 클래스를 제외했고, 실제로 만들어 낸 것은 다음이다 —
-  모델이 파일을 만들라는 지시와 workspace를 언급하지 말라는 지시를 함께
-  받고도 형식 네 개를 번호로 나열했으며 그 4번이 "이미지 생성 도구"였다.
-  사용자가 4를 골랐고, 모델은 (정확하게) 거기 갈 방법이 없다고 답했다.
-  제외는 **컨트롤만 없애고 문장은 남겼고**, 그것이 가장 나쁜 절반이다.
-  - 그래도 **SVG가 먼저다**. 시스템 블록은 계속 파일을 만들라고 지시한다 —
-    인포그래픽은 글자가 정확해야 하는 물건이고 text-to-image 모델은 한국어
-    글자를 신뢰할 만하게 그리지 못한다. 칩은 그 **옆에** 놓이지 그것을
-    대체하지 않는다.
 - **모델은 목적지를 말하지 않는다.** 어떤 답변도 이미지 생성이 어디 있는지,
   어떻게 가는지 설명하거나 목록의 항목으로 제시해서는 안 된다
   (`lib/imageCapabilityPrompt.ts`가 금지한다). 이동할 수 없는 모델은
-  사용자가 그 목록에서 고른 선택을 이행할 수 없기 때문이며, 그래서 **컨트롤이
-  유일한 제안**이다.
+  사용자가 그 목록에서 고른 선택을 이행할 수 없기 때문이다.
 - 카탈로그의 기존 `이미지 입력` 필터(`modelSupportsImageInput` — 입력
   능력)와 이미지 **생성** 모델 목록을 같은 목록에 혼합하지 않는다.
 - 컴포저에서 전환 시 작성 중 텍스트는 이미지 prompt 초안으로 가져오고,

@@ -1,3 +1,4 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
@@ -144,7 +145,9 @@ export async function POST(
           return NextResponse.json({ error: "Conversation ID is required." }, { status: 400 });
       }
 
-      const session = await getServerSession(authOptions);
+      const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
       if (!session || !session.user) {
           return NextResponse.json({ error: "Authentication required." }, { status: 401 });
       }

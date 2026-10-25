@@ -211,6 +211,11 @@ jobs:
             echo "push with**, and no production access. \`npm run\` needs Node 22 and"
             echo "\`npm ci\`; skip that line if you have not installed."
             echo
+            echo "The first command creates the branch; the second merges into it."
+            echo "That order is not cosmetic -- creating a branch during a conflicted"
+            echo "merge discards \`MERGE_HEAD\`, so branching afterwards loses the merge"
+            echo "you came to make."
+            echo
             echo "**Run them one at a time and stop at the first failure.** Pasting the"
             echo "block runs every line regardless: in PowerShell a failed external command"
             echo "does not stop the next one, so a failed \`git commit\` would be followed by"
@@ -229,7 +234,10 @@ jobs:
             echo
             echo '```'
             echo "git fetch origin main develop"
-            echo "git checkout -B claude/back-merge-main-${MAIN_SHORT} origin/develop"
+            echo "git switch -c claude/back-merge-main-${MAIN_SHORT} origin/develop"
+            echo "#  ^ refuses if that branch already exists, which is the useful"
+            echo "#    answer: another session may have opened this back-merge"
+            echo "#    already. Look for its pull request before making a second."
             echo "git merge --no-ff origin/main"
             echo "#  ^ stops on the conflicts listed below. Edit each file, then:"
             echo "npm run report:back-merge-divergence   # the same reading, locally"

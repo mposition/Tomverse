@@ -1,0 +1,33 @@
+[Unit]
+Description=Auto-rec credential gateway (one request)
+Documentation=https://github.com/mposition/Tomverse/blob/develop/tools/auto-rec-agent/README.md
+
+[Service]
+# Its own transient account, never autorec: autorec runs agent-written code,
+# and this process holds the app secret and the GitHub token.
+DynamicUser=yes
+User=autorec-gw
+# The gateway's own develop mirror and its publish log.
+StateDirectory=autorec-gw
+StateDirectoryMode=0700
+# Read by systemd as root (root:root 0600), so the values reach only this
+# service's environment. A missing file stops the unit from starting.
+EnvironmentFile=/etc/autorec/autorec.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# The instance name carries the connecting PID; the gateway answers only the
+# runner's MainPID, never a process the agent or its tests started.
+Environment=AUTOREC_PEER=%i
+# A root-owned copy installed by install.sh, never the autorec account's checkout.
+ExecStart=/usr/bin/node --disable-sigusr1 --no-warnings=ExperimentalWarning /usr/local/lib/autorec-agent/tools/auto-rec-agent/bin/autorec-gateway.mjs
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+# The first publish fetches develop (up to 30 min); push 10 min; Auto PR wait 5 min.
+RuntimeMaxSec=70min
+NoNewPrivileges=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes

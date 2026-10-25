@@ -21,9 +21,10 @@
  * So the badge is narrowed to the one question it actually has an input for.
  * `requested: false` becomes "no web search" -- a statement about the search,
  * not about what did ground the answer. What *did* ground it is stated by the
- * disclosures that own that fact and are counted by the server:
- * `memory-usage-disclosure` today (§13.4), and the knowledge attribution that
- * follows it.
+ * disclosure that owns that fact and is counted by the server: the profile
+ * knowledge count (`knowledge-usage-disclosure`,
+ * docs/policy/external-conversation-import-and-memory.md §14.3). Account memory
+ * is not stated per answer.
  *
  * The second change is that a message with no `searchMetadata` gets no badge.
  * That field is written on every assistant message the current code

@@ -20,6 +20,19 @@ export type PrCiAutoFixVerdict = { push: true } | { push: false; reasons: string
 
 const TEST_PATH = /(^|\/)(tests?|__tests__|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 
+const CONTRACT_DOCUMENT = /^docs\/(policy|ui-contracts|release-gates)\//;
+
+/**
+ * What the model may not touch although the merge lane may merge it when a
+ * person or an agent session wrote it (owner 2026-10-23 narrowed the lane to
+ * the minimum; the auto-fix keeps the wider fence): everything under
+ * .github/ and scripts/ (the checks and what they run), any file at the
+ * repository root (how checks run and are configured), and every package
+ * manifest or npm config wherever it sits (`npm ci` runs install scripts).
+ */
+const AUTO_FIX_FENCE = /^(\.github|scripts)\//;
+const PACKAGE_FILE = /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|\.npmrc)$/i;
+
 export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: string }): PrCiAutoFixVerdict {
   const reasons = new Set<string>();
   const changedFiles: { path: string; previousPath?: string }[] = [];
@@ -31,7 +44,14 @@ export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: strin
   }
   if (changedFiles.length === 0) reasons.add("no_change");
   for (const file of changedFiles) {
-    for (const path of [file.path, file.previousPath]) if (path && TEST_PATH.test(path)) reasons.add("test_file");
+    for (const path of [file.path, file.previousPath]) {
+      if (path && TEST_PATH.test(path)) reasons.add("test_file");
+      // Contract documents stay off-limits to the model even though the merge
+      // lane may merge one a person wrote (owner 2026-10-23): a model fixing
+      // CI must not rewrite another feature's policy to make its change pass.
+      if (path && CONTRACT_DOCUMENT.test(path)) reasons.add("gate_path");
+      if (path && (AUTO_FIX_FENCE.test(path) || !path.includes("/") || PACKAGE_FILE.test(path))) reasons.add("gate_path");
+    }
   }
   const lane = judgeQaReleaseMergeLaneExclusion({
     headBranch: "auto-fix",

@@ -1214,6 +1214,7 @@ Console에만 남습니다.
 | 이미지 생성 예약·정산 | `lib/imageGenerationService.ts` |
 | 크레딧 구매·분쟁 | `lib/creditPurchase.ts` |
 | extraction run 생성·chunk 종료·취소 | `lib/memoryExtractionService.ts` |
+| Code 태스크 예약·호출 정산·해제·orphan 정리 | `lib/codeManagedService.ts` |
 
 ### DB 제약 — 잠금의 대체물이 아니라 그 아래 그물
 

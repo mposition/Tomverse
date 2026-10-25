@@ -1,10 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 
-import { authOptions } from "@/lib/auth";
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { autoSelectionCapability } from "@/lib/autoRoutingUi";
 import { identifyChatCaller } from "@/lib/chatSecurity";
@@ -32,7 +32,9 @@ const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
  * side.
  */
 export async function GET(request: Request) {
-  const session = await getServerSession(authOptions);
+  const routeAuth = await resolveChatRouteSession(request);
+  if (routeAuth.response) return routeAuth.response;
+  const session = routeAuth.session;
   if (!session?.user?.id) {
     const access = identifyChatCaller(request, null);
     try {
@@ -94,8 +96,11 @@ export async function GET(request: Request) {
 
   try {
     const availability = await autoAvailabilityFor(session.user.id);
+    const voice = voiceConversationConfig(process.env);
     return NextResponse.json(
-      { autoSelection: autoSelectionCapability(availability) },
+      // Older APKs use this field for their 300-second client timer and reserve
+      // estimate. Updated clients opt into continuous funding explicitly.
+      { autoSelection: autoSelectionCapability(availability), voiceConversation: { enabled: Boolean(voice), maxSeconds: 300, continuous: Boolean(voice), reservationSeconds: voice?.reservationSeconds ?? 60 } },
       { headers: NO_STORE_HEADERS }
     );
   } catch (error) {

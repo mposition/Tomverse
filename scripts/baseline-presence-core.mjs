@@ -299,9 +299,8 @@ export const presenceDeclarationIn = (sql) => {
   }
   const match = DECLARATION.exec(declarations[0]);
   if (!match || !RELATION_NAME.test(match[2])) return { kind: "invalid" };
-  return match[1] === "function"
-    ? { kind: "function", function: match[2] }
-    : { kind: "relation", relation: match[2] };
+  if (match[1] === "function") return { kind: "function", function: match[2] };
+  return { kind: "relation", relation: match[2] };
 };
 
 /** The fixed question, with the name as a bound parameter -- never as SQL text. */

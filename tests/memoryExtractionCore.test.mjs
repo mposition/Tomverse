@@ -26,8 +26,13 @@ import {
 import {
     MEMORY_EXTRACTION_EVAL_REGISTER,
     findApprovedEvalPair,
+    findCriticalProbeFailures,
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
+import {
+    MUST_REJECT,
+    MUST_REQUIRE_SENSITIVE_REVIEW,
+} from "../lib/memoryValidatorProbeCorpus.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 
 // --- revocation semantics (§12.1, lib/memoryAccess.ts) ---
@@ -198,12 +203,91 @@ const approvedEntry = (overrides = {}) => ({
 
 const NOW = new Date("2026-08-03T12:00:00.000Z");
 
-test("the shipped register has no problems and no approved pairs", () => {
-    assert.deepEqual(findEvalRegisterProblems(MEMORY_EXTRACTION_EVAL_REGISTER, NOW), []);
+test("the shipped register has no problems and two approved pairs, both on owner launches", () => {
+    assert.deepEqual(
+        findEvalRegisterProblems(MEMORY_EXTRACTION_EVAL_REGISTER, new Date("2026-10-24T00:00:00Z")),
+        []
+    );
+    const approved = MEMORY_EXTRACTION_EVAL_REGISTER.filter((entry) => entry.status === "approved");
+    assert.deepEqual(
+        approved.map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`),
+        // v10 first: automatic extraction takes the first approved pair.
+        ["gpt-5-6-luna::mem-extract-v10", "gpt-5-6-luna::mem-extract-v9"]
+    );
+    for (const entry of approved) {
+        assert.equal(entry.evaluation, null);
+        assert.equal(entry.ownerLaunch.expiresAt, "2026-11-22");
+    }
+});
+
+const ownerLaunchEntry = (launch = {}) => ({
+    extractionModelId: "gpt-5-6-luna",
+    promptVersion: "mem-extract-v9",
+    status: "approved",
+    owner: "@qa",
+    registeredAt: "2026-10-21",
+    evalBudget: null,
+    evaluation: null,
+    ownerLaunch: {
+        approver: "@qa",
+        approvedAt: "2026-10-23",
+        expiresAt: "2026-11-22",
+        decisionRef: "chat",
+        knownLimitations: "unmeasured",
+        ...launch,
+    },
+});
+const DURING_LAUNCH = new Date("2026-10-24T00:00:00Z");
+
+test("an owner launch needs neither a budget nor metrics", () => {
+    assert.deepEqual(findEvalRegisterProblems([ownerLaunchEntry()], DURING_LAUNCH), []);
+});
+
+test("an owner launch must expire within thirty days and before it is used", () => {
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry({ expiresAt: "2026-11-23" })], DURING_LAUNCH)[0],
+        /expire within 30 days/
+    );
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry()], new Date("2026-11-22T00:00:00Z"))[0],
+        /expired/
+    );
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry({ expiresAt: "soon" })], DURING_LAUNCH)[0],
+        /ISO dates/
+    );
+});
+
+test("an owner launch with an empty field fails", () => {
+    assert.match(
+        findEvalRegisterProblems([ownerLaunchEntry({ decisionRef: " " })], DURING_LAUNCH)[0],
+        /empty fields/
+    );
+});
+
+test("an approval rests on one basis, never both", () => {
+    const both = { ...approvedEntry(), ownerLaunch: ownerLaunchEntry().ownerLaunch };
+    assert.match(findEvalRegisterProblems([both], NOW)[0], /one basis/);
+});
+
+test("every critical validator probe still holds", () => {
+    // An empty corpus would pass vacuously, so the probes must be there to run.
+    assert.ok(MUST_REJECT.length > 0 && MUST_REQUIRE_SENSITIVE_REVIEW.length > 0);
+    assert.deepEqual(findCriticalProbeFailures(), []);
+});
+
+test("an approval stops resolving at its expiry, at runtime", () => {
+    const pair = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" };
+    const register = [ownerLaunchEntry()];
+    assert.ok(findApprovedEvalPair(pair, { kind: "none" }, register, DURING_LAUNCH));
     assert.equal(
-        MEMORY_EXTRACTION_EVAL_REGISTER.filter((entry) => entry.status === "approved")
-            .length,
-        0
+        findApprovedEvalPair(pair, { kind: "none" }, register, new Date("2026-11-22T00:00:00Z")),
+        null
+    );
+    // An approved entry that names no expiry resolves to nothing.
+    assert.equal(
+        findApprovedEvalPair(pair, { kind: "none" }, [{ ...ownerLaunchEntry(), ownerLaunch: null }], DURING_LAUNCH),
+        null
     );
 });
 

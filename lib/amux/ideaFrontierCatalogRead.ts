@@ -10,6 +10,7 @@ import {
   type AmuxIdeaFrontierCatalogRow,
 } from "./ideaFrontierCatalogCore.ts";
 import {
+  checkAmuxIdeaFrontierModel,
   checkAmuxIdeaFrontierSelection,
   type AmuxIdeaFrontierApproval,
   type AmuxIdeaFrontierSelectionDecision,
@@ -19,6 +20,90 @@ import {
 type VerifiedCatalogRead =
   | { decision: "catalog_current"; approvals: AmuxIdeaFrontierApproval[]; databaseNow: Date }
   | { decision: "hold"; reason: string };
+
+async function readVerifiedAmuxIdeaFrontierCatalogFromTx(
+  tx: Prisma.TransactionClient,
+  integrityKeys: ReturnType<typeof adminAuditIntegrityKeys>,
+): Promise<VerifiedCatalogRead> {
+  const rows = await tx.amuxIdeaFrontierModelApproval.findMany({
+    take: 257,
+    orderBy: [{ provider: "asc" }, { modelId: "asc" }, { version: "asc" }],
+  });
+  if (rows.length > 256) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  const catalogRows: AmuxIdeaFrontierCatalogRow[] = rows.map((row) => ({
+    id: row.id,
+    provider: row.provider as AmuxIdeaFrontierCatalogRow["provider"],
+    modelId: row.modelId,
+    allowedEfforts: row.allowedEfforts as AmuxIdeaFrontierCatalogRow["allowedEfforts"],
+    version: row.version,
+    status: row.status as AmuxIdeaFrontierCatalogRow["status"],
+    approvedAt: row.approvedAt,
+    approvedByUserId: row.approvedByUserId,
+    approvalAuditLogId: row.approvalAuditLogId,
+    revokedAt: row.revokedAt,
+    revokedByUserId: row.revokedByUserId,
+    revocationAuditLogId: row.revocationAuditLogId,
+  }));
+  const auditRows = await tx.adminAuditLog.findMany({
+    // Query by target, not only the IDs still stored on the row. An
+    // unreferenced revocation must be detected as a catalog conflict.
+    where: {
+      targetType: "AmuxIdeaFrontierModelApproval",
+      targetId: { in: rows.map((row) => row.id) },
+    },
+    take: 513,
+    select: {
+      id: true, previousHash: true, actorUserId: true, actorEmail: true,
+      action: true, targetType: true, targetId: true, summary: true,
+      metadata: true, ipAddress: true, userAgent: true,
+      entryHash: true, createdAt: true,
+    },
+  });
+  if (auditRows.length > 512) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  const predecessorIds = auditRows.flatMap((row) =>
+    row.previousHash ? [row.previousHash] : []);
+  const predecessorRows = await tx.adminAuditLog.findMany({
+    where: { entryHash: { in: predecessorIds } },
+    select: { entryHash: true },
+  });
+  const audits: AmuxIdeaFrontierAuditRow[] = auditRows.map((row) => ({
+    id: row.id,
+    previousHash: row.previousHash,
+    actorUserId: row.actorUserId,
+    actorEmail: row.actorEmail,
+    action: row.action,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    summary: row.summary,
+    metadata: row.metadata ?? null,
+    ipAddress: row.ipAddress,
+    userAgent: row.userAgent,
+    entryHash: row.entryHash,
+    createdAt: row.createdAt.toISOString(),
+  }));
+  const catalog = verifyAmuxIdeaFrontierCatalog(
+    catalogRows,
+    audits,
+    new Set(predecessorRows.flatMap((row) => row.entryHash ? [row.entryHash] : [])),
+    integrityKeys,
+  );
+  if (!catalog.ok) {
+    console.error("AMUX v4 frontier catalog rejected", { reason: catalog.reason });
+    return { decision: "hold", reason: catalog.reason };
+  }
+  const databaseTime = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT clock_timestamp() AS "now"
+  `;
+  const databaseNow = databaseTime[0]?.now;
+  if (!(databaseNow instanceof Date) || !Number.isFinite(databaseNow.getTime())) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  return { decision: "catalog_current", approvals: catalog.approvals, databaseNow };
+}
 
 /**
  * Read-side pre-call check. Its result is a snapshot observation, not a lease
@@ -38,84 +123,7 @@ async function readVerifiedAmuxIdeaFrontierCatalog(): Promise<VerifiedCatalogRea
         SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
                set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
       `;
-      const rows = await tx.amuxIdeaFrontierModelApproval.findMany({
-        take: 257,
-        orderBy: [{ provider: "asc" }, { modelId: "asc" }, { version: "asc" }],
-      });
-      if (rows.length > 256) {
-        return { decision: "hold", reason: "model_catalog_unverified" };
-      }
-      const catalogRows: AmuxIdeaFrontierCatalogRow[] = rows.map((row) => ({
-        id: row.id,
-        provider: row.provider as AmuxIdeaFrontierCatalogRow["provider"],
-        modelId: row.modelId,
-        allowedEfforts: row.allowedEfforts as AmuxIdeaFrontierCatalogRow["allowedEfforts"],
-        version: row.version,
-        status: row.status as AmuxIdeaFrontierCatalogRow["status"],
-        approvedAt: row.approvedAt,
-        approvedByUserId: row.approvedByUserId,
-        approvalAuditLogId: row.approvalAuditLogId,
-        revokedAt: row.revokedAt,
-        revokedByUserId: row.revokedByUserId,
-        revocationAuditLogId: row.revocationAuditLogId,
-      }));
-      const auditRows = await tx.adminAuditLog.findMany({
-        // Query by target, not only the IDs still stored on the row. An
-        // unreferenced revocation must be detected as a catalog conflict.
-        where: {
-          targetType: "AmuxIdeaFrontierModelApproval",
-          targetId: { in: rows.map((row) => row.id) },
-        },
-        take: 513,
-        select: {
-          id: true, previousHash: true, actorUserId: true, actorEmail: true,
-          action: true, targetType: true, targetId: true, summary: true,
-          metadata: true, ipAddress: true, userAgent: true,
-          entryHash: true, createdAt: true,
-        },
-      });
-      if (auditRows.length > 512) {
-        return { decision: "hold", reason: "model_catalog_unverified" };
-      }
-      const predecessorIds = auditRows.flatMap((row) =>
-        row.previousHash ? [row.previousHash] : []);
-      const predecessorRows = await tx.adminAuditLog.findMany({
-        where: { entryHash: { in: predecessorIds } },
-        select: { entryHash: true },
-      });
-      const audits: AmuxIdeaFrontierAuditRow[] = auditRows.map((row) => ({
-        id: row.id,
-        previousHash: row.previousHash,
-        actorUserId: row.actorUserId,
-        actorEmail: row.actorEmail,
-        action: row.action,
-        targetType: row.targetType,
-        targetId: row.targetId,
-        summary: row.summary,
-        metadata: row.metadata ?? null,
-        ipAddress: row.ipAddress,
-        userAgent: row.userAgent,
-        entryHash: row.entryHash,
-        createdAt: row.createdAt.toISOString(),
-      }));
-      const catalog = verifyAmuxIdeaFrontierCatalog(
-        catalogRows,
-        audits,
-        new Set(predecessorRows.flatMap((row) => row.entryHash ? [row.entryHash] : [])),
-        integrityKeys,
-      );
-      if (!catalog.ok) {
-        console.error("AMUX v4 frontier catalog rejected", { reason: catalog.reason });
-        return { decision: "hold", reason: catalog.reason };
-      }
-      const databaseTime = await tx.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
-      `;
-      const databaseNow = databaseTime[0]?.now;
-      if (!(databaseNow instanceof Date) || !Number.isFinite(databaseNow.getTime())) {
-        return { decision: "hold", reason: "model_catalog_unverified" };
-      }
-      return { decision: "catalog_current", approvals: catalog.approvals, databaseNow };
+      return readVerifiedAmuxIdeaFrontierCatalogFromTx(tx, integrityKeys);
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
       maxWait: 5_000,
@@ -156,4 +164,38 @@ export async function readCurrentAmuxIdeaFrontierSelection(
   const catalog = await readVerifiedAmuxIdeaFrontierCatalog();
   if (catalog.decision !== "catalog_current") return catalog;
   return checkAmuxIdeaFrontierSelection(selected, catalog.approvals, catalog.databaseNow);
+}
+
+/**
+ * Verified selection read inside a caller-owned transaction. The caller may
+ * hold the audit-chain lock so approval or revocation cannot race this check.
+ * Query failures escape and abort that transaction rather than becoming a
+ * usable permission signal.
+ */
+export async function readCurrentAmuxIdeaFrontierSelectionFromTx(
+  tx: Prisma.TransactionClient,
+  selected: AmuxIdeaModelSelection,
+): Promise<AmuxIdeaFrontierSelectionDecision> {
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  if (integrityKeys.length === 0) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  const catalog = await readVerifiedAmuxIdeaFrontierCatalogFromTx(tx, integrityKeys);
+  if (catalog.decision !== "catalog_current") return catalog;
+  return checkAmuxIdeaFrontierSelection(selected, catalog.approvals, catalog.databaseNow);
+}
+
+/** Same verified read for one provider/model at any effort, inside the
+ * caller's transaction (which should hold the audit-chain lock). */
+export async function readCurrentAmuxIdeaFrontierModelFromTx(
+  tx: Prisma.TransactionClient,
+  selected: { provider: string; modelId: string },
+): Promise<ReturnType<typeof checkAmuxIdeaFrontierModel>> {
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  if (integrityKeys.length === 0) {
+    return { decision: "hold", reason: "model_catalog_unverified" };
+  }
+  const catalog = await readVerifiedAmuxIdeaFrontierCatalogFromTx(tx, integrityKeys);
+  if (catalog.decision !== "catalog_current") return catalog;
+  return checkAmuxIdeaFrontierModel(selected, catalog.approvals, catalog.databaseNow);
 }

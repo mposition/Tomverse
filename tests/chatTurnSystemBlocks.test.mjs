@@ -22,7 +22,6 @@ const base = {
   nativeSearchEnabled: false,
   nativeSearchForced: false,
   turnAttachments: [],
-  promptText: "draw a picture of a cat",
   imageGenerationFlagEnabled: true,
   planAllowsImageGeneration: true,
 };
@@ -89,7 +88,6 @@ test("route and preflight get the same blocks and the same count from the same i
   const asPreflight = build();
   assert.deepEqual(asRoute.systemMessages, asPreflight.systemMessages);
   assert.equal(asRoute.promptTokens, asPreflight.promptTokens);
-  assert.equal(asRoute.imageIntentClass, asPreflight.imageIntentClass);
 });
 
 test("the forced-search flag only matters while native search is enabled", () => {
@@ -158,27 +156,18 @@ test("no viewer is told how to reach image generation, whatever their plan", () 
   }
 });
 
-test("an attached-image edit request takes the edit branch", () => {
-  const blocks = build({
-    promptText: "배경을 바꿔 줘",
+test("an attached image does not change the image block", () => {
+  // Routing an image request is the LLM judgement's job
+  // (lib/chatImageIntent.ts); the capability block depends on the viewer and
+  // the tools, never on the turn's text or attachments.
+  const withImage = build({
     turnAttachments: [
       { handle: "att_1", name: "p.png", mediaType: "image/png", byteSize: 10 },
     ],
   });
-  assert.equal(blocks.imageIntentClass, "edit_or_reference");
-  assert.ok(blocks.imageCapabilityPrompt.includes("workspace cannot edit"));
-  assert.equal(blocks.imageCapabilityPrompt.includes("Image generation exists"), false);
-});
-
-test("a question about an attached image does not take the edit branch", () => {
-  const blocks = build({
-    promptText: "이 사진을 설명해 줘",
-    turnAttachments: [
-      { handle: "att_1", name: "p.png", mediaType: "image/png", byteSize: 10 },
-    ],
-  });
-  assert.equal(blocks.imageIntentClass, "analysis");
-  assert.equal(blocks.imageCapabilityPrompt.includes("workspace cannot edit"), false);
+  assert.equal(withImage.imageCapabilityPrompt, build().imageCapabilityPrompt);
+  assert.equal(withImage.imageCapabilityPrompt.includes("workspace cannot edit"), false);
+  assert.ok(withImage.imageCapabilityPrompt.includes("Image generation exists in this app"));
 });
 
 /* ------------------------------------------------------------------------ */

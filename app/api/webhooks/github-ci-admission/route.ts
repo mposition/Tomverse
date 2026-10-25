@@ -7,14 +7,15 @@ import { NextResponse } from "next/server";
 
 import { CI_ADMISSION_REPOSITORY } from "@/lib/ciAdmissionGithub";
 import { ciAdmissionArrival, verifyCiAdmissionWebhookSignature } from "@/lib/ciAdmissionWebhookCore";
-import { ciAdmissionMode, runCiAdmissionRound } from "@/lib/ciAdmissionService";
+import { ciAdmissionMode, requestCiAdmissionRound } from "@/lib/ciAdmissionService";
 
 /**
  * GitHub's webhook for CI admission (lib/ciAdmissionCore.ts): pull_request and
  * workflow_run events from the CI admission GitHub App. Off (the default) it
  * answers 404 and reads nothing. Every delivery must carry a valid
  * X-Hub-Signature-256 for `CI_ADMISSION_WEBHOOK_SECRET`, which is read here and
- * nowhere else.
+ * nowhere else. A delivery is answered at once (202) and asks for a round,
+ * which runs after the answer, coalesced.
  */
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -59,12 +60,9 @@ export async function POST(request: Request) {
   const decision = ciAdmissionArrival(event, payload, CI_ADMISSION_REPOSITORY);
   if (decision.kind === "ignore") return NextResponse.json({ ignored: decision.reason }, { status: 202 });
 
-  try {
-    const outcome = await runCiAdmissionRound(decision.arrival);
-    // A failed GitHub read is retried by the service; the delivery shows it failed.
-    return NextResponse.json(outcome, { status: outcome.outcome === "read_failed" ? 503 : 200 });
-  } catch (error) {
-    console.error("CI admission round failed:", error instanceof Error ? error.message : "unknown");
-    return NextResponse.json({ error: "Round failed." }, { status: 500 });
-  }
+  // Answer within GitHub's ten seconds: ask for a round and return. The round
+  // reads the whole line from GitHub after the answer, so no delivery carries
+  // anything that could be lost.
+  requestCiAdmissionRound();
+  return NextResponse.json({ accepted: true, arrival: decision.arrival }, { status: 202 });
 }

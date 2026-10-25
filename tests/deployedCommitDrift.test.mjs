@@ -16,6 +16,7 @@ import {
     deployedCommitDrift,
     describeDrift,
     describeEndpointFailure,
+    driftEnvironments,
 } from "../scripts/report-deployed-commit-drift-core.mjs";
 
 const NOW = "2026-08-26T12:00:00.000Z";
@@ -250,4 +251,22 @@ test("every failure reason produces a line, and an unknown one produces none", (
         assert.ok(!line.includes("undefined"), `${reason} should not print undefined`);
     }
     assert.equal(describeEndpointFailure({ reason: null }), null);
+});
+
+test("each environment is compared against the branch it actually deploys", () => {
+    // The lane switch (2026-10-07): staging serves the `test` branch's release
+    // candidate and develop lands on dev. Against develop, staging would show
+    // every merge since the candidate as an hour-old lag.
+    assert.deepEqual(
+        driftEnvironments({}).map(({ name, url, branch }) => [name, url, branch]),
+        [
+            ["production", "https://tomverse.app", "main"],
+            ["staging", "https://staging.tomverse.app", "test"],
+            ["dev", "https://dev.tomverse.app", "develop"],
+        ]
+    );
+    assert.equal(
+        driftEnvironments({ DEV_APP_URL: "https://dev.example" }).find((e) => e.name === "dev").url,
+        "https://dev.example"
+    );
 });

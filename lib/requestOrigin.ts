@@ -46,6 +46,8 @@ const EXEMPT_MUTATION_PATHS = [
   "/api/auth/mobile/exchange",
   "/api/auth/mobile/refresh",
   "/api/auth/mobile/logout",
+  // App-owned email proof; default-off, no ambient session, existing OTP limits.
+  "/api/auth/mobile/email",
 ];
 
 const parseOrigin = (value: string | null) => {

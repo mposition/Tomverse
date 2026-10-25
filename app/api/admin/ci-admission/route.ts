@@ -10,20 +10,29 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { CI_ADMISSION_MAX_CAPACITY } from "@/lib/ciAdmissionCore";
-import { changeCiAdmission, readCiAdmissionAdminView, runCiAdmissionRound, stopCiAdmissionPull } from "@/lib/ciAdmissionService";
+import {
+  changeCiAdmission,
+  readCiAdmissionAdminView,
+  requestCiAdmissionRound,
+  runCiAdmissionRound,
+  stopCiAdmissionPull,
+} from "@/lib/ciAdmissionService";
 
 /**
  * Admin › Agent digests: the CI admission line (lib/ciAdmissionCore.ts).
  * Reading is any administrator; every change is ops:write with a recent
- * sign-in, and is audited. After a change a round runs at once, so moving a
- * pull request to the top releases it as soon as a slot is free.
+ * sign-in, and is audited. After a change or a stop a round is asked for and
+ * the answer does not wait for it (2026-10-25: a round under a burst of runs
+ * outlasted the page's deadline, and a stop that had cancelled the runs read
+ * as a failed save); the page shows its result on its next read. Only
+ * "Run a round now" waits for the round.
  */
 
 const prNumber = z.number().int().positive().max(9_999_999);
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reorder"), order: z.array(prNumber).max(100) }).strict(),
   z.object({ action: z.literal("move_top"), number: prNumber }).strict(),
-  z.object({ action: z.literal("remove"), number: prNumber }).strict(),
+  z.object({ action: z.literal("move_bottom"), number: prNumber }).strict(),
   z.object({ action: z.literal("set_capacity"), capacity: z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY) }).strict(),
   z.object({ action: z.literal("evaluate") }).strict(),
   // The operator's stop: back to draft and every run force-cancelled.
@@ -68,13 +77,18 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "The line changed; reload and try again.", code: "stale" }, { status: 409 });
       }
     }
-    // A round after every change: a pull request moved to the top, or a larger
-    // budget, may release one now. A round that cannot run is not an error here.
-    const round = await runCiAdmissionRound(null).catch((error: unknown) => ({
+    if (body.action !== "evaluate") {
+      // A pull request moved to the top, or a larger budget, may release one
+      // now: a round runs after this answer.
+      requestCiAdmissionRound();
+      return NextResponse.json({ ...(await readCiAdmissionAdminView()), ...(stop ? { stop } : {}) });
+    }
+    // A round that cannot run is not an error here.
+    const round = await runCiAdmissionRound().catch((error: unknown) => ({
       outcome: "read_failed" as const,
       failure: error instanceof Error ? error.message.slice(0, 80) : "unknown",
     }));
-    return NextResponse.json({ ...(await readCiAdmissionAdminView()), round, ...(stop ? { stop } : {}) });
+    return NextResponse.json({ ...(await readCiAdmissionAdminView()), round });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;

@@ -13,6 +13,7 @@ import {
   type MouseEventHandler,
 } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
+import { VoiceConversationHistory } from "@/components/chat/VoiceConversationHistory";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -54,6 +55,10 @@ import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import type { ReviewImageTurns } from "@/lib/reviewImageTurn";
+import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import {
   answeringModelId,
   CHAT_WELCOME_MESSAGE_ID as WELCOME_MESSAGE_ID,
@@ -126,6 +131,8 @@ import {
 } from "@/lib/guestAutoRetry";
 
 const processedPromptKeys = new Set<string>();
+// One image-turn request plus two re-asks under the same answer id.
+const CHAT_IMAGE_TURN_ATTEMPTS = 3;
 const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
 const DURABLE_ATTEMPT_MAX_POLL_MS = 5 * 60 * 1_000;
 const DURABLE_ATTEMPT_MAX_BACKOFF_MS = 15_000;
@@ -206,6 +213,7 @@ function guestTranscriptWithCarriedAnswers(
 }
 
 type ChatAppProps = {
+  voiceHistoryRevision?: number;
   /** Product chrome that owns this panel's account and purchase returns. */
   currentProduct?: ChatWorkspaceProduct;
   modelId: string;
@@ -270,6 +278,12 @@ type ChatAppProps = {
     contextLayout?: "single" | "comparison";
     /** Opaque reference to a server-held Refiner decision; carries no prompt. */
     promptRefinerDecision?: PromptRefinerProductChatDecision;
+    /**
+     * Answer this turn with an image instead of text (lib/chatImageTurn.ts):
+     * the image-intent triage's models and preset.
+     */
+    imageTurn?: ChatImageTurnRequest;
+    imageTurnsByModel?: ReviewImageTurns;
   } | null;
   /**
    * Asks the shell for a context the whole run can share, after this panel's
@@ -438,6 +452,7 @@ const interpolateModelOnlyLabel = (template: string, modelName: string) =>
     template.replace("{model}", modelName);
 
 function ChatAppComponent({
+  voiceHistoryRevision,
   currentProduct = "review",
   modelId,
   transcriptScope = "model",
@@ -479,7 +494,7 @@ function ChatAppComponent({
       ? { kind: "guest" }
       : { kind: "account", userId: sessionUserId }
   );
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
     // UX-021. Only used to name this panel's follow-up field. Three panels
     // render three of these, so a name that does not say *which* model is the
     // same as no name at all for anyone navigating by form field.
@@ -1462,7 +1477,9 @@ function ChatAppComponent({
     onDispatchStarted?: () => void,
     /** One server-held Refiner decision. Never reused by a recovery send. */
     promptRefinerDecision?: PromptRefinerProductChatDecision,
-    guestAutoCapability?: string
+    guestAutoCapability?: string,
+    /** Answer with an image instead of text; see the branch below. */
+    imageTurn?: ChatImageTurnRequest | null
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1562,7 +1579,11 @@ function ChatAppComponent({
 	  createdAt: new Date().toISOString(),
     };
 
-    let assistantMessageId = crypto.randomUUID();
+    // A retried image turn keeps its first answer id: it is the image
+    // group's idempotency key (lib/chatImageTurn.ts).
+    let assistantMessageId =
+      imageTurn?.assistantMessageId ?? (imageTurn?.comparison
+        ? `${imageTurn.comparison.id}_${imageTurn.comparison.index}` : crypto.randomUUID());
     const assistantMessage: Message = {
 		id: assistantMessageId,
 		role: "assistant",
@@ -1575,7 +1596,11 @@ function ChatAppComponent({
     writeChatRuntimeMessages(runKey, (prev) => [
       // A refresh that completed after the durable Message POST may already
       // include this user row. The accepted turn must appear once, in order.
-      ...prev.filter((message) => message.id !== userMsgId),
+      // A retried image turn reuses its answer id, so its failed bubble is
+      // replaced rather than duplicated.
+      ...prev.filter(
+        (message) => message.id !== userMsgId && message.id !== assistantMessageId
+      ),
       userMessage,
       assistantMessage,
     ]);
@@ -1716,6 +1741,123 @@ function ChatAppComponent({
     // Keep that uncertainty scoped to this exact logical turn; ordinary Guest
     // manual and pre-POST verification failures retain their existing retry.
     let guestAutoRequestStarted = false;
+
+    /*
+      An image turn: the saved question is answered by an image in this same
+      conversation (POST .../image-turn), not by /api/chat. The route reserves
+      and starts the image and writes the answer; the card on the answer polls
+      the group for the pictures. Account Chat only -- a Guest has no saved
+      question to answer.
+
+      Two ways in: the composer's own image-intent call decided before the
+      send (`imageTurn`), or -- on an Auto turn -- /api/chat decided it beside
+      its router call and answered `X-Chat-Response-Mode: image-turn` before
+      reserving anything (see the response-mode branches below).
+    */
+    const runImageTurn = async (request: ChatImageTurnRequest) => {
+      const sentPrompt = getChatRuntimeLastPrompt(runKey);
+      if (sentPrompt) {
+        setChatRuntimeLastPrompt(runKey, {
+          ...sentPrompt,
+          imageTurn: {
+            modelIds: request.modelIds,
+            preset: request.preset,
+            ...(request.prompt ? { prompt: request.prompt } : {}),
+            assistantMessageId,
+            ...(request.comparison ? { comparison: request.comparison } : {}),
+          },
+        });
+      }
+      try {
+        /*
+          The request is idempotent on the answer id, so an outcome this
+          client could not read -- a dropped connection, a 5xx, a body that
+          did not parse -- is asked again under the same id rather than shown
+          as a failure: the image may already be reserved, and asking again
+          recovers that group instead of leaving the user to send the
+          question a second time (and pay a second time). A readable refusal
+          (4xx) is final.
+        */
+        const postImageTurn = async () => {
+          const res = await fetch(
+            `/api/conversations/${encodeURIComponent(targetChatId)}/image-turn`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sourceUserMessageId,
+                assistantMessageId,
+                modelId,
+                imageModelIds: request.modelIds,
+                ...(request.comparison ? { imageGroupModelIds: request.comparison.modelIds } : {}),
+                preset: request.preset,
+                ...(request.prompt ? { prompt: request.prompt } : {}),
+              }),
+              signal: controller.signal,
+            }
+          );
+          const data: unknown = await res.json().catch(() => null);
+          return { res, data };
+        };
+        let outcome: { res: Response; data: unknown } | null = null;
+        for (let attempt = 0; attempt < CHAT_IMAGE_TURN_ATTEMPTS; attempt += 1) {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, attempt * 1_500));
+          }
+          if (controller.signal.aborted) break;
+          try {
+            outcome = await postImageTurn();
+            if (outcome.res.status < 500 && outcome.data !== null) break;
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            outcome = null;
+          }
+        }
+        if (!outcome) throw new Error("Chat image turn outcome unknown.");
+        const { res, data } = outcome;
+        const body = (data ?? {}) as { content?: unknown; imageTurn?: unknown; error?: unknown; code?: unknown };
+        const imageTurnRef = res.ok ? readChatImageTurnRef(body.imageTurn) : null;
+        if (!imageTurnRef) {
+          const errorCode =
+            typeof body.code === "string" ? body.code : "CHAT_IMAGE_TURN_FAILED";
+          setAssistantMessage(
+            assistantMessageId,
+            typeof body.error === "string" ? body.error : t("chat.responseError"),
+            "error",
+            { errorCode }
+          );
+          return;
+        }
+        const content = typeof body.content === "string" ? body.content : "";
+        setAssistantMessage(assistantMessageId, content, "normal", undefined, {
+          imageTurn: imageTurnRef,
+        });
+        onResponseComplete?.(analyticsPromptId, modelId, content);
+      } catch {
+        setAssistantMessage(
+          assistantMessageId,
+          controller.signal.aborted ? t("chat.responseCancelled") : t("chat.responseError"),
+          controller.signal.aborted ? "cancelled" : "error",
+          controller.signal.aborted ? undefined : { errorCode: "CHAT_IMAGE_TURN_FAILED" }
+        );
+      }
+    };
+    if (imageTurn === null && !isGuestMode) {
+      setAssistantMessage(assistantMessageId, reviewWorkspaceCopy[lang].unsupported, "normal");
+      liveness.stop();
+      endChatRuntimeRun(runKey, controller);
+      return;
+    }
+    if (imageTurn && !isGuestMode) {
+      try {
+        onDispatchStarted?.();
+        await runImageTurn(imageTurn);
+      } finally {
+        liveness.stop();
+        endChatRuntimeRun(runKey, controller);
+      }
+      return;
+    }
 
     try {
       const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal);
@@ -1996,6 +2138,19 @@ function ChatAppComponent({
           ? { ...message, modelId: answeringModelId({ requestedModelId: modelId, routedModelId }) }
           : message
       ));
+
+      if (response.headers.get("X-Chat-Response-Mode") === "image-turn") {
+        // The server's Auto turn found an image request and stopped before
+        // reserving anything; the same answer id makes the image.
+        liveness.stop();
+        const decision = readChatImageTurnRequest(
+          ((await response.json().catch(() => null)) as { imageTurn?: unknown } | null)
+            ?.imageTurn
+        );
+        if (!decision) throw new Error(t("chat.responseError"));
+        await runImageTurn(decision);
+        return;
+      }
 
       if (response.headers.get("X-Chat-Response-Mode") === "async-job") {
         // Deep research doesn't stream -- the idle-timeout watchdog is
@@ -2507,6 +2662,7 @@ function ChatAppComponent({
     runGuestChatRequest,
     sessionUserId,
     t,
+    lang,
     webSearchMode,
     transcriptScope,
     reviewProvider,
@@ -2589,7 +2745,9 @@ function ChatAppComponent({
         await handleSendPrompt(
           lastPrompt.text,
           lastPrompt.targetChatId,
-          crypto.randomUUID(),
+          // An image retry answers the same saved question in place, so the
+          // question keeps its own id instead of showing a second copy.
+          lastPrompt.imageTurn ? lastPrompt.sourceUserMessageId : crypto.randomUUID(),
           lastPrompt.attachments,
           null,
           undefined,
@@ -2601,7 +2759,12 @@ function ChatAppComponent({
           // through the stored mode would quietly send it with search off.
           lastPrompt.webSearchMode,
           [],
-          lastPrompt.sourceUserMessageId
+          lastPrompt.sourceUserMessageId,
+          undefined,
+          undefined,
+          undefined,
+          // An image turn is retried as the same image request.
+          lastPrompt.imageTurn
         );
       } finally {
         endSendPreparation(preparationKey, preparationToken);
@@ -2845,7 +3008,10 @@ function ChatAppComponent({
             );
           },
           promptPayload.promptRefinerDecision,
-          promptPayload.guestAutoCapability
+          promptPayload.guestAutoCapability,
+          promptPayload.imageTurnsByModel
+            ? promptPayload.imageTurnsByModel[modelId]
+            : promptPayload.imageTurn
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });
@@ -3008,6 +3174,7 @@ function ChatAppComponent({
         // A continuation is not an empty conversation: the imported half is
         // its earlier turns, and they render inside this list.
         !hasImportedTranscript ? null : <ChatMessageList
+        transcriptFooter={voiceHistoryRevision !== undefined && initialConversationId && !isGuestMode ? <VoiceConversationHistory conversationId={initialConversationId} revision={voiceHistoryRevision} /> : undefined}
         messages={
           // The imported half first, always: it is what this conversation
           // continues from. `useCenteredWelcome` drops the panel's own

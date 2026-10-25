@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import {
   VOICE_OPERATIONAL_LIMIT_REACHED,
   voiceSettlementRelease,
@@ -92,8 +93,9 @@ const book = async (input: {
   periodStart: Date;
   seconds: number;
   limit: number;
+  client?: Prisma.TransactionClient;
 }): Promise<boolean> => {
-  const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+  const rows = await (input.client ?? prisma).$queryRaw<Array<{ count: bigint }>>`
     INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
     VALUES (${input.key}, ${input.period}, ${input.periodStart}, ${input.seconds}, NOW())
     ON CONFLICT ("key", "period", "periodStart")
@@ -106,8 +108,8 @@ const book = async (input: {
   return rows.length > 0;
 };
 
-const unbook = async (key: string, booking: ProviderBooking) => {
-  await prisma.$executeRaw`
+const unbook = async (key: string, booking: ProviderBooking, client?: Prisma.TransactionClient) => {
+  await (client ?? prisma).$executeRaw`
     UPDATE "ChatUsageBucket"
     SET "count" = GREATEST("count" - ${booking.seconds}, 0), "updatedAt" = NOW()
     WHERE "key" = ${key}
@@ -120,6 +122,7 @@ export const reserveVoiceProviderSeconds = async (input: {
   seconds: number;
   env?: Record<string, string | undefined>;
   now?: Date;
+  client?: Prisma.TransactionClient;
 }): Promise<VoiceProviderReservation> => {
   const env = input.env ?? process.env;
   const { limits } = resolveVoiceProviderBudget(env, {
@@ -166,7 +169,7 @@ export const reserveVoiceProviderSeconds = async (input: {
     seconds,
   };
 
-  const dayBooked = await book({ key, ...day, limit: limits.secondsPerDay });
+  const dayBooked = await book({ key, ...day, limit: limits.secondsPerDay, client: input.client });
   if (!dayBooked) {
     throw new VoiceBudgetError(
       429,
@@ -180,12 +183,13 @@ export const reserveVoiceProviderSeconds = async (input: {
     key,
     ...month,
     limit: limits.secondsPerMonth,
+    client: input.client,
   });
   if (!monthBooked) {
     // The day was booked and the month refused. Give the day back before the
     // caller sees the refusal, or a month-capped deployment burns its daily
     // budget on requests that never ran.
-    await unbook(key, day).catch(() => undefined);
+    await unbook(key, day, input.client).catch(() => undefined);
     // The month's own boundary, not the day's. Answering a monthly refusal
     // with "try tomorrow" sends the user back into the same refusal every day
     // until the 1st, and the retry-after they were given was never true.
@@ -210,6 +214,7 @@ export const reserveVoiceProviderSeconds = async (input: {
 export const settleVoiceProviderSeconds = async (input: {
   reservation: VoiceProviderReservation;
   basis: VoiceSettlementBasis;
+  client?: Prisma.TransactionClient;
 }): Promise<{ releasedSeconds: number }> => {
   const { reservation } = input;
   if (reservation.settled) return { releasedSeconds: 0 };
@@ -223,7 +228,7 @@ export const settleVoiceProviderSeconds = async (input: {
 
   const key = providerKey();
   for (const booking of reservation.bookings) {
-    await unbook(key, { ...booking, seconds: release });
+    await unbook(key, { ...booking, seconds: release }, input.client);
   }
   return { releasedSeconds: release };
 };

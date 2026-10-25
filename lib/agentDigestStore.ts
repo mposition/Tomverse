@@ -205,7 +205,7 @@ const countByAgent = (rows: readonly RetentionRow[]) =>
 
 /**
  * Body expiry, the first of the table's two allowed changes (shared contract
- * items 4-5; docs/policy/qa-release-agent.md section 4). One batch of rows past
+ * items 4-5; docs/policy/billing-finance-ops.md §1.4). One batch of rows past
  * their `retentionUntil`, for every agent: the payload becomes NULL and the
  * update trigger stamps `bodyDeletedAt` from the database clock. The trigger
  * refuses the update for any row still inside its retention, so this function

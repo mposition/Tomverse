@@ -1,47 +1,74 @@
 /**
- * CI admission's judgements (owner decision 2026-10-20). GitHub's 40 concurrent
- * jobs are shared per job, so when more pull requests run CI at once than the
- * runners hold, every one of them finishes late. Admission keeps the number
- * running at once inside a budget of slots, holds the rest as drafts (a draft
- * runs no CI) in a line the operator orders in Admin, and releases the head of
- * that line when a slot frees.
+ * CI admission's judgements (owner decisions 2026-10-20, revised 2026-10-21).
+ * GitHub's concurrent jobs are shared per job, so when more pull requests run
+ * CI at once than the runners hold, every one of them finishes late.
  *
- * - A pull request into develop takes 1 slot, one into main (release or
- *   hotfix) takes 2; the budget is 3 by default, set in Admin. Three develop
- *   pull requests, or one into main and one into develop, run at once.
- * - No class jumps the line: a hotfix waits like any other until the operator
- *   moves it to the top, so it never competes with running pull requests.
- * - A pull request uses its slots while its CI runs. One admission released or
- *   let through also reserves its slots until GitHub shows its runs (or the
- *   grace period ends), so a burst of events cannot let several through
- *   against the same free slot; once its runs are seen, they alone count, so
- *   a CI that finishes fast frees its slots at once. One whose CI finished and
- *   only waits to be merged holds none.
- * - Arrival is a pull request becoming ready for review (or opened or reopened
- *   ready). If anything waits in line, or its slots do not fit, it goes back
- *   to draft, its just-started runs are cancelled, and it joins the end of the
- *   line. Pushes to develop and main are never held, but their CI (what
- *   Railway waits for to deploy) occupies slots like a pull request into the
- *   same branch: it uses the same runners.
- * - A draft runs no CI, so a draft with a pull_request run queued or in
- *   progress is a re-run of an event from before it became a draft (GitHub
- *   re-runs replay the original event, draft flag included): that run is
- *   cancelled.
- * - Stacked pull requests (base other than develop or main) and forks are not
- *   handled.
+ * The line is every open pull request into develop or main, drafts included,
+ * in one priority order the operator sets in Admin. It is read from GitHub
+ * every round, so it never depends on which webhook arrived: a new pull request
+ * joins at the bottom, a closed one leaves, and nothing else moves it.
  *
- * Pure: no clock, network or database. lib/ciAdmissionService.ts passes what it
+ * - The budget is GitHub's concurrent-job limit for hosted runners, 40 by
+ *   default, set in Admin (owner, 2026-10-23: runners, not slots). Each kind
+ *   of CI needs the runners its peak used (measured 2026-10-23): a pull
+ *   request into develop 15, into main (release or hotfix) 34, push CI on
+ *   develop 18 and on main 19 (what Railway waits for; never held).
+ * - A CI that runs is counted at the jobs it holds or waits on right now, as
+ *   GitHub lists them per pull request (owner, 2026-10-24: live runners, not
+ *   the peak for the whole run). A run lists its jobs as soon as it starts and
+ *   each job that finishes gives its runner back, so the line moves as soon as
+ *   there is room. For CI_ADMISSION_RAMP_MS after a run starts it counts at its
+ *   need at least, while GitHub is still listing its jobs. Without that reading
+ *   every CI counts at its need. Other workflows' jobs count too.
+ * - Runners go from the top of the line down. A ready pull request whose CI is
+ *   running keeps its slots while they fit; one further down whose CI runs
+ *   past the budget goes back to draft and its runs are cancelled. A draft
+ *   that the slots reach is marked ready -- CI starts -- when it has no
+ *   conflict with its base and is not behind it; otherwise it is passed over
+ *   and says why. The first draft that does not
+ *   fit stops the walk for drafts: nothing jumps a higher one.
+ * - A ready pull request whose CI is not running (finished, waiting to be
+ *   merged) takes no slot and is left alone.
+ * - A release reserves its slots until GitHub shows its runs or the grace
+ *   period ends, so two rounds never fill the same free slot.
+ * - A draft the slots reach that is behind its base has its branch brought up
+ *   to date (GitHub's update-branch: develop merged into it), once per head,
+ *   so an operator never has to (owner, 2026-10-25). The new head is checked
+ *   and released like any other on a later round. CI_ADMISSION_UPDATE_BRANCH=off
+ *   turns this off; it needs the App's Contents write permission.
+ * - A draft with a run queued or in progress is a replayed event: cancelled.
+ * - Stacked pull requests (base other than develop or main), forks, and pull
+ *   requests labelled ci:hold are not handled: they are not in the line
+ *   (owner, 2026-10-25), and runners their CI holds count as other workflows'.
+ *
+ * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.
  */
+
 import { z } from "zod";
 
 export const CI_ADMISSION_STATE_SETTING_KEY = "ci_admission_state";
-export const CI_ADMISSION_DEFAULT_CAPACITY = 3;
-export const CI_ADMISSION_MAX_CAPACITY = 20;
-/** How long a released or admitted pull request is reserved (and its own ready event recognised) before GitHub shows its runs. */
+/** GitHub Pro's concurrent-job limit for standard hosted runners: the default budget, in runners. */
+export const CI_ADMISSION_DEFAULT_CAPACITY = 40;
+export const CI_ADMISSION_MAX_CAPACITY = 200;
+/** Runners each kind of CI needs: the peak measured on recent runs, 2026-10-23. */
+export const CI_ADMISSION_DEFAULT_NEEDS = Object.freeze({ develop: 15, main: 34, developPush: 18, mainPush: 19 });
+export type CiAdmissionNeeds = { develop: number; main: number; developPush: number; mainPush: number };
+/** How long after a run starts its CI counts at its need at least: GitHub is still listing its jobs. */
+export const CI_ADMISSION_RAMP_MS = 2 * 60 * 1000;
+/** How often a round runs while a draft waits for runners: a job finishing sends no webhook. */
+export const CI_ADMISSION_WAIT_RECHECK_MS = 60_000;
+/** How long a released pull request is reserved before GitHub shows its runs. */
 export const CI_ADMISSION_RELEASE_GRACE_MS = 5 * 60 * 1000;
+/** How long one head is left alone after its branch update was asked for, done or failed. */
+export const CI_ADMISSION_UPDATE_RETRY_MS = 10 * 60 * 1000;
+/** A pull request with this label is left out of the line: admission never marks it ready. */
+export const CI_ADMISSION_HOLD_LABEL = "ci:hold";
+/** How many drafts at the top of the line a round checks for conflicts and lag. */
+export const CI_ADMISSION_CHECK_LIMIT = 6;
 const MAX_EVENTS = 50;
-const MAX_QUEUE = 100;
+const MAX_QUEUE = 300;
+const SHA = /^[0-9a-f]{40}$/;
 
 export type CiAdmissionMode = "off" | "shadow" | "on";
 
@@ -50,14 +77,6 @@ export function parseCiAdmissionMode(text: string | undefined): CiAdmissionMode 
   const value = (text ?? "").trim();
   if (value === "") return "off";
   return value === "off" || value === "shadow" || value === "on" ? value : null;
-}
-
-/** Slots a pull request takes, or null when admission does not handle it. */
-export function ciAdmissionUnits(pull: Pick<CiAdmissionPull, "base" | "fork">): number | null {
-  if (pull.fork) return null;
-  if (pull.base === "develop") return 1;
-  if (pull.base === "main") return 2;
-  return null;
 }
 
 export type CiAdmissionPull = {
@@ -69,7 +88,83 @@ export type CiAdmissionPull = {
   headSha: string;
   draft: boolean;
   fork: boolean;
+  labels?: readonly string[];
 };
+
+/** Runners a pull request's CI needs, or null when admission does not handle it. */
+export function ciAdmissionUnits(pull: Pick<CiAdmissionPull, "base" | "fork">, needs: CiAdmissionNeeds = CI_ADMISSION_DEFAULT_NEEDS): number | null {
+  if (pull.fork) return null;
+  if (pull.base === "develop") return needs.develop;
+  if (pull.base === "main") return needs.main;
+  return null;
+}
+
+/**
+ * One holder of GitHub-hosted runners right now: a pull request's runs, a
+ * deploy's (push CI on develop or main), or another workflow's. Ubicloud jobs
+ * are left out: they are outside GitHub's limit.
+ */
+export type CiRunnerOwner = {
+  /** ciRunnerOwnerKey, or `other:<workflow>`. */
+  key: string;
+  title: string;
+  /** The pull request's number; null for a deploy or another workflow. */
+  number: number | null;
+  /** The pull request's base or the deploy's branch; null for another workflow. */
+  base: string | null;
+  sha: string | null;
+  running: number;
+  queued: number;
+  /** When its newest active run started. */
+  startedAt: string;
+};
+
+export const ciRunnerOwnerKey = {
+  pull: (number: number) => `pull:${number}`,
+  deploy: (branch: string, sha: string) => `deploy:${branch}@${sha}`,
+};
+
+/** Runners a CI is counted at: the jobs it holds or waits on now, and its need at least while its run is starting. */
+export function ciRunnerCount(need: number, owner: Pick<CiRunnerOwner, "running" | "queued" | "startedAt"> | undefined, nowMs: number): number {
+  if (!owner) return need;
+  const live = owner.running + owner.queued;
+  return nowMs - Date.parse(owner.startedAt) < CI_ADMISSION_RAMP_MS ? Math.max(live, need) : live;
+}
+
+/**
+ * Whether admission may bring a pull request's branch up to date: only one
+ * into develop from a working branch. Updating a branch merges its base into
+ * it, so a pull request into main (a release or hotfix) or from develop or
+ * main would merge one deploy branch into another -- the operator's merge
+ * and deploy, never admission's.
+ */
+export function ciAdmissionUpdatesBranchOf(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
+  return (
+    !pull.fork &&
+    pull.base === "develop" &&
+    pull.head !== "develop" &&
+    pull.head !== "main" &&
+    !pull.head.startsWith("release/") &&
+    !pull.head.startsWith("hotfix/")
+  );
+}
+
+/** What GitHub says about a draft before it is marked ready; null where it could not tell. */
+export type CiAdmissionCheck = { conflict: boolean | null; behind: boolean | null };
+
+/**
+ * Where a pull request stands after a round:
+ * running -- its CI runs inside the budget; done -- ready, CI not running;
+ * next -- a draft the slots reached, released this round (or as soon as runs
+ * being cancelled stop); waiting -- a draft the slots did not reach; conflict,
+ * behind -- a draft the slots reached but passed over; updating -- one behind
+ * whose branch update was asked for, waiting for its new head; checking -- GitHub
+ * has not said yet whether it conflicts; held -- sent back to draft this round.
+ * hold is no longer given (ci:hold pull requests leave the line) but stays
+ * readable in a stored state.
+ */
+export const CI_ADMISSION_ENTRY_STATUSES = ["running", "done", "next", "waiting", "conflict", "behind", "updating", "hold", "checking", "held"] as const;
+export type CiAdmissionEntryStatus = (typeof CI_ADMISSION_ENTRY_STATUSES)[number];
 
 const queueEntrySchema = z
   .object({
@@ -77,9 +172,11 @@ const queueEntrySchema = z
     title: z.string().max(200),
     base: z.string().max(100),
     head: z.string().max(200),
-    /** The head commit when last seen: its status is shared with any pull request on the same commit. */
     headSha: z.string().max(40).default(""),
+    /** When it joined the line. */
     queuedAt: z.string().max(30),
+    draft: z.boolean().default(true),
+    status: z.enum(CI_ADMISSION_ENTRY_STATUSES).default("waiting"),
   })
   .strict();
 
@@ -89,78 +186,71 @@ const deploySchema = z
     sha: z.string().max(40),
     /** The run's title: the merge commit's first line. */
     title: z.string().max(200),
+    /** Runners it was counted at (ciRunnerCount). */
+    runners: z.number().int().nonnegative().optional(),
   })
   .strict();
 
 const eventSchema = z
   .object({
     at: z.string().max(30),
-    kind: z.enum(["held", "released", "admitted", "dropped", "cancelled", "failed", "stopped"]),
+    kind: z.enum(["held", "released", "admitted", "dropped", "cancelled", "failed", "stopped", "updated"]),
     number: z.number().int().positive(),
     shadow: z.boolean(),
     detail: z.string().max(120).nullable(),
   })
   .strict();
 
+const needSchema = z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY);
+const needsSchema = z.object({ develop: needSchema, main: needSchema, developPush: needSchema, mainPush: needSchema }).strict();
+
 const stateSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(3),
+    /** The budget, in runners. */
     capacity: z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY),
+    needs: needsSchema,
+    /** Every handled open pull request, in priority order. */
     queue: z.array(queueEntrySchema).max(MAX_QUEUE),
-    /** Pull requests this admission released or let through, within the grace period. */
+    /** Released pull requests whose runs GitHub has not shown yet, within the grace period. */
     released: z
-      .array(
-        z
-          .object({
-            number: z.number().int().positive(),
-            /** The head the reservation is for: a new commit needs a new reservation. */
-            headSha: z.string().max(40).default(""),
-            atMs: z.number().int().nonnegative(),
-            /** Runs for that head have been seen: from then on they, not the reservation, count. */
-            observed: z.boolean().default(false),
-          })
-          .strict(),
-      )
+      .array(z.object({ number: z.number().int().positive(), headSha: z.string().max(40), atMs: z.number().int().nonnegative() }).strict())
       .max(MAX_QUEUE),
     /**
-     * Pull requests admission let run (admitted, released, or continuing) that
-     * still hold their slots. Only these keep their slots across a new push;
-     * a pull request merely seen running was never granted anything.
+     * Commits whose `CI admission` status admission set to pending when it sent
+     * their pull request back to draft. Each is set back to success once that
+     * pull request is ready again, moved on to a new head, or closed, so none
+     * is left holding a merge back.
      */
-    granted: z
-      .array(z.object({ number: z.number().int().positive(), headSha: z.string().max(40) }).strict())
+    pendingStatus: z.array(z.object({ number: z.number().int().positive(), headSha: z.string().regex(SHA) }).strict()).max(MAX_QUEUE),
+    /** Heads whose branch update was asked for, so one head is asked once per CI_ADMISSION_UPDATE_RETRY_MS. */
+    updating: z
+      .array(z.object({ number: z.number().int().positive(), headSha: z.string().max(40), atMs: z.number().int().nonnegative() }).strict())
       .max(MAX_QUEUE)
       .default([]),
-    /** Arrivals whose round could not read GitHub: judged first by the next round. */
-    pendingArrivals: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
-    /**
-     * Places in line of the pull requests the last round released. If the
-     * next round still finds one a draft (its ready call failed, or the process
-     * stopped before making it), it goes back to the top of the line.
-     */
-    releasing: z.array(queueEntrySchema).max(MAX_QUEUE).default([]),
-    /** The pull requests the last round held: one GitHub still shows ready is judged again. */
-    holding: z.array(z.number().int().positive()).max(MAX_QUEUE).default([]),
-    /**
-     * Commits whose `CI admission` status is owed. The status lives on the
-     * commit, so this is kept by commit, not pull request: recorded with the
-     * round's judgment, written by the service at the end of the round from
-     * the final line (pending while any open pull request on the commit
-     * waits, success otherwise), taken off once written. A pending left
-     * behind would hold merge-train back.
-     */
-    owedCommits: z.array(z.string().regex(/^[0-9a-f]{40}$/)).max(MAX_QUEUE * 2).default([]),
     events: z.array(eventSchema).max(MAX_EVENTS),
-    /** The latest round: when, how many slots were in use after it, and by which pull requests. */
+    /** The latest round: when, how many runners were in use after it, and by whom. */
     lastRound: z
       .object({
         at: z.string().max(30),
         used: z.number().int().nonnegative(),
         running: z
-          .array(z.object({ number: z.number().int().positive(), title: z.string().max(200), base: z.string().max(100) }).strict())
+          .array(
+            z
+              .object({
+                number: z.number().int().positive(),
+                title: z.string().max(200),
+                base: z.string().max(100),
+                /** Runners it was counted at (ciRunnerCount). */
+                runners: z.number().int().nonnegative().optional(),
+              })
+              .strict(),
+          )
           .max(MAX_QUEUE),
         /** Push runs on develop and main (the deploy CI Railway waits for), one per commit. */
         deploys: z.array(deploySchema).max(MAX_QUEUE).default([]),
+        /** Runners other workflows held. */
+        others: z.number().int().nonnegative().default(0),
       })
       .strict()
       .nullable(),
@@ -170,31 +260,63 @@ const stateSchema = z
 export type CiAdmissionQueueEntry = z.infer<typeof queueEntrySchema>;
 export type CiAdmissionEvent = z.infer<typeof eventSchema>;
 export type CiAdmissionDeploy = z.infer<typeof deploySchema>;
-
-/** Slots a deploy's CI takes: the same as a pull request into the same branch. */
-export const ciAdmissionDeployUnits = (branch: CiAdmissionDeploy["branch"]) => (branch === "main" ? 2 : 1);
 export type CiAdmissionState = z.infer<typeof stateSchema>;
 
+/** Runners a deploy's CI needs. */
+export const ciAdmissionDeployUnits = (branch: CiAdmissionDeploy["branch"], needs: CiAdmissionNeeds = CI_ADMISSION_DEFAULT_NEEDS) =>
+  branch === "main" ? needs.mainPush : needs.developPush;
+
 export const emptyCiAdmissionState = (): CiAdmissionState => ({
-  version: 1,
+  version: 3,
   capacity: CI_ADMISSION_DEFAULT_CAPACITY,
+  needs: { ...CI_ADMISSION_DEFAULT_NEEDS },
   queue: [],
   released: [],
-  granted: [],
-  pendingArrivals: [],
-  releasing: [],
-  holding: [],
-  owedCommits: [],
+  pendingStatus: [],
+  updating: [],
   events: [],
   lastRound: null,
 });
+
+/** The first stored shape (a line of held drafts built from events): its budget and order carry over. */
+const legacySchema = z
+  .object({
+    version: z.literal(1),
+    capacity: z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY),
+    queue: z.array(z.object({ number: z.number().int().positive() }).passthrough()),
+  })
+  .passthrough();
 
 /** The stored state, or an empty one when nothing (or something unreadable) is stored. */
 export function parseCiAdmissionState(value: string | null | undefined): CiAdmissionState {
   if (!value) return emptyCiAdmissionState();
   try {
-    const parsed = stateSchema.safeParse(JSON.parse(value));
-    return parsed.success ? parsed.data : emptyCiAdmissionState();
+    const json = JSON.parse(value) as unknown;
+    const parsed = stateSchema.safeParse(json);
+    if (parsed.success) return parsed.data;
+    // Version 2 counted slots: everything carries over but the budget, which
+    // becomes the runner default (a slot count means nothing in runners).
+    const slots = stateSchema.safeParse({ ...(json as object), version: 3, capacity: CI_ADMISSION_DEFAULT_CAPACITY, needs: { ...CI_ADMISSION_DEFAULT_NEEDS } });
+    if ((json as { version?: unknown } | null)?.version === 2 && slots.success) return slots.data;
+    const legacy = legacySchema.safeParse(json);
+    if (!legacy.success) return emptyCiAdmissionState();
+    // Only the order survives (its budget counted slots); the next round reads the rest from GitHub.
+    return {
+      ...emptyCiAdmissionState(),
+      queue: legacy.data.queue.slice(0, MAX_QUEUE).map((entry) => {
+        const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+        return {
+          number: entry.number,
+          title: text(entry.title, 200),
+          base: text(entry.base, 100),
+          head: text(entry.head, 200),
+          headSha: SHA.test(text(entry.headSha, 40)) ? text(entry.headSha, 40) : "",
+          queuedAt: text(entry.queuedAt, 30) || new Date(0).toISOString(),
+          draft: true,
+          status: "waiting" as const,
+        };
+      }),
+    };
   } catch {
     return emptyCiAdmissionState();
   }
@@ -208,318 +330,299 @@ export function parseCiAdmissionState(value: string | null | undefined): CiAdmis
 export const ciRunKey = (number: number, headSha: string) => `${number}@${headSha}`;
 
 export type CiAdmissionAction =
+  /** Back to draft, its runs cancelled, its commit's status pending. */
   | { kind: "hold"; pull: CiAdmissionPull }
-  /** `entry` is its place in line, put back at the top if marking it ready fails. */
-  | { kind: "release"; pull: CiAdmissionPull; entry: CiAdmissionQueueEntry }
+  /** Marked ready: CI starts. */
+  | { kind: "release"; pull: CiAdmissionPull }
+  /** A draft's replayed runs cancelled. */
   | { kind: "cancel"; pull: CiAdmissionPull }
-  /** Let straight through: nothing to change on GitHub but its commit's status. */
-  | { kind: "admit"; pull: CiAdmissionPull };
-
+  /** A pending status this admission left, set back to success. */
+  | { kind: "clear_status"; number: number; headSha: string }
+  /** A draft behind its base: its branch brought up to date. */
+  | { kind: "update_branch"; pull: CiAdmissionPull };
 
 export type CiAdmissionEvaluation = {
   state: CiAdmissionState;
   actions: CiAdmissionAction[];
   /** Slots in use after this evaluation's releases. */
   used: number;
-  /**
-   * When someone waits and a reservation is still unobserved: how long until it
-   * expires, so the caller can judge again then without waiting for an event.
-   */
+  /** When something waits on a reservation or a cancellation: when to judge again without an event. */
   nextCheckInMs: number | null;
 };
 
 /**
- * One evaluation. `arrival` is the pull request whose event triggered it when
- * that event made it ready for review; `running` holds `ciRunKey(number, head)`
- * for every pull request with a
- * pull_request workflow run queued or in progress.
+ * The line: the stored order kept for pull requests still open and handled,
+ * new ones appended by number (oldest first). The only place order is decided.
  */
+export function ciAdmissionOrder(stored: readonly Pick<CiAdmissionQueueEntry, "number">[], openPulls: readonly CiAdmissionPull[]): CiAdmissionPull[] {
+  const handled = new Map(
+    openPulls
+      .filter((pull) => ciAdmissionUnits(pull) !== null && !(pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL))
+      .map((pull) => [pull.number, pull]),
+  );
+  const kept = stored.map((entry) => handled.get(entry.number)).filter((pull): pull is CiAdmissionPull => pull !== undefined);
+  const seen = new Set(kept.map((pull) => pull.number));
+  const added = [...handled.values()].filter((pull) => !seen.has(pull.number)).sort((a, b) => a.number - b.number);
+  return [...kept, ...added].slice(0, MAX_QUEUE);
+}
+
+/**
+ * The drafts a round asks GitHub about before judging: those the free slots
+ * reach, judged without any check (so each says "checking"), at most
+ * CI_ADMISSION_CHECK_LIMIT. With no free slot it asks about none.
+ */
+export function ciAdmissionDraftsToCheck(input: Omit<Parameters<typeof evaluateCiAdmission>[0], "checks" | "shadow">): CiAdmissionPull[] {
+  const open = new Map(input.openPulls.map((pull) => [pull.number, pull]));
+  return evaluateCiAdmission({ ...input, checks: new Map(), shadow: true })
+    .state.queue.filter((entry) => entry.status === "checking")
+    .slice(0, CI_ADMISSION_CHECK_LIMIT)
+    .flatMap((entry) => {
+      const pull = open.get(entry.number);
+      return pull ? [pull] : [];
+    });
+}
+
+/** One evaluation of the whole line. `running` holds `ciRunKey(number, head)` for every queued or in-progress pull_request run. */
 export function evaluateCiAdmission(input: {
   state: CiAdmissionState;
   openPulls: readonly CiAdmissionPull[];
   running: ReadonlySet<string>;
   /** The base of each pull request with a running run, open or not. */
   runningBases?: ReadonlyMap<number, string>;
-  /**
-   * Push runs on develop and main queued or in progress, one per commit. They
-   * are never held, but they use the same runners, so they occupy slots.
-   */
   deploys?: readonly CiAdmissionDeploy[];
-  arrival: number | null;
+  /** What GitHub said about drafts (ciAdmissionDraftsToCheck); a draft missing here is "checking". */
+  checks?: ReadonlyMap<number, CiAdmissionCheck>;
+  /** Who holds GitHub-hosted runners right now; null when unread (every CI then counts at its need). */
+  runners?: readonly CiRunnerOwner[] | null;
   nowMs: number;
   shadow: boolean;
+  /** Whether a draft behind its base has its branch updated (CI_ADMISSION_UPDATE_BRANCH); on unless false. */
+  updateBranches?: boolean;
 }): CiAdmissionEvaluation {
-  const { nowMs, shadow } = input;
+  const { nowMs, shadow, state } = input;
   const at = new Date(nowMs).toISOString();
-  const open = new Map(input.openPulls.map((pull) => [pull.number, pull]));
+  const checks = input.checks ?? new Map<number, CiAdmissionCheck>();
   const events: CiAdmissionEvent[] = [];
   const event = (kind: CiAdmissionEvent["kind"], number: number, detail: string | null = null) =>
     events.push({ at, kind, number, shadow, detail });
 
-  const released = input.state.released
-    .filter((entry) => nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS && open.get(entry.number)?.draft === false)
-    .map((entry) => ({ ...entry, observed: entry.observed || input.running.has(ciRunKey(entry.number, entry.headSha)) }));
-  // Reserved: counts until runs for the reserved head are seen.
-  const reserve = (pull: CiAdmissionPull) => {
-    const index = released.findIndex((entry) => entry.number === pull.number);
-    if (index >= 0) released.splice(index, 1);
-    released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: input.running.has(ciRunKey(pull.number, pull.headSha)) });
-  };
-  // Its own release echoing back is recognised by number and head together: a
-  // reservation for an older head never exempts new commits from judgment.
-  const reservedHead = (pull: CiAdmissionPull) => released.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
-  // Granted earlier and still holding, with the head it was granted for: a new
-  // push keeps its slots (its new runs replace the old ones), so a fix push
-  // never goes to the back of the line.
-  const grantedHead = new Map(input.state.granted.map((grant) => [grant.number, grant.headSha]));
-  const granted = {
-    has: (number: number) => grantedHead.has(number),
-    add: (pull: CiAdmissionPull) => grantedHead.set(pull.number, pull.headSha),
-  };
-  // A granted pull request whose head moved got new commits, whichever event
-  // brings the news first: reserve the new head now, so no round in between
-  // mistakes its slot for a free one.
-  for (const [number, headSha] of grantedHead) {
-    const pull = open.get(number);
-    if (!pull || pull.draft || pull.headSha === headSha) continue;
-    reserve(pull);
-    grantedHead.set(number, pull.headSha);
-    event("admitted", number, "continuing");
-  }
-  const reserved = () => new Set(released.filter((entry) => !entry.observed).map((entry) => entry.number));
-
-  // Arrivals left over from a round whose GitHub read failed are judged first,
-  // then this round's own, each in turn.
-  // A hold the last round recorded that GitHub does not show (the pull request
-  // is still ready: the draft conversion failed or never ran) is judged again
-  // too, rather than taken for one made ready elsewhere.
-  const unconfirmedHolds = input.state.holding.filter((number) => open.get(number)?.draft === false);
-  const arrivals = [
-    ...new Set([...input.state.pendingArrivals, ...unconfirmedHolds, ...(input.arrival === null ? [] : [input.arrival])]),
-  ];
-
-  // The line keeps only open drafts admission still handles.
-  const queue: CiAdmissionQueueEntry[] = [];
-  // Commits whose status this round changes: every one is owed a write.
-  const owed = new Set<string>();
-  for (const entry of input.state.queue) {
-    const pull = open.get(entry.number);
-    if (!pull || ciAdmissionUnits(pull) === null) {
-      event("dropped", entry.number, pull ? "not_handled" : "closed");
-      // Its commit (and any open pull request still on it) no longer waits.
-      if (pull) owed.add(pull.headSha);
-      if (entry.headSha) owed.add(entry.headSha);
-      continue;
-    }
-    if (!pull.draft && !arrivals.includes(entry.number)) {
-      // Made ready by someone else while waiting: it runs; it no longer waits.
-      event("dropped", entry.number, "ready_elsewhere");
-      owed.add(pull.headSha);
-      if (entry.headSha) owed.add(entry.headSha);
-      continue;
-    }
-    if (entry.headSha !== pull.headSha) {
-      // New commits on a waiting draft: the new commit says "waiting", and the
-      // old one is decided again.
-      owed.add(pull.headSha);
-      if (entry.headSha) owed.add(entry.headSha);
-    }
-    queue.push({ ...entry, title: pull.title.slice(0, 200), base: pull.base, head: pull.head.slice(0, 200), headSha: pull.headSha });
-  }
-  // A release the last round recorded but GitHub does not show: back to the top.
-  for (const entry of [...input.state.releasing].reverse()) {
-    const pull = open.get(entry.number);
-    if (!pull || !pull.draft || ciAdmissionUnits(pull) === null || queue.some((queued) => queued.number === entry.number)) continue;
-    queue.unshift(entry);
-    event("failed", entry.number, "release_unconfirmed");
-  }
-
-  const running = (pull: CiAdmissionPull) => !pull.draft && (input.running.has(ciRunKey(pull.number, pull.headSha)) || reserved().has(pull.number));
+  const line = ciAdmissionOrder(state.queue, input.openPulls);
+  const open = new Map(input.openPulls.map((pull) => [pull.number, pull]));
   const runningNumbers = new Set([...input.running].map((key) => Number(key.split("@")[0])));
-  // Runs GitHub shows for a pull request -- on any head, ready or draft --
-  // occupy its slots until they stop; a cancellation requested is not a run
-  // stopped. A ready pull request whose runs have not shown yet holds its
-  // reservation instead.
-  const occupying = (pull: CiAdmissionPull) => runningNumbers.has(pull.number) || running(pull);
-  // A closed or merged pull request whose runs still run occupies its slots
-  // until they stop, like any other.
-  const closedRunning = [...runningNumbers].filter((number) => !open.has(number));
-  const closedUnits = closedRunning.reduce(
-    (sum, number) => sum + (ciAdmissionUnits({ base: input.runningBases?.get(number) ?? "", fork: false }) ?? 0),
-    0,
+  // A reservation lasts until runs for its head show or the grace period ends.
+  const released = state.released.filter((entry) => {
+    const pull = open.get(entry.number);
+    return (
+      nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS &&
+      pull?.draft === false &&
+      pull.headSha === entry.headSha &&
+      !input.running.has(ciRunKey(entry.number, entry.headSha))
+    );
+  });
+  const reserved = new Set(released.map((entry) => entry.number));
+  // A head whose branch update was asked for is left alone a while: GitHub
+  // merges asynchronously, and a new head is a new pull request to judge.
+  const updating = state.updating.filter(
+    (entry) => nowMs - entry.atMs < CI_ADMISSION_UPDATE_RETRY_MS && open.get(entry.number)?.headSha === entry.headSha,
   );
-  const deploys = input.deploys ?? [];
-  const deployUnits = deploys.reduce((sum, deploy) => sum + ciAdmissionDeployUnits(deploy.branch), 0);
-  const usedBy = (exclude: number | null) =>
-    deployUnits +
-    closedUnits +
-    input.openPulls.reduce((sum, pull) => {
-      const units = ciAdmissionUnits(pull);
-      return units !== null && pull.number !== exclude && occupying(pull) ? sum + units : sum;
-    }, 0);
+  const occupying = (pull: CiAdmissionPull) => runningNumbers.has(pull.number) || (!pull.draft && reserved.has(pull.number));
 
+  const needs = state.needs;
+  const unitsOf = (pull: Pick<CiAdmissionPull, "base" | "fork">) => ciAdmissionUnits(pull, needs);
+  // What each CI is counted at: its live jobs when GitHub listed them, else its need.
+  const owners = new Map((input.runners ?? []).map((owner) => [owner.key, owner]));
+  const counted = new Set<string>();
+  const countOf = (key: string, need: number) => {
+    counted.add(key);
+    return ciRunnerCount(need, owners.get(key), nowMs);
+  };
+  // Runners nobody here can give back: deploy CI, and runs of pull requests
+  // not in the line -- closed, or open with a ci:hold label -- counted at
+  // their need when GitHub's jobs are unread, like any other.
+  const inLineNumbers = new Set(line.map((pull) => pull.number));
+  const closedRunning = [...runningNumbers]
+    .filter((number) => !inLineNumbers.has(number))
+    .flatMap((number) => {
+      const base = open.get(number)?.base ?? input.runningBases?.get(number) ?? "";
+      const need = unitsOf({ base, fork: false });
+      const title = open.get(number)?.title.slice(0, 200) ?? "";
+      return need === null ? [] : [{ number, base, title, runners: countOf(ciRunnerOwnerKey.pull(number), need) }];
+    });
+  const deploys = (input.deploys ?? []).map((deploy) => ({
+    ...deploy,
+    runners: countOf(ciRunnerOwnerKey.deploy(deploy.branch, deploy.sha), ciAdmissionDeployUnits(deploy.branch, needs)),
+  }));
+  const pullRunners = new Map(line.filter(occupying).map((pull) => [pull.number, countOf(ciRunnerOwnerKey.pull(pull.number), unitsOf(pull)!)]));
+  // Runners other workflows hold (nightly, scheduled jobs, a stacked pull
+  // request's CI): they cannot be given back either.
+  const others = (input.runners ?? []).reduce((sum, owner) => (counted.has(owner.key) ? sum : sum + owner.running + owner.queued), 0);
+  const fixedUnits =
+    closedRunning.reduce((sum, closed) => sum + closed.runners, 0) + deploys.reduce((sum, deploy) => sum + deploy.runners, 0) + others;
+  // Runners in use now, by every run GitHub shows: a cancellation asked for
+  // frees nothing until the runs stop.
+  let used = fixedUnits + [...pullRunners.values()].reduce((sum, runners) => sum + runners, 0);
+
+  const status = new Map<number, CiAdmissionEntryStatus>();
   const actions: CiAdmissionAction[] = [];
-  const capacity = input.state.capacity;
-
-  for (const arrivalNumber of arrivals) {
-    const arrival = open.get(arrivalNumber);
-    if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && granted.has(arrival.number)) {
-      // Its own release echoing back, or new commits on a pull request already
-      // granted: same slots, reserved for this head until its runs show.
-      const priorHead = released.find((entry) => entry.number === arrival.number)?.headSha;
-      reserve(arrival);
-      granted.add(arrival);
-      if (priorHead !== arrival.headSha) event("admitted", arrival.number, "continuing");
-    } else if (arrival && !arrival.draft && ciAdmissionUnits(arrival) !== null && !reservedHead(arrival)) {
-      const units = ciAdmissionUnits(arrival)!;
-      const waiting = queue.some((entry) => entry.number !== arrival.number);
-      const queued = queue.some((entry) => entry.number === arrival.number);
-      if ((waiting || usedBy(arrival.number) + units > capacity) && !queued && queue.length >= MAX_QUEUE) {
-        // A full line takes no more: the stored state must stay inside its schema.
-        event("failed", arrival.number, "queue_full");
-      } else if (waiting || usedBy(arrival.number) + units > capacity) {
-        actions.push({ kind: "hold", pull: arrival });
-        if (!queue.some((entry) => entry.number === arrival.number)) {
-          queue.push({
-            number: arrival.number,
-            title: arrival.title.slice(0, 200),
-            base: arrival.base,
-            head: arrival.head.slice(0, 200),
-            headSha: arrival.headSha,
-            queuedAt: at,
-          });
-        }
-        event("held", arrival.number, waiting ? "line_waiting" : "no_slot");
+  const budget = state.capacity - fixedUnits;
+  let allotted = 0;
+  let draftsBlocked = false;
+  let waitingOnRuns = false;
+  let waitingOnRunners = false;
+  for (const pull of line) {
+    // A CI that needs more than the whole budget still runs alone, never waits forever.
+    const units = Math.min(unitsOf(pull)!, state.capacity);
+    if (!pull.draft) {
+      const runners = Math.min(pullRunners.get(pull.number) ?? 0, state.capacity);
+      if (!occupying(pull)) {
+        status.set(pull.number, "done");
+      } else if (allotted + runners <= budget) {
+        allotted += runners;
+        status.set(pull.number, "running");
       } else {
-        const index = queue.findIndex((entry) => entry.number === arrival.number);
-        if (index >= 0) queue.splice(index, 1);
-        reserve(arrival);
-        granted.add(arrival);
-        actions.push({ kind: "admit", pull: arrival });
-        event("admitted", arrival.number, null);
+        actions.push({ kind: "hold", pull });
+        status.set(pull.number, "held");
+        event("held", pull.number, "over_budget");
       }
+      continue;
     }
-  }
-
-  // A draft running CI is a replayed event -- on any head it ever had, since a
-  // re-run of an older head's run counts too: stop it. (A pull request held in
-  // this evaluation has its runs cancelled by the hold itself.)
-  const holding = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
-  for (const pull of input.openPulls) {
-    if (!pull.draft || ciAdmissionUnits(pull) === null || holding.has(pull.number)) continue;
-    if (!runningNumbers.has(pull.number)) continue;
-    actions.push({ kind: "cancel", pull });
-    event("cancelled", pull.number, "draft_rerun");
-  }
-
-  // Release strictly from the top: the operator's order is the order. A pull
-  // request held in this evaluation keeps occupying its slots while its runs
-  // show: they are freed by the round that sees the runs gone, never by this
-  // one on the strength of a cancellation request. A held pull request that
-  // is itself released here adds nothing -- it already occupies its slots.
-  const releasedNow = new Set<number>();
-  const heldNow = new Set(actions.filter((action) => action.kind === "hold").map((action) => action.pull.number));
-  let used = usedBy(null);
-  while (queue.length > 0) {
-    const top = queue[0];
-    const pull = open.get(top.number);
-    if (!pull) break;
-    const units = ciAdmissionUnits(pull)!;
-    // A pull request held in this same evaluation is a draft from here on.
-    const asDraft = heldNow.has(pull.number) ? { ...pull, draft: true } : pull;
-    const adds = heldNow.has(pull.number) && occupying(pull) ? 0 : units;
-    if (used + adds > capacity) break;
-    queue.shift();
-    actions.push({ kind: "release", pull: asDraft, entry: top });
-    released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs, observed: false });
-    granted.add(pull);
-    releasedNow.add(pull.number);
-    used += adds;
+    if (runningNumbers.has(pull.number)) {
+      actions.push({ kind: "cancel", pull });
+      event("cancelled", pull.number, "draft_rerun");
+    }
+    if (draftsBlocked || allotted + units > budget) {
+      waitingOnRunners ||= !draftsBlocked;
+      draftsBlocked = true;
+      status.set(pull.number, "waiting");
+      continue;
+    }
+    const check = checks.get(pull.number);
+    if (!check || check.conflict === null) {
+      status.set(pull.number, "checking");
+      continue;
+    }
+    if (check.conflict) {
+      status.set(pull.number, "conflict");
+      continue;
+    }
+    if (check.behind === true) {
+      const asked = updating.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
+      const updates = input.updateBranches !== false && ciAdmissionUpdatesBranchOf(pull);
+      if (updates && !asked) {
+        actions.push({ kind: "update_branch", pull });
+        updating.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs });
+        event("updated", pull.number, null);
+      }
+      status.set(pull.number, updates ? "updating" : "behind");
+      continue;
+    }
+    allotted += units;
+    status.set(pull.number, "next");
+    // Released only once it fits beside every run GitHub still shows: runs
+    // being cancelled hold their runners until they stop.
+    if (used + units > state.capacity) {
+      draftsBlocked = true;
+      waitingOnRuns = true;
+      continue;
+    }
+    used += units;
+    actions.push({ kind: "release", pull });
+    released.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs });
     event("released", pull.number, null);
   }
 
-  // Held and released in the same evaluation: it never needed to wait. Let it
-  // through instead of drafting it, cancelling its runs and marking it ready.
-  for (const number of heldNow) {
-    if (!releasedNow.has(number)) continue;
-    actions.splice(actions.findIndex((a) => a.kind === "hold" && a.pull.number === number), 1);
-    actions.splice(actions.findIndex((a) => a.kind === "release" && a.pull.number === number), 1);
-    const reservation = released.find((entry) => entry.number === number);
-    if (reservation) reservation.observed = input.running.has(ciRunKey(reservation.number, reservation.headSha));
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      if (events[i].number === number && (events[i].kind === "held" || events[i].kind === "released")) events.splice(i, 1);
+  // Pending statuses this admission left are set back to success once their
+  // pull request is ready again, on a new head, or closed. One sent back to
+  // draft this round is recorded; its status is written by the hold.
+  const held = actions.flatMap((action) => (action.kind === "hold" ? [action.pull] : []));
+  const releasing = new Set(actions.flatMap((action) => (action.kind === "release" ? [action.pull.number] : [])));
+  for (const entry of state.pendingStatus) {
+    const pull = open.get(entry.number);
+    if (held.some((h) => h.number === entry.number && h.headSha === entry.headSha)) continue;
+    const stillWaiting = pull !== undefined && pull.draft && !releasing.has(entry.number) && pull.headSha === entry.headSha;
+    if (!stillWaiting) actions.push({ kind: "clear_status", number: entry.number, headSha: entry.headSha });
+  }
+  const pendingStatus = [...state.pendingStatus];
+  for (const pull of held) {
+    if (SHA.test(pull.headSha) && !pendingStatus.some((p) => p.number === pull.number && p.headSha === pull.headSha)) {
+      pendingStatus.push({ number: pull.number, headSha: pull.headSha });
     }
-    actions.push({ kind: "admit", pull: open.get(number)! });
-    event("admitted", number, null);
   }
 
-  // A grant ends when its pull request no longer runs and holds no reservation.
-  for (const number of [...grantedHead.keys()]) {
-    // Released in this evaluation: still a draft in this snapshot, about to run.
-    if (releasedNow.has(number)) continue;
-    const pull = open.get(number);
-    if (!pull || pull.draft || !occupying(pull)) grantedHead.delete(number);
+  const heldNumbers = new Set(held.map((pull) => pull.number));
+  const queuedAt = new Map(state.queue.map((entry) => [entry.number, entry.queuedAt]));
+  const queue: CiAdmissionQueueEntry[] = line.map((pull) => ({
+    number: pull.number,
+    title: pull.title.slice(0, 200),
+    base: pull.base,
+    head: pull.head.slice(0, 200),
+    headSha: pull.headSha.slice(0, 40),
+    queuedAt: queuedAt.get(pull.number) ?? at,
+    draft: (pull.draft || heldNumbers.has(pull.number)) && !releasing.has(pull.number),
+    status: status.get(pull.number) ?? "waiting",
+  }));
+  const inLine = new Set(line.map((pull) => pull.number));
+  for (const entry of state.queue) {
+    // Only a closed one is "dropped": one still open left for a ci:hold label or another base.
+    if (!inLine.has(entry.number) && entry.title !== "" && !open.has(entry.number)) event("dropped", entry.number, "closed");
   }
 
   return {
     state: {
-      version: 1,
-      capacity,
+      version: 3,
+      capacity: state.capacity,
+      needs,
       queue,
-      released,
-      granted: [...grantedHead].map(([number, headSha]) => ({ number, headSha })).slice(0, MAX_QUEUE),
-      pendingArrivals: [],
-      releasing: actions.flatMap((action) => (action.kind === "release" ? [action.entry] : [])),
-      holding: actions.flatMap((action) => (action.kind === "hold" ? [action.pull.number] : [])),
-      // Recorded before anything runs; the service takes each off once
-      // written, so a stop in between leaves it for the next round.
-      owedCommits: [
-        ...new Set([
-          ...input.state.owedCommits,
-          ...owed,
-          ...actions.filter((action) => action.kind !== "cancel").map((action) => action.pull.headSha),
-        ]),
-      ]
-        .filter((sha) => /^[0-9a-f]{40}$/.test(sha))
-        .slice(-MAX_QUEUE * 2),
-      events: [...input.state.events, ...events].slice(-MAX_EVENTS),
+      released: released.slice(-MAX_QUEUE),
+      // Cleared entries are taken off by the round once their status is written.
+      pendingStatus: pendingStatus.slice(-MAX_QUEUE),
+      updating: updating.slice(-MAX_QUEUE),
+      events: [...state.events, ...events].slice(-MAX_EVENTS),
       lastRound: {
         at,
         used,
-        running: input.openPulls
-          .filter(
-            (pull) =>
-              ciAdmissionUnits(pull) !== null &&
-              (occupying(pull) || releasedNow.has(pull.number)),
-          )
-          .map((pull) => ({ number: pull.number, title: pull.title.slice(0, 200), base: pull.base }))
-          .concat(
-            closedRunning
-              .filter((number) => ciAdmissionUnits({ base: input.runningBases?.get(number) ?? "", fork: false }) !== null)
-              .map((number) => ({ number, title: "", base: input.runningBases?.get(number) ?? "" })),
-          ),
+        running: line
+          .filter((pull) => occupying(pull) || releasing.has(pull.number))
+          .map((pull) => ({
+            number: pull.number,
+            title: pull.title.slice(0, 200),
+            base: pull.base,
+            runners: pullRunners.get(pull.number) ?? unitsOf(pull)!,
+          }))
+          .concat(closedRunning.map((closed) => ({ number: closed.number, title: closed.title, base: closed.base, runners: closed.runners }))),
         deploys: deploys.slice(0, MAX_QUEUE).map((deploy) => ({ ...deploy, title: deploy.title.slice(0, 200) })),
+        others,
       },
     },
     actions,
     used,
     nextCheckInMs:
-      queue.length === 0
-        ? null
-        : released
-            .filter((entry) => !entry.observed)
-            .reduce<number | null>((soonest, entry) => {
-              const left = Math.max(1_000, entry.atMs + CI_ADMISSION_RELEASE_GRACE_MS - nowMs);
-              return soonest === null ? left : Math.min(soonest, left);
-            }, null),
+      waitingOnRuns || waitingOnRunners || released.length > 0 || updating.length > 0
+        ? released.reduce(
+            (soonest, entry) => Math.min(soonest, Math.max(1_000, entry.atMs + CI_ADMISSION_RELEASE_GRACE_MS - nowMs)),
+            CI_ADMISSION_WAIT_RECHECK_MS,
+          )
+        : null,
   };
 }
 
-/** The queue in a new order the operator gave: exactly the same numbers, rearranged. */
+/**
+ * The line in the order the operator gave. Pull requests the operator did not
+ * see (opened since the page loaded) keep their order after the given ones;
+ * numbers no longer in line are ignored. Null when the order names nothing.
+ */
 export function reorderCiAdmissionQueue(state: CiAdmissionState, order: readonly number[]): CiAdmissionState | null {
-  const current = state.queue.map((entry) => entry.number);
-  if (order.length !== current.length || new Set(order).size !== order.length) return null;
-  if (!order.every((number) => current.includes(number))) return null;
   const byNumber = new Map(state.queue.map((entry) => [entry.number, entry]));
-  return { ...state, queue: order.map((number) => byNumber.get(number)!) };
+  const given = [...new Set(order)].filter((number) => byNumber.has(number));
+  if (given.length === 0) return null;
+  const rest = state.queue.filter((entry) => !given.includes(entry.number));
+  return { ...state, queue: [...given.map((number) => byNumber.get(number)!), ...rest] };
+}
+
+/** One pull request moved to the top or the bottom of the line; null when it is not in line. */
+export function moveCiAdmissionEntry(state: CiAdmissionState, number: number, to: "top" | "bottom"): CiAdmissionState | null {
+  const entry = state.queue.find((queued) => queued.number === number);
+  if (!entry) return null;
+  const rest = state.queue.filter((queued) => queued.number !== number);
+  return { ...state, queue: to === "top" ? [entry, ...rest] : [...rest, entry] };
 }

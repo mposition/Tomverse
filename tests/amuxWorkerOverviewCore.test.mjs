@@ -45,6 +45,12 @@ const seat = (name, state, secondsAgo = 12) => ({
   heartbeatAt: secondsAgo === null ? null : at(secondsAgo),
 });
 
+const RECORDED = {
+  revision: 1,
+  capability: { model: null, routingTags: ["implementation"], toolCapabilities: [], v22: null },
+  changedAt: "2026-10-13T00:00:00.000Z",
+};
+
 const REGISTRATIONS = [
   reg("claude-chore", "active", "chore"),
   reg("codex-impl", "active"),
@@ -107,10 +113,24 @@ test("a live state decides an active worker; every unhealthy one needs a look", 
     not_admitted: ["attention", "not_in_assignment"],
     catalog_unknown: ["attention", "not_in_assignment"],
   };
+  // A recorded capability, so "not in the list" is not explained by its absence.
+  const capabilities = capabilitiesOf(REGISTRATIONS, new Map([["codex-impl", RECORDED]]));
   for (const [state, [group, status]] of Object.entries(cases)) {
-    const overview = build({ live: liveOf([seat("codex-impl", state)]) });
+    const overview = build({ capabilities, live: liveOf([seat("codex-impl", state)]) });
     assert.deepEqual([rowOf(overview, "codex-impl").group, rowOf(overview, "codex-impl").status], [group, status], state);
   }
+});
+
+test("an active worker left out for having no recorded capability says so", () => {
+  for (const state of ["not_admitted", "catalog_unknown"]) {
+    const overview = build({ live: liveOf([seat("codex-impl", state, null)]) });
+    assert.deepEqual([rowOf(overview, "codex-impl").group, rowOf(overview, "codex-impl").status], ["attention", "capability_missing"], state);
+  }
+  // Unread capabilities are not taken as missing ones.
+  const unread = build({ capabilities: null, live: liveOf([seat("codex-impl", "not_admitted", null)]) });
+  assert.equal(rowOf(unread, "codex-impl").status, "not_in_assignment");
+  // A connected worker is described by its connection, recorded or not.
+  assert.equal(rowOf(build(), "codex-impl").status, "assignable_ready");
 });
 
 test("an open stop latch is named when the worker is not in the assignment list", () => {

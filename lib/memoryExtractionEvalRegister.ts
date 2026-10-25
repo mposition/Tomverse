@@ -7,8 +7,10 @@
  * `scripts/check-memory-extraction-eval-register.mjs` (PR Fast Gate) refuses
  * an `approved` entry whose evidence does not carry everything §12.1 lists.
  * An implementation agent may add `candidate` entries; moving one to
- * `approved` is the §12.4 human procedure (decision-grade eval, blind
- * review, independent re-run, approver sign-off) and never automatic.
+ * `approved` is a human act and never automatic — either the §12.4 procedure
+ * (decision-grade eval, blind review, independent re-run, approver sign-off)
+ * or the §12.4a owner launch, which is short-lived and keeps the critical
+ * checks.
  *
  * Runtime effectiveness is narrower than register approval on purpose
  * (§12.1): effective = approved here ∧ extraction flag on ∧ verified
@@ -27,6 +29,11 @@ import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
 } from "@/lib/memoryExtractionEvalCore";
 import type { EvalBudgetTuple } from "@/lib/memoryEvalBudgetBinding";
+import { validateMemoryCandidate } from "@/lib/memoryValidatorCore";
+import {
+    MUST_REJECT,
+    MUST_REQUIRE_SENSITIVE_REVIEW,
+} from "@/lib/memoryValidatorProbeCorpus";
 
 
 export type MemoryExtractionEvalEntry = {
@@ -149,10 +156,70 @@ export type MemoryExtractionEvalEntry = {
         expiresAt: string; // ISO date — re-evaluation deadline
         knownLimitations: string;
     } | null;
+    /**
+     * Owner launch approval: the other basis an `approved` entry may rest on,
+     * instead of `evaluation`. The owner accepts the pair at its current,
+     * unmeasured quality (decision 2026-10-23). What it does not relax:
+     *
+     *   * expiry is short and enforced at runtime, not only in CI;
+     *   * the deterministic validator probes must all hold;
+     *   * the critical probes are what stand between a mislabelled secret or
+     *     directive and a prompt: since 2026-10-24 a validator-clean standard
+     *     candidate activates without review, and nothing sensitive is stored.
+     */
+    ownerLaunch?: {
+        approver: string;
+        approvedAt: string; // ISO date
+        expiresAt: string; // ISO date, at most MEMORY_OWNER_LAUNCH_MAX_DAYS later
+        /** Where the decision was made, e.g. the PR that recorded it. */
+        decisionRef: string;
+        knownLimitations: string;
+    } | null;
 };
+
+/** An owner launch approval must be renewed this often. */
+export const MEMORY_OWNER_LAUNCH_MAX_DAYS = 30;
 
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
+        {
+            // The pair automatic extraction uses: the approved entry for the
+            // prompt this build sends (lib/memoryExtractionAuto.ts). v10 is
+            // new in the change that approves it, so its text and this
+            // approval land together.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v10",
+            status: "approved",
+            owner: "@mposition",
+            registeredAt: "2026-10-24",
+            notes: "v9 with the health rules rewritten: the behaviour a health fact creates is kept without its reason, and anything still health-revealing is not extracted. Needed because extraction no longer has a review queue.",
+            evalBudget: null,
+            evaluation: null,
+            ownerLaunch: {
+                approver: "@mposition",
+                approvedAt: "2026-10-24",
+                expiresAt: "2026-11-22",
+                decisionRef: "Owner decision in chat, 2026-10-24: free automatic extraction on import, no review queue, health reasons rewritten out and still-sensitive candidates not stored.",
+                knownLimitations: "Unmeasured, like v9. Candidates activate without review, so the deterministic validator and its critical probes are the only gate before a memory reaches a prompt.",
+            },
+        },
+        {
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v9",
+            status: "approved",
+            owner: "@mposition",
+            registeredAt: "2026-10-21",
+            notes: "Adds model-proposed canonical topics for user-reviewed conflict resolution. Approved 2026-10-23 on an owner launch, not an evaluation: no paid evaluation has run on v9, and the historical v8 result remains revoked.",
+            evalBudget: null,
+            evaluation: null,
+            ownerLaunch: {
+                approver: "@mposition",
+                approvedAt: "2026-10-23",
+                expiresAt: "2026-11-22",
+                decisionRef: "Owner decision in chat, 2026-10-23: launch memory at current quality and improve it daily with the memory quality agent.",
+                knownLimitations: "Unmeasured. The closest predecessor (mem-extract-v8, 2026-09-05) scored precision 0.71 and recall 0.70 and proposed bulk-safe candidates on 10 critical cases; candidates from this pair are therefore never bulk-approved. Korean product retrieval Recall@5 baseline is 69% (MEMORY-01).",
+            },
+        },
         {
             // **Never approved, superseded by v2.** The pair was the §12.5
             // first eval target and its only live run reached five
@@ -906,7 +973,8 @@ export const MEMORY_EVAL_REQUIRED_LANGUAGES = ["ko", "en"] as const;
 export function findApprovedEvalPair(
     pair: MemoryExtractionPairRef,
     revokedPairs: RevokedPairsState,
-    register: readonly MemoryExtractionEvalEntry[] = MEMORY_EXTRACTION_EVAL_REGISTER
+    register: readonly MemoryExtractionEvalEntry[] = MEMORY_EXTRACTION_EVAL_REGISTER,
+    now: Date = new Date()
 ): MemoryExtractionEvalEntry | null {
     const entry = register.find(
         (candidate) =>
@@ -915,7 +983,37 @@ export function findApprovedEvalPair(
     );
     if (!entry || entry.status !== "approved") return null;
     if (isPairRevoked(revokedPairs, pair)) return null;
+    // Expiry is enforced here, not only by the register check: a deployed
+    // build would otherwise keep an approval alive long after CI refused it.
+    const expiresAt = Date.parse(
+        entry.evaluation?.expiresAt ?? entry.ownerLaunch?.expiresAt ?? ""
+    );
+    if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) return null;
     return entry;
+}
+
+/**
+ * The deterministic half of the critical gate, re-run for an approval that has
+ * no evaluation behind it: every probe whose shape alone settles it must still
+ * be refused bulk-safe storage.
+ */
+export function findCriticalProbeFailures(): string[] {
+    const failures: string[] = [];
+    for (const [list, probes] of [
+        ["MUST_REJECT", MUST_REJECT],
+        ["MUST_REQUIRE_SENSITIVE_REVIEW", MUST_REQUIRE_SENSITIVE_REVIEW],
+    ] as const) {
+        for (const probe of probes) {
+            const result = validateMemoryCandidate({
+                kind: "identity",
+                statement: probe.statement,
+                confidence: 0.9,
+                evidence: [{ role: probe.role ?? "user", sourceType: "external_message" }],
+            });
+            if (result.bulkSafe) failures.push(`${list}: ${probe.note}`);
+        }
+    }
+    return failures;
 }
 
 /**
@@ -997,6 +1095,42 @@ export function findEvalRegisterProblems(
             }
         }
         if (entry.status !== "approved") continue;
+
+        if (entry.ownerLaunch && entry.evaluation) {
+            problems.push(
+                `${label}: approved on both an evaluation and an owner launch; record one basis`
+            );
+            continue;
+        }
+        if (entry.ownerLaunch) {
+            const launch = entry.ownerLaunch;
+            if (
+                [launch.approver, launch.approvedAt, launch.expiresAt,
+                    launch.decisionRef, launch.knownLimitations]
+                    .some((field) => !field || String(field).trim() === "")
+            ) {
+                problems.push(`${label}: owner launch approval has empty fields`);
+            }
+            const approvedAt = Date.parse(launch.approvedAt);
+            const expiresAt = Date.parse(launch.expiresAt);
+            if (!Number.isFinite(approvedAt) || !Number.isFinite(expiresAt)) {
+                problems.push(`${label}: owner launch dates must be ISO dates`);
+            } else if (
+                expiresAt <= approvedAt ||
+                expiresAt - approvedAt > MEMORY_OWNER_LAUNCH_MAX_DAYS * 86_400_000
+            ) {
+                problems.push(
+                    `${label}: owner launch approval must expire within ` +
+                        `${MEMORY_OWNER_LAUNCH_MAX_DAYS} days of approvedAt`
+                );
+            } else if (expiresAt <= now.getTime()) {
+                problems.push(`${label}: owner launch approval expired; renew or revoke`);
+            }
+            for (const failure of findCriticalProbeFailures()) {
+                problems.push(`${label}: critical validator probe is bulk-safe (${failure})`);
+            }
+            continue;
+        }
 
         if (!entry.evalBudget) {
             problems.push(

@@ -8,12 +8,6 @@
 // changing an approved contract, which means going back to that packet rather
 // than editing this file -- so each carries the item number it answers.
 
-/** Live chat enrollment is separate from building the native client. */
-export const MOBILE_CHAT_PATH = "/api/mobile/chat";
-export const mobileChatEnabled = (environment: Record<string, string | undefined> = process.env) =>
-  environment.MOBILE_CHAT_ENABLED === "true";
-export const mobileChatBearerRoutes = () => mobileChatEnabled() ? [MOBILE_CHAT_PATH] : [];
-
 /** 8.1.1 #1 -- access token lifetime. */
 export const MOBILE_ACCESS_TOKEN_TTL_SECONDS = 10 * 60;
 

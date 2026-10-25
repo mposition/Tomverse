@@ -189,17 +189,6 @@ mock.module(mod("lib/promptRefinerShadowRunStore.ts"), {
   },
 });
 
-// The shared AgentDigestItem retention (docs/policy/qa-release-agent.md
-// section 4). Mocked as a store for the same reason: the model name appears only
-// inside lib/agentDigestStore.ts, so the stub guard below cannot see it. One
-// short batch each, so each step stops after its first call.
-mock.module(mod("lib/agentDigestStore.ts"), {
-  namedExports: {
-    AGENT_DIGEST_RETENTION_BATCH: 200,
-    expireAgentDigestBodies: async () => ({ expired: 37 }),
-    purgeAgentDigestMeta: async () => ({ purged: 41 }),
-  },
-});
 // The product-research agent's two app-side duties. Its store is mocked rather
 // than its Prisma model stubbed, because the model name appears only inside the
 // store and so the stub guard below cannot see it -- which is how this file
@@ -218,6 +207,17 @@ mock.module(mod("lib/productResearchObservationStore.ts"), {
 mock.module(mod("lib/billingFinanceOpsSilence.ts"), {
   namedExports: {
     checkBillingFinanceOpsSilence: async () => "recorded",
+  },
+});
+// The shared AgentDigestItem retention (docs/policy/billing-finance-ops.md
+// §1.4). Mocked as a store for the same reason: the model name appears only
+// inside lib/agentDigestStore.ts, so the stub guard below cannot see it. One
+// short batch each, so each step stops after its first call.
+mock.module(mod("lib/agentDigestStore.ts"), {
+  namedExports: {
+    AGENT_DIGEST_RETENTION_BATCH: 200,
+    expireAgentDigestBodies: async () => ({ expired: 37 }),
+    purgeAgentDigestMeta: async () => ({ purged: 41 }),
   },
 });
 // The sre-ops reservation retention (docs/policy/sre-ops.md §10), mocked as
@@ -432,9 +432,9 @@ test("a step that throws does not skip the steps behind it", async () => {
   // is the assertion the change exists for.
   assert.deepEqual(deletedAccountIds, ["user-past-its-grace-period"]);
   assert.equal(result.scheduledAccountsDeleted, 1);
+  assert.equal(result.billingFinanceOpsSilence, "recorded");
   assert.equal(result.agentDigestBodiesExpired, 37);
   assert.equal(result.agentDigestMetaPurged, 41);
-  assert.equal(result.billingFinanceOpsSilence, "recorded");
   assert.equal(result.opsObserverDeliveriesPurged, 43);
 
   // So did everything after it, all the way to the last step.

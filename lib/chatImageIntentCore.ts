@@ -21,14 +21,35 @@ import {
 /** Long enough to read the request; the rest of a long message adds nothing. */
 export const CHAT_IMAGE_INTENT_MAX_PROMPT_CHARS = 2_000;
 
-/** One small JSON object plus slack for providers that count reasoning. */
-export const CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS = 160;
+/**
+ * One small JSON object plus room for reasoning: an OpenAI reasoning model
+ * counts its reasoning against this, and a ceiling it hits returns no object.
+ */
+export const CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS = 400;
 
-/** The send waits on this call, so a slow answer reads as "not an image". */
-export const CHAT_IMAGE_INTENT_TIMEOUT_MS = 4_000;
+/**
+ * The send waits on this call, so a slow answer reads as "not an image".
+ *
+ * Measured on dev 2026-10-20 with gpt-6-luna as the router model: the Auto
+ * router's own call took 3.1 s and the first image-intent call, at a 4 s
+ * deadline, was cut off at 4,005 ms -- every image request then fell through
+ * to a text answer. The deadline only bounds the worst case; a send waits as
+ * long as the call actually takes.
+ */
+export const CHAT_IMAGE_INTENT_TIMEOUT_MS = 8_000;
 
-/** The composer's wait: the server's deadline plus the round trip. */
-export const CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS = 5_000;
+/**
+ * A follow-up ("make it bluer") writes the whole new prompt as well as the
+ * decision, so it gets room for up to CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS of
+ * any script (a Korean character can be more than one token) plus reasoning,
+ * and the time to write it. Used only when a previous image is shown; the
+ * worst-case budget hold is taken at this ceiling then.
+ */
+export const CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS = 2_500;
+export const CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS = 12_000;
+
+/** The composer's wait: the longest server deadline plus the round trip. */
+export const CHAT_IMAGE_INTENT_CLIENT_TIMEOUT_MS = 14_000;
 
 const PRESETS: readonly ImagePreset[] = ["draft", "standard", "final"];
 
@@ -41,9 +62,27 @@ export type ChatImageModelCandidate = {
     credits: Partial<Record<ImagePreset, number>>;
 };
 
+/**
+ * `prompt` is set only for a follow-up to the conversation's previous image
+ * ("make it bluer"): the complete prompt for the new image, the previous one
+ * with the change applied. Null means the message itself is the prompt.
+ */
 export type ChatImageDecision =
     | { image: false }
-    | { image: true; modelId: string | null; preset: ImagePreset | null };
+    | {
+          image: true;
+          modelId: string | null;
+          preset: ImagePreset | null;
+          prompt: string | null;
+      };
+
+/**
+ * The longest follow-up rewrite accepted. The call is told this limit; a
+ * rewrite over it is refused, never cut -- the end of the prompt is where
+ * the change ("now in blue") usually is, and an image made from a prompt
+ * missing it would be charged for the wrong picture.
+ */
+export const CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS = 1_500;
 
 /** Enabled models with at least one square price, in catalogue order. */
 export const chatImageModelCandidates = (
@@ -89,6 +128,8 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
     "A separate image generator exists. Decide whether this message asks for a new image to be created and, if it does, which image model and preset should make it.",
     "",
     CHAT_IMAGE_ROUTING_CRITERIA,
+    "",
+    "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details or composition, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
     "When image=false, fill modelId and preset with any listed value; they are ignored.",
 ].join("\n");
 
@@ -96,10 +137,11 @@ export const CHAT_IMAGE_INTENT_SYSTEM = [
 export const chatImageIntentPrompt = (text: string): string =>
     text.trim().slice(0, CHAT_IMAGE_INTENT_MAX_PROMPT_CHARS);
 
-/** The model list, then the message. */
+/** The model list, the previous image when there is one, then the message. */
 export const chatImageIntentUserMessage = (
     text: string,
-    candidates: readonly ChatImageModelCandidate[]
+    candidates: readonly ChatImageModelCandidate[],
+    previousImagePrompt: string | null = null
 ): string =>
     [
         "Image models (credits per 1024x1024 image, by preset):",
@@ -110,6 +152,15 @@ export const chatImageIntentUserMessage = (
             return `- ${candidate.id} (${candidate.name}; ${candidate.latency}): ${prices}`;
         }),
         "",
+        ...(previousImagePrompt
+            ? [
+                  "Previous image:",
+                  // Whole: a cut previous prompt would lose what the change
+                  // is applied to.
+                  previousImagePrompt,
+                  "",
+              ]
+            : []),
         "Message:",
         chatImageIntentPrompt(text),
     ].join("\n");
@@ -122,8 +173,9 @@ export const chatImageIntentOutputSchema = (
         image: { type: "boolean" as const },
         modelId: { type: "string" as const, enum: candidates.map((candidate) => candidate.id) },
         preset: { type: "string" as const, enum: [...PRESETS] },
+        prompt: { type: "string" as const },
     },
-    required: ["image", "modelId", "preset"],
+    required: ["image", "modelId", "preset", "prompt"],
     additionalProperties: false as const,
 });
 
@@ -134,27 +186,51 @@ export const chatImageIntentOutputSchema = (
  */
 export const parseChatImageIntentOutput = (
     output: unknown,
-    candidates: readonly ChatImageModelCandidate[]
+    candidates: readonly ChatImageModelCandidate[],
+    /** A rewrite is kept only when the call was shown a previous image. */
+    followUpAllowed = false
 ): ChatImageDecision => {
     if (typeof output !== "object" || output === null) return { image: false };
-    const value = output as { image?: unknown; modelId?: unknown; preset?: unknown };
+    const value = output as {
+        image?: unknown;
+        modelId?: unknown;
+        preset?: unknown;
+        prompt?: unknown;
+    };
     if (value.image !== true) return { image: false };
+    const rewrite =
+        followUpAllowed && typeof value.prompt === "string" ? value.prompt.trim() : "";
+    // Over the limit is refused, not cut: see CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS.
+    // The message then goes to chat rather than paying for a mangled image.
+    if (rewrite.length > CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS) return { image: false };
+    const prompt = rewrite || null;
     const candidate = candidates.find((entry) => entry.id === value.modelId);
-    if (!candidate) return { image: true, modelId: null, preset: null };
+    if (!candidate) return { image: true, modelId: null, preset: null, prompt };
     const preset =
         typeof value.preset === "string" &&
         (PRESETS as readonly string[]).includes(value.preset) &&
         candidate.credits[value.preset as ImagePreset] !== undefined
             ? (value.preset as ImagePreset)
             : null;
-    return { image: true, modelId: candidate.id, preset };
+    return { image: true, modelId: candidate.id, preset, prompt };
 };
 
 /** The client's reading of the route's JSON; anything malformed is chat. */
 export const readChatImageDecision = (data: unknown): ChatImageDecision => {
     if (typeof data !== "object" || data === null) return { image: false };
-    const value = data as { image?: unknown; modelId?: unknown; preset?: unknown };
+    const value = data as {
+        image?: unknown;
+        modelId?: unknown;
+        preset?: unknown;
+        prompt?: unknown;
+    };
     if (value.image !== true) return { image: false };
+    if (
+        typeof value.prompt === "string" &&
+        value.prompt.trim().length > CHAT_IMAGE_INTENT_MAX_REWRITE_CHARS
+    ) {
+        return { image: false };
+    }
     return {
         image: true,
         modelId: typeof value.modelId === "string" && value.modelId ? value.modelId : null,
@@ -163,5 +239,26 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
             (PRESETS as readonly string[]).includes(value.preset)
                 ? (value.preset as ImagePreset)
                 : null,
+        prompt:
+            typeof value.prompt === "string" && value.prompt.trim()
+                ? value.prompt.trim()
+                : null,
     };
+};
+
+/**
+ * Whether the message being sent -- the last user message -- carries an
+ * attachment. Only that turn decides image eligibility: a file shared earlier
+ * in the conversation does not make a later "draw a cat" anything but an
+ * image request.
+ */
+export const latestUserTurnHasAttachments = (
+    messages: readonly { role?: unknown; attachments?: unknown }[]
+): boolean => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== "user") continue;
+        return Array.isArray(message.attachments) && message.attachments.length > 0;
+    }
+    return false;
 };

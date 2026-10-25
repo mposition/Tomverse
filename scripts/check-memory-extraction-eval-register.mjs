@@ -3,9 +3,12 @@
  * import/memory policy §12.1, §12.4). Runs in the PR Fast Gate.
  *
  *   * An `approved` pair must carry complete §12.1 evidence, §12.3-passing
- *     metrics, an unexpired approval, and a human-approved eval budget —
- *     anything less fails the build, because an approved pair is what the
- *     extraction runtime will actually call.
+ *     metrics, an unexpired approval, and a human-approved eval budget — or,
+ *     on the owner launch (docs/policy/external-conversation-import-and-memory.md
+ *     §12.4a), a complete `ownerLaunch` record expiring
+ *     within 30 days with every critical validator probe holding. Anything
+ *     less fails the build, because an approved pair is what the extraction
+ *     runtime will actually call.
  *   * Every registered model must have an explicit pricing profile
  *     (§11: extraction follows the verified-pricing contract).
  *   * Candidate pairs without a budget are the expected §12.5 waiting state

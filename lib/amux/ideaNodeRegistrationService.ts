@@ -25,6 +25,9 @@ import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4DuplicateReasonRequired,
   amuxV4UnitWriteEnabled, commitAmuxV4NodeCreation,
   commitAmuxV4UnitPrepare,
   markAmuxV4UnitConsumeOutcomeUnknown } from "./ideaUnitDecisionStore.ts";
+import { isAmuxSystemRegistrationAuthority,
+  type AmuxRegistrationAuditAuthority } from
+  "./ideaRegistrationAuditAuthority.ts";
 
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -80,8 +83,8 @@ export async function approvedAncestors(tx: Prisma.TransactionClient,
   return path;
 }
 
-export type AmuxV4NodePrepareInTx = {
-  session: Session; request: Request; actorUserId: string;
+export type AmuxV4NodePrepareInTx = AmuxRegistrationAuditAuthority & {
+  actorUserId: string;
   choice: { ideaId: string; draftUnitId: string; parentNodeId: string | null;
     prepareRequestId: string; decisionReason: string | null };
   verified: Awaited<ReturnType<typeof readVerifiedAmuxNodeProposal>>;
@@ -89,6 +92,7 @@ export type AmuxV4NodePrepareInTx = {
   keys: ReturnType<typeof loadCurrentAmuxContentKeys>;
   decisionId: string; nodeId: string;
   ownerSession: ReturnType<typeof amuxV4UnitBrowserDigest>;
+  registrationAuthority?: AmuxIdeaUnitConfirmationSnapshot["registrationAuthority"];
 };
 
 /** The preparation itself, inside the caller's transaction: the single
@@ -97,7 +101,6 @@ export async function prepareAmuxV4NodeCreationInTx(tx: Prisma.TransactionClient
   args: AmuxV4NodePrepareInTx) {
   const { choice, verified, scanner, keys, decisionId, nodeId, ownerSession,
     actorUserId } = args;
-  const input = { session: args.session, request: args.request };
   await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
   const idea = await tx.amuxIdeaSubmission.findFirst({
     where: { id: choice.ideaId, actorUserId },
@@ -170,6 +173,8 @@ export async function prepareAmuxV4NodeCreationInTx(tx: Prisma.TransactionClient
     ideaId: choice.ideaId, decisionId,
     prepareRequestId: choice.prepareRequestId,
     actorUserId, ownerSession, nodeId,
+    ...(args.registrationAuthority ?
+      { registrationAuthority: args.registrationAuthority } : {}),
     unit: { id: unit.id, localRef: unit.localRef!,
       bodyDigest: unit.bodyDigest,
       bodyDigestKeyId: unit.bodyDigestKeyId },
@@ -183,8 +188,10 @@ export async function prepareAmuxV4NodeCreationInTx(tx: Prisma.TransactionClient
     decisionReason: choice.decisionReason, key: keys,
   });
   if (!snapshot) throw new AmuxV4UnitDecisionError("reconfirm");
-  const result = await commitAmuxV4UnitPrepare(tx, {
-    session: input.session, request: input.request,
+  const authority = isAmuxSystemRegistrationAuthority(args) ?
+    { systemActor: args.systemActor, actorUserId: args.actorUserId } :
+    { session: args.session, request: args.request };
+  const result = await commitAmuxV4UnitPrepare(tx, { ...authority,
     snapshot, duplicateScan: duplicates, taskCost: null,
     digestKey: keys,
   });

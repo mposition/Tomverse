@@ -81,7 +81,7 @@ const LANE_RULES = [
   // decide whether a paid turn starts at all.
   [
     "finance",
-    /^(credit-finance|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|prompt-refiner-vnext-one-shot|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route)/,
+    /^(credit-finance|code-managed-|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|prompt-refiner-vnext-one-shot|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route|voice-conversation-ledger)/,
   ],
   // The agents and the review machinery around them: AMUX intake, promotion
   // and reconciliation, the engineering and marketing agents, Prompt Refiner
@@ -90,14 +90,15 @@ const LANE_RULES = [
   // Prompt Refiner suites keep the lanes they had.
   // AMUX itself, the optimizer that files AMUX cards and the engineering agent
   // that takes them. Split out of `agents` on 2026-10-19, when that lane held
-  // 68 suites on develop and ran ~15 minutes against 3-8 for most others;
-  // below `routing` so its AMUX suites keep that lane.
+  // 68 suites and ran ~15 minutes against 3-8 for most others; below
+  // `routing` so its AMUX suites keep that lane.
   ["amux", /^(amux-|chat-unified-optimizer-|engineering-agent-)/],
   // The two operations agents with the largest DB surfaces, split out of
   // `agents` on 2026-10-19 for the same reason.
   ["ops-triage", /^(ops-observer-|support-triage-)/],
   // Back-office agents that came to rest in `accounts` (QA release, billing
-  // finance ops, digests, Auto router optimizer), moved on 2026-10-19.
+  // finance ops, digests, Auto router optimizer), moved on 2026-10-19 when
+  // accounts held 49 suites.
   [
     "operations",
     /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|chat-refiner-initial-auto-release)/,
@@ -118,6 +119,20 @@ const LANE_RULES = [
  * classified runs here.
  */
 export const DB_INTEGRATION_FALLBACK_GROUP = "accounts";
+
+/**
+ * A compatibility job, not a lane. CI's lanes run PostgreSQL 17; production's
+ * version is not known to this repository, and docs/policy/support-triage.md
+ * §4 requires the support-triage timeout suites to run on 16 as well, where
+ * transaction_timeout does not exist. These suites also run in their own lane
+ * on 17, so this list is outside the lane partition: it never removes a suite
+ * from a lane, and `dbIntegrationGroupOf` never returns it.
+ */
+export const POSTGRES16_COMPAT_GROUP = "postgres16";
+export const POSTGRES16_COMPAT_SUITES = Object.freeze([
+  "tests/integration/support-triage-run.db.test.ts",
+  "tests/integration/support-triage-timeouts.db.test.ts",
+]);
 
 export const DB_INTEGRATION_GROUPS = [
   ...LANE_RULES.map(([id]) => id),

@@ -2,24 +2,6 @@ const CANONICAL_HOST = "tomverse.app";
 const CANONICAL_ORIGIN = "https://tomverse.app";
 const ORIGIN_VERIFY_HEADER = "x-tomverse-origin-verify";
 
-/** Exact HTTPS origin used by mobile login configuration, without a path or credentials. */
-export const mobileAuthHttpsOrigin = (value: string): string | null => {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password && !url.port &&
-      url.pathname === "/" && !url.search && !url.hash ? url.origin : null;
-  } catch { return null; }
-};
-
-/** The browser return host must remain separate from every configured login host. */
-export const mobileAppLinkOrigin = (env: NodeJS.ProcessEnv = process.env) => {
-  const origin = mobileAuthHttpsOrigin(env.MOBILE_AUTH_APP_LINK_ORIGIN ?? "");
-  const loginOrigins = ["https://tomverse.app", "https://www.tomverse.app", env.NEXTAUTH_URL,
-    env.PUBLIC_APP_URL, env.NEXT_PUBLIC_APP_URL, env.NEXT_PUBLIC_SHARE_BASE_URL]
-    .filter((value): value is string => Boolean(value)).map(mobileAuthHttpsOrigin);
-  return origin && !loginOrigins.includes(origin) ? origin : null;
-};
-
 const splitCsv = (value: string | undefined) =>
   (value || "")
     .split(",")

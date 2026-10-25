@@ -1,0 +1,35 @@
+export const dynamic = "force-dynamic";
+
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+
+import { isAdminSession } from "@/lib/adminAuth";
+import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
+import { authOptions } from "@/lib/auth";
+import { readGithubPullActivity } from "@/lib/githubPullActivity";
+import { readQaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
+
+/**
+ * Admin › QA and release › Merge lane: the lane's latest rounds and verdicts
+ * (lib/qaReleaseMergeLaneRoundStore.ts) with the pull requests open on GitHub
+ * right now and those whose CI still runs, polled by the lane tab so a pull
+ * request closed or merged since the lane's last round leaves the page at
+ * once, and one whose CI finished stops saying it runs. Any administrator may
+ * read it.
+ */
+export async function GET(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id || !isAdminSession(session)) {
+      return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
+    await consumeApiRateLimit(req, session.user.id, "admin-qa-release-lane-read", { minute: 20, day: 5000 });
+    const [rounds, github] = await Promise.all([readQaReleaseLaneRounds(), readGithubPullActivity()]);
+    return NextResponse.json({ rounds, github });
+  } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    console.error("Failed to read the merge lane:", error);
+    return NextResponse.json({ error: "Failed to read the merge lane." }, { status: 500 });
+  }
+}

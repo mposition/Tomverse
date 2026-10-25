@@ -50,7 +50,7 @@ entry point rather than at the submit button.
 
 ## Entry points
 
-There are exactly five, and no standalone "New image" button:
+There are exactly four, and no standalone "New image" button:
 
 1. Desktop sidebar **split button** — the primary click stays "new chat"; the
    caret opens the menu that holds image generation.
@@ -59,37 +59,39 @@ There are exactly five, and no standalone "New image" button:
 3. Chat composer **tools menu** → image generation, which switches to the image
    draft client-side.
 4. Model catalogue → **image tab** (see below).
-5. Chat **image-request handoff chip** — one control, offered at two moments:
-   while an image request is being typed, and beside the answer to one already
-   asked. Same component, same copy, same lock states; only the question it
-   carries differs.
+
+On Review (`/review`) entries 3 and 4, and the starter catalogue's image card,
+do not open this workspace: they arm the Review composer's image mode
+(`review-image-mode`) and the answer is generated inside the conversation
+(`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). The sidebar
+and drawer launcher stay explicit entries to this workspace there too.
+
+The Chat **image-request handoff chip** that used to be a fifth entry point was
+**deleted on 2026-10-20**: the LLM judgement on send (policy §13 ⑥,
+`lib/chatImageIntent.ts`) replaced the rule-based classifier behind it, and the
+classifier, the chip component, its copy and its E2E spec went with it. The
+`image_intent_suggestion_*` analytics event names stay registered only because
+a database CHECK constraint lists them; nothing emits them.
 
 Requirements:
 
 - The launcher renders once per shell. A second image button anywhere is a
-  contract violation, not a convenience. The chip is not a second launcher: it
-  is state-driven, appears at most once per question, and offers the same
-  handoff the tools menu already performs.
-- **The chip is one control in one place, not one per answer.** It renders in
-  the composer, which is shared. A control rendered under each assistant answer
-  would appear N times for one question in a comparison, and the offer belongs
-  to the question, not to any model's reply.
+  contract violation, not a convenience.
 - The menu is a real menu: `role="menu"`/`role="menuitem"`, focus moves into it
   on open, Escape closes it and returns focus to the trigger.
 - Switching to the image draft creates **no server row**. The conversation only
   exists once a generation is actually reserved (policy §6).
 
-### The handoff chip is an entry point, not an execution
+### A handoff from a typed request never executes by itself
 
-Non-negotiable, and the reason this entry point was allowed to exist at all
-(policy §13):
+A request typed in words can reach the workspace through a handoff (today the
+Review Easy image triage; the Chat send answers in the conversation instead,
+policy §13 ⑥). The deleted handoff chip used to be the entry point for this;
+what survives of its rules is the following.
 
-- **The user must press it.** Switching to the image draft without a press —
-  because the text "looked like" an image request — is forbidden. The chip
-  changes nothing until it is clicked.
 - **Submitting a generation without confirmation is forbidden, unless the
   account has said otherwise while looking at the price.** The default is
-  unchanged: the press lands in the workspace with the prompt filled and the
+  unchanged: the handoff lands in the workspace with the prompt filled and the
   price on the button, and generating is one more click.
 
   `UserSettings.imageHandoffAutoGenerate` is the exception, and every part of
@@ -103,10 +105,10 @@ Non-negotiable, and the reason this entry point was allowed to exist at all
   - **It is an account setting, not a browser one.** It decides whether one
     click spends credits, and a per-device preference would let a shared
     computer spend somebody else's.
-  - **Only the chat handoff may act on it.** The launcher, the drawer rows, the
-    tools menu and the catalogue tab are someone opening the workspace to
-    compose. A workspace that generated because it was opened would spend
-    credits on navigation.
+  - **Only a handoff that began with a typed request may act on it**
+    (`fromImageRequest`). The launcher, the drawer rows, the tools menu and the
+    catalogue tab are someone opening the workspace to compose. A workspace
+    that generated because it was opened would spend credits on navigation.
   - **It never bypasses a refusal.** The arrival submits only when the button
     itself would be enabled, so a held price, an over-long prompt, a viewer
     without the plan and a request already in flight all refuse it exactly as
@@ -118,37 +120,10 @@ Non-negotiable, and the reason this entry point was allowed to exist at all
     while a generation is running, so the account that has just watched a press
     spend credits can turn it off where it turned it on. It renders only for a
     viewer who can actually generate.
-- **A visible chip never blocks an ordinary chat submit.** Ignoring it and
-  pressing send sends the chat turn.
-- **Guest and Free see the requirement inside the chip**, before the click, and
-  the click routes to sign-in or `/pricing` — the same locked-exposure rule the
-  table below states for every other entry point.
-- **With the flag off the chip does not render**, like every other entry point.
-- **The chip is offered for a request that wants a picture**: unmistakable
-  raster generation, and a text-dense chart or infographic. A request to edit
-  or reference an attached image, and a request to describe one, are **out of
-  scope** and get no chip — the workspace starts from text, so neither can be
-  answered there.
-- **A text-dense visual gets both answers, not one instead of the other.** The
-  system block still tells the model to make the SVG, because exact text is
-  what an infographic is for and a text-to-image model does not render Korean
-  reliably; the chip is offered beside it. Withholding the chip for this class
-  was the earlier rule, and what it produced is recorded in policy §13.
-- **The chip survives the send.** While the composer holds an image request the
-  offer is about the draft; once it is empty the offer is about the last
-  question asked in that conversation, and it carries that question rather than
-  the empty box. It is scoped to the conversation, so it never follows the user
-  to a question they are no longer looking at. A dismissal belongs to the
-  question's text, so "not now" before the send is still "not now" after it.
 - **The model never names the destination.** No answer may tell the user where
   image generation is, how to reach it, or offer it as an item in a list —
   `lib/imageCapabilityPrompt.ts` forbids it, because a model that cannot
-  navigate cannot honour a choice the user makes from such a list. The control
-  is the only offer.
-- It obeys the mobile composer contract: its own full-width row above the
-  textarea, never sharing, overlapping or floating above it, and it is
-  suppressed during IME composition so a chip cannot resize the composer
-  mid-word.
+  navigate cannot honour a choice the user makes from such a list.
 
 ## Locked exposure, everywhere
 
@@ -510,8 +485,8 @@ Verified for **both** desktop and mobile projects:
 | 9 | reload | timeline rebuilt from the server, not from client memory |
 | 10 | image tab | separate list; no chat rows, no chat selection count |
 | 11 | held models | every one listed, disabled, hold stated |
-| 12 | picked from the image tab | workspace opens seeded with that model |
-| 13 | composer draft carry-over | text carried; cancel restores it exactly |
+| 12 | picked from the image tab | workspace opens seeded with that model (Review: composer image mode names that model, no workspace) |
+| 13 | composer draft carry-over | text carried; cancel restores it exactly (Review: text stays in the composer through image mode and its cancel) |
 | 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
 | 15 | two providers in one group | both prices quoted, total is their sum, one POST carrying both ids |
 | 16 | option one selected model cannot price | submission disabled; re-enabled when the option changes back |

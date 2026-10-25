@@ -11,6 +11,9 @@ import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorH
 import { AmuxTaskCostCatalogApprovalPanel } from "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
 import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
 import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
+import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePanel";
+import { AmuxMaxSubscriptionPricePanel } from "@/components/admin/AmuxMaxSubscriptionPricePanel";
+import { AmuxSessionBudgetResolutionPanel } from "@/components/admin/AmuxSessionBudgetResolutionPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import { AmuxWorkersOverviewPanel } from "@/components/admin/AmuxWorkersOverview";
 import {
@@ -113,8 +116,13 @@ export default async function AdminAmuxSettingsPage({
     const modelWriteAvailable =
       frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]) &&
       frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV]);
+    // amux-intake v19 item 2: the operating scope is the one approval for
+    // unattended intake, so it comes first on this owner-only tab.
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
+      <AmuxOperatingScopePanel operatorId={session.user.id} />
+      <AmuxMaxSubscriptionPricePanel />
       <AmuxAnalysisMonthlyBudgetPanel available={budgetAvailable} operatorId={session.user.id} />
+      <AmuxSessionBudgetResolutionPanel />
       <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} />
       <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
         amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} /></div>;

@@ -1,12 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage, type QaConversationMessage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, openModelPickerCatalogue, prepareGuestPage, type QaConversationMessage } from "./support/app-fixtures";
 import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
 import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
 
-async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3, messages: QaConversationMessage[] = []) {
+async function prepare(page: Page, width: number, theme: "light" | "dark" = "light", models = THREE_MODELS, providerCount = 3, messages: QaConversationMessage[] = [], imageTriage = false) {
   await page.setViewportSize({ width, height: width > 768 ? 1000 : 932 });
   await prepareGuestPage(page, "ko", "studio");
   const account = await mockAuthenticatedApi(page, {
@@ -20,9 +20,10 @@ async function prepare(page: Page, width: number, theme: "light" | "dark" = "lig
   await suppressTransientUi(page);
   await setDeterministicTheme(page, theme);
   await page.context().addCookies([{ name: "__tomverse_e2e_review_easy", value: "1", url: "http://127.0.0.1:3100" }, { name: "__tomverse_e2e_chat_starter", value: "1", url: "http://127.0.0.1:3100" }, { name: "__tomverse_e2e_image_generation", value: "1", url: "http://127.0.0.1:3100" }]);
+  if (imageTriage) await page.context().addCookies([{ name: "__tomverse_e2e_chat_image_intent", value: "1", url: "http://127.0.0.1:3100" }]);
   await page.goto("/review?lang=ko", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("chat-input")).toBeVisible({ timeout: 60_000 });
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Easy", exact: true }).click();
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Easy", exact: true }).click();
   await expect(page.locator(".review-participant-list>button")).toHaveCount(providerCount, { timeout: 20000 });
 }
 
@@ -94,11 +95,11 @@ for (const width of [1600, 430]) for (const theme of ["light", "dark"] as const)
       await page.getByTestId("mobile-sidebar-open").click();
       await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar")).toBeVisible();
       await expectHeaderControlsFit(page);
-      await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
-      await expect(page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+      await expect(page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
     }
     await page.getByTestId("review-appearance").selectOption("studio");
-    await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+    await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
     await expect(page.getByTestId("chat-textarea")).toHaveValue("Preserve this draft across appearance and mode changes.");
     await page.locator(".review-participants-heading").click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
@@ -158,9 +159,9 @@ for (const width of [1600, 430]) test(`Easy ${width}px selects the provider's re
   expect(requests.map(request => request.modelId).sort()).toEqual([deep, "gpt-6-luna"].sort());
   expect(routes).toBe(1);
   if (width <= 768) await page.getByTestId("mobile-sidebar-open").click();
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await (width <= 768 ? page.getByTestId("mobile-sidebar-drawer").getByTestId("review-command-bar") : page.getByTestId("composer-review-mode")).getByRole("button", { name: "Professional", exact: true }).click();
   if (width <= 768) await page.keyboard.press("Escape");
-  else await expect(page.locator(".review-research-shortcut")).toBeVisible();
+  else await expect(page.locator(".review-research-shortcut")).toHaveCount(0);
   await page.getByTestId("composer-tools-button").click();
   await expect(page.getByTestId("tools-deep-research-row")).toBeVisible();
 });
@@ -184,7 +185,7 @@ test("Easy routes once and dispatches each selected provider through the existin
   await expect(page.getByText("Answer from gpt-6-luna.", { exact: true })).toBeVisible();
   await expect(page.getByText(`Answer from ${THREE_MODELS[0]}.`, { exact: true })).toBeVisible();
   expect(routes).toBe(2);
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
   await expect.poll(() => page.getByTestId("desktop-model-panel").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-model-id")))).toEqual(THREE_MODELS);
 });
 
@@ -199,7 +200,7 @@ test("unsupported image providers show a local notice and never start a text or 
   });
   await page.getByTestId("chat-textarea").fill("Create an illustration.");
   await page.getByTestId("chat-send-button").click();
-  await expect(page.getByTestId("review-image-unsupported")).toHaveCount(3);
+  await expect(page.getByText("해당 공급자는 이미지 생성 모델이 제공되지 않습니다.", { exact: true })).toHaveCount(3);
   expect(images).toBe(0); expect(text).toBe(0);
 });
 
@@ -241,9 +242,9 @@ for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
 test("a supported image provider still executes while unsupported peers keep their notices", async ({ page }) => {
   await prepare(page, 1600);
   const imageCalls: string[][] = [];
-  await page.route("**/api/images/generations", route => {
-    imageCalls.push(route.request().postDataJSON().modelIds);
-    return route.fulfill({ status: 500, json: { error: "QA_PROVIDER_FAILURE" } });
+  await page.route("**/api/conversations/*/image-turn", route => {
+    imageCalls.push(route.request().postDataJSON().imageModelIds);
+    return route.fulfill({ status: 403, json: { error: "QA_PROVIDER_FAILURE" } });
   });
   await page.route("**/api/review/route", route => {
     const body = route.request().postDataJSON();
@@ -251,9 +252,117 @@ test("a supported image provider still executes while unsupported peers keep the
   });
   await page.getByTestId("chat-textarea").fill("Create an illustration of a mountain.");
   await page.getByTestId("chat-send-button").click();
-  await expect(page.getByTestId("review-image-unsupported")).toHaveCount(2);
-  await page.getByTestId("image-generation-submit").click();
+  await expect(page.getByText("해당 공급자는 이미지 생성 모델이 제공되지 않습니다.", { exact: true })).toHaveCount(2);
   await expect.poll(() => imageCalls).toEqual([["gpt-image-2"]]);
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+});
+
+const INLINE_IMAGE_PROMPT = "Create an illustration of a mountain.";
+async function installInlineImageAnswers(page: Page) {
+  const turns: Array<{ conversationId: string; modelId: string; imageModelIds: string[]; imageGroupModelIds: string[]; assistantMessageId: string; sourceUserMessageId: string }> = [];
+  let textCalls = 0, workspaceCalls = 0, preflightCalls = 0, routingCalls = 0;
+  const groups = new Map<string, string[]>();
+  await page.route("**/api/review/route", route => {
+    routingCalls++;
+    const body = route.request().postDataJSON();
+    return route.fulfill({ json: { kind: "image", preset: "draft", choices: body.providers.map((provider: string) => ({
+      provider, modelId: provider === "openai" ? "gpt-image-2" : provider === "google" ? "gemini-3.1-flash-image" : null,
+    })) } });
+  });
+  await page.route("**/api/conversations/*/image-turn", route => {
+    const body = route.request().postDataJSON();
+    const conversationId = new URL(route.request().url()).pathname.split("/")[3];
+    turns.push({ ...body, conversationId });
+    const groupId = `image-${body.assistantMessageId.split("_")[0]}`;
+    groups.set(groupId, body.imageGroupModelIds ?? body.imageModelIds);
+    return route.fulfill({ status: 202, json: { content: `[Image generated] ${INLINE_IMAGE_PROMPT}`,
+      imageTurn: { groupId, modelIds: body.imageModelIds } } });
+  });
+  await page.route("**/api/images/groups/*", route => {
+    const groupId = new URL(route.request().url()).pathname.split("/").pop()!;
+    const modelIds = groups.get(groupId) ?? [];
+    return route.fulfill({ json: { status: "succeeded",
+      targets: modelIds.map(modelId => ({ targetId: `${groupId}-${modelId}`, modelId, currentGenerationId: `${groupId}-${modelId}` })),
+      generations: modelIds.map(modelId => ({ generationId: `${groupId}-${modelId}`, modelId, status: "succeeded", prompt: INLINE_IMAGE_PROMPT,
+        assets: [{ role: "original", url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJ1sAAAAASUVORK5CYII=" }] })) } });
+  });
+  await page.route("**/api/chat", route => { textCalls++; return route.fulfill({ status: 500, body: "Unexpected text call" }); });
+  await page.route("**/api/images/generations", route => { workspaceCalls++; return route.fulfill({ status: 500, json: {} }); });
+  await page.route("**/api/chat/preflight", route => { preflightCalls++; return route.fulfill({ status: 500, json: {} }); });
+  return { turns, counts: () => ({ textCalls, workspaceCalls, preflightCalls, routingCalls }) };
+}
+
+for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
+  for (const appearance of ["studio", "classic"] as const) for (const mode of ["Easy", "Professional"] as const) {
+    test(`Review inline images ${mode} ${appearance} ${width}px ${theme}`, { tag: "@ui-risk" }, async ({ page }) => {
+      const calls = await installInlineImageAnswers(page);
+      await prepare(page, width, theme, THREE_MODELS, 3, [], true);
+      if (mode === "Professional") await page.getByTestId("composer-review-mode").getByRole("button", { name: mode, exact: true }).click();
+      if (appearance === "classic") await page.evaluate(() => {
+        localStorage.setItem("tomverse_review_appearance", "classic");
+        window.dispatchEvent(new Event("tomverse:review-preferences"));
+      });
+      await page.getByTestId("chat-textarea").fill(INLINE_IMAGE_PROMPT);
+      await page.getByTestId("chat-textarea").blur();
+      await page.getByTestId("chat-send-button").click();
+      await expect.poll(() => calls.turns.length).toBe(2);
+      await expect(page.getByTestId("chat-image-turn")).toHaveCount(2);
+      await expect(page.getByText("해당 공급자는 이미지 생성 모델이 제공되지 않습니다.", { exact: true })).toHaveCount(1);
+      await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+      await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+      expect(calls.turns.map(turn => turn.imageModelIds[0]).sort()).toEqual(["gemini-3.1-flash-image", "gpt-image-2"]);
+      expect(new Set(calls.turns.map(turn => turn.conversationId))).toEqual(new Set(["qa-conversation"]));
+      expect(calls.counts()).toEqual({ textCalls: 0, workspaceCalls: 0, preflightCalls: 0, routingCalls: 1 });
+      expect(new Set(calls.turns.map(turn => turn.assistantMessageId)).size).toBe(2);
+      expect(new Set(calls.turns.map(turn => turn.assistantMessageId.split("_")[0])).size).toBe(1);
+      for (const turn of calls.turns) expect(turn.imageGroupModelIds).toEqual(["gemini-3.1-flash-image", "gpt-image-2"]);
+      await expect(page.getByTestId("chat-image-turn").locator("img")).toHaveCount(2);
+      await expect(page).toHaveURL(/\/review/);
+      await expect(page.locator("html")).toHaveClass(new RegExp(theme));
+    });
+  }
+
+test("Professional image selection stages the composer, then answers inline without automatic routing", async ({ page }) => {
+  const calls = await installInlineImageAnswers(page);
+  await prepare(page, 1440);
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
+  const picker = await openModelPickerCatalogue(page);
+  await picker.getByTestId("model-picker-tab-image").click();
+  await picker.locator('[data-testid="image-model-option"][data-model-id="gpt-image-2"]').click();
+  await expect(page.getByTestId("review-image-mode")).toContainText("GPT Image 2");
+  expect(calls.turns.length).toBe(0);
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await page.getByTestId("chat-textarea").fill(INLINE_IMAGE_PROMPT);
+  await page.getByTestId("chat-send-button").click();
+  await expect(page.getByTestId("chat-image-turn").locator("img")).toHaveCount(1);
+  expect(calls.turns).toHaveLength(1);
+  expect(calls.turns[0].imageModelIds).toEqual(["gpt-image-2"]);
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
+  const saved = await page.evaluate(async () => (await fetch("/api/conversations/qa-conversation")).json());
+  expect(saved.selectedModels).toEqual(THREE_MODELS);
+  expect(calls.counts()).toEqual({ textCalls: 0, workspaceCalls: 0, preflightCalls: 0, routingCalls: 0 });
+});
+
+test("Review reload restores each provider image in its original conversation panel", async ({ page }) => {
+  const calls = await installInlineImageAnswers(page);
+  await prepare(page, 390, "dark");
+  await page.getByTestId("chat-textarea").fill(INLINE_IMAGE_PROMPT);
+  await page.getByTestId("chat-send-button").click();
+  await expect(page.getByTestId("chat-image-turn").locator("img")).toHaveCount(2);
+  const messages = [
+    { id: calls.turns[0].sourceUserMessageId, role: "user", content: INLINE_IMAGE_PROMPT },
+    ...calls.turns.map(turn => ({ id: turn.assistantMessageId, role: "assistant", modelId: turn.modelId,
+      content: `[Image generated] ${INLINE_IMAGE_PROMPT}`,
+      imageTurn: { groupId: `image-${turn.assistantMessageId.split("_")[0]}`, modelIds: turn.imageModelIds } })),
+  ];
+  await page.route(/\/api\/conversations\/qa-conversation(\?.*)?$/, route => route.request().method() === "GET"
+    ? route.fulfill({ json: { id: "qa-conversation", kind: "chat", productKey: "review", title: "Review images",
+      selectedModels: THREE_MODELS, disabledPanels: [], messages, messagePage: { hasMore: false, nextCursor: null } } })
+    : route.fallback());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("chat-image-turn").locator("img")).toHaveCount(2);
+  expect(calls.turns).toHaveLength(2);
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 
 test("Studio at 320px preserves a full-width textarea and reachable controls at 200% text size", async ({ page }) => {
@@ -271,7 +380,7 @@ test("Studio at 320px preserves a full-width textarea and reachable controls at 
 test("Easy deduplicates Professional providers and restores every model when switched back", async ({ page }) => {
   await prepare(page, 1600, "light", ["gpt-5-4-mini", "gpt-6-luna", "claude-haiku-4-5"], 2);
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(2);
-  await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 });
 
@@ -317,7 +426,7 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
       ...Object.fromEntries(healthy.map(id => [id, { kind: "success", chunks: [`Healthy ${id}.`] }])),
     });
     await prepare(page, width, theme);
-    await page.getByTestId("review-command-bar").getByRole("button", { name: "Professional", exact: true }).click();
+    await page.getByTestId("composer-review-mode").getByRole("button", { name: "Professional", exact: true }).click();
     await page.getByTestId("chat-textarea").fill("Compare, then recover the failed provider.");
     await page.getByTestId("chat-send-button").click();
     await page.getByRole("button", { name: "다시 시도", exact: true }).click();

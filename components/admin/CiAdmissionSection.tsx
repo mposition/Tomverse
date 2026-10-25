@@ -10,10 +10,13 @@ import { adminCiAdmissionMessages } from "@/lib/adminMessages/ciAdmission";
 import type { CiRunnerUsage } from "@/lib/ciRunnerUsage";
 import {
   CI_ADMISSION_MAX_CAPACITY,
+  ciRunnerCount,
+  type CiAdmissionEntryStatus,
   type CiAdmissionEvent,
   type CiAdmissionMode,
   type CiAdmissionQueueEntry,
   type CiAdmissionState,
+  type CiRunnerOwner,
 } from "@/lib/ciAdmissionCore";
 
 export type CiAdmissionView = { mode: CiAdmissionMode; configured: boolean; state: CiAdmissionState };
@@ -21,18 +24,23 @@ type View = CiAdmissionView;
 
 const RUNNER_REFRESH_MS = 20_000;
 const VIEW_REFRESH_MS = 20_000;
+const SLOW_ACTION_TIMEOUT_MS = 60_000;
 
 /**
- * GitHub runner usage right now (lib/ciRunnerUsage.ts), refreshed every 20
- * seconds while the page is visible and at once when it becomes visible again.
- * The server shares one cached read among all viewers.
+ * Who holds GitHub runners right now (lib/ciRunnerUsage.ts), read again every
+ * 20 seconds while the page is visible and at once when it becomes visible
+ * again; null until the first answer. The server shares one cached read among
+ * all viewers. A read GitHub failed keeps the last good reading on screen with
+ * its failure, rather than swapping the cards for the latest round's record
+ * and back (2026-10-25: the running cards came and went).
  */
-function RunnerUsagePanel() {
-  const m = useAdminMessages(adminCiAdmissionMessages);
+function useRunnerUsage(): CiRunnerUsage | null {
   // Read after the page renders, so a slow GitHub read never holds the page.
   const [usage, setUsage] = useState<CiRunnerUsage | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-
+  const keep = (next: CiRunnerUsage) =>
+    setUsage((previous) =>
+      next.status === "unavailable" && previous?.status === "ok" ? { ...previous, failure: next.failure } : next,
+    );
   useEffect(() => {
     let stopped = false;
     // One request at a time, none from a background tab's timer
@@ -43,7 +51,7 @@ function RunnerUsagePanel() {
       inFlight = true;
       try {
         const response = await adminFetch("/api/admin/ci-admission/runners", { cache: "no-store" });
-        if (response.ok && !stopped) setUsage((await response.json()) as CiRunnerUsage);
+        if (response.ok && !stopped) keep((await response.json()) as CiRunnerUsage);
       } catch {
         // The next tick tries again; the last reading stays on screen.
       } finally {
@@ -52,7 +60,6 @@ function RunnerUsagePanel() {
     };
     const first = setTimeout(() => void poll("event"), 0);
     const refresh = setInterval(() => void poll("interval"), RUNNER_REFRESH_MS);
-    const clockTick = setInterval(() => setNow(Date.now()), 5_000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void poll("event");
     };
@@ -61,78 +68,10 @@ function RunnerUsagePanel() {
       stopped = true;
       clearTimeout(first);
       clearInterval(refresh);
-      clearInterval(clockTick);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
-
-  const box = "flex flex-col gap-2.5 rounded-xl border border-zinc-800 bg-zinc-950 p-4";
-  if (usage === null) {
-    return (
-      <div className={box} data-testid="ci-runner-usage" aria-busy>
-        <span className="text-[13px] font-medium text-zinc-300">{m.runnerTitle}</span>
-        <div className="h-2.5 animate-pulse rounded-sm bg-zinc-800" />
-      </div>
-    );
-  }
-  if (usage.status === "not_configured") {
-    return <p className={`${box} text-xs text-zinc-500`}>{m.runnerNotConfigured}</p>;
-  }
-  const seconds = Math.max(0, Math.round((now - Date.parse(usage.at)) / 1000));
-  const live = (
-    <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-zinc-500">
-      <span className={`h-1.5 w-1.5 rounded-full ${usage.status === "ok" ? "bg-teal-400" : "bg-amber-300"}`} />
-      {fill(m.runnerRefresh, { seconds })}
-    </span>
-  );
-  if (usage.status === "unavailable") {
-    return (
-      <div className={box} data-testid="ci-runner-usage">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-medium text-zinc-300">{m.runnerTitle}</span>
-          {live}
-        </div>
-        <p className="text-xs text-amber-300">{fill(m.runnerUnavailable, { failure: usage.failure })}</p>
-      </div>
-    );
-  }
-  const busy = Math.min(usage.githubRunning, usage.limit);
-  return (
-    <div className={box} data-testid="ci-runner-usage">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] font-medium text-zinc-300">{m.runnerTitle}</span>
-        <span className="font-mono text-[13px] font-medium text-zinc-100" data-testid="ci-runner-usage-count">
-          {usage.githubRunning} / {usage.limit}
-        </span>
-        <span className="text-[13px] text-zinc-400">{m.runnerInUse}</span>
-        {live}
-      </div>
-      <div className="flex gap-[3px]" role="meter" aria-valuemin={0} aria-valuemax={usage.limit} aria-valuenow={busy} aria-label={m.runnerTitle}>
-        {Array.from({ length: usage.limit }, (_, index) => (
-          <span key={index} className={`h-2.5 flex-1 rounded-sm ${index < busy ? "bg-blue-400" : "bg-zinc-800"}`} />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-        <span className="inline-flex items-center gap-1.5 text-zinc-400">
-          <span className="h-2 w-2 rounded-sm bg-blue-400" />
-          {m.runnerRunning} <span className="font-mono font-medium text-zinc-300">{usage.githubRunning}</span>
-        </span>
-        <span className="inline-flex items-center gap-1.5 text-zinc-400">
-          <span className="h-2 w-2 rounded-sm bg-amber-300" />
-          {m.runnerQueued} <span className="font-mono font-medium text-zinc-300">{usage.githubQueued}</span>
-        </span>
-        {usage.ubicloudRunning + usage.ubicloudQueued > 0 ? (
-          <span className="inline-flex items-center gap-1.5 text-zinc-400">
-            <span className="h-2 w-2 rounded-sm bg-teal-400" />
-            {m.runnerUbicloud}{" "}
-            <span className="font-mono font-medium text-zinc-300">
-              {fill(m.runnerUbicloudNote, { count: usage.ubicloudRunning + usage.ubicloudQueued })}
-            </span>
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
+  return usage;
 }
 
 /** A reorder in progress: by pointer (mouse, pen, touch on the handle) or by keyboard. */
@@ -158,12 +97,11 @@ const clock = (iso: string) => {
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
 const COMMIT_URL = "https://github.com/mposition/Tomverse/commit/";
-const PAGE_PATH = "/admin/agent-digests?tab=ci-admission";
+const PAGE_PATH = "/admin/qa-release?tab=ci-admission";
 
 type Kind = "develop" | "main" | "hotfix";
 const kindOf = (entry: Pick<CiAdmissionQueueEntry, "base" | "head">): Kind =>
   entry.base !== "main" ? "develop" : entry.head.startsWith("hotfix/") ? "hotfix" : "main";
-const unitsOf = (kind: Kind) => (kind === "develop" ? 1 : 2);
 const BADGE: Record<Kind, string> = {
   develop: "bg-blue-400/15 text-blue-300",
   main: "bg-violet-400/15 text-violet-300",
@@ -182,6 +120,47 @@ const EVENT_DOT: Record<CiAdmissionEvent["kind"], string> = {
   cancelled: "bg-zinc-400",
   failed: "bg-amber-300",
   stopped: "bg-rose-400",
+  updated: "bg-sky-400",
+};
+
+const STATUS_BADGE: Record<CiAdmissionEntryStatus, string> = {
+  running: "bg-emerald-400/15 text-emerald-300",
+  next: "bg-emerald-400/15 text-emerald-300",
+  done: "bg-zinc-700/60 text-zinc-300",
+  waiting: "bg-zinc-800 text-zinc-400",
+  checking: "bg-zinc-800 text-zinc-400",
+  conflict: "bg-amber-300/15 text-amber-300",
+  behind: "bg-amber-300/15 text-amber-300",
+  updating: "bg-sky-400/15 text-sky-300",
+  hold: "bg-amber-300/15 text-amber-300",
+  held: "bg-rose-400/15 text-rose-300",
+};
+
+/** One holder of runners in the running panel; `live` when its jobs were read from GitHub just now. */
+type RunnerCard = { owner: CiRunnerOwner; kind: Kind; runners: number; handled: boolean; live?: false };
+
+/** A card from the latest round's record, where no live jobs are known. */
+const storedCard = (
+  type: "deploy" | "pull" | "other",
+  base: string | null,
+  sha: string | null,
+  number: number | null,
+  title: string,
+  runners: number,
+  kind: Kind = base === "main" ? "main" : "develop",
+): RunnerCard => ({
+  owner: { key: `${type}:${number ?? sha ?? ""}`, title, number, base, sha, running: 0, queued: 0, startedAt: "" },
+  kind,
+  runners,
+  handled: type !== "other",
+  live: false,
+});
+
+/** Deploys first, then pull requests in line order, then everything else. */
+const cardRank = (card: RunnerCard, order: readonly number[]) => {
+  if (card.owner.number === null) return card.handled ? 0 : 1_000_000;
+  const at = order.indexOf(card.owner.number);
+  return 1 + (at < 0 ? order.length : at);
 };
 
 const moved = (order: number[], number: number, to: number) => {
@@ -192,7 +171,8 @@ const moved = (order: number[], number: number, to: number) => {
 
 /**
  * Admin's CI admission line (lib/ciAdmissionCore.ts): who is using the slots,
- * the waiting drafts in release order -- rearranged by dragging the handle
+ * every open pull request into develop or main in priority order, each with
+ * where it stands -- rearranged by dragging the handle
  * (mouse, pen or touch) or from the keyboard -- the slot budget, and recent
  * decisions. A reorder is shown at once and saved; a refused save restores
  * the previous order.
@@ -207,6 +187,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const [announcement, setAnnouncement] = useState("");
   const [drag, setDrag] = useState<Drag | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const runnerUsage = useRunnerUsage();
   const listRef = useRef<HTMLOListElement>(null);
   const rowRefs = useRef(new Map<number, HTMLLIElement>());
   const handleRefs = useRef(new Map<number, HTMLButtonElement>());
@@ -308,6 +289,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        // A stop waits for a round already running; "Run a round now" waits for its own.
+        timeoutMs: body.action === "stop" || body.action === "evaluate" ? SLOW_ACTION_TIMEOUT_MS : undefined,
       });
       const payload = (await response.json().catch(() => ({}))) as Partial<View> & {
         code?: unknown;
@@ -331,7 +314,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       }
       if (!response.ok || !payload.state) {
         restore();
-        setNotice(m.saveFailed);
+        // "The previous order is back" only where an order was put back.
+        setNotice(rollback ? m.saveFailed : fill(m.requestFailed, { status: response.status }));
         return;
       }
       setView(payload as View);
@@ -360,7 +344,14 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       }
     } catch {
       restore();
-      setNotice(m.saveFailed);
+      if (rollback) {
+        setNotice(m.saveFailed);
+      } else {
+        // No answer is not a failure: the server may still be stopping it.
+        // What it did shows in the line and the recent decisions.
+        setNotice(m.noAnswer);
+        await load();
+      }
     } finally {
       setBusy(false);
     }
@@ -457,12 +448,52 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
     );
   const button =
     "inline-flex min-h-8 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50";
-  const running = state.lastRound?.running ?? [];
-  const deploys = state.lastRound?.deploys ?? [];
-  const used = state.lastRound?.used ?? 0;
-  const free = Math.max(0, state.capacity - used);
   const minutes = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
-  const badgeText = (kind: Kind) => (kind === "develop" ? m.develop : kind === "hotfix" ? m.hotfix : m.main);
+  // Runners each kind of CI needs (lib/ciAdmissionCore.ts), from the stored state.
+  const unitsOf = (kind: Kind) => (kind === "develop" ? state.needs.develop : state.needs.main);
+  const deployUnits = (branch: string) => (branch === "main" ? state.needs.mainPush : state.needs.developPush);
+  const badgeText = (kind: Kind, n = unitsOf(kind)) => fill(kind === "develop" ? m.develop : kind === "hotfix" ? m.hotfix : m.main, { n });
+  const pullKind = (number: number, base: string): Kind => {
+    const entry = byNumber.get(number);
+    return entry ? kindOf(entry) : base === "main" ? "main" : "develop";
+  };
+  // Who holds runners: read live from GitHub, counted as admission counts
+  // them; until that reading arrives (or without the App), the latest round's.
+  const live = runnerUsage?.status === "ok" ? runnerUsage : null;
+  const cards: RunnerCard[] = live
+    ? live.owners
+        .map((owner): RunnerCard => {
+          const handled = owner.base === "develop" || owner.base === "main";
+          const kind = owner.number !== null && handled ? pullKind(owner.number, owner.base!) : owner.base === "main" ? "main" : "develop";
+          const need = !handled ? 0 : owner.number !== null ? unitsOf(kind) : deployUnits(owner.base!);
+          return { owner, kind, runners: ciRunnerCount(need, owner, now), handled };
+        })
+        // A pull request or deploy with a run in progress stays even between
+        // its job waves, when it holds no runner for a few seconds.
+        .filter((card) => card.runners > 0 || card.owner.number !== null || card.handled)
+        .sort((a, b) => cardRank(a, order) - cardRank(b, order))
+    : [
+        ...(state.lastRound?.deploys ?? []).map((deploy) => storedCard("deploy", deploy.branch, deploy.sha, null, deploy.title, deploy.runners ?? deployUnits(deploy.branch))),
+        ...(state.lastRound?.running ?? []).map((pull) => {
+          const kind = pullKind(pull.number, pull.base);
+          return storedCard("pull", pull.base, null, pull.number, pull.title, pull.runners ?? unitsOf(kind), kind);
+        }),
+        ...(state.lastRound?.others ? [storedCard("other", null, null, null, "", state.lastRound.others)] : []),
+      ];
+  const used = live ? cards.reduce((sum, card) => sum + card.runners, 0) : (state.lastRound?.used ?? 0);
+  const free = Math.max(0, state.capacity - used);
+  const statusText: Record<CiAdmissionEntryStatus, string> = {
+    running: m.statusRunning,
+    done: m.statusDone,
+    next: m.statusNext,
+    waiting: m.statusWaiting,
+    conflict: m.statusConflict,
+    behind: m.statusBehind,
+    updating: m.statusUpdating,
+    hold: m.statusHold,
+    checking: m.statusChecking,
+    held: m.statusHeld,
+  };
 
   const rowBody = (entry: CiAdmissionQueueEntry, rank: number, floating: boolean) => {
     const kind = kindOf(entry);
@@ -480,9 +511,15 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             #{entry.number} {entry.title}
           </a>
           <span className="truncate font-mono text-xs text-zinc-400">
-            {entry.head} · {fill(m.waitedFor, { minutes: minutes(entry.queuedAt) })}
+            {entry.head} · {entry.draft ? m.draft : m.ready} · {fill(m.waitedFor, { minutes: minutes(entry.queuedAt) })}
           </span>
         </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[entry.status]}`}
+          data-testid={floating ? undefined : `ci-admission-status-${entry.number}`}
+        >
+          {statusText[entry.status]}
+        </span>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[kind]}`}>{badgeText(kind)}</span>
       </>
     );
@@ -502,14 +539,26 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       <p className="-mt-2 text-[13px] text-zinc-400">{m.note}</p>
       {!view.configured && view.mode !== "off" ? <p className="text-sm text-amber-300">{m.notConfigured}</p> : null}
 
-      <RunnerUsagePanel />
-
       {/* Slots */}
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4" data-testid="ci-admission-slots">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] font-medium text-zinc-300">{m.running}</span>
-          <span className="font-mono text-[13px] font-medium text-zinc-100">{fill(m.slotsUsed, { used, capacity: state.capacity })}</span>
-          {state.lastRound ? <span className="text-xs text-zinc-500">{fill(m.lastRound, { at: clock(state.lastRound.at) })}</span> : null}
+          <span className="font-mono text-[13px] font-medium text-zinc-100" data-testid="ci-admission-used">
+            {fill(m.slotsUsed, { used, capacity: state.capacity })}
+          </span>
+          {live ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-zinc-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-teal-400" />
+              {fill(m.runnerRefresh, { seconds: Math.max(0, Math.round((now - Date.parse(live.at)) / 1000)) })}
+            </span>
+          ) : state.lastRound ? (
+            <span className="text-xs text-zinc-500">{fill(m.lastRound, { at: clock(state.lastRound.at) })}</span>
+          ) : null}
+          {runnerUsage?.status === "unavailable" || live?.failure ? (
+            <span className="text-xs text-amber-300">
+              {fill(m.runnerUnavailable, { failure: runnerUsage?.status === "unavailable" ? runnerUsage.failure : (live?.failure ?? "") })}
+            </span>
+          ) : null}
           <span className="ml-auto text-xs text-zinc-400">{m.budget}</span>
           <div className="inline-flex items-center rounded-lg border border-zinc-700">
             <button
@@ -521,7 +570,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             >
               −
             </button>
-            <span className="w-8 text-center font-mono text-sm text-zinc-100" data-testid="ci-admission-capacity">
+            <span className="w-10 text-center font-mono text-sm text-zinc-100" data-testid="ci-admission-capacity">
               {state.capacity}
             </span>
             <button
@@ -535,57 +584,64 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             </button>
           </div>
         </div>
-        {state.lastRound === null ? (
+        {!live && state.lastRound === null ? (
           <p className="text-xs text-zinc-500">{m.noRound}</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {deploys.map((deploy) => {
-              const kind: Kind = deploy.branch === "main" ? "main" : "develop";
-              const units = unitsOf(kind);
-              return (
-                <a
-                  key={`${deploy.branch}@${deploy.sha}`}
-                  href={`${COMMIT_URL}${deploy.sha}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`flex min-w-[10rem] flex-col gap-0.5 rounded-lg border border-dashed px-3 py-2.5 ${SLOT[kind]}`}
-                  style={{ flexGrow: units, flexBasis: `${units * 8}rem` }}
-                  data-testid={`ci-admission-deploy-${deploy.sha.slice(0, 7)}`}
-                >
-                  <span className="truncate text-[13px] font-medium text-zinc-100">
-                    {deploy.title || fill(m.deployTitle, { sha: deploy.sha.slice(0, 7) })}
-                  </span>
-                  <span className="font-mono text-[11px] text-zinc-400">
-                    {fill(m.deploy, { branch: deploy.branch, units })} · {deploy.sha.slice(0, 7)}
-                  </span>
-                </a>
-              );
-            })}
-            {running.map((pull) => {
-              const kind: Kind = pull.base === "main" ? "main" : "develop";
+            {cards.map(({ owner, kind, runners, handled, live: fresh }) => {
+              const size = { flexGrow: runners, flexBasis: `${Math.max(8, runners / 2)}rem` };
+              const jobs = fresh === false ? null : <span className="font-mono text-[11px] text-zinc-500">{fill(m.jobs, { running: owner.running, queued: owner.queued })}</span>;
+              if (owner.number === null) {
+                const sha = owner.sha ?? "";
+                return handled ? (
+                  <a
+                    key={owner.key}
+                    href={`${COMMIT_URL}${sha}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`flex min-w-[10rem] flex-col gap-0.5 rounded-lg border border-dashed px-3 py-2.5 ${SLOT[kind]}`}
+                    style={size}
+                    data-testid={`ci-admission-deploy-${sha.slice(0, 7)}`}
+                  >
+                    <span className="truncate text-[13px] font-medium text-zinc-100">{owner.title || fill(m.deployTitle, { sha: sha.slice(0, 7) })}</span>
+                    <span className="font-mono text-[11px] text-zinc-400">
+                      {fill(m.deploy, { branch: owner.base ?? "", units: runners })} · {sha.slice(0, 7)}
+                    </span>
+                    {jobs}
+                  </a>
+                ) : (
+                  <div key={owner.key} className="flex min-w-[8rem] flex-col gap-0.5 rounded-lg border border-zinc-700 bg-zinc-800/40 px-3 py-2.5" style={size}>
+                    <span className="truncate text-[13px] font-medium text-zinc-300">{owner.title || m.otherTitle}</span>
+                    <span className="font-mono text-[11px] text-zinc-400">{fill(m.other, { n: runners })}</span>
+                    {jobs}
+                  </div>
+                );
+              }
+              const number = owner.number;
               return (
                 <div
-                  key={pull.number}
-                  className={`flex min-w-[10rem] items-start gap-2 rounded-lg border px-3 py-2.5 ${SLOT[kind]}`}
-                  style={{ flexGrow: unitsOf(kind), flexBasis: `${unitsOf(kind) * 8}rem` }}
-                  data-testid={`ci-admission-running-${pull.number}`}
+                  key={owner.key}
+                  className={`flex min-w-[10rem] items-start gap-2 rounded-lg border px-3 py-2.5 ${handled ? SLOT[kind] : "border-zinc-700 bg-zinc-800/40"}`}
+                  style={size}
+                  data-testid={`ci-admission-running-${number}`}
                 >
-                  <a href={`${PULL_URL}${pull.number}`} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <a href={`${PULL_URL}${number}`} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate text-[13px] font-medium text-zinc-100 hover:underline">
-                      #{pull.number} {pull.title}
+                      #{number} {owner.title}
                     </span>
-                    <span className="font-mono text-[11px] text-zinc-400">{badgeText(kind)}</span>
+                    <span className="font-mono text-[11px] text-zinc-400">{handled ? badgeText(kind, runners) : fill(m.other, { n: runners })}</span>
+                    {jobs}
                   </a>
-                  {canWrite ? (
+                  {canWrite && handled ? (
                     <button
                       type="button"
                       className="shrink-0 rounded-md border border-rose-400/40 px-2 py-1 text-[11px] font-medium text-rose-300 hover:bg-rose-400/10 disabled:opacity-50"
                       disabled={busy}
-                      aria-label={fill(m.stopLabel, { number: pull.number })}
-                      title={fill(m.stopLabel, { number: pull.number })}
+                      aria-label={fill(m.stopLabel, { number })}
+                      title={fill(m.stopLabel, { number })}
                       onClick={() => {
-                        if (window.confirm(fill(m.stopConfirm, { number: pull.number }))) {
-                          void send({ action: "stop", number: pull.number });
+                        if (window.confirm(fill(m.stopConfirm, { number }))) {
+                          void send({ action: "stop", number });
                         }
                       }}
                     >
@@ -598,7 +654,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
             {free > 0 ? (
               <div
                 className="flex min-w-[8rem] flex-col gap-0.5 rounded-lg border border-dashed border-zinc-700 px-3 py-2.5"
-                style={{ flexGrow: free, flexBasis: `${free * 8}rem` }}
+                style={{ flexGrow: free, flexBasis: `${Math.max(8, free / 2)}rem` }}
               >
                 <span className="text-[13px] font-medium text-zinc-500">{m.emptySlot}</span>
                 <span className="text-[11px] text-zinc-500">{fill(m.emptySlotNote, { count: free })}</span>
@@ -633,14 +689,6 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           <p className="text-sm text-zinc-400">{m.empty}</p>
         ) : (
           <>
-            {(() => {
-              const head = byNumber.get(preview[0]);
-              return head ? (
-                <span className="self-start rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs font-medium text-emerald-400">
-                  {fill(m.nextUp, { units: unitsOf(kindOf(head)) })}
-                </span>
-              ) : null;
-            })()}
             <ol ref={listRef} className="relative flex flex-col gap-2" data-testid="ci-admission-queue">
               {preview.map((number, index) => {
                 const entry = byNumber.get(number)!;
@@ -670,7 +718,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                     className={`flex items-center gap-3 rounded-xl border bg-zinc-950 p-3 transition-shadow ${
                       isDragged
                         ? "border-blue-400 shadow-[0_12px_28px_rgba(0,0,0,0.55)] ring-1 ring-blue-400"
-                        : index === 0
+                        : entry.status === "running" || entry.status === "next"
                           ? "border-emerald-400/60"
                           : "border-zinc-800"
                     }`}
@@ -720,7 +768,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                       type="button"
                       className="min-h-8 rounded-lg px-2 text-[13px] font-medium text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
                       disabled={!canWrite || busy || drag !== null}
-                      onClick={() => void send({ action: "remove", number })}
+                      onClick={() => void send({ action: "move_bottom", number })}
                     >
                       {m.remove}
                     </button>
@@ -775,6 +823,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                         cancelled: m.eventCancelled,
                         failed: m.eventFailed,
                         stopped: m.eventStopped,
+                        updated: m.eventUpdated,
                       }[event.kind]
                     }
                   </span>

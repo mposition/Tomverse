@@ -96,7 +96,7 @@ export function MarketingWebhookProduction({ section }: { section: string }) {
 
   if (unreadable) {
     return (
-      <div data-testid="marketing-webhook-production" className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <div data-testid="marketing-webhook-production">
         <p className="text-xs text-amber-300">{m.prodUnreadable}</p>
       </div>
     );
@@ -299,9 +299,8 @@ export function MarketingWebhookProductionView({
   return (
     <div
       data-testid="marketing-webhook-production"
-      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
     >
-      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{m.prodTitle}</p>
+      <p className="text-sm font-semibold text-zinc-100">{m.prodTitle}</p>
       <p className="mt-1 text-xs text-zinc-500">{m.prodNote}</p>
       <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
         {rows.map(([label, value]) => (

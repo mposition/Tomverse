@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Lock } from "lucide-react";
 import type { AdminRole } from "@/lib/adminAuthCore";
 import {
   adminVisibleTabs,
@@ -22,6 +23,8 @@ export type AdminPageTabChip = {
   label: string;
   /** Drawn in the attention colour: writes are open, rather than closed. */
   attention?: boolean;
+  /** A section a later stage owns: drawn with a lock and in a muted colour. */
+  locked?: boolean;
 };
 
 type Props = {
@@ -52,6 +55,11 @@ type Props = {
   counts?: AdminNavigationCounts;
   /** Chips keyed by tab id. The caller reads the state; the strip draws it. */
   chips?: Readonly<Record<string, AdminPageTabChip | undefined>>;
+  /**
+   * `pills` (the default) is the strip most pages use; `underline` is a
+   * lighter strip for a page whose own header and cards sit above it.
+   */
+  variant?: "pills" | "underline";
 };
 
 /**
@@ -76,7 +84,9 @@ export async function AdminPageTabs({
   role,
   counts,
   chips = {},
+  variant = "pills",
 }: Props) {
+  const underline = variant === "underline";
   const locale = await getAdminLocale();
   const shell = adminMessagesFor(adminShellMessages, locale);
   const item = findAdminNavItem(basePath);
@@ -103,7 +113,7 @@ export async function AdminPageTabs({
 
   return (
     <nav aria-label={label} className="min-w-0">
-      <ul className="flex min-w-0 flex-wrap gap-2">
+      <ul className={underline ? "flex min-w-0 flex-wrap gap-1 border-b border-zinc-800" : "flex min-w-0 flex-wrap gap-2"}>
         {tabs.map((tab) => {
           const active = tab.id === activeTabId;
           const chip = chips[tab.id];
@@ -131,20 +141,37 @@ export async function AdminPageTabs({
                 // does not move, so scrolling to the top would lose their place
                 // for no gain.
                 scroll={false}
-                className={`flex min-h-11 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition ${
-                  active
-                    ? "border-blue-500/40 bg-blue-500/15 text-white"
-                    : "border-zinc-800 bg-zinc-900/70 text-zinc-300 hover:border-zinc-700 hover:text-white"
-                }`}
+                className={
+                  underline
+                    ? `-mb-px flex min-h-11 items-center gap-2 border-b-2 px-3 py-2 text-sm transition ${
+                        active
+                          ? "border-blue-500 font-semibold text-white"
+                          : "border-transparent font-medium text-zinc-400 hover:border-zinc-600 hover:text-zinc-100"
+                      }`
+                    : `flex min-h-11 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition ${
+                        active
+                          ? "border-blue-500/40 bg-blue-500/15 text-white"
+                          : "border-zinc-800 bg-zinc-900/70 text-zinc-300 hover:border-zinc-700 hover:text-white"
+                      }`
+                }
               >
-                <span className="truncate">{tab.label}</span>
+                {underline && chip?.locked ? <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : null}
+                <span className={`truncate ${underline && chip?.locked && !active ? "text-zinc-500" : ""}`}>{tab.label}</span>
                 {chip ? (
                   <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-bold ${
-                      chip.attention
-                        ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-                        : "border-zinc-700 bg-zinc-950 text-zinc-300"
-                    }`}
+                    className={
+                      underline
+                        ? chip.locked
+                          ? "shrink-0 text-[11px] font-medium text-zinc-500"
+                          : `shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                              chip.attention ? "bg-blue-500/15 text-blue-300" : "bg-zinc-800 text-zinc-400"
+                            }`
+                        : `shrink-0 rounded-full border px-2 py-0.5 text-xs font-bold ${
+                            chip.attention
+                              ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+                              : "border-zinc-700 bg-zinc-950 text-zinc-300"
+                          }`
+                    }
                   >
                     {chip.label}
                   </span>
@@ -159,7 +186,7 @@ export async function AdminPageTabs({
           );
         })}
       </ul>
-      <p className="mt-2 px-1 text-xs text-zinc-400">
+      <p className={underline ? "mt-3 px-1 text-xs text-zinc-500" : "mt-2 px-1 text-xs text-zinc-400"}>
         {tabs.find((tab) => tab.id === activeTabId)?.description}
       </p>
     </nav>

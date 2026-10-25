@@ -17,6 +17,7 @@
  * route segment config export has to be in the route's own file.
  */
 
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { cookies } from "next/headers";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -52,6 +53,7 @@ import {
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
+import { ImageModelCatalogProvider } from "@/components/images/ImageModelCatalogProvider";
 import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
 import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
@@ -59,6 +61,7 @@ import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
+import { voiceConversationConfig } from "@tomverse/chat-core";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -108,6 +111,8 @@ export async function ReviewWorkspaceShell({
     pulled it. A read failure leaves it false, exactly like a missing flag row.
   */
   let voiceInputEnabled = false;
+  const voiceConfig = voiceConversationConfig(process.env);
+  let voiceConversationEnabled = Boolean(voiceConfig);
   // Availability and the final offer are deliberately separate. The stored
   // flag may authorize a rollout only after an adapter exists; until then the
   // final server-owned decision remains false and the composer renders no
@@ -187,6 +192,11 @@ export async function ReviewWorkspaceShell({
   const chatImageIntentEnabled =
     imageGenerationEnabled && (await chatImageTriageModelId()) !== null;
 
+  // The image catalogue an operator may have changed at runtime, resolved
+  // once here so the composer quotes the prices admission will charge
+  // (lib/modelCatalog.ts). Code seed when the database cannot be read.
+  const imageModels = imageGenerationEnabled ? await refreshImageModelCatalog() : undefined;
+
   // Which application-managed search backends this process can reach, resolved
   // here for the same reason the image limit is: the client cannot answer it.
   // The only client-side signal would be a public environment variable, and a
@@ -203,9 +213,14 @@ export async function ReviewWorkspaceShell({
   // (lib/securityEnvironment.ts e2eBypassDisabled).
   const fixtureMode = isE2EFixtureMode();
   let reviewEasyFixtureOffered = false;
+  let imageTriageFixtureOffered = false;
   if (fixtureMode) {
     const jar = await cookies();
+    if (!process.env.VOICE_CONVERSATION_KILL_SWITCH) {
+      voiceConversationEnabled ||= jar.get("__tomverse_e2e_voice_conversation")?.value === "1";
+    }
     reviewEasyFixtureOffered = jar.get("__tomverse_e2e_review_easy")?.value === "1";
+    imageTriageFixtureOffered = jar.get("__tomverse_e2e_chat_image_intent")?.value === "1";
     if (!imageGenerationEnabled) {
       imageGenerationEnabled =
         jar.get("__tomverse_e2e_image_generation")?.value === "1";
@@ -332,13 +347,17 @@ export async function ReviewWorkspaceShell({
       {promptRefinerFixtureModeRefreshEnabled ? (
         <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
       ) : null}
+      {/* The catalogue crosses as context, not as a module global (see the provider). */}
+      <ImageModelCatalogProvider models={imageModels}>
       <ChatPageClient
         reviewEasyAvailable={reviewEasyEnabled() || reviewEasyFixtureOffered}
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
-        chatImageIntentEnabled={chatImageIntentEnabled}
+        chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         voiceInputEnabled={voiceInputEnabled}
+        voiceConversationEnabled={voiceConversationEnabled}
+        voiceConversationMaxSeconds={voiceConfig ? voiceConfig.maxSeconds : 300}
         promptRefinerMode={promptRefinerMode}
         promptRefinerProductRelease={promptRefinerProductRelease}
         // The composer cannot read this itself: `process.env` in a Client
@@ -354,6 +373,7 @@ export async function ReviewWorkspaceShell({
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
       />
+      </ImageModelCatalogProvider>
       </HelpGuideAccessProvider>
     </GuestVerificationProvider>
   );

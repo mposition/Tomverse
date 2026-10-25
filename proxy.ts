@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createStaticMarketingCsp, createStrictCsp } from "@/lib/csp";
+import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import {
   isStaticMarketingPathname,
   localizedMarketingRedirect,
@@ -16,7 +16,6 @@ import {
   hasValidOriginSecret,
   isAllowedAmuxReviewPrivateHost,
   isAllowedRequestHost,
-  mobileAppLinkOrigin,
 } from "@/lib/originProtection";
 import {
   apiRouteChoosesOwnCaching,
@@ -41,10 +40,13 @@ import {
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
-import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES, mobileChatBearerRoutes } from "@/lib/mobileAuthContract";
+import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
+import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
+  nativeChatBearerRoute,
+  nativeParityBearerRoute,
   stripInternalAuthHeaders,
 } from "@/lib/nativeBearerGate";
 
@@ -160,15 +162,6 @@ const withNativeCors = <T extends NextResponse>(
 };
 
 export function proxy(request: NextRequest) {
-  // A dedicated return host must not become another login, page or API origin.
-  // Allowed return requests still face every normal host/origin-secret check below.
-  const mobileReturnOrigin = process.env.MOBILE_AUTH_APP_LINKS_ENABLED === "true" ? mobileAppLinkOrigin() : null;
-  if (mobileReturnOrigin && request.headers.get("host")?.toLowerCase() === new URL(mobileReturnOrigin).host) {
-    const allowed = ["/mobile/auth/callback", "/.well-known/assetlinks.json", "/.well-known/apple-app-site-association"];
-    if (!allowed.includes(request.nextUrl.pathname) || !["GET", "HEAD"].includes(request.method)) {
-      return new NextResponse("Not Found", { status: 404, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
-    }
-  }
   // Container liveness must remain directly reachable by Railway. Readiness
   // performs database and monitoring work, so it goes through the same host
   // and Cloudflare origin-secret boundary as every other dynamic endpoint.
@@ -281,13 +274,16 @@ export function proxy(request: NextRequest) {
   // mutation-origin check or N1b does not exist -- that ordering is the one
   // surviving reason the design rejected verifying only inside routes.
   //
-  // The base N1B list stays empty. Only the exact native chat gateway can be
-  // enrolled by its separate, default-off activation switch. That route also
-  // independently verifies the bearer and revocation, never the cookie session.
+  // The original N1b list remains empty. The default-off native Chat switch
+  // enrolls only the exact method/path pairs whose handlers resolve bearers
+  // and verify live session state. Operational activation is a separate step.
+  const nativeChat = process.env.TOMVERSE_NATIVE_CHAT_ENABLED === "true" &&
+    (nativeChatBearerRoute(request.nextUrl.pathname, request.method, true) ||
+      nativeParityBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true"));
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),
-    registeredRoutes: [...N1B_BEARER_ROUTES, ...mobileChatBearerRoutes()],
+    registeredRoutes: nativeChat ? [...N1B_BEARER_ROUTES, request.nextUrl.pathname] : N1B_BEARER_ROUTES,
     verify: (token) => {
       const verdict = verifyMobileAccessTokenString(token);
       return verdict.ok
@@ -299,6 +295,9 @@ export function proxy(request: NextRequest) {
     return withNativeCors(blockedBearerResponse(), request);
   }
   if (bearer.kind === "yes") {
+    if (nativeChat && request.headers.get("origin") && !isNativeAppOrigin(request.headers.get("origin"))) {
+      return withNativeCors(blockedBearerResponse(), request);
+    }
     applyMobileIdentityHeaders(requestHeaders, bearer.identity);
   }
 
@@ -382,13 +381,6 @@ export function proxy(request: NextRequest) {
     return redirect;
   }
 
-  // This standalone callback owns a resource-free CSP and loads no app layout.
-  // Preserve its policy after the normal host, origin-secret and auth checks.
-  if (request.nextUrl.pathname === "/mobile/auth/callback") {
-    requestHeaders.delete("x-nonce");
-    return NextResponse.next({ request: { headers: requestHeaders } });
-  }
-
   const isStaticMarketingRequest = marketing.staticMarketing;
   const staticMarketingHashes = isStaticMarketingRequest
     ? getStaticMarketingCspHashes(request.nextUrl.pathname)
@@ -411,9 +403,9 @@ export function proxy(request: NextRequest) {
   const nonce = isStaticMarketingRequest
     ? null
     : Buffer.from(crypto.randomUUID()).toString("base64");
-  const csp = nonce
-    ? createStrictCsp(nonce)
-    : createStaticMarketingCsp(staticMarketingHashes || undefined);
+  const csp = request.nextUrl.pathname === "/chat-offline.html"
+    ? createOfflineChatCsp()
+    : nonce ? createStrictCsp(nonce) : createStaticMarketingCsp(staticMarketingHashes || undefined);
   const enforce = process.env.CSP_MODE === "enforce";
   const policyHeader = enforce
     ? "Content-Security-Policy"

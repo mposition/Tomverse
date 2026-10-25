@@ -3,9 +3,6 @@ import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { mintChatRefinerInitialAutoRouterAuthority } from
-  "../../lib/chatRefinerInitialAutoRouterAuthority.ts";
-
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "..", "..", path)).href;
 const originalEnv = { ...process.env };
 let plan = "Pro";
@@ -17,12 +14,6 @@ let readiness = {
   outstanding: ["shadow_report", "offline_quality_evaluation", "attempt_manifest_boundary"],
   problems: [],
 };
-
-const authority = mintChatRefinerInitialAutoRouterAuthority({
-  routerActivationAuditLogId: "audit_router_initial_release",
-  runtimeCommitSha: "a".repeat(40),
-  runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
-});
 
 mock.module(mod("lib/billingEntitlements.ts"), { namedExports: {
   getUserBillingPlan: async () => {
@@ -41,6 +32,15 @@ mock.module(mod("lib/autoRolloutReadiness.ts"), { namedExports: {
   autoRolloutReadiness: () => readiness,
 } });
 
+// Mint after module mocks are registered so the WeakSet authority belongs to
+// the same module instance consulted by autoCohort under the test loader.
+const { mintChatRefinerInitialAutoRouterAuthority } = await import(
+  "@/lib/chatRefinerInitialAutoRouterAuthority");
+const authority = mintChatRefinerInitialAutoRouterAuthority({
+  routerActivationAuditLogId: "audit_router_initial_release",
+  runtimeCommitSha: "a".repeat(40),
+  runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+});
 const { autoAvailabilityFor } = await import(mod("lib/autoAvailability.ts"));
 
 test.beforeEach(() => {

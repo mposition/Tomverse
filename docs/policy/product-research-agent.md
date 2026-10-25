@@ -7,7 +7,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | v1 | mposition 2026-10-03 | 최초 승인. 비공개 설계서(revision 15)의 공개 가능한 계약 |
-| v2 | mposition, 병합 2026-10-12(UTC, #2411) | 개선 탐색 기능 추가(당시 10~21절). 관측 기능의 변경 넷: 각 외부 호출 직전의 상태 확인(§3), Agent 전체 kill switch와 쓰기 직렬화(§6), kill switch 중 보존 삭제 지연(§4), kill switch 중 침묵 검사 정지(§5). 비공개 설계서(revision 20)의 공개 가능한 계약 |
+| v2 | mposition, 병합 2026-10-12(UTC, #2411) | 개선 탐색 기능 추가(§10~§21). 관측 기능의 변경 넷: 각 외부 호출 직전의 상태 확인(§3), Agent 전체 kill switch와 쓰기 직렬화(§6), kill switch 중 보존 삭제 지연(§4), kill switch 중 침묵 검사 정지(§5). 비공개 설계서(revision 20)의 공개 가능한 계약 |
 | v3 | mposition 2026-10-13 | 승인 기록 정정만. v2는 UTC 2026-10-12 22:16에 병합되어 `approvedAt` 2026-10-13과 승인 판정 5가 맞지 않았습니다. 본문은 v2와 같습니다 |
 | 2026-10-19 | 운영자 결정(대화) | 개선 탐색을 LLM-first로 전환(§10~§14). v2·v3의 개선 탐색 장치(slot·latch·kill switch·page token·손으로 짠 규칙)와 관측 기능의 v2 변경 넷은 만들지 않았고 이 문서에서 뺐습니다 |
 
@@ -285,7 +285,11 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
   새는 것을 측정했습니다. resolver 규칙은 두 번째 층으로 둡니다.
 - 문서 응답은 CDP가 붙잡은 채 읽어, `cf-mitigated: challenge`나 400 이상이면 실패시킵니다. iframe·뒤늦은 navigation도
   같습니다.
-- WebSocket·service worker·다운로드·권한 요청은 막고, Chromium sandbox는 켠 채로만 띄웁니다.
+- WebSocket·service worker·다운로드·권한 요청은 막습니다. Chromium은 sandbox를 켜고 먼저 띄웁니다. 일부 Railway 호스트는
+  sandbox의 user namespace 준비를 거부하므로(2026-10-20·21 관측: `Permission denied`), 실패가 Chromium sandbox 설정 코드
+  (credentials·namespace·zygote·setuid 파일, `SANDBOX_SETUP_SOURCES`)의 FATAL이거나 `No usable sandbox`일 때만 sandbox 없이
+  한 번 더 띄웁니다(운영자 결정 2026-10-21). timeout·crash·라이브러리 누락 같은 다른 실패는 재시도하지 않습니다. 요청 규칙과 컨테이너의 비권한 사용자는 그대로이고, 실행 로그가 `sandbox: on|off`를
+  남깁니다. walker 변수 `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off`면 재시도하지 않고 page 단계를 건너뜁니다.
 - production 20개 page가 시도하는 다른 origin은 googletagmanager와 Turnstile뿐이며, 둘 다 막습니다.
 
 ## 13. 변수와 켜는 순서
@@ -295,10 +299,11 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 | `PRODUCT_RESEARCH_SCOUT_ENABLED` | 앱과 walker | 꺼짐은 unset·빈 문자열. 앱에서 꺼져 있으면 route는 404 |
 | `PRODUCT_RESEARCH_SCOUT_INGEST_SECRET` | 앱과 walker | 32자 이상. Bearer로 비교 |
 | `PRODUCT_RESEARCH_SCOUT_INGEST_URL` | walker | 그 환경 앱의 `https://…/api/internal/product-research/scout` |
+| `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK` | walker, 선택 | `off`면 sandbox가 거부된 날 sandbox 없이 다시 띄우지 않음(§12). 없으면 재시도 |
 | 모델·하루 호출 상한 | Admin › 제품 리서치 › 실행과 비용 (`AppSetting` 두 행) | owner가 정함. 모델이 없으면 route는 `model_off`, 상한을 다 쓰면 `daily_cap_reached`로 답함 |
 
-켜는 순서: 앱 변수 → walker 서비스와 스위치 → Admin에서 모델과 하루 상한 지정(owner). walker의 첫 실행이 Railway 컨테이너에서
-Chromium sandbox가 뜨는지도 확인합니다. walker는 Railway cron `Product Research Scout`로 매일 18:00 UTC(04:00 AEST)에 돕니다.
+켜는 순서: 앱 변수 → walker 서비스와 스위치 → Admin에서 모델과 하루 상한 지정(owner). 실행마다 로그의 `sandbox`가 그날
+Chromium sandbox가 떴는지(`on`), 재시도로 sandbox 없이 떴는지(`off`) 말합니다. walker는 Railway cron `Product Research Scout`로 매일 18:00 UTC(04:00 AEST)에 돕니다.
 
 ## 14. 보류 — 자격증명이나 유료 생성 승인이 필요한 것
 

@@ -12,8 +12,8 @@ import {
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
-import type { ComponentPropsWithoutRef, MouseEventHandler } from "react";
-import { CHAT_MARKDOWN_REMARK_PLUGINS } from "@/lib/chatMarkdownPlugins";
+import type { ComponentPropsWithoutRef, MouseEventHandler, ReactNode } from "react";
+import { AnswerMarkdown } from "@tomverse/chat-ui";
 import rehypeHighlight from "rehype-highlight";
 import {
   ArrowDown,
@@ -39,6 +39,9 @@ import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
+import { imageModelOwner } from "@/lib/imageModelRegistry";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
@@ -51,7 +54,7 @@ import {
   type ChatScrollMode,
 } from "@/lib/chatAutoScroll";
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
-import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
+import { knowledgeExcerptCountToShow } from "@/lib/answerContextDisclosure";
 import { recoveryPromptsForMessages } from "@/lib/chatTranscriptRecovery";
 import { splitInlineCode, splitUserMessageSegments } from "@/lib/userMessageSegments";
 import { CHAT_CONCURRENCY_ERROR_CODES } from "@/lib/chatConcurrencyCore";
@@ -63,6 +66,7 @@ import {
 } from "@/lib/chatProductUiCopy";
 
 type ChatMessageListProps = {
+  transcriptFooter?: ReactNode;
   messages: Message[];
   onRetryLast?: () => void;
   /** Chat restores this message's question to the composer; never dispatches. */
@@ -401,6 +405,7 @@ function TypingIndicator({ label }: { label?: string }) {
 }
 
 export function ChatMessageList({
+  transcriptFooter,
   messages,
   onRetryLast,
   onRestoreQuestion,
@@ -421,6 +426,7 @@ export function ChatMessageList({
   importedTranscript,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS, getModel } = useModelCatalog();
+  const { getModel: getImageModel } = useImageModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
@@ -807,6 +813,18 @@ export function ChatMessageList({
             const modelInfo = !isUser && msg.modelId
               ? AVAILABLE_MODELS.find(m => m.id === msg.modelId)
               : null;
+            // An image answer is made by its image models, so the header
+            // names those rather than the panel's chat model.
+            const imageTurnModels = (msg.imageTurn?.modelIds ?? []).map((id) => {
+              const profile = getImageModel(id);
+              return {
+                name: profile?.name ?? id,
+                provider: profile ? imageModelOwner(profile) : undefined,
+              };
+            });
+            const headerName = imageTurnModels.length > 0
+              ? imageTurnModels.map((model) => model.name).join(" · ")
+              : modelInfo?.name;
 
             // Only the message this panel is actually streaming right now
             // (always the last one) gets the connecting/generating status --
@@ -929,13 +947,17 @@ export function ChatMessageList({
                     data-testid="assistant-message-header"
                     className="mb-1.5 ml-1 flex max-w-full select-none items-center gap-2"
                   >
-                    <ModelLogo model={modelInfo} size="sm" />
+                    {imageTurnModels.length > 0 ? (
+                      <ModelLogo provider={imageTurnModels[0].provider} size="sm" />
+                    ) : (
+                      <ModelLogo model={modelInfo} size="sm" />
+                    )}
                     <span
                       data-testid="assistant-message-model-name"
-                      title={modelInfo.name}
+                      title={headerName}
                       className="min-w-0 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
                     >
-                      {modelInfo.name}
+                      {headerName}
                     </span>
                     {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
                       // The badge reports web search and nothing else. Why it
@@ -989,7 +1011,7 @@ export function ChatMessageList({
                     )}
                   </div>
                 )}
-                
+
                 {!isUser && !modelInfo && msg.id === "welcome" && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
                     <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
@@ -1201,7 +1223,11 @@ export function ChatMessageList({
                       ))}
                     </div>
                   )}
-                  {msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
+                  {msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
+                    // An image turn's answer is the picture; its text is only
+                    // the record kept for later turns and exports.
+                    <ChatImageTurnCard groupId={msg.imageTurn.groupId} modelIds={msg.imageTurn.modelIds} />
+                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
@@ -1214,8 +1240,7 @@ export function ChatMessageList({
                     )
                   ) : msg.role === "assistant" ? (
                     <>
-                    <ReactMarkdown
-                      remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
+                    <AnswerMarkdown
                       rehypePlugins={[rehypeHighlight]}
                       components={{
                         /*
@@ -1311,7 +1336,7 @@ export function ChatMessageList({
                       }}
                     >
                       {displayContent}
-                    </ReactMarkdown>
+                    </AnswerMarkdown>
                     {isActivelyGenerating && (
                       <span
                         className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-zinc-400 align-middle motion-reduce:animate-none dark:bg-zinc-500"
@@ -1319,79 +1344,69 @@ export function ChatMessageList({
                       />
                     )}
                     {/*
-                      docs/policy/external-conversation-import-and-memory.md
-                      §13.4 and §14.3: what this answer was given, shown to its
-                      owner and counted by the server. Rendered only above zero
-                      -- the policy forbids a misleading indication, and
-                      "0 memories used" on an answer that never had any is one.
-                      It is a statement about this answer, so it sits with the
-                      answer rather than in any dock or rail, and touches
-                      neither the mobile composer contract nor the comparison
-                      rail's.
-
-                      One sentence for two facts, each named: an answer built
-                      from the user's own uploaded files and one built from
-                      their stored memories are different claims, and a single
-                      merged count would state neither.
+                      One row under the answer: report this answer, which model
+                      Auto chose, and -- only when a profile's knowledge was
+                      given to it -- how many excerpts (docs/policy/
+                      external-conversation-import-and-memory.md §14.3). Kept on
+                      a single line at every width: the badge truncates its model
+                      name rather than wrapping. It sits with the answer rather
+                      than in any dock or rail, and touches neither the mobile
+                      composer contract nor the comparison rail's.
                     */}
                     {!isUser &&
                       (() => {
-                        const disclosure = decideAnswerContextDisclosure({
-                          memoryUsedCount: msg.memoryUsedCount,
-                          knowledgeChunkCount: msg.knowledgeChunkCount,
-                        });
-                        if (!disclosure.shown) return null;
+                        const canReport =
+                          !isActivelyGenerating &&
+                          !msg.carriedAnswer &&
+                          msg.status !== "error" &&
+                          Boolean(displayContent.trim());
+                        const knowledgeCount = knowledgeExcerptCountToShow(msg.knowledgeChunkCount);
+                        if (!canReport && !msg.routedModelId && knowledgeCount === null) return null;
                         return (
-                          <p
-                            data-testid="memory-usage-disclosure"
-                            className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
-                          >
-                            {t("chat.answerContextLabel")}
-                            {": "}
-                            {disclosure.parts
-                              .map((part) =>
-                                t(
-                                  part.kind === "memory"
-                                    ? "chat.answerContextMemory"
-                                    : "chat.answerContextKnowledge"
-                                ).replaceAll("{count}", String(part.count))
-                              )
-                              .join(" · ")}
-                          </p>
+                          <div className="mt-3 flex min-w-0 flex-nowrap items-center gap-1.5 whitespace-nowrap">
+                            {canReport && (
+                              <FeedbackButton sourceMessageId={msg.id} currentModelId={msg.modelId}
+                                triggerLabel={t("memoryReview.reportAnswer")} triggerTestId="memory-answer-feedback"
+                                triggerClassName="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                                triggerIconClassName="h-3 w-3 text-blue-500" />
+                            )}
+                            {/*
+                              Which model answered, on a turn Auto routed
+                              (docs/ui-contracts/auto-model-selection.md).
+
+                              Only on a routed turn: `routedModelId` is set from a
+                              response header the server writes when the Router chose
+                              the model and omits when it did not, so a fallback turn
+                              has nothing here rather than a badge claiming a decision
+                              nobody made.
+
+                              The display name, not the id -- the id is for logs. A
+                              model that has since left the catalogue falls back to its
+                              id rather than rendering an empty badge, because "this
+                              answer came from something we no longer list" is still
+                              the truth about the answer.
+                            */}
+                            {!isUser && msg.routedModelId && (
+                              <AutoRoutedByBadge
+                                routed
+                                modelName={
+                                  getModel(msg.routedModelId)?.name ?? msg.routedModelId
+                                }
+                                reason={msg.routedReason ?? null}
+                                language={lang as Parameters<typeof AutoRoutedByBadge>[0]["language"]}
+                              />
+                            )}
+                            {knowledgeCount !== null && (
+                              <span
+                                data-testid="knowledge-usage-disclosure"
+                                className="shrink-0 text-[11px] text-zinc-400 dark:text-zinc-500"
+                              >
+                                {t("chat.answerContextKnowledge").replaceAll("{count}", String(knowledgeCount))}
+                              </span>
+                            )}
+                          </div>
                         );
                       })()}
-                    {/*
-                      Which model answered, on a turn Auto routed
-                      (docs/ui-contracts/auto-model-selection.md).
-
-                      Only on a routed turn: `routedModelId` is set from a
-                      response header the server writes when the Router chose
-                      the model and omits when it did not, so a fallback turn
-                      has nothing here rather than a badge claiming a decision
-                      nobody made.
-
-                      The display name, not the id -- the id is for logs. A
-                      model that has since left the catalogue falls back to its
-                      id rather than rendering an empty badge, because "this
-                      answer came from something we no longer list" is still
-                      the truth about the answer.
-
-                      It is a statement about this answer, so it sits with the
-                      answer. It touches neither the mobile composer contract
-                      nor the comparison rail's.
-                    */}
-                    {!isUser && msg.routedModelId && (
-                      <p className="mt-3">
-                        <AutoRoutedByBadge
-                          routed
-                          modelName={
-                            getModel(msg.routedModelId)?.name ?? msg.routedModelId
-                          }
-                          reason={msg.routedReason ?? null}
-                          language={lang as Parameters<typeof AutoRoutedByBadge>[0]["language"]}
-                        />
-                      </p>
-                    )}
                     {!isUser && msg.routedModelId && msg.autoRewrite && (
                       <AutoRewriteDisclosure
                         rewrite={msg.autoRewrite}
@@ -1810,6 +1825,7 @@ export function ChatMessageList({
               </Fragment>
             );
           })}
+          {transcriptFooter}
         </div>
       </div>
 

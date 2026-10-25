@@ -8,7 +8,8 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -201,6 +202,56 @@ test("a file is installed when absent, left only when already right, and kept in
     assert.notEqual(action(state, wanted).status, 0, `${state} -> ${wanted}`);
   }
   assert.match(installer, /replace\|repair\)\n[\s\S]*?\/usr\/bin\/install -d [^\n]*\$backup[\s\S]*?\/usr\/bin\/cp -a -- "\$\{DM_PLAN_DEST\[\$index\]\}" "\$backup/);
+});
+
+test("a CLI's vendor-home source is read only when its destination is not already §5a's file", () => {
+  // 2026-10-23: a re-login updated codex in amux-dm-openai's home, and the
+  // check on that source refused a broker-only reinstall whose codex copy was
+  // already right.
+  const needed = (state) => bash('dm_cli_source_needed "$1" "$2" && echo needed || echo skipped', state, SHA).stdout;
+  assert.equal(needed(`file 0 0 555 1 ${SHA}`), "skipped\n");
+  assert.equal(needed("absent"), "needed\n");
+  assert.equal(needed(`file 0 0 555 1 ${OTHER_SHA}`), "needed\n");
+  assert.equal(needed(`file 992 992 555 1 ${SHA}`), "needed\n");
+  assert.equal(needed(`file 0 0 755 1 ${SHA}`), "needed\n");
+  assert.equal(needed(`file 0 0 555 2 ${SHA}`), "needed\n");
+  for (const state of ["link", "other", "unreadable"]) assert.equal(needed(state), "needed\n", state);
+  assert.match(installer, /dm_cli_fits "\$DM_CODEX_DEST" "\$DM_CODEX_SOURCE" "\$DM_CODEX_SHA256"/);
+  assert.match(installer, /dm_cli_fits "\$DM_CLAUDE_DEST" "\$DM_CLAUDE_SOURCE" "\$DM_CLAUDE_SHA256"/);
+});
+
+test("the CLI check passes on a right destination whatever the source, and otherwise only on a right source", () => {
+  // dm_cli_fits itself, not only its predicate (review r-20261023-091230-5f9c44):
+  // the destination's state is stubbed, since "same" needs a root-owned file;
+  // the source is a real file whose sha256 the installer computes.
+  const dir = mkdtempSync(join(tmpdir(), "amux-dm-cli-fits-"));
+  try {
+    const source = join(dir, "codex").replaceAll("\\", "/");
+    writeFileSync(source, "codex stand-in\n");
+    const right = createHash("sha256").update("codex stand-in\n").digest("hex");
+    const missing = join(dir, "absent").replaceAll("\\", "/");
+    const fits = (destState, sourcePath, wanted) =>
+      bash(
+        'DEST_STATE=$1; dm_file_state() { printf "%s\\n" "$DEST_STATE"; }; dm_cli_fits /dest "$2" "$3" && echo ok || echo refused',
+        destState,
+        sourcePath,
+        wanted,
+      ).stdout;
+    const same = `file 0 0 555 1 ${right}`;
+    // A right destination needs no source: missing or other bytes both pass.
+    assert.equal(fits(same, missing, right), "ok\n");
+    assert.equal(fits(same, source, OTHER_SHA), "refused\n", "a destination is only right with the wanted sha256");
+    assert.equal(fits(`file 0 0 555 1 ${SHA}`, source, SHA), "ok\n", "a right destination ignores a source with other bytes");
+    // Anything else reads the source, which must be the wanted file.
+    const stale = "c".repeat(64);
+    for (const destState of ["absent", `file 0 0 555 1 ${stale}`, `file 992 992 555 1 ${right}`, "link"]) {
+      assert.equal(fits(destState, source, right), "ok\n", destState);
+      assert.equal(fits(destState, missing, right), "refused\n", `${destState}, no source`);
+      assert.equal(fits(destState, source, OTHER_SHA), "refused\n", `${destState}, other source bytes`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the manifest names exactly the release's files, each once, in sha256sum's format", () => {

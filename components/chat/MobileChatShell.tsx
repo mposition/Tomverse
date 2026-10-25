@@ -154,6 +154,7 @@ const PROVIDER_BANNER_MIN_REM = 5;
 const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
+  workspaceNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   /** Current product chrome; switching routes never rewrites this conversation. */
@@ -180,6 +181,8 @@ type MobileChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  voiceConversationControl?: ReactNode;
+  voiceHistoryRevision?: number;
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
@@ -457,6 +460,7 @@ const mobileModelTabPanelId = (modelId: string) =>
   `mobile-model-tabpanel-${modelId}`;
 
 export function MobileChatShell({
+  workspaceNotice,
   review,
   chatWorkspace,
   currentProduct,
@@ -479,6 +483,8 @@ export function MobileChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  voiceConversationControl,
+  voiceHistoryRevision,
   promptRefinerOffered = false,
   promptRefinerState,
   promptRefinerProductMode = false,
@@ -1281,12 +1287,15 @@ export function MobileChatShell({
           Now the two fixed controls never shrink, and the model button is
           the one that does. It gives up its label first and stops at a 44px
           icon (`min-w-11`). Below a 9.75rem content box even three 2.75rem
-          controls and their gaps (3 x 2.75rem + 3 x 0.5rem) no longer fit on one line,
-          so only there may the row wrap when New Chat is present. It is measured on the header's own
+          controls and their horizontal gaps (3 x 2.75rem + 3 x 0.5rem) no longer fit on one line,
+          so only there may the row wrap when New Chat is present. Wrapped rows
+          keep a compact 0.125rem vertical gap: all controls retain their full
+          44px target while a single viewport-height drag can still reach Send
+          at 300% page zoom. It is measured on the header's own
           width, so 320px and wider -- where all three fit at full size --
           lay out exactly as before.
         */}
-        <div className={`flex items-center gap-2 ${!isActiveConversationEmpty ? "@max-[9.75rem]/header:flex-wrap" : ""}`}>
+        <div className={`flex items-center gap-x-2 gap-y-0.5 ${!isActiveConversationEmpty ? "@max-[9.75rem]/header:flex-wrap" : ""}`}>
         <button
           type="button"
           onClick={(event) => openDrawer(event.currentTarget)}
@@ -1433,6 +1442,7 @@ export function MobileChatShell({
           )}
         </div>
         )}
+        {workspaceNotice}
       </header>
 
       {/*
@@ -1683,6 +1693,7 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  voiceHistoryRevision={singleTranscript ? voiceHistoryRevision : undefined}
                   reviewProvider={review?.mode === "easy" ? AVAILABLE_MODELS.find(model => model.id === modelId)?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
@@ -1892,6 +1903,7 @@ export function MobileChatShell({
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
             voiceInputEnabled={voiceInputEnabled}
+            voiceConversationControl={voiceConversationControl}
             onVoiceTranscript={onVoiceTranscript}
             promptRefinerOffered={promptRefinerOffered}
             promptRefinerState={promptRefinerState}
@@ -2017,14 +2029,14 @@ export function MobileChatShell({
               ref={drawerCloseButtonRef}
               type="button"
               onClick={closeDrawer}
-              // Above the sidebar's own sticky header (z-10), which the button
+              // Above the sidebar's own sticky header (z-30), which the button
               // deliberately floats over -- the header reserves pr-16 for it.
               //
               // The offset carries the top inset itself. Absolute positioning
               // resolves against the panel's border edge, so the panel's
               // `pt-[env(safe-area-inset-top)]` moves its content but not this
               // button, which otherwise settles under the notch.
-              className="absolute right-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-20 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
+              className="absolute right-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
               aria-label={t("auth.cancel")}
             >
               <X className="h-5 w-5" />

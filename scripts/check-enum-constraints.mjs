@@ -36,6 +36,13 @@ const migrationsDirectory = join(root, "prisma", "migrations");
  * how it becomes a decision somebody can revisit rather than an omission.
  */
 const REGISTRY = {
+  Feedback_answerSignal_check: {
+    owner: "list",
+    module: "lib/feedbackPolicy.ts",
+    list: "FEEDBACK_ANSWER_SIGNALS",
+    reason:
+      "Optional explicit assessment of an owned assistant answer. The request schema and client payload share this list; NULL represents reports without a verified answer link or assessment.",
+  },
   ProductAnalyticsEvent_name_check: {
     owner: "list",
     module: "lib/productAnalyticsShared.ts",
@@ -63,6 +70,13 @@ const REGISTRY = {
     list: "WEB_SEARCH_OVERRIDES",
     reason:
       "An administrator's per-model web search route: off or the application-managed backend. NULL follows the code. There is no value for a provider's native tool on purpose -- its cost ceiling is verified per model in lib/webSearchCapability.ts, not chosen in a form.",
+  },
+  AutoRouterOptimizerCycle_target_check: {
+    owner: "list",
+    module: "lib/autoLlmRouterCore.ts",
+    list: "AUTO_LLM_ROUTER_GUIDANCE_KINDS",
+    reason:
+      "Which guidance an optimizer cycle improves: the router's routing guidance or its rewrite guidance. Promotion writes the cycle's proposal into the guidance its target names, so a third value the code did not know would have no guidance to promote into.",
   },
   Conversation_selectionMode_check: {
     owner: "list",
@@ -367,7 +381,7 @@ const REGISTRY = {
     module: "lib/routerCandidates.ts",
     list: "CANDIDATE_REJECTIONS",
     reason:
-      "The eleven reasons the candidate filter can give, the same list the filter itself emits. A reason the list does not know would be a refusal nobody could interpret, and the column is nullable because an eligible candidate has no reason to give.",
+      "The candidate filter rejection reasons, the same list the filter itself emits. A reason the list does not know would be a refusal nobody could interpret, and the column is nullable because an eligible candidate has no reason to give.",
   },
   QuotaScope_scopeKind_check: {
     owner: "list",
@@ -663,9 +677,11 @@ const REGISTRY = {
   },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxIdeaFrontierModelApproval_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/amux/ideaAnalysisChannelCore.ts",
+    list: "AMUX_IDEA_ANALYSIS_PROVIDERS",
     reason:
-      "AMUX v4 analysis currently admits only OpenAI and Anthropic for operator-approved Frontier models. A future provider needs a policy and migration change; no live model writer is enabled here.",
+      "The provider is the CLI channel that runs the analysis: openai (Codex), anthropic (Claude), github-copilot and cursor, each on a subscription account (owner decision 2026-10-20). Copilot and Cursor model IDs are the names their CLI accepts. The manual v4 path still admits only OpenAI and Anthropic at its own hold ledger.",
   },
   AmuxIdeaFrontierModelApproval_status_check: {
     owner: "database",
@@ -676,6 +692,56 @@ const REGISTRY = {
     owner: "database",
     reason:
       "AMUX v4 idea analysis storage is a closed lifecycle. This schema-only migration does not enable a writer; the future intake service must validate exactly these states before activation.",
+  },
+  AmuxIdeaSubmission_origin_check: {
+    owner: "database",
+    reason:
+      "An AMUX idea is stored either by the existing owner Admin path or by the v19 session path under the current owner-approved operating scope. The origin selects distinct human-versus-system audit evidence and cannot be relabelled after insert.",
+  },
+  AmuxIdeaSessionAnalysisReservation_status_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_STATUSES",
+    reason:
+      "A v19 session reservation is an append-only queue identity. Later dispatch, stop and cost evidence use separate rows rather than relabelling this receipt.",
+  },
+  AmuxIdeaSessionAnalysisReservation_provider_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_PROVIDERS",
+    reason:
+      "The queue receipt copies the CLI channel from the immutable owner-approved operating scope; the four channels are lib/amux/ideaAnalysisChannelCore.ts (owner decision 2026-10-20). Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
+  AmuxIdeaSessionAnalysisReservation_reasoning_effort_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_REASONING_EFFORTS",
+    reason:
+      "The queue receipt copies the reasoning effort from the immutable owner-approved operating scope. Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
+  AmuxIdeaRegistrationRefusal_attempt_kind_check: {
+    owner: "list",
+    module: "lib/amux/ideaRegistrationRefusalCore.ts",
+    list: "AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS",
+    reason:
+      "The durable v20 refusal identifies the prepare, consume or whole-plan boundary that rolled back before the separate refusal transaction recorded it.",
+  },
+  AmuxIdeaRegistrationRefusal_code_check: {
+    owner: "list",
+    module: "lib/amux/ideaRegistrationRefusalCore.ts",
+    list: "AMUX_REGISTRATION_REFUSAL_CODES",
+    reason:
+      "The deterministic v20 Task Guard and v19 whole-plan refusal codes are shared with the system registration core and Admin API; arbitrary text and expected paths never enter the record.",
+  },
+  AmuxIdeaRegistrationRefusal_proposed_grade_check: {
+    owner: "type_only",
+    reason:
+      "AmuxExecutionGrade in lib/amux/executionGradeCore.ts is the routine, advanced or frontier union. NULL preserves an invalid or absent model proposal without inventing a grade.",
+  },
+  AmuxIdeaRegistrationRefusal_final_grade_check: {
+    owner: "type_only",
+    reason:
+      "The final deterministic grade uses the same AmuxExecutionGrade union. NULL means the Guard could not derive a valid final grade before refusing the proposal.",
   },
   AmuxIdeaSourcePlanRevision_state_check: {
     owner: "database",
@@ -698,9 +764,11 @@ const REGISTRY = {
       "The dark v4 analysis hold distinguishes subscription CLI API-conversion estimates from actual API-mode costs. No reservation writer is enabled by the schema migration.",
   },
   AmuxIdeaAnalysisBudgetHold_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/amux/ideaAnalysisChannelCore.ts",
+    list: "AMUX_V4_ANALYSIS_PROVIDERS",
     reason:
-      "Only the currently approved OpenAI and Anthropic analysis providers may appear in the dark hold ledger. A later provider needs a policy and migration change.",
+      "The manual v4 hold ledger keeps the OpenAI and Anthropic vendors. The GitHub Copilot and Cursor channels added on 2026-10-20 serve only the v19 session runner, whose claims use their own table.",
   },
   AmuxIdeaAnalysisBudgetHold_status_check: {
     owner: "database",
@@ -708,9 +776,11 @@ const REGISTRY = {
       "The dark hold lifecycle preserves outcome_unknown as occupied and distinguishes an owner-consumed worst-case reserve from a verified non-start release. The future single writer must validate the same states.",
   },
   AmuxIdeaAnalysisPriceVersion_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/amux/ideaAnalysisChannelCore.ts",
+    list: "AMUX_IDEA_ANALYSIS_PROVIDERS",
     reason:
-      "Only OpenAI and Anthropic may have owner-approved AMUX v4 analysis prices; adding a provider requires an explicit policy and migration change.",
+      "A subscription_cli price may name any of the four CLI channels (owner decision 2026-10-20); the price writer still refuses an api price for github-copilot or cursor, which have no API mode here.",
   },
   AmuxIdeaAnalysisPriceVersion_mode_check: {
     owner: "database",
@@ -735,7 +805,7 @@ const REGISTRY = {
   AmuxIdeaContentKeyRetirement_purpose_check: {
     owner: "database",
     reason:
-      "Only the four per-unit AMUX analysis bodies with approved retention clocks can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
+      "Only AMUX content purposes with an approved retention clock, including the seven-day CLI read manifest, can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
   },
   AmuxIdeaRetentionHold_reason_check: {
     owner: "database",
@@ -1403,11 +1473,105 @@ const REGISTRY = {
     reason:
       "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
   },
+  SupportTriageDecisionRecord_decisionKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "DECISION_KINDS",
+    reason:
+      "What a person decided: a suggestion accepted or rejected, a group confirmed or dismissed, a sample judged. One record per decision; the record itself is never changed.",
+  },
+  SupportTriageGroup_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_STATES",
+    reason:
+      "candidate and confirmed are open; dismissed, expired and invalidated are terminal. The guard trigger allows only the core table's transitions, and a terminal group takes nothing but its tombstone clearing.",
+  },
+  SupportTriageGroup_primaryKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "The one kind a group is an equivalence class of, in priority order. Fixed for the life of the group.",
+  },
+  SupportTriageGroup_decision_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_DECISIONS",
+    reason:
+      "A person's decision, kept apart from the state so that a confirmed group that later loses members still says it was confirmed.",
+  },
+  SupportTriageGroup_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a candidate group has been shown to a person; the same two values as a suggestion's, reached once and stamped by the database.",
+  },
+  SupportTriageGroupSignal_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "One signal row per group and kind. Every kind is an equality over a server fact; a report's text is never one.",
+  },
+  SupportTriageGroupSignal_provenanceClass_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SIGNAL_PROVENANCE_CLASSES",
+    reason:
+      "Where the signal's server value comes from. A second CHECK ties it to the kind, so the column can never disagree with SIGNAL_PROVENANCE.",
+  },
+  SupportTriageSuggestion_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_STATES",
+    reason:
+      "pending, claimed, ready and six terminal states. The guard trigger allows only the core table's transitions and never changes a terminal row.",
+  },
+  SupportTriageSuggestion_failureCode_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_FAILURE_CODES",
+    reason:
+      "Why a suggestion failed; present exactly when the state is failed. retry_exhausted is what a fourth reclaim must become, because the attempt count stops at three.",
+  },
+  SupportTriageSuggestion_lane_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "TRIAGE_LANES",
+    reason:
+      "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
+  },
   ProductResearchScoutLlmCall_outcome_check: {
     owner: "list",
     module: "lib/productResearchScoutCore.ts",
     list: "SCOUT_LLM_CALL_OUTCOMES",
     reason: "A Scout model call is started before it runs and settled ok or failed after; started rows count toward the daily cap.",
+  },
+  ModelCatalogEntry_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Image and coding have rows; chat is a view of ModelRegistryEntry and video has no activation policy yet.",
+  },
+  ModelCatalogEntry_draftSource_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "CATALOG_DRAFT_SOURCES",
+    reason: "A pending draft is written by one model call; nothing else writes drafts.",
+  },
+  ModelCatalogPriceRevision_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "STORED_CATALOG_CATEGORIES",
+    reason: "Price revisions exist for the categories that have rows.",
+  },
+  ModelCatalogSnapshot_category_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "SNAPSHOT_CATALOG_CATEGORIES",
+    reason: "Only the coding catalogue is published as a snapshot, for the Code client.",
   },
   ProductResearchSuggestion_kind_check: {
     owner: "list",
@@ -1432,6 +1596,34 @@ const REGISTRY = {
     module: "lib/productResearchScoutCore.ts",
     list: "SUGGESTION_STATUSES",
     reason: "open until the operator dismisses it or sends it to AMUX.",
+  },
+  SupportTriageSuggestion_laneSource_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "LANE_SOURCES",
+    reason:
+      "Where a ready suggestion's lane came from. llm when the model answered and no money or trust-and-safety keyword held the human lane; keyword otherwise.",
+  },
+  SupportTriageSuggestion_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a ready suggestion has been shown to a person. Separate from the state, reached once and stamped by the database.",
+  },
+  SupportTriageRun_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_KINDS",
+    reason:
+      "worker and retention. Each kind has its own deadline (5 minutes, 100 seconds) and its own daily cap of 52, both applied by the row-creation trigger from the kind alone.",
+  },
+  SupportTriageRun_outcome_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_OUTCOMES",
+    reason:
+      "running until the run finishes, then one final outcome. The finishing trigger turns a late success or partial into deadline_exceeded, so the list holds a value the database records and the application never asks for.",
   },
   EngineeringAgentRun_status_check: {
     owner: "list",

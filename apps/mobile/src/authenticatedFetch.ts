@@ -208,7 +208,7 @@ export const authenticatedFetch = async (
   });
   if (response.status !== 401) return response;
 
-  const second = await options.bridge.getAccessToken();
+  const second = await options.bridge.getAccessToken({ rejectedAccessToken: first.accessToken });
   if (!isUsable(second, Date.now()) || second.accessToken === first.accessToken) {
     // The bridge had nothing newer to give. Retrying with the same token would
     // ask the same question and get the same answer.

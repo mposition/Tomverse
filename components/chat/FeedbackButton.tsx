@@ -96,8 +96,10 @@ export function FeedbackButton({
   errorReport,
   triggerLabel,
   triggerClassName,
+  triggerIconClassName,
   triggerTestId,
   respondsToOpenRequests = false,
+  sourceMessageId,
 }: {
   currentModelId?: string | null;
   currentPlan?: string | null;
@@ -117,6 +119,7 @@ export function FeedbackButton({
   errorReport?: MessageErrorReportContext;
   triggerLabel?: string;
   triggerClassName?: string;
+  triggerIconClassName?: string;
   triggerTestId?: string;
   /**
    * Opens this dialog when `openFeedbackDialog()` asks (HELP-NAV-01's "report a
@@ -124,6 +127,7 @@ export function FeedbackButton({
    * one request opens one dialog and never a per-message error report.
    */
   respondsToOpenRequests?: boolean;
+  sourceMessageId?: string;
 }) {
   const { t, lang } = useLanguage();
   const { status } = useSession();
@@ -286,7 +290,7 @@ export function FeedbackButton({
       // override a per-message value with a later panel's trace.
       setTraceId(
         errorReport?.traceId ||
-          window.localStorage.getItem("tomverse_last_error_trace_id") ||
+          (!sourceMessageId ? window.localStorage.getItem("tomverse_last_error_trace_id") : "") ||
           ""
       );
     }
@@ -442,7 +446,8 @@ export function FeedbackButton({
       const description =
         message.trim() || (isErrorReport ? errorReportDefaultMessage : "");
       const outcome = await submitFeedback({
-        type,
+        ...(sourceMessageId ? { messageId: sourceMessageId, answerSignal: "needs_improvement" as const } : {}),
+        type: sourceMessageId ? "bug" : type,
         message: composeFeedbackMessage({
           description,
           // Already sanitised, and possibly edited or removed by the user.
@@ -617,7 +622,7 @@ export function FeedbackButton({
                       : t("feedback.title")}
                   </legend>
 
-                  {!isErrorReport && (
+                  {!isErrorReport && !sourceMessageId && (
                     <label className="mt-4 block text-sm font-bold text-zinc-700 dark:text-zinc-200">
                       {t("feedback.typeLabel")}
                       <select
@@ -948,7 +953,7 @@ export function FeedbackButton({
           "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
         }
       >
-        <LifeBuoy className="h-4 w-4 text-blue-500" aria-hidden="true" />
+        <LifeBuoy className={triggerIconClassName || "h-4 w-4 text-blue-500"} aria-hidden="true" />
         {triggerLabel || t("feedback.button")}
       </button>
       {dialog}

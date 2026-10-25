@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import {
   VOICE_OPERATIONAL_LIMIT_REACHED,
   resolveVoiceGuardrails,
@@ -162,6 +163,7 @@ export const reserveVoiceSeconds = async (input: {
   subjectKey: string;
   seconds: number;
   env?: Record<string, string | undefined>;
+  client?: Prisma.TransactionClient;
 }): Promise<VoiceSecondsReservation> => {
   const { limits } = resolveVoiceGuardrails(input.env ?? process.env);
   const now = new Date();
@@ -182,7 +184,7 @@ export const reserveVoiceSeconds = async (input: {
     );
   }
 
-  const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+  const rows = await (input.client ?? prisma).$queryRaw<Array<{ count: bigint }>>`
     INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
     VALUES (${key}, ${SECONDS_PERIOD}, ${start}, ${seconds}, NOW())
     ON CONFLICT ("key", "period", "periodStart")
@@ -228,6 +230,7 @@ export const reserveVoiceSeconds = async (input: {
 export const settleVoiceSeconds = async (input: {
   reservation: VoiceSecondsReservation;
   basis: VoiceSettlementBasis;
+  client?: Prisma.TransactionClient;
 }): Promise<{ releasedSeconds: number }> => {
   const { reservation } = input;
   if (reservation.settled) return { releasedSeconds: 0 };
@@ -240,7 +243,7 @@ export const settleVoiceSeconds = async (input: {
   if (release === 0) return { releasedSeconds: 0 };
 
   const key = bucketKey(reservation.subjectKey);
-  await prisma.$executeRaw`
+  await (input.client ?? prisma).$executeRaw`
     UPDATE "ChatUsageBucket"
     SET "count" = GREATEST("count" - ${release}, 0), "updatedAt" = NOW()
     WHERE "key" = ${key}

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { AMUX_IDEA_ANALYSIS_PROVIDERS } from "./ideaAnalysisChannelCore.ts";
+
 /** Owner decisions are stored in the app; this contract cannot open a CLI. */
 export const AMUX_V4_FRONTIER_CATALOG_WRITE_CODE_LATCH = true;
 export const AMUX_V4_FRONTIER_CATALOG_WRITE_ENV = "TOMVERSE_AMUX_V4_FRONTIER_CATALOG_WRITE";
@@ -23,7 +25,7 @@ const approveSchema = z.object({
   schemaVersion: z.literal(1),
   action: z.literal("approve"),
   approvalId: uuid,
-  provider: z.enum(["openai", "anthropic"]),
+  provider: z.enum(AMUX_IDEA_ANALYSIS_PROVIDERS),
   modelId,
   allowedEfforts: z.array(effort).min(1).max(effortOrder.length),
   expectedPreviousVersion: naturalVersion,

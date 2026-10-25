@@ -1,8 +1,7 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
-import { authOptions } from "@/lib/auth";
 import { isMemoryInjectionEnabled } from "@/lib/appSettings";
 import { conversationExportPersonalizationNotice } from "@/lib/memorySharingNotice";
 import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
@@ -81,7 +80,7 @@ async function sourceIncludedExport(
             return {
                 title,
                 text: `${formatConversationHeader(
-                    { title, createdAt: conversation.createdAt },
+                    { title, createdAt: conversation.createdAt, productKey: conversation.productKey },
                     personalizationNotice,
                     [
                         ...continuationExportProvenance({
@@ -140,7 +139,9 @@ export async function GET(
     context: { params: Promise<{ conversationId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
         const userId = (session?.user as { id?: string } | undefined)?.id;
 
         if (!userId) {
@@ -179,6 +180,7 @@ export async function GET(
                 createdAt: true,
                 password: true,
                 kind: true,
+                productKey: true,
                 // The naming columns the conversation list reads, read the
                 // same way: the file has to be named what the list calls the
                 // conversation (lib/continuationTitleContext.ts).
@@ -252,7 +254,7 @@ export async function GET(
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt }, personalizationNotice, [...continuationProvenance, ...titleHeaderLines])}\n`
+                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt, productKey: conversation.productKey }, personalizationNotice, [...continuationProvenance, ...titleHeaderLines])}\n`
                         )
                     );
                     return;

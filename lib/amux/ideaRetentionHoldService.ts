@@ -60,7 +60,8 @@ export async function readAmuxIdeaRetentionHoldScope(
     select: { rawCiphertext: true, rawPurgedAt: true } });
   if (!idea) throw new AmuxIdeaRetentionHoldError("not_found");
   const [previewRemaining, previewPurged, chunkRemaining, chunkPurged,
-    draftRemaining, draftPurged] = await Promise.all([
+    draftRemaining, draftPurged, readManifestRemaining,
+    readManifestPurged] = await Promise.all([
     tx.amuxIdeaTransferPreview.count({ where: { ideaId,
       payloadCiphertext: { not: null } } }),
     tx.amuxIdeaTransferPreview.count({ where: { ideaId,
@@ -73,11 +74,15 @@ export async function readAmuxIdeaRetentionHoldScope(
       bodyCiphertext: { not: null } } }),
     tx.amuxIdeaDraftUnit.count({ where: { ideaId,
       bodyPurgedAt: { not: null } } }),
+    tx.amuxIdeaTrackedCheckoutReadManifest.count({ where: { ideaId,
+      ciphertext: { not: null } } }),
+    tx.amuxIdeaTrackedCheckoutReadManifest.count({ where: { ideaId,
+      bodyPurgedAt: { not: null } } }),
   ]);
   return { remainingBodies: Number(idea.rawCiphertext !== null) +
-      previewRemaining + chunkRemaining + draftRemaining,
+      previewRemaining + chunkRemaining + draftRemaining + readManifestRemaining,
     alreadyPurgedBodies: Number(idea.rawPurgedAt !== null) +
-      previewPurged + chunkPurged + draftPurged };
+      previewPurged + chunkPurged + draftPurged + readManifestPurged };
 }
 
 export async function commitAmuxIdeaRetentionHold(tx: Prisma.TransactionClient,

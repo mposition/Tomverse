@@ -14,7 +14,6 @@ import {
     X,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
-import { MemoryExtractionLauncher } from "@/components/memory/MemoryExtractionLauncher";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     FACTUAL_MEMORY_KINDS,
@@ -26,21 +25,20 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 
 /**
- * /settings/memory — the Release B review surface (policy §8, §21, slice B3).
+ * /settings/memory — the account's saved memories
+ * (docs/policy/external-conversation-import-and-memory.md §8, §21).
+ *
+ * There is no review queue (owner decision 2026-10-24): memories extracted
+ * from imported conversations activate by themselves, and this page is where
+ * the user sees, edits, pins and deletes them, and turns memory off.
  *
  * Split of authority with the API (docs/policy/
  * external-conversation-import-and-memory.md §15 never-strand posture):
  * the list, the delete action and the account memory settings are NOT
  * flag-gated server-side, so this page always renders what the user has
- * stored. Review mutations (approve/reject/edit/pin, bulk approve, manual
- * creation) are flag-gated; the server answering MEMORY_FEATURE_DISABLED is
- * the probe, and the page then shows the disabled notice while keeping the
- * stored items visible and deletable.
- *
- * Nothing here decides what a memory is worth: approval calls re-run the
- * server validator, and a 409 conflict (MEMORY_ITEM_CONFLICT) always comes
- * back to the user as an explicit keep-or-replace choice (§8.3) — the UI
- * never resolves it silently.
+ * stored. Mutations (edit/pin, manual creation) are flag-gated; the server
+ * answering MEMORY_FEATURE_DISABLED is the probe, and the page then shows the
+ * disabled notice while keeping the stored items visible and deletable.
  */
 
 const interpolate = (
@@ -120,9 +118,11 @@ type ListState =
     | { kind: "ready"; rows: MemoryRowView[]; total: number }
     | { kind: "error" };
 
-const REVIEW_STATUSES = ["candidate", "manual_review_required"] as const;
-
 const ARCHIVED_STATUSES = [
+    // Left over from the review queue (removed 2026-10-24): never used in a
+    // chat, still the user's to see and delete.
+    "candidate",
+    "manual_review_required",
     "rejected",
     "superseded",
     "expired",
@@ -244,14 +244,6 @@ function MemoryRowHeader({ row }: { row: MemoryRowView }) {
                     {t("memoryReview.sensitiveBadge")}
                 </span>
             )}
-            {row.status === "manual_review_required" && (
-                <span
-                    className={`${badgeClass} bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200`}
-                    data-testid="memory-individual-review-badge"
-                >
-                    {t("memoryReview.needsIndividualReview")}
-                </span>
-            )}
             {row.pinned && (
                 <span
                     className={`${badgeClass} bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-200`}
@@ -282,20 +274,18 @@ export function MemoryReviewSettings() {
     // itself is never gated, so the page keeps rendering stored memories.
     const [featureDisabled, setFeatureDisabled] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
-    const [conflictId, setConflictId] = useState<string | null>(null);
     const [rowError, setRowError] = useState<{
         id: string;
-        kind: "validation" | "generic";
+        kind: "validation" | "conflict" | "generic";
     } | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editStatement, setEditStatement] = useState("");
-    const [editParkedNotice, setEditParkedNotice] = useState(false);
+    const [restoreId, setRestoreId] = useState<string | null>(null);
+    const [restoreGrounds, setRestoreGrounds] = useState("");
     const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
-    const [bulkBusy, setBulkBusy] = useState(false);
-    const [bulkResult, setBulkResult] = useState<{
-        approved: number;
-        skipped: number;
-    } | null>(null);
+    // A run that is still turning imported conversations into memories, so
+    // the page can say why the list is still growing.
+    const [organisingRunId, setOrganisingRunId] = useState<string | null>(null);
 
     const [createKind, setCreateKind] = useState<MemoryKind>("preference");
     const [createStatement, setCreateStatement] = useState("");
@@ -386,10 +376,32 @@ export function MemoryReviewSettings() {
         [listState]
     );
 
+    const loadOrganisingRun = useCallback(async () => {
+        try {
+            const response = await fetch("/api/memories/extraction-runs", {
+                cache: "no-store",
+            });
+            if (!response.ok) {
+                // Flag off or unreachable: the page simply says nothing.
+                await discardResponseBody(response);
+                return;
+            }
+            const body = (await response.json()) as {
+                activeRunId?: string | null;
+            };
+            setOrganisingRunId(
+                typeof body.activeRunId === "string" ? body.activeRunId : null
+            );
+        } catch {
+            // A status line, never a reason to break the page.
+        }
+    }, []);
+
     useEffect(() => {
         queueMicrotask(() => {
             void loadSettings();
             void loadMemories();
+            void loadOrganisingRun();
         });
         // Mount-only: mutation handlers reload explicitly, and loadMemories'
         // identity changes with its own state.
@@ -433,14 +445,9 @@ export function MemoryReviewSettings() {
     );
 
     const patchMemory = useCallback(
-        async (
-            memoryId: string,
-            body: Record<string, unknown>,
-            { wasActive = false }: { wasActive?: boolean } = {}
-        ) => {
+        async (memoryId: string, body: Record<string, unknown>) => {
             setBusyId(memoryId);
             setRowError(null);
-            setBulkResult(null);
             const result = await callApi(`/api/memories/${memoryId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
@@ -448,20 +455,14 @@ export function MemoryReviewSettings() {
             });
             setBusyId(null);
             if (result.ok) {
-                setConflictId(null);
                 setEditingId(null);
-                const rows = await loadMemories();
-                if (wasActive && body.action === "edit") {
-                    const updated = rows?.find((row) => row.id === memoryId);
-                    setEditParkedNotice(
-                        updated?.status === "manual_review_required"
-                    );
-                }
+                setRestoreId(null);
+                void loadMemories();
                 return;
             }
             if (handleGatedFailure(result.failure)) return;
             if (result.failure.code === "MEMORY_ITEM_CONFLICT") {
-                setConflictId(memoryId);
+                setRowError({ id: memoryId, kind: "conflict" });
                 return;
             }
             if (result.failure.code === "MEMORY_VALIDATION_FAILED") {
@@ -492,23 +493,6 @@ export function MemoryReviewSettings() {
         },
         [loadMemories]
     );
-
-    const bulkApprove = useCallback(async () => {
-        setBulkBusy(true);
-        setBulkResult(null);
-        const result = await callApi("/api/memories/bulk-approve", {
-            method: "POST",
-        });
-        setBulkBusy(false);
-        if (result.ok) {
-            setBulkResult(
-                result.body as { approved: number; skipped: number }
-            );
-            void loadMemories();
-            return;
-        }
-        handleGatedFailure(result.failure);
-    }, [handleGatedFailure, loadMemories]);
 
     const submitCreate = useCallback(
         async (resolveConflict: boolean) => {
@@ -615,15 +599,12 @@ export function MemoryReviewSettings() {
 
     const groups = useMemo(() => {
         if (listState.kind !== "ready") {
-            return { review: [], active: [], archived: [] } as Record<
-                "review" | "active" | "archived",
+            return { active: [], archived: [] } as Record<
+                "active" | "archived",
                 MemoryRowView[]
             >;
         }
         return {
-            review: listState.rows.filter((row) =>
-                (REVIEW_STATUSES as readonly string[]).includes(row.status)
-            ),
             active: listState.rows.filter((row) => row.status === "active"),
             archived: listState.rows.filter((row) =>
                 (ARCHIVED_STATUSES as readonly string[]).includes(row.status)
@@ -636,43 +617,10 @@ export function MemoryReviewSettings() {
             <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs leading-5 text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200">
                 {rowError.kind === "validation"
                     ? t("memoryReview.validationFailed")
-                    : t("memoryReview.errorGeneric")}
+                    : rowError.kind === "conflict"
+                      ? t("memoryReview.restoreConflict")
+                      : t("memoryReview.errorGeneric")}
             </p>
-        );
-
-    const renderConflict = (rowId: string) =>
-        conflictId === rowId && (
-            <div
-                className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 dark:border-amber-900/60 dark:bg-amber-950/20"
-                data-testid="memory-conflict"
-            >
-                <p className="text-xs leading-5 text-amber-800 dark:text-amber-200">
-                    {t("memoryReview.conflictNotice")}
-                </p>
-                <div className="mt-1.5 flex gap-2">
-                    <button
-                        type="button"
-                        className={smallButtonClass}
-                        data-testid="memory-conflict-replace"
-                        disabled={busyId !== null}
-                        onClick={() =>
-                            void patchMemory(rowId, {
-                                action: "approve",
-                                resolveConflict: "supersede_existing",
-                            })
-                        }
-                    >
-                        {t("memoryReview.conflictReplace")}
-                    </button>
-                    <button
-                        type="button"
-                        className={smallButtonClass}
-                        onClick={() => setConflictId(null)}
-                    >
-                        {t("memoryReview.cancel")}
-                    </button>
-                </div>
-            </div>
         );
 
     const renderEditor = (row: MemoryRowView) =>
@@ -696,14 +644,10 @@ export function MemoryReviewSettings() {
                             editStatement.trim().length === 0
                         }
                         onClick={() =>
-                            void patchMemory(
-                                row.id,
-                                {
-                                    action: "edit",
-                                    statement: editStatement.trim(),
-                                },
-                                { wasActive: row.status === "active" }
-                            )
+                            void patchMemory(row.id, {
+                                action: "edit",
+                                statement: editStatement.trim(),
+                            })
                         }
                     >
                         <Check className="h-3.5 w-3.5" />
@@ -894,149 +838,35 @@ export function MemoryReviewSettings() {
                 )}
             </section>
 
-            {/* Extraction start sits between the settings and the queue it
-                fills: the launcher removes itself when the rollout flag is off
-                (its endpoint is gated), so a rollback leaves the review and
-                delete surfaces exactly as they were (§15). */}
-            <MemoryExtractionLauncher />
+            {organisingRunId && (
+                <section
+                    className={sectionClass}
+                    data-testid="memory-organising-notice"
+                >
+                    <div className="flex flex-wrap items-center gap-2 text-sm leading-6 text-zinc-500">
+                        <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
+                        <span>{t("memoryReview.organisingNotice")}</span>
+                        <Link
+                            href={`/settings/memory/runs/${organisingRunId}`}
+                            className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
+                            data-testid="memory-organising-link"
+                        >
+                            {t("memoryReview.organisingView")}
+                        </Link>
+                    </div>
+                </section>
+            )}
 
-            <section className={sectionClass} data-testid="memory-review-queue">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-bold">
-                        {t("memoryReview.reviewTitle")}
-                    </h2>
-                    <button
-                        type="button"
-                        className={secondaryButtonClass}
-                        data-testid="memory-bulk-approve"
-                        disabled={
-                            featureDisabled ||
-                            bulkBusy ||
-                            groups.review.length === 0
-                        }
-                        onClick={() => void bulkApprove()}
-                    >
-                        {bulkBusy && (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                        )}
-                        {t("memoryReview.bulkApprove")}
-                    </button>
-                </div>
-                <p className="mt-1 text-sm leading-6 text-zinc-500">
-                    {t("memoryReview.reviewDescription")}
-                </p>
-                {bulkResult && (
-                    <p
-                        className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs leading-5 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200"
-                        data-testid="memory-bulk-result"
-                    >
-                        {interpolate(t("memoryReview.bulkResult"), {
-                            approved: bulkResult.approved,
-                            skipped: bulkResult.skipped,
-                        })}
-                    </p>
-                )}
+            <section className={sectionClass} data-testid="memory-active-list">
+                <h2 className="text-sm font-bold">
+                    {t("memoryReview.activeTitle")}
+                </h2>
                 {listState.kind === "loading" && (
                     <Loader2 className="mt-3 h-4 w-4 animate-spin text-zinc-400" />
                 )}
                 {listState.kind === "error" && (
                     <p className="mt-2 text-sm leading-6 text-zinc-500">
                         {t("memoryReview.errorGeneric")}
-                    </p>
-                )}
-                {listState.kind === "ready" &&
-                    (groups.review.length === 0 ? (
-                        <p
-                            className="mt-2 text-sm leading-6 text-zinc-500"
-                            data-testid="memory-review-empty"
-                        >
-                            {t("memoryReview.reviewEmpty")}
-                        </p>
-                    ) : (
-                        <ul className="mt-3 space-y-2">
-                            {groups.review.map((row) => (
-                                <li
-                                    key={row.id}
-                                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900"
-                                    data-testid="memory-review-row"
-                                >
-                                    <MemoryRowHeader row={row} />
-                                    {renderEditor(row)}
-                                    <EvidenceList evidence={row.evidence} />
-                                    {renderConflict(row.id)}
-                                    {renderRowError(row.id)}
-                                    <div className="mt-2 flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            className={smallButtonClass}
-                                            data-testid="memory-approve"
-                                            disabled={
-                                                featureDisabled ||
-                                                busyId !== null
-                                            }
-                                            onClick={() =>
-                                                void patchMemory(row.id, {
-                                                    action: "approve",
-                                                })
-                                            }
-                                        >
-                                            <Check className="h-3.5 w-3.5" />
-                                            {t("memoryReview.approve")}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className={smallButtonClass}
-                                            data-testid="memory-reject"
-                                            disabled={
-                                                featureDisabled ||
-                                                busyId !== null
-                                            }
-                                            onClick={() =>
-                                                void patchMemory(row.id, {
-                                                    action: "reject",
-                                                })
-                                            }
-                                        >
-                                            <X className="h-3.5 w-3.5" />
-                                            {t("memoryReview.reject")}
-                                        </button>
-                                        {editingId !== row.id && (
-                                            <button
-                                                type="button"
-                                                className={smallButtonClass}
-                                                data-testid="memory-edit"
-                                                disabled={
-                                                    featureDisabled ||
-                                                    busyId !== null
-                                                }
-                                                onClick={() => {
-                                                    setEditingId(row.id);
-                                                    setEditStatement(
-                                                        row.statement
-                                                    );
-                                                }}
-                                            >
-                                                {t("memoryReview.edit")}
-                                            </button>
-                                        )}
-                                        {renderDeleteButton(row)}
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    ))}
-            </section>
-
-            <section className={sectionClass} data-testid="memory-active-list">
-                <h2 className="text-sm font-bold">
-                    {t("memoryReview.activeTitle")}
-                </h2>
-                {editParkedNotice && (
-                    <p
-                        className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"
-                        data-testid="memory-edit-parked-notice"
-                    >
-                        {t("memoryReview.editParkedNotice")}
                     </p>
                 )}
                 {listState.kind === "ready" &&
@@ -1055,7 +885,6 @@ export function MemoryReviewSettings() {
                                     <MemoryRowHeader row={row} />
                                     {renderEditor(row)}
                                     <EvidenceList evidence={row.evidence} />
-                                    {renderConflict(row.id)}
                                     {renderRowError(row.id)}
                                     <div className="mt-2 flex flex-wrap gap-2">
                                         <button
@@ -1136,6 +965,26 @@ export function MemoryReviewSettings() {
                                 <p className="mt-1 break-words text-sm leading-6 text-zinc-500">
                                     {row.statement}
                                 </p>
+                                {row.status === "suspended_by_source_delete" && (
+                                    <div className="mt-2 space-y-2">
+                                        {restoreId !== row.id ? <button type="button" className={smallButtonClass}
+                                            data-testid="memory-restore" disabled={featureDisabled || busyId !== null}
+                                            onClick={() => { setRestoreId(row.id); setRestoreGrounds(""); }}>
+                                            {t("memoryReview.restoreGrounds")}</button> : <>
+                                            <label className="block text-xs">{t("memoryReview.restoreGroundsNotice")}
+                                                <textarea className="mt-1 block w-full rounded border bg-transparent p-2 text-sm"
+                                                    data-testid="memory-restore-grounds" maxLength={2000} value={restoreGrounds}
+                                                    onChange={event => setRestoreGrounds(event.target.value)} />
+                                            </label>
+                                            <button type="button" className={smallButtonClass} data-testid="memory-restore-save"
+                                                disabled={featureDisabled || busyId !== null || !restoreGrounds.trim()}
+                                                onClick={() => void patchMemory(row.id, { action: "restore_grounds", groundsText: restoreGrounds.trim() })}>
+                                                {t("memoryReview.save")}</button>
+                                            <button type="button" className={smallButtonClass} onClick={() => setRestoreId(null)}>{t("memoryReview.cancel")}</button>
+                                        </>}
+                                        {renderRowError(row.id)}
+                                    </div>
+                                )}
                                 <div className="mt-2">
                                     {renderDeleteButton(row)}
                                 </div>

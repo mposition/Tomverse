@@ -23,8 +23,9 @@
 //
 // ## What passes
 //
-//   develop                       the release
-//   release/**                    a selective release cut from main (checklist 7.9.1)
+//   develop                       the release, when develop has not moved since its candidate
+//   release/**                    a release branch: at the candidate Test verified, or a
+//                                 selective release cut from main (checklist 7.9, 7.9.1)
 //   any `hotfix` path segment     hotfix/login, claude/hotfix/stripe-timeout
 //   dependabot/**                 security updates ignore target-branch (checklist 7.9.2)
 //   feedback-autofix-main/**      owner-approved promotion (checklist 6.1)

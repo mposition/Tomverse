@@ -42,7 +42,7 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   // in the signup note and again in a guest note, in near-identical words;
   // the second element is gone.
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
-    /Review/
+    guestChatAvailable ? /without an account/i : /Review/
   );
   await expect(page.getByTestId("landing-guest-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);

@@ -1,10 +1,13 @@
 ﻿"use client";
 
+import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
+
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
 import { askReviewRoute } from "@/lib/reviewRoutingClient";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPanels } from "@/lib/reviewProviderTranscript";
+import { REVIEW_PROVIDER_PREFERENCES_UPDATED } from "@/lib/reviewProviderPreferencesCore";
 import { flushSync } from "react-dom";
 import React, {
   useState,
@@ -19,6 +22,8 @@ import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } fro
 import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
+import { VoiceConversationControl } from "@/components/chat/VoiceConversationControl";
+import type { VoiceAnswerReceipt } from "@/components/chat/voiceConversationClient";
 import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
@@ -142,6 +147,10 @@ import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageIntent } from "@/lib/chatImageIntentClient";
 import type { ChatImageDecision } from "@/lib/chatImageIntentCore";
+import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
+import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
+import { DEFAULT_IMAGE_MODEL_ID, imageModelOwner } from "@/lib/imageModelRegistry";
 import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
@@ -673,8 +682,11 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
-  /** The image-intent call already answered "chat" for this exact draft. */
+  /** The image-intent call already answered for this exact draft. */
   imageIntentChecked?: boolean;
+  /** Answer this send with an image in the conversation (lib/chatImageTurn.ts). */
+  imageTurn?: ChatImageTurnRequest;
+  imageTurnsByModel?: ReviewImageTurns;
   reviewRouteChecked?: boolean;
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
@@ -747,6 +759,8 @@ export function ChatPageClient({
   chatImageIntentEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
+  voiceConversationEnabled = false,
+  voiceConversationMaxSeconds = 300,
   promptRefinerMode = "off",
   promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: false },
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
@@ -784,6 +798,8 @@ export function ChatPageClient({
    * after an operator pulled the kill switch.
    */
   voiceInputEnabled?: boolean;
+  voiceConversationEnabled?: boolean;
+  voiceConversationMaxSeconds?: number | null;
   /**
    * The server's final Prompt Refiner mode. The only active value today is a
    * deterministic, no-cost loopback fixture; there is no product adapter.
@@ -873,6 +889,8 @@ export function ChatPageClient({
     getModel,
     isEnabledModelId,
   } = useModelCatalog();
+  const imageCatalog = useImageModelCatalog();
+  const [reviewImageModelId, setReviewImageModelId] = useState<string | null>(null);
   const router = useRouter();
   // Which URL this mount is actually at, so a selection that already has the
   // right one does not push it again (a repeated push of the current path is
@@ -1031,6 +1049,19 @@ export function ChatPageClient({
     ? guestActiveChatStorageKey
     : GUEST_ACTIVE_CHAT_STORAGE_KEY;
   const reviewWorkspace = useReviewWorkspace(identityKey, reviewEasyAvailable && !isGuestMode, currentChatId);
+  const reviewDefaultProvidersRef = useRef<{ userId: string; providers: string[] } | null>(null);
+  const reviewDefaultsOwnerRef = useRef(sessionUserId);
+  useLayoutEffect(() => { reviewDefaultsOwnerRef.current = sessionUserId; }, [sessionUserId]);
+  useEffect(() => {
+    const remember = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId: string; providers: string[] }>).detail;
+      if (detail?.userId === sessionUserId && Array.isArray(detail.providers) && detail.providers.length <= 3 && detail.providers.every(provider => typeof provider === "string")) {
+        reviewDefaultProvidersRef.current = { userId: detail.userId, providers: detail.providers };
+      }
+    };
+    window.addEventListener(REVIEW_PROVIDER_PREFERENCES_UPDATED, remember);
+    return () => window.removeEventListener(REVIEW_PROVIDER_PREFERENCES_UPDATED, remember);
+  }, [sessionUserId]);
   const chatWorkspace = useWorkspaceAppearance("chat");
   const reviewWorkspaceRef = useRef(reviewWorkspace);
   useLayoutEffect(() => { reviewWorkspaceRef.current = reviewWorkspace; }, [reviewWorkspace]);
@@ -1608,12 +1639,14 @@ export function ChatPageClient({
     }
     const dismissable = promptRefinerState.status === "failed"
       ? promptRefinerState.request
-      : promptRefinerState.status === "accepted_preview"
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
         ? promptRefinerState.suggestion
         : null;
     const sourcePrompt = promptRefinerState.status === "failed"
       ? promptRefinerState.request.prompt
-      : promptRefinerState.status === "accepted_preview"
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
         ? promptRefinerState.suggestion.sourcePrompt
         : null;
     if (!dismissable || dismissable.requestId !== requestId) return false;
@@ -2369,6 +2402,15 @@ export function ChatPageClient({
       });
   }, [isGuestMode]);
   const currentAccessPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
+  // Whether a composer send here asks the image-intent model first and hands
+  // an image request to the image workspace (lib/chatImageIntent.ts). The
+  // send gate in `handleGlobalSubmit` reads this answer.
+  const imageIntentRoutedOnSend =
+    chatImageIntentEnabled &&
+    !isGuestMode &&
+    imageGenerationEnabled &&
+    planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
+    mountedSurface === "chat";
   const planLockedModelIds = useMemo(
     () =>
       selectedModels.filter((modelId) => {
@@ -4222,6 +4264,11 @@ export function ChatPageClient({
                     return res.json();
                 })
                 .then((data) => {
+                    if (reviewDefaultsOwnerRef.current === sessionUserId && Array.isArray(data?.reviewEasyEffectiveProviders)) {
+                        const providers = data.reviewEasyEffectiveProviders.filter((provider: unknown): provider is string => typeof provider === "string").slice(0, 3);
+                        reviewDefaultProvidersRef.current = { userId: sessionUserId, providers };
+                        if (mountedSurface === "workspace" && !currentChatIdRef.current && !reviewWorkspaceRef.current.providersConfigured) reviewWorkspaceRef.current.setProviders(providers);
+                    }
                     if (typeof data?.imageHandoffAutoGenerate === "boolean") {
                         setImageHandoffAutoGenerate(data.imageHandoffAutoGenerate);
                     }
@@ -4343,6 +4390,9 @@ export function ChatPageClient({
 
     const handleNewChat = () => {
         resetPromptRefinerState();
+        const defaults = reviewDefaultProvidersRef.current;
+        if (defaults?.userId === sessionUserId) reviewWorkspace.setProviders(defaults.providers.slice(0, Math.min(3, maxSelectableModels)));
+        else reviewWorkspace.clearProviders();
         if (mountedSurface === "continuation" && identityKey) {
             // This route transition unmounts the continuation tree. Promote
             // accepted turns before changing the selection ticket so their
@@ -4447,6 +4497,7 @@ export function ChatPageClient({
     setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
     setIsDeepResearchPending(false);
     setIsImageDraftActive(false);
+    setReviewImageModelId(null);
     discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
@@ -4468,6 +4519,13 @@ export function ChatPageClient({
             modelIds?: readonly string[];
         }
     ) => {
+        if (mountedSurface === "workspace") {
+            setReviewImageModelId(modelId ?? options?.modelIds?.[0] ?? DEFAULT_IMAGE_MODEL_ID);
+            reviewWorkspace.setImagePromptMode(true);
+            setInputValue(draftText);
+            setFocusToken(value => value + 1);
+            return;
+        }
         if (promptRefinerMode === "e2e_fixture") {
             // The no-cost Refiner fixture cannot hand an accepted synthetic
             // Chat draft to a second provider-facing workspace either.
@@ -4805,6 +4863,7 @@ export function ChatPageClient({
         // Cross-surface navigation unmounts this workspace and the identity
         // cleanup clears the pending create; in-place selection clears it here.
         localComparisonResponsesRef.current.clear();
+        if (id !== currentChatIdRef.current) reviewWorkspace.clearProviders();
         pendingCreatedChatRef.current = null;
         setPendingCreatedDraftScope(null);
         latestLocalComparisonPromptRef.current = null;
@@ -5677,17 +5736,41 @@ export function ChatPageClient({
       // marker would not survive every restore/remount path safely.
       return;
     }
-    if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy" &&
+    if (mountedSurface === "workspace" && reviewWorkspace.mode === "professional" &&
+      options === undefined && reviewWorkspace.imagePromptMode && reviewImageModelId) {
+      const model = imageCatalog.getModel(reviewImageModelId);
+      if (!model || model.disabledReason || isGuestMode || !imageGenerationEnabled ||
+        !planAllowsImageGeneration(accountUsage?.plan ?? "Free")) return;
+      const plan = reviewImageTurnPlan({ choices: [{ provider: imageModelOwner(model), modelId: model.id }],
+        panels: selectedModels, models: AVAILABLE_MODELS.filter(item => item.enabled && canUseModelWithPlan(currentAccessPlan, item)),
+        preset: "standard", comparisonId: crypto.randomUUID() });
+      if (!plan) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
+      // An image choice sends only its provider's panel without discarding
+      // the other text models the Professional user selected.
+      const panelId = plan.panelIds[0];
+      const panels = selectedModels.includes(panelId) ? selectedModels :
+        [...selectedModels.slice(0, Math.max(0, maxSelectableModels - 1)), panelId];
+      flushSync(() => mutateModelSettings(currentChatIdRef.current, panels,
+        disabledPanels.filter(id => id !== panelId)));
+      return handleGlobalSubmitRef.current({ reviewRouteChecked: true,
+        imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds });
+    }
+    const professionalImageRouting = mountedSurface === "workspace" &&
+      options === undefined &&
+      reviewWorkspace.mode === "professional" && chatImageIntentEnabled && imageGenerationEnabled &&
+      !isGuestMode && attachments.length === 0 && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
+    if (mountedSurface === "workspace" && (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
       !options?.reviewRouteChecked && !isImageDraftActiveRef.current) {
       if (!isModelSelectionReady || !isInitialConversationResolved) return;
-      if (!reviewEasyAvailable || isGuestMode) {
+      if ((!reviewEasyAvailable && !professionalImageRouting) || isGuestMode) {
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].unavailable);
         return;
       }
       if (reviewRoutingPendingRef.current) return;
       const routeText = options?.overrideText ?? inputValue;
       if (!routeText.trim()) return;
-      const providers = (reviewWorkspace.providers.length ? reviewWorkspace.providers :
+      const routeMode = reviewWorkspace.mode;
+      const providers = (routeMode === "easy" && reviewWorkspace.providersConfigured ? reviewWorkspace.providers :
         [...new Set(selectedModels.filter(id => !disabledPanels.includes(id)).flatMap(id => {
           const model = getModel(id); return model ? [model.provider] : [];
         }))]).slice(0, Math.min(3, maxSelectableModels));
@@ -5707,6 +5790,7 @@ export function ChatPageClient({
         const previous = latestLocalComparisonPromptRef.current
           ? localComparisonResponsesRef.current.get(latestLocalComparisonPromptRef.current)?.values().next().value : undefined;
         decision = await askReviewRoute({ text: routeText, providers, context: previous?.slice(0, 600),
+          ...(professionalImageRouting ? { imageOnly: true } : {}),
           requestedKind: routeRequestedKind ? "image" : undefined,
           hasImages: draft.attachments.some(attachment => attachment.mediaType.startsWith("image/")) });
       } finally {
@@ -5714,32 +5798,40 @@ export function ChatPageClient({
         reviewWorkspaceRef.current.setPending(false);
       }
       const live = readDraft(scope);
-      const liveProviders = reviewWorkspaceRef.current.providers.length ? reviewWorkspaceRef.current.providers :
+      const liveProviders = routeMode === "easy" && reviewWorkspaceRef.current.providersConfigured ? reviewWorkspaceRef.current.providers :
         [...new Set(latestModelSettingsRef.current.models.filter(id => !latestModelSettingsRef.current.disabled.includes(id)).flatMap(id => {
           const model = getModel(id); return model ? [model.provider] : [];
         }))];
       if (!owner || owner !== identityNamespaceKey(identityNamespaceRef.current) ||
         epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
         live.text !== draft.text || !sameStringList(attachmentIds, live.attachments.map(a => a.id)) ||
-        reviewWorkspaceRef.current.mode !== "easy" ||
+        reviewWorkspaceRef.current.mode !== routeMode ||
         reviewWorkspaceRef.current.imagePromptMode !== routeRequestedKind ||
         (liveProviders.length > 0 && !sameStringList(providers, liveProviders))) return;
-      if (!decision) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
+      if (!decision) {
+        if (professionalImageRouting) return handleGlobalSubmitRef.current({ reviewRouteChecked: true, imageIntentChecked: true });
+        reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return;
+      }
       if (decision.kind === "blocked") {
         reviewWorkspace.setError(t(imageGenerationEnabled ? "chat.imageGenerationPlanGateBody" : "chat.imageGenerationDisabledNotice")); return;
+      }
+      if (professionalImageRouting && decision.kind === "text") {
+        return handleGlobalSubmitRef.current({ reviewRouteChecked: true, imageIntentChecked: true });
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
         if (chosen.length > imageGroupMaxModelsProp) {
           reviewWorkspace.setError(t("chat.imageGenerationModelLimitNotice").replace("{max}", String(imageGroupMaxModelsProp))); return;
         }
-        reviewImageSeedRouteRef.current = { text: routeText.trim(), modelIds: chosen, preset: decision.preset };
-        reviewWorkspace.setImageRequest(true);
-        reviewWorkspace.setUnsupportedProviders(decision.choices.filter(choice => !choice.modelId).map(choice => choice.provider));
-        if (chosen.length) handleStartImageDraft(routeText, undefined, {
-          fromImageRequest: true, modelIds: chosen, preset: decision.preset,
-        });
-        return;
+        const plan = reviewImageTurnPlan({ choices: decision.choices, panels: selectedModels,
+          models: AVAILABLE_MODELS.filter(model => model.enabled && canUseModelWithPlan(currentAccessPlan, model)),
+          preset: decision.preset, comparisonId: crypto.randomUUID() });
+        if (!plan) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
+        reviewWorkspace.setImageRequest(false);
+        reviewWorkspace.setUnsupportedProviders([]);
+        flushSync(() => mutateModelSettings(currentChatIdRef.current, plan.panelIds, []));
+        return handleGlobalSubmitRef.current({ ...options, reviewRouteChecked: true,
+          imageIntentChecked: true, imageTurnsByModel: plan.turns });
       }
       if (!chosen.length || decision.choices.some(choice => !choice.modelId)) {
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].noText); return;
@@ -5776,25 +5868,17 @@ export function ChatPageClient({
       return;
     }
     /*
-      A composer send that asks for a picture goes to the image workspace
-      instead of to chat, decided by one small model call before anything is
-      saved (lib/chatImageIntent.ts). It is the image-intent chip's handoff,
-      taken on the user's behalf: no server row, the draft comes back on
-      cancel, and the workspace generates on arrival only for an account that
-      turned that on beside the price -- otherwise it waits on the price for
-      one press. Any failure or "no" falls through to the ordinary send.
-
-      In Review the models already chosen for the comparison make the image:
-      each one's maker's image model, side by side, with only the preset left
-      to the triage. Chat lets the triage pick the model as well.
+      A composer send that asks for a picture is answered with an image in
+      this conversation instead of text, decided by one small model call
+      before anything is saved (lib/chatImageIntent.ts). Any failure or "no"
+      falls through to the ordinary text send.
     */
     if (
       options === undefined &&
-      chatImageIntentEnabled &&
-      !isGuestMode &&
-      imageGenerationEnabled &&
-      planAllowsImageGeneration(accountUsage?.plan ?? "Free") &&
-      mountedSurface === "chat" &&
+      imageIntentRoutedOnSend &&
+      // An Auto turn is asked on the server, beside its router call
+      // (app/api/chat/route.ts), so it does not wait for this call first.
+      selectionModeRef.current !== "auto" &&
       !isImageDraftActiveRef.current &&
       attachments.length === 0 &&
       inputValue.trim().length > 0
@@ -5807,7 +5891,11 @@ export function ChatPageClient({
       imageIntentCheckPendingRef.current = true;
       let decision: ChatImageDecision = { image: false };
       try {
-        decision = await askChatImageIntent(intentText);
+        // The conversation lets a follow-up ("make it bluer") find the
+        // image it changes.
+        decision = await askChatImageIntent(intentText, {
+          conversationId: currentChatIdRef.current,
+        });
       } finally {
         imageIntentCheckPendingRef.current = false;
       }
@@ -5835,18 +5923,24 @@ export function ChatPageClient({
       ) {
         return;
       }
-      if (decision.image) {
-        // The triage's models and preset seed the workspace; a choice the
-        // catalogue cannot honour falls back to its defaults there.
-        handleStartImageDraft(intentText, undefined, {
-          fromImageRequest: true,
-          modelIds: decision.modelId ? [decision.modelId] : undefined,
-          preset: decision.preset ?? undefined,
-        });
-        return;
-      }
       // Re-entered through the ref so the ordinary send runs on current state.
-      return handleGlobalSubmitRef.current({ imageIntentChecked: true });
+      // An image request is still an ordinary send -- the question is saved
+      // and the conversation created exactly as for text -- and only its
+      // answer differs: an image in the conversation, made by the triage's
+      // model and preset (owner decision 2026-10-20: Chat needs no image
+      // workspace and asks no confirmation).
+      return handleGlobalSubmitRef.current({
+        imageIntentChecked: true,
+        ...(decision.image
+          ? {
+              imageTurn: {
+                modelIds: decision.modelId ? [decision.modelId] : [],
+                preset: decision.preset,
+                ...(decision.prompt ? { prompt: decision.prompt } : {}),
+              },
+            }
+          : {}),
+      });
     }
     const waitForCommittedAutoScope = async (
       expectedConversationId: string,
@@ -6655,16 +6749,28 @@ export function ChatPageClient({
         return true;
       };
       if (!chatSendIsCurrent()) return;
-      const preflight = await runComparisonPreflight({
-        comparisonId,
-        conversationId: activeChatId,
-        prompt: authoredPrompt,
-        promptAttachments,
-        modelIds: activeModelIds,
-        ...(options?.webSearchOverride
-          ? { webSearchMode: options.webSearchOverride }
-          : {}),
-      });
+      /*
+        An image turn never reaches /api/chat (lib/chatImageTurn.ts), so it
+        takes none of the text path's preparation: the preflight would reserve
+        a Chat concurrency slot and request capacity that nothing claims or
+        returns (chat-concurrency-and-identity.md §3), and a memory context
+        bundle would be prepared for a prompt no text model reads. The image
+        reservation applies its own gates.
+      */
+      const imageTurnSend = (Boolean(options?.imageTurn) && activeModelIds.length === 1) ||
+        (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
+      const preflight = imageTurnSend
+        ? { allowed: true as const, admissionToken: null, contextBundle: null }
+        : await runComparisonPreflight({
+            comparisonId,
+            conversationId: activeChatId,
+            prompt: authoredPrompt,
+            promptAttachments,
+            modelIds: activeModelIds,
+            ...(options?.webSearchOverride
+              ? { webSearchMode: options.webSearchOverride }
+              : {}),
+          });
       if (!preflight.allowed || !chatSendIsCurrent()) return;
       // The comparison preflight prices the whole set and hands back one
       // bundle for it. A single-model send never had a preparation step, so
@@ -6675,7 +6781,9 @@ export function ChatPageClient({
           ? ("comparison" as const)
           : ("single" as const);
       const contextBundle =
-        contextLayout === "comparison"
+        imageTurnSend
+          ? null
+          : contextLayout === "comparison"
           ? preflight.contextBundle
           : await prepareChatContextBundle({
               conversationId: isGuestMode ? null : activeChatId,
@@ -7184,6 +7292,10 @@ export function ChatPageClient({
       setCachedCompareSummaryChatId(null);
       if (pendingScreenModels) setSelectedModels(pendingScreenModels);
       if (pendingScreenDisabled) setDisabledPanels(pendingScreenDisabled);
+      if (voiceTurnRef.current && !voiceTurnRef.current.promptId) {
+        voiceTurnRef.current.promptId = comparisonId;
+        voiceTurnRef.current.sourceUserMessageId = userMsgId;
+      }
       setPromptPayload({
         id: comparisonId,
         text: authoredPrompt,
@@ -7220,6 +7332,15 @@ export function ChatPageClient({
         ...(promptRefinerDecisionForSend
           ? { promptRefinerDecision: promptRefinerDecisionForSend }
           : {}),
+        // One answer per question: every panel named in modelIds consumes
+        // this payload, and each image turn reserves its own paid group, so
+        // a send made for more than one panel never carries one.
+        ...(imageTurnSend && options?.imageTurn
+          ? { imageTurn: options.imageTurn }
+          : {}),
+        ...(imageTurnSend && options?.imageTurnsByModel
+          ? { imageTurnsByModel: options.imageTurnsByModel }
+          : {}),
       });
       if (skipAutoForThisTurn) setPromptRefinerSkipAutoScope(null);
       if (explicitPromptRefinerDecision) resetPromptRefinerState();
@@ -7232,7 +7353,7 @@ export function ChatPageClient({
       // question it carried came from a finished turn, not from the composer.
       if (!isOverrideSend && !preparedDraft) {
         const currentDraft = readDraft(activeChatId);
-        if (mountedSurface !== "chat" || chatDraftMatchesSubmission({
+        if (chatDraftMatchesSubmission({
           submittedText: inputValue,
           submittedAttachmentIds: attachments.map((attachment) => attachment.id),
           currentText: currentDraft.text,
@@ -7435,8 +7556,22 @@ export function ChatPageClient({
    * never reach its expected count and the offer would wait for a completion
    * that is not coming.
    */
+  const voiceTurnRef = useRef<{
+    promptId: string | null;
+    sourceUserMessageId: string | null;
+    resolve: (receipt: VoiceAnswerReceipt) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+  useEffect(() => () => {
+    voiceTurnRef.current?.reject(new Error("Voice conversation identity changed."));
+    voiceTurnRef.current = null;
+  }, [identityKey]);
+
   const handleTurnError = useCallback(
     (promptId: string | null, modelId: string, errorCode: string) => {
+      if (promptId && voiceTurnRef.current?.promptId === promptId) {
+        voiceTurnRef.current.reject(new Error(errorCode));
+      }
       const retry = webSearchRetryOutcomeRef.current;
       if (!retry || promptId !== retry.promptId) return;
       if (errorCode === WEB_SEARCH_COST_UNBOUNDED) retry.blocked = true;
@@ -7462,6 +7597,9 @@ export function ChatPageClient({
       responseText: string,
       searchMetadata?: WebSearchExecution | null
     ) => {
+      if (promptId && voiceTurnRef.current?.promptId === promptId && voiceTurnRef.current.sourceUserMessageId && currentChatIdRef.current) {
+        voiceTurnRef.current.resolve({ sourceUserMessageId: voiceTurnRef.current.sourceUserMessageId, conversationId: currentChatIdRef.current });
+      }
       if (
         promptId &&
         responseText.trim() &&
@@ -8553,6 +8691,27 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
+  const requestVoiceAnswer = (text: string): Promise<VoiceAnswerReceipt> => {
+    if (voiceTurnRef.current || inputValue.trim() || attachments.length || pendingSubmission) {
+      return Promise.reject(new Error("The composer is busy."));
+    }
+    return new Promise<VoiceAnswerReceipt>((resolve, reject) => {
+      const timer = setTimeout(() => pending.reject(new Error("The voice answer timed out.")), 240_000);
+      const pending = {
+        promptId: null as string | null,
+        sourceUserMessageId: null as string | null,
+        resolve: (receipt: VoiceAnswerReceipt) => { clearTimeout(timer); if (voiceTurnRef.current === pending) voiceTurnRef.current = null; resolve(receipt); },
+        reject: (error: Error) => { clearTimeout(timer); if (voiceTurnRef.current === pending) voiceTurnRef.current = null; reject(error); },
+      };
+      voiceTurnRef.current = pending;
+      // Use the normal draft and Send pipeline: Auto routing, tools, credits,
+      // durable messages, and existing conversation context all stay canonical.
+      flushSync(() => setInputValue(text));
+      void handleGlobalSubmitRef.current().then(() => {
+        if (!pending.promptId) pending.reject(new Error("The voice request was not sent."));
+      }).catch(pending.reject);
+    });
+  };
   const pendingDeepResearchSubmitRef = useRef<{
     depth: "quick" | "standard" | "deep";
     /**
@@ -9761,7 +9920,7 @@ export function ChatPageClient({
     const seed = reviewImageSeedRouteRef.current;
     reviewImageSeedRouteRef.current = null;
     if (seed?.text === text) return seed;
-    const providers = reviewWorkspace.providers.length ? reviewWorkspace.providers :
+    const providers = reviewWorkspace.providersConfigured ? reviewWorkspace.providers :
       [...new Set(selectedModels.flatMap(id => { const model = getModel(id); return model ? [model.provider] : []; }))];
     const owner = identityKey;
     const epoch = submitIdentityFenceRef.current.epoch;
@@ -9935,6 +10094,19 @@ export function ChatPageClient({
   const productSwitchHasUnknownWrite =
     selectionModeUnknown?.identityKey === identityKey &&
     selectionModeUnknown.conversationId === currentChatId;
+  const [voiceHistoryRevision, setVoiceHistoryRevision] = useState(0);
+  const voiceConversationControl = voiceConversationEnabled && mountedSurface === "chat" && !isGuestMode ? (
+    <VoiceConversationControl
+      conversationId={currentChatId}
+      scopeKey={identityKey ?? "unresolved"}
+      maxSeconds={voiceConversationMaxSeconds}
+      disabled={!isInitialConversationResolved || Boolean(pendingSubmission) || Boolean(inputValue.trim()) || attachments.length > 0}
+      selectionLabel={selectionMode === "auto" ? "Smart Adaptive" : getModel(selectedModels[0])?.name ?? "Tomverse"}
+      searchEnabled={isWebSearchEnabled(webSearchMode)}
+      onRequest={requestVoiceAnswer}
+      onSessionEnded={() => setVoiceHistoryRevision(value => value + 1)}
+    />
+  ) : undefined;
   const productSwitchDisabled =
     Boolean(pendingSubmission) ||
     selectionModePending ||
@@ -10000,6 +10172,7 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport && !(mountedSurface === "workspace" && reviewWorkspace.appearance === "studio") ? (
         <MobileChatShell
+          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           review={mountedSurface === "workspace" ? {
             ...reviewWorkspace,
@@ -10007,6 +10180,7 @@ export function ChatPageClient({
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
+            imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
@@ -10143,6 +10317,8 @@ export function ChatPageClient({
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
+          voiceConversationControl={voiceConversationControl}
+          voiceHistoryRevision={voiceConversationEnabled ? voiceHistoryRevision : undefined}
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}
@@ -10161,6 +10337,7 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
           onStudioStarter={id => {
@@ -10177,6 +10354,7 @@ export function ChatPageClient({
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
+            imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
@@ -10313,6 +10491,8 @@ export function ChatPageClient({
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
+          voiceConversationControl={voiceConversationControl}
+          voiceHistoryRevision={voiceConversationEnabled ? voiceHistoryRevision : undefined}
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}

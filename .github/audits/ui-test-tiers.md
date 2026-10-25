@@ -72,6 +72,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `chat-unified-workspace.spec.ts` |
 | `chat-product-switcher.spec.ts` |
 | `compact-composer.spec.ts` |
+| `composer-feature-parity.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
 | `email-notification-settings.spec.ts` |
@@ -160,8 +161,9 @@ desktop·mobile 양쪽에서 돌립니다.
 그 메시지로 실제로 이동하는지, 잠금 grant가 만료된 발췌가 화면에서 사라지는지는
 정적 검사가 답할 수 없습니다. 후자는 권한 없는 본문 노출이라 회수가 성립하지 않고,
 전자는 결과가 대화만 열고 위치를 잃으면 기능이 조용히 반쪽이 됩니다
-(docs/policy/external-conversation-continuation.md §8.2.1). 나머지 describe는
-태그 없이 전체 CI에 남습니다.
+(docs/policy/external-conversation-continuation.md §8.2.1). 2026-10-23에는 모델 선택기와
+현재 모델 개수가 각각 한 개만 노출되고 기존 picker로 열리는 검사도 합류했습니다.
+그 밖의 describe는 태그 없이 전체 CI에 남습니다.
 
 `conversation-draft-identity.spec.ts`가 2026-09-02에 합류해 54개입니다.
 같은 방식으로 막혔고, 같은 이유로 이 tier에 있습니다 — 초안이 신원별로

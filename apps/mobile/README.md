@@ -1,152 +1,281 @@
-# Native Tomverse shell
+# Tomverse native app MVP
 
-A locally bundled Vite + Capacitor app. The default build still shows the
-readiness diagnostics. Native text chat is an explicitly enabled local build.
-There is no remote `server.url` or browser session fallback.
+Locally bundled Vite + React + Capacitor application. It uses the existing
+mobile session service and Chat persistence, streaming, attachments and voice
+APIs. Production builds contain no demo transport and no remote `server.url`.
 
-## Implemented chat
+## C21 implementation (2026-10-21)
 
-- Connect an account using the system browser and a client-bound, 60-second
-  one-time code. Compare the request ID in the app with the browser page and
-  explicitly confirm the match before creating the code. The app creates its PKCE proof natively; only the public
-  challenge enters the browser URL. Code creation requires an explicit click
-  on the authenticated `/mobile/connect` page, after the ordinary web login
-  (Google, Microsoft or email). With verified auth links configured, choose
-  **Return to Tomverse app** to complete sign-in without pasting a code.
-  Manual code entry remains available when the link cannot open the app.
-- Native Swift/Java `MobileAuth` exchanges and rotates credentials directly
-  over HTTPS, with redirects disabled and no cookies. Keychain on iOS and
-  Android Keystore AES-GCM protect the stored session. Only short-lived access
-  tokens and expiry cross the bridge. Validation and secure-store read errors
-  preserve existing sessions. The UI checks/restores a session before showing
-  pairing controls, and a failed identity read offers a safe retry. Browser fallback always refuses auth.
-- Native mutation calls are serialized. Local single-use state is consumed
-  before rotation; a timeout or unknown outcome signs out instead of replaying
-  an exchange or rotation. Sign-out removes local state before remote logout.
-- `GET /api/mobile/chat` reads the verified account identity. `POST` uses the
-  existing chat execution, model access, moderation, budget, credit and stream
-  handling. Both independently verify the bearer and session revocation. There
-  is no cookie fallback. Only this exact endpoint is enrolled when enabled.
-- Text conversation and the opt-in location session live in memory. New chat,
-  sign-out or reload clears them. This first native screen has no persisted
-  conversation sync, attachments, generated files or model picker. Native and
-  web use the same `@tomverse/chat-core` stream consumer and completion parser;
-  length-limited answers remain visible and are labeled incomplete.
-- Current location defaults off. Enabling requests approximate foreground
-  access. Each send acquires a fresh fix, coarsens it and sends `currentLocation`
-  only while consent and account identity still match, rechecking after native
-  token acquisition and before any 401 retry. Denial/timeout continues
-  without location. Permission decisions do not consume the acquisition timeout;
-  Stop cancels the caller’s pending read immediately. There is no background watch, saved fix or JS credential
-  storage. Web search is separately opt-in for live weather/place facts.
+Web and native answers now share `@tomverse/chat-ui` (the existing GFM/CJK
+Markdown behavior), and file responses share `@tomverse/api-client`. Native
+answers display sources and generated-file cards from the canonical message
+readback. Ready files use the existing authenticated artifact endpoint, with
+ownership, lock and size checks unchanged. Android's document picker and iOS's
+document export picker require an explicit Save action; neither accepts a
+filesystem path from JavaScript. Browser tests exercise the browser fallback.
 
-## Enablement is separate from implementation
+Unsent text drafts are scoped by authenticated account and conversation on the
+device, expire after one day and clear on sign-out/session loss. Model selection
+preserves the pending draft. No offline message is dispatched automatically.
 
-All three switches are off unless explicitly set:
+Account export and deletion have in-app confirmation and reauthentication UI.
+They reuse the existing single-use export ticket and deletion scheduler. Native
+sensitive actions additionally require `TOMVERSE_NATIVE_ACCOUNT_ENABLED=true`
+(default off) beside the existing native Chat enrollment. Step-up freshness is
+the token family's original sign-in time; rotating a token cannot renew it.
+Unknown deletion outcomes are not automatically retried. This implementation
+does not enable the switch, send mail or delete any real account.
 
-| Setting | Boundary |
-|---|---|
-| `MOBILE_CHAT_ENABLED=true` on the API server | Exact native bearer gateway and browser pairing page |
-| `VITE_NATIVE_CHAT_ENABLED=true` during Vite build | Native chat UI instead of readiness diagnostics |
-| `NATIVE_CHAT_ENABLED=true` during Capacitor sync | Native auth plugin permission |
+The web PWA has an install manifest, explicit install action, and a public-only
+offline shell. Its service worker never caches account/API responses or generated
+files. A draft entered offline remains bound to the tab and account until the user
+chooses Restore offline draft in the normal Chat composer. Sign-out and account
+changes clear it before another identity can recover it. Run `npm run test:pwa` for the browser
+contract. Shared-package verification executes the actual React Markdown bundle
+in Chromium as well as checking standalone TypeScript and emitted tokens.
 
-`VITE_TOMVERSE_API_ORIGIN` must be one trusted HTTPS origin; it configures both
-Vite transport and native auth. Rebuild and sync together when changing it.
-The app uses native code, not JavaScript, for credential exchange/rotation.
-These switches have not been set on a deployed service by this change.
+Android compilation and browser contracts are local evidence. Physical phones,
+iOS compilation/signing, domain associations, live activation and store release
+remain separate steps.
 
-## System-browser sign-in return
+The file saver was also exercised in a fresh Android emulator with networking
+disabled: path refusal, user cancellation, concurrent-save refusal and saving
+the exact 29-byte synthetic fixture through the system picker all passed.
 
-The browser uses the existing `/auth/signin` page and cookie session. The app
-receives only a 60-second, single-use grant in the fragment of the exact HTTPS
-`/mobile/auth/callback` link, bound to its in-memory PKCE request. It refuses
-other origins, paths, query credentials, unrelated requests and duplicate
-callbacks. The verifier and rotating session stay native. An app restart
-requires a new connection request; a cold-start link cannot resume lost proof.
-If link verification fails, the standalone fallback clears the fragment from
-browser history, loads no analytics/resources and offers manual code entry.
+## Local development
 
-App returns stay off by default. Configure these together when preparing a
-signed build and its matching API deployment:
+From the repository root, using local PowerShell, without production credentials:
 
-| Location | Setting |
-|---|---|
-| API server | `MOBILE_AUTH_APP_LINKS_ENABLED=true` |
-| API server | `MOBILE_AUTH_APP_LINK_ORIGIN`: a dedicated HTTPS return origin on this deployment, different from all web login hosts |
-| API server, Android | `MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS`: comma-separated SHA-256 fingerprints of the installed app's signing certificates (Play App Signing certificate for Play builds) |
-| API server, iOS | `MOBILE_AUTH_IOS_APP_ID`: the actual App ID prefix plus `.app.tomverse.shell` |
-| Vite build | `VITE_MOBILE_AUTH_APP_LINKS_ENABLED=true` |
-| Vite build and Capacitor sync | `VITE_MOBILE_AUTH_APP_LINK_ORIGIN`: the same dedicated return origin |
-| Capacitor sync | `NATIVE_AUTH_APP_LINKS_ENABLED=true` |
+- `npm --workspace @tomverse/mobile run dev` opens the real native-auth client.
+- `$env:VITE_TOMVERSE_DEMO="true"; npm --workspace @tomverse/mobile run dev`
+  enables an explicitly labelled, synthetic development demo. It makes no model
+  call. The demo is compiled out of production builds.
+- `npm run build:mobile-shell`
+- `npm --workspace @tomverse/mobile run typecheck`
+- `npm --workspace @tomverse/mobile run cap:sync`
+- `npm --workspace @tomverse/mobile run brand:assets` regenerates native sizes
+  from the existing logo using the repository's Sharp dependency.
+- `npm --workspace @tomverse/mobile run test:ui` runs the synthetic browser
+  interaction suite; it is not physical-device verification.
+- `npm run check:native-token-boundary`
+- `npm run check:capacitor-local-bundle`
+- `npm run check:shared-packages`
+- `npm run verify:package-build-matrix`
 
-Use the same `VITE_TOMVERSE_API_ORIGIN` for build and sync. The sync hook adds
-an Android auto-verified intent filter for only the callback path and configures
-iOS Associated Domains in the app's entitlements/build settings. Existing
-capabilities are preserved; disabling the sync switch removes only managed
-entries. Enable Associated Domains for the iOS App ID and signing profile too.
-When other capabilities have since been added to a generated entitlements file,
-disabling keeps that file's signing reference so those capabilities stay intact.
-Attach the return hostname to this API deployment and explicitly add it to
-`ALLOWED_REQUEST_HOSTS`, retaining the existing Cloudflare origin-secret gate.
-Serve the two association paths and callback over HTTPS with no redirect.
-The return host serves only those three read-only paths; chat, sign-in and API
-routes are refused on that host. Build and sync fail if the explicit return
-origin is missing. iOS [keeps same-host browser links in Safari](https://developer.apple.com/documentation/technotes/tn3155-debugging-universal-links),
-so configured login/share aliases and production login hosts cannot be used
-as the dedicated return origin.
-The API publishes `/.well-known/assetlinks.json` and
-`/.well-known/apple-app-site-association` only with valid, configured signing
-identities. No placeholder signing identity is published.
+Native projects are now versioned because they contain microphone permissions,
+backup restrictions and app-link declarations. Generated bundles and build
+outputs remain ignored. Android builds require JDK 21, Android SDK 36 and Gradle;
+run `npm --workspace @tomverse/mobile run build:android` after installing them.
+The iOS MVP targets iOS 17.4+ and requires macOS and Xcode. Signing and real device verification are separate.
 
-Physical Android/iOS verification of the signed app's association and
-browser-to-app return remains required. Local tests mock OS link delivery;
-they do not establish that a release certificate or Apple provisioning profile
-has been configured. No production setting or signing identity is changed by
-the implementation.
+## Authentication and operational boundary
 
-## Local checks
+The primary sign-in action opens the existing web sign-in flow in the system
+browser and returns to the installed app through the native PKCE session.
+It uses the same sign-in options as the website. The welcome screen also offers
+an explicit email-code option inside the app. The email form's alternate sign-in
+action uses the same native browser flow; it does not open a standalone website
+login that cannot return a session to the app. Cancelled, expired and unavailable
+browser sign-ins retain the email-code option and show an appropriate message.
 
-Run on the local PC, PowerShell, from the repository root. These checks write
-local build/test artifacts and require no production credentials or paid calls.
+The email option signs existing accounts in using a six-digit code entered
+inside the app. The native plugin calls the exact
+`/api/auth/mobile/email` path; the server reuses the existing email delivery,
+OTP verification, rate limits and mobile session issuer. Cookies cannot grant
+identity on this path. Signup and additional Turnstile verification are directed
+to the website rather than bypassed. The initial form has English/Korean copy,
+with English fallback for the other app locales.
 
-```powershell
-npm --workspace @tomverse/chat-core run typecheck
-npm --workspace @tomverse/mobile run typecheck
-npm run check:shared-packages
-npm run check:native-token-boundary
-npm run check:capacitor-local-bundle
-npm run build:mobile-shell
-npx playwright test --config playwright.native.config.ts
-```
+System-browser sign-in with S256 PKCE remains available in the native plugin
+for browser-based identity providers. Existing web sign-in issues a single-use grant.
+It now probes the public mobile capability endpoint before opening the browser.
+Only a claimed HTTPS callback is accepted; there is no custom-scheme fallback.
+The native layer exchanges the grant and serializes refresh rotation. Android
+stores AES-GCM ciphertext with a Keystore key; iOS uses a non-synchronizing,
+this-device-only Keychain entry. Access tokens live only in memory. Nothing
+returns a rotating credential to JavaScript. An uncertain refresh consumes the
+local credential and requires a new sign-in, rather than replaying it.
 
-The native screen tests use mocked native plugins and a mocked API. They test
-pairing, session-restoration races, per-message location, denial, stop,
-sign-out, incomplete answers, narrow screens and enlarged text. The Android
-plugin also has JVM tests executing its real validation and rotation control
-flow with isolated secure-store and HTTP ports. They are not physical-device evidence. Android debug compilation is
-possible with JDK 21 and Android SDK 36. iOS compilation requires macOS/Xcode.
+The server enrollment switch `TOMVERSE_NATIVE_CHAT_ENABLED` defaults off. Proxy
+and route handlers both validate bearers. Routes additionally check current
+family/device/account state; all existing ownership, lock, plan, budget and
+persistence checks remain in place. Cookie requests retain cookie authentication
+and CSRF checks. Live enrollment, paid calls, push, merge, deployment and store
+submission require their separate approvals.
 
-## Native projects
+The existing `app.tomverse.shell` identifier is provisional. No production app
+IDs, Apple Team ID or signing certificate have been chosen by the owner. No
+association files are published or fabricated. The native declarations are
+preparation, not proof of verified links. Browser screenshots and sync output
+are not physical-device authentication evidence. iOS uses ASWebAuthenticationSession with an exact HTTPS callback, rather than
+relying on Safari same-domain navigation. Physical app-link and session evidence
+remains required before release.
+The email-code path itself needs no app-link callback or production app ID.
+It still requires a deployed, enabled server and the existing mobile keyring.
+The iOS entitlements prepare both `applinks` and `webcredentials` for the HTTPS
+authentication session. AASA registration for either service still requires the
+owner's actual application/Team IDs and separate operational approval.
 
-Generated `apps/mobile/android` and `apps/mobile/ios` stay uncommitted. Auth
-plugin sources live in `native-auth`, while `cap:sync` also configures foreground
-location permissions idempotently. Android requests coarse location only; iOS
-includes the Geolocation plugin's two required usage descriptions and reduced
-accuracy by default, without requesting background or always authorization.
-The installed Geolocation 8.2.4 manifest declares no permissions; the generated
-Android merged manifest was checked to contain only coarse location.
+## Product surface
 
-```powershell
-npm --workspace @tomverse/mobile exec cap add android
-npm --workspace @tomverse/mobile exec cap add ios # macOS/Xcode
-npm --workspace @tomverse/mobile run cap:sync
-```
+The official `public/tomverse-logo.png`, seven locales and light/dark themes are
+used. Chat has a full-width IME-safe composer, conversation history, stream/stop,
+server restoration, attachment selection and voice-to-editable-text. Navigation
+and model changes are blocked during an uncertain send until a server read.
+Requests with unknown outcomes are never automatically resubmitted.
 
-The Android release application ID is `app.tomverse.shell`, confirmed by the
-owner on 2026-10-25. Keep the generated Android project and Google Play
-registration aligned with this ID. Manual code pairing needs no association
-files; browser-to-app return uses the verified links described above.
+Chat and Review remain separate surfaces. The Review screen currently previews
+Easy (provider selection) and Professional (direct model selection); it makes no
+comparison request. Chat model changes use the existing authenticated server
+PATCH and read back the confirmed selection. Server-offered Smart Adaptive
+remains a mode within Chat. Text Send has no credit estimate.
 
-Release signing, iOS build, device secure-store checks,
-permission prompts and foreground keyboard behavior remain device/release
-validation. No merge, deployment or live activation is implied by local checks.
+## Verification status (2026-10-20)
+
+The local bundle, Capacitor Android/iOS sync, TypeScript, scoped lint, shared
+package purity and Vite package execution checks passed. Synthetic browser
+coverage passed 14 cases: first/follow-up answer, tab restart, IME, cancellation,
+model sheet, product modes, attachments, voice, denied microphone and sign-out.
+Focused bearer/transport/stream checks passed 54 cases; existing server and web product
+regressions passed 85 and 28 cases. Broader mobile/session regressions passed
+268 cases before the final recovery/error-copy additions. No product provider
+was called.
+
+An isolated local PostgreSQL 17 cluster built successfully from the existing
+migrations. The existing mobile auth schema/service integration suites passed
+34 cases. A real bearer/DB smoke check also confirmed authenticated ownership,
+foreign-conversation refusal and suspended-account refusal. Claude accepted the
+finished security follow-up at commit 0944c9d;
+that review is not authorization to activate the default-off routes.
+
+The full Next webpack build remains blocked by the existing Admin import chain
+from decisionMakerBodyCore (node:crypto) into AmuxDecisionMakerRequestsPanel.
+Those Admin files are unchanged in this implementation.
+
+Android assembly, installation and local native authentication have now been
+verified as described below. iOS still cannot be built on this Windows PC.
+Physical-device verification, production links and operational enrollment remain
+open; this is not a released MVP.
+
+## Android native verification (2026-10-20)
+
+The user-authorized toolchain installation used checksum-verified Temurin
+21.0.12.1+1 and Android command-line tools 15859902. Installed SDK components:
+platform 36, build-tools 35.0.0/36.0.0, platform-tools 37.0.1, emulator 37.2.12 and
+the API 36 Google APIs x86_64 image. JAVA_HOME and ANDROID_HOME are configured
+at user scope; an already-open terminal may need those user values reloaded.
+
+The native plugin now declares AppCompat explicitly, fixing its first actual
+Java compilation failure. Bridge logging is disabled even for debug builds,
+because Capacitor debug logs can include access-token results. A regression
+check protects that configuration.
+
+The ordinary debug APK builds with the workspace build:android script. It uses
+the provisional app.tomverse.shell ID, a generated development signer and bundled
+assets. Its verification copy is .tmp/native-01/tomverse-android-debug.apk
+(SHA-256 e517314d5d38b43fa69e678d6a079038c03ec2cc743f3603478d09a8a18a73a6).
+The packaged config was checked for loggingBehavior=none, no remote server URL
+and no local test CA.
+
+No physical phone was connected. The dedicated Android 16/API 36 emulator
+installed and launched the APK. A separate debug fixture APK, built using an
+external Gradle init file, trusted a short-lived local CA for the isolated test.
+Neither that trust override nor its private key is part of the ordinary APK or
+tracked source. All test HTTPS tunnels terminated locally; other TLS hosts and
+paid Chat/voice executions were refused.
+
+The browser form and mail delivery were synthetic. Verification reused the
+existing email-code verifier, PKCE grant service, exchange/refresh/logout route
+handlers, live session checks and authenticated conversation-list handler
+against an isolated PostgreSQL database. Observed results:
+
+- System Chrome opened from the installed app; the code verifier accepted the
+  synthetic code and a user-clicked HTTPS callback returned to the app.
+- Native grant exchange returned 200, followed by bearer conversation-list 200.
+- The native preference held only an AES-GCM IV and ciphertext. Credential-shaped
+  plugin result log count was zero; no raw credentials were exported in evidence.
+- After force-stop and relaunch, native refresh returned 200 and authenticated
+  conversation-list read returned 200 again.
+- Logout returned 204 and cleared the native sealed session record.
+
+The database receipt showed two refresh-rotation records and a family revoked
+for logout. Android Gradle unit tasks passed. Mobile logging/CI admission
+regressions passed 55 cases; the final logging guard passed all eight cases.
+Mobile TypeScript and scoped lint passed. APK Signature Scheme v2 verified.
+
+The emulator's domain state was manually approved for this callback test after
+its unverified state was recorded. This is not domain-ownership verification,
+production AASA/assetlinks publication, real mail receipt or Google/Apple SSO
+evidence. The full Next sign-in page was not used in the final fixture.
+Playwright WebView attachment disrupted native callback completion on this
+image; app actions and screenshots used ADB without attaching that debugger.
+
+## Installed APK login correction (2026-10-20)
+
+The owner reported that Continue with Tomverse opened a 404 page. A read-only
+production check confirmed GET /auth/mobile returned 404; GET on the existing
+exchange route returned 405. The earlier successful auth test used a local
+fixture and did not establish production login readiness. The installed APK
+therefore could not complete its advertised production sign-in.
+
+Continue now opens the app-owned email form. Missing/disabled server support
+shows a specific error inside the app, with no automatic browser navigation.
+The new route is behind the unchanged default-off native enrollment switch.
+It accepts only existing-account OTP proof, checks active account state before
+issuing a session, and delegates mail/abuse checks to the existing request handler.
+The native layer stores issued rotating credentials; the form receives no tokens.
+An uncertain verify result is not retried automatically and requires a new code.
+
+Verification: 12 new server route tests, 14 bridge/origin tests and all 16 browser
+UI scenarios passed. The actual installed Android emulator also completed app
+email entry, synthetic mail request, invalid-code refusal, real existing-code
+verification/session issuance, bearer list read and force-stop/relaunch refresh.
+No browser or callback link was needed for that native email flow. Only mail
+delivery was synthetic; the verifier, route, DB, native bridge and secure store
+were real. This remains local-fixture evidence, not production login evidence.
+Logout returned 204. A separate local plain-HTML 404 test through the actual
+native plugin showed the Korean unavailable-service message inside the app.
+Credential-shaped bridge log count remained zero. Root/mobile type checks,
+scoped lint and diff checks passed. The ordinary APK was reinstalled after the
+fixture tests; the emulator, fixture servers, local DB and Gradle daemon stopped.
+
+The updated ordinary APK is .tmp/native-01/tomverse-android-email-debug.apk
+(SHA-256 064b37b21ad7235486808dadef63f0e72e30aa608f4f3eae2257782d93ce6076).
+It supersedes the earlier APK for the login UI fix. It contains no fixture CA.
+Installing it alone does not enable production login: server deployment and
+native route activation still require their separate owner approvals.
+
+## Production support diagnosis and review follow-up
+
+The owner's second test still could not request a code. Read-only production
+GET /api/auth/mobile/email returned NextAuth's plain-text HTTP 400 unsupported
+action response. A malformed-body POST, containing no email or code, returned
+403 INVALID_REQUEST_ORIGIN before a handler could send mail. This is a missing
+server integration, not evidence that the owner's mailbox rejected a message.
+No real email was sent by the diagnostic probes.
+
+The native email request now requires a positive, read-only capability response
+before submitting any email. Unsupported routes (including the actual NextAuth
+400 behavior) cannot be mistaken for a delivered code. Request, delivery and
+verification errors have distinct copy, and the existing browser sign-in is
+reachable as a secondary action.
+
+Independent review r-20261020-103844-3e4c80 rejected the first email-route diff:
+the token-bearing POST must refuse every browser Origin, including the
+Capacitor origins, because only native HTTP clients should consume its result.
+The route now enforces that rule before processing proof or sending mail.
+The follow-up also removes stale delegated content-length/cookies, preserves
+specific service error codes, and conditionally reactivates expired suspensions
+with a re-read, following web sign-in behavior. Local checks passed 19 route,
+14 bridge/origin and five login UI scenarios. A new independent review covers
+the corrected authentication boundary; no live endpoint was enabled by this work.
+
+Do not hand a local validation APK over as a production-login fix. Real-account
+testing requires separately approved publication/deployment and server enrollment,
+followed by a supported capability response from the actual target server.
+
+## Foreground location
+
+The current Chat and Review composers offer an off-by-default Current location switch in Tools. Each message reads a fresh approximate fix and shares it only while that account's consent remains active. Location is excluded from stored messages and device drafts. Switching accounts, signing out, or reloading clears consent. Permission denial and acquisition failures leave ordinary chat available.
+
+The existing native chat enrollment, browser login, secure store and product navigation are unchanged. Run the workspace cap:sync script after dependency changes; its post-sync hook configures foreground coarse Android location and reduced-accuracy iOS usage descriptions. Physical-device permission and GPS observations remain separate from browser fixtures.

@@ -1,19 +1,19 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
+import { resolveFeedbackMessageId } from "@/lib/feedbackMessageAttribution";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
-import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import { FEEDBACK_ANSWER_SIGNALS, feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 import {
   initialFeedbackLifecycleEvents,
   initialFeedbackStatus,
@@ -44,6 +44,8 @@ const feedbackSchema = z
     type: z.enum(["bug", "feature", "billing", "support", "other"]),
     email: z.string().trim().email().max(254).optional(),
     message: z.string().trim().min(5).max(2_000),
+    messageId: z.string().trim().min(1).max(64).optional(),
+    answerSignal: z.enum(FEEDBACK_ANSWER_SIGNALS).optional(),
     traceId: z.string().trim().max(120).optional(),
     /**
      * Server-issued proof that the trace above belongs to a real server
@@ -181,7 +183,13 @@ const resolveTraceReport = async (body: {
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    // The web sends its cookie session; the mobile app sends its bearer, which
+    // resolveChatRouteSession verifies against the native parity allowlist
+    // (lib/nativeBearerGate.ts). Without either, the caller is a guest and
+    // passes the Turnstile check below.
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     // Per-caller, not a single shared "guest" bucket: one anonymous client must
     // not be able to exhaust the daily allowance for every other visitor.
     const subject = session?.user?.id || `guest:${getAnonymousClientKey(req)}`;
@@ -249,10 +257,13 @@ export async function POST(req: Request) {
       traceId: body.traceId,
     };
     const { feedback, delivery, userDelivery } = await prisma.$transaction(async (tx) => {
+      const messageId = await resolveFeedbackMessageId(tx, session?.user?.id ?? null, body.messageId);
       const feedback = await tx.feedback.create({
         data: {
           status: initialFeedbackStatus(autoReviewInput),
           userId: session?.user?.id || null,
+          messageId,
+          answerSignal: messageId ? body.answerSignal ?? null : null,
           email,
           type: body.type,
           message: body.message,

@@ -1,0 +1,163 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
+import test from "node:test";
+
+import {
+  amuxSessionIntakeWritePermitted,
+  inspectAmuxIdeaSessionInput,
+  inspectAmuxIdeaSessionSource,
+  inspectAmuxIdeaSessionSubmission,
+  inspectAmuxSessionModelChoice,
+  inspectSealedAmuxIdeaSessionInput,
+  sameAmuxOperatingScopeAuthority,
+} from "@/lib/amux/ideaSessionSubmissionCore";
+
+const source = {
+  toolName: "Codex",
+  modelProvider: "OpenAI",
+  sessionDisplay: "AMUX intake implementation",
+};
+const submission = (input: Record<string, unknown>) => ({
+  version: 1,
+  requestId: randomUUID(),
+  input,
+  source,
+});
+const idea = (overrides: Record<string, unknown> = {}) => ({
+  version: 1,
+  idea: "Add one guarded intake path.",
+  repositories: ["mposition/Tomverse"],
+  pullRequests: [],
+  ...overrides,
+});
+
+test("session intake needs both exact enabled switches and defaults off", () => {
+  assert.equal(amuxSessionIntakeWritePermitted(undefined, undefined), false);
+  assert.equal(amuxSessionIntakeWritePermitted("enabled", undefined), false);
+  assert.equal(amuxSessionIntakeWritePermitted(undefined, "enabled"), false);
+  assert.equal(amuxSessionIntakeWritePermitted("ENABLED", "enabled"), false);
+  assert.equal(amuxSessionIntakeWritePermitted("enabled", "enabled"), true);
+});
+
+test("session source keeps the three encrypted provenance labels exactly", () => {
+  assert.deepEqual(inspectAmuxIdeaSessionSource(source), { ok: true, source });
+  assert.deepEqual(inspectAmuxIdeaSessionSource({ ...source, path: "repo" }),
+    { ok: false, code: "source_invalid" });
+  assert.deepEqual(inspectAmuxIdeaSessionSource({ ...source, sessionDisplay: "token=abcdefgh" }),
+    { ok: false, code: "source_invalid" });
+  assert.deepEqual(inspectAmuxIdeaSessionSource({ ...source, sessionDisplay: "" }),
+    { ok: false, code: "source_invalid" });
+});
+
+test("session input does not inherit the owner parser's byte or item caps", () => {
+  const longIdea = "Implement this guarded behavior. " + "x".repeat(8_300);
+  const manyRepositories = Array.from({ length: 9 }, (_, index) => "owner/repo" + index);
+  const manyPullRequests = Array.from({ length: 17 }, (_, index) => ({
+    repository: manyRepositories[index % manyRepositories.length],
+    number: index + 1,
+  }));
+  const inspected = inspectAmuxIdeaSessionSubmission(submission(idea({
+    idea: longIdea,
+    repositories: manyRepositories,
+    pullRequests: manyPullRequests,
+  })));
+  assert.equal(inspected.ok, true);
+  if (!inspected.ok) return;
+  assert.ok(inspected.counts.ideaBytes > 8_192);
+  assert.equal(inspected.counts.repositoryCount, 9);
+  assert.equal(inspected.counts.pullRequestCount, 17);
+  assert.equal(inspected.input.idea, longIdea);
+  assert.deepEqual(inspectAmuxIdeaSessionInput(idea({ idea: longIdea,
+    repositories: manyRepositories, pullRequests: manyPullRequests })),
+  { ok: true, input: inspected.input, counts: inspected.counts });
+});
+
+test("session email refusal preserves its existing address boundaries", () => {
+  for (const value of [
+    "person@example.test",
+    "prefix person.name+tag@example-domain.test suffix",
+    "person@example.test!",
+  ]) {
+    assert.deepEqual(inspectAmuxIdeaSessionSubmission(submission(idea({ idea: value }))),
+      { ok: false, code: "content_refused" });
+  }
+  for (const value of [
+    "@example.test",
+    "person!@example.test",
+    "person@example",
+    "person@example.c",
+  ]) {
+    assert.equal(inspectAmuxIdeaSessionSubmission(submission(idea({ idea: value }))).ok, true);
+  }
+});
+
+test("a sealed v1 body retains its intake-time content decision", () => {
+  const stored = idea({ idea: "person@example.test" });
+  assert.deepEqual(inspectAmuxIdeaSessionInput(stored),
+    { ok: false, code: "content_refused" });
+  assert.equal(inspectSealedAmuxIdeaSessionInput(stored).ok, true);
+  assert.equal(inspectSealedAmuxIdeaSessionInput({ ...stored,
+    repositories: ["not-a-repository"] }).ok, false);
+});
+
+test("session parser scans multi-megabyte non-email content without quadratic slowdown", () => {
+  const overOneMiB = 1_048_576 + 257;
+  const startedAt = performance.now();
+  const inspected = inspectAmuxIdeaSessionSubmission({
+    ...submission(idea({ idea: "i".repeat(overOneMiB) })),
+    source: { ...source, sessionDisplay: "s".repeat(overOneMiB) },
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(inspected.ok, true);
+  assert.ok(elapsedMs < 10_000, `session parser took ${elapsedMs.toFixed(1)}ms`);
+});
+
+test("session input refuses schema ambiguity and sensitive content", () => {
+  for (const input of [
+    idea({ idea: "" }),
+    idea({ idea: "person@example.test" }),
+    idea({ idea: "C:\\Users\\operator\\secret.txt" }),
+    idea({ idea: "token=abcdefgh" }),
+    idea({ repositories: ["not-a-repository"] }),
+    idea({ repositories: ["owner/repo", "OWNER/REPO"] }),
+    idea({ pullRequests: [{ repository: "owner/repo", number: 0 }] }),
+    { ...idea(), extra: true },
+  ]) {
+    assert.equal(inspectAmuxIdeaSessionSubmission(submission(input)).ok, false);
+  }
+  assert.equal(inspectAmuxIdeaSessionSubmission({
+    ...submission(idea()), requestId: "not-a-request-id",
+  }).ok, false);
+});
+
+test("scope authority equality binds its row, version, owner and normalized scope", () => {
+  const authority = {
+    settingId: "scope-1",
+    version: 2,
+    approvedByUserId: "owner-1",
+    scope: {
+      repositories: ["mposition/Tomverse"],
+      model: { provider: "openai" as const, modelId: "gpt-6-astra", reasoningEffort: "high" as const },
+    },
+  };
+  assert.equal(sameAmuxOperatingScopeAuthority(authority, structuredClone(authority)), true);
+  assert.equal(sameAmuxOperatingScopeAuthority(authority, { ...authority, version: 3 }), false);
+  assert.equal(sameAmuxOperatingScopeAuthority(authority, {
+    ...authority, approvedByUserId: "owner-2",
+  }), false);
+});
+
+test("a per-idea model choice is absent or one exact approved-catalog shape", () => {
+  assert.deepEqual(inspectAmuxSessionModelChoice(undefined), { ok: true, model: null });
+  assert.deepEqual(inspectAmuxSessionModelChoice(null), { ok: true, model: null });
+  const model = { provider: "github-copilot", modelId: "kimi-k3", reasoningEffort: "high" };
+  assert.deepEqual(inspectAmuxSessionModelChoice(model), { ok: true, model });
+  for (const bad of [{ ...model, extra: true }, { provider: "cursor", modelId: "grok" },
+    { ...model, provider: "operator" }, { ...model, modelId: "../x" },
+    { ...model, modelId: "a".repeat(121) }, { ...model, reasoningEffort: "extreme" },
+    [model], "kimi-k3", 1]) {
+    assert.deepEqual(inspectAmuxSessionModelChoice(bad), { ok: false }, JSON.stringify(bad));
+  }
+});

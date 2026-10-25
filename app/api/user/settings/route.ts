@@ -1,11 +1,10 @@
-﻿export const dynamic = "force-dynamic";
+﻿import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
-import { getUserBillingPlan } from "@/lib/billingEntitlements";
+import { effectivePlanModelLimit, getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
     getRuntimeModels,
     isEnabledRuntimeModelId,
@@ -18,6 +17,7 @@ import {
     NEW_CONVERSATION_MODELS_MAX,
 } from "@/lib/newConversationModels";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
+import { lockCreditAccount } from "@/lib/creditDebt";
 import { migrateCurrentDailyUsageBuckets } from "@/lib/userDailyUsage";
 import {
     DEFAULT_USER_TIME_ZONE,
@@ -29,6 +29,9 @@ import { ensureDefaultPreferences } from "@/lib/emailPreferences";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
+import { getPlatformReviewProviderDefaults } from "@/lib/reviewProviderDefaults";
+import { parseReviewProviderDefaults, resolveReviewProviderDefaults, reviewProviderOptions } from "@/lib/reviewProviderPreferencesCore";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
@@ -37,6 +40,7 @@ import {
 
 const settingsSchema = z
     .object({
+        reviewEasyDefaultProviders: z.array(z.string()).min(1).max(3).refine(value => parseReviewProviderDefaults(value) !== null, "Choose distinct providers.").nullable().optional(),
         theme: z.enum(["dark", "light", "system"]).optional(),
         language: z.enum(["en", "ko", "zh", "fr", "de", "es", "pt"]).optional(),
         defaultModel: z.string().min(1).max(120).optional(),
@@ -95,7 +99,9 @@ const timeZonePayload = (settings: {
 
 export async function GET(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
@@ -175,7 +181,19 @@ export async function GET(req: Request) {
             );
         }
 
+        const reviewPlatformProviders = await getPlatformReviewProviderDefaults();
+        const reviewOptions = reviewProviderOptions(models, billingPlan.tier);
+        const reviewMaxProviders = Math.min(3, effectivePlanModelLimit(billingPlan));
         return NextResponse.json({
+            reviewEasyDefaultProviders: parseReviewProviderDefaults(settings.reviewEasyDefaultProviders),
+            reviewEasyPlatformProviders: reviewPlatformProviders,
+            reviewEasyProviderOptions: reviewOptions,
+            reviewEasyMaxProviders: reviewMaxProviders,
+            reviewEasyEffectiveProviders: resolveReviewProviderDefaults({
+                personal: settings.reviewEasyDefaultProviders,
+                platform: reviewPlatformProviders,
+                available: reviewOptions, maxProviders: reviewMaxProviders,
+            }),
             theme: settings.theme,
             language: settings.language,
             defaultModel: resolved.effectiveDefaultModelId,
@@ -209,7 +227,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const routeAuth = await resolveChatRouteSession(req);
+        if (routeAuth.response) return routeAuth.response;
+        const session = routeAuth.session;
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
@@ -219,6 +239,7 @@ export async function POST(req: Request) {
             day: 100,
         });
         const {
+            reviewEasyDefaultProviders,
             theme,
             language,
             defaultModel,
@@ -227,6 +248,17 @@ export async function POST(req: Request) {
             timeZoneSource,
             imageHandoffAutoGenerate,
         } = await readLimitedJson(req, 4 * 1024, settingsSchema);
+
+        if (reviewEasyDefaultProviders) {
+            const [models, plan] = await Promise.all([getRuntimeModels(), getUserBillingPlan(userId)]);
+            const available: string[] = reviewProviderOptions(models, plan.tier);
+            if (reviewEasyDefaultProviders.length > effectivePlanModelLimit(plan) || reviewEasyDefaultProviders.some(provider => !available.includes(provider))) {
+                return NextResponse.json({ error: "Choose providers available on your current plan.", code: "REVIEW_PROVIDERS_INVALID" }, { status: 400 });
+            }
+        }
+        const reviewWrite = reviewEasyDefaultProviders === undefined ? {} : {
+            reviewEasyDefaultProviders: reviewEasyDefaultProviders === null ? Prisma.DbNull : reviewEasyDefaultProviders,
+        };
 
         // Explicit combination save: every model must be selectable right now
         // on this account's plan, and the representative model is always the
@@ -277,8 +309,9 @@ export async function POST(req: Request) {
         const usageKey = getUserChatUsageKey(userId);
 
         const updatedSettings = await prisma.$transaction(async (tx) => {
-            // Chat reservations use the same lock. A time-zone change therefore
-            // cannot race a request into the old daily usage bucket.
+            // Keep the shared monetary order: account first, then the usage
+            // subject used by Chat and Code admission, settlement and refunds.
+            await lockCreditAccount(tx, userId);
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${usageKey}))`;
             const current = await tx.userSettings.findUnique({
                 where: { userId },
@@ -340,6 +373,7 @@ export async function POST(req: Request) {
             return tx.userSettings.upsert({
                 where: { userId },
                 update: {
+                    ...reviewWrite,
                     ...(theme !== undefined ? { theme } : {}),
                     ...(language !== undefined ? { language } : {}),
                     ...(imageHandoffAutoGenerate !== undefined
@@ -359,6 +393,7 @@ export async function POST(req: Request) {
                         : {}),
                 },
                 create: {
+                    ...reviewWrite,
                     userId,
                     theme: theme || APP_DEFAULTS.defaultTheme,
                     language: language || APP_DEFAULTS.defaultLanguage,

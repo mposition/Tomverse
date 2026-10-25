@@ -53,6 +53,10 @@ export const MEMORY_EVAL_PROMPT_RULE_IMPLEMENTATIONS: Readonly<
     // is unchanged, so the claim is the same claim, restated for this version
     // rather than inherited for the reason v7's entry gives.
     "mem-extract-v8": ["v3-unfixable-evidence-emits-nothing"],
+    // v9 adds a review-only canonical topic and preserves the polarity rule.
+    "mem-extract-v9": ["v3-unfixable-evidence-emits-nothing"],
+    // v10 rewrites the health rules only; the polarity rule is unchanged.
+    "mem-extract-v10": ["v3-unfixable-evidence-emits-nothing"],
 };
 
 /**

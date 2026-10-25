@@ -4,15 +4,18 @@ import { after, beforeEach, test } from "node:test";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
-import { MEMORY_EXTRACTION_LEASE_TTL_MS } from "@/lib/memoryExtractionCore";
+import {
+    MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS,
+    MEMORY_EXTRACTION_LEASE_TTL_MS,
+} from "@/lib/memoryExtractionCore";
 import {
     claimMemoryExtractionRun,
     claimNextExtractionChunk,
     createMemoryExtractionRun,
-    estimateMemoryExtraction,
 } from "@/lib/memoryExtractionService";
 import {
     dispatchPendingMemoryExtractionRuns,
+    driveMemoryExtractionRun,
     handleMemoryExtractionChunk,
     type ExtractionAdapterFactory,
 } from "@/lib/memoryExtractionWorker";
@@ -154,15 +157,10 @@ const seedRun = async (conversationCount = 1) => {
         userId: user.id,
         extractionModelId: "gpt-5-6-luna",
         promptVersion: "mem-extract-v1",
-        plan: "Free" as const,
         selectedConversationIds: conversationIds,
         register: APPROVED_REGISTER,
     };
-    const estimate = await estimateMemoryExtraction(input);
-    const run = await createMemoryExtractionRun({
-        ...input,
-        confirmedCredits: estimate.estimatedCredits,
-    });
+    const run = await createMemoryExtractionRun(input);
     await setExtractionFlag(true);
     return { user, run, conversationIds };
 };
@@ -222,7 +220,7 @@ test("a chunk's answer is stored with the pair that produced it", async () => {
     // be identified if the pair was written down here.
     assert.equal(stored[0].extractionModelId, "gpt-5-6-luna");
     assert.equal(stored[0].promptVersion, "mem-extract-v1");
-    assert.equal(stored[0].status, "candidate");
+    assert.equal(stored[0].status, "active");
 });
 
 test("a chunk reads only its own account's conversations", async () => {
@@ -515,7 +513,8 @@ const titleOf = async (id: string) =>
 const providerCallsFor = (runId: string) =>
     prisma.memoryExtractionProviderCall.findMany({
         where: { chunk: { runId } },
-        select: { callIssued: true },
+        select: { callIssued: true, failureCode: true },
+        orderBy: { attemptCount: "asc" },
     });
 
 test("a source locked after the run was created never reaches the provider", async () => {
@@ -604,19 +603,19 @@ test("a source locked while the request was being prepared stops it before it le
     assert.equal(await prisma.memoryItem.count(), 0);
 });
 
-test("an answer that arrived after its source was locked is kept as an ordinary candidate", async () => {
+test("an answer that arrived after its source was locked is kept like any other answer", async () => {
     // The request left while the source was open and the lock landed while
     // the provider was answering. The exposure has already happened and
     // cannot be undone; what is left to decide is what to do with the answer.
     //
-    // Kept, and kept as `candidate` -- not `suspended_by_source_lock`. That
-    // status is written only over `active` and restored to `active` on
-    // unlock (lib/memorySourceLock.ts), so storing a candidate in it would let
-    // unlocking promote something the user never approved. Nor does keeping it
-    // expose anything: retrieval excludes a memory whose evidence is all
-    // locked at read time, whatever its status says -- pinned by "a locked
-    // source's memory is excluded from retrieval even if its status was
-    // missed" in tests/integration/external-conversation-lock.db.test.ts.
+    // Kept, and stored active like every validator-clean answer since the
+    // review queue went (2026-10-24). Keeping it exposes nothing: retrieval
+    // excludes a memory whose evidence is all locked at read time, whatever
+    // its status says -- pinned by "a locked source's memory is excluded from
+    // retrieval even if its status was missed" in
+    // tests/integration/external-conversation-lock.db.test.ts -- and the §7.1
+    // reconciliation moves it to `suspended_by_source_lock`, from which the
+    // unlock restores it.
     const { run } = await seedRun(1);
     const { lease, chunk } = await claimFirstChunk(run.id);
 
@@ -636,8 +635,135 @@ test("an answer that arrived after its source was locked is kept as an ordinary 
         select: { status: true, approvedAt: true },
     });
     assert.equal(stored.length, 1);
-    assert.equal(stored[0].status, "candidate");
-    assert.equal(stored[0].approvedAt, null);
+    assert.equal(stored[0].status, "active");
+    assert.ok(stored[0].approvedAt);
     const calls = await providerCallsFor(run.id);
     assert.equal(calls[0]?.callIssued, true, "the call really did go out");
+});
+
+test("memory turned off while the provider answered leaves the chunk to run again", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await claimFirstChunk(run.id);
+
+    const result = await handleMemoryExtractionChunk({
+        lease,
+        chunk,
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            afterIssue: async () => {
+                await prisma.userMemorySettings.upsert({
+                    where: { userId: user.id },
+                    create: { userId: user.id, masterEnabled: false },
+                    update: { masterEnabled: false },
+                });
+            },
+        }),
+    });
+
+    // A failed attempt, not a completed chunk: its conversations are still
+    // owed an extraction once memory is back on.
+    assert.deepEqual(result, { outcome: "failed", code: "memory_off" });
+    assert.equal(await prisma.memoryItem.count(), 0);
+});
+
+test("a run parked by memory off does not take a dispatcher slot", async () => {
+    const parked = await seedRun(1);
+    await prisma.userMemorySettings.create({
+        data: { userId: parked.user.id, masterEnabled: false },
+    });
+    const waiting = await seedRun(1);
+
+    const result = await dispatchPendingMemoryExtractionRuns(new Date(), 1, {
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(result.dispatchedRuns, 1);
+    const [parkedRow, waitingRow] = await Promise.all(
+        [parked.run.id, waiting.run.id].map((id) =>
+            prisma.memoryExtractionRun.findUniqueOrThrow({ where: { id } })
+        )
+    );
+    assert.equal(parkedRow.status, "pending");
+    assert.notEqual(waitingRow.status, "pending");
+});
+
+test("a chunk paused by memory off on its last attempt resumes through the real worker and ledger", async () => {
+    const { user, run } = await seedRun(1);
+    await prisma.memoryExtractionChunk.updateMany({
+        where: { runId: run.id },
+        data: { attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 1 },
+    });
+    const paused = await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-pause",
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            afterIssue: async () => {
+                await prisma.userMemorySettings.create({
+                    data: { userId: user.id, masterEnabled: false },
+                });
+            },
+        }),
+    });
+    assert.equal(paused.outcome, "blocked");
+    assert.equal(paused.reason, "memory_off");
+    const calls = await providerCallsFor(run.id);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].failureCode, "memory_off");
+
+    await prisma.userMemorySettings.update({
+        where: { userId: user.id },
+        data: { masterEnabled: true },
+    });
+    const resumed = await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-resume",
+        register: APPROVED_REGISTER,
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+    });
+    assert.equal(resumed.outcome, "completed");
+    assert.equal((await providerCallsFor(run.id)).length, 2, "a second, distinct ledger row");
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id, status: "active" } }), 1);
+});
+
+test("a paused attempt is left out of the retry budget when the resumed call fails", async () => {
+    // Paused one attempt before the last: without leaving the pause out, the
+    // failed resume would be the last attempt and end the run.
+    const { user, run } = await seedRun(1);
+    await prisma.memoryExtractionChunk.updateMany({
+        where: { runId: run.id },
+        data: { attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 2 },
+    });
+    await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-pause",
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            afterIssue: async () => {
+                await prisma.userMemorySettings.create({
+                    data: { userId: user.id, masterEnabled: false },
+                });
+            },
+        }),
+    });
+    await prisma.userMemorySettings.update({
+        where: { userId: user.id },
+        data: { masterEnabled: true },
+    });
+    await driveMemoryExtractionRun({
+        runId: run.id,
+        owner: "qa-resume",
+        register: APPROVED_REGISTER,
+        adapterFactory: () => async () => {
+            throw new Error("provider exploded");
+        },
+    });
+    const chunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id },
+    });
+    assert.equal(chunk.status, "pending", "one real attempt is still left");
+    assert.equal(
+        (await prisma.memoryExtractionRun.findUniqueOrThrow({ where: { id: run.id } })).status,
+        "pending"
+    );
 });

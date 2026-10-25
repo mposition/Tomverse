@@ -1,3 +1,4 @@
+import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 
 export const en = {
@@ -163,9 +164,6 @@ export const en = {
         imageGenerationBackToChat: "Back to chat",
         toolsImageGeneration: "Image generation",
         toolsImageGenerationDescription: "Compare images from several models",
-        imageIntentSuggestionTitle: "Generate this as an image?",
-        imageIntentSuggestionAccept: "Open image generation",
-        imageIntentSuggestionDismiss: "Not now",
         imageGenerationModelLabel: "Models",
         imageGenerationModelCount: "{count} model(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -230,6 +228,7 @@ export const en = {
         imageGenerationErrorBudget: "Image generation is temporarily paused for maintenance. Try again shortly.",
         imageGenerationErrorConflict: "Your credit balance changed while reserving. Try again.",
         imageGenerationErrorGeneric: "Could not start the image generation. Try again.",
+        imageGenerationErrorPriceChanged: "A price changed since this page loaded. Nothing was charged. Reload to see the current price.",
         imageGenerationRestoreExcluded: "{models} is not available right now, so it was left out of the restored selection.",
         imageGenerationSelectionCount: "{count}/{max} models",
         imageGenerationModelLimitNotice: "You can compare up to {max} models at once. Deselect one model before choosing another.",
@@ -238,7 +237,7 @@ export const en = {
         imageGenerationRestoreOptionsUnavailable: "The quality and size from your last comparison could not be restored, so the defaults are selected.",
         modelSelectionNotice: "Some models in your saved default combination are unavailable, so a replacement combination is used. Re-save the combination in Settings to confirm it.",
         welcome: "Hello! How can I help you today?",
-        welcomeBack: "Welcome back. What can I help with?",
+        welcomeBack: workspaceWelcomeCopy.en.greeting,
         guestWelcome: "Hello! You are currently in guest mode. Please enter your question.",
         inputPlaceholder: "Ask anything...",
         aiDisclaimer: "AI responses can be inaccurate. Please verify important information. Your prompt and any attachment content may be sent to the selected AI providers to generate a response -- avoid entering unnecessary sensitive information.",
@@ -281,6 +280,9 @@ export const en = {
         stopThisResponse: "Stop this response",
         stop: "Stop",
         responseGenerating: "Generating a response.",
+        imageTurnGenerating: "Creating the image…",
+        imageTurnFailed: "The image could not be created. Please try again.",
+        imageTurnRetry: "Try again",
         responseComplete: "Response complete.",
         responseIncomplete: "The response stopped at the output length limit.",
         responseIncompleteNotice: "The response was cut off by the output length limit. You can ask a follow-up question to continue.",
@@ -600,8 +602,6 @@ export const en = {
         artifactDownloadFailed: "The file could not be downloaded. Please try again.",
         artifactDownloadLocked: "Unlock this conversation to download the file.",
         searchCitationsLabel: "Sources",
-        answerContextLabel: "Answer context",
-        answerContextMemory: "{count} account memories",
         answerContextKnowledge: "{count} profile knowledge excerpts",
         modelsSelectedOne: "AI",
         modelsSelectedOther: "AIs",
@@ -1918,6 +1918,11 @@ export const en = {
         dataTabOpen: "Open AI assistants",
     },
     memoryReview: {
+        restoreGrounds: "Add new grounds",
+        restoreGroundsNotice: "Use this memory again, grounded in what you write.",
+
+        reportAnswer: "Report a problem with this answer",
+
         sourceDeleteDerivedImport:
             "{count} memories made from this import will be deleted too.",
         sourceDeleteDerivedConversation:
@@ -1931,47 +1936,31 @@ export const en = {
         sourceLockBacked: "{count} memories backed by other evidence keep being used.",
         sourceLockRestoreNote: "Removing the lock brings back the memories that were stopped because of this conversation.",
         dataTabTitle: "Account memory",
-        dataTabDescription:
-            "Review memory candidates extracted from imported conversations, and choose whether approved memories are used in new chats.",
+        dataTabDescription: "See the memories organised automatically from imported conversations and the ones you added yourself, and choose whether new chats use them.",
         dataTabOpen: "Manage memory",
         dataTabStatusOn: "Used in new chats",
         dataTabStatusOff: "Not used in new chats",
-        dataTabStatusPending: "{count} awaiting review",
         pageTitle: "Account memory",
-        pageDescription:
-            "Approve or reject memory candidates awaiting review, and edit, pin or delete the memories in use.",
+        pageDescription: "Edit, pin or delete the memories organised automatically from imported conversations and the ones you added yourself.",
         signInRequired: "Sign in to manage your account memory.",
-        privacyNote:
-            "Only memories you have reviewed and approved are used in new chats. Approved memories and answer-style preferences are passed to your currently selected Tomverse model as reference material, and you can view, edit, disable or delete them at any time.",
-        disabledNotice:
-            "Memory review and creation are not available right now. Memories you already stored remain viewable and deletable.",
+        privacyNote: "When you finish an import, Tomverse automatically organises memories from it through an AI provider, at no credit cost. Sensitive content such as health information is not saved as a memory. Memories in use and answer-style preferences are passed as reference material to the Tomverse model answering, and you can view, edit, disable or delete them at any time.",
+        disabledNotice: "Editing and adding memories isn't available right now. You can still view and delete the memories already saved.",
         settingsTitle: "Memory usage settings",
-        masterToggleLabel: "Use approved memories in new chats",
-        masterToggleDescription:
-            "When off, no chat uses memories. Stored memories are not deleted.",
+        masterToggleLabel: "Use memories in new chats",
+        masterToggleDescription: "Turned off, no chat uses memories and imported conversations make no new ones. Saved memories are not deleted.",
         styleToggleLabel: "Use answer-style memories",
         styleToggleDescription:
             "Lets answers take into account the tone, length and structure preferences inferred from past conversations.",
         defaultModeLabel: "Default for new chats",
         defaultModeOn: "Use memory",
         defaultModeOff: "Don't use memory",
-        reviewTitle: "Memories awaiting review",
-        reviewDescription:
-            "Extracted candidates are only used in new chats after you approve them. Sensitive candidates and those needing individual review are never included in bulk approval.",
-        reviewEmpty: "No memories are waiting for review.",
-        bulkApprove: "Approve all non-sensitive candidates",
-        bulkResult: "{approved} approved · {skipped} need individual review",
-        approve: "Approve",
-        reject: "Reject",
         edit: "Edit",
         save: "Save",
         cancel: "Cancel",
-        needsIndividualReview: "Individual review required",
         sensitiveBadge: "Sensitive",
         pinnedBadge: "Pinned",
         expires: "Expires: {date}",
-        conflictNotice:
-            "An active memory already covers the same item. You can keep the existing memory or replace it with this one.",
+        conflictNotice: "These memories may cover the same topic. Review them and choose what to keep.",
         conflictReplace: "Replace the existing memory",
         activeTitle: "Memories in use",
         activeEmpty: "No memories are in use yet.",
@@ -1980,8 +1969,6 @@ export const en = {
         unpin: "Unpin",
         delete: "Delete",
         deleteArmed: "Press again to delete",
-        editParkedNotice:
-            "Your edit needs another review, so the memory moved back to the review queue.",
         validationFailed:
             "This can't be stored as a memory. Write it as a declarative statement of fact, like \"The user prefers concise answers\".",
         errorGeneric: "Something went wrong. Please try again.",
@@ -2018,14 +2005,14 @@ export const en = {
         deleteAllSubmit: "Delete all memories",
         deleteAllDone: "All memories have been deleted.",
         status: {
-            candidate: "Awaiting review",
+            candidate: "Earlier candidate · not used",
             active: "In use",
             rejected: "Rejected",
             superseded: "Replaced",
             expired: "Expired",
             suspended_by_source_lock: "Suspended by source lock",
             suspended_by_source_delete: "Suspended by source deletion",
-            manual_review_required: "Individual review required",
+            manual_review_required: "Earlier candidate · not used",
         },
         kind: {
             identity: "Identity",
@@ -2048,48 +2035,18 @@ export const en = {
             citation_preference: "Citation preference",
             code_style: "Code style",
         },
+        organisingNotice: "Organising memories from your imported conversations.",
+        organisingView: "View progress",
+        restoreConflict: "A memory on the same topic is already in use. Delete it and try again.",
+        importNotice: "When you finish this import, Tomverse automatically organises memories from the imported conversations, at no credit cost. To do this, their content is sent to an AI provider, and sensitive content such as health information is not saved as a memory.",
+        importNoticeSettings: "Memory settings",
+        importNoticePrivacy: "Privacy Policy",
     },
     // Extraction run launch (Release B, §11 pre-run confirmation, §21).
     memoryExtraction: {
-        launchTitle: "Extract memories from imported conversations",
-        launchDescription:
-            "Choose imported conversations to extract memory candidates from. Candidates are never used in answers until you review and approve them.",
-        modelTitle: "Model used for extraction",
-        modelUnavailable: "No extraction model is available right now.",
-        modelUnavailableDescription:
-            "An extraction model only opens after it passes a quality evaluation. When one does, you will be able to choose it here.",
-        modelCredits: "{credits} credits per batch",
-        conversationsTitle: "Choose conversations",
-        conversationsDescription:
-            "Only the conversations you select are used. They are processed in batches sized by content, and credits are counted per batch.",
-        conversationsEmpty: "You have not imported any conversations yet.",
-        conversationsEmptyCta: "Import conversations",
-        selectAllVisible: "Select all shown",
-        clearSelection: "Clear selection",
-        selectionSummary: "{count} selected · about {size}",
-        selectionHidden: "{count} selected conversations are not shown in this list.",
-        selectionTooLarge: "You can select up to {max} conversations at a time.",
-        conversationMeta: "{messages} messages · {size}",
-        loadMore: "Show more",
         estimate: "Check required credits",
-        estimating: "Calculating…",
-        estimateResult: "{chunks} batches · about {credits} credits",
-        estimateDescription:
-            "{conversations} conversations are processed as {chunks} batches. The final charge is settled after the run and never exceeds the amount you confirmed.",
-        estimateStale: "The selection changed. Check the credits again.",
         start: "Start extraction for {credits} credits",
         starting: "Starting…",
-        runInProgress: "An extraction is already running.",
-        runInProgressOpen: "View progress",
-        errorGeneric: "Something went wrong. Please try again.",
-        errorEstimateChanged:
-            "The selected conversations changed, so the estimate no longer matches. Check it again before starting.",
-        errorPairUnavailable: "That model is not available right now.",
-        errorLocked:
-            "One of the selected conversations is locked, so extraction can't start. Refresh the list and select again.",
-        lockedRowHint: "Locked conversations can't be used for extraction.",
-        errorBudget:
-            "Extraction capacity is temporarily full. Please try again shortly.",
         runTitle: "Extraction progress",
         runBack: "Back to memory settings",
         runNotFound: "This extraction run could not be found.",
@@ -2113,8 +2070,6 @@ export const en = {
         cancel: "Cancel extraction",
         cancelArmed: "Press again to cancel",
         cancelling: "Cancelling…",
-        recentRunsTitle: "Recent extractions",
-        recentRunOpen: "View details",
         status: {
             pending: "Waiting",
             running: "Running",
@@ -2248,7 +2203,7 @@ export const en = {
         externalImportTitle: "Conversations imported from other AI services",
         externalImport: "You can store past conversations you select from an export file downloaded from another AI service, such as ChatGPT, Claude or Gemini (Google Takeout), in your Tomverse account. The export file is opened only in your browser; the original archive is never uploaded to or retained by Tomverse servers or storage. Only the normalized text of the conversations you select, together with provenance details (source service, original timestamps, display-only model names), is stored as account-private material. Images, audio and attachments are not imported. Imported conversations may contain other people's personal information, so it is your responsibility to confirm that you are entitled to import that data. You can view, delete and export imported material at any time, and it is deleted with your account. Deleting it from Tomverse does not delete the data held by the original service.",
         memoryTitle: "Account long-term memory",
-        memory: "If you choose to use the memory feature, Tomverse sends the parts of your imported conversations that you select to the AI provider you confirm, in order to extract memory candidates. Extraction uses the model and the credit amount shown to you before it runs. Extracted candidates are not used to generate answers until you review and approve them. Candidates classified as sensitive, and those that need individual review, are excluded from bulk approval and must be confirmed one at a time. Candidates, approved memories and their evidence are retained in your account until you delete them or your account data is deleted. Approved memories and answer-style preferences are sent as reference material to the AI provider that generates each new answer, which means to each model's provider when you compare several models. You can view, edit and disable stored memories at any time, download the full list as a file, or delete all of them at once. Turning memory off stops it being used in new chats.",
+        memory: "When you save imported conversations to your Tomverse account, Tomverse automatically organises memories from them while the memory feature is on. To do this, the content of those conversations is sent to an AI provider chosen by Tomverse, and no credits are charged for it. Sensitive content such as health information is not saved as a memory; only content that passes validation is saved, and it is used straight away. On the same topic, what a more recent conversation says replaces the earlier memory. Memories and their evidence are retained in your account until you delete them or your account data is deleted. Memories and answer-style preferences are sent as reference material to the AI provider that generates each new answer, which means to each model's provider when you compare several models. You can view, edit and delete stored memories at any time, download the full list as a file, or delete all of them at once. Turning memory off stops it being used in new chats and stops new memories being made from imported conversations.",
         assistantProfilesTitle: "Custom AI assistants and knowledge files",
         assistantProfiles: "If you create an AI assistant, Tomverse stores the name, description, instructions, model choice and conversation starters you enter, and keeps every published revision so a conversation can show what it actually ran under. Knowledge files you attach are stored privately for your account; Tomverse extracts their text, splits it into passages and builds a search index over them so relevant excerpts can be found. When you chat with an assistant, its instructions and the excerpts that match your message are sent as reference material to the AI provider that generates the answer. Excerpts are treated as reference material and never as instructions to the assistant. Assistants are private: they are not shared with other people, not listed publicly and not sold. Deleting an assistant removes its revisions and its knowledge files, and the stored files are erased shortly afterwards; conversations that used the assistant stay readable in your account. Turning an assistant off, or deleting it, stops it being used in new chats. If you create an assistant by importing a package, Tomverse also stores what you assembled before publishing it, the source the package or you stated it came from, and when you confirmed it. Tomverse never opens an address a package names. An import you abandon expires on its own, and the files staged for it go with it.",
         emailTitle: "Email we send you",
@@ -2300,61 +2255,7 @@ export const en = {
         providerSource: "Source",
         back: "Back to Tomverse",
     },
-    chatStarter: {
-        title: "What you can do here",
-        hint: "Pick one to fill the box below. Nothing is sent until you press send.",
-        lockedSignIn: "Sign in to use this",
-        lockedPlan: "Needs the {plan} plan",
-        lockedSignInShort: "Sign in required",
-        lockedPlanShort: "{plan} required",
-        cards: {
-            compareAnswers: {
-                label: "Compare three answers side by side",
-                outcome: "Ask one question and read three models answer it side by side",
-                seed: "Explain in plain language what a vector database is for, in about 200 words.",
-            },
-            documentQuestions: {
-                label: "Ask several models about a PDF",
-                outcome: "Attach an 18 page PDF and ask several models the same question about it",
-                seed: "I attached a document. Summarise what it asks me to decide, and list every deadline it names.",
-            },
-            sourcedAnswer: {
-                label: "Get an answer with sources",
-                outcome: "Get an answer with the source links it was built from",
-                seed: "What changed in EU AI Act enforcement this year? Include the sources you used.",
-            },
-            debugStackTrace: {
-                label: "Find the failing line in a stack trace",
-                outcome: "Paste a stack trace and get the failing line plus a fix to try",
-                seed: "Here is a stack trace from my build. Tell me which line failed and what to change.",
-            },
-            spreadsheetFromAnswer: {
-                label: "Get an .xlsx file",
-                outcome: "Turn an answer into an .xlsx file you can download",
-                seed: "Build a monthly budget sheet with category, planned amount and actual amount, and save it as a spreadsheet file.",
-            },
-            readAScreenshot: {
-                label: "Ask what a screenshot error means",
-                outcome: "Attach a screenshot and ask what the error on it means",
-                seed: "I attached a screenshot of an error dialog. Tell me what it means and what to do next.",
-            },
-            translateAndCompare: {
-                label: "Compare two translations",
-                outcome: "Translate a draft and read two models versions next to each other",
-                seed: "Translate the text below into English and keep the tone formal:",
-            },
-            compareImageModels: {
-                label: "Compare image models",
-                outcome: "Send one sentence to several image models and compare what each returns",
-                seed: "A quiet reading room at dawn, warm light through tall windows, photographic.",
-            },
-            speakAQuestion: {
-                label: "Speak a question, edit the text",
-                outcome: "Speak a long question instead of typing it, and edit the text before it is sent",
-                seed: "Turn what I say next into a short, clear set of instructions.",
-            },
-        },
-    },
+    chatStarter: workspaceWelcomeCopy.en.starter,
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "Find how to do something",

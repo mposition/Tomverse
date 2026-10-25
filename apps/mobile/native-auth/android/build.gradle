@@ -1,24 +1,16 @@
-buildscript {
-    repositories { google(); mavenCentral() }
-    dependencies { classpath 'com.android.tools.build:gradle:8.13.0' }
-}
 apply plugin: 'com.android.library'
+
 android {
     namespace 'app.tomverse.mobileauth'
-    compileSdk project.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
-    defaultConfig {
-        minSdk 24
-        targetSdk 36
-    }
+    compileSdk 36
+    defaultConfig { minSdk 24 }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
     }
-    testOptions { unitTests.returnDefaultValues = true }
 }
-repositories { google(); mavenCentral() }
 dependencies {
     implementation project(':capacitor-android')
-    testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.json:json:20250517'
+    implementation "androidx.appcompat:appcompat:${rootProject.ext.androidxAppCompatVersion}"
+    implementation "androidx.biometric:biometric:1.1.0"
 }

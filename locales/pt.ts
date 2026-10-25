@@ -1,3 +1,4 @@
+import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -165,9 +166,6 @@ export const pt = {
         imageGenerationBackToChat: "Voltar ao chat",
         toolsImageGeneration: "Geração de imagens",
         toolsImageGenerationDescription: "Compare imagens de vários modelos",
-        imageIntentSuggestionTitle: "Gerar isso como imagem?",
-        imageIntentSuggestionAccept: "Abrir geração de imagens",
-        imageIntentSuggestionDismiss: "Agora não",
         imageGenerationModelLabel: "Modelos",
         imageGenerationModelCount: "{count} modelo(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -232,6 +230,7 @@ export const pt = {
         imageGenerationErrorBudget: "A geração de imagens está temporariamente pausada. Tente novamente em instantes.",
         imageGenerationErrorConflict: "Seu saldo de créditos mudou durante a reserva. Tente novamente.",
         imageGenerationErrorGeneric: "Não foi possível iniciar a geração da imagem. Tente novamente.",
+        imageGenerationErrorPriceChanged: "Um preço mudou desde que esta página foi carregada. Nada foi cobrado. Recarregue para ver o preço atual.",
         imageGenerationRestoreExcluded: "{models} não está disponível no momento, por isso ficou de fora da seleção restaurada.",
         imageGenerationSelectionCount: "{count}/{max} modelos",
         imageGenerationModelLimitNotice: "Você pode comparar até {max} modelos por vez. Desmarque um modelo antes de escolher outro.",
@@ -263,7 +262,7 @@ export const pt = {
         quickSummaryNoVerificationItems: "Nenhum item específico para verificação foi identificado.",
         quickSummaryDisclaimer: "Esta análise por IA compara apenas as respostas fornecidas. Ela não pesquisa na Web, não verifica fatos externamente e não garante a resposta correta.",
         welcome: "Olá! Como posso ajudar hoje?",
-        welcomeBack: "Que bom te ver de novo. Em que posso ajudar?",
+        welcomeBack: workspaceWelcomeCopy.pt.greeting,
         guestWelcome: "Olá! Você está no modo convidado. Digite sua pergunta.",
         inputPlaceholder: "Pergunte qualquer coisa...",
         aiDisclaimer: "As respostas de IA podem conter erros. Verifique informações importantes. A sua mensagem e o conteúdo dos anexos podem ser enviados aos fornecedores de IA selecionados para gerar uma resposta -- evite introduzir informação sensível desnecessária.",
@@ -290,6 +289,9 @@ export const pt = {
         firstResponseTimeout: "A resposta ainda estava sendo preparada depois de mais tempo do que o esperado, então a conexão foi encerrada. Tente novamente em instantes.",
         streamIdleTimeout: "A resposta parou de chegar por mais tempo do que o esperado, então a conexão foi encerrada. Esta resposta está incompleta.",
         responseGenerating: "Gerando uma resposta.",
+        imageTurnGenerating: "Criando a imagem…",
+        imageTurnFailed: "Não foi possível criar a imagem. Tente novamente.",
+        imageTurnRetry: "Tentar novamente",
         responseComplete: "Resposta concluída.",
         responseIncomplete: "A resposta parou no limite de comprimento de saída.",
         responseIncompleteNotice: "A resposta foi interrompida pelo limite de comprimento de saída. Você pode continuar com uma pergunta de acompanhamento.",
@@ -547,8 +549,6 @@ export const pt = {
         artifactDownloadFailed: "Não foi possível baixar o arquivo. Tente novamente.",
         artifactDownloadLocked: "Desbloqueie esta conversa para baixar o arquivo.",
         searchCitationsLabel: "Fontes",
-        answerContextLabel: "Contexto da resposta",
-        answerContextMemory: "{count} memórias da conta",
         answerContextKnowledge: "{count} trechos de conhecimento do perfil",
         modelsSelectedOne: "IA",
         modelsSelectedOther: "IAs",
@@ -1904,6 +1904,11 @@ export const pt = {
         dataTabOpen: "Abrir assistentes de IA",
     },
     memoryReview: {
+        restoreGrounds: "Adicionar novos fundamentos",
+        restoreGroundsNotice: "Usar esta memória de novo, fundamentada no que você escrever.",
+
+        reportAnswer: "Comunicar um problema com esta resposta",
+
         sourceDeleteDerivedImport:
             "{count} memórias criadas a partir desta importação também serão excluídas.",
         sourceDeleteDerivedConversation:
@@ -1917,48 +1922,31 @@ export const pt = {
         sourceLockBacked: "{count} memórias apoiadas por outras evidências continuam sendo usadas.",
         sourceLockRestoreNote: "Remover o bloqueio traz de volta as memórias que foram interrompidas por causa desta conversa.",
         dataTabTitle: "Memória da conta",
-        dataTabDescription:
-            "Revise as memórias candidatas extraídas de conversas importadas e escolha se as memórias aprovadas são usadas em novos chats.",
+        dataTabDescription: "Veja as memórias organizadas automaticamente a partir das conversas importadas e as que você adicionou, e escolha se os novos chats as usam.",
         dataTabOpen: "Gerir memória",
         dataTabStatusOn: "Usada em novos chats",
         dataTabStatusOff: "Não usada em novos chats",
-        dataTabStatusPending: "{count} a aguardar revisão",
         pageTitle: "Memória da conta",
-        pageDescription:
-            "Aprove ou rejeite as memórias candidatas aguardando revisão, e edite, fixe ou exclua as memórias em uso.",
+        pageDescription: "Edite, fixe ou exclua as memórias organizadas automaticamente a partir das conversas importadas e as que você adicionou.",
         signInRequired: "Faça login para gerenciar a memória da sua conta.",
-        privacyNote:
-            "Somente as memórias que você revisou e aprovou são usadas em novos chats. As memórias aprovadas e as preferências de estilo de resposta são enviadas como referência ao modelo Tomverse selecionado no momento, e você pode consultá-las, editá-las, desativá-las ou excluí-las a qualquer momento.",
-        disabledNotice:
-            "A revisão e a criação de memórias não estão disponíveis no momento. As memórias já salvas continuam visíveis e podem ser excluídas.",
+        privacyNote: "Ao concluir uma importação, a Tomverse organiza automaticamente memórias a partir dela por meio de um provedor de IA, sem desconto de créditos. Conteúdo sensível, como informações de saúde, não é salvo como memória. As memórias em uso e as preferências de estilo de resposta são passadas como material de referência ao modelo da Tomverse que responde, e você pode consultá-las, editá-las, desativá-las ou excluí-las a qualquer momento.",
+        disabledNotice: "Editar e adicionar memórias não está disponível no momento. Você ainda pode consultar e excluir as memórias já salvas.",
         settingsTitle: "Configurações de uso da memória",
-        masterToggleLabel: "Usar memórias aprovadas em novos chats",
-        masterToggleDescription:
-            "Quando desligado, nenhum chat usa memórias. As memórias salvas não são excluídas.",
+        masterToggleLabel: "Usar memórias em novos chats",
+        masterToggleDescription: "Desativada, nenhum chat usa memórias e as conversas importadas não criam novas. As memórias salvas não são excluídas.",
         styleToggleLabel: "Usar memórias de estilo de resposta",
         styleToggleDescription:
             "Permite que as respostas considerem as preferências de tom, extensão e estrutura deduzidas de conversas anteriores.",
         defaultModeLabel: "Padrão para novos chats",
         defaultModeOn: "Usar memória",
         defaultModeOff: "Não usar memória",
-        reviewTitle: "Memórias aguardando revisão",
-        reviewDescription:
-            "As candidatas extraídas só são usadas em novos chats depois que você as aprova. Candidatas sensíveis e as que exigem revisão individual nunca entram na aprovação em massa.",
-        reviewEmpty: "Nenhuma memória aguarda revisão.",
-        bulkApprove: "Aprovar todas as candidatas não sensíveis",
-        bulkResult:
-            "{approved} aprovadas · {skipped} exigem revisão individual",
-        approve: "Aprovar",
-        reject: "Rejeitar",
         edit: "Editar",
         save: "Salvar",
         cancel: "Cancelar",
-        needsIndividualReview: "Revisão individual necessária",
         sensitiveBadge: "Sensível",
         pinnedBadge: "Fixada",
         expires: "Expira: {date}",
-        conflictNotice:
-            "Uma memória ativa já cobre o mesmo item. Você pode manter a memória existente ou substituí-la por esta.",
+        conflictNotice: "Estas memórias podem tratar do mesmo assunto. Reveja-as e escolha o que manter.",
         conflictReplace: "Substituir a memória existente",
         activeTitle: "Memórias em uso",
         activeEmpty: "Ainda não há memórias em uso.",
@@ -1967,8 +1955,6 @@ export const pt = {
         unpin: "Desafixar",
         delete: "Excluir",
         deleteArmed: "Pressione novamente para excluir",
-        editParkedNotice:
-            "Sua edição precisa de nova revisão, então a memória voltou para a fila de revisão.",
         validationFailed:
             "Este conteúdo não pode ser salvo como memória. Escreva-o como uma afirmação declarativa de um fato, por exemplo, «O usuário prefere respostas concisas».",
         errorGeneric: "Algo deu errado. Tente novamente.",
@@ -2006,14 +1992,14 @@ export const pt = {
         deleteAllSubmit: "Excluir todas as memórias",
         deleteAllDone: "Todas as memórias foram excluídas.",
         status: {
-            candidate: "Aguardando revisão",
+            candidate: "Candidata anterior · não usada",
             active: "Em uso",
             rejected: "Rejeitada",
             superseded: "Substituída",
             expired: "Expirada",
             suspended_by_source_lock: "Suspensa: origem bloqueada",
             suspended_by_source_delete: "Suspensa: origem excluída",
-            manual_review_required: "Revisão individual necessária",
+            manual_review_required: "Candidata anterior · não usada",
         },
         kind: {
             identity: "Identidade",
@@ -2036,48 +2022,18 @@ export const pt = {
             citation_preference: "Preferência de citação",
             code_style: "Estilo de código",
         },
+        organisingNotice: "Organizando memórias a partir das suas conversas importadas.",
+        organisingView: "Ver progresso",
+        restoreConflict: "Já há uma memória em uso sobre o mesmo assunto. Exclua-a e tente de novo.",
+        importNotice: "Ao concluir esta importação, a Tomverse organiza automaticamente memórias a partir das conversas importadas, sem desconto de créditos. Para isso, o conteúdo delas é enviado a um provedor de IA, e conteúdo sensível, como informações de saúde, não é salvo como memória.",
+        importNoticeSettings: "Configurações de memória",
+        importNoticePrivacy: "Política de privacidade",
     },
     // Início da extração (Release B, §11 confirmação prévia, §21).
     memoryExtraction: {
-        launchTitle: "Extrair memórias das conversas importadas",
-        launchDescription:
-            "Escolha as conversas importadas para extrair candidatos. Os candidatos só são usados nas respostas depois de você revisar e aprovar.",
-        modelTitle: "Modelo usado na extração",
-        modelUnavailable: "Nenhum modelo de extração está disponível no momento.",
-        modelUnavailableDescription:
-            "Um modelo de extração só é liberado depois de passar por uma avaliação de qualidade. Quando isso acontecer, você poderá escolhê-lo aqui.",
-        modelCredits: "{credits} créditos por lote",
-        conversationsTitle: "Escolher conversas",
-        conversationsDescription:
-            "Somente as conversas selecionadas são usadas. Elas são processadas em lotes conforme o tamanho, e os créditos são contados por lote.",
-        conversationsEmpty: "Você ainda não importou nenhuma conversa.",
-        conversationsEmptyCta: "Importar conversas",
-        selectAllVisible: "Selecionar tudo o que aparece",
-        clearSelection: "Limpar seleção",
-        selectionSummary: "{count} selecionadas · cerca de {size}",
-        selectionHidden: "{count} conversas selecionadas não aparecem nesta lista.",
-        selectionTooLarge: "Você pode selecionar até {max} conversas por vez.",
-        conversationMeta: "{messages} mensagens · {size}",
-        loadMore: "Ver mais",
         estimate: "Ver créditos necessários",
-        estimating: "Calculando…",
-        estimateResult: "{chunks} lotes · cerca de {credits} créditos",
-        estimateDescription:
-            "{conversations} conversas serão processadas em {chunks} lotes. A cobrança final é acertada após a execução e nunca ultrapassa o valor que você confirmou.",
-        estimateStale: "A seleção mudou. Verifique os créditos novamente.",
         start: "Iniciar extração por {credits} créditos",
         starting: "Iniciando…",
-        runInProgress: "Já existe uma extração em andamento.",
-        runInProgressOpen: "Ver progresso",
-        errorGeneric: "Algo deu errado. Tente novamente.",
-        errorEstimateChanged:
-            "As conversas selecionadas mudaram e a estimativa não corresponde mais. Verifique antes de iniciar.",
-        errorPairUnavailable: "Esse modelo não está disponível no momento.",
-        errorLocked:
-            "Uma das conversas selecionadas está bloqueada, então a extração não pode começar. Atualize a lista e selecione novamente.",
-        lockedRowHint: "Conversas bloqueadas não podem ser usadas na extração.",
-        errorBudget:
-            "A capacidade de extração está temporariamente esgotada. Tente novamente em instantes.",
         runTitle: "Progresso da extração",
         runBack: "Voltar às configurações de memória",
         runNotFound: "Esta extração não foi encontrada.",
@@ -2101,8 +2057,6 @@ export const pt = {
         cancel: "Cancelar extração",
         cancelArmed: "Pressione de novo para cancelar",
         cancelling: "Cancelando…",
-        recentRunsTitle: "Extrações recentes",
-        recentRunOpen: "Ver detalhes",
         status: {
             pending: "Aguardando",
             running: "Em andamento",
@@ -2236,7 +2190,7 @@ export const pt = {
         externalImportTitle: "Conversas importadas de outros serviços de IA",
         externalImport: "Você pode guardar na sua conta Tomverse as conversas anteriores que selecionar de um arquivo de exportação baixado de outro serviço de IA, como ChatGPT, Claude ou Gemini (Google Takeout). O arquivo de exportação é aberto apenas no seu navegador; o arquivo original nunca é enviado nem retido nos servidores ou no armazenamento da Tomverse. Somente o texto normalizado das conversas selecionadas, junto com os dados de origem (serviço de origem, horários originais, nomes de modelo apenas para exibição), é guardado como material privado da conta. Imagens, áudio e anexos não são importados. As conversas importadas podem conter dados pessoais de outras pessoas, portanto é sua responsabilidade confirmar que você tem direito de importar esses dados. Você pode consultar, excluir e exportar o material importado a qualquer momento, e ele é excluído junto com a sua conta. Excluí-lo da Tomverse não exclui os dados mantidos pelo serviço original.",
         memoryTitle: "Memória de longo prazo da conta",
-        memory: "Se você optar por usar o recurso de memória, a Tomverse envia as partes das suas conversas importadas que você selecionar ao provedor de IA que você confirmar, para extrair memórias candidatas. A extração usa o modelo e a quantidade de créditos exibidos a você antes da execução. As candidatas extraídas não são usadas para gerar respostas até que você as revise e aprove. Candidatas classificadas como sensíveis e as que exigem revisão individual ficam fora da aprovação em massa e precisam ser confirmadas uma a uma. Candidatas, memórias aprovadas e seus fundamentos permanecem na sua conta até que você as exclua ou os dados da sua conta sejam excluídos. As memórias aprovadas e as preferências de estilo de resposta são enviadas como material de referência ao provedor de IA que gera cada nova resposta — ou seja, ao provedor de cada modelo quando você compara vários. Você pode consultar, editar e desativar as memórias salvas a qualquer momento, baixar a lista completa como arquivo ou excluir todas de uma vez. Ao desativar a memória, ela deixa de ser usada em novos chats.",
+        memory: "Quando você salva conversas importadas na sua conta Tomverse, a Tomverse organiza automaticamente memórias a partir delas enquanto o recurso de memória estiver ativado. Para isso, o conteúdo dessas conversas é enviado a um provedor de IA escolhido pela Tomverse, sem desconto de créditos. Conteúdo sensível, como informações de saúde, não é salvo como memória; só é salvo o conteúdo que passa na validação, e ele é usado imediatamente. Sobre um mesmo assunto, o que uma conversa mais recente diz substitui a memória anterior. As memórias e seus fundamentos permanecem na sua conta até que você as exclua ou os dados da sua conta sejam excluídos. As memórias e as preferências de estilo de resposta são enviadas como material de referência ao provedor de IA que gera cada nova resposta — ou seja, ao provedor de cada modelo quando você compara vários. Você pode consultar, editar e excluir as memórias salvas a qualquer momento, baixar a lista completa como arquivo ou excluir todas de uma vez. Ao desativar a memória, ela deixa de ser usada em novos chats e nenhuma nova memória é criada a partir das conversas importadas.",
         assistantProfilesTitle: "Assistentes de IA personalizados e arquivos de conhecimento",
         assistantProfiles: "Se você criar um assistente de IA, a Tomverse guarda o nome, a descrição, as instruções, a escolha de modelo e as frases de início que você digita, além de manter cada revisão publicada para que uma conversa possa mostrar sob qual ela realmente rodou. Os arquivos de conhecimento que você anexa ficam guardados de forma privada na sua conta; a Tomverse extrai o texto deles, divide em trechos e monta um índice de busca para encontrar os excertos relevantes. Quando você conversa com um assistente, as instruções dele e os excertos que correspondem à sua mensagem são enviados como material de referência ao provedor de IA que gera a resposta. Os excertos são tratados como material de referência e nunca como instruções ao assistente. Assistentes são privados: não são compartilhados com outras pessoas, não aparecem em listas públicas e não são vendidos. Excluir um assistente remove suas revisões e seus arquivos de conhecimento, e os arquivos guardados são apagados logo depois; as conversas que o usaram continuam legíveis na sua conta. Desativar ou excluir um assistente faz com que ele deixe de ser usado em novas conversas. Se criar um assistente importando um pacote, o Tomverse guarda também o que compôs antes de publicar, a origem declarada pelo pacote ou por si, e quando confirmou. O Tomverse nunca abre um endereço indicado por um pacote. Uma importação que abandone expira por si mesma, e os ficheiros preparados para ela vão com ela.",
         emailTitle: "E-mails que enviamos a você",
@@ -2288,61 +2242,7 @@ export const pt = {
         providerSource: "Fonte",
         back: "Voltar para Tomverse",
     },
-    chatStarter: {
-        title: "O que você pode fazer aqui",
-        hint: "Escolha um cartão para preencher o campo abaixo. Nada é enviado até você tocar em enviar.",
-        lockedSignIn: "Entre na conta para usar",
-        lockedPlan: "Requer o plano {plan}",
-        lockedSignInShort: "Requer login",
-        lockedPlanShort: "Requer {plan}",
-        cards: {
-            compareAnswers: {
-                label: "Compare três respostas lado a lado",
-                outcome: "Faça uma pergunta e leia três modelos respondendo lado a lado",
-                seed: "Explique em linguagem simples para que serve um banco de dados vetorial, em cerca de 200 palavras.",
-            },
-            documentQuestions: {
-                label: "Pergunte a vários modelos sobre um PDF",
-                outcome: "Anexe um PDF de 18 páginas e faça a mesma pergunta a vários modelos",
-                seed: "Anexei um documento. Resuma o que ele pede que eu decida e liste todos os prazos citados.",
-            },
-            sourcedAnswer: {
-                label: "Receba uma resposta com fontes",
-                outcome: "Receba uma resposta com os links das fontes usadas",
-                seed: "O que mudou neste ano na aplicação do regulamento europeu de IA? Inclua as fontes usadas.",
-            },
-            debugStackTrace: {
-                label: "Ache a linha que falhou em um stack trace",
-                outcome: "Cole um stack trace e receba a linha que falhou e uma correção para testar",
-                seed: "Este é um stack trace da minha compilação. Diga qual linha falhou e o que devo mudar.",
-            },
-            spreadsheetFromAnswer: {
-                label: "Receba um arquivo .xlsx",
-                outcome: "Transforme uma resposta em um arquivo .xlsx para baixar",
-                seed: "Crie uma planilha de orçamento mensal com categoria, valor previsto e valor real, e salve como arquivo de planilha.",
-            },
-            readAScreenshot: {
-                label: "Pergunte o que significa o erro de uma captura",
-                outcome: "Anexe uma captura de tela e pergunte o que o erro significa",
-                seed: "Anexei a captura de uma caixa de diálogo de erro. Diga o que significa e o que fazer em seguida.",
-            },
-            translateAndCompare: {
-                label: "Compare duas traduções",
-                outcome: "Traduza um rascunho e compare as versões de dois modelos",
-                seed: "Traduza o texto abaixo para o inglês mantendo um tom formal:",
-            },
-            compareImageModels: {
-                label: "Compare modelos de imagem",
-                outcome: "Envie uma frase para vários modelos de imagem e compare o que cada um devolve",
-                seed: "Uma sala de leitura tranquila ao amanhecer, luz quente por janelas altas, estilo fotográfico.",
-            },
-            speakAQuestion: {
-                label: "Dite uma pergunta e edite o texto",
-                outcome: "Dite uma pergunta longa em vez de digitar e edite o texto antes do envio",
-                seed: "Transforme o que eu disser a seguir em uma lista de instruções curta e clara.",
-            },
-        },
-    },
+    chatStarter: workspaceWelcomeCopy.pt.starter,
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "Descobrir como fazer algo",

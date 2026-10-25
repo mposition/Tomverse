@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   AmuxIdeaPlanReadBackButton,
   AmuxIdeaPlanReadBackNotice,
+  readAmuxIdeaPlanApprovalFailure,
   type ReadBackView,
 } from "@/components/admin/AmuxIdeaPlanApprovalPanel";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
@@ -35,6 +36,67 @@ const text = (markup: string) => {
   }
   return out.replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
 };
+
+const TASK_REFUSALS = [
+  "task_expected_paths_missing",
+  "task_expected_paths_out_of_range",
+  "task_expected_path_invalid",
+  "task_expected_paths_duplicate",
+  "task_expected_paths_mixed",
+  "task_role_review_refused",
+  "task_execution_grade_mismatch",
+  "task_confirmation_grade_mismatch",
+  "task_cost_receipt_grade_mismatch",
+] as const;
+
+test("whole-plan refusals translate every stable Task guard code without exposing it", async () => {
+  for (const locale of ["en", "ko"] as const) {
+    const m = adminAmuxIdeaInputMessages[locale];
+    const actionable = new Set([
+      m.taskRegistrationExpectedPathsRefused,
+      m.taskRegistrationMixedPathsRefused,
+      m.taskRegistrationReviewRoleRefused,
+      m.taskRegistrationGradeRefused,
+    ]);
+    for (const code of TASK_REFUSALS) {
+      const failure = await readAmuxIdeaPlanApprovalFailure(
+        Response.json({ error: code, retryWrite: false }, { status: 409 }), m, locale,
+      );
+      assert.equal(failure.tone, "error");
+      assert.equal(failure.requiresReauthentication, false);
+      assert.equal(failure.approvalId, null);
+      assert.equal(failure.message.includes(code), false,
+        `${locale} whole-plan copy must not expose ${code}`);
+      assert.equal(actionable.has(failure.message), true,
+        `${locale} whole-plan copy must name a corrective action`);
+    }
+  }
+});
+
+test("whole-plan failures outside the Task guard keep shared Admin handling", async () => {
+  const generic = await readAmuxIdeaPlanApprovalFailure(
+    Response.json({ error: "schema_rejected", retryWrite: false }, { status: 400 }),
+    adminAmuxIdeaInputMessages.en,
+    "en",
+  );
+  assert.equal(generic.message, "schema_rejected");
+  const reauthentication = await readAmuxIdeaPlanApprovalFailure(
+    Response.json({ error: "ADMIN_REAUTHENTICATION_REQUIRED",
+      retryWrite: false }, { status: 428 }),
+    adminAmuxIdeaInputMessages.ko,
+    "ko",
+  );
+  assert.equal(reauthentication.requiresReauthentication, true);
+  const taskCodeOnReauthentication = await readAmuxIdeaPlanApprovalFailure(
+    Response.json({ error: "task_expected_paths_mixed",
+      retryWrite: false }, { status: 428 }),
+    adminAmuxIdeaInputMessages.en,
+    "en",
+  );
+  assert.equal(taskCodeOnReauthentication.requiresReauthentication, true,
+    "an impossible Task code must not mask the HTTP 428 classification");
+  assert.equal(taskCodeOnReauthentication.message.includes("task_expected_paths_mixed"), false);
+});
 
 test("a read-back is one of recorded, not recorded, settling, mixed or failed, and only a settled read with nothing approved frees the approval", () => {
   const started = 1_000_000;

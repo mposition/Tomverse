@@ -5,6 +5,7 @@ import {
   checksVerdict,
   deploymentOutcome,
   inFlightDeployments,
+  LANES,
   laneState,
   parseTrainState,
   pickNextPullRequest,
@@ -15,6 +16,18 @@ import {
   skippedCommits,
   withLane,
 } from "../scripts/merge-train-core.mjs";
+
+test("develop merges wait on dev, and the train never merges into what staging deploys", () => {
+  // The lane switch (2026-10-07): staging serves the `test` branch's release
+  // candidate. Holding develop merges on staging's deployments would bring back
+  // the wait the split removed, and a lane into `test` would replace the
+  // candidate a person chose.
+  assert.deepEqual(LANES, [
+    { branch: "develop", environment: "dev" },
+    { branch: "main", environment: "production" },
+  ]);
+  assert.ok(!LANES.some((lane) => lane.environment === "staging" || lane.branch === "test"));
+});
 
 const run = (status, conclusion = null, name = "check", workflowName = "Other") => ({
   __typename: "CheckRun",

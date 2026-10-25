@@ -21,6 +21,31 @@ export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
  * acquire an unrelated AMUX module in their fixed runtime source closure. */
 export const AMUX_V4_IDEA_SYSTEM_ACTOR = "amux-v4-intake" as const;
 
+/** Intake v19: a coding-tool session submits an idea under the owner's saved
+ * operating scope. This actor is never the data owner and never human approval. */
+export const AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR = "amux-session-intake" as const;
+export const AMUX_SESSION_IDEA_SUBMITTED_ACTION = "amux.idea.session_submitted" as const;
+export const AMUX_SESSION_IDEA_SUBMITTED_TARGET = "AmuxIdeaSubmission" as const;
+export const AMUX_SESSION_IDEA_SUBMITTED_SCOPE = "session-submission-v1" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_ACTION =
+  "amux.idea.session_analysis_reserved" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_TARGET =
+  "AmuxIdeaSessionAnalysisReservation" as const;
+export const AMUX_SESSION_ANALYSIS_RESERVED_SCOPE =
+  "session-analysis-reservation-v1" as const;
+/** Session CLI cost uses the same monthly Agent ledger as v4, but never a
+ * preview receipt or a user credit. */
+export const AMUX_V19_SESSION_BUDGET_CLAIM_ACTION =
+  "amux.v19.session_budget.claimed" as const;
+export const AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION =
+  "amux.v19.session_budget.resolved" as const;
+export const AMUX_V19_SESSION_BUDGET_TARGET =
+  "AmuxIdeaSessionAnalysisBudgetClaim" as const;
+export const AMUX_V19_SESSION_BUDGET_CLAIM_SCOPE =
+  "session-budget-claim-v1" as const;
+export const AMUX_V19_SESSION_BUDGET_RESOLVE_SCOPE =
+  "session-budget-resolve-v1" as const;
+
 /**
  * The legacy internal auto-promotion tick consumes an owner-bound grant.
  */
@@ -37,9 +62,18 @@ export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-contr
 /** Policy v42: records only content-free, exact FIRST model-access evidence. */
 export const AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR = "amux-v22-api-model-access" as const;
 
+/** Provider-free CHAT-01 optimizer metadata only. The scoped actions below
+ * cannot authorize a paid call, external dispatch or candidate promotion
+ * (docs/policy/chat-unified-router-refiner-v1.md §§7, 12). */
+export const CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR =
+  "chat-unified-optimizer" as const;
 /** The Auto router guidance optimizer (lib/autoRouterOptimizer.ts) when the
  * owner has turned on its daily cycle or automatic promotion. */
 export const AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR = "auto-router-optimizer" as const;
+/** The coding agent on the Ubuntu runner (tools/auto-rec-agent) taking an open
+ * code recommendation and reporting the develop PR it opened, or why not.
+ * Owner approval 2026-10-20; merging its PR stays a person's. */
+export const AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR = "auto-router-rec-agent" as const;
 
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
@@ -56,6 +90,19 @@ export const ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS = [
 export type EngineeringAgentSystemAuditActor =
   (typeof ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS)[number];
 
+/**
+ * The product-research agent's actors
+ * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
+ * recorded, and rows removed once past the retention period. Neither is a
+ * person, so neither is approval evidence -- and this agent has nothing to
+ * approve, because it decides nothing.
+ */
+export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
+  "product-research-observer",
+  "product-research-retention",
+] as const;
+export type ProductResearchSystemAuditActor =
+  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
 /** AMUX intake policy v12 (approved by mposition, 2026-10-01): the v4 actor
  * has an explicit action/target scope per writer, not general audit authority. */
 export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
@@ -86,6 +133,61 @@ export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE = "analysis-budget-settle-v1" 
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION = "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE = "analysis-outcome-unknown-v1" as const;
+/** v19 direct-read checkout evidence contains only a fixed SHA and aggregate
+ * exclusion proof. It grants no repository credential and starts no CLI. */
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION =
+  "amux.v19.tracked_checkout.recorded" as const;
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET =
+  "AmuxIdeaTrackedCheckoutEvidence" as const;
+export const AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE =
+  "tracked-checkout-evidence-v1" as const;
+/** Links an already fenced Max claim to the checkout proof in the same chain. */
+export const AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION =
+  "amux.v19.tracked_checkout.max_claim_bound" as const;
+export const AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE =
+  "tracked-checkout-max-claim-bound-v1" as const;
+export const AMUX_V19_READ_MANIFEST_RECORDED_ACTION =
+  "amux.v19.read_manifest.recorded" as const;
+export const AMUX_V19_READ_MANIFEST_RECORDED_TARGET =
+  "AmuxIdeaTrackedCheckoutReadManifest" as const;
+export const AMUX_V19_READ_MANIFEST_RECORDED_SCOPE =
+  "tracked-checkout-read-manifest-v1" as const;
+export const AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION =
+  "amux.v19.read_manifest.key_intent" as const;
+export const AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET =
+  "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION =
+  "amux.v19.read_manifest.max_claim_bound" as const;
+export const AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE =
+  "read-manifest-max-claim-bound-v1" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION =
+  "amux.v19.session_analysis.result_recorded" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET =
+  "AmuxIdeaSessionAnalysisResult" as const;
+export const AMUX_V19_SESSION_ANALYSIS_RESULT_SCOPE =
+  "session-analysis-result-v1" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_CLAIM_ACTION =
+  "amux.v19.session_analysis.orphan_key_claimed" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_RETIRE_ACTION =
+  "amux.v19.session_analysis.orphan_key_retired" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_TARGET =
+  "AmuxIdeaSessionResultOrphanKeyRetirement" as const;
+export const AMUX_V19_SESSION_RESULT_ORPHAN_KEY_SCOPE =
+  "session-result-orphan-key-v1" as const;
+export const AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE =
+  "tracked-checkout-read-manifest-key-intent-v1" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION =
+  "amux.v19.read_manifest.orphan_key_retirement_claimed" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_TARGET =
+  "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_SCOPE =
+  "tracked-checkout-read-manifest-orphan-key-claim-v1" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_ACTION =
+  "amux.v19.read_manifest.orphan_key_retired" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_TARGET =
+  "AmuxIdeaReadManifestKeyIntent" as const;
+export const AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_SCOPE =
+  "tracked-checkout-read-manifest-orphan-key-retire-v1" as const;
 /** One complete, normalized first analysis is stored as independently purgeable units. */
 export const AMUX_V4_FIRST_DRAFT_SAVED_ACTION = "AMUX_V4_FIRST_ANALYSIS_DRAFT_SAVED" as const;
 export const AMUX_V4_FIRST_DRAFT_SAVED_TARGET = "AmuxIdeaAnalysisChunk" as const;
@@ -109,6 +211,22 @@ export const AMUX_V4_UNIT_INVALIDATE_ACTION = "amux.v4.unit.invalidate" as const
 export const AMUX_V4_UNIT_EXPIRE_ACTION = "amux.v4.unit.expire" as const;
 export const AMUX_V4_UNIT_DECISION_TARGET = "AmuxIdeaUnitDecision" as const;
 export const AMUX_V4_UNIT_HOUSEKEEPING_SCOPE = "unit-decision-housekeeping-v1" as const;
+/** Intake v19 system registration uses the v4 intake actor as a narrowly
+ * scoped registrar. Data ownership remains the saved operating-scope owner. */
+export const AMUX_V19_UNIT_REGISTRATION_SCOPE =
+  "system-unit-registration-v1" as const;
+export const AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE =
+  "system-portfolio-assessment-v1" as const;
+export const AMUX_V19_PORTFOLIO_SCORE_SCOPE =
+  "system-portfolio-score-v1" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_ACTION =
+  "amux.v19.plan.auto_registered" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_TARGET =
+  "AmuxIdeaSubmission" as const;
+export const AMUX_V19_SYSTEM_REGISTRATION_SCOPE =
+  "system-plan-registration-v1" as const;
+export const AMUX_V19_REGISTRATION_REFUSAL_SCOPE =
+  "system-registration-refusal-v1" as const;
 /** One authenticated source collector claims one already owner-approved file. */
 
 /**
@@ -123,19 +241,6 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
   "amux-intake-retention",
   "amux-portfolio-scorer",
 ] as const;
-/**
- * The product-research agent's actors
- * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
- * recorded, and rows removed once past the retention period. Neither is a
- * person, so neither is approval evidence -- and this agent has nothing to
- * approve, because it decides nothing.
- */
-export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
-  "product-research-observer",
-  "product-research-retention",
-] as const;
-export type ProductResearchSystemAuditActor =
-  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
 
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
@@ -154,14 +259,14 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
+  CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR,
+  AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  "qa-release-intake",
-  "qa-release-merge-lane",
-  "agent-digest-retention",
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "model-catalog-renewal",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -181,6 +286,14 @@ export const isSystemAuditActor = (value: unknown): value is SystemAuditActor =>
 /** Existing actors retain their established call-site contracts. Each v4
  * intake action/target pair has its own immutable scope marker. */
 export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): string | null => {
+  if (targetType === AMUX_V19_SESSION_BUDGET_TARGET) {
+    if (action === AMUX_V19_SESSION_BUDGET_CLAIM_ACTION) {
+      return AMUX_V19_SESSION_BUDGET_CLAIM_SCOPE;
+    }
+    if (action === AMUX_V19_SESSION_BUDGET_RESOLVE_ACTION) {
+      return AMUX_V19_SESSION_BUDGET_RESOLVE_SCOPE;
+    }
+  }
   if (action === AMUX_V4_INITIAL_SOURCE_PLAN_ACTION &&
       targetType === AMUX_V4_INITIAL_SOURCE_PLAN_TARGET) {
     return AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE;
@@ -209,6 +322,43 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
       targetType === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET) {
     return AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE;
   }
+  if (action === AMUX_V19_TRACKED_CHECKOUT_RECORDED_ACTION &&
+      targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
+    return AMUX_V19_TRACKED_CHECKOUT_RECORDED_SCOPE;
+  }
+  if (action === AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_ACTION &&
+      targetType === AMUX_V19_TRACKED_CHECKOUT_RECORDED_TARGET) {
+    return AMUX_V19_MAX_CHECKOUT_CLAIM_BOUND_SCOPE;
+  }
+  if (action === AMUX_V19_READ_MANIFEST_RECORDED_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_RECORDED_TARGET) {
+    return AMUX_V19_READ_MANIFEST_RECORDED_SCOPE;
+  }
+  if (action === AMUX_V19_READ_MANIFEST_KEY_INTENT_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
+    return AMUX_V19_READ_MANIFEST_KEY_INTENT_SCOPE;
+  }
+  if (action === AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_KEY_INTENT_TARGET) {
+    return AMUX_V19_MAX_READ_MANIFEST_CLAIM_BOUND_SCOPE;
+  }
+  if (action === AMUX_V19_SESSION_ANALYSIS_RESULT_ACTION &&
+      targetType === AMUX_V19_SESSION_ANALYSIS_RESULT_TARGET) {
+    return AMUX_V19_SESSION_ANALYSIS_RESULT_SCOPE;
+  }
+  if ((action === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_CLAIM_ACTION ||
+       action === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_RETIRE_ACTION) &&
+      targetType === AMUX_V19_SESSION_RESULT_ORPHAN_KEY_TARGET) {
+    return AMUX_V19_SESSION_RESULT_ORPHAN_KEY_SCOPE;
+  }
+  if (action === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_TARGET) {
+    return AMUX_V19_READ_MANIFEST_ORPHAN_KEY_CLAIM_SCOPE;
+  }
+  if (action === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_ACTION &&
+      targetType === AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_TARGET) {
+    return AMUX_V19_READ_MANIFEST_ORPHAN_KEY_RETIRE_SCOPE;
+  }
   if (action === AMUX_V4_FIRST_DRAFT_SAVED_ACTION &&
       targetType === AMUX_V4_FIRST_DRAFT_SAVED_TARGET) {
     return AMUX_V4_FIRST_DRAFT_SAVED_SCOPE;
@@ -235,13 +385,46 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
        action === AMUX_V4_UNIT_EXPIRE_ACTION)) {
     return AMUX_V4_UNIT_HOUSEKEEPING_SCOPE;
   }
+  if (targetType === AMUX_V4_UNIT_DECISION_TARGET &&
+      (action === "amux.v4.unit.prepare" ||
+       action === "amux.v4.unit.consume")) {
+    return AMUX_V19_UNIT_REGISTRATION_SCOPE;
+  }
+  if (action === "amux.v4.portfolio.assessment.approve" &&
+      targetType === "AmuxPortfolioAssessment") {
+    return AMUX_V19_PORTFOLIO_ASSESSMENT_SCOPE;
+  }
+  if (action === "amux.v4.portfolio.score.confirm" &&
+      targetType === "AmuxPortfolioScoreSnapshot") {
+    return AMUX_V19_PORTFOLIO_SCORE_SCOPE;
+  }
+  if (action === AMUX_V19_SYSTEM_REGISTRATION_ACTION &&
+      targetType === AMUX_V19_SYSTEM_REGISTRATION_TARGET) {
+    return AMUX_V19_SYSTEM_REGISTRATION_SCOPE;
+  }
+  if (action === "amux.v20.registration.refuse" &&
+      targetType === "AmuxIdeaRegistrationRefusal") {
+    return AMUX_V19_REGISTRATION_REFUSAL_SCOPE;
+  }
   return null;
 };
+
+export const amuxSessionIntakeSystemAuditScope = (
+  action: unknown,
+  targetType: unknown,
+): string | null =>
+  action === AMUX_SESSION_IDEA_SUBMITTED_ACTION &&
+  targetType === AMUX_SESSION_IDEA_SUBMITTED_TARGET
+    ? AMUX_SESSION_IDEA_SUBMITTED_SCOPE
+    : action === AMUX_SESSION_ANALYSIS_RESERVED_ACTION &&
+        targetType === AMUX_SESSION_ANALYSIS_RESERVED_TARGET
+      ? AMUX_SESSION_ANALYSIS_RESERVED_SCOPE
+      : null;
 
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
-  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) &&
+  isSystemAuditActor(actor) && marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) &&
   (actor !== AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.inspected" &&
       targetType === "AmuxV22TaskRecoveryEvidence")) &&
@@ -255,10 +438,26 @@ export const systemAuditActionAllowed = (
   (actor !== AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.api_model_access_observed" &&
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
+  (actor !== AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR ||
+    ((action === "auto.llm_router_recommendation.claimed" ||
+      action === "auto.llm_router_recommendation.result_recorded") &&
+      targetType === "AutoRouterOptimizerCycle")) &&
   (actor !== AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR ||
     ((action === "auto.llm_router_optimizer.cycle_started" ||
-      action === "auto.llm_router_guidance.promoted") &&
-      targetType === "AutoRouterOptimizerCycle")) &&
+      action === "auto.llm_router_guidance.promoted" ||
+      action === "auto.llm_router_rewrite_guidance.promoted") &&
+      targetType === "AutoRouterOptimizerCycle") ||
+     // Its own setting changes (lib/autoRouterTunablesCore.ts), owner approval
+     // 2026-10-20, on the one settings row they live in.
+     ((action === "auto.llm_router_tunable.applied" || action === "auto.llm_router_tunable.reverted") &&
+      targetType === "AppSettings")) &&
+  (actor !== CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR ||
+    (action === "chat.unified_optimizer.run_admitted" &&
+      targetType === "ChatUnifiedOptimizerRun") ||
+    ((action === "chat.unified_optimizer.dispatch_intended" ||
+      action === "chat.unified_optimizer.run_terminal" ||
+      action === "chat.unified_optimizer.queued_before_dispatch_terminal") &&
+      targetType === "ChatUnifiedOptimizerRoleJob")) &&
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||
@@ -292,7 +491,9 @@ export const systemAuditActionAllowed = (
     (action === "amux.auto_promotion.halted" &&
       targetType === "AmuxRecommendationAutoHalt")) &&
   (actor !== AMUX_V4_IDEA_SYSTEM_ACTOR ||
-    amuxV4SystemAuditScope(action, targetType) !== null);
+    amuxV4SystemAuditScope(action, targetType) !== null) &&
+  (actor !== AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR ||
+    amuxSessionIntakeSystemAuditScope(action, targetType) !== null);
 
 /** Whether caller-supplied metadata claims the reserved key at its top level. */
 export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
@@ -341,8 +542,37 @@ export const auditRowActorKind = (
       metadata.actorScope === amuxV4SystemAuditScope(row.action, row.targetType)
       ? "system" : "unknown";
   }
+  if (actor === AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR) {
+    const metadata = row.metadata as Record<string, unknown>;
+    return systemAuditActionAllowed(actor, row.action, row.targetType) &&
+      metadata.actorScope === amuxSessionIntakeSystemAuditScope(row.action, row.targetType)
+      ? "system" : "unknown";
+  }
   return "system";
 };
+
+/**
+ * The support-triage agent's actors (docs/policy/support-triage.md §7): the
+ * worker pass and the retention run, listed in SYSTEM_AUDIT_ACTORS above.
+ * Neither is a person, so neither is approval evidence. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
+  "support-triage-worker",
+  "support-triage-retention",
+  "support-triage-account-deletion",
+] as const satisfies readonly SystemAuditActor[];
+export type SupportTriageSystemAuditActor =
+  (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];
+
+/**
+ * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
+ * state transition, reservation close and retention batch the store writes.
+ * Not a person, so never approval evidence -- a genesis is the owner's own
+ * Admin action and is written with writeAdminAuditLog. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;
 
 /**
  * The AMUX Decision Maker's actors (docs/policy/amux-decision-maker.md §10):
@@ -358,15 +588,6 @@ export const AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS = [
 ] as const satisfies readonly SystemAuditActor[];
 export type AmuxDecisionMakerSystemAuditActor =
   (typeof AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS)[number];
-
-/**
- * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
- * state transition, reservation close and retention batch the store writes.
- * Not a person, so never approval evidence -- a genesis is the owner's own
- * Admin action and is written with writeAdminAuditLog. Declared at the end of
- * the file, and listed above on an existing line, so no access above moves.
- */
-export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;
 
 /**
  * The marketing generator writes only the LLM cost ledger's five actions, each
@@ -388,4 +609,20 @@ function marketingGeneratorAuditScope(actor: unknown, action: unknown, targetTyp
       targetType === "MarketingLlmCall") ||
     (action === "marketing_report.generator_recorded" && targetType === "MarketingReport") ||
     (action === "marketing_competitor.proposed" && targetType === "MarketingCompetitor");
+}
+
+/**
+ * The scheduled renewal of the Code client's coding catalogue snapshot
+ * (renewCodingSnapshotIfUnchanged in lib/modelCatalog.ts): one action about one
+ * snapshot row, taken only when the judged content equals the newest
+ * snapshot's. A change of content is published by a person with
+ * writeAdminAuditLog. Not a person, so never approval evidence. Declared at the
+ * end of the file and joined into `systemAuditActionAllowed()` on its existing
+ * first line, so no access above it moves.
+ */
+export const MODEL_CATALOG_RENEWAL_AUDIT_ACTOR = "model-catalog-renewal" as const satisfies SystemAuditActor;
+export const MODEL_CATALOG_SNAPSHOT_RENEWED_ACTION = "model_catalog.snapshot_renewed" as const;
+function modelCatalogRenewalAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
+  return actor !== "model-catalog-renewal" ||
+    (action === "model_catalog.snapshot_renewed" && targetType === "ModelCatalogSnapshot");
 }

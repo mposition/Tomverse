@@ -541,6 +541,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           onClick={() => void refreshBoard()}><RefreshCw size={14} aria-hidden="true" />{m.refresh}</button>
       </div>
     </div>
+    <p className="text-xs text-zinc-500">{m.globalAttention} <Link
+      href="/admin/amux-settings?tab=safety" className="underline">{m.haltsLink}</Link></p>
     {view === "board" && <div className={styles.toolbar}>
       <label className={styles.search}>
         <Search size={16} aria-hidden="true" />

@@ -525,9 +525,26 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
   retrieval에서 즉시 제외되고, 사용자가 evidence를 직접 작성해 재승인해야
   active로 복귀합니다. 자동 복귀는 없습니다.
 
-- 같은 conflict group(canonical key)의 값이 다르면 자동 덮어쓰지 않고 사용자가
-  유지/교체/병기/만료/직접 병합을 선택합니다. 최신 날짜만으로 진위를 정하지
-  않습니다.
+- **검토 단계 없음 — [확정 · 2026-10-24 @mposition]**: 추출 후보는 validator가
+  standard·bulk-safe로 받아들이면 바로 `active`로 저장되고(`approvedAt` = 저장
+  시각), 그 밖의 후보(민감, `manual_review_required`,
+  `sensitive_review_required`, 거절)는 저장하지 않습니다
+  (`lib/memoryExtractionPersistence.ts`). `candidate`와
+  `manual_review_required`는 이 결정 전에 만들어진 행에만 남는 상태입니다.
+- 추출 v9부터 LLM이 값·극성을 뺀 주제 `canonicalKey`를 제안하고, 서버가 형식을
+  검증해 `conflictKey`에 보관합니다. **같은 주제는 최신 대화가 이깁니다**: 새
+  후보가 활성 기억과 같은 conflict group이면, 근거 메시지의 원래 시각
+  (`sourceTimestamp`, 없으면 대화 시각)이 같거나 더 최근인 쪽이 남고 이전 기억은
+  `superseded`가 됩니다. 사용자가 직접 쓰거나 수정하거나 고정한 기억은 추출이
+  대체하지 않으며, 이미 있는 문장은 다시 저장하지 않습니다. 재시도한 chunk도 이전
+  시도가 저장한 행을 지우지 않고 새 문장만 더합니다.
+- 기억 사용(master toggle)이 꺼져 있으면 저장 단계가 아무것도 저장하지 않습니다.
+  이 결정 이전의 `candidate`·`manual_review_required` 행은 보관된 기억 목록에서
+  보이고 삭제할 수 있습니다.
+- 원문 삭제로 중지된 기억은 사용자가 새 수동 근거를 쓰면 바로 `active`로
+  돌아갑니다(근거 작성이 승인입니다). 사용 중인 기억을 validator가 그대로
+  받아들이지 않는 문장으로 수정하면 저장하지 않고 다시 쓰게 합니다. 수동 근거
+  추가·편집 후에도 원래 추출 pair의 승인·철회 검사를 유지합니다.
 
 ### 8.4 서버 deterministic validator
 
@@ -549,12 +566,12 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
   `unsourced`로 따로 셉니다 — 문장이 부적합했던 것이 아니라 근거가 사라진
   것입니다.
 
-**Bulk-safe 계약**: 일괄 승인에는 서술형 사실·선호만 포함합니다. URL, redirect
-지시, imperative, "항상·반드시·무조건" + 행동 명령, system/developer/tool 명령
-형태, 외부 파일·명령 실행 요구, credential 패턴, 현재 지시 무시, model identity
-변경 후보는 모델 분류와 무관하게 거부하거나 `manual_review_required` /
-`sensitive_review_required`로 강등하며, "비민감 모두 승인"에 포함되지 않습니다.
-민감 후보는 개별 승인만 가능합니다.
+**Bulk-safe 계약**: 자동 활성화(§8.3)에는 서술형 사실·선호만 포함합니다. URL,
+redirect 지시, imperative, "항상·반드시·무조건" + 행동 명령, system/developer/tool
+명령 형태, 외부 파일·명령 실행 요구, credential 패턴, 현재 지시 무시, model
+identity 변경 후보는 모델 분류와 무관하게 거부하거나 `manual_review_required` /
+`sensitive_review_required`로 강등하며, 강등된 후보와 민감 후보는 저장하지
+않습니다. 검토 단계가 없으므로 이 계약이 후보와 prompt 사이의 유일한 관문입니다.
 
 ### 8.5 MemoryEvidence source 확장성
 
@@ -679,9 +696,9 @@ memory·knowledge·imported content는 untrusted data입니다. 고정 system ru
 - **규칙은 항상 블록 앞에 옵니다.** 뒤에 놓으면 주입 payload가 규칙보다 먼저
   읽힙니다.
 - **선택된 memory가 0이면 블록 자체를 만들지 않습니다**(`text: null`). 빈
-  "account memory" 제목은 §13.4가 금지하는 오해 유발 표시입니다.
-- §13.4의 "이 응답에 memory N개 사용"의 N은 이 모듈이 실제로 렌더한 줄 수이며,
-  client 주장 값이 아닙니다.
+  "account memory" 제목은 오해를 부르는 표시입니다.
+- 서버가 세는 기억 사용 개수(`usedCount`)는 이 모듈이 실제로 렌더한 줄 수이며,
+  client 주장 값이 아닙니다. 화면에는 표시하지 않습니다(§13.4).
 
 ## 10. Context bundle 계약
 
@@ -738,13 +755,26 @@ Node crypto)입니다.
 ## 11. Extraction 실행 계약
 
 - Import 파싱·저장은 AI 호출 없이 수행합니다(credit 소비 없음).
-- extraction은 기존 credit·reservation·settlement 계약을 따릅니다: 실행 전
-  model·예상 chunk 수·예상 credit 표시 → 사용자 명시 확인 → 승인 pair만 사용
-  → `service_tier` 미지정 → `pricingVersion`·`costSource` snapshot → 실패·취소
-  정산 → 원시 내부 USD 미노출(`publicChatErrorDetails()` 계약 유지).
-- 승인 pair가 사용자 plan에서 하나도 허용되지 않으면 extraction을 차단하고
-  안내합니다. 승인되지 않은 대체 모델·다른 promptVersion으로의 자동 fallback을
-  금지합니다. UI 표시 모델과 실제 호출 모델은 항상 일치합니다.
+- **무료 자동 추출 — [확정 · 2026-10-24 @mposition]**: import 완료(finalize)가
+  곧 추출 요청입니다. 서버가 계정의 아직 추출되지 않은, 잠기지 않은 finalized
+  대화(최대 500개, 최근 import 순)로 run을 만들고 `after()`로 kick합니다
+  (`lib/memoryExtractionAuto.ts`). 모델·대화 선택 화면과 사전 확인은 없습니다.
+  추출은 무료이며 Tomverse가 비용을 냅니다: reservation은 0 credit이고, 그 행은
+  Tomverse가 내는 provider 비용(`reservedCostMicroUsd` → 정산 시 실행한 chunk
+  비율의 `settledCostMicroUsd`)을 기록합니다. provider 예산과 batch
+  sub-budget(§3), `service_tier` 미지정, `pricingVersion`·`costSource` snapshot,
+  원시 내부 USD 미노출은 그대로입니다.
+- pair는 이 build가 실제로 보내는 프롬프트 버전(현재 `mem-extract-v10`)의 승인
+  pair뿐입니다. worker는 항상 현재 프롬프트를 만들기 때문에, 그 pair가 철회·만료되면
+  이전 버전으로 fallback하지 않고 추출을 멈춥니다. 사용자가 고르거나 내는 모델이
+  아니므로 요금제 제한은 없습니다.
+- 그 자리에서 시작하지 못한 run(이미 열린 run, 예산 소진, 그 사이 잠긴 대화,
+  계정 제한)은 15분 dispatcher가 계정 5개씩 다시 시작합니다. 어떤 run에든 포함된
+  대화는 다시 추출하지 않습니다(취소·전체 삭제 포함). 실패한 run의 대화는
+  6시간 뒤 다시 시도하고, 실패가 3번이면 더 시도하지 않습니다. 계정의 기억 사용
+  (master toggle)이 꺼져 있으면 시작하지 않고, 진행 중인 run도 다음 chunk의
+  provider 호출 전에 멈춥니다(`memory_off`; 다시 켜면 이어서 실행). dispatcher는
+  시작할 수 있는 계정(열린 run 없음, 기억 사용 켬, 제한·삭제 예정 아님)만 고릅니다.
 - durable run: 사용자당 1개, 동일 source range 중복 방지, atomic chunk claim,
   lease expiry, retry, cancel, deterministic release, orphan reconciliation
   (15분), idempotent settlement. 브라우저를 닫아도 완료 chunk와 승인 상태가
@@ -848,7 +878,7 @@ Node crypto)입니다.
   저장합니다.
 - **revocation surface는 중지만 합니다.** `feature.memoryExtractionEnabled`와
   `feature.memoryInjectionEnabled`에는 의도적으로 admin 쓰기 경로가 없습니다 —
-  활성화는 §12.4의 사람 절차이고, 마지막 단계만 버튼으로 만들면 앞의 다섯
+  활성화는 §12.4(또는 §12.4a)의 사람 절차이고, 마지막 단계만 버튼으로 만들면 앞의 다섯
   단계를 건너뛸 수 있게 됩니다. 이 결정은
   `tests/appSettingWriters.test.mjs`의 registry에 이유와 함께 기록돼 있고,
   누군가 쓰기 경로를 추가하면 그 테스트가 실패합니다.
@@ -917,7 +947,7 @@ arm당 200개로 돌아갑니다. 이것은 문서상의 약속이 아니라
 조용히 분모에서 제외하지 않으며, 제외·재실행 규칙은 사전에 manifest에 고정하고,
 표본 변경 시 dataset version을 올립니다.
 
-### 12.3 합격 기준 (운영 활성화 판정의 유일한 기준)
+### 12.3 합격 기준 (eval 경로의 운영 활성화 판정 기준 · 운영자 출시 승인은 §12.4a)
 
 - durable memory precision: Wilson 95% 하한 ≥ **0.95**
 - durable memory recall: Wilson 95% 하한 ≥ **0.85**
@@ -944,7 +974,33 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   artifact 보존 → blind review → 독립 재실행 → §12.3 기준 그대로 판정(축약·
   완화 금지) → 승인자 서명 → register PR 병합 → staging 검증 → 그 후에만
   `memoryInjectionEnabled=true`. 승인 pair가 없거나 revoke되면 flag가 켜져
-  있어도 injection은 fail-closed입니다.
+  있어도 injection은 fail-closed입니다. eval 없이 출시하는 경로는 §12.4a이며,
+  그때는 이 순서 대신 운영자 출시 승인 → register PR 병합 → staging 검증 → flag
+  순서입니다.
+
+### 12.4a 운영자 출시 승인 — [확정 · 2026-10-23 @mposition]
+
+운영자는 eval 없이 현재 품질로 pair를 승인할 수 있습니다. register 항목에
+`evaluation` 대신 `ownerLaunch`(승인자, 승인일, 만료일, 결정 출처, 알려진 한계)를
+적고 `status: approved`로 둡니다. 첫 대상은 `gpt-5-6-luna × mem-extract-v9`입니다.
+두 번째는 `gpt-5-6-luna × mem-extract-v10`(2026-10-24, 건강 정보는 이유를 뺀 행동만
+쓰고 그래도 드러나면 추출하지 않는 프롬프트)이며, 자동 추출(§11)이 씁니다. v9
+승인은 이미 저장된 기억의 주입을 위해 유지합니다. 이후 품질은 메모리 개선
+에이전트로 매일 올립니다.
+
+이 경로에서도 그대로 남는 것:
+
+- **만료**: 승인일로부터 최대 30일(`MEMORY_OWNER_LAUNCH_MAX_DAYS`)입니다. CI의
+  register 검사뿐 아니라 runtime(`findApprovedEvalPair`)도 만료일을 읽으므로,
+  만료되면 배포 없이도 추출·주입이 닫힙니다. 연장은 새 승인 기록입니다.
+- **치명 안전 검사**: register 검사가 결정적 validator probe(`MUST_REJECT`,
+  `MUST_REQUIRE_SENSITIVE_REVIEW`)를 다시 돌려, 하나라도 bulk-safe면 승인을
+  거부합니다. 2026-10-24부터 검토 단계가 없어(§8.3) validator를 통과한 standard
+  후보는 바로 활성화되므로, 모델이 비밀정보나 지시문을 잘못 분류했을 때 prompt를
+  막는 것은 이 결정적 probe와 §8.4 validator입니다.
+- 승인은 프롬프트 버전을 따라가지 않습니다. 새 버전은 새 승인입니다.
+- flag 활성화(§15.1)는 별도 승인입니다. 특히 `memoryExtractionEnabled`는 유료
+  호출을 시작합니다.
 
 ### 12.5 첫 승인 후보 pair와 eval 예산 (§23 항목 4)
 
@@ -969,7 +1025,8 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   ko/en 양쪽에서 운영 실적이 가장 많습니다. 예비 후보는 `gpt-5-4-mini`
   (관찰 기간 중, 동일하게 verified pricing 보유)입니다.
 - 후보 선정은 **eval 대상 지정일 뿐 승인이 아닙니다.** 운영 활성화는 §12.3
-  기준을 §12.4 절차로 통과한 pair에만 주어집니다.
+  기준을 §12.4 절차로 통과한 pair, 또는 §12.4a의 운영자 출시 승인을 받은 pair에만
+  주어집니다.
 - **eval 실행 예산은 사람이 승인합니다.** 산정 기준: decision-grade 표본
   1,150(① 400 + ②③④ 750, §12.2 [개정 · 2026-08-23]) × 독립 재실행 포함 최소
   2회 전체 실행 +
@@ -990,8 +1047,10 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 
 ### 12.6 표본 작성 상태 — `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW`
 
-**차단 범위: 실제 extraction pair 승인과 `memoryInjectionEnabled` 활성화.**
-릴리스 B 코드 완료와는 별개 축입니다(§12.4).
+**차단 범위: eval 경로(§12.4)의 extraction pair 승인.** 릴리스 B 코드 완료와는
+별개 축입니다. 2026-10-23부터는 §12.4a의 운영자 출시 승인이 이 표본 없이 pair를
+승인하고 `memoryInjectionEnabled`를 켤 수 있게 하므로, 이 항목은 출시를 막지
+않습니다.
 
 `docs/ops/memory-extraction-eval-dataset.md`는 **절차만** 마련했고, 표본 작성·
 동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
@@ -1062,7 +1121,7 @@ adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 
   - **삭제의 분류와 모든 memory 쓰기는 직렬화합니다**(MEM-SOURCE-DELETE-01). 두 삭제
     경로는 import·snapshot 행 잠금 뒤, memory를 분류하기 **전에** 계정의 memory
     잠금(`lib/memoryItemLock.ts`의 `lockAccountMemoryItems()`)을 잡습니다.
-    `MemoryItem`을 쓰는 모든 경로 — 추출 저장, 생성·승인·일괄 승인·거절·편집·고정·
+    `MemoryItem`을 쓰는 모든 경로 — 추출 저장, 생성·승인·거절·편집·고정·
     삭제·전체 삭제, source 잠금과 그 reconciliation, 만료 sweep(계정별), 검색어
     backfill 유지보수 script — 가 같은 함수를 쓰고, 결정의 근거가 되는 행을 잠금
     **뒤에** 읽습니다. 잠금 없이 읽어도 되는 것은 처리할 id 목록뿐이며, 그 행의
@@ -1160,31 +1219,16 @@ locale이 없고 header가 이미 영문입니다).
 - 필드는 optional이라 이전 snapshot은 그대로 parse되고 부재는 false로 읽힙니다
   — 주입이 존재하기 전 모든 snapshot에 대해 맞는 답입니다.
 
-### 13.4 memory 사용 투명성
+### 13.4 memory 사용 투명성 — 삭제됨 [확정 · 2026-10-24 @mposition]
 
-memory 사용 응답에는 소유자 본인에게 "이 응답에 memory N개 사용"을 표시합니다.
-N은 서버 계산이며 client 주장 count를 쓰지 않습니다. 0이면 오해 유발 표시를
-하지 않고, 상세 열람 시 인증·소유권·source lock을 재검증하며, 표시는 mobile
-composer·comparison rail contract를 침범하지 않습니다.
+답변마다 "이 응답에 memory N개 사용"을 표시하던 요구는 삭제했습니다. 매 답변의
+표시는 사용자에게 의미보다 잡음이 컸습니다. 사용자는 기억 설정 화면에서 저장된
+기억을 보고 지울 수 있습니다.
 
-구현: 표시는 `ChatMessageList`의 `memory-usage-disclosure`이고, 값의 출처는
-두 곳입니다 — 생성 중에는 `/api/chat`의 `X-Chat-Memory-Used` header, 다시
-열었을 때는 `GET /api/conversations/[conversationId]`가 돌려주는
-`Message.memoryUsedCount`입니다.
-
-- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 주입 자체가
-  불가능했던 요청이고 `0`은 bundle은 있었지만 retrieval이 아무것도 고르지 않은
-  경우이며, §13.4는 둘 다 표시를 금지합니다. 둘 다 필드를 **빼서** 보냅니다 —
-  받은 숫자를 안 보여줘야 하는 renderer는 한 번의 수정으로 보여주게 됩니다.
-- **재조회가 없으면 이 계약은 절반만 참입니다.** header만 있던 동안 표시는
-  답변이 쓰이는 중에만 참이었고 다음 방문에는 조용히 사라졌습니다.
-- **읽는 쪽은 소유자 자신의 조회뿐입니다.** 같은 route가 소유권과 lock grant를
-  먼저 확인하며, share snapshot과 conversation export는 각자의 select를 쓰고
-  이 컬럼을 이름조차 대지 않습니다(§13.3). `memoryTokens`는 §22의 집계용이라
-  어디서도 이 경로에 실리지 않습니다.
-- 검증: `tests/integration/memory-usage-disclosure-route.db.test.ts`(읽기),
-  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
-  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+서버는 개수를 계속 계산합니다(`X-Chat-Memory-Used` header, `Message.memoryUsedCount`).
+§22 관측(`lib/memoryMetrics.ts`)과 기억 모드 신호(`lib/memoryModeSignals.ts`)가
+그 값을 쓰기 때문이며, 화면에는 표시하지 않습니다. 소유자 이외의 경로(share, export)가 이 값을 싣지 않는다는 §13.3의
+규칙은 그대로입니다. profile knowledge 발췌 개수 표시는 §14.3이 정합니다.
 
 ### 13.5 imported data export의 잠긴 snapshot
 
@@ -1421,12 +1465,11 @@ profile 이름도 revision 번호도 지시문도 남지 않습니다.
 
 ### 14.3 Knowledge 사용 투명성 — 답변별 귀속
 
-§13.4가 memory에 대해 정한 것과 같은 계약을 profile knowledge에 적용합니다.
-**두 개의 다른 사실이므로 하나의 숫자로 합치지 않습니다** — 사용자 자신이 올린
-파일에서 나온 답과 저장된 기억에서 나온 답은 다른 주장이고, 합친 count는 둘 중
-어느 것도 말하지 않습니다.
+profile knowledge 발췌를 받은 답변은 소유자에게 그 개수를 표시합니다. account
+memory 개수는 표시하지 않으므로(§13.4) 두 숫자를 합치는 일도 없습니다 — 사용자
+자신이 올린 파일에서 나온 답과 저장된 기억에서 나온 답은 다른 주장입니다.
 
-- 값의 출처는 두 곳이며 §13.4와 대칭입니다. 생성 중에는 `/api/chat`의
+- 값의 출처는 두 곳입니다. 생성 중에는 `/api/chat`의
   `X-Chat-Knowledge-Used` header, 다시 열었을 때는
   `GET /api/conversations/[conversationId]`가 돌려주는
   `Message.knowledgeChunkCount`입니다.
@@ -1448,10 +1491,9 @@ profile 이름도 revision 번호도 지시문도 남지 않습니다.
 - **client 직렬화 allowlist에 넣지 않습니다.** `lib/chatMessageSerialization.ts`의
   `pickTransportFields()`가 allowlist이므로 이 필드는 요청 transcript와 guest
   localStorage에 실리지 않습니다. 거기 실린 값은 stale한 주장일 수밖에 없습니다.
-- 표시는 §13.4의 memory 표시와 한 문장을 공유합니다
-  (`ChatMessageList`의 `memory-usage-disclosure`). 판정은
-  `lib/answerContextDisclosure.ts`의 `decideAnswerContextDisclosure()` 한 곳이며,
-  memory가 먼저 오는 순서는 §9.1 system block이 조립되는 순서와 같습니다.
+- 표시는 답변 하단 한 줄(신고 버튼, 자동 선택 배지와 같은 줄)의
+  `knowledge-usage-disclosure`입니다. 판정은
+  `lib/answerContextDisclosure.ts`의 `knowledgeExcerptCountToShow()` 한 곳입니다.
 - 검증: `tests/answerContextDisclosure.test.mjs`(판정 행렬),
   `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
   `tests/chatMessageSerialization.test.ts`(allowlist 배제),
@@ -1465,7 +1507,7 @@ AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
 |---|---|---|
 | `externalConversationImportEnabled` | A | Import API·UI 전체 |
 | `memoryExtractionEnabled` | B | extraction run 생성 |
-| `memoryInjectionEnabled` | B | 새 대화 주입 (§12.4의 운영 절차 선행 필수) |
+| `memoryInjectionEnabled` | B | 새 대화 주입 (§12.4 또는 §12.4a의 운영 절차 선행 필수) |
 | `assistantProfilesEnabled` | C | profile CRUD·runtime |
 | `assistantKnowledgeEnabled` | C | knowledge 업로드·retrieval |
 
@@ -1518,7 +1560,7 @@ flag를 순서 때문에 되돌리지는 않습니다.
 | 릴리스 | 새 처리 활동 |
 |---|---|
 | A | 제3자 AI 서비스 export 대화의 계정 저장(제3자 개인정보 포함 가능, 사용자의 권한·적법성 확인 책임), raw archive는 브라우저에서만 처리, 정규화 선택분만 서버 저장, media 미저장, 보존·삭제·export, Tomverse 삭제가 원 제공자 삭제를 의미하지 않음 |
-| B | 선택 source chunk의 extraction provider 전송, 승인 memory/style의 chat provider 전송(비교 시 여러 provider), extraction model·credit, candidate/active 보존, 조회·수정·비활성화·전체 export·delete-all, 민감 후보 검토 정책, source lock·suspension 동작 |
+| B | 가져온 대화의 extraction provider 자동 전송(import 완료 시, 기억 사용이 켜진 동안, credit 무료 — 2026-10-24), 활성 memory/style의 chat provider 전송(비교 시 여러 provider), 민감 정보 미저장과 최신 대화 우선, memory 보존, 조회·수정·비활성화·전체 export·delete-all, source lock·suspension 동작. import 확정 화면에도 같은 고지를 둡니다 |
 | C | instructions 저장, knowledge file 저장·분석, knowledge excerpt의 provider 전송, 보존·삭제, private 기본, share snapshot 제외, marketplace·connector 미지원 |
 
 Release C의 사용법·활성화 분석은 기존 analytics 동의 경계를 그대로 따릅니다.
@@ -1636,7 +1678,7 @@ entitlement(`CREDIT_*`, `PLAN_*`)와 guardrail(`OPERATIONAL_*`, `PROVIDER_*`)
 | prompt injection → memory 오염 | 서술형 정규화(§8.2), deterministic validator(§8.4), bulk-safe 차단, untrusted 경계(§9.1), eval 범주 ④ |
 | assistant 추측의 사용자 사실화 | user-role evidence 요구, validator 패턴 차단, eval 범주 ② 0건 기준 |
 | secret·credential의 memory 유입 | validator 패턴 차단, sensitive 강등, eval 범주 ③ 0건 기준 |
-| client 위조 (fingerprint·count·memory 선택·retrieval 결과) | 서버 digest 재계산(§4.1), 서버 주도 retrieval(§8.1-3), 서버 계산 투명성 count(§13.4) |
+| client 위조 (fingerprint·count·memory 선택·retrieval 결과) | 서버 digest 재계산(§4.1), 서버 주도 retrieval(§8.1-3), 서버 계산 투명성 count(§14.3) |
 | cross-user IDOR (import·memory·profile·knowledge·lock grant) | owner scope 전면 적용, resource type 결속 grant(§7), IDOR 테스트 |
 | context bundle replay·변조 | 서명·nonce·expiry·subject/conversation 결속, admission과 역할 분리(§10) |
 | staging 자원 노출 | 일반 목록·검색·export 비노출, TTL·cleanup |
@@ -1824,14 +1866,13 @@ GET    /api/imports/external/export            imported data export (provenance 
 ### 릴리스 B
 
 ```
-POST   /api/memories/extraction-runs           run 생성 (credit estimate 확인 후)
+GET    /api/memories/extraction-runs           최근 run과 열린 run (생성은 import 완료 시 서버, §11)
 GET    /api/memories/extraction-runs/[runId]   진행 상태
 POST   /api/memories/extraction-runs/[runId]/cancel
 GET    /api/memories                           목록 (status·kind filter)
 POST   /api/memories                           직접 작성
-PATCH  /api/memories/[memoryId]                수정·승인·거절·pin·expiry
+PATCH  /api/memories/[memoryId]                수정·pin·expiry·근거 복원 (승인·거절은 이전 후보 행용)
 DELETE /api/memories/[memoryId]
-POST   /api/memories/bulk-approve              bulk-safe 후보만 (§8.4)
 GET/PUT /api/memories/settings                 master toggle·기본 mode
 GET    /api/memories/export                    전체 export (재인증, §13.2)
 POST   /api/memories/delete-all                (재인증, §13.1)
@@ -1944,23 +1985,14 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     보고서 전체에 문장이 없는지 확인합니다.
   - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
     (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
-    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy의 feedback
-    신호 하나**(`Feedback`에 대상 답변으로 가는 연결이 없음). lock
-    suspension/restore(B5), chunk당 credit·batch sub-budget(slice 1.6),
-    injection 비율·token bucket·stale bundle 비율(§10 배선), follow-up·regenerate
-    (답변별 귀속)은 모두 출처가 생겨 목록에서 빠졌습니다.
-  - **`followup_repair_proxy_feedback_signal` = `POLICY_DECISION_REQUIRED /
-    METRIC_UNAVAILABLE`.** 이 하나가 비어 있다는 사실이 릴리스 B **코드**를
-    미완으로 만들지는 않습니다 — 위 규칙대로 `unavailable`로 표시되어 0으로
-    위장되지 않기 때문입니다. 초기 staging은 이 상태로 진행할 수 있고,
-    **production 확대와 효과 판정 전에 닫습니다.** 그때까지의 판정문은 이 신호를
-    제외했다고 명시하고, 확대 여부는 사람에게 다시 확인합니다.
+    혼동이 이 목록이 존재하는 이유입니다. 현재 구현된 지표 중 출처가 없는 항목은 없습니다. DB/schema를 읽을 수 없는 경우의 unavailable 상태는 계속 별도로 표시합니다.
+  - **명시적 answer attribution 구현 (2026-10-21):** 답변별 신고는 문의 분류와 별도로 `needs_improvement`를 보냅니다. 이 연결은 사용자 신고 의도이며 Trace 인증이나 자동 수정 권한이 아닙니다. 일반 문의와 `helpful`은 repair proxy에 포함하지 않습니다. 이는 코드 구현 기록이며 production 활성화나 효과 판정의 증거가 아닙니다.
 
     닫는 방법은 "가장 최근 답변 추정"이 아니라 **명시적 answer attribution**입니다.
     추정은 comparison·재생성·동시 요청에서 조용히 틀리고, 틀린 귀속은
     `unavailable`보다 나쁩니다(0이 아닌 값을 보고하므로).
 
-    - `Feedback.answerMessageId`를 **nullable relation**으로 추가합니다. 특정
+    - `Feedback.messageId`를 **nullable relation**으로 사용합니다. 특정
       assistant 답변에서 연 피드백만 이 ID를 보내고, sidebar·support·billing
       등 일반 진입점은 계속 `null`입니다.
     - 서버가 인증 사용자·Conversation 소유권·`role=assistant`를 **재검증**합니다.
@@ -1973,7 +2005,7 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     - **무엇을 repair 신호로 셀 것인가도 함께 정합니다.** 현재 `Feedback.type`은
       bug·feature·billing 같은 **문의 분류**이지 답변 품질의 방향성이 아니므로,
       answer-linked Feedback을 전부 부정 신호로 세면 안 됩니다. 답변 진입점에
-      폐쇄형 의미를 따로 둡니다 — `needs_improvement`는 proxy에 포함,
+      폐쇄형 `answerSignal`을 따로 둡니다 — `needs_improvement`는 proxy에 포함,
       `helpful`은 별도 관측(첫 버전 미지원 가능), 일반 Feedback은 proxy 제외.
     - **Trace와 answer attribution은 분리합니다.** Trace ID로 답변을 찾거나
       `occurrenceId`를 답변 ID로 재사용하지 않습니다. Trace evidence는 검증된
@@ -2043,17 +2075,15 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 
 | 항목 | 상태 | 차단 범위 |
 |---|---|---|
-| `memory_eval_dataset` | `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW` | 실제 extraction pair 승인과 `memoryInjectionEnabled` 활성화 (§12.6) |
-| `followup_repair_proxy_feedback_signal` | `POLICY_DECISION_REQUIRED / METRIC_UNAVAILABLE` | 없음 — production 확대·효과 판정 전에 닫습니다 (§22) |
+| `memory_eval_dataset` | `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW` | eval 경로의 extraction pair 승인 (§12.6). 출시는 §12.4a로 진행 |
+| `followup_repair_proxy_feedback_signal` | 구현됨 — 답변 FK·명시적 signal·집계 | production 실행·효과 실측은 별도 (§22) |
 
 - **릴리스 B 코드 완료는 위 두 항목과 분리해 판단합니다.** 두 항목 중 어느 것도
-  코드 계약의 결함이 아니며, feedback 신호는 §22 규칙대로 `unavailable`로
-  표시되어 0으로 위장되지 않습니다.
-- **extraction·injection 운영 활성화는 eval 데이터셋과 §12.4 승인 절차 완료 전까지
-  차단**입니다. 이것이 데이터셋 항목의 실제 무게이며, 코드 완료로 대체되지
-  않습니다.
-- **production 효과 판정 시에는** feedback 신호를 제외했다고 판정문에 명시하고,
-  확대 여부를 사람에게 다시 확인합니다.
+  코드 계약의 결함이 아닙니다. feedback 신호는 §22의 소유권 확인과 명시적 평가를 거쳐 집계하며, 분모가 없으면 null로 표시합니다.
+- **extraction·injection 운영 활성화는 승인된 pair가 있어야 합니다.** 승인은
+  eval 데이터셋과 §12.4 절차를 거치거나, §12.4a의 운영자 출시 승인(최대 30일)으로
+  받습니다. 코드 완료만으로는 대체되지 않습니다.
+- **production 효과 판정 시에는** 실제 배포 버전과 계측 가능 여부를 기록하고, 확대 여부를 사람에게 확인합니다.
 
 기록된 한계:
 

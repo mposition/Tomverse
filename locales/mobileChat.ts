@@ -1,5 +1,6 @@
 /** Small, framework-free copy shared by the native bundle and device connection page. */
 const en = {
+  disable: "Turn off current location",
   title: "Tomverse Chat", connect: "Connect your account", openBrowser: "Sign in in your browser",
   connectionNote: "Sign in on the page that opens, create a one-time connection code, then paste it here. The code only works for this device's connection request.",
   browserConnectionNote: "Sign in with your usual Tomverse login, confirm this device's connection request, then choose Return to Tomverse app. You can also paste the connection code here.",
@@ -23,6 +24,7 @@ const en = {
 };
 
 const ko: typeof en = {
+  disable: "현재 위치 사용 끄기",
   browserConnectionNote: "평소 사용하는 Tomverse 로그인으로 인증하고 이 기기의 연결 요청을 확인한 뒤 앱으로 돌아가기를 선택하세요. 연결 코드를 여기에 붙여 넣어도 됩니다.",
   returnToApp: "Tomverse 앱으로 돌아가기", returnFallback: "앱이 열리지 않으면 Tomverse 앱으로 돌아가 이 연결 코드를 붙여 넣으세요. 앱을 다시 실행했다면 새 로그인 요청을 시작하세요.",
   title: "Tomverse Chat", connect: "계정 연결", openBrowser: "브라우저에서 로그인",

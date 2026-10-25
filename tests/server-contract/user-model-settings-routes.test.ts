@@ -56,6 +56,7 @@ type World = {
   creates: Array<Record<string, unknown>>;
   updates: Array<Record<string, unknown>>;
   upserts: Array<Record<string, unknown>>;
+  locks: unknown[];
 };
 
 const { AVAILABLE_MODELS, DEFAULT_MODEL_ID } = require(
@@ -95,6 +96,7 @@ const freshWorld = (): World => ({
   creates: [],
   updates: [],
   upserts: [],
+  locks: [],
 });
 
 let world = freshWorld();
@@ -136,7 +138,7 @@ async function loadRoutes() {
     mock.module(mod("lib/billingEntitlements.ts"), {
       namedExports: {
         ...realBilling,
-        getUserBillingPlan: async () => ({ tier: world.planTier }),
+        getUserBillingPlan: async () => ({ tier: world.planTier, maxModels: world.planTier === "Free" ? 2 : 3 }),
       },
     });
 
@@ -161,7 +163,9 @@ async function loadRoutes() {
     const fakePrisma: Record<string, unknown> = {
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
         fn(fakePrisma),
-      $executeRaw: async () => 0,
+      $executeRaw: async (_query: unknown, ...values: unknown[]) => { world.locks.push(...values); return 0; },
+      $queryRaw: async () => [{ exists: false }],
+      chatUsageBucket: { findUnique: async () => null },
       userSettings: {
         findUnique: async () => world.settingsRow,
         create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -242,6 +246,37 @@ const quiet = async <T>(run: () => Promise<T>): Promise<T> => {
 
 test.beforeEach(() => {
   world = freshWorld();
+});
+
+test("Easy provider defaults save independently of the model combination", async () => {
+  const { settings } = await loadRoutes();
+  const previousModels = world.settingsRow!.newConversationModelIds;
+  const response = await settings.POST(postRequest("/api/user/settings", { reviewEasyDefaultProviders: ["openai"] }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(world.settingsRow!.reviewEasyDefaultProviders, ["openai"]);
+  assert.deepEqual(world.settingsRow!.newConversationModelIds, previousModels);
+  const read = await settings.GET(new Request("http://localhost/api/user/settings"));
+  assert.equal(read.status, 200);
+  const body = await readJson(read);
+  assert.deepEqual(body.reviewEasyDefaultProviders, ["openai"]);
+  assert.deepEqual(body.reviewEasyEffectiveProviders, ["openai"]);
+});
+
+test("Easy defaults reject unknown providers and duplicate choices without writing", async () => {
+  const { settings } = await loadRoutes();
+  for (const providers of [["unknown-provider"], ["openai", "openai"], []]) {
+    const response = await settings.POST(postRequest("/api/user/settings", { reviewEasyDefaultProviders: providers }));
+    assert.equal(response.status, 400);
+  }
+  assert.equal(world.upserts.length, 0);
+});
+
+test("a user time-zone change locks the credit account before moving usage under the subject lock",async()=>{
+  const {settings}=await loadRoutes();
+  const response=await settings.POST(postRequest('/api/user/settings',{timeZone:'Australia/Brisbane',timeZoneSource:'user'}));
+  assert.equal(response.status,200);assert.equal(world.settingsRow!.timeZone,'Australia/Brisbane');
+  assert.equal(world.locks[0],'credit-account:user_1');assert.equal(typeof world.locks[1],'string');assert.notEqual(world.locks[1],world.locks[0]);
+  assert.equal(world.locks.length,2,'the pre-Code schema path uses only account and subject advisory locks');
 });
 
 // --- GET: the read path reports, it does not rewrite -------------------------

@@ -29,7 +29,10 @@ import {
 } from "@/lib/productResearchObservationCore.mjs";
 import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
 import { prisma } from "@/lib/prisma";
-import { readProductResearchEnabledSince } from "@/lib/productResearchObservationStore";
+import {
+  latestProductResearchSuccess,
+  readProductResearchEnabledSince,
+} from "@/lib/productResearchObservationStore";
 import { slotForInstant } from "@/lib/productResearchObservationRunnerCore.mjs";
 
 /** How many slots the screen lists, and says it lists. */
@@ -206,7 +209,13 @@ export async function readProductResearchConsole(
   // (docs/policy/product-research-agent.md §2, condition 8). Yesterday's
   // observation is not wrong, but it is not the answer to the question the
   // heading asks.
-  const newestSuccess = rows.find((row) => row.outcome === "ok") ?? null;
+  //
+  // So the first question gets its own query. Answered from the rows above it
+  // would be bounded by them: thirty failures would hide a success still well
+  // inside the ninety-day retention, and the screen would report a silence the
+  // maintenance incident -- which asks unbounded -- does not. Two readings of
+  // one fact, disagreeing, is worse than either.
+  const newestSuccess = enabled ? await latestProductResearchSuccess() : null;
   const displayable = displayableObservationSlot(series, {
     // Any row, not just a successful one. Keyed on successes, a table holding
     // nothing but failures would be captioned "nothing was ever recorded" --
@@ -247,13 +256,13 @@ export async function readProductResearchConsole(
     silenceHours: OBSERVATION_SILENCE_HOURS,
     silence: observationSilenceVerdict({
       enabled,
-      lastSuccessAt: newestSuccess?.slot.getTime() ?? null,
+      lastSuccessAt: newestSuccess?.getTime() ?? null,
       // The anchor outlives the rows, so the screen keeps saying how long it has
       // been after the retention sweep has removed every row there was.
       enabledSince: enabledSince?.getTime() ?? null,
       now: now.getTime(),
     }),
-    lastSuccessAt: newestSuccess?.slot.toISOString() ?? null,
+    lastSuccessAt: newestSuccess?.toISOString() ?? null,
     enabledSince: enabledSince?.toISOString() ?? null,
     slots,
     latest:

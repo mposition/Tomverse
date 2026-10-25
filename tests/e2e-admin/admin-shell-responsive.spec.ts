@@ -40,6 +40,7 @@ const NAV_LABELS = [
   "Product research",
   "Engineering agent",
   "SRE agent",
+  "QA and release",
   "Agent digests",
   "Agent office",
   "Platform settings",

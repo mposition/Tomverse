@@ -108,7 +108,8 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
         `RAILWAY_PROJECT_ID`, `RAILWAY_PROJECT_NAME`, `RAILWAY_SERVICE_ID`, `RAILWAY_SERVICE_NAME`, `RAILWAY_DEPLOYMENT_ID`,
         `RAILWAY_REPLICA_ID`, `RAILWAY_REPLICA_REGION`, `RAILWAY_SNAPSHOT_ID`, `RAILWAY_PUBLIC_DOMAIN`, `RAILWAY_PRIVATE_DOMAIN`,
         `RAILWAY_STATIC_URL`, `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_GIT_AUTHOR`, `RAILWAY_GIT_BRANCH`, `RAILWAY_GIT_REPO_NAME`,
-        `RAILWAY_GIT_REPO_OWNER`, `RAILWAY_GIT_COMMIT_MESSAGE`.
+        `RAILWAY_GIT_REPO_OWNER`, `RAILWAY_GIT_COMMIT_MESSAGE`, `RAILWAY_BETA_ENABLE_RUNTIME_V2`(V2 runtime 표식,
+        2026-10-23 추가).
 
      이 목록은 코드 상수이고, 테스트가 이 절과 같음을 고정합니다. Railway가 목록에 없는 이름을 넣어 서비스가 멈추면 그 이름을
      코드 상수와 이 절에 함께 더하고 PR에 한 줄로 남깁니다(정책 버전 증가 없음). (b)에 걸리는 이름은 더할 수 없습니다.

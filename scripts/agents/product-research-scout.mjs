@@ -10,7 +10,8 @@
 // the app calls the model and stores the suggestions.
 //
 // Variables: PRODUCT_RESEARCH_SCOUT_ENABLED (unset or empty: nothing runs),
-// PRODUCT_RESEARCH_SCOUT_INGEST_URL and PRODUCT_RESEARCH_SCOUT_INGEST_SECRET.
+// PRODUCT_RESEARCH_SCOUT_INGEST_URL and PRODUCT_RESEARCH_SCOUT_INGEST_SECRET;
+// PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK=off stops the unsandboxed retry.
 // It holds no model key and no database credential. A send whose outcome is
 // unknown is not repeated; the next day's run covers the subject again.
 
@@ -23,10 +24,12 @@ import {
   SCOUT_LOCALES,
   SCOUT_PAGE_ORIGIN,
   SCOUT_PAGES,
+  SCOUT_SANDBOX_FALLBACK_ENV,
   errorCode,
   isScoutCausedConsoleError,
   launchFailure,
   originOf,
+  retriesWithoutSandbox,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
 import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
@@ -169,14 +172,34 @@ async function capturePage(browser, rules, target) {
   return { subject: { kind: "page", subject: target.id, language: target.lang, images, signals } };
 }
 
+/**
+ * Whether this run's Chromium had its sandbox: on; off (the retry after a
+ * refused sandbox); off_failed (the retry did not start either); or none when
+ * no browser started and no retry was made.
+ */
+let sandbox = "none";
+
 async function walkPages() {
+  const args = [resolverRules([new URL(SCOUT_PAGE_ORIGIN).hostname])];
   let browser;
   try {
-    browser = await launch([resolverRules([new URL(SCOUT_PAGE_ORIGIN).hostname])]);
+    browser = await launch(args);
+    sandbox = "on";
   } catch (error) {
-    // The first run in a new runtime is the sandbox check (§13): say why.
-    console.warn(JSON.stringify({ event: "product_research_scout_browser_launch_failed", ...launchFailure(error), host: sandboxHost() }));
-    throw error;
+    // Some Railway hosts refuse the sandbox's setup (§12): say why, then
+    // start once more without it unless the operator turned that off.
+    const failure = launchFailure(error);
+    console.warn(JSON.stringify({ event: "product_research_scout_browser_launch_failed", ...failure, host: sandboxHost() }));
+    if (!retriesWithoutSandbox(process.env.PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK, failure)) throw error;
+    sandbox = "off_failed";
+    try {
+      browser = await launch(args, { sandbox: false });
+    } catch (retryError) {
+      console.warn(JSON.stringify({ event: "product_research_scout_browser_unsandboxed_failed", ...launchFailure(retryError), host: sandboxHost() }));
+      throw retryError;
+    }
+    sandbox = "off";
+    console.warn(JSON.stringify({ event: "product_research_scout_browser_unsandboxed", cause: failure.cause, source: failure.source, switch: SCOUT_SANDBOX_FALLBACK_ENV }));
   }
   try {
     const rules = await installCdpRules(browser, [SCOUT_PAGE_ORIGIN]);
@@ -305,4 +328,4 @@ for (const [name, step] of [["pages", walkPages], ["files", walkFiles], ["catalo
     console.warn(JSON.stringify({ event: "product_research_scout_step_failed", step: name, error: errorCode(error) }));
   }
 }
-console.log(JSON.stringify({ event: "product_research_scout_run", elapsedMs: Date.now() - startedAt, ...outcomes, mode: outDir ? "local" : "send" }));
+console.log(JSON.stringify({ event: "product_research_scout_run", elapsedMs: Date.now() - startedAt, ...outcomes, sandbox, mode: outDir ? "local" : "send" }));

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
@@ -106,6 +107,7 @@ type PromptPayload = {
 };
 
 export type DesktopChatShellProps = {
+  workspaceNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   studioStarterCards?: readonly VisibleStarterCard[];
@@ -134,6 +136,8 @@ export type DesktopChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  voiceConversationControl?: ReactNode;
+  voiceHistoryRevision?: number;
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
@@ -413,6 +417,7 @@ export type DesktopChatShellProps = {
 };
 
 export function DesktopChatShell({
+  workspaceNotice,
   review,
   chatWorkspace,
   studioStarterCards,
@@ -437,6 +442,8 @@ export function DesktopChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  voiceConversationControl,
+  voiceHistoryRevision,
   promptRefinerOffered = false,
   promptRefinerState,
   promptRefinerProductMode = false,
@@ -966,7 +973,7 @@ export function DesktopChatShell({
         onReview={() => onProductSwitch?.("review") ?? false} /> : sidebarElement}
 
       <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding}
+        {review && <ReviewCommandBar review={review} showModeSwitcher={false} locked={productSwitchDisabled || isAnyModelResponding}
           view={studioView} setView={studio ? setStudioView : undefined} />}
         {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
         <div className={studio ? "review-studio-body" : "contents"}>
@@ -1108,6 +1115,7 @@ export function DesktopChatShell({
             })}
           </div>
         )}
+        {workspaceNotice}
         <div
           ref={setConversationDropSurface}
           data-testid="desktop-conversation-surface"
@@ -1358,6 +1366,7 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  voiceHistoryRevision={singleTranscript ? voiceHistoryRevision : undefined}
                   reviewProvider={review?.mode === "easy" ? modelInfo?.provider : undefined}
                   currentProduct={currentProduct}
                   transcriptScope={transcriptScope}
@@ -1551,6 +1560,7 @@ export function DesktopChatShell({
               onAttachmentsChange={setAttachments}
               attachmentCapabilities={attachmentCapabilities}
               voiceInputEnabled={voiceInputEnabled}
+              voiceConversationControl={voiceConversationControl}
               onVoiceTranscript={onVoiceTranscript}
               promptRefinerOffered={promptRefinerOffered}
               promptRefinerState={promptRefinerState}

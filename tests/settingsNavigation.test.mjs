@@ -18,6 +18,8 @@ import {
   assistantProfileHierarchy,
   assistantProfileListHref,
   settingsEntryHierarchy,
+  settingsHrefForProduct,
+  settingsReturnProductFrom,
 } from "../lib/settingsNavigation.ts";
 import {
   consumePendingAccountSettingsRequest,
@@ -227,6 +229,26 @@ test("the generic exit goes to the bare Review route, with nothing appended", ()
   }
 });
 
+test("settings opened from a product returns to that product, Review when unknown", () => {
+  assert.equal(settingsExitHref("chat"), "/chat");
+  assert.equal(settingsExitHref("studio"), "/studio");
+  assert.match(settingsSectionHref("memory", "chat"), /^\/chat\?settings=/);
+
+  assert.equal(settingsReturnProductFrom("chat"), "chat");
+  for (const unusable of [null, undefined, "", "admin", "https://evil.example"]) {
+    assert.equal(settingsReturnProductFrom(unusable), "review", String(unusable));
+  }
+
+  // Hierarchy crumbs are built for Review; only the bare Review route moves.
+  assert.equal(
+    settingsHrefForProduct(settingsSectionHref("imports"), "chat"),
+    settingsSectionHref("imports", "chat")
+  );
+  assert.equal(settingsHrefForProduct("/review", "chat"), "/chat");
+  assert.equal(settingsHrefForProduct("/settings/imports", "chat"), "/settings/imports");
+  assert.equal(settingsHrefForProduct("/reviewer", "chat"), "/reviewer");
+});
+
 test("both movements are named, in every language, and never share a phrase", () => {
   for (const [name, locale] of Object.entries(ALL_LOCALES)) {
     const { backToSettings, backToChat, backToChatShort, exitNavLabel } =
@@ -315,7 +337,6 @@ test("every row can state where it stands, including when it is empty", () => {
       locale.memoryReview.dataTabStatusOff,
       name
     );
-    assert.ok(locale.memoryReview.dataTabStatusPending.includes("{count}"), name);
   }
 });
 

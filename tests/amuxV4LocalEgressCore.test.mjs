@@ -8,7 +8,8 @@ import {
   planAmuxV4EgressConnect,
   planAmuxV4EgressTarget,
 } from "../lib/amux/ideaLocalEgressCore.ts";
-import { createAmuxV4EgressProxy } from "../lib/amux/ideaLocalEgressProxy.ts";
+import { createAmuxV4EgressProxy, createAmuxV19EgressProxy } from
+  "../lib/amux/ideaLocalEgressProxy.ts";
 
 const candidate = (changes = {}) => ({
   method: "CONNECT",
@@ -60,6 +61,27 @@ const exchange = (port, request, until) => new Promise((resolve, reject) => {
     }
   });
   socket.once("connect", () => socket.write(request));
+});
+const openTunnel = (port) => new Promise((resolve, reject) => {
+  const socket = connectTcp({ host: "127.0.0.1", port });
+  let header = "";
+  const fail = (error) => { socket.destroy(); reject(error); };
+  socket.once("error", fail);
+  socket.once("connect", () => socket.write(
+    "CONNECT api.anthropic.com:443 HTTP/1.1\r\n" +
+    "Host: api.anthropic.com:443\r\n\r\n"));
+  const onData = (bytes) => {
+    header += bytes.toString("utf8");
+    if (!header.includes("\r\n\r\n")) return;
+    socket.off("data", onData);
+    socket.off("error", fail);
+    if (!/^HTTP\/1\.1 200/.test(header)) {
+      fail(new Error("approved tunnel was rejected"));
+      return;
+    }
+    resolve(socket);
+  };
+  socket.on("data", onData);
 });
 
 test("proxy rejects unapproved targets before DNS and dials only the checked IP", async () => {
@@ -180,17 +202,176 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
     assert.match(await exchange(proxyPort, request, "429 Too Many Requests"),
       /429 Too Many Requests/);
     const closed = once(sockets[0], "close");
+    const proxyClientClosed = once(proxyClients[0], "close");
     const upstreamClosed = once(echoSockets[0], "close");
     // A peer's close can precede the proxy's own close/release callback.
     const released = once(proxyClients[0], "close");
     sockets[0].destroy();
     await closed;
+    await proxyClientClosed;
     await upstreamClosed;
     await released;
     sockets.push(await openTunnel());
   } finally {
     for (const socket of sockets) socket.destroy();
     await close(proxy);
+    await close(echo);
+  }
+});
+
+test("a v19 proxy holds the Cursor CLI's simultaneous tunnels but stays bounded", async () => {
+  const echo = createTcpServer((socket) => socket.pipe(socket));
+  const echoPort = await listen(echo);
+  const proxy = createAmuxV19EgressProxy(["api2.cursor.sh"], {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  });
+  const proxyPort = await listen(proxy);
+  const request = "CONNECT api2.cursor.sh:443 HTTP/1.1\r\nHost: api2.cursor.sh:443\r\n\r\n";
+  const sockets = [];
+  // Resolves with the proxy's first reply, or "closed" when it drops the socket.
+  const openTunnel = () => new Promise((resolve) => {
+    const socket = connectTcp({ host: "127.0.0.1", port: proxyPort });
+    sockets.push(socket);
+    socket.once("error", () => resolve("closed"));
+    socket.once("close", () => resolve("closed"));
+    socket.once("connect", () => socket.write(request));
+    socket.once("data", (bytes) => resolve(bytes.toString()));
+  });
+  try {
+    // Measured: Cursor opened up to nine approved tunnels at once.
+    const answers = await Promise.all(Array.from({ length: 9 }, openTunnel));
+    assert.ok(answers.every((answer) => /200 Connection Established/.test(answer)));
+    const more = await Promise.all(Array.from({ length: 7 }, openTunnel));
+    assert.ok(more.every((answer) => /200 Connection Established/.test(answer)));
+    // Sixteen is the bound: the next tunnel is never established.
+    assert.doesNotMatch(await openTunnel(), /200 Connection Established/);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await close(proxy);
+    await close(echo);
+  }
+});
+
+test("v19 direct-read tunnel carries more than the v4 byte ceiling", async () => {
+  const echo = createTcpServer((socket) => socket.pipe(socket));
+  const echoPort = await listen(echo);
+  const proxy = createAmuxV19EgressProxy(["api.anthropic.com"], {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  });
+  const proxyPort = await listen(proxy);
+  const total = 17 * 1024 * 1024;
+  const socket = connectTcp({ host: "127.0.0.1", port: proxyPort });
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("v19 tunnel stalled")), 15_000);
+      let established = false;
+      let header = Buffer.alloc(0);
+      let received = 0;
+      const fail = (error) => { clearTimeout(timeout); reject(error); };
+      socket.once("error", fail);
+      socket.once("close", () => fail(new Error("v19 tunnel closed early")));
+      socket.once("connect", () => socket.write(
+        "CONNECT api.anthropic.com:443 HTTP/1.1\r\n" +
+        "Host: api.anthropic.com:443\r\n\r\n"));
+      socket.on("data", (bytes) => {
+        if (!established) {
+          header = Buffer.concat([header, bytes]);
+          const end = header.indexOf("\r\n\r\n");
+          if (end < 0) return;
+          if (!/^HTTP\/1\.1 200/.test(header.subarray(0, end).toString())) {
+            fail(new Error("v19 tunnel rejected approved host"));
+            return;
+          }
+          received += header.length - end - 4;
+          established = true;
+          header = Buffer.alloc(0);
+          for (let index = 0; index < 17; index += 1)
+            socket.write(Buffer.alloc(1024 * 1024, 0x61));
+        } else received += bytes.length;
+        if (received >= total) {
+          clearTimeout(timeout);
+          if (received === total) resolve();
+          else fail(new Error("v19 tunnel returned too many bytes"));
+        }
+      });
+    });
+  } finally {
+    socket.destroy();
+    await close(proxy);
+    await close(echo);
+  }
+});
+
+test("v4 tunnel still closes beyond its 16 MiB byte ceiling", async () => {
+  const echo = createTcpServer((socket) => {
+    socket.on("error", () => {});
+    socket.pipe(socket);
+  });
+  const echoPort = await listen(echo);
+  const proxy = createAmuxV4EgressProxy(["api.anthropic.com"], {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  });
+  const proxyPort = await listen(proxy);
+  const socket = await openTunnel(proxyPort);
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("v4 tunnel did not close")), 15_000);
+      socket.on("data", () => {});
+      socket.on("error", () => {});
+      socket.once("close", () => { clearTimeout(timeout); resolve(); });
+      for (let index = 0; index < 17; index += 1)
+        socket.write(Buffer.alloc(1024 * 1024, 0x61));
+    });
+    assert.equal(socket.destroyed, true);
+  } finally {
+    socket.destroy();
+    await close(proxy);
+    await close(echo);
+  }
+});
+
+test("v4 tunnel expires at ten minutes while v19 remains open", async (t) => {
+  const echo = createTcpServer((socket) => {
+    socket.on("error", () => {});
+    socket.pipe(socket);
+  });
+  const echoPort = await listen(echo);
+  const deps = {
+    resolve: async () => ["104.18.6.192"],
+    dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
+  };
+  const v4 = createAmuxV4EgressProxy(["api.anthropic.com"], deps);
+  const v19 = createAmuxV19EgressProxy(["api.anthropic.com"], deps);
+  const v4Port = await listen(v4);
+  const v19Port = await listen(v19);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let v4Socket;
+  let v19Socket;
+  try {
+    v4Socket = await openTunnel(v4Port);
+    v19Socket = await openTunnel(v19Port);
+    v4Socket.on("error", () => {});
+    const v4Closed = new Promise((resolve) => v4Socket.once("close", resolve));
+    t.mock.timers.tick(600_001);
+    t.mock.timers.reset();
+    let deadline;
+    try {
+      await Promise.race([v4Closed, new Promise((_resolve, reject) => {
+        deadline = setTimeout(() =>
+          reject(new Error("v4 deadline did not close tunnel")), 1_000);
+      })]);
+    } finally { clearTimeout(deadline); }
+    assert.equal(v4Socket.destroyed, true);
+    assert.equal(v19Socket.destroyed, false);
+  } finally {
+    t.mock.timers.reset();
+    v4Socket?.destroy();
+    v19Socket?.destroy();
+    await close(v4);
+    await close(v19);
     await close(echo);
   }
 });

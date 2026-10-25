@@ -16,7 +16,6 @@ import { useState } from "react";
 import { Capacitor } from "@capacitor/core";
 
 import { collectReadinessChecks } from "./readinessChecks";
-import { LocationReadiness } from "./LocationReadiness";
 
 export const ReadinessScreen = () => {
   // Computed once, in a lazy initialiser rather than an effect. `main.tsx`
@@ -58,7 +57,6 @@ export const ReadinessScreen = () => {
         </div>
       ))}
 
-      <LocationReadiness />
       <p className="lede" data-testid="readiness-summary" style={{ marginTop: 24 }}>
         {failed === 0
           ? `All ${checks.length} checks passed.`

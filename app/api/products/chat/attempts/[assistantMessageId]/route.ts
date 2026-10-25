@@ -1,9 +1,8 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 export const dynamic = "force-dynamic";
 
-import { getServerSession } from "next-auth/next";
 
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
 import {
   chatResponseAttemptIdSchema,
@@ -30,7 +29,9 @@ const noStore = (response: Response) => {
 
 export async function GET(request: Request, { params }: Params) {
   try {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(request);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401);
     }

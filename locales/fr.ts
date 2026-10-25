@@ -1,3 +1,4 @@
+import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -165,9 +166,6 @@ export const fr = {
         imageGenerationBackToChat: "Retour au chat",
         toolsImageGeneration: "Génération d'images",
         toolsImageGenerationDescription: "Comparer les images de plusieurs modèles",
-        imageIntentSuggestionTitle: "Générer une image ?",
-        imageIntentSuggestionAccept: "Ouvrir la génération d'images",
-        imageIntentSuggestionDismiss: "Pas maintenant",
         imageGenerationModelLabel: "Modèles",
         imageGenerationModelCount: "{count} modèle(s)",
         // Catalogue image tab (policy v2 section 13)
@@ -232,6 +230,7 @@ export const fr = {
         imageGenerationErrorBudget: "La génération d'images est temporairement suspendue. Réessayez sous peu.",
         imageGenerationErrorConflict: "Votre solde de crédits a changé pendant la réservation. Réessayez.",
         imageGenerationErrorGeneric: "Impossible de démarrer la génération de l'image. Réessayez.",
+        imageGenerationErrorPriceChanged: "Un prix a changé depuis le chargement de cette page. Rien n'a été facturé. Rechargez pour voir le prix actuel.",
         imageGenerationRestoreExcluded: "{models} n'est pas disponible actuellement et a été exclu de la sélection restaurée.",
         imageGenerationSelectionCount: "{count}/{max} modèles",
         imageGenerationModelLimitNotice: "Vous pouvez comparer jusqu'à {max} modèles à la fois. Désélectionnez un modèle avant d'en choisir un autre.",
@@ -263,7 +262,7 @@ export const fr = {
         quickSummaryNoVerificationItems: "Aucun point précis à vérifier n’a été identifié.",
         quickSummaryDisclaimer: "Cette analyse IA compare uniquement les réponses fournies. Elle ne recherche pas sur le Web, ne vérifie pas les faits auprès de sources externes et ne garantit pas la bonne réponse.",
         welcome: "Bonjour ! Comment puis-je vous aider aujourd'hui ?",
-        welcomeBack: "Content de vous revoir. Comment puis-je vous aider ?",
+        welcomeBack: workspaceWelcomeCopy.fr.greeting,
         guestWelcome: "Bonjour ! Vous êtes en mode invité. Posez votre question.",
         inputPlaceholder: "Posez votre question...",
         aiDisclaimer: "Les réponses de l'IA peuvent contenir des erreurs. Vérifiez les informations importantes. Votre message et le contenu des pièces jointes peuvent être envoyés aux fournisseurs IA sélectionnés pour générer une réponse -- évitez de saisir des informations sensibles non nécessaires.",
@@ -290,6 +289,9 @@ export const fr = {
         firstResponseTimeout: "La réponse était encore en préparation après un délai plus long que prévu, la connexion a donc été fermée. Réessayez dans un instant.",
         streamIdleTimeout: "La réponse a cessé d'arriver pendant plus longtemps que prévu, la connexion a donc été fermée. Cette réponse est incomplète.",
         responseGenerating: "Génération d'une réponse.",
+        imageTurnGenerating: "Création de l'image…",
+        imageTurnFailed: "L'image n'a pas pu être créée. Veuillez réessayer.",
+        imageTurnRetry: "Réessayer",
         responseComplete: "Réponse terminée.",
         responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
         responseIncompleteNotice: "La réponse a été interrompue par la limite de longueur de sortie. Vous pouvez poursuivre avec une question complémentaire.",
@@ -547,8 +549,6 @@ export const fr = {
         artifactDownloadFailed: "Le fichier n'a pas pu être téléchargé. Veuillez réessayer.",
         artifactDownloadLocked: "Déverrouillez cette conversation pour télécharger le fichier.",
         searchCitationsLabel: "Sources",
-        answerContextLabel: "Contexte de la réponse",
-        answerContextMemory: "{count} mémoires du compte",
         answerContextKnowledge: "{count} extraits de connaissances du profil",
         modelsSelectedOne: "IA",
         modelsSelectedOther: "IA",
@@ -1904,6 +1904,11 @@ export const fr = {
         dataTabOpen: "Ouvrir les assistants IA",
     },
     memoryReview: {
+        restoreGrounds: "Ajouter un nouveau fondement",
+        restoreGroundsNotice: "Réutiliser ce souvenir, justifié par ce que vous écrivez.",
+
+        reportAnswer: "Signaler un problème avec cette réponse",
+
         sourceDeleteDerivedImport:
             "{count} souvenirs issus de cet import seront également supprimés.",
         sourceDeleteDerivedConversation:
@@ -1917,49 +1922,31 @@ export const fr = {
         sourceLockBacked: "{count} souvenirs appuyés par d'autres éléments restent utilisés.",
         sourceLockRestoreNote: "Retirer le verrou remet en service les souvenirs suspendus à cause de cette conversation.",
         dataTabTitle: "Mémoire du compte",
-        dataTabDescription:
-            "Examinez les souvenirs candidats extraits des conversations importées et choisissez si les souvenirs approuvés sont utilisés dans les nouvelles discussions.",
+        dataTabDescription: "Consultez les souvenirs tirés automatiquement des conversations importées et ceux que vous avez ajoutés, et choisissez si les nouvelles discussions les utilisent.",
         dataTabOpen: "Gérer la mémoire",
         dataTabStatusOn: "Utilisée dans les nouvelles discussions",
         dataTabStatusOff: "Non utilisée dans les nouvelles discussions",
-        dataTabStatusPending: "{count} en attente de vérification",
         pageTitle: "Mémoire du compte",
-        pageDescription:
-            "Approuvez ou refusez les souvenirs candidats en attente d'examen, et modifiez, épinglez ou supprimez les souvenirs en usage.",
+        pageDescription: "Modifiez, épinglez ou supprimez les souvenirs tirés automatiquement des conversations importées et ceux que vous avez ajoutés.",
         signInRequired: "Connectez-vous pour gérer la mémoire de votre compte.",
-        privacyNote:
-            "Seuls les souvenirs que vous avez examinés et approuvés sont utilisés dans les nouvelles discussions. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au modèle Tomverse actuellement sélectionné, et vous pouvez les consulter, les modifier, les désactiver ou les supprimer à tout moment.",
-        disabledNotice:
-            "L'examen et la création de souvenirs sont indisponibles pour le moment. Les souvenirs déjà enregistrés restent consultables et supprimables.",
+        privacyNote: "Lorsque vous terminez une importation, Tomverse en tire automatiquement des souvenirs via un fournisseur d'IA, sans débit de crédits. Les contenus sensibles, comme les informations de santé, ne sont pas enregistrés comme souvenirs. Les souvenirs utilisés et les préférences de style de réponse sont transmis comme références au modèle Tomverse qui répond, et vous pouvez les consulter, modifier, désactiver ou supprimer à tout moment.",
+        disabledNotice: "La modification et l'ajout de souvenirs ne sont pas disponibles pour le moment. Vous pouvez toujours consulter et supprimer les souvenirs déjà enregistrés.",
         settingsTitle: "Réglages d'utilisation de la mémoire",
-        masterToggleLabel:
-            "Utiliser les souvenirs approuvés dans les nouvelles discussions",
-        masterToggleDescription:
-            "Une fois désactivé, aucune discussion n'utilise de souvenirs. Les souvenirs enregistrés ne sont pas supprimés.",
+        masterToggleLabel: "Utiliser les souvenirs dans les nouvelles discussions",
+        masterToggleDescription: "Désactivée, aucune discussion n'utilise de souvenirs et les conversations importées n'en créent pas de nouveaux. Les souvenirs enregistrés ne sont pas supprimés.",
         styleToggleLabel: "Utiliser les souvenirs de style de réponse",
         styleToggleDescription:
             "Permet aux réponses de tenir compte des préférences de ton, de longueur et de structure déduites des conversations passées.",
         defaultModeLabel: "Valeur par défaut des nouvelles discussions",
         defaultModeOn: "Utiliser la mémoire",
         defaultModeOff: "Ne pas utiliser la mémoire",
-        reviewTitle: "Souvenirs en attente d'examen",
-        reviewDescription:
-            "Les candidats extraits ne sont utilisés dans les nouvelles discussions qu'après votre approbation. Les candidats sensibles et ceux nécessitant un examen individuel ne sont jamais inclus dans l'approbation groupée.",
-        reviewEmpty: "Aucun souvenir n'attend d'examen.",
-        bulkApprove: "Approuver tous les candidats non sensibles",
-        bulkResult:
-            "{approved} approuvé(s) · {skipped} nécessitent un examen individuel",
-        approve: "Approuver",
-        reject: "Refuser",
         edit: "Modifier",
         save: "Enregistrer",
         cancel: "Annuler",
-        needsIndividualReview: "Examen individuel requis",
         sensitiveBadge: "Sensible",
         pinnedBadge: "Épinglé",
         expires: "Expire : {date}",
-        conflictNotice:
-            "Un souvenir actif couvre déjà le même élément. Vous pouvez conserver le souvenir existant ou le remplacer par celui-ci.",
+        conflictNotice: "Ces souvenirs peuvent concerner le même sujet. Examinez-les et choisissez quoi conserver.",
         conflictReplace: "Remplacer le souvenir existant",
         activeTitle: "Souvenirs en usage",
         activeEmpty: "Aucun souvenir n'est encore en usage.",
@@ -1968,8 +1955,6 @@ export const fr = {
         unpin: "Désépingler",
         delete: "Supprimer",
         deleteArmed: "Appuyez encore pour supprimer",
-        editParkedNotice:
-            "Votre modification doit être réexaminée : le souvenir est retourné dans la file d'examen.",
         validationFailed:
             "Ce contenu ne peut pas être enregistré comme souvenir. Rédigez-le comme un énoncé factuel déclaratif, par exemple « L'utilisateur préfère des réponses concises ».",
         errorGeneric: "Un problème est survenu. Veuillez réessayer.",
@@ -2007,14 +1992,14 @@ export const fr = {
         deleteAllSubmit: "Supprimer tous les souvenirs",
         deleteAllDone: "Tous les souvenirs ont été supprimés.",
         status: {
-            candidate: "En attente d'examen",
+            candidate: "Ancien candidat · non utilisé",
             active: "En usage",
             rejected: "Refusé",
             superseded: "Remplacé",
             expired: "Expiré",
             suspended_by_source_lock: "Suspendu : source verrouillée",
             suspended_by_source_delete: "Suspendu : source supprimée",
-            manual_review_required: "Examen individuel requis",
+            manual_review_required: "Ancien candidat · non utilisé",
         },
         kind: {
             identity: "Identité",
@@ -2037,48 +2022,18 @@ export const fr = {
             citation_preference: "Préférence de citation",
             code_style: "Style de code",
         },
+        organisingNotice: "Création de souvenirs à partir de vos conversations importées en cours.",
+        organisingView: "Voir la progression",
+        restoreConflict: "Un souvenir sur le même sujet est déjà utilisé. Supprimez-le puis réessayez.",
+        importNotice: "À la fin de cette importation, Tomverse tire automatiquement des souvenirs des conversations importées, sans débit de crédits. Pour cela, leur contenu est envoyé à un fournisseur d'IA, et les contenus sensibles, comme les informations de santé, ne sont pas enregistrés comme souvenirs.",
+        importNoticeSettings: "Réglages de mémoire",
+        importNoticePrivacy: "Politique de confidentialité",
     },
     // Lancement de l'extraction (Release B, §11 confirmation préalable, §21).
     memoryExtraction: {
-        launchTitle: "Extraire des souvenirs des conversations importées",
-        launchDescription:
-            "Choisissez les conversations importées à analyser. Les candidats ne sont jamais utilisés dans les réponses tant que vous ne les avez pas examinés et approuvés.",
-        modelTitle: "Modèle utilisé pour l'extraction",
-        modelUnavailable: "Aucun modèle d'extraction n'est disponible actuellement.",
-        modelUnavailableDescription:
-            "Un modèle d'extraction n'est ouvert qu'après avoir réussi une évaluation de qualité. Vous pourrez alors le choisir ici.",
-        modelCredits: "{credits} crédits par lot",
-        conversationsTitle: "Choisir les conversations",
-        conversationsDescription:
-            "Seules les conversations sélectionnées sont utilisées. Elles sont traitées par lots selon leur taille, et les crédits se comptent par lot.",
-        conversationsEmpty: "Vous n'avez encore importé aucune conversation.",
-        conversationsEmptyCta: "Importer des conversations",
-        selectAllVisible: "Tout sélectionner ici",
-        clearSelection: "Effacer la sélection",
-        selectionSummary: "{count} sélectionnées · environ {size}",
-        selectionHidden: "{count} conversations sélectionnées ne figurent pas dans cette liste.",
-        selectionTooLarge: "Vous pouvez sélectionner jusqu'à {max} conversations à la fois.",
-        conversationMeta: "{messages} messages · {size}",
-        loadMore: "Afficher plus",
         estimate: "Voir les crédits nécessaires",
-        estimating: "Calcul en cours…",
-        estimateResult: "{chunks} lots · environ {credits} crédits",
-        estimateDescription:
-            "{conversations} conversations seront traitées en {chunks} lots. Le montant final est régularisé après l'exécution et ne dépasse jamais celui que vous avez confirmé.",
-        estimateStale: "La sélection a changé. Vérifiez à nouveau les crédits.",
         start: "Lancer l'extraction pour {credits} crédits",
         starting: "Démarrage…",
-        runInProgress: "Une extraction est déjà en cours.",
-        runInProgressOpen: "Voir la progression",
-        errorGeneric: "Une erreur est survenue. Veuillez réessayer.",
-        errorEstimateChanged:
-            "Les conversations sélectionnées ont changé, l'estimation ne correspond plus. Vérifiez-la avant de lancer.",
-        errorPairUnavailable: "Ce modèle n'est pas disponible actuellement.",
-        errorLocked:
-            "Une des conversations sélectionnées est verrouillée, l'extraction ne peut donc pas démarrer. Actualisez la liste et sélectionnez à nouveau.",
-        lockedRowHint: "Les conversations verrouillées ne peuvent pas servir à l'extraction.",
-        errorBudget:
-            "La capacité d'extraction est temporairement saturée. Réessayez sous peu.",
         runTitle: "Progression de l'extraction",
         runBack: "Retour aux réglages de mémoire",
         runNotFound: "Cette extraction est introuvable.",
@@ -2102,8 +2057,6 @@ export const fr = {
         cancel: "Annuler l'extraction",
         cancelArmed: "Appuyez à nouveau pour annuler",
         cancelling: "Annulation…",
-        recentRunsTitle: "Extractions récentes",
-        recentRunOpen: "Voir le détail",
         status: {
             pending: "En attente",
             running: "En cours",
@@ -2237,7 +2190,7 @@ export const fr = {
         externalImportTitle: "Conversations importées depuis d'autres services d'IA",
         externalImport: "Vous pouvez enregistrer dans votre compte Tomverse les conversations passées que vous sélectionnez dans un fichier d'export téléchargé depuis un autre service d'IA, tel que ChatGPT, Claude ou Gemini (Google Takeout). Le fichier d'export est ouvert uniquement dans votre navigateur ; l'archive d'origine n'est jamais transférée ni conservée sur les serveurs ou le stockage de Tomverse. Seuls le texte normalisé des conversations sélectionnées et les informations de provenance (service source, horodatages d'origine, noms de modèles à titre d'affichage) sont conservés comme données privées du compte. Les images, l'audio et les pièces jointes ne sont pas importés. Les conversations importées peuvent contenir des données personnelles de tiers ; il vous appartient donc de vérifier que vous êtes autorisé à les importer. Vous pouvez consulter, supprimer et exporter ces données à tout moment, et elles sont supprimées avec votre compte. Leur suppression sur Tomverse n'entraîne pas leur suppression chez le service d'origine.",
         memoryTitle: "Mémoire à long terme du compte",
-        memory: "Si vous choisissez d'utiliser la fonction de mémoire, Tomverse envoie les parties de vos conversations importées que vous sélectionnez au fournisseur d'IA que vous confirmez, afin d'en extraire des souvenirs candidats. L'extraction utilise le modèle et le montant de crédits qui vous sont indiqués avant son exécution. Les candidats extraits ne servent pas à générer des réponses tant que vous ne les avez pas examinés et approuvés. Les candidats classés comme sensibles et ceux nécessitant un examen individuel sont exclus de l'approbation groupée et doivent être confirmés un par un. Les candidats, les souvenirs approuvés et leurs justifications sont conservés dans votre compte jusqu'à ce que vous les supprimiez ou que les données de votre compte soient supprimées. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au fournisseur d'IA qui génère chaque nouvelle réponse, donc au fournisseur de chaque modèle lorsque vous en comparez plusieurs. Vous pouvez consulter, modifier et désactiver les souvenirs enregistrés à tout moment, télécharger la liste complète sous forme de fichier, ou tout supprimer en une fois. Si vous désactivez la mémoire, elle n'est plus utilisée dans les nouvelles discussions.",
+        memory: "Lorsque vous enregistrez des conversations importées dans votre compte Tomverse, Tomverse en tire automatiquement des souvenirs tant que la fonction de mémoire est activée. Pour cela, le contenu de ces conversations est envoyé à un fournisseur d'IA choisi par Tomverse, sans aucun débit de crédits. Les contenus sensibles, comme les informations de santé, ne sont pas enregistrés comme souvenirs ; seuls les contenus qui passent la validation sont enregistrés, et ils sont utilisés immédiatement. Sur un même sujet, ce que dit une conversation plus récente remplace le souvenir précédent. Les souvenirs et leurs justifications sont conservés dans votre compte jusqu'à ce que vous les supprimiez ou que les données de votre compte soient supprimées. Les souvenirs et les préférences de style de réponse sont transmis comme références au fournisseur d'IA qui génère chaque nouvelle réponse, donc au fournisseur de chaque modèle lorsque vous en comparez plusieurs. Vous pouvez consulter, modifier et supprimer les souvenirs enregistrés à tout moment, télécharger la liste complète sous forme de fichier, ou tout supprimer en une fois. Si vous désactivez la mémoire, elle n'est plus utilisée dans les nouvelles discussions et aucun nouveau souvenir n'est créé à partir des conversations importées.",
         assistantProfilesTitle: "Assistants IA personnalisés et fichiers de connaissances",
         assistantProfiles: "Si vous créez un assistant IA, Tomverse conserve le nom, la description, les instructions, le choix de modèle et les amorces de conversation que vous saisissez, ainsi que chaque révision publiée, afin qu'une conversation puisse indiquer celle avec laquelle elle s'est réellement déroulée. Les fichiers de connaissances que vous joignez sont conservés en privé pour votre compte ; Tomverse en extrait le texte, le découpe en passages et construit un index de recherche afin de retrouver les extraits pertinents. Lorsque vous discutez avec un assistant, ses instructions et les extraits correspondant à votre message sont transmis comme documentation de référence au fournisseur d'IA qui génère la réponse. Les extraits sont traités comme de la documentation de référence et jamais comme des instructions adressées à l'assistant. Les assistants sont privés : ils ne sont pas partagés, pas répertoriés publiquement et pas vendus. Supprimer un assistant supprime ses révisions et ses fichiers de connaissances, et les fichiers stockés sont effacés peu après ; les conversations qui l'ont utilisé restent lisibles dans votre compte. Désactiver un assistant ou le supprimer met fin à son utilisation dans les nouvelles conversations. Si vous créez un assistant en important un paquet, Tomverse conserve aussi ce que vous avez composé avant de le publier, la provenance déclarée par le paquet ou par vous, et le moment où vous l'avez confirmé. Tomverse n'ouvre jamais une adresse indiquée par un paquet. Un import que vous abandonnez expire de lui-même, et les fichiers préparés pour lui disparaissent avec.",
         emailTitle: "Les e-mails que nous vous envoyons",
@@ -2289,61 +2242,7 @@ export const fr = {
         providerSource: "Référence",
         back: "Retour à Tomverse",
     },
-    chatStarter: {
-        title: "Ce que vous pouvez faire ici",
-        hint: "Choisissez une carte pour remplir le champ ci-dessous. Rien n'est envoyé tant que vous n'appuyez pas sur envoyer.",
-        lockedSignIn: "Connectez-vous pour l'utiliser",
-        lockedPlan: "Nécessite le forfait {plan}",
-        lockedSignInShort: "Connexion requise",
-        lockedPlanShort: "{plan} requis",
-        cards: {
-            compareAnswers: {
-                label: "Comparez trois réponses côte à côte",
-                outcome: "Posez une question et lisez la réponse de trois modèles côte à côte",
-                seed: "Expliquez simplement à quoi sert une base de données vectorielle, en 200 mots environ.",
-            },
-            documentQuestions: {
-                label: "Interrogez plusieurs modèles sur un PDF",
-                outcome: "Joignez un PDF de 18 pages et posez la même question à plusieurs modèles",
-                seed: "J'ai joint un document. Résumez ce qu'il me demande de décider et listez toutes les échéances qu'il cite.",
-            },
-            sourcedAnswer: {
-                label: "Obtenez une réponse sourcée",
-                outcome: "Obtenez une réponse accompagnée des liens sources utilisés",
-                seed: "Qu'est-ce qui a changé cette année dans l'application du règlement européen sur l'IA ? Indiquez les sources utilisées.",
-            },
-            debugStackTrace: {
-                label: "Trouvez la ligne fautive d'une trace",
-                outcome: "Collez une trace d'erreur et obtenez la ligne fautive et un correctif à tester",
-                seed: "Voici une trace d'erreur de mon build. Dites-moi quelle ligne a échoué et quoi changer.",
-            },
-            spreadsheetFromAnswer: {
-                label: "Obtenez un fichier .xlsx",
-                outcome: "Transformez une réponse en fichier .xlsx téléchargeable",
-                seed: "Créez un budget mensuel avec catégorie, montant prévu et montant réel, puis enregistrez-le comme fichier tableur.",
-            },
-            readAScreenshot: {
-                label: "Comprenez l'erreur d'une capture",
-                outcome: "Joignez une capture d'écran et demandez ce que signifie l'erreur",
-                seed: "J'ai joint la capture d'une boîte de dialogue d'erreur. Dites-moi ce qu'elle signifie et quoi faire ensuite.",
-            },
-            translateAndCompare: {
-                label: "Comparez deux traductions",
-                outcome: "Traduisez un brouillon et comparez les versions de deux modèles",
-                seed: "Traduisez le texte ci-dessous en anglais en gardant un ton formel :",
-            },
-            compareImageModels: {
-                label: "Comparez des modèles d'image",
-                outcome: "Envoyez une phrase à plusieurs modèles d'image et comparez leurs rendus",
-                seed: "Une salle de lecture calme à l'aube, lumière chaude par de hautes fenêtres, style photographique.",
-            },
-            speakAQuestion: {
-                label: "Dictez une question, corrigez le texte",
-                outcome: "Dictez une longue question au lieu de la taper, et corrigez le texte avant l'envoi",
-                seed: "Transformez ce que je vais dire en une liste d'instructions courte et claire.",
-            },
-        },
-    },
+    chatStarter: workspaceWelcomeCopy.fr.starter,
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "Trouver comment faire",

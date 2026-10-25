@@ -214,6 +214,10 @@ const v4SecretPattern = (value: string): boolean =>
   /DATABASE_URL\s*=/.test(value) ||
   /(?:api[\s_-]*key|secret|password|token)\s*[:=]\s*\S{8,}/i.test(value);
 
+/** v19 checkout files have no text-size ceiling, so reuse only the v4
+ * credential detector, never the bounded idea-input validator. */
+export const amuxV4RepositoryContainsSecret = v4SecretPattern;
+
 const emailPattern = (value: string): boolean => /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value);
 
 const phonePattern = (value: string): boolean => /\b\d{3}[-. ]\d{3}[-. ]\d{4}\b/.test(value);

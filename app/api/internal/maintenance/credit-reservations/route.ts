@@ -13,6 +13,7 @@ export const maxDuration = 300;
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import { reconcileExpiredCodeTasks } from "@/lib/codeManagedService";
 import {
   databaseErrorMetadata,
   isRetryableDatabaseError,
@@ -39,6 +40,7 @@ import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactS
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
 import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
+import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -102,7 +104,13 @@ export async function POST(request: Request) {
     // failed one.
     const deepResearchSettlements =
       await reconcileUnsettledDeepResearchSettlementsQuietly();
+    const voiceConversations = await reconcileVoiceConversationsQuietly();
     const result = await reconcileCreditReservationsWithRetry();
+    // Code owns independent task/call leases and shares the same credit wallet.
+    const codeTasks = await reconcileExpiredCodeTasks().catch(() => {
+      console.warn(JSON.stringify({ event: "code_lease_sweep_deferred" }));
+      return { interrupted: 0, deferred: true };
+    });
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
@@ -224,6 +232,7 @@ export async function POST(request: Request) {
     const memoryExtractionDispatch =
       await dispatchPendingMemoryExtractionRuns().catch(() => ({
         reclaimedRuns: 0,
+        autoStartedRuns: 0,
         dispatchedRuns: 0,
         chunksProcessed: 0,
         skippedForTime: 0,
@@ -233,7 +242,9 @@ export async function POST(request: Request) {
       processedCount: result.examined,
       result: {
         ...result,
+        codeTasks,
         deepResearchSettlements,
+        voiceConversations,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
@@ -255,7 +266,9 @@ export async function POST(request: Request) {
       {
         success: true,
         result,
+        codeTasks,
         deepResearchSettlements,
+        voiceConversations,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,

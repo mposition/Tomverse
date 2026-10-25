@@ -7,7 +7,7 @@ import {
   type UserDayWindow,
 } from "@/lib/userTimeZone";
 
-const DAILY_USAGE_PERIODS = ["day", "tokens-day", "cost-day"] as const;
+const DAILY_USAGE_PERIODS = ["day", "tokens-day", "cost-day", "op-cost-day"] as const;
 let didWarnAboutTimeZoneSchema = false;
 
 export const getUserDayWindow = async (
@@ -37,6 +37,7 @@ export const getUserDayWindow = async (
   }
 };
 
+/** The settings transaction holds the account lock, then the usage-subject lock. */
 export const migrateCurrentDailyUsageBuckets = async (
   tx: Prisma.TransactionClient,
   input: {
@@ -96,6 +97,20 @@ export const migrateCurrentDailyUsageBuckets = async (
       },
     });
     movedPeriods += 1;
+  }
+
+  // A task's dayStart is its refundable bucket reference, not a pricing
+  // snapshot. Move it with that exact current bucket, including closed tasks
+  // that can still receive a late provider receipt. Historical days stay put.
+  // Settings also runs while the default-off Code schema is not deployed yet.
+  const [codeSchema] = await tx.$queryRaw<Array<{ exists: boolean }>>`
+    SELECT to_regclass('"CodeTaskReservation"') IS NOT NULL AS "exists"
+  `;
+  if (codeSchema.exists) {
+    await tx.$executeRaw`
+      UPDATE "CodeTaskReservation" SET "dayStart"=${nextWindow.start},"updatedAt"=${now}
+      WHERE "subjectKey"=${input.key} AND "dayStart"=${previousWindow.start} AND "userId" IS NOT NULL
+    `;
   }
 
   return { previousWindow, nextWindow, movedPeriods };

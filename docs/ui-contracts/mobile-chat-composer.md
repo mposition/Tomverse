@@ -52,9 +52,15 @@ size: a `4rem` minimum input row inside a normal-state card no taller than
 its normal-state card is no taller than `10.25rem`. These minima remain
 rem-scaled so browser text scaling preserves the complete visible lines.
 
+Classic Review keeps its Composer-local Easy/Professional selector in the
+existing product context row and its model picker in the tools row. It must
+preserve the density budgets above and the answer canvas. Studio uses the
+segmented mode selector above the prompt in its separate Composer panel.
+
 The normal compact context row keeps canonical Chat/Review navigation and its
 mode control outside the input: Smart Adaptive ON/OFF for Chat when offered,
-or the real selected-model count and existing picker action for Review. When
+or the Easy/Professional selector for Review, with the real selected-model
+count and existing picker action in its tools row. When
 the measured visible viewport reports the on-screen keyboard or landscape
 compaction, that context row may fold; the footer model picker and the picker's
 Smart Adaptive switch remain the accessible return path. In that folded state,
@@ -65,7 +71,7 @@ the base input card is no taller than `7.5rem` before exceptional status rows.
 The mobile composer must preserve this vertical structure:
 
 1. Optional compact context row: product navigation plus Smart Adaptive or
-   Review's selected-model count
+   Review's Easy/Professional selector
 2. Optional exception/status rows
 3. Dedicated full-width textarea row
 4. Tools/model and credit/submit groups
@@ -76,7 +82,7 @@ Optional rows may be compacted or conditionally hidden. The textarea row may not
 The normal mobile state keeps its compact context row at supported portrait
 heights, including a 680px viewport. Keyboard-open and landscape compaction may
 fold that row as described above; a merely shorter portrait viewport does not.
-Review discloses the actual selected count in the compact context action rather
+Review discloses the actual selected count in its compact tools action rather
 than repeating every model chip above the textarea. The shell's model strip
 continues to identify each selected model, and the same canonical picker owns
 selection changes.
@@ -90,15 +96,21 @@ As implemented, that is:
 [composer-textarea-row]       ← always; the textarea alone, width: 100%
 [actions row]                 ← tools/model/search left; credit, voice and send right
 [chat-ai-disclaimer-mobile]   ← always; AI + sensitive-data notice with "details"
+[composer-consent-slot]       ← optional analytics consent notice
 ```
+
+The bottom dock reserves the bottom safe-area inset once, after the last visible
+footer row. Neither the composer bar nor the disclaimer reserves it again, so
+the optional analytics notice stays inside the dock's safe area.
 
 ## Non-negotiable invariants
 
 - The textarea owns a dedicated row.
-- Product navigation and the Chat mode or Review model-count action share one
+- Product navigation and the Chat mode or Review Easy/Professional action share one
   compact context row outside the textarea. They may only open the existing
   canonical navigation, mode or model-picker paths; none may write a product or
-  model selection directly.
+  model selection directly. Review's model count and canonical picker live in
+  the tools row.
 - The empty textarea provides at least one complete visible line.
 - The textarea uses the available inner width of the composer.
 - A status chip may not reduce the textarea to remaining horizontal space.
@@ -246,7 +258,12 @@ Requirements:
 - Tool-state details must remain available through `aria-label`, `aria-describedby`, or an accessible disclosure.
 - Disabled actions must expose their specific reason (not through `title` alone).
 - Focus indicators must remain visible and must not be clipped by the composer's `overflow-hidden`.
-  The textarea opts out of the global outline (`data-focus-ring="container"`) and the composer draws an outline inside its own border for it instead: the textarea's outline was drawn outside it and cut off by the rounded corners whenever the input was the composer's first row (COMPOSER-FOCUS-CLIP-01). It is an outline, not a box-shadow ring, because forced-colors mode removes box-shadow. `tests/e2e/mobile-composer-contract.spec.ts` checks that a visible outline exists on focus, including under forced colors, and that its rectangle lies inside each clipping ancestor, corners included; it measures geometry, not contrast.
+  The textarea opts out of the global outline (`data-focus-ring="container"`).
+  Its prompt surface draws a neutral underline inset from the rounded corners
+  (COMPOSER-FOCUS-CLIP-01), rather than a blue outline around the entire composer.
+  The underline uses a border, including CanvasText in forced colors, so it
+  remains visible when box shadows are removed. The focus regression measures
+  its painted bounds against every clipping ancestor, including rounded corners.
 - Interactive targets must be at least 44×44px.
 - Status updates must not repeatedly interrupt typing through an excessively noisy live region.
 - Quick-comparison and AI cross-review must each carry their own `aria-describedby`, so two different credit costs are never described by one shared sentence.

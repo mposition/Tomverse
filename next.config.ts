@@ -70,7 +70,7 @@ const nextConfig: NextConfig = {
   // That is the point: a package with its own build step would need its own
   // target decisions, and the first thing to diverge would be exactly the
   // chat behaviour these packages exist to keep identical.
-  transpilePackages: ["@tomverse/chat-core"],
+  transpilePackages: ["@tomverse/chat-core", "@tomverse/chat-ui", "@tomverse/api-client"],
   experimental: {
     sri: {
       algorithm: "sha384",
@@ -78,6 +78,7 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      { source: "/chat-sw.js", headers: [{ key: "Cache-Control", value: "no-store" }, { key: "Service-Worker-Allowed", value: "/" }] },
       {
         source: "/:path*",
         headers: securityHeaders,

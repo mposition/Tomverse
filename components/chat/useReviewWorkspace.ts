@@ -14,6 +14,7 @@ export type ReviewWorkspaceControls = {
   mode: ReviewMode;
   setMode: (value: ReviewMode) => void;
   providers: string[];
+  providersConfigured?: boolean;
   setProviders: (value: string[]) => void;
   maxProviders: number;
   easyAvailable: boolean;
@@ -23,6 +24,7 @@ export type ReviewWorkspaceControls = {
   unsupportedProviders: string[];
   imageRequest: boolean;
   imagePromptMode: boolean;
+  imageModelLabel?: string;
   setImagePromptMode: (value: boolean) => void;
 };
 
@@ -44,7 +46,11 @@ export function useReviewWorkspace(identityKey: string | null, easyAvailable: bo
     catch { /* The current browser may disable persistence. */ }
     window.dispatchEvent(new Event(PREFERENCES_CHANGED));
   }, [identityKey]);
-  const [providers, setProviders] = useState<string[]>([]);
+  const [providerSelection, setProviderSelection] = useState<{ identityKey: string | null; values: string[] } | null>(null);
+  const providersConfigured = providerSelection !== null && providerSelection.identityKey === identityKey;
+  const providers = providersConfigured ? providerSelection.values : [];
+  const setProviders = useCallback((values: string[]) => setProviderSelection({ identityKey, values }), [identityKey]);
+  const clearProviders = useCallback(() => setProviderSelection(null), []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unsupportedProviders, setUnsupportedProviders] = useState<string[]>([]);
@@ -55,14 +61,14 @@ export function useReviewWorkspace(identityKey: string | null, easyAvailable: bo
     let cancelled = false;
     queueMicrotask(() => {
     if (cancelled) return;
-    setProviders([]);
+    setProviderSelection(null);
     setError(null);
     setUnsupportedProviders([]);
     setImageRequest(false);
     });
     return () => { cancelled = true; };
   }, [identityKey]);
-  return { appearance, setAppearance, mode, setMode, providers, setProviders,
+  return { appearance, setAppearance, mode, setMode, providers, providersConfigured, setProviders, clearProviders,
     pending, setPending, error, setError, unsupportedProviders, setUnsupportedProviders,
     imageRequest, setImageRequest, imagePromptMode, setImagePromptMode };
 }

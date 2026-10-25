@@ -14,12 +14,20 @@ import { promisify } from "node:util";
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint } from "./qaReleaseDigestEndpointCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
-import { QA_RELEASE_TRAIN_BRANCH_PREFIX, QA_RELEASE_TRAIN_LABEL, type QaReleaseTrainCandidate, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
+import { QA_RELEASE_TRAIN_CANDIDATE_DAYS } from "./qaReleaseTrainCargoCore.ts";
+import {
+  QA_RELEASE_TRAIN_BRANCH_PREFIX,
+  QA_RELEASE_TRAIN_MAX_PREDECESSORS,
+  qaReleaseTrainMergedPullNumber,
+  type QaReleaseTrainCandidate,
+  type QaReleaseTrainPick,
+} from "./qaReleaseTrainCore.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
 
 const REPOSITORY = "mposition/Tomverse";
 const API = `https://api.github.com/repos/${REPOSITORY}`;
 const SHA = /^[0-9a-f]{40}$/;
+const PULL_READS_AT_ONCE = 8;
 const run = promisify(execFile);
 
 type Json = Record<string, unknown>;
@@ -43,6 +51,16 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
     });
     return { status: response.status, json: () => JSON.parse(response.text) as unknown };
   };
+  // The pull request itself is the authority on whether it was merged into
+  // develop; one that was not is left out.
+  const readCargo = async (number: number): Promise<QaReleaseTrainCandidate | null> => {
+    const pull = await request("GET", `${API}/pulls/${number}`);
+    if (pull.status === 404) return null;
+    if (pull.status !== 200) throw new Error(`github_${pull.status}`);
+    const data = record(pull.json());
+    if (record(data.base).ref !== "develop" || typeof data.merged_at !== "string" || typeof data.merge_commit_sha !== "string") return null;
+    return { number, title: String(data.title ?? ""), mergeCommitSha: data.merge_commit_sha, mergedAt: data.merged_at };
+  };
   return {
     async branchExists(branch) {
       const answer = await request("GET", `${API}/git/ref/heads/${branch}`);
@@ -57,25 +75,12 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
       if (!Array.isArray(list)) throw new Error("github_shape");
       return list.filter((pull) => String(record(record(pull).head).ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX)).length;
     },
-    async labelledCargo() {
-      const q = encodeURIComponent(`repo:${REPOSITORY} is:pr is:merged base:develop label:"${QA_RELEASE_TRAIN_LABEL}"`);
-      const search = await request("GET", `https://api.github.com/search/issues?q=${q}&per_page=100`);
-      if (search.status !== 200) throw new Error(`github_${search.status}`);
-      const items = record(search.json()).items;
-      if (!Array.isArray(items)) throw new Error("github_shape");
+    async cargo(numbers) {
+      const ordered = [...new Set(numbers)];
       const cargo: QaReleaseTrainCandidate[] = [];
-      for (const item of items.slice(0, 100)) {
-        const number = record(item).number;
-        if (typeof number !== "number") continue;
-        const pull = await request("GET", `${API}/pulls/${number}`);
-        if (pull.status !== 200) throw new Error(`github_${pull.status}`);
-        const data = record(pull.json());
-        // The search index can lag: the pull request itself is the authority,
-        // its label included -- removing the label takes a pull request off.
-        const labels = Array.isArray(data.labels) ? data.labels.map((label) => record(label).name) : [];
-        if (!labels.includes(QA_RELEASE_TRAIN_LABEL)) continue;
-        if (record(data.base).ref !== "develop" || typeof data.merged_at !== "string" || typeof data.merge_commit_sha !== "string") continue;
-        cargo.push({ number, title: String(data.title ?? ""), mergeCommitSha: data.merge_commit_sha, mergedAt: data.merged_at });
+      for (let index = 0; index < ordered.length; index += PULL_READS_AT_ONCE) {
+        const batch = await Promise.all(ordered.slice(index, index + PULL_READS_AT_ONCE).map((number) => readCargo(number)));
+        for (const candidate of batch) if (candidate) cargo.push(candidate);
       }
       return cargo;
     },
@@ -104,10 +109,22 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.extraEnv },
       });
       return { ok: true, stdout: stdout.trim() };
-    } catch {
+    } catch (error) {
+      // No git binary at all is a deployment problem, not a repository one.
+      if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") throw new Error("git_missing");
       if (options.allowFail) return { ok: false, stdout: "" };
-      throw new Error("git_failed");
+      throw new Error(`git_${args[0] === "clone" ? "clone" : args[0] === "push" ? "push" : "failed"}`);
     }
+  };
+  // Develop pull requests merged before this one, within the Admin window, that
+  // changed a file the pick conflicted on: what main most likely lacks. The
+  // fetch of the merge commit brought develop's history; a failed read names none.
+  const predecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<number[]> => {
+    if (files.length === 0) return [];
+    const since = new Date(Date.parse(pull.mergedAt) - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const log = await git(["log", "--first-parent", `--since=${since}`, "--format=%s", `${pull.mergeCommitSha}^1`, "--", ...files], { allowFail: true });
+    const numbers = log.stdout.split("\n").map(qaReleaseTrainMergedPullNumber).filter((n): n is number => n !== null && n !== pull.number);
+    return [...new Set(numbers)].slice(0, QA_RELEASE_TRAIN_MAX_PREDECESSORS);
   };
   return {
     async assemble(branch, cargo, capacity) {
@@ -133,6 +150,15 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
         const before = (await git(["rev-parse", "HEAD"])).stdout;
         const picked = await git(["cherry-pick", "-m", "1", pull.mergeCommitSha], { allowFail: true });
         if (picked.ok && (await git(["rev-parse", "HEAD"])).stdout !== before) {
+          // The App has no workflows permission, and GitHub refuses a push that
+          // adds or changes a workflow file without it: the whole train would
+          // fail. Such a pull request comes back off and is released alone.
+          const touched = (await git(["diff", "--name-only", before, "HEAD"])).stdout.split("\n");
+          if (touched.some((file) => file.startsWith(".github/workflows/"))) {
+            await git(["reset", "--quiet", "--hard", before]);
+            picks.push({ number: pull.number, outcome: "changes_workflows" });
+            continue;
+          }
           picks.push({ number: pull.number, outcome: "included" });
           continue;
         }
@@ -144,7 +170,8 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
           picks.push({ number: pull.number, outcome: "already_in_main" });
         } else {
           await git(["cherry-pick", "--abort"]);
-          picks.push({ number: pull.number, outcome: "conflict" });
+          const conflicted = unmerged.split("\n").filter((file) => file !== "");
+          picks.push({ number: pull.number, outcome: "conflict", predecessors: await predecessors(pull, conflicted) });
         }
       }
       const headSha = (await git(["rev-parse", "HEAD"])).stdout;
@@ -191,6 +218,12 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
     return { status: response.status, body: record(JSON.parse(response.text)) };
   };
   return {
+    async selection() {
+      const answer = await call({ phase: "selection" });
+      const numbers = answer.status === 200 ? answer.body.numbers : null;
+      if (!Array.isArray(numbers) || !numbers.every((n) => Number.isInteger(n) && n > 0)) throw new Error("app_selection_shape");
+      return numbers as number[];
+    },
     async admit(slot) {
       const answer = await call({ phase: "admit", slot });
       return answer.status === 200 && answer.body.admitted === true

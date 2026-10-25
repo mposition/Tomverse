@@ -114,7 +114,7 @@ const seedUser = async () => {
   await prisma.userMemorySettings.create({ data: { userId, masterEnabled: true } });
 
   const conversation = await prisma.conversation.create({
-    data: { selectedModels: '["gpt-6-luna"]', userId, title: "Kept", kind: "chat" },
+    data: { selectedModels: '["gpt-6-luna"]', userId, title: "Kept", kind: "chat", productKey: "chat" },
   });
   await prisma.message.create({
     data: {
@@ -126,6 +126,27 @@ const seedUser = async () => {
   });
 
   await prisma.conversationProject.create({ data: { userId, name: "Project" } });
+  await prisma.autoRouterDecision.create({
+    data: {
+      userId,
+      conversationId: conversation.id,
+      version: "auto-llm-router-v1",
+      traceId: sentinel("autoRouterDecision-trace"),
+      routerInput: "The user's Auto question",
+      routerContext: "The earlier answer Auto read",
+      rewrite: "The restatement used to answer",
+      sessionTopic: "The conversation's topic",
+      routerSession: { topic: sentinel("autoRouterDecision-session") },
+      candidates: [{ id: sentinel("autoRouterDecision-candidate") }],
+      taskKind: "general",
+      ruleModelId: sentinel("autoRouterDecision-rule"),
+      routerModelId: sentinel("autoRouterDecision-router"),
+      pickedModelId: "gpt-6-luna",
+      reason: sentinel("autoRouterDecision-reason"),
+      outcome: "picked",
+      latencyMs: 10,
+    },
+  });
   await prisma.memoryItem.create({
     data: {
       userId,
@@ -783,6 +804,18 @@ test("the export still contains the data the user is owed", async () => {
   assert.equal(result.data.active_sessions?.length, 1);
   assert.equal(result.data.payments?.length, 1);
   assert.equal(result.data.chat_credit_usage?.length, 1);
+  const conversations = result.data.conversations as Array<{ id: string; productKey: string }>;
+  const choices = result.data.auto_model_choices as Array<Record<string, unknown>>;
+  assert.equal(conversations[0].productKey, "chat");
+  assert.deepEqual(choices, [{
+    conversationId: conversations[0].id,
+    routerInput: "The user's Auto question",
+    routerContext: "The earlier answer Auto read",
+    rewrite: "The restatement used to answer",
+    sessionTopic: "The conversation's topic",
+    pickedModelId: "gpt-6-luna",
+    createdAt: choices[0].createdAt,
+  }]);
   assert.equal(result.data.data_export_history?.length, 1);
   assert.ok(serialised.includes("a picture the user asked for"));
   assert.ok(serialised.includes("an imported message the user receives"));

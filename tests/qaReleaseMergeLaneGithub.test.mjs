@@ -110,6 +110,27 @@ test("open develop pull requests come back in the merge train's rollup shape", a
   assert.match(JSON.parse(calls[0].body).query, /baseRefName: "develop"/);
 });
 
+test("a check re-run on the same head counts only its newest run (#2878: cancelled then skipped)", async () => {
+  const rust = (conclusion, startedAt) => ({
+    __typename: "CheckRun",
+    name: "Build and test the Rust workspace",
+    status: "COMPLETED",
+    conclusion,
+    startedAt,
+    checkSuite: { workflowRun: { workflow: { name: "Orchestrator Rust" } } },
+  });
+  const pr = graphqlPull();
+  pr.commits.nodes[0].commit.statusCheckRollup.contexts.nodes.push(rust("CANCELLED", "2026-10-21T11:29:32Z"), rust("SKIPPED", "2026-10-21T11:29:34Z"));
+  const { github } = ports([
+    [is("POST", `${API}/graphql`), json(200, { data: { repository: { pullRequests: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [pr] } } } })],
+  ]);
+  const [pull] = await github.listOpenDevelopPulls();
+  assert.deepEqual(
+    pull.statusCheckRollup.filter((c) => c.name === "Build and test the Rust workspace").map((c) => c.conclusion),
+    ["SKIPPED"],
+  );
+});
+
 test("a rollup past one page is a failing context, and an unbounded list or a GraphQL error is an error", async () => {
   const paged = graphqlPull();
   paged.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasNextPage = true;
@@ -203,7 +224,7 @@ test("exclusion inputs: every changed file to the last page, migration text at t
     { path: "lib/b.ts", previousPath: "lib/old.ts" },
   ]);
   assert.ok(input.policyTestPaths.includes("tests/autoPrAutoMergeArming.test.mjs"));
-  assert.ok(input.agentOwnPatterns.includes("lib/qaRelease*"));
+  assert.ok(input.agentOwnPatterns.includes("lib/qaReleaseMergeLane*"));
   assert.equal(calls.find((call) => call.url.includes("/contents/")).headers.accept, "application/vnd.github.raw+json");
 
   // Read once per round, however many candidates.

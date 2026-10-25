@@ -84,6 +84,8 @@ export type UseVoiceRecorderOptions = {
   identityKey?: string | null;
   /** Where to POST the clip. Injected so a test can point it elsewhere. */
   endpoint?: string;
+  /** Transport port for the locally bundled native app. */
+  fetchImpl?: typeof fetch;
   /**
    * Obtains a Turnstile token when the endpoint asks a guest to verify.
    *
@@ -181,6 +183,8 @@ export function useVoiceRecorder(
     later render must not force the adapter to be rebuilt mid-recording.
   */
   const requestVerificationTokenRef = useRef(options.requestVerificationToken);
+  const fetchRef = useRef(options.fetchImpl);
+  useEffect(() => { fetchRef.current = options.fetchImpl; }, [options.fetchImpl]);
 
   // The latest-callback pattern, in an effect rather than the render body: the
   // callback is only read from an async continuation, which by definition runs
@@ -291,7 +295,7 @@ export function useVoiceRecorder(
             new Blob(parts as BlobPart[], { type: mediaType }) as unknown as {
               size: number;
             } & BodyInit,
-          fetchImpl: (input, init) => fetch(input, init),
+          fetchImpl: (input, init) => (fetchRef.current ?? fetch)(input, init),
           now: () => Date.now(),
           setInterval: (handler, ms) => window.setInterval(handler, ms),
           clearInterval: (handle) => window.clearInterval(handle as number),

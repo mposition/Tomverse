@@ -205,9 +205,7 @@ async function readRouting(now: Date): Promise<AgentOfficeRoutingState> {
     const [last, monthCycles, promoted] = await Promise.all([
       prisma.autoRouterOptimizerCycle.findFirst({
         orderBy: { createdAt: "desc" },
-        // main has no `target` column yet (it arrives with the rewrite cycle,
-        // #2812), and every cycle on main is a routing one.
-        select: { status: true, failure: true, createdAt: true, finishedAt: true },
+        select: { target: true, status: true, failure: true, createdAt: true, finishedAt: true },
       }),
       prisma.autoRouterOptimizerCycle.findMany({
         where: { createdAt: { gte: agentOfficeRoutingMonthStart(now) } },
@@ -219,12 +217,7 @@ async function readRouting(now: Date): Promise<AgentOfficeRoutingState> {
         select: { promotedAt: true },
       }),
     ]);
-    return agentOfficeRoutingState({
-      last: last ? { ...last, target: "routing" } : null,
-      monthCycles,
-      lastPromotedAt: promoted?.promotedAt ?? null,
-      now,
-    });
+    return agentOfficeRoutingState({ last, monthCycles, lastPromotedAt: promoted?.promotedAt ?? null, now });
   } catch {
     console.warn({ event: "admin_agent_office_read_failed", read: "auto_router_optimizer" });
     return { kind: "unread" };

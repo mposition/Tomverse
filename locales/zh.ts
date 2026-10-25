@@ -1,3 +1,4 @@
+import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -182,9 +183,6 @@ export const zh = {
         imageGenerationBackToChat: "返回聊天",
         toolsImageGeneration: "图像生成",
         toolsImageGenerationDescription: "比较多个模型生成的图像",
-        imageIntentSuggestionTitle: "要用图像生成来制作吗？",
-        imageIntentSuggestionAccept: "打开图像生成",
-        imageIntentSuggestionDismiss: "暂不",
         imageGenerationModelLabel: "模型",
         imageGenerationModelCount: "{count} 个模型",
         // Catalogue image tab (policy v2 section 13)
@@ -249,6 +247,7 @@ export const zh = {
         imageGenerationErrorBudget: "图像生成暂时不可用，请稍后重试。",
         imageGenerationErrorConflict: "预留期间积分余额发生变化，请重试。",
         imageGenerationErrorGeneric: "无法开始图像生成，请重试。",
+        imageGenerationErrorPriceChanged: "此页面加载后价格已变更，未扣除任何额度。请刷新以查看当前价格。",
         imageGenerationRestoreExcluded: "{models} 当前不可用，已从恢复的选择中移除。",
         imageGenerationSelectionCount: "{count}/{max} 个模型",
         imageGenerationModelLimitNotice: "一次最多可比较 {max} 个模型。请先取消选择一个模型，再选择其他模型。",
@@ -266,7 +265,7 @@ export const zh = {
         guestVerificationTimeout: "确认超时，请重试。",
         guestVerificationExpired: "确认在使用前已过期，请重试。",
         welcome: "你好！我能帮你做些什么？",
-        welcomeBack: "欢迎回来，有什么可以帮你的？",
+        welcomeBack: workspaceWelcomeCopy.zh.greeting,
         guestWelcome: "你好！你当前正在使用访客模式。请输入你的问题。",
         inputPlaceholder: "我能帮你做些什么？",
         aiDisclaimer: "AI 回答可能存在错误，请核实重要信息。你的提示词和附件内容可能会发送给所选 AI 提供商以生成回复——请避免输入不必要的敏感信息。",
@@ -299,6 +298,9 @@ export const zh = {
         deepResearchWritingStatus: "正在撰写报告…",
         deepResearchTakingLonger: "耗时比平时更长。深度研究报告可能需要几分钟才能完成。",
         responseGenerating: "正在生成回复。",
+        imageTurnGenerating: "正在生成图片…",
+        imageTurnFailed: "图片生成失败，请重试。",
+        imageTurnRetry: "重试",
         responseComplete: "回复已完成。",
         responseIncomplete: "回复因输出长度上限而中断。",
         responseIncompleteNotice: "回复因输出长度上限而中断。你可以通过追问继续。",
@@ -598,8 +600,6 @@ export const zh = {
         artifactDownloadFailed: "文件下载失败，请重试。",
         artifactDownloadLocked: "请先解锁此对话再下载文件。",
         searchCitationsLabel: "来源",
-        answerContextLabel: "回答上下文",
-        answerContextMemory: "账户记忆 {count} 条",
         answerContextKnowledge: "档案知识摘录 {count} 条",
         modelsSelectedOne: "个模型",
         modelsSelectedOther: "个模型",
@@ -1896,6 +1896,11 @@ export const zh = {
         dataTabOpen: "打开 AI 配置",
     },
     memoryReview: {
+        restoreGrounds: "添加新依据",
+        restoreGroundsNotice: "以您写下的依据重新使用这条记忆。",
+
+        reportAnswer: "报告此回答的问题",
+
         sourceDeleteDerivedImport: "由此次导入生成的 {count} 条记忆也会一并删除。",
         sourceDeleteDerivedConversation: "由此对话生成的 {count} 条记忆也会一并删除。",
         sourceDeleteKeep: "保留记忆，仅停止使用",
@@ -1905,47 +1910,31 @@ export const zh = {
         sourceLockBacked: "另有依据支持的 {count} 条记忆将继续使用。",
         sourceLockRestoreNote: "解除锁定后，因这个对话而停用的记忆会重新启用。",
         dataTabTitle: "账户长期记忆",
-        dataTabDescription:
-            "审核从导入对话中提取的记忆候选，并设置已批准的记忆是否用于新对话。",
+        dataTabDescription: "查看从导入对话中自动整理的记忆和您亲自添加的记忆，并设置新对话是否使用它们。",
         dataTabOpen: "管理记忆",
         dataTabStatusOn: "在新对话中使用",
         dataTabStatusOff: "不在新对话中使用",
-        dataTabStatusPending: "{count} 条待审核",
         pageTitle: "账户长期记忆",
-        pageDescription:
-            "批准或拒绝等待审核的记忆候选，并可编辑、置顶或删除正在使用的记忆。",
+        pageDescription: "您可以修改、固定或删除从导入对话中自动整理的记忆和您亲自添加的记忆。",
         signInRequired: "登录后即可管理账户长期记忆。",
-        privacyNote:
-            "只有经您审核并批准的记忆才会用于新对话。已批准的记忆和回答风格偏好会作为参考资料传递给您当前选择的 Tomverse 模型，您可以随时查看、修改、停用或删除它们。",
-        disabledNotice:
-            "记忆审核和创建功能目前不可用。已保存的记忆仍可查看和删除。",
+        privacyNote: "完成导入后，Tomverse 会通过 AI 提供方自动从中整理记忆，不扣除额度。健康信息等敏感内容不会保存为记忆。使用中的记忆和回答风格会作为参考资料传给生成回答的 Tomverse 模型，您可以随时查看、修改、停用或删除。",
+        disabledNotice: "目前无法修改或添加记忆。已保存的记忆仍可查看和删除。",
         settingsTitle: "记忆使用设置",
-        masterToggleLabel: "在新对话中使用已批准的记忆",
-        masterToggleDescription:
-            "关闭后所有对话都不会使用记忆。已保存的记忆不会被删除。",
+        masterToggleLabel: "在新对话中使用记忆",
+        masterToggleDescription: "关闭后，所有对话都不使用记忆，导入的对话也不会生成新的记忆。已保存的记忆不会被删除。",
         styleToggleLabel: "使用回答风格记忆",
         styleToggleDescription:
             "让回答参考从过去对话中推断的语气、长度和结构偏好。",
         defaultModeLabel: "新对话默认值",
         defaultModeOn: "使用记忆",
         defaultModeOff: "不使用记忆",
-        reviewTitle: "等待审核的记忆",
-        reviewDescription:
-            "提取的候选需要您批准后才会用于新对话。敏感候选和需要单独审核的候选不会包含在批量批准中。",
-        reviewEmpty: "没有等待审核的记忆。",
-        bulkApprove: "批量批准非敏感候选",
-        bulkResult: "已批准 {approved} 条 · {skipped} 条需单独审核",
-        approve: "批准",
-        reject: "拒绝",
         edit: "编辑",
         save: "保存",
         cancel: "取消",
-        needsIndividualReview: "需单独审核",
         sensitiveBadge: "敏感",
         pinnedBadge: "已置顶",
         expires: "到期：{date}",
-        conflictNotice:
-            "已有一条使用中的记忆涵盖相同项目。您可以保留现有记忆，或用这条内容替换它。",
+        conflictNotice: "这些记忆可能涉及同一主题。请检查并选择如何保留。",
         conflictReplace: "替换现有记忆",
         activeTitle: "使用中的记忆",
         activeEmpty: "还没有使用中的记忆。",
@@ -1954,7 +1943,6 @@ export const zh = {
         unpin: "取消置顶",
         delete: "删除",
         deleteArmed: "再按一次即删除",
-        editParkedNotice: "修改后的内容需要重新审核，已移回等待审核列表。",
         validationFailed:
             "此内容无法保存为记忆。请写成描述事实的陈述句，例如“用户偏好简洁的回答”。",
         errorGeneric: "出现问题，请重试。",
@@ -1990,14 +1978,14 @@ export const zh = {
         deleteAllSubmit: "删除全部记忆",
         deleteAllDone: "所有记忆已删除。",
         status: {
-            candidate: "等待审核",
+            candidate: "早期候选 · 未使用",
             active: "使用中",
             rejected: "已拒绝",
             superseded: "已替换",
             expired: "已过期",
             suspended_by_source_lock: "因来源锁定而暂停",
             suspended_by_source_delete: "因来源删除而暂停",
-            manual_review_required: "需单独审核",
+            manual_review_required: "早期候选 · 未使用",
         },
         kind: {
             identity: "身份",
@@ -2020,47 +2008,18 @@ export const zh = {
             citation_preference: "引用偏好",
             code_style: "代码风格",
         },
+        organisingNotice: "正在从导入的对话中整理记忆。",
+        organisingView: "查看进度",
+        restoreConflict: "同一主题的记忆已在使用中。请先删除它再重试。",
+        importNotice: "完成导入后，Tomverse 会自动从导入的对话中整理记忆，不扣除额度。为此，对话内容会发送给 AI 提供方，健康信息等敏感内容不会保存为记忆。",
+        importNoticeSettings: "记忆设置",
+        importNoticePrivacy: "隐私政策",
     },
     // 记忆提取执行（Release B，§11 运行前确认，§21）。
     memoryExtraction: {
-        launchTitle: "从导入的对话中提取记忆",
-        launchDescription:
-            "选择导入的对话来提取记忆候选。候选在你审核并批准之前，不会用于任何回答。",
-        modelTitle: "用于提取的模型",
-        modelUnavailable: "目前没有可用的提取模型。",
-        modelUnavailableDescription:
-            "提取模型只有通过质量评估后才会开放。开放后你可以在这里选择。",
-        modelCredits: "每批 {credits} 积分",
-        conversationsTitle: "选择对话",
-        conversationsDescription:
-            "只有你选择的对话会被使用。对话会按内容大小分批处理，积分按批数计算。",
-        conversationsEmpty: "你还没有导入任何对话。",
-        conversationsEmptyCta: "导入对话",
-        selectAllVisible: "选择显示的全部",
-        clearSelection: "取消选择",
-        selectionSummary: "已选 {count} 个 · 约 {size}",
-        selectionHidden: "已选的 {count} 个对话未显示在此列表中。",
-        selectionTooLarge: "一次最多可选择 {max} 个对话。",
-        conversationMeta: "{messages} 条消息 · {size}",
-        loadMore: "显示更多",
         estimate: "查看所需积分",
-        estimating: "计算中…",
-        estimateResult: "{chunks} 批 · 约 {credits} 积分",
-        estimateDescription:
-            "{conversations} 个对话将分为 {chunks} 批处理。实际扣费在运行后结算，不会超过你确认的金额。",
-        estimateStale: "选择已更改，请重新查看积分。",
         start: "以 {credits} 积分开始提取",
         starting: "正在开始…",
-        runInProgress: "已有正在进行的提取。",
-        runInProgressOpen: "查看进度",
-        errorGeneric: "出现问题，请重试。",
-        errorEstimateChanged:
-            "所选对话已更改，估算不再匹配。请重新确认后再开始。",
-        errorPairUnavailable: "该模型目前不可用。",
-        errorLocked:
-            "所选对话中有已锁定的对话，无法开始提取。请刷新列表后重新选择。",
-        lockedRowHint: "已锁定的对话不能用于提取。",
-        errorBudget: "提取容量暂时已满，请稍后再试。",
         runTitle: "提取进度",
         runBack: "返回记忆设置",
         runNotFound: "找不到该提取任务。",
@@ -2081,8 +2040,6 @@ export const zh = {
         cancel: "取消提取",
         cancelArmed: "再按一次即取消",
         cancelling: "正在取消…",
-        recentRunsTitle: "最近的提取",
-        recentRunOpen: "查看详情",
         status: {
             pending: "等待中",
             running: "进行中",
@@ -2216,7 +2173,7 @@ export const zh = {
         externalImportTitle: "从其他 AI 服务导入的对话",
         externalImport: "您可以将从 ChatGPT、Claude、Gemini（Google Takeout）等其他 AI 服务下载的导出文件中所选的历史对话保存到 Tomverse 账户。导出文件仅在您的浏览器中打开，原始压缩包不会上传或保存到 Tomverse 的服务器或存储中。仅保存您所选对话的规范化文本及来源信息（来源服务、原始时间、仅供显示的模型名称），图片、音频和附件不会被导入。导入的对话可能包含他人的个人信息，因此您有责任确认自己有权导入这些数据。您可以随时查看、删除和导出导入的资料，删除账户时这些资料也会一并删除。在 Tomverse 中删除并不会删除原服务中保存的数据。",
         memoryTitle: "账户长期记忆",
-        memory: "如果您选择使用记忆功能，Tomverse 会将您指定的导入对话内容发送给您确认的 AI 提供方，以提取记忆候选。提取会使用运行前向您显示的模型和额度。提取出的候选在您审核并批准之前不会用于生成回答。被归类为敏感的候选以及需要单独审核的候选不会包含在批量批准中，必须逐条确认。候选、已批准的记忆及其依据会保存在您的账户中，直到您删除它们或您的账户数据被删除。已批准的记忆和回答风格偏好会作为参考资料发送给生成该回答的 AI 提供方；在比较多个模型时，会分别发送给各模型的提供方。您可以随时查看、修改和停用已保存的记忆，将完整列表下载为文件，或一次性全部删除。关闭记忆后，新对话将不再使用记忆。",
+        memory: "当您把导入的对话保存到 Tomverse 账户后，只要记忆功能处于开启状态，Tomverse 会自动从这些对话中整理记忆。为此，这些对话的内容会发送给 Tomverse 选定的 AI 提供方，此处理不会扣除额度。健康信息等敏感内容不会保存为记忆；只有通过校验的内容才会保存为记忆并立即使用。对于同一主题，较新对话中的内容会取代之前的记忆。记忆及其依据会保存在您的账户中，直到您删除它们或您的账户数据被删除。记忆和回答风格偏好会作为参考资料发送给生成每个新回答的 AI 提供方；在比较多个模型时，会分别发送给各模型的提供方。您可以随时查看、修改和删除已保存的记忆，将完整列表下载为文件，或一次性全部删除。关闭记忆后，新对话将不再使用记忆，也不会再从导入的对话中生成新的记忆。",
         assistantProfilesTitle: "自定义 AI 配置与知识文件",
         assistantProfiles: "如果你创建 AI 配置，Tomverse 会保存你输入的名称、说明、指令、模型选择和对话开场白，并保留每一个已发布的修订，以便对话能显示它实际使用的是哪一个。你附加的知识文件仅为你的账户私密保存；Tomverse 会提取其文本、切分为段落并建立检索索引，以便找到相关摘录。当你使用某个配置对话时，它的指令以及与你的消息匹配的摘录会作为参考资料发送给生成回答的 AI 提供商。摘录始终作为参考资料处理，绝不作为对助手的指令。配置是私密的：不会与他人共享，不会公开列出，也不会出售。删除配置会一并删除其修订和知识文件，已保存的文件随后被清除；使用过该配置的对话仍保留在你的账户中可供阅读。关闭或删除配置后，它将不再用于新的对话。 如果你通过导入一个包来创建助手，Tomverse 还会保存你在发布前整理的内容、包或你自己声明的来源，以及你确认的时间。Tomverse 不会打开包里写的任何网址。你中断的导入会自行到期，为它暂存的文件也会随之消失。",
         emailTitle: "我们发送给您的邮件",
@@ -2268,61 +2225,7 @@ export const zh = {
         providerSource: "依据",
         back: "返回 Tomverse",
     },
-    chatStarter: {
-        title: "在这里可以做什么",
-        hint: "选择一张卡片即可填入下方输入框。在你点击发送之前不会发出任何内容。",
-        lockedSignIn: "登录后可使用",
-        lockedPlan: "需要 {plan} 方案",
-        lockedSignInShort: "需要登录",
-        lockedPlanShort: "需要 {plan}",
-        cards: {
-            compareAnswers: {
-                label: "并排比较三个回答",
-                outcome: "提一个问题，并排阅读三个模型的回答",
-                seed: "用通俗的语言解释向量数据库用来解决什么问题，大约 200 字。",
-            },
-            documentQuestions: {
-                label: "就一份 PDF 问多个模型",
-                outcome: "上传一份 18 页的 PDF，向多个模型提出同一个问题",
-                seed: "我上传了一份文档。请概括它要我做出什么决定，并列出其中提到的所有截止日期。",
-            },
-            sourcedAnswer: {
-                label: "获得附带来源的回答",
-                outcome: "获得一份附带来源链接的回答",
-                seed: "今年欧盟人工智能法案的执行有哪些变化？请附上你使用的来源。",
-            },
-            debugStackTrace: {
-                label: "从堆栈跟踪找到出错行",
-                outcome: "粘贴一段堆栈跟踪，得到出错的那一行和可尝试的修复",
-                seed: "这是我构建时的堆栈跟踪。请告诉我哪一行出错，以及应该改什么。",
-            },
-            spreadsheetFromAnswer: {
-                label: "生成 .xlsx 文件",
-                outcome: "把回答变成可下载的 .xlsx 文件",
-                seed: "帮我建立一份月度预算表，包含类别、计划金额和实际金额，并保存为电子表格文件。",
-            },
-            readAScreenshot: {
-                label: "询问截图里的错误",
-                outcome: "上传一张截图，询问上面的错误是什么意思",
-                seed: "我上传了一张错误对话框的截图。请告诉我它是什么意思，以及接下来该怎么做。",
-            },
-            translateAndCompare: {
-                label: "并排比较两份译文",
-                outcome: "翻译一段草稿，并排比较两个模型的版本",
-                seed: "把下面的文字翻译成英文，保持正式的语气：",
-            },
-            compareImageModels: {
-                label: "比较图像模型",
-                outcome: "把同一句话发给多个图像模型，比较各自的结果",
-                seed: "清晨安静的阅览室，暖光从高窗照入，摄影风格。",
-            },
-            speakAQuestion: {
-                label: "用语音提问，再改文字",
-                outcome: "用语音说出较长的问题，在发送前再修改文字",
-                seed: "把我接下来说的话整理成一份简短清晰的操作说明。",
-            },
-        },
-    },
+    chatStarter: workspaceWelcomeCopy.zh.starter,
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "查找操作方法",

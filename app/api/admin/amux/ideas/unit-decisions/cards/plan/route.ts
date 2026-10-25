@@ -15,6 +15,8 @@ import { AmuxV4CardPlanError, approveAmuxV4CardPlan } from
 import { AMUX_V4_UNIT_WRITE_ENV, AmuxV4DuplicateReasonRequired,
   AmuxV4UnitDecisionError,
   amuxV4UnitWriteEnabled } from "@/lib/amux/ideaUnitDecisionStore";
+import { isAmuxV20TaskRegistrationRefusal } from
+  "@/lib/amux/ideaUnitRegistrationCore";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 // amux-intake.md v18 item 3 (card part): one owner action approves every
@@ -27,8 +29,12 @@ import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
+const uuid = z.uuid().regex(
+  /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+);
 const body = z.object({
   ideaId: id,
+  planRequestId: uuid,
   reasons: z.record(id, z.string().min(3).max(500)).default({}),
   publicPrConsentOff: z.array(id).max(24).default([]),
 }).strict();
@@ -82,7 +88,8 @@ export async function POST(request: Request) {
     if (error instanceof AmuxV4UnitDecisionError) {
       return NextResponse.json({ error: error.code, retryWrite: false },
         { status: error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 :
-          error.code === "not_ready" || error.code === "reconfirm" ? 409 : 503,
+          error.code === "not_ready" || error.code === "reconfirm" ||
+          isAmuxV20TaskRegistrationRefusal(error.code) ? 409 : 503,
           headers: noStore });
     }
     const security = apiSecurityResponse(error);

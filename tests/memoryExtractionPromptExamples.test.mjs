@@ -712,5 +712,5 @@ test("the examples ship under a version of their own", () => {
     // approved budget and any archived verdict are keyed to it. Adding
     // examples changes what every chunk is asked, so it is a version bump and
     // not an edit in place.
-    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v8");
+    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v10");
 });

@@ -3,27 +3,28 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Locally bundled Capacitor shell with default-off native text chat and foreground location.",
+  "description": "Locally bundled Tomverse native mobile MVP",
   "scripts": {
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview",
     "typecheck": "tsc --project tsconfig.json",
     "cap:sync": "cap sync",
-    "capacitor:sync:after": "node scripts/configure-location-permissions.mjs && node scripts/configure-auth-app-links.mjs"
+    "brand:assets": "node brand-assets.mjs",
+    "test:ui": "playwright test --config playwright.config.ts",
+    "build:android": "node build-android.mjs",
+    "capacitor:sync:after": "node scripts/configure-location-permissions.mjs"
   },
   "dependencies": {
-    "@capacitor/app": "^8.1.2",
-    "@capacitor/browser": "^8.0.5",
-    "@capacitor/core": "^8.5.2",
-    "@capacitor/geolocation": "^8.2.4",
-    "@tomverse/mobile-auth": "file:native-auth",
+    "@tomverse/mobile-auth": "file:./native-auth",
+    "@capacitor/core": "^8.5.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@capacitor/geolocation": "^8.2.4"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.2",
-    "@capacitor/cli": "^8.5.2",
-    "@capacitor/ios": "^8.5.2"
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/ios": "^8.5.3"
   }
 }

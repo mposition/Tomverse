@@ -91,7 +91,7 @@ process.env.CHAT_STREAM_KEEPALIVE_INTERVAL_MS = String(KEEPALIVE_INTERVAL_MS);
 process.env.CHAT_FIRST_TOKEN_DEADLINE_MS = String(FIRST_TOKEN_DEADLINE_MS);
 
 let cookieReads = 0;
-mock.module(mod("lib/mobileAuthRoute.ts"), { namedExports: { requireMobileBearer: async () => ({ ok: true, identity: { userId: USER_ID } }) } });
+mock.module(mod("lib/mobileAuthRoute.ts"), { namedExports: { requireMobileBearer: async () => ({ ok: true, identity: { userId: USER_ID, deviceId: "fixture-device", familyId: "fixture-family" } }) } });
 
 mock.module("next-auth/next", {
   namedExports: {
@@ -237,7 +237,8 @@ const conversationRow = {
 };
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
-  user: { findUnique: () => ({ id: USER_ID, email: "keepalive-qa@tomverse.app", name: "Native fixture" }) },
+  mobileTokenFamily: { findFirst: () => ({ createdAt: new Date() }) },
+  user: { findUnique: () => ({ id: USER_ID, email: "keepalive-qa@tomverse.app", name: "Native fixture", accountStatus: "active" }) },
   conversation: {
     findUnique: () => conversationRow,
     findFirst: () => conversationRow,
@@ -446,14 +447,14 @@ const ask = async (next: Script, extraPayload: Record<string, unknown> = {}, nat
 
   const { POST } = await loadRoute();
   const response = await POST(
-    new Request(`http://127.0.0.1:3100/api/${native ? "mobile/chat" : "chat"}`, {
+    new Request("http://127.0.0.1:3100/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(native ? { authorization: "Bearer fixture-native", origin: "https://localhost" } : {}) },
       body: JSON.stringify({
         messages: [{ role: "user", content: "이 자료를 분석해 줘" }],
         modelId: MODEL_ID,
-        conversationId: native ? undefined : CONVERSATION_ID,
-        assistantMessageId: native ? undefined : ASSISTANT_MESSAGE_ID,
+        conversationId: CONVERSATION_ID,
+        assistantMessageId: ASSISTANT_MESSAGE_ID,
         ...extraPayload,
       }),
     })
@@ -844,9 +845,9 @@ test("an already-aborted request never crosses the provider boundary", async () 
 });
 
 
-test("the native bearer gateway executes the existing budgeted stream with a fresh fix and no cookie identity or persisted transcript", async () => {
-  const previous = process.env.MOBILE_CHAT_ENABLED;
-  process.env.MOBILE_CHAT_ENABLED = "true";
+test("native chat executes the existing budgeted stream with a fresh fix and keeps location out of persisted messages", async () => {
+  const previous = process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
+  process.env.TOMVERSE_NATIVE_CHAT_ENABLED = "true";
   const before = cookieReads;
   try {
     const { body } = await ask({ text: "Native nearby answer." }, { currentLocation: {
@@ -855,8 +856,9 @@ test("the native bearer gateway executes the existing budgeted stream with a fre
     assert.ok(body.includes("Native nearby answer."));
     assert.equal(cookieReads, before);
     assert.ok(JSON.stringify(providerRequestMessages).includes("-33.869"));
-    assert.deepEqual(world.messages, []);
+    assert.ok(world.messages.length > 0);
+    assert.equal(JSON.stringify(world.messages).includes("latitude"), false);
     assert.equal(ledger.settlements[0].outcome, "completed");
     assert.ok(ledger.releases.length > 0);
-  } finally { if (previous === undefined) delete process.env.MOBILE_CHAT_ENABLED; else process.env.MOBILE_CHAT_ENABLED = previous; }
+  } finally { if (previous === undefined) delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; else process.env.TOMVERSE_NATIVE_CHAT_ENABLED = previous; }
 });

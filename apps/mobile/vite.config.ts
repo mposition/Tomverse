@@ -1,4 +1,5 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
 
 /**
  * No plugins on purpose.
@@ -13,22 +14,14 @@ import { defineConfig, loadEnv } from "vite";
  * asset paths resolve differently between the two. Relative paths work on both
  * and in `vite preview`.
  */
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "VITE_");
-  let returnOrigin: URL | null = null;
-  try { returnOrigin = new URL(env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? ""); } catch {}
-  if (env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED === "true" && (!returnOrigin || returnOrigin.protocol !== "https:" ||
-      returnOrigin.username || returnOrigin.password || returnOrigin.port || returnOrigin.pathname !== "/" || returnOrigin.search || returnOrigin.hash)) {
-    throw new Error("VITE_MOBILE_AUTH_APP_LINK_ORIGIN must be an exact HTTPS origin when mobile auth app links are enabled.");
-  }
-  return {
-    base: "./",
-    build: {
-      outDir: "dist",
-      // A local bundle ships to a store; a source map in the binary publishes the
-      // source. The web app's own Sentry upload path is separate and unaffected.
-      sourcemap: false,
-      target: "es2022",
-    },
-  };
+export default defineConfig({
+  resolve: { alias: { "@": fileURLToPath(new URL("../../", import.meta.url)) } },
+  base: "./",
+  build: {
+    outDir: "dist",
+    // A local bundle ships to a store; a source map in the binary publishes the
+    // source. The web app's own Sentry upload path is separate and unaffected.
+    sourcemap: false,
+    target: "es2022",
+  },
 });

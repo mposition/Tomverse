@@ -1,4 +1,4 @@
-import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
+import { listImageModels } from "@/lib/imageModelRegistry";
 
 /**
  * What the composer is allowed to do to its model selection, given the limit
@@ -18,8 +18,11 @@ import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
  */
 
 /** Registry position, so a limited or restored set always comes back the same. */
-const registryOrder = (modelId: string) => {
-  const index = IMAGE_MODEL_REGISTRY.findIndex((model) => model.id === modelId);
+const registryOrder = (
+  models: readonly { id: string }[],
+  modelId: string
+) => {
+  const index = models.findIndex((model) => model.id === modelId);
   return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 };
 
@@ -92,9 +95,15 @@ export type ImageModelSelectionLimitOutcome = {
 export const limitImageModelSelection = (input: {
   modelIds: readonly string[];
   maxModels: number;
+  /**
+   * The catalogue whose order decides. A client passes the list it was handed
+   * (image catalogue context); omitted, the server-side active catalogue.
+   */
+  models?: readonly { id: string }[];
 }): ImageModelSelectionLimitOutcome => {
+  const models = input.models ?? listImageModels();
   const ordered = [...new Set(input.modelIds)].sort(
-    (a, b) => registryOrder(a) - registryOrder(b)
+    (a, b) => registryOrder(models, a) - registryOrder(models, b)
   );
   if (input.maxModels <= 0 || ordered.length <= input.maxModels) {
     return { modelIds: ordered, excludedModelIds: [] };

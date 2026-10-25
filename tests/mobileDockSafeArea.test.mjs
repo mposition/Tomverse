@@ -4,9 +4,10 @@ import test from "node:test";
 
 /**
  * MOBILE-KB-INSET-01. The mobile bottom dock pays the bottom safe-area inset
- * once, after its footer rows. `env()` cannot be set from a browser test
- * (Chromium emulation reports 0), so ownership is pinned on the dock wrapper.
- * Both the disclaimer and the optional consent slot sit above that inset.
+ * once, after its last visible row. `env()` cannot be set from a browser test
+ * (Chromium emulation reports 0), so ownership is pinned on the source: the
+ * dock reserves the inset after the disclaimer and optional consent notice.
+ * Neither the disclaimer nor the composer bar reserves it again.
  *
  * Whether this removes the gap seen above the keyboard on a real phone is a
  * device observation, not something this test can show.
@@ -25,7 +26,7 @@ test("the composer bar reserves no bottom safe-area inset", () => {
     assert.equal(barClassName(read("components/chat/ChatInput.tsx")).includes(INSET), false);
 });
 
-test("the dock wrapper owns the safe-area inset and the disclaimer does not duplicate it", () => {
+test("the mobile dock reserves the bottom safe-area inset once", () => {
     const shell = read("components/chat/MobileChatShell.tsx");
     const wrapper = /data-testid="mobile-bottom-dock"\s+className="([^"]*)"/.exec(shell);
     assert.ok(wrapper, "the dock wrapper's className was not found");
@@ -36,7 +37,7 @@ test("the dock wrapper owns the safe-area inset and the disclaimer does not dupl
     assert.equal(row[1].includes(INSET), false);
 });
 
-test("the disclaimer and consent slot follow the bar composer inside the single inset", () => {
+test("the mobile dock ends with the disclaimer and optional consent after the bar composer", () => {
     const shell = read("components/chat/MobileChatShell.tsx");
     const dockOpen = shell.indexOf('data-testid="mobile-bottom-dock"');
     const notice = shell.indexOf('<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />');
@@ -44,8 +45,8 @@ test("the disclaimer and consent slot follow the bar composer inside the single 
     assert.ok(dockOpen > 0 && composer > dockOpen && notice > composer, "the notice no longer follows the dock's composer");
     // The dock's composer is the bar variant, the one whose padding this pins.
     assert.match(shell.slice(composer, notice), /variant="bar"/);
-    const footer = /^<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" \/>\s*<div[^>]*data-testid="composer-consent-slot"[^>]*\/>\s*<\/div>/.exec(shell.slice(notice));
-    assert.ok(footer, "the disclaimer and consent slot must be the dock's last rows");
-    const dock = shell.slice(dockOpen, notice + footer[0].length);
-    assert.equal(dock.split(INSET).length - 1, 1);
+    // The wrapper owns the inset; rows above the footer must not duplicate it.
+    assert.equal(shell.slice(dockOpen, notice).split(INSET).length - 1, 1);
+    // Consent follows the disclaimer, inside the same safe-area reservation.
+    assert.match(shell.slice(notice), /^<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" \/>\s*<div ref=\{setBottomConsentSlot\} data-testid="composer-consent-slot"[^>]* \/>\s*<\/div>/);
 });

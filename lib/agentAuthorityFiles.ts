@@ -115,6 +115,11 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/reviewOrchestrator*",
   "tests/reviewOrchestrator*",
   "tests/fixtures/review-orchestrator/**",
+  // The app side of the Auto router coding agent on the Ubuntu runner: the
+  // bearer-secret check, the claim and result it may write, and its system
+  // audit writer. An agent changing them could widen its own permission.
+  "lib/autoRouterRecAgent*",
+  "tests/autoRouterRecAgent*",
   // §4-4: policy and contract documents.
   "docs/policy/**",
   "docs/ui-contracts/**",
@@ -166,6 +171,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/adminMessages/agentOffice*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
+  "lib/chatUnifiedOptimizerAmux*",
   "crates/**",
   "apps/**",
   "app/api/internal/**",
@@ -173,8 +179,10 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The independent Ubuntu AMUX server is still agent execution code, never tier one.
   "vendor/amux/**",
   "tests/amux*",
+  "tests/chatUnifiedOptimizerAmux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",
+  "tests/verifyAmuxWslGitTransfer.test.mjs",
   "tests/orchestrator*",
 ];
 
@@ -298,7 +306,7 @@ export const RESERVED_DECISION_CONSTANTS: ReadonlyArray<{
     definedIn: ["lib/modelPricing.ts", "scripts/report-issue-backlog-core.mjs"],
   },
   { name: "CACHE_WRITE_PRICING_IS_BILLED_WHERE_MEASURED", definedIn: ["lib/modelPricing.ts"] },
-  { name: "MARKETING_LLM_PRICE_PINS", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
+  { name: "MARKETING_OPENAI_WEB_SEARCH_MICRO_USD_PER_CALL", definedIn: ["lib/marketingLlmBudgetCore.ts"] },
   { name: "STATIC_CATALOG_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "OUTPUT_CAP_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },
   { name: "RESERVATION_ONLY_RECONCILIATION_MODEL_IDS", definedIn: ["lib/modelRegistryShared.ts"] },

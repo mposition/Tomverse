@@ -360,3 +360,24 @@ test("with no pair admitted, only user-authored memories are retrieved", async (
         "the user asked to remember Korean tone",
     ]);
 });
+
+
+test("manual grounds and user edits never bypass extraction pair admission or revocation", async () => {
+    const user = await createUser();
+    const item = await seedMemory(user.id, "the user prefers formal Korean", {
+        extractionModelId: "revoked-model", promptVersion: "mem-extract-v1",
+    });
+    await prisma.memoryItem.update({ where: { id: item.id }, data: { userEdited: true } });
+    await prisma.memoryEvidence.create({ data: { userId: user.id, memoryItemId: item.id,
+        sourceType: "manual", manualContent: "I confirm my preference", evidenceDigest: "test-manual-digest" } });
+    const request = { userId: user.id, query: "Korean" };
+    const admitted = await retrieveMemoryContext({ ...request, approvedPairs: [
+        { extractionModelId: "revoked-model", promptVersion: "mem-extract-v1" },
+    ] });
+    assert.equal(admitted.selected.length, 1);
+    const revoked = await retrieveMemoryContext({ ...request, approvedPairs: [
+        { extractionModelId: "sibling-model", promptVersion: "mem-extract-v1" },
+    ] });
+    assert.equal(revoked.selected.length, 0);
+    assert.equal((await retrieveMemoryContext({ ...request, approvedPairs: [] })).selected.length, 0);
+});

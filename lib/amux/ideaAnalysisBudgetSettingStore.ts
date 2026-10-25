@@ -49,11 +49,14 @@ export async function readAnalysisBudgetSnapshot(tx: Tx): Promise<AnalysisBudget
   if (window && window.limitMicroUsd !== BigInt(setting.limitMicroUsd)) {
     throw new AnalysisBudgetSettingError("budget_unavailable");
   }
-  const spent = window?.spentMicroUsd ?? BigInt(0);
+  const shadowOverrun = window?.shadowOverrunMicroUsd ?? BigInt(0);
+  const spent = (window?.spentMicroUsd ?? BigInt(0)) + shadowOverrun;
   const reserved = window?.reservedMicroUsd ?? BigInt(0);
+  const headroom = BigInt(setting.limitMicroUsd) - spent - reserved;
   return { ...setting, monthStart: monthStart.toISOString(),
     spentMicroUsd: spent.toString(), reservedMicroUsd: reserved.toString(),
-    remainingMicroUsd: (BigInt(setting.limitMicroUsd) - spent - reserved).toString() };
+    remainingMicroUsd: (headroom > BigInt(0) ? headroom : BigInt(0)).toString(),
+    shadowOverrunMicroUsd: shadowOverrun.toString() };
 }
 
 /** Sole configuration writer. It changes only the ceiling, never ledger usage. */
@@ -90,7 +93,9 @@ export async function commitAnalysisBudgetSetting(tx: Tx, input: {
   if (window && window.limitMicroUsd !== BigInt(current.limitMicroUsd)) {
     throw new AnalysisBudgetSettingError("budget_unavailable");
   }
-  if (BigInt(limit) < (window?.spentMicroUsd ?? BigInt(0)) + (window?.reservedMicroUsd ?? BigInt(0))) {
+  if (BigInt(limit) < (window?.spentMicroUsd ?? BigInt(0)) +
+      (window?.shadowOverrunMicroUsd ?? BigInt(0)) +
+      (window?.reservedMicroUsd ?? BigInt(0))) {
     throw new AnalysisBudgetSettingError("below_committed_cost");
   }
   const version = current.version + 1;

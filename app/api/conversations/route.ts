@@ -1,3 +1,4 @@
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
@@ -46,7 +47,9 @@ const safeParse = (data: unknown, fallback: string[]) => {
 
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = (session?.user as { id?: string } | undefined)?.id;
     if (!userId) {
       return NextResponse.json(

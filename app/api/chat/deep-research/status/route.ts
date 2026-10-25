@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
-import { getServerSession } from "next-auth/next";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import { extendChatReservationExpiry } from "@/lib/chatSecurity";
 import {
   serializeDeepResearchSettlementUsage,
@@ -68,7 +67,9 @@ const jsonError = (
 export async function POST(request: Request) {
   const traceId = randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const authentication = await resolveChatRouteSession(request);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401, traceId);
     }

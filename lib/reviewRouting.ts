@@ -8,6 +8,7 @@ import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
 import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import { CHAT_IMAGE_ROUTING_CRITERIA } from "@/lib/chatImageIntentCore";
+import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 import { parseReviewRoute, reviewRouteOutputSchema, type ReviewRoutingCandidates } from "@/lib/reviewRoutingCore";
@@ -17,9 +18,10 @@ export const reviewEasyEnabled = () => process.env.REVIEW_EASY_ENABLED === "true
 
 export async function routeReviewPrompt(input: {
   text: string; context: string; providers: string[]; requestedKind?: "image";
+  imageOnly?: boolean;
   models: AiModel[]; candidates: ReviewRoutingCandidates;
 }) {
-  if (!reviewEasyEnabled()) return null;
+  if (input.imageOnly ? !(await chatImageTriageModelId()) : !reviewEasyEnabled()) return null;
   const routerModel = resolveAutoLlmRouterModel(input.models, (await readAutoLlmRouterModelId()) ?? undefined);
   if (!routerModel) return null;
   const active = await readActiveRouterGuidance();
@@ -49,7 +51,7 @@ export async function routeReviewPrompt(input: {
       providerOptions: autoLlmRouterProviderOptions(routerModel.provider) });
     const usage = result.usage;
     if (usage.inputTokens !== undefined && usage.outputTokens !== undefined) {
-      await settleRouterCost(routerModel.provider, callCostMicroUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, worstCaseMicroUsd: reserved, ...prices }) - reserved, at);
+      await settleRouterCost(routerModel.provider, callCostMicroUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, ...prices }) - reserved, at);
     }
     return parseReviewRoute(result.output, input.providers, input.candidates);
   } catch {

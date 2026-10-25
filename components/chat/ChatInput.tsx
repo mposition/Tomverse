@@ -1,9 +1,10 @@
 ﻿"use client";
 
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
-import { ReviewParticipants } from "./ReviewStudioChrome";
 import { ChatLocationControl } from "./ChatLocationControl";
+import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
 import {
   useCallback,
   useEffect,
@@ -131,15 +132,6 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import {
-  allowsImageHandoffReshow,
-  classifyImageIntent,
-  imageIntentDraftKey,
-  offersImageHandoffChip,
-  type ImageIntentClass,
-} from "@/lib/imageIntentSignals";
-import { normalizeComposerImageIntentInput } from "@/lib/imageIntentInput";
-import { ImageIntentHandoffChip } from "@/components/chat/ImageIntentHandoffChip";
-import {
   deriveWebSearchComposerState,
   type WebSearchComposerState,
 } from "@/lib/webSearchComposerState";
@@ -171,14 +163,6 @@ import {
   type PromptRefinerResolution,
   type PromptRefinerUiState,
 } from "@/lib/promptRefinerSuggestion";
-
-/**
- * A stable empty list for the image-intent classifier.
- *
- * A fresh `[]` per render would make the memo below re-classify on every
- * keystroke of an unrelated field, and the classifier runs between them.
- */
-const EMPTY_IMAGE_INTENT_ATTACHMENTS: never[] = [];
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -880,18 +864,8 @@ type ChatInputProps = {
    * starting prompt. Absent when the image feature flag is off. `modelId` is
    * set when the user arrived from the catalogue's image tab and therefore
    * already chose which model to start from.
-   *
-   * `fromImageRequest` marks the one entry point that began with the user
-   * asking for a picture in words. Only that one may generate on the press
-   * for an account that has chosen to stop being asked -- the tools menu and
-   * the launcher are someone opening the workspace, not someone submitting a
-   * request they already wrote.
    */
-  onStartImageDraft?: (
-    draftText: string,
-    modelId?: string,
-    options?: { fromImageRequest?: boolean }
-  ) => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   /**
    * Whether this viewer may record voice input (docs/policy/voice-input.md §3).
    *
@@ -903,6 +877,7 @@ type ChatInputProps = {
    * deliberately not turned on.
    */
   voiceInputEnabled?: boolean;
+  voiceConversationControl?: ReactNode;
   /**
    * Appends a finished transcript to one conversation's draft
    * (docs/policy/voice-input.md §8.4).
@@ -1088,6 +1063,7 @@ export function ChatInput({
   onOpenDeepResearchSetup,
   onStartImageDraft,
   voiceInputEnabled = false,
+  voiceConversationControl,
   onVoiceTranscript,
   identityKey,
   imageGenerationLock = null,
@@ -1161,23 +1137,11 @@ export function ChatInput({
   const [isWebSearchExceptionOpen, setIsWebSearchExceptionOpen] = useState(false);
   const [dismissedComplementaryModelId, setDismissedComplementaryModelId] = useState<string | null>(null);
   /*
-    The image-request handoff chip's own state (entry point 5 of
-    docs/ui-contracts/image-generation-workspace.md).
-
-    `isComposingDraft` exists because this chip changes the composer's height.
-    The web-search suggestion above can afford to appear mid-composition; a row
-    that grows while a Korean syllable is being assembled moves the input under
-    the cursor, which the mobile composer contract treats as an input accident.
-    So classification is suspended between compositionstart and compositionend
-    and resumes one debounce later.
+    `isComposingDraft` is true between compositionstart and compositionend. The
+    prompt-refiner panel reads it so that a row appearing mid-syllable cannot
+    move the input under the cursor (docs/ui-contracts/mobile-chat-composer.md).
   */
   const [isComposingDraft, setIsComposingDraft] = useState(false);
-  const [settledDraft, setSettledDraft] = useState("");
-  const [dismissedImageIntent, setDismissedImageIntent] = useState<{
-    key: string;
-    intentClass: ImageIntentClass;
-  } | null>(null);
-  const [imageIntentReshownOnce, setImageIntentReshownOnce] = useState(false);
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
@@ -1610,7 +1574,8 @@ export function ChatInput({
   // button itself. `title` alone does not reach a screen reader or a keyboard
   // user, so this is rendered as text the button points at with
   // aria-describedby (docs/ui-contracts/mobile-chat-composer.md).
-  const sendDisabledReason = singleModelSelection && selectedModels.length !== 1
+  const noReviewProviders = review?.mode === "easy" && review.providersConfigured && !review.providers.length;
+  const sendDisabledReason = noReviewProviders ? reviewProviderPreferencesCopy(lang).select : singleModelSelection && selectedModels.length !== 1
     ? t("chat.singleModelRequired") : isUsageLimitReached
     ? t("chat.exceedDailyLimit")
     : activeSelectedModels.length === 0
@@ -1689,212 +1654,6 @@ export function ChatInput({
   // flipping the switch is itself the consent to search and to the surcharge,
   // and the switch's own description says the search is conditional.
 
-  /*
-    The image-request handoff.
-
-    Offered for a request that wants a picture -- raster generation and, since
-    2026-08-25, a text-dense chart or infographic. An edit of an attached image
-    and a question about one are classified here too and deliberately get
-    nothing: the workspace starts from text, so it cannot do what either of
-    them asked. See docs/policy/image-generation.md §13.
-
-    The classifier is shared with the server's image-capability system block
-    (lib/imageIntentSignals.ts). Two dictionaries would let the offer appear on
-    turns the block says nothing about.
-
-    ## It outlives the send
-
-    Two moments ask the same question, so one control answers both:
-
-      composer      the draft is an image request -- offer before a chat turn
-                    is spent on it;
-      after_answer  the draft is empty and the last question asked in this
-                    conversation was an image request -- offer beside the
-                    answer they just read.
-
-    The second exists because the first is not where people decide. A person
-    asks for an infographic, reads what the chat could produce, and only then
-    wants the picture -- and until this existed, the only thing waiting for
-    them was a sentence the model wrote about a workspace it cannot open. On
-    2026-08-25 that produced a numbered list whose fourth option was the image
-    tool; the user picked it, and the model had to answer that it could not go
-    there. The model is now forbidden to mention the destination at all
-    (lib/imageCapabilityPrompt.ts), which is only safe because this offer is
-    real.
-
-    One control, not two: a person offered the workspace while typing and
-    refused it after reading would have learned only that the offer is
-    arbitrary. The dismissal is keyed to the text, so dismissing before the
-    send stays dismissed after it -- the same question, already answered.
-  */
-  useEffect(() => {
-    if (isComposingDraft) return;
-    // Same debounce shape as the rest of this composer's derived state: the
-    // verdict follows the settled draft, not every keystroke.
-    const timer = setTimeout(() => setSettledDraft(value), 150);
-    return () => clearTimeout(timer);
-  }, [value, isComposingDraft]);
-
-  /*
-    What the offer is about: the draft while there is one, the last question
-    asked in this conversation once the composer is empty again.
-
-    Scoped by conversation rather than cleared on a timer, and derived rather
-    than reset in an effect -- an effect that calls setState whenever the
-    conversation changes is a cascading render, and the stale value is
-    unreachable while the ids disagree anyway.
-  */
-  const [lastSentImageIntentPrompt, setLastSentImageIntentPrompt] = useState<{
-    chatId: string | null;
-    text: string;
-  } | null>(null);
-  /*
-    The first send in a new conversation creates it, so `currentChatId` goes
-    from null to a real id one render after the question was remembered. That
-    is not the user moving anywhere -- it is the conversation they are looking
-    at acquiring a name -- so the memory is adopted into it rather than
-    discarded. Every other change of id is a move, and ends the offer.
-
-    Adjusted during render rather than in an effect: this is React's own
-    "derive state from props" idiom, and an effect here would render the chip
-    once against the old conversation before removing it.
-  */
-  const [imageIntentChatId, setImageIntentChatId] = useState(currentChatId);
-  if (imageIntentChatId !== currentChatId) {
-    // Adoption and a move look identical from the id alone. What separates
-    // them is whether a question is waiting that was asked before the id
-    // existed -- and on adoption the dismissal must survive too, or "not now"
-    // typed into a new conversation would be forgotten by the send itself.
-    const isAdoptingTheConversationThisSendCreated =
-      lastSentImageIntentPrompt?.chatId === null;
-    setImageIntentChatId(currentChatId);
-    setLastSentImageIntentPrompt((remembered) =>
-      remembered && remembered.chatId === null
-        ? { chatId: currentChatId, text: remembered.text }
-        : null
-    );
-    if (!isAdoptingTheConversationThisSendCreated) {
-      setDismissedImageIntent(null);
-      setImageIntentReshownOnce(false);
-    }
-  }
-  const rememberedPrompt =
-    lastSentImageIntentPrompt &&
-    lastSentImageIntentPrompt.chatId === currentChatId
-      ? lastSentImageIntentPrompt.text
-      : "";
-  const draftIsBeingComposed = settledDraft.trim().length > 0;
-  const imageIntentSurface: "composer" | "after_answer" = draftIsBeingComposed
-    ? "composer"
-    : "after_answer";
-  const imageIntentSourceText = draftIsBeingComposed
-    ? settledDraft
-    : rememberedPrompt;
-  /*
-    A remembered question carries no attachments. They were consumed by the
-    send, and reusing this composer's current ones would classify last
-    question's text against next question's files -- which is how a request to
-    describe a photograph would come back as an offer to redraw it.
-  */
-  const imageIntentSourceAttachments = draftIsBeingComposed
-    ? attachments
-    : EMPTY_IMAGE_INTENT_ATTACHMENTS;
-  const imageIntentClass = useMemo(
-    () =>
-      classifyImageIntent(
-        normalizeComposerImageIntentInput({
-          text: imageIntentSourceText,
-          attachments: imageIntentSourceAttachments,
-        })
-      ),
-    [imageIntentSourceText, imageIntentSourceAttachments]
-  );
-  const imageIntentKey = imageIntentDraftKey(imageIntentSourceText);
-  const imageIntentOffered =
-    Boolean(onStartImageDraft || imageGenerationLock) &&
-    !isComposingDraft &&
-    imageIntentSourceText.trim().length > 0 &&
-    offersImageHandoffChip(imageIntentClass);
-  /*
-    A dismissal belongs to the question it was made on, not to the draft box.
-    It used to lapse the moment the composer emptied, which was right while the
-    offer only existed before the send -- and is wrong now that the same
-    question is still being offered after it. Keyed by text, so "no thanks"
-    typed into the composer is still "no thanks" once the answer arrives.
-  */
-  const activeImageIntentDismissal = dismissedImageIntent;
-  const imageIntentDismissed = Boolean(
-    activeImageIntentDismissal &&
-      !(
-        !imageIntentReshownOnce &&
-        allowsImageHandoffReshow({
-          dismissedKey: activeImageIntentDismissal.key,
-          currentKey: imageIntentKey,
-          dismissedIntent: activeImageIntentDismissal.intentClass,
-          currentIntent: imageIntentClass,
-        })
-      )
-  );
-  const showImageIntentSuggestion = imageIntentOffered && !imageIntentDismissed;
-  const trackedImageIntentKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!showImageIntentSuggestion) {
-      // Nothing is on offer, so the next one is a new offer rather than a
-      // repeat. A ref, not state: this is bookkeeping for an external call,
-      // not something the render reads.
-      trackedImageIntentKeyRef.current = null;
-      return;
-    }
-    // The key alone, not the key and the surface: the same question offered
-    // before and after the send is one offer seen twice, and counting it twice
-    // would make the take-up rate of both surfaces look half as good as it is.
-    if (trackedImageIntentKeyRef.current === imageIntentKey) return;
-    trackedImageIntentKeyRef.current = imageIntentKey;
-    trackProductEvent("image_intent_suggestion_shown", selectedModels.length, {
-      image_intent_class: imageIntentClass,
-      image_intent_lock: imageGenerationLock ?? "none",
-      image_intent_surface: imageIntentSurface,
-    });
-  }, [
-    showImageIntentSuggestion,
-    imageIntentKey,
-    imageIntentClass,
-    imageIntentSurface,
-    imageGenerationLock,
-    selectedModels.length,
-  ]);
-  /*
-    Called at the moment of sending, while `value` still holds the question.
-
-    The composer does not own the text -- the shell does, and clears it -- so
-    this is the only point at which the question and the conversation it
-    belongs to are both known here. Stored even when the question is not an
-    image request: classifying it here and remembering only the matches would
-    duplicate a decision that is already made, once, below.
-  */
-  const rememberImageIntentPrompt = () => {
-    const sent = value.trim();
-    setLastSentImageIntentPrompt(
-      sent.length > 0 ? { chatId: currentChatId, text: value } : null
-    );
-  };
-
-  const dismissImageIntentSuggestion = (accepted: boolean) => {
-    if (activeImageIntentDismissal) setImageIntentReshownOnce(true);
-    else if (imageIntentReshownOnce) setImageIntentReshownOnce(false);
-    setDismissedImageIntent({ key: imageIntentKey, intentClass: imageIntentClass });
-    trackProductEvent(
-      accepted
-        ? "image_intent_suggestion_accepted"
-        : "image_intent_suggestion_dismissed",
-      selectedModels.length,
-      {
-        image_intent_class: imageIntentClass,
-        image_intent_lock: imageGenerationLock ?? "none",
-        image_intent_surface: imageIntentSurface,
-      }
-    );
-  };
   // Model-picker-only counterpart to the message-content-driven
   // contextualSuggestion above: nudges toward one complementary model based
   // on what kind of thinking the *currently selected* models are missing,
@@ -2606,7 +2365,6 @@ export function ChatInput({
     // still active. The visible branch below presents Stop instead of Send.
     if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending) {
       dismissGuestQuickStart();
-      rememberImageIntentPrompt();
       onSubmit();
     }
   };
@@ -3209,7 +2967,7 @@ export function ChatInput({
     <ChatInputWebSearchChipView
       state={webSearchState}
       isAutoMode={isAutoMode}
-      isMobileShell={isMobileShell}
+      isMobileShell={isMobileShell || isStudio}
       fullLabel={webSearchChipLabel}
       compactLabel={webSearchChipCompactLabel}
       description={webSearchStateDescription}
@@ -3285,6 +3043,67 @@ export function ChatInput({
   const keyboardInset = useKeyboardInset();
   const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
+  const footerModelPicker = review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || (!isStudio && Boolean(review))) && (
+            <button
+              ref={modelMenuButtonRef}
+              type="button"
+              onClick={(event) => toggleModelPicker(event.currentTarget)}
+              className="flex h-11 min-w-0 max-w-[4.75rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
+              data-testid="composer-model-select"
+              title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
+              aria-label={
+                isAutoMode
+                  ? `${autoCopy.compactLabel}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                  : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`
+              }
+              aria-expanded={isMenuOpen && menuView === "models"}
+              aria-controls="chat-input-popover"
+              aria-haspopup="dialog"
+            >
+              {!isAutoMode && (
+                activeSelectedModels.length === 1 ? (
+                  <span className="max-[240px]:hidden">
+                    <ModelLogo
+                      model={AVAILABLE_MODELS.find(
+                        (item) => item.id === activeSelectedModels[0]
+                      )}
+                      size="xs"
+                    />
+                  </span>
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
+                  >
+                    {activeSelectedModels.length}
+                  </span>
+                )
+              )}
+              {!isAutoMode && activeSelectedModels.length === 1 && (
+                <span
+                  aria-hidden="true"
+                  className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white max-[240px]:flex"
+                >
+                  1
+                </span>
+              )}
+              <span
+                data-testid="composer-active-model-count"
+                className={`min-w-0 line-clamp-2 break-keep ${
+                  isAutoMode ? "" : "max-[240px]:sr-only"
+                }`}
+              >
+                {isAutoMode
+                  ? autoCopy.compactLabel
+                  : modelsSelectedLabel(activeSelectedModels.length)}
+              </span>
+              <ComposerChevronDownIcon
+                className="text-zinc-400"
+                aria-hidden="true"
+              />
+            </button>
+  );
+
   // MOBILE-KB-INSET-01. The bar adds no safe-area inset of its own. It is
   // only below md inside MobileChatShell, whose dock pads after its last row
   // (the disclaimer or analytics notice). Adding the inset here too would
@@ -3332,13 +3151,13 @@ export function ChatInput({
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`relative mx-auto w-full max-w-5xl overflow-hidden rounded-2xl border bg-white p-2 shadow-[0_8px_24px_-6px_rgba(23,28,46,0.08)] transition-colors has-[textarea[data-focus-ring=container]:focus-visible]:outline-2 has-[textarea[data-focus-ring=container]:focus-visible]:-outline-offset-3 has-[textarea[data-focus-ring=container]:focus-visible]:outline-blue-500 dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:p-3 ${
+            className={`relative mx-auto w-full max-w-5xl overflow-hidden rounded-2xl border bg-white p-2 shadow-[0_8px_24px_-6px_rgba(23,28,46,0.08)] transition-colors dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:p-3 ${
               isDragActive
                 ? "border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-950/30"
                 : "border-zinc-200 dark:border-zinc-800"
             }`}
           >
-          {currentProduct && showProductSwitcher && review?.appearance !== "studio" && (
+          {currentProduct && showProductSwitcher && (
             <div
               data-testid="composer-product-mode-row"
               className="flex min-h-11 min-w-0 flex-wrap items-center justify-between gap-2 md:min-h-0 md:flex-nowrap md:[@media(pointer:fine)]:h-8"
@@ -3362,7 +3181,8 @@ export function ChatInput({
                   }}
                 />
               )}
-              {showReviewContextPicker && review?.mode !== "easy" && (
+              {review && !isStudio && <ReviewModeSwitcher review={review} compact locked={productSwitchDisabled || isSending || draftLocked} />}
+              {showReviewContextPicker && review?.mode !== "easy" && !isStudio && !review && (
                 <div
                   data-testid="composer-review-models"
                   className="flex h-11 min-w-0 items-center md:[@media(pointer:fine)]:h-8"
@@ -3545,26 +3365,6 @@ export function ChatInput({
                 </div>
               </div>
             )}
-          {showImageIntentSuggestion && (
-            <ImageIntentHandoffChip
-              lock={imageGenerationLock}
-              onAccept={() => {
-                dismissImageIntentSuggestion(true);
-                if (imageGenerationLock) {
-                  onLockedImageGenerationClick?.(imageGenerationLock);
-                  return;
-                }
-                // The same handoff the tools menu performs: no server row is
-                // created and cancelling restores this draft. The prompt is
-                // the question the offer is about -- which after the send is
-                // the one already answered, not the empty composer.
-                onStartImageDraft?.(imageIntentSourceText, undefined, {
-                  fromImageRequest: true,
-                });
-              }}
-              onDismiss={() => dismissImageIntentSuggestion(false)}
-            />
-          )}
           {/*
             The chips own a row of their own in *both* shells. They used to ride
             the mobile textarea's first line, which left the input whatever
@@ -3908,18 +3708,15 @@ export function ChatInput({
             {t("chat.singleModelRequired")}
           </p>
         )}
-        {review?.mode === "easy" && review.imagePromptMode && <div className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
-        {review && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels}
+        {review?.imagePromptMode && <div data-testid="review-image-mode" className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{review.imageModelLabel ?? t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
+        {review && showProductSwitcher && isStudio && <ReviewModeSwitcher review={review} composer locked={productSwitchDisabled || isSending || draftLocked} />}
+        {review && showReviewModelRow && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels}
           canSelectModel={id => { const model = AVAILABLE_MODELS.find(m => m.id === id); return Boolean(model && canUseModelWithPlan(currentPlan, model)); }} />}
-        <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
+        <div data-testid="composer-textarea-row" className="composer-prompt-surface flex w-full min-w-0">
         {/*
-          COMPOSER-FOCUS-CLIP-01. The global focus outline is drawn outside the
-          textarea, and this composer is rounded and overflow-hidden, so the
-          outline was cut at the corners whenever the input was the first row.
-          The composer draws the indicator instead: an outline pulled 3px inside
-          its own border, which its own overflow does not clip. An outline and
-          not a box-shadow ring, because forced-colors mode removes box-shadow
-          and keeps outlines.
+          The prompt surface owns a quiet, inset focus underline. It remains
+          visible in forced colors without outlining the whole composer or
+          clipping at its rounded corners.
         */}
         <textarea
           data-testid="chat-textarea"
@@ -3935,13 +3732,7 @@ export function ChatInput({
           }}
           onKeyDown={handleKeyDown}
           onCompositionStart={() => setIsComposingDraft(true)}
-          onCompositionEnd={(e) => {
-            setIsComposingDraft(false);
-            // The committed syllable is in the element, not yet in `value` on
-            // every engine, so the settled draft is taken from the event's own
-            // target rather than waiting a render.
-            setSettledDraft(e.currentTarget.value);
-          }}
+          onCompositionEnd={() => setIsComposingDraft(false)}
           onPaste={handlePaste}
           aria-label={placeholderText}
           placeholder={placeholderText}
@@ -3962,7 +3753,8 @@ export function ChatInput({
           composer's own `overflow-hidden` then clipped Send out of sight.
         */}
         <div
-          className={`relative flex flex-wrap items-center justify-between ${
+          data-testid="composer-actions-row"
+          className={`relative mt-3 flex flex-wrap items-center justify-between ${
             useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
           } max-[360px]:gap-x-0.5`}
           ref={menuRef}
@@ -4003,79 +3795,10 @@ export function ChatInput({
           </button>
           {showWebSearchInFooter && webSearchChip}
           {isStudio && !webSearchState.isVisible && <button type="button" data-testid="composer-web-search-shortcut" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
-          {isStudio && review?.mode !== "easy" && (
-            <button
-              type="button"
-              data-testid="composer-deep-research-shortcut"
-              className="review-research-shortcut"
-              onClick={openDeepResearchSetup}
-              disabled={!deepResearchModel || isDeepResearchPending || review?.pending}
-              aria-describedby={deepResearchReason ? "composer-deep-research-reason" : undefined}
-            >
-              {t("chat.toolsDeepResearch")}
-              {deepResearchReason && <span id="composer-deep-research-reason" className="sr-only">{deepResearchReason}</span>}
-            </button>
-          )}
-          {review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || review?.appearance === "studio") && (
-            <button
-              ref={modelMenuButtonRef}
-              type="button"
-              onClick={(event) => toggleModelPicker(event.currentTarget)}
-              className="flex h-11 min-w-0 max-w-[4.75rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
-              data-testid="composer-model-select"
-              title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
-              aria-label={
-                isAutoMode
-                  ? `${autoCopy.compactLabel}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
-                  : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`
-              }
-              aria-expanded={isMenuOpen && menuView === "models"}
-              aria-controls="chat-input-popover"
-              aria-haspopup="dialog"
-            >
-              {!isAutoMode && (
-                activeSelectedModels.length === 1 ? (
-                  <span className="max-[240px]:hidden">
-                    <ModelLogo
-                      model={AVAILABLE_MODELS.find(
-                        (item) => item.id === activeSelectedModels[0]
-                      )}
-                      size="xs"
-                    />
-                  </span>
-                ) : (
-                  <span
-                    aria-hidden="true"
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
-                  >
-                    {activeSelectedModels.length}
-                  </span>
-                )
-              )}
-              {!isAutoMode && activeSelectedModels.length === 1 && (
-                <span
-                  aria-hidden="true"
-                  className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white max-[240px]:flex"
-                >
-                  1
-                </span>
-              )}
-              <span
-                data-testid="composer-active-model-count"
-                className={`min-w-0 line-clamp-2 break-keep ${
-                  isAutoMode ? "" : "max-[240px]:sr-only"
-                }`}
-              >
-                {isAutoMode
-                  ? autoCopy.compactLabel
-                  : modelsSelectedLabel(activeSelectedModels.length)}
-              </span>
-              <ComposerChevronDownIcon
-                className="text-zinc-400"
-                aria-hidden="true"
-              />
-            </button>
-          )}
+          {!isStudio && (review && footerModelPicker ? <div data-testid="composer-review-models" className="flex min-w-0">
+            {footerModelPicker}
+            <span className="sr-only">{activeSelectedModelObjects.map(model => <span key={model.id} className="sr-only" data-testid="composer-review-selected-model" data-model-id={model.id}>{model.name}</span>)}</span>
+          </div> : footerModelPicker)}
         </div>
 
         {/*
@@ -4089,7 +3812,7 @@ export function ChatInput({
         */}
         <div
           data-testid="composer-submit-actions"
-          className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-[360px]:gap-x-0.5 max-[240px]:contents"
+          className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-[360px]:gap-x-0.5 max-[240px]:contents"
         >
 
           <ChatInputAutoCapabilityPendingNotice
@@ -4118,6 +3841,7 @@ export function ChatInput({
             Placed before the send/stop branch so it is the neighbour of
             whichever of the two is rendered.
           */}
+          {voiceConversationControl}
           {voiceInputEnabled && (
             <VoiceInputButton
               state={voice.state}
@@ -4148,13 +3872,13 @@ export function ChatInput({
               onClick={() => {
                 if (isVoiceSubmissionBlocked) return;
                 dismissGuestQuickStart();
-                rememberImageIntentPrompt();
                 onSubmit();
               }}
               disabled={
                 isDraftMutationDisabled ||
                 Boolean(review?.pending || review?.ready === false) ||
                 Boolean(review?.mode === "easy" && !review.easyAvailable) ||
+                Boolean(noReviewProviders) ||
                 isVoiceSubmissionBlocked ||
                 (singleModelSelection && selectedModels.length !== 1) ||
                 activeSelectedModels.length === 0 ||
@@ -4186,6 +3910,7 @@ export function ChatInput({
           )}
         </div>
 
+          {isStudio && footerModelPicker && <div className="basis-full">{footerModelPicker}</div>}
           {isMenuOpen && (
             <ComposerMenuPortal>
             <>
@@ -4913,7 +4638,7 @@ export function ChatInput({
                       already in.
                     */}
                     <Link
-                      href={settingsSectionHref("assistants")}
+                      href={settingsSectionHref("assistants", currentProduct ?? "review")}
                       data-testid="assistant-manage-cta"
                       onClick={() => closeMenu(false)}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 dark:hover:bg-zinc-800 ${

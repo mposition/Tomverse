@@ -1,5 +1,7 @@
 // N1a. Cross-origin access for the locally bundled Capacitor shell, and
 // nothing else.
+// Native Chat authentication lives in nativeBearerGate/chatRouteSession behind
+// a default-off enrollment switch; this file grants no authorization.
 //
 // Contract: .github/audits/2026-08-30-native-mobile-readiness.md §3.1, and
 // `AUTH-04` in docs/release-gates/tomverse-chat-v1.yaml ("CORS bypass and
@@ -20,17 +22,14 @@
 //
 //   - the host allowlist and the Cloudflare origin-secret check still run,
 //     ahead of this;
-//   - the mutation-origin (CSRF) check in `lib/requestOrigin.ts` still runs,
-//     and still rejects every non-GET request from these origins, because
-//     nothing here makes a request same-origin;
+//   - the mutation-origin (CSRF) check still protects cookie requests. Only a
+//     verified bearer on an explicitly enrolled route replaces that check;
 //   - every route still does its own authentication, ownership, plan, credit
 //     and moderation checks.
 //
-// So after this change a native shell can *read* a `403
-// INVALID_REQUEST_ORIGIN` instead of receiving an opaque network error. It
-// still cannot mutate anything. Lifting that is N1b, and N1b needs a verified
-// bearer identity, which does not exist yet -- see the note on
-// `Access-Control-Allow-Headers` below.
+// A shell can read a server refusal instead of an opaque network error.
+// Successful mutations require the separate proxy and route authentication,
+// live-session verification and route-specific authorization checks.
 //
 // ## Why the origins are literals
 //
@@ -64,13 +63,9 @@ export const NATIVE_APP_ORIGINS = [
 
 /** Headers a native client may send on a cross-origin request. */
 const ALLOWED_REQUEST_HEADERS = [
-  // Listed so that a preflight for a bearer request succeeds rather than
-  // failing at the browser. Listing it grants nothing: no code path verifies
-  // an `Authorization` header today, and the mutation-origin check does not
-  // consult it. A header that is merely *present* must never change a security
-  // decision -- `proxy.ts` says the same about prefetch headers, for the same
-  // reason ("gating those on request headers would let any caller opt out of
-  // the entire edge security layer").
+  // Listing a header lets its preflight succeed; it does not authenticate it.
+  // Proxy and enrolled route handlers independently verify bearer credentials.
+  // Mere header presence never bypasses the mutation-origin check.
   "Authorization",
   "Content-Type",
   // The app's own correlation identifiers. Both are client-supplied and are
@@ -78,13 +73,14 @@ const ALLOWED_REQUEST_HEADERS = [
   // trace the client sent as `client_supplied`, which is not a credential.
   "X-Request-ID",
   "X-Tomverse-Trace-Id",
+  "X-Tomverse-Conversation-Unlocks",
+  "X-Tomverse-Time-Zone",
 ] as const;
 
 /**
  * Methods advertised in a preflight response.
  *
- * The mutating ones are here on purpose even though every one of them is
- * currently rejected by the mutation-origin check. Omitting them would make
+ * The mutating ones are advertised independently of authorization. Omitting them would make
  * the browser fail the preflight, and the app would see a generic CORS error
  * with no status and no body -- indistinguishable from the server being down.
  * Advertising them lets the *server's* refusal arrive intact, with its status,
@@ -168,10 +164,10 @@ export type NativeCorsHeaders = Record<string, string>;
  *
  *   1. no credentialed CORS sharing, which is what this absence provides;
  *   2. the server authenticating and authorising every request on its own,
- *      including the CSRF check in `lib/requestOrigin.ts` that both native
- *      origins still fail;
+ *      including CSRF for cookie requests and explicit enrollment plus double
+ *      verification for native bearer requests;
  *   3. the native transport carrying no cookie and instead presenting a bearer
- *      token the server verifies -- which is N2's job, and does not exist yet.
+ *      token the proxy and route verify, with live family/device/account checks.
  *
  * A bearer token is attached explicitly rather than sent ambiently, which is
  * why the bearer path does not need CSRF protection while the cookie path does
@@ -188,7 +184,7 @@ export const nativeAppCorsHeaders = (
     // differed only by case or surrounding whitespace is answered with the
     // canonical form rather than with its own input echoed back.
     "Access-Control-Allow-Origin": (origin as string).trim().toLowerCase(),
-    "Access-Control-Expose-Headers": "X-Request-ID, X-Chat-Routed-Model, Retry-After",
+    "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, X-Request-ID, X-Chat-Routed-Model, Retry-After",
   };
 };
 

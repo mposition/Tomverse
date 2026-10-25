@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { expectTappableInVisibleViewport } from "./support/ui-audit";
 import {
   mockGuestUsage,
   mockUserUsage,
@@ -423,7 +424,16 @@ test.describe("Chat starter catalogue", () => {
         composer: composer ? rect(composer) : null,
         cards: Array.from(
           document.querySelectorAll('[data-testid="chat-starter-card"]')
-        ).map(rect),
+        ).map(node => {
+          const box = rect(node);
+          const surface = node.closest('[data-testid="mobile-conversation-surface"]');
+          const clip = surface ? rect(surface) : { x: 0, y: 0, width: innerWidth, height: innerHeight };
+          const left = Math.max(box.x, clip.x, 0);
+          const top = Math.max(box.y, clip.y, 0);
+          const right = Math.min(box.x + box.width, clip.x + clip.width, innerWidth);
+          const bottom = Math.min(box.y + box.height, clip.y + clip.height, innerHeight);
+          return { ...box, painted: { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) } };
+        }),
       };
     });
 
@@ -441,16 +451,21 @@ test.describe("Chat starter catalogue", () => {
       // 44px touch target, which has to survive text scaling rather than be
       // squeezed by it.
       expect(box.height, `card ${index} is under the touch target`).toBeGreaterThanOrEqual(44);
-      // And it may not sit on the textarea's row. Overlap is a rectangle
-      // intersection, not a y comparison: the composer contract forbids
-      // sharing the row, floating above it and overlapping it alike.
+      // Offscreen content inside the welcome scroller has layout rectangles
+      // beyond its clip. Compare painted bounds, then verify every card can
+      // actually be reached and hit after scrolling.
+      const painted = box.painted;
       const overlaps =
-        box.x < composerBox.x + composerBox.width &&
-        box.x + box.width > composerBox.x &&
-        box.y < composerBox.y + composerBox.height &&
-        box.y + box.height > composerBox.y;
+        painted.width > 0 && painted.height > 0 &&
+        painted.x < composerBox.x + composerBox.width &&
+        painted.x + painted.width > composerBox.x &&
+        painted.y < composerBox.y + composerBox.height &&
+        painted.y + painted.height > composerBox.y;
       expect(overlaps, `card ${index} overlaps the composer`).toBe(false);
     });
+    for (const [index, card] of (await cards(page).all()).entries()) {
+      await expectTappableInVisibleViewport(page, card, `Starter card ${index} at 200% text`);
+    }
   });
 
   test("the guidance sentence is on the first screen, not cut at the dock, on a 412px phone at 125% text", { tag: "@ui-risk" }, async ({
@@ -674,26 +689,28 @@ test.describe("Chat starter catalogue", () => {
 
     await page.locator('[data-starter-id="sourced-answer"]').click();
     await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+    const textarea = page.getByTestId("chat-textarea");
+    const sourcedSeed = await textarea.inputValue();
 
-    // The image workspace opened with the card's own sentence.
+    // Review answers images inside the conversation (docs/ui-contracts/
+    // review-studio.md), so the card arms the composer's image mode with its
+    // own sentence instead of opening the image workspace.
     await page.locator('[data-starter-id="compare-image-models"]').click();
-    const imagePrompt = page.getByTestId("image-generation-prompt");
-    await expect(imagePrompt).toBeVisible();
-    expect((await imagePrompt.inputValue()).trim().length).toBeGreaterThan(0);
+    await expect(page.getByTestId("review-image-mode")).toBeVisible();
+    await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+    const imageSeed = await textarea.inputValue();
+    expect(imageSeed.trim().length).toBeGreaterThan(0);
+    expect(imageSeed).not.toBe(sourcedSeed);
 
-    // The toggle is asked about back in the chat, never from the image
-    // workspace: over there the composer does not exist, so an absent chip
-    // would say nothing about whether search was disarmed. Asserted from the
-    // image side, this test passed against the very defect it is here to
-    // catch.
-    await page.getByTestId("image-generation-cancel-draft").click();
-    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    // The sourced card's toggle was withdrawn with its sentence. The chip is
+    // read from the same composer the image prompt is sent from, so an absent
+    // chip here does mean search is off for that send.
     await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 
-    // And the chat composer kept nothing: the sourced card's seed was
-    // withdrawn with its toggle, so what comes back is an empty box rather
-    // than either card's sentence.
-    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    // Leaving image mode does not bring the search back either.
+    await page.getByTestId("review-image-mode").getByRole("button").click();
+    await expect(page.getByTestId("review-image-mode")).toHaveCount(0);
+    await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
   });
 
   test("with the image flag off the image card is absent, not locked", { tag: "@ui-risk" }, async ({

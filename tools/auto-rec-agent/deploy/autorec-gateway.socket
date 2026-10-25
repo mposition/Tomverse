@@ -1,0 +1,15 @@
+[Unit]
+Description=Auto-rec credential gateway socket (claim, result, publish)
+
+[Socket]
+ListenStream=/run/autorec-gateway.sock
+# Only the runner's account (and root) can connect.
+SocketUser=autorec
+SocketGroup=autorec
+SocketMode=0600
+# One gateway instance per connection, and one at a time.
+Accept=yes
+MaxConnections=1
+
+[Install]
+WantedBy=sockets.target

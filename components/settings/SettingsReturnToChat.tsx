@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { MessageSquare } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
     SETTINGS_RETURN_TO_CHAT_TEST_ID,
     settingsExitHref,
@@ -17,9 +18,9 @@ import {
  * settings panel. That hierarchy is right and stays, but it means the way out
  * of settings costs as many clicks as the depth the visitor reached — and the
  * panel's own close button lives on the conversation surface, which is the one place
- * they cannot get to. This is the missing edge: Review from anywhere, once.
- * The canonical generic destination is `/review`; explicit Chat product
- * flows carry their product identity through the shared controls instead.
+ * they cannot get to. This is the missing edge: back to the product whose
+ * panel was opened, from anywhere, once — Chat to Chat, Review to Review, and
+ * Review when that is unknown.
  *
  * Not an X. Settings is a full page, not a modal, so a close glyph would read
  * as "discard" or "cancel" — it would be describing an action this control
@@ -34,10 +35,11 @@ import {
 export function SettingsReturnToChat() {
     const { t } = useLanguage();
     const label = t("settingsNav.backToChat");
+    const product = useSettingsReturnProduct();
 
     return (
         <Link
-            href={settingsExitHref()}
+            href={settingsExitHref(product)}
             data-testid={SETTINGS_RETURN_TO_CHAT_TEST_ID}
             aria-label={label}
             className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 dark:focus-visible:ring-offset-zinc-950"

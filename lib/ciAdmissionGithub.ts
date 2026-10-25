@@ -1,6 +1,13 @@
 import { createSign } from "node:crypto";
 
-import { ciRunKey, type CiAdmissionDeploy, type CiAdmissionPull } from "@/lib/ciAdmissionCore";
+import {
+  ciRunKey,
+  ciRunnerOwnerKey,
+  type CiAdmissionCheck,
+  type CiAdmissionDeploy,
+  type CiAdmissionPull,
+  type CiRunnerOwner,
+} from "@/lib/ciAdmissionCore";
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
@@ -9,8 +16,10 @@ import { ciRunKey, type CiAdmissionDeploy, type CiAdmissionPull } from "@/lib/ci
  *
  * Writes, and nothing else: convert a pull request to draft, mark one ready
  * for review, cancel a pull_request workflow run of a held pull request, a
- * draft or one the operator stops in Admin, and one commit status (context `CI admission`) on a pull request's
- * head telling sessions it waits in line. No merge, push, label or comment. Every failure is a short
+ * draft or one the operator stops in Admin, one commit status (context `CI admission`) on a pull request's
+ * head telling sessions it waits in line, and GitHub's update-branch for a
+ * draft behind its base (develop merged into its branch: Contents write, owner
+ * 2026-10-25). No merge into a base, no other push, label or comment. Every failure is a short
  * code; no token, key or body is ever returned or logged. The webhook
  * signature check is in lib/ciAdmissionWebhookCore.ts.
  */
@@ -88,6 +97,20 @@ const runPulls = (run: Json): { number: number; base: string | null }[] =>
   });
 const runPullNumbers = (run: Json): number[] => runPulls(run).map((pr) => pr.number);
 
+/** Whose runners an active run holds, with no jobs counted yet: its pull request, its deploy, or its workflow. */
+const runnerOwner = (run: Json): CiRunnerOwner => {
+  const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+  const sha = SHA.test(text(run.head_sha, 40)) ? text(run.head_sha, 40) : null;
+  const shared = { title: text(run.display_title, 200), sha, running: 0, queued: 0, startedAt: text(run.run_started_at, 30) || text(run.created_at, 30) };
+  const pull = run.event === "pull_request" ? runPulls(run)[0] : undefined;
+  if (pull) return { ...shared, key: ciRunnerOwnerKey.pull(pull.number), number: pull.number, base: pull.base };
+  if (run.event === "push" && sha && (run.head_branch === "develop" || run.head_branch === "main")) {
+    return { ...shared, key: ciRunnerOwnerKey.deploy(run.head_branch, sha), number: null, base: run.head_branch };
+  }
+  const workflow = text(run.name, 100) || "workflow";
+  return { ...shared, key: `other:${workflow}`, title: workflow, number: null, base: null };
+};
+
 const toPull = (item: unknown): CiAdmissionPull | null => {
   const pull = record(item);
   const head = record(pull.head);
@@ -102,6 +125,9 @@ const toPull = (item: unknown): CiAdmissionPull | null => {
     headSha: String(head.sha ?? ""),
     draft: pull.draft === true,
     fork: headRepo === null || headRepo.full_name !== CI_ADMISSION_REPOSITORY,
+    labels: (Array.isArray(pull.labels) ? pull.labels : []).flatMap((label) =>
+      typeof label === "object" && label !== null && typeof (label as Json).name === "string" ? [String((label as Json).name)] : [],
+    ),
   };
 };
 
@@ -115,8 +141,16 @@ export type CiAdmissionGithub = {
   runningPulls(): Promise<{ keys: Set<string>; bases: Map<number, string>; deploys: CiAdmissionDeploy[] }>;
   /** One pull request as GitHub shows it now, with whether it is open; null when there is none. */
   pull(number: number): Promise<{ pull: CiAdmissionPull; open: boolean } | null>;
+  /**
+   * Whether a draft conflicts with its base (GitHub's `mergeable`, which may
+   * still be computing: null) and whether its base has commits it lacks
+   * (null when the comparison cannot be read).
+   */
+  check(pull: CiAdmissionPull): Promise<CiAdmissionCheck>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
+  /** Merges the base into the pull request's branch (GitHub's update-branch), only while its head is still the one judged. */
+  updateBranch(pull: CiAdmissionPull): Promise<void>;
   /**
    * Cancels the pull request's own queued and running pull_request runs (never
    * another pull request's on the same commit); returns how many. `force` is
@@ -124,18 +158,16 @@ export type CiAdmissionGithub = {
    * the operator's stop, not admission's own holds.
    */
   cancelRuns(pull: CiAdmissionPull, options?: { force?: boolean }): Promise<number>;
-  /** Jobs holding or waiting for a runner right now, repository-wide, split by GitHub-hosted and Ubicloud. */
-  runnerUsage(): Promise<CiRunnerUsageCounts>;
+  /** Who holds or waits for a GitHub-hosted runner right now, repository-wide: each pull request, deploy and other workflow. */
+  runnerUsage(): Promise<CiRunnerOwner[]>;
   /** The `CI admission` commit status on the pull request's head. */
   setStatus(sha: string, state: "pending" | "success", description: string): Promise<void>;
 };
 
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
 
-export type CiRunnerUsageCounts = { githubRunning: number; githubQueued: number; ubicloudRunning: number; ubicloudQueued: number };
-
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
-  const call = async (method: "GET" | "POST", url: string, auth: string, body?: Json) => {
+  const call = async (method: "GET" | "POST" | "PUT", url: string, auth: string, body?: Json) => {
     const response = await fetch(url, {
       method,
       headers: {
@@ -153,26 +185,34 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     return { status: response.status, json: () => JSON.parse(text) as unknown };
   };
 
-  let token: Promise<string> | null = null;
-  const installationToken = () =>
-    (token ??= (async () => {
+  const tokens = new Map<string, Promise<string>>();
+  let compareAvailable = true;
+  const ADMISSION_PERMISSIONS = { pull_requests: "write", actions: "write", statuses: "write", metadata: "read" };
+  const installationToken = (permissions: Record<string, string> = ADMISSION_PERMISSIONS): Promise<string> => {
+    const key = JSON.stringify(permissions);
+    const existing = tokens.get(key);
+    if (existing) return existing;
+    const created = (async () => {
       const jwt = appJwt(config, now());
       const installation = await call("GET", `${REPO}/installation`, jwt);
       if (installation.status !== 200) throw new Error(`github_installation_${installation.status}`);
       const id = record(installation.json()).id;
       if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) throw new Error("github_shape");
-      const created = await call("POST", `${API}/app/installations/${id}/access_tokens`, jwt, {
+      const answer = await call("POST", `${API}/app/installations/${id}/access_tokens`, jwt, {
         repositories: [CI_ADMISSION_REPOSITORY.split("/")[1]],
-        permissions: { pull_requests: "write", actions: "write", statuses: "write", metadata: "read" },
+        permissions,
       });
-      if (created.status !== 201) throw new Error(`github_token_${created.status}`);
-      const value = record(created.json()).token;
+      if (answer.status !== 201) throw new Error(`github_token_${answer.status}`);
+      const value = record(answer.json()).token;
       if (typeof value !== "string" || value === "") throw new Error("github_shape");
       return value;
     })().catch((error) => {
-      token = null;
+      tokens.delete(key);
       throw error;
-    }));
+    });
+    tokens.set(key, created);
+    return created;
+  };
 
   const get = async (url: string) => {
     const answer = await call("GET", url, await installationToken());
@@ -184,7 +224,14 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     const answer = await call("POST", `${API}/graphql`, await installationToken(), { query: mutation, variables: { id } });
     if (answer.status !== 200) throw new Error(`github_graphql_${answer.status}`);
     const body = record(answer.json());
-    if (body.errors !== undefined) throw new Error("github_graphql_errors");
+    if (body.errors !== undefined) {
+      // GitHub's error type (FORBIDDEN, NOT_FOUND ...) says what to fix; its
+      // message is free text and is not kept. 2026-10-23: every release failed
+      // as a bare "github_graphql_errors" and nobody could tell why.
+      const first = Array.isArray(body.errors) && body.errors.length > 0 ? record(body.errors[0]) : {};
+      const type = typeof first.type === "string" && /^[A-Z_]{1,40}$/.test(first.type) ? first.type : "UNKNOWN";
+      throw new Error(`github_graphql_errors:${type}`);
+    }
     return record(body.data);
   };
   return {
@@ -195,7 +242,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         state,
         context: CI_ADMISSION_STATUS_CONTEXT,
         description: description.slice(0, 140),
-        ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/agent-digests?tab=ci-admission` } : {}),
+        ...(/^https:\/\//.test(target) ? { target_url: `${target}/admin/qa-release?tab=ci-admission` } : {}),
       });
       if (answer.status !== 201) throw new Error(`github_status_${answer.status}`);
     },
@@ -250,6 +297,31 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       const pull = toPull(body);
       return pull ? { pull, open: record(body).state === "open" } : null;
     },
+    async check(pull) {
+      const detail = await call("GET", `${REPO}/pulls/${pull.number}`, await installationToken());
+      if (detail.status !== 200) throw new Error(`github_${detail.status}`);
+      const mergeable = record(detail.json()).mergeable;
+      const conflict = mergeable === false ? true : mergeable === true ? false : null;
+      let behind: boolean | null = null;
+      if (compareAvailable && SHA.test(pull.headSha) && /^[A-Za-z0-9._/-]{1,100}$/.test(pull.base)) {
+        try {
+          const compare = await call(
+            "GET",
+            `${REPO}/compare/${encodeURIComponent(pull.base)}...${pull.headSha}`,
+            await installationToken({ contents: "read", metadata: "read" }),
+          );
+          if (compare.status === 200) {
+            const behindBy = record(compare.json()).behind_by;
+            if (typeof behindBy === "number") behind = behindBy > 0;
+          }
+        } catch {
+          // No contents permission (the token is refused) or the read failed:
+          // behind stays unknown, and this client stops asking.
+          compareAvailable = false;
+        }
+      }
+      return { conflict, behind };
+    },
     async convertToDraft(pull) {
       const data = await graphql(
         "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }",
@@ -264,42 +336,51 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       );
       if (record(record(data.markPullRequestReadyForReview).pullRequest).isDraft !== false) throw new Error("github_still_draft");
     },
+    async updateBranch(pull) {
+      // Only this write needs Contents write; every other token stays without it.
+      const answer = await call(
+        "PUT",
+        `${REPO}/pulls/${pull.number}/update-branch`,
+        await installationToken({ contents: "write", pull_requests: "write", metadata: "read" }),
+        { expected_head_sha: pull.headSha },
+      );
+      // 422: the head moved meanwhile, a conflict, or GitHub refused (a
+      // workflow file change needs the Workflows permission too).
+      if (answer.status !== 202) throw new Error(`github_update_branch_${answer.status}`);
+    },
     async runnerUsage() {
-      const runIds = new Set<number>();
+      const runs = new Map<number, Json>();
       for (const status of ACTIVE_RUN_STATUSES) {
         for (let page = 1; page <= 3; page += 1) {
-          const runs = list(record(await get(`${REPO}/actions/runs?status=${status}&per_page=100&page=${page}`)).workflow_runs);
-          for (const run of runs) {
-            const id = record(run).id;
-            if (typeof id === "number") runIds.add(id);
-          }
-          if (runs.length < 100) break;
+          const batch = list(record(await get(`${REPO}/actions/runs?status=${status}&per_page=100&page=${page}`)).workflow_runs).map(record);
+          for (const run of batch) if (typeof run.id === "number") runs.set(run.id, run);
+          if (batch.length < 100) break;
         }
       }
-      const counts: CiRunnerUsageCounts = { githubRunning: 0, githubQueued: 0, ubicloudRunning: 0, ubicloudQueued: 0 };
       // Bounded, so a busy repository still answers within a few seconds: at
       // most RUNNER_USAGE_MAX_RUNS runs, RUNNER_USAGE_PARALLEL job reads at a time.
-      const ids = [...runIds].slice(0, RUNNER_USAGE_MAX_RUNS);
-      const jobLists: unknown[][] = [];
-      for (let index = 0; index < ids.length; index += RUNNER_USAGE_PARALLEL) {
-        const batch = ids.slice(index, index + RUNNER_USAGE_PARALLEL);
-        jobLists.push(
-          ...(await Promise.all(batch.map(async (id) => list(record(await get(`${REPO}/actions/runs/${id}/jobs?filter=latest&per_page=100`)).jobs)))),
-        );
+      const owners = new Map<string, CiRunnerOwner>();
+      const active = [...runs.values()].slice(0, RUNNER_USAGE_MAX_RUNS);
+      for (let index = 0; index < active.length; index += RUNNER_USAGE_PARALLEL) {
+        const batch = active.slice(index, index + RUNNER_USAGE_PARALLEL);
+        const jobLists = await Promise.all(batch.map(async (run) => list(record(await get(`${REPO}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`)).jobs)));
+        batch.forEach((run, at) => {
+          const owner = runnerOwner(run);
+          const entry = owners.get(owner.key) ?? owner;
+          if (entry.startedAt < owner.startedAt) entry.startedAt = owner.startedAt;
+          for (const item of jobLists[at]) {
+            const job = record(item);
+            const status = String(job.status);
+            const labels = Array.isArray(job.labels) ? job.labels.map(String) : [];
+            // Ubicloud jobs are outside GitHub's limit.
+            if (!ACTIVE_RUN_STATUSES.has(status) || labels.some((label) => label.startsWith("ubicloud"))) continue;
+            if (status === "in_progress") entry.running += 1;
+            else entry.queued += 1;
+          }
+          owners.set(entry.key, entry);
+        });
       }
-      for (const jobs of jobLists) {
-        for (const item of jobs) {
-          const job = record(item);
-          const status = String(job.status);
-          if (!ACTIVE_RUN_STATUSES.has(status)) continue;
-          const labels = Array.isArray(job.labels) ? job.labels.map(String) : [];
-          const ubicloud = labels.some((label) => label.startsWith("ubicloud"));
-          const running = status === "in_progress";
-          if (ubicloud) counts[running ? "ubicloudRunning" : "ubicloudQueued"] += 1;
-          else counts[running ? "githubRunning" : "githubQueued"] += 1;
-        }
-      }
-      return counts;
+      return [...owners.values()];
     },
     async cancelRuns(pull, options = {}) {
       // Every queued or running pull_request run of this pull request, on any
