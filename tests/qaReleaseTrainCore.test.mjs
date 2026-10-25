@@ -6,6 +6,7 @@ import {
   parseQaReleaseTrainSlots,
   qaReleaseTrainBranch,
   qaReleaseTrainDeparture,
+  qaReleaseTrainEmergencySlot,
   qaReleaseTrainPullRequest,
   qaReleaseTrainShouldDepart,
   qaReleaseTrainNextDepartureMs,
@@ -94,4 +95,17 @@ test("the next departure is the first hour after now in AEST, today's or tomorro
   // 21:00 AEST -> tomorrow 08:00 AEST (22:00Z the same UTC day).
   assert.equal(at("2026-10-25T11:00:00Z"), "2026-10-25T22:00:00.000Z");
   assert.equal(qaReleaseTrainNextDepartureMs(0, []), null);
+});
+
+test("an emergency train is named by its AEST minute, never a scheduled departure's", () => {
+  const hours = [8, 11, 14, 17, 20];
+  // 12:37 AEST.
+  assert.equal(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T02:37:00Z"), hours), "20261020-1237");
+  // 11:00 AEST is the 11:00 train's own slot: the emergency takes 11:01.
+  assert.equal(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T01:00:30Z"), hours), "20261020-1101");
+  // 12:00 is not a departure hour, so it keeps 12:00.
+  assert.equal(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T02:00:00Z"), hours), "20261020-1200");
+  // The AEST date, not UTC's: 23:50 UTC is 09:50 the next day.
+  assert.equal(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T23:50:00Z"), hours), "20261021-0950");
+  assert.equal(qaReleaseTrainBranch(qaReleaseTrainEmergencySlot(Date.parse("2026-10-20T02:37:00Z"), hours)), "release/train-20261020-1237");
 });

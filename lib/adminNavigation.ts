@@ -675,7 +675,14 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "overview",
         label: "Overview",
-        description: "What needs the operator, production against main, the merge lane, the train and the latest digest",
+        description: "What needs the operator, production against main, the merge lane and the latest digest",
+      },
+      {
+        // Its own tab (owner, 2026-10-25): the next train's cargo, an
+        // emergency departure and the departure board of past trains.
+        id: "train",
+        label: "Release train",
+        description: "The next train's cargo, an emergency departure and the departure board of past trains",
       },
       {
         id: "lane",

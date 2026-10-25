@@ -28,7 +28,7 @@ const body = z.union([
     })
     .strict(),
   z.object({ phase: z.literal("selection") }).strict(),
-  z.object({ phase: z.literal("admit"), slot: SLOT }).strict(),
+  z.object({ phase: z.literal("admit"), slot: SLOT, emergency: z.literal(true).optional() }).strict(),
   z
     .object({
       phase: z.literal("report"),
@@ -80,11 +80,13 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
       return { status: 200, body: { recorded: true } };
     }
     if (input.phase === "selection") {
-      // Read only: the numbers the next train carries, picked in Admin.
-      return { status: 200, body: { numbers: (await readQaReleaseTrainSelection()).numbers } };
+      // Read only: the numbers the next scheduled train carries, and an
+      // emergency request's numbers when one is waiting, both picked in Admin.
+      const next = await readQaReleaseTrainSelection();
+      return { status: 200, body: { numbers: next.numbers, emergency: next.emergency.pending?.numbers ?? null } };
     }
     if (input.phase === "admit") {
-      const result = await admitQaReleaseTrain({ callerRevision, slot: input.slot });
+      const result = await admitQaReleaseTrain({ callerRevision, slot: input.slot, emergency: input.emergency === true });
       return result.admitted ? { status: 200, body: result } : { status: 409, body: result };
     }
     const report = { slot: input.slot, outcome: input.outcome, pullRequestNumber: input.pullRequestNumber, branch: input.branch, rcSha: input.rcSha, failure: input.failure, picks: input.picks };

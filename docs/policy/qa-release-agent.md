@@ -293,7 +293,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     서비스가 develop 회차 뒤에 **열차 회차**를 돕니다. 판정은 `lib/qaReleaseTrainCore.ts`, 순서는 `lib/qaReleaseTrainService.ts`입니다.
     - **출발 시각**은 AEST 08·11·14·17·20시이고 `QA_RELEASE_TRAIN_SLOTS`(쉼표로 나눈 시) 하나로 바꿉니다. 출발 뒤 한 시간 안의
       회차만 그 출발을 시작하며, 그 출발의 브랜치 `release/train-YYYYMMDD-HHMM`(AEST)이 GitHub에 있으면 다시 시작하지 않습니다.
-    - **실을 PR**은 운영자가 Admin › Agent digests › QA·릴리스의 "다음 열차"에서 고른 develop 병합 PR입니다(운영자 결정
+    - **실을 PR**은 운영자가 Admin › QA·릴리스 › 릴리스 열차 탭의 "다음 열차"에서 고른 develop 병합 PR입니다(운영자 결정
       2026-10-23, 그 전에는 `main:next` 라벨). 선택은 앱이 감사 기록(`qa_release.train_cargo_selected`, owner·ops와 최근
       로그인)으로 남기고, 서비스는 출발 때 앱에서 읽기만 하며 GitHub에서 그 PR이 develop에 병합됐는지 확인합니다. 선택은 그 뒤
       처음 승인된 출발이 가져가고 소진됩니다. 그 열차가 보고하면 충돌·정원 초과로 빠진 PR과, PR을 열기 전에 실패한 열차가
@@ -306,6 +306,15 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       병합 전 14일 안, 최대 10개)을 보고에 적고, Admin은 그중 아직 main에 없는 것을 "먼저 실어야 할 PR"로 보이며 함께 고르게 합니다. `.github/workflows/**`를 바꾸는 PR도
       되돌려 뺍니다: App에 workflows 권한이 없어 그 파일이 든 push는 GitHub이 거절하고, 열차 전체가 실패하기 때문입니다. 그런 PR은
       `release/**`나 `hotfix/**`로 따로 냅니다.
+    - **긴급 열차**(운영자 2026-10-25): owner·ops가 최근 로그인으로 릴리스 열차 탭에서 PR과 사유(5~300자)를 적어 요청하면
+      (`qa_release.train_emergency_requested`, 감사 기록) 서비스가 출발 시각을 기다리지 않고 다음 회차(30분 안)에 출발합니다. 열린 열차가
+      있어도 기다리지 않습니다. 열차 번호는 출발한 AEST 분(`release/train-YYYYMMDD-HHMM`)이고, 정기 출발과 같은 이름(`HH00`)이
+      되면 `HH01`을 씁니다. 승인은 따로 기록(`qa_release.train_emergency_admitted`)되며 앱이 대기 중인 요청이 있을 때만 승인하므로,
+      정기 열차의 선택을 소진하지 않습니다. 사유는 감사 기록에만 남고 공개 PR 본문에는 나오지 않습니다. 빈 요청은 대기 중인 요청을
+      취소합니다. 조립·제외·보고는 정기 열차와 같습니다.
+    - **출발 전광판**: 릴리스 열차 탭은 승인·보고 감사 기록과 각 main PR의 GitHub 상태로 최근 열차를 한 줄씩 보입니다(편성 중,
+      탑승 중, 도착, 운행 취소, 공차, 결항, 보고 없음). 줄을 누르면 실린 PR, 못 실린 PR과 이유·선행 PR, 이미 main에 있던 PR,
+      RC SHA와 걸린 시간이 펼쳐집니다.
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
       — 운영자가 `npm run merge-train`으로 합니다. label·comment·status는 쓰지 않습니다.

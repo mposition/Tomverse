@@ -59,8 +59,10 @@ function ports(overrides = {}) {
         scheduled.push(hours);
         if (overrides.scheduleFails) throw new Error("app_500");
       },
-      selection: async () => note("selection", overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number)),
-      admit: async (slot) => note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot]), overrides.admit ?? { admitted: true }),
+      selection: async () =>
+        note("selection", { numbers: overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number), emergency: overrides.emergency ?? null }),
+      admit: async (slot, emergency) =>
+        note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot, emergency === true]), overrides.admit ?? { admitted: true }),
       report: async (report) => void note("report", report),
     },
   };
@@ -81,7 +83,8 @@ test("off, or a bad departure list, does nothing at all", async () => {
 test("outside a departure hour, after this departure's branch exists, with an open train, or with no cargo, nothing is written", async () => {
   const outside = ports();
   assert.equal((await runQaReleaseTrainRound(env(), outside.p, Date.parse("2026-10-20T00:59:00Z"))).train, "no_departure");
-  assert.deepEqual(outside.calls, []);
+  // Off the hours only the emergency read happens.
+  assert.deepEqual(outside.names(), ["selection"]);
   for (const [overrides, expected] of [
     [{ branchExists: true }, "departure_done"],
     [{ openTrains: 1 }, "train_open"],
@@ -204,4 +207,48 @@ test("every running round tells the app its departure hours; off or misconfigure
   assert.equal(failing.scheduled.length, 1);
   assert.notEqual(outcome.train, "failed");
   assert.ok(failing.names().includes("admitSlot"), "the departure still runs");
+});
+
+// Emergency trains (owner request 2026-10-25).
+test("an emergency request departs off the hours, on its own minute's branch, without waiting for an open train", async () => {
+  // 2026-10-20 12:37 AEST: no departure hour.
+  const at = Date.parse("2026-10-20T02:37:00Z");
+  const { p, calls } = ports({ emergency: [12], openTrains: 1 });
+  const outcome = await runQaReleaseTrainRound(env(), p, at);
+  assert.equal(outcome.train, "opened");
+  assert.equal(outcome.slot, "20261020-1237");
+  assert.deepEqual(
+    calls.find(([n]) => n === "admitSlot"),
+    ["admitSlot", "20261020-1237", true],
+  );
+  assert.deepEqual(calls.find(([n]) => n === "assemble")[1], { branch: "release/train-20261020-1237", numbers: [12], capacity: 30 });
+  assert.ok(!calls.some(([n]) => n === "openTrains"), "an emergency does not wait for an open train");
+  const pr = calls.find(([n]) => n === "openPullRequest")[1];
+  assert.match(pr.title, /^release: emergency train 20261020-1237 \(1 PR\)$/);
+  assert.match(pr.body, /^Emergency release train 20261020-1237 \(AEST\), opened by the QA-release agent on an operator's emergency request in Admin\./);
+});
+
+test("an emergency in a departure hour goes first, and the scheduled train still waits for its own round", async () => {
+  // 11:05 AEST: the 11:00 departure's window, so the emergency takes 11:05.
+  const { p, calls } = ports({ emergency: [10] });
+  const outcome = await runQaReleaseTrainRound(env(), p, NOW);
+  assert.equal(outcome.slot, "20261020-1105");
+  assert.deepEqual(calls.find(([n]) => n === "assemble")[1].numbers, [10]);
+});
+
+test("an emergency branch already pushed this minute is done; a refused emergency admission writes nothing", async () => {
+  const at = Date.parse("2026-10-20T02:37:00Z");
+  const done = ports({ emergency: [12], branchExists: true });
+  assert.equal((await runQaReleaseTrainRound(env(), done.p, at)).train, "departure_done");
+  const refused = ports({ emergency: [12], admit: { admitted: false, reason: "no_emergency" } });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), refused.p, at), { exitCode: 0, train: "not_admitted", reason: "no_emergency" });
+  assert.ok(!refused.names().includes("assemble"));
+});
+
+test("off the hours an app that cannot answer is no departure, not a failed round", async () => {
+  const { p } = ports();
+  p.app.selection = async () => {
+    throw new Error("app_503");
+  };
+  assert.deepEqual(await runQaReleaseTrainRound(env(), p, Date.parse("2026-10-20T02:37:00Z")), { exitCode: 0, train: "no_departure" });
 });

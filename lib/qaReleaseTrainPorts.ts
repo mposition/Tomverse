@@ -223,12 +223,16 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
     },
     async selection() {
       const answer = await call({ phase: "selection" });
+      const isNumbers = (value: unknown): value is number[] => Array.isArray(value) && value.every((n) => Number.isInteger(n) && n > 0);
       const numbers = answer.status === 200 ? answer.body.numbers : null;
-      if (!Array.isArray(numbers) || !numbers.every((n) => Number.isInteger(n) && n > 0)) throw new Error("app_selection_shape");
-      return numbers as number[];
+      if (!isNumbers(numbers)) throw new Error("app_selection_shape");
+      // An app older than emergency trains sends no `emergency`: none is waiting.
+      const emergency = answer.body.emergency ?? null;
+      if (emergency !== null && !isNumbers(emergency)) throw new Error("app_selection_shape");
+      return { numbers, emergency };
     },
-    async admit(slot) {
-      const answer = await call({ phase: "admit", slot });
+    async admit(slot, emergency) {
+      const answer = await call({ phase: "admit", slot, ...(emergency ? { emergency: true } : {}) });
       return answer.status === 200 && answer.body.admitted === true
         ? { admitted: true }
         : { admitted: false, reason: typeof answer.body.reason === "string" ? answer.body.reason : "unknown" };

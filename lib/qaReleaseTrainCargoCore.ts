@@ -224,3 +224,43 @@ export function qaReleaseTrainSelectionFrom(input: {
     lastTrain,
   };
 }
+
+/*
+ * Emergency trains (owner request 2026-10-25): the operator names pull
+ * requests and a reason in Admin, and the train service departs with them on
+ * its next round instead of waiting for a departure hour. The request is an
+ * audited Admin action; the train's emergency admission spends it. An empty
+ * request withdraws a pending one.
+ */
+export const QA_RELEASE_TRAIN_EMERGENCY_REASON_MIN = 5;
+export const QA_RELEASE_TRAIN_EMERGENCY_REASON_MAX = 300;
+
+/** A reason as saved: trimmed, one line, within bounds. Null when not one. */
+export function parseQaReleaseTrainEmergencyReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const reason = value.replace(/\s+/g, " ").trim();
+  return reason.length >= QA_RELEASE_TRAIN_EMERGENCY_REASON_MIN && reason.length <= QA_RELEASE_TRAIN_EMERGENCY_REASON_MAX ? reason : null;
+}
+
+export type QaReleaseTrainEmergency = {
+  /** The pending request's numbers, or null when none is waiting. */
+  pending: { numbers: number[]; reason: string; requestedAt: string; requestedBy: string | null } | null;
+  /** The emergency departure that took the newest request, when one did. */
+  departedWith: string | null;
+};
+
+/** The emergency state from the newest request and the newest emergency admission. */
+export function qaReleaseTrainEmergencyFrom(input: {
+  request: { numbers: unknown; reason: unknown; at: Date; by: string | null } | null;
+  admission: { slot: string; at: Date } | null;
+}): QaReleaseTrainEmergency {
+  const { request, admission } = input;
+  if (!request) return { pending: null, departedWith: null };
+  if (admission !== null && admission.at.getTime() > request.at.getTime()) return { pending: null, departedWith: admission.slot };
+  const numbers = parseQaReleaseTrainCargoPick(request.numbers) ?? [];
+  const reason = parseQaReleaseTrainEmergencyReason(request.reason);
+  return {
+    pending: numbers.length > 0 && reason !== null ? { numbers, reason, requestedAt: request.at.toISOString(), requestedBy: request.by } : null,
+    departedWith: null,
+  };
+}

@@ -1,14 +1,28 @@
 import type { MouseEvent } from "react";
 
+import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
+
 /** Where each attention item sends the operator: a section of the QA and release tab. */
 export const QA_RELEASE_SECTION_IDS = {
   main: "qa-release-main",
   lane: "qa-release-lane",
   digest: "qa-release-digest",
-  train: "qa-release-train-section",
   cargo: "qa-release-train-cargo",
   settings: "qa-release-settings",
 } as const;
+
+/** The release train's own tab, where a failed train's attention item sends the operator. */
+export const QA_RELEASE_TRAIN_TAB_HREF = "/admin/qa-release?tab=train";
+
+/** A train report as the overview's attention strip reads it. */
+export type QaReleaseTrainView = {
+  slot: string;
+  at: string;
+  outcome: "opened" | "empty" | "failed";
+  pullRequestNumber: number | null;
+  failure: string | null;
+  picks: Pick<QaReleaseTrainPick, "number" | "outcome">[];
+};
 
 /** The tab's card surface, shared by its sections. */
 export const card = "rounded-2xl border border-zinc-800 bg-zinc-900 p-4 sm:p-5";

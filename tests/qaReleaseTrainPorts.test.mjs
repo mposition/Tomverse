@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
+import { createQaReleaseTrainAppPorts, createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
 import { qaReleaseTrainPullRequest } from "../lib/qaReleaseTrainCore.ts";
 
 // The two defects left by the train's review: a rider that changes a workflow
@@ -101,4 +101,32 @@ test("the picked numbers are read one by one; one not merged into develop, or go
   const github = createQaReleaseTrainGithubPorts({ http, token: async () => "t" });
   const cargo = await github.cargo([1, 2, 3, 404, 1]);
   assert.deepEqual(cargo.map((c) => c.number), [1]);
+});
+
+// The app's answer to the train (owner request 2026-10-25): the scheduled
+// pick, and an emergency request's numbers when one is waiting.
+test("the app port reads an emergency request and asks for an emergency admission by name", async () => {
+  const env = { RAILWAY_ENVIRONMENT_NAME: "production", QA_RELEASE_MERGE_LANE_SECRET: "lane-secret", QA_RELEASE_CONTROL_REVISION: "3" };
+  const sent = [];
+  const answerWith = (body) =>
+    createQaReleaseTrainAppPorts({
+      env,
+      http: async (request) => {
+        sent.push(JSON.parse(request.body));
+        return { status: 200, text: JSON.stringify(body) };
+      },
+    });
+  assert.deepEqual(await answerWith({ numbers: [1, 2], emergency: [3] }).selection(), { numbers: [1, 2], emergency: [3] });
+  // An app older than emergency trains says nothing of them.
+  assert.deepEqual(await answerWith({ numbers: [1] }).selection(), { numbers: [1], emergency: null });
+  await assert.rejects(answerWith({ numbers: [1], emergency: ["x"] }).selection(), /app_selection_shape/);
+
+  sent.length = 0;
+  const ports = answerWith({ admitted: true });
+  await ports.admit("20261020-1237", true);
+  await ports.admit("20261020-1100");
+  assert.deepEqual(sent, [
+    { phase: "admit", slot: "20261020-1237", emergency: true },
+    { phase: "admit", slot: "20261020-1100" },
+  ]);
 });

@@ -102,7 +102,10 @@ works in it, not only reads it; `/admin/agent-digests?tab=qa-release` and
 Its `lane` tab is the merge lane's own record of its latest rounds: every
 open develop pull request with what the lane will do with it, the ones that
 are the operator's first with the files that made them so; that count is
-the tab's chip.
+the tab's chip. Its `train` tab (2026-10-25) is the release train: the next
+train's cargo, an emergency departure request, and a departure board of
+past trains that stays dark in both console themes (the one Admin file
+`tests/adminTheme.test.mjs` lets use literal colours).
 
 **Agent digests** is the common area where agent teams' daily digests are
 read (`docs/policy/qa-release-agent.md` section 4), one section per agent
