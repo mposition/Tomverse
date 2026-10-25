@@ -28,6 +28,17 @@ const ports = (answer) => {
   };
 };
 
+test("an entirely unconfigured Monitor is dormant; partial or foreign configuration still fails", async () => {
+  const p = ports({ status: 200, body: { verdict: "fresh" } });
+  assert.deepEqual(await runQaReleaseMonitorService({ PATH: "/usr/bin", RAILWAY_ENVIRONMENT_NAME: "staging" }, p),
+    { exitCode: 0, outcome: "unconfigured" });
+  for (const value of [{ QA_RELEASE_MONITOR_SECRET: "" }, { QA_RELEASE_CONTROL_REVISION: "1" },
+    { DATABASE_URL: "postgres://synthetic" }, { RAILWAY_TOKEN: "synthetic" }])
+    assert.deepEqual(await runQaReleaseMonitorService({ PATH: "/usr/bin", ...value }, p),
+      { exitCode: 1, outcome: "refused_to_start" });
+  assert.equal(p.calls.length, 0);
+});
+
 test("the Monitor calls its one fixed destination with its secret and the control revision", async () => {
   const p = ports({ status: 200, body: { verdict: "stale", alerted: true } });
   assert.deepEqual(await runQaReleaseMonitorService(env(), p), { exitCode: 0, outcome: "checked", verdict: "stale" });
