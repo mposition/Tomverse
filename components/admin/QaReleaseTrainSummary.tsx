@@ -12,12 +12,15 @@ export function QaReleaseTrainSummary({
   riding,
   carried,
   openTrain,
+  openUnknown,
   emergencyPulls,
 }: {
   nextDepartureAt: string | null;
   riding: number;
   carried: number;
   openTrain: number | null;
+  /** GitHub's open pull requests could not be read: whether a train is open is unknown, never "none". */
+  openUnknown: boolean;
   /** A pending emergency request's pull request count: it departs before the scheduled train. */
   emergencyPulls: number | null;
 }) {
@@ -50,10 +53,13 @@ export function QaReleaseTrainSummary({
           <a className="font-mono text-xl font-semibold text-blue-300 hover:underline" href={`${PR_URL}${openTrain}`} target="_blank" rel="noreferrer">
             #{openTrain}
           </a>
+        ) : openUnknown ? (
+          <span className="font-mono text-xl font-semibold text-amber-300">{m.summaryOpenUnknown}</span>
         ) : (
           <span className="font-mono text-xl font-semibold text-zinc-100">{m.summaryOpenNone}</span>
         )}
         {openTrain !== null ? <span className="text-xs text-zinc-400">{m.summaryOpenNote}</span> : null}
+        {openTrain === null && openUnknown ? <span className="text-xs text-amber-300">{m.summaryOpenUnknownNote}</span> : null}
       </div>
     </div>
   );

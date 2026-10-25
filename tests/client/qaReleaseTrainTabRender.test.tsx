@@ -54,7 +54,7 @@ test("an empty board says so, and an unread GitHub is named instead of guessed",
 
 test("the summary shows the next departure, what rides it, and the open train", () => {
   const html = renderToStaticMarkup(
-    <QaReleaseTrainSummary nextDepartureAt="2026-10-25T07:00:00Z" riding={16} carried={12} openTrain={2998} emergencyPulls={2} />,
+    <QaReleaseTrainSummary nextDepartureAt="2026-10-25T07:00:00Z" riding={16} carried={12} openTrain={2998} openUnknown={false} emergencyPulls={2} />,
   );
   assert.match(html, /16/);
   assert.match(html, /12 carried · 4 new/);
@@ -62,6 +62,15 @@ test("the summary shows the next departure, what rides it, and the open train", 
   // A pending emergency departs first, and the scheduled time still shows.
   assert.match(html, /Emergency: next round/);
   assert.ok(html.includes("with 2 PR(s); the scheduled train follows at"));
+});
+
+test("open main pull requests GitHub did not give are named unknown, never none, and the emergency train warns", () => {
+  const html = renderToStaticMarkup(<QaReleaseTrainSummary nextDepartureAt={null} riding={0} carried={0} openTrain={null} openUnknown={true} emergencyPulls={null} />);
+  assert.match(html, /Not read/);
+  assert.match(html, /a train may be open/);
+  assert.doesNotMatch(html, />None</);
+  assert.match(renderToStaticMarkup(<QaReleaseTrainEmergencySection canWrite={true} openUnknown={true} />), /qa-release-train-emergency-open-unknown/);
+  assert.doesNotMatch(renderToStaticMarkup(<QaReleaseTrainEmergencySection canWrite={true} />), /qa-release-train-emergency-open-unknown/);
 });
 
 test("only a writer is offered the emergency train", () => {

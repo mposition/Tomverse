@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { card } from "@/components/admin/qaReleaseTabParts";
+import { announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -29,6 +29,7 @@ const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   unchecked: "bg-zinc-800 text-zinc-300",
   in_main_pull_request: "bg-zinc-800 text-zinc-400",
   on_main: "bg-zinc-800 text-zinc-400",
+  mentioned: "bg-amber-300/15 text-amber-300",
   changes_workflows: "bg-amber-300/15 text-amber-300",
   back_merge: "bg-zinc-800 text-zinc-400",
 };
@@ -45,7 +46,11 @@ const hoursText = (hours: readonly number[]) => hours.map((hour) => String(hour)
  * train left out rides the next one, marked here with the develop pull
  * requests a conflict needs first.
  */
-export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean; id?: string }) {
+/**
+ * `reloadKey`: the overview's Refresh count. Each new value reads the
+ * candidates again from GitHub, past the shared ten-minute read.
+ */
+export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { canWrite: boolean; id?: string; reloadKey?: number }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
   const [view, setView] = useState<View | null>(null);
   const [failed, setFailed] = useState(false);
@@ -59,7 +64,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
 
   useEffect(() => {
     let cancelled = false;
-    adminFetch(API, { cache: "no-store" })
+    adminFetch(reloadKey > 0 ? `${API}?fresh=1` : API, { cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
         return response.json() as Promise<View>;
@@ -76,7 +81,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   const saved = useMemo(() => new Set(view?.selection.numbers ?? []), [view]);
   const changed = picked.size !== saved.size || [...picked].some((number) => !saved.has(number));
@@ -135,6 +140,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       setView((current) => (current ? { ...current, selection: payload.result! } : current));
       setPicked(new Set(payload.result.numbers));
       setNotice({ tone: "ok", text: m.trainCargoSaved.replace("{count}", String(payload.result.numbers.length)) });
+      announceQaReleaseTrainChanged();
     } catch {
       setNotice({ tone: "error", text: m.trainCargoSaveFailed });
     } finally {
@@ -151,7 +157,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
   const unreleased = (predecessors: readonly number[]) =>
     predecessors.filter((number) => {
       const status = candidateByNumber.get(number)?.status;
-      return status === undefined || status === "available" || status === "unchecked" || status === "changes_workflows";
+      return status === undefined || qaReleaseTrainCargoPickable(status) || status === "changes_workflows";
     });
   const trainLabel = lastTrain ? (lastTrain.pullRequestNumber !== null ? `#${lastTrain.pullRequestNumber}` : lastTrain.slot) : "";
   const leftOutText = (reason: QaReleaseTrainCarryReason) =>
@@ -176,6 +182,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       unchecked: m.trainCargoUnchecked,
       in_main_pull_request: m.trainCargoInMainPull.replace("{number}", String(candidate.mainPullRequest ?? "")),
       on_main: m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
+      mentioned: m.trainCargoMentioned.replace("{number}", String(candidate.mainPullRequest ?? "")),
       changes_workflows: m.trainCargoWorkflows,
       back_merge: m.trainCargoBackMerge,
     })[candidate.status];
@@ -216,7 +223,10 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       ) : null}
 
       {failed || view?.candidates.status === "unread" ? (
-        <p className="mt-3 text-sm text-amber-300">{m.trainCargoUnread}</p>
+        <p className="mt-3 text-sm text-amber-300">
+          {m.trainCargoUnread}
+          {view?.candidates.status === "unread" ? m.githubFailure.replace("{failure}", view.candidates.failure) : ""}
+        </p>
       ) : view === null ? (
         <p className="mt-3 text-sm text-zinc-400">{m.trainCargoLoading}</p>
       ) : (

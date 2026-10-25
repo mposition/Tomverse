@@ -6,6 +6,7 @@ import {
   buildAccountRestoredEmail,
 } from "../lib/accountEmails.ts";
 import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
+import { storeBillingDeletionNotice } from "../locales/storeBilling.ts";
 
 // The two account lifecycle notices, in every language this product speaks.
 //
@@ -24,6 +25,13 @@ const SCHEDULED_FOR = "2026-09-15T09:00:00.000Z";
 
 const deletion = (language) =>
   buildAccountDeletionScheduledEmail({ scheduledFor: SCHEDULED_FOR, language });
+
+test("deletion emails and the app disclose separate store cancellation in every language", () => {
+  for (const language of SUPPORTED_LANGUAGES) {
+    const notice = storeBillingDeletionNotice(language);
+    assert.ok(deletion(language).text.includes(notice), `${language} omits the store cancellation disclosure`);
+  }
+});
 
 test("the deletion notice renders in every supported language", () => {
   assert.equal(SUPPORTED_LANGUAGES.length, 7);

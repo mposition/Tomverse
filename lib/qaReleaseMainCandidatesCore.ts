@@ -25,6 +25,8 @@ export type QaReleaseMainCandidate = {
 export type QaReleaseMainCandidates = {
   /** null when GitHub's answer could not be read. */
   pullRequests: QaReleaseMainCandidate[] | null;
+  /** Why GitHub could not be read (`github_403`, `timeout` ...); null when it was. */
+  readFailure: string | null;
   production: {
     environment: string;
     servingSha: string | null;
@@ -44,6 +46,7 @@ export function qaReleaseMainCandidates(input: {
   mainHeadJson: unknown;
   environment: string;
   servingSha: string | null;
+  readFailure?: string | null;
 }): QaReleaseMainCandidates {
   let pullRequests: QaReleaseMainCandidate[] | null = null;
   if (Array.isArray(input.openPullsJson)) {
@@ -72,6 +75,7 @@ export function qaReleaseMainCandidates(input: {
   const servingSha = input.servingSha && SHA.test(input.servingSha) ? input.servingSha : null;
   return {
     pullRequests,
+    readFailure: input.readFailure ?? null,
     production: {
       environment: input.environment,
       servingSha,

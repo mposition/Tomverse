@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
@@ -70,10 +70,30 @@ export function AdminAgentDigestsPanel({
   /** The server's clock when the page was read, so both renders agree. */
   nowMs: number;
 }) {
+  const m = useAdminMessages(adminAgentDigestsMessages);
+  const router = useRouter();
   const items = qaReleaseAttentionItems({ console: initial, main, trains, nowMs });
   const figures = qaReleaseStatusFigures({ digests: initial.digests, main });
+  // Refresh: the page is read again on the server (main's pull requests and
+  // production straight from GitHub). The next train lives on its own tab.
+  const [refreshing, startRefresh] = useTransition();
+  const refresh = () => startRefresh(() => router.refresh());
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="qa-release-tab">
+      <div className="-mb-2 flex items-center justify-end gap-3">
+        <span className="text-xs text-zinc-500" data-testid="qa-release-read-at">
+          {m.overviewReadAt.replace("{at}", aestStamp(new Date(nowMs).toISOString()))}
+        </span>
+        <button
+          type="button"
+          className="inline-flex min-h-8 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50"
+          onClick={refresh}
+          disabled={refreshing}
+          data-testid="qa-release-refresh"
+        >
+          {refreshing ? m.overviewRefreshing : m.overviewRefresh}
+        </button>
+      </div>
       <AttentionStrip items={items} />
       <StatusCards figures={figures} />
       <div className="grid min-w-0 gap-5 lg:grid-cols-2">
@@ -125,7 +145,12 @@ function AttentionStrip({ items }: { items: QaReleaseAttentionItem[] }) {
           urgent: true,
         };
       case "main_unread":
-        return { title: m.attentionMainUnread, detail: m.attentionMainUnreadDetail, action: null, urgent: false };
+        return {
+          title: m.attentionMainUnread,
+          detail: m.attentionMainUnreadDetail + (item.failure ? fill(m.githubFailure, { failure: item.failure }) : ""),
+          action: null,
+          urgent: false,
+        };
       case "ci_failed":
         return {
           title: fill(m.attentionCiFailed, { count: item.count }),

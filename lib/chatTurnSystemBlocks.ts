@@ -53,15 +53,16 @@ import {
   APP_MANAGED_WEB_SEARCH_TOOL_DEFINITION_TOKENS,
 } from "@/lib/appManagedWebSearchPrompt";
 import type { TurnAttachmentDescriptor } from "@/lib/messageAttachmentCore";
+import { buildChatLocationContext, buildChatLocationPrompt, CHAT_LOCATION_INPUT_TOKEN_RESERVE } from "@/lib/chatLocationPrompt";
+import type { ChatLocation } from "@tomverse/chat-core";
 
 export type ChatTurnSystemBlocksInput = {
+  currentLocation?: ChatLocation | null;
+  reserveLocationInput?: boolean;
   modelId: string;
   provider: string;
   /**
-   * Deep research never reaches the streaming path, so it carries no
-   * capability blocks at all -- the same exclusion the artifact policy already
-   * made, extended to the image block for the same reason: a block about a
-   * workflow this job cannot run is priced input with no use.
+   * Deep research carries location context but no file/image tool blocks.
    */
   isDeepResearchTurn: boolean;
   /** Whether Auto chose `modelId` (see ArtifactToolPlanInput.autoRouted). */
@@ -119,7 +120,7 @@ export type ChatTurnSystemBlocksInput = {
 };
 
 export type ChatTurnSystemBlocks = {
-  /** Null on a deep-research turn, where no block is carried. */
+  /** Null on a deep-research turn, where no artifact block is carried. */
   artifactPlan: ArtifactToolPlan | null;
   /** Empty on a deep-research turn. */
   imageCapabilityPrompt: string;
@@ -165,6 +166,10 @@ const artifactStateOf = (plan: ArtifactToolPlan | null): ImageArtifactState => {
 export const buildChatTurnSystemBlocks = (
   input: ChatTurnSystemBlocksInput
 ): ChatTurnSystemBlocks => {
+  const locationPrompt = buildChatLocationPrompt();
+  const locationTokens = estimateTextTokens(locationPrompt) +
+    estimateTextTokens(buildChatLocationContext(input.currentLocation)) +
+    (input.reserveLocationInput ? CHAT_LOCATION_INPUT_TOKEN_RESERVE : 0);
   if (input.isDeepResearchTurn) {
     return {
       artifactPlan: null,
@@ -175,7 +180,9 @@ export const buildChatTurnSystemBlocks = (
       webSearchCapabilityPrompt: "",
       systemMessages: [],
       untrustedDataMessages: [],
-      promptTokens: 0,
+      // Deep research carries no application-authored system blocks.
+      promptTokens: estimateTextTokens(buildChatLocationContext(input.currentLocation)) +
+        (input.reserveLocationInput ? CHAT_LOCATION_INPUT_TOKEN_RESERVE : 0),
     };
   }
 
@@ -211,6 +218,7 @@ export const buildChatTurnSystemBlocks = (
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: artifactPlan.systemPrompt },
     { role: "system", content: imageCapabilityPrompt },
+    { role: "system", content: locationPrompt },
     // Only on a turn that cannot search; an empty block would be a system
     // message saying nothing, priced and sent.
     ...(webSearchCapabilityPrompt
@@ -246,6 +254,7 @@ export const buildChatTurnSystemBlocks = (
   // the provider adds when the schema is sent, and they are build-time
   // constants rather than a per-request tokenisation.
   const promptTokens =
+    locationTokens +
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
     estimateTextTokens(webSearchCapabilityPrompt) +

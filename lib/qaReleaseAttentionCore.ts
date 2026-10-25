@@ -13,7 +13,7 @@ export type QaReleaseAttentionItem =
   | { kind: "control_missing" }
   | { kind: "production_behind"; servingSha: string | null; mainHeadSha: string | null }
   | { kind: "main_refused"; numbers: number[] }
-  | { kind: "main_unread" }
+  | { kind: "main_unread"; failure: string | null }
   | { kind: "ci_failed"; count: number }
   | { kind: "checks_failed"; count: number }
   | { kind: "digest_stale"; lastAt: string | null }
@@ -48,7 +48,7 @@ export function qaReleaseAttentionItems(input: {
   if (production.servesMainHead === false) {
     items.push({ kind: "production_behind", servingSha: production.servingSha, mainHeadSha: production.mainHeadSha });
   }
-  if (pullRequests === null) items.push({ kind: "main_unread" });
+  if (pullRequests === null) items.push({ kind: "main_unread", failure: input.main.readFailure ?? null });
   else {
     const refused = pullRequests.filter((pull) => !pull.allowed).map((pull) => pull.number);
     if (refused.length > 0) items.push({ kind: "main_refused", numbers: refused });

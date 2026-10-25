@@ -7,7 +7,9 @@ import {
   qaReleaseTrainCargoCandidates,
   qaReleaseTrainCargoPickable,
   parseQaReleaseTrainEmergencyReason,
+  qaReleaseTrainEmergencyAdmissible,
   qaReleaseTrainEmergencyFrom,
+  qaReleaseTrainCarried,
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainReferencedNumbers,
   qaReleaseTrainSelectionFrom,
@@ -22,10 +24,12 @@ const develop = (number, mergedAt = "2026-10-22T00:00:00Z", overrides = {}) => (
   merged_at: mergedAt,
   ...overrides,
 });
+let commitCount = 0;
+const commit = (message, sha = (++commitCount).toString(16).padStart(40, "c")) => ({ sha, message });
 const release = (number, body, merged = true) => ({ number, title: `release: ${number}`, body, merged_at: merged ? "2026-10-22T05:00:00Z" : null });
 
-test("a release pull request names the develop pull requests it carries", () => {
-  assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "release: two (#2873)", body: "Brings #2862 and #2873.\nSee #2873." }), [2873, 2862]);
+test("without its commits, a release carries what its title names and a train's Included section; free text in a body is not read", () => {
+  assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: "release: two (#2873)", body: "Brings #2862 and #2873.\nSee #2873." }), [2873]);
   assert.deepEqual(qaReleaseTrainReferencedNumbers({ title: null, body: null }), []);
   // A train names what it left out and skipped too; only its Included section is carried (#2906).
   const train = [
@@ -59,9 +63,14 @@ test("candidates: merged develop pull requests in the window, newest first, each
       develop(7, null),
       develop(8, "2026-10-22T06:00:00Z", { base: { ref: "main" } }),
     ],
-    // #2 is on main; a closed-unmerged release naming #3 does not count.
+    // #2 is on main; a closed-unmerged release carrying #3 does not count.
     mergedMainJson: [release(900, "Brings #2"), release(901, "Brings #3", false)],
     openMainJson: [release(902, "Brings #3", false)],
+    mainCommits: new Map([
+      [900, [commit("Merge pull request #2 from mposition/b2")]],
+      [901, [commit("Merge pull request #3 from mposition/b3")]],
+      [902, [commit("Merge pull request #3 from mposition/b3")]],
+    ]),
     files: new Map([
       [1, ["lib/a.ts"]],
       [3, ["lib/c.ts"]],
@@ -234,4 +243,94 @@ test("an emergency request waits until an emergency admission after it takes it;
   assert.equal(parseQaReleaseTrainEmergencyReason("four"), null);
   assert.equal(parseQaReleaseTrainEmergencyReason("x".repeat(301)), null);
   assert.equal(parseQaReleaseTrainEmergencyReason(" five! "), "five!");
+
+  // Review r-20261025-053930: only the request the train read and assembled
+  // from may be admitted -- not one replaced, withdrawn or spent since.
+  const pending = qaReleaseTrainEmergencyFrom({ request, admission: null }).pending;
+  assert.equal(qaReleaseTrainEmergencyAdmissible(pending, "req-1"), true);
+  assert.equal(qaReleaseTrainEmergencyAdmissible(qaReleaseTrainEmergencyFrom({ request: { ...request, id: "req-2" }, admission: null }).pending, "req-1"), false);
+  assert.equal(qaReleaseTrainEmergencyAdmissible(qaReleaseTrainEmergencyFrom({ request: { ...request, numbers: [] }, admission: null }).pending, "req-1"), false);
+  assert.equal(qaReleaseTrainEmergencyAdmissible(null, "req-1"), false);
+});
+
+test("what a release carries is its commits: a merge subject or a cherry-picked merge commit, never a number its body mentions", () => {
+  const picked = "a".repeat(40);
+  assert.deepEqual(
+    qaReleaseTrainCarried([
+      `Merge pull request #2919 from mposition/codex/memory01\n\nx\n\n(cherry picked from commit ${picked})`,
+      "Merge main into release/x",
+      "test(e2e): re-record goldens for #2940",
+    ]),
+    { numbers: new Set([2919]), shas: new Set([picked]) },
+  );
+  // 2026-10-25: #2941 carried #2919 and #2934; its body told staging to run
+  // the checklist from #2940, which stayed on develop.
+  const body = "Selective release of #2919 and #2934.\n\nStaging is still to do: run docs/ops/memory-launch-staging-checklist.md (#2940) there before merge.";
+  const memoryRelease = { number: 2941, title: "release: account memory owner launch (#2919, #2934)", body, merged_at: "2026-10-22T05:00:00Z" };
+  const reworded = { ...develop(2934, "2026-10-22T03:00:00Z"), merge_commit_sha: "b".repeat(40) };
+  const candidates = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [develop(2940, "2026-10-22T04:00:00Z"), reworded, develop(2919, "2026-10-22T02:00:00Z")],
+    mergedMainJson: [memoryRelease],
+    openMainJson: [],
+    files: new Map([[2940, ["docs/ops/memory-launch-staging-checklist.md"]]]),
+    // #2934 rides as a cherry-pick whose subject was reworded: its merge commit still matches.
+    mainCommits: new Map([
+      [2941, [commit("Merge pull request #2919 from mposition/codex/x"), commit(`memory owner launch\n\n(cherry picked from commit ${"b".repeat(40)})`)]],
+    ]),
+    developCommits: new Map([[2940, ["d".repeat(40), "e".repeat(40)]]]),
+    nowMs: NOW,
+  });
+  // #2940 is only mentioned: it can be picked, with a word to check.
+  assert.deepEqual(
+    candidates.map((c) => [c.number, c.status, c.mainPullRequest]),
+    [
+      [2940, "mentioned", 2941],
+      [2934, "on_main", 2941],
+      [2919, "on_main", 2941],
+    ],
+  );
+  assert.equal(qaReleaseTrainCargoPickable("mentioned"), true);
+  // Its commits unread, the title still names what it carries -- and only that.
+  const fallback = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [develop(2940, "2026-10-22T04:00:00Z"), develop(2919, "2026-10-22T02:00:00Z")],
+    mergedMainJson: [memoryRelease],
+    openMainJson: [],
+    files: new Map([[2940, ["docs/a.md"]]]),
+    nowMs: NOW,
+  });
+  assert.deepEqual(
+    fallback.map((c) => [c.number, c.status]),
+    [
+      [2940, "mentioned"],
+      [2919, "on_main"],
+    ],
+  );
+});
+
+test("a release that cherry-picks a pull request's own commits one by one carries it once every one is there", () => {
+  const [a, b, c] = ["a", "b", "c"].map((x) => x.repeat(40));
+  const release2943 = { number: 2943, title: "release(mobile): voice", body: "Carries the voice work from #2937.", merged_at: "2026-10-22T05:00:00Z" };
+  const candidates = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [develop(2937, "2026-10-22T04:00:00Z"), develop(2936, "2026-10-22T03:00:00Z")],
+    mergedMainJson: [release2943],
+    openMainJson: [],
+    files: new Map([
+      [2937, ["lib/a.ts"]],
+      [2936, ["lib/b.ts"]],
+    ]),
+    // #2937's two commits are both there (one as a cherry-pick); only one of #2936's.
+    mainCommits: new Map([[2943, [commit("fix: a", a), commit(`fix: b\n\n(cherry picked from commit ${b})`)]]]),
+    developCommits: new Map([
+      [2937, [a, b]],
+      [2936, [a, c]],
+    ]),
+    nowMs: NOW,
+  });
+  assert.deepEqual(
+    candidates.map((x) => [x.number, x.status, x.mainPullRequest]),
+    [
+      [2937, "on_main", 2943],
+      [2936, "available", null],
+    ],
+  );
 });

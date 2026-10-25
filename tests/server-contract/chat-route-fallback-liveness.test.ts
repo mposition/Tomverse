@@ -127,6 +127,7 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
     return preview;
   },
 } });
+let forceAnthropicPrimary = false;
 const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as typeof import("../../lib/autoModelSelection");
 const modelPickInputs: Array<Parameters<typeof realAutoSelection.applyLlmModelPick>> = [];
 const modelPickResults: Array<ReturnType<typeof realAutoSelection.applyLlmModelPick>> = [];
@@ -140,7 +141,8 @@ mock.module(mod("lib/autoModelSelection.ts"), { namedExports: {
   },
   selectAutoModel: (input: Parameters<typeof realAutoSelection.selectAutoModel>[0]) => {
     routerInputs.push(input);
-    return realAutoSelection.selectAutoModel(input);
+    return realAutoSelection.selectAutoModel(forceAnthropicPrimary
+      ? { ...input, models: input.models.filter((model) => model.provider === "anthropic") } : input);
   },
 } });
 const realRoutingShadow = require(resolve(ROOT, "lib/routingShadow.ts")) as typeof import("../../lib/routingShadow");
@@ -496,6 +498,7 @@ let fallbackBehaviour:
   | "partial"
   | "completion_wait" = "answers";
 let injectPrimaryFault = true;
+let turnLocation: Record<string, unknown> | undefined;
 let completionUsageRead = false;
 let releasePendingCompletionUsage: () => void = () => {};
 let fallbackTransitionAbortAt:
@@ -1618,6 +1621,7 @@ const ask = async (
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
         webSearchMode,
+        ...(turnLocation ? { currentLocation: turnLocation } : {}),
         ...(includeSourceUserMessageId
           ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
           : {}),
@@ -1720,6 +1724,22 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   const primaryAbort = attemptLifecycle.indexOf("0:provider_abort");
   assert.ok(primaryAbort >= 0);
   assert.equal(attemptLifecycle[primaryAbort + 1], "0:reader_cancel");
+});
+
+test("a location-aware primary caches its stable prefix but fallback carries only the uncached current fix", async () => {
+  forceAnthropicPrimary = true;
+  turnLocation = { latitude: -27.4697701, longitude: 153.0251234, accuracy: 10, timestamp: Date.now() };
+  try {
+    await ask("answers", "claimed", 200, false, [
+      { role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" },
+      { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+    ]);
+    assert.equal(attempts.length, 2);
+    assert.ok(JSON.stringify(attempts[0].messages).includes("cacheControl"));
+    assert.ok(JSON.stringify(attempts[0].messages).includes("-27.47"));
+    assert.ok(JSON.stringify(attempts[1].messages).includes("-27.47"));
+    assert.ok(!JSON.stringify(attempts[1].messages).includes("cacheControl"));
+  } finally { turnLocation = undefined; forceAnthropicPrimary = false; }
 });
 
 for (const [mode, decision] of [

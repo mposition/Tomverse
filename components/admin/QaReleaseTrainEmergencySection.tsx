@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { card } from "@/components/admin/qaReleaseTabParts";
+import { announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
 import { adminQaReleaseTrainMessages } from "@/lib/adminMessages/qaReleaseTrain";
@@ -29,7 +29,7 @@ type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: { emerge
  * pull requests that can ride and writes a reason; the train service departs
  * with them on its next round. A pending request can be withdrawn.
  */
-export function QaReleaseTrainEmergencySection({ canWrite }: { canWrite: boolean }) {
+export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }: { canWrite: boolean; openUnknown?: boolean }) {
   const m = useAdminMessages(adminQaReleaseTrainMessages);
   const common = useAdminMessages(adminAgentDigestsMessages);
   const [view, setView] = useState<View | null>(null);
@@ -87,6 +87,7 @@ export function QaReleaseTrainEmergencySection({ canWrite }: { canWrite: boolean
       setPicked([]);
       setReason("");
       setNotice({ tone: "ok", text: ok });
+      announceQaReleaseTrainChanged();
     } catch {
       setNotice({ tone: "error", text: m.emergencyFailed });
     } finally {
@@ -121,6 +122,11 @@ export function QaReleaseTrainEmergencySection({ canWrite }: { canWrite: boolean
         ) : null}
       </div>
       <p className="mt-1 text-[13px] text-zinc-400">{m.emergencyNote}</p>
+      {openUnknown ? (
+        <p className="mt-2 text-[13px] text-amber-300" data-testid="qa-release-train-emergency-open-unknown">
+          {m.emergencyOpenUnknown}
+        </p>
+      ) : null}
 
       {emergency?.pending ? (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-red-400/40 bg-red-400/5 px-3 py-2" data-testid="qa-release-train-emergency-pending">

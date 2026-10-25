@@ -8,7 +8,7 @@ import {
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import type { ModelTier } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 
 export type BillingFeature =
   | "attachments"
@@ -26,6 +26,7 @@ export const getUserBillingPlan = async (
     where: { id: userId },
     select: {
       plan: true,
+      ...STORE_ENTITLEMENT_SELECT,
       subscriptionStatus: true,
       subscriptionCurrentPeriodEnd: true,
     },
@@ -33,6 +34,7 @@ export const getUserBillingPlan = async (
   return getBillingPlanByTier(
     normalizePlanTier(
       effectivePlanForAccess({
+        ...user,
         plan: user?.plan,
         subscriptionStatus: user?.subscriptionStatus,
         subscriptionCurrentPeriodEnd: user?.subscriptionCurrentPeriodEnd,

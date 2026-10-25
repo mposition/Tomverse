@@ -6,6 +6,7 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
 import {
+  qaReleaseTrainEmergencyAdmissible,
   qaReleaseTrainEmergencyFrom,
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainSelectionFrom,
@@ -62,7 +63,9 @@ export async function admitQaReleaseTrain(input: {
       if (earlier) return { admitted: false as const, reason: "already_admitted" as const };
       const emergency = input.emergencyRequestId !== undefined;
       const pending = emergency ? (await readQaReleaseTrainEmergency(tx)).pending : null;
-      if (emergency && pending?.id !== input.emergencyRequestId) return { admitted: false as const, reason: "no_emergency" as const };
+      if (input.emergencyRequestId !== undefined && !qaReleaseTrainEmergencyAdmissible(pending, input.emergencyRequestId)) {
+        return { admitted: false as const, reason: "no_emergency" as const };
+      }
       await writeSystemAuditLog({
         tx,
         systemActor: "qa-release-merge-lane",

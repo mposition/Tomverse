@@ -9,6 +9,7 @@ import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLane
 import { QaReleaseTrainBoard } from "@/components/admin/QaReleaseTrainBoard";
 import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
 import { QaReleaseTrainEmergencySection } from "@/components/admin/QaReleaseTrainEmergencySection";
+import { QaReleaseTrainRefresher } from "@/components/admin/QaReleaseTrainRefresher";
 import { QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
 import { QA_RELEASE_SECTION_IDS } from "@/components/admin/qaReleaseTabParts";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
@@ -98,14 +99,16 @@ async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number 
   const carried = next.departedWith && next.lastTrain?.slot === next.departedWith ? next.numbers.length : 0;
   return (
     <div className="flex min-w-0 flex-col gap-5">
+      <QaReleaseTrainRefresher />
       <QaReleaseTrainSummary
         nextDepartureAt={nextMs === null ? null : new Date(nextMs).toISOString()}
         riding={next.numbers.length}
         carried={carried}
         openTrain={board.rows.find((row) => row.status === "boarding")?.pullRequestNumber ?? null}
+        openUnknown={!board.openRead}
         emergencyPulls={next.emergency.pending?.numbers.length ?? null}
       />
-      <QaReleaseTrainEmergencySection canWrite={canWrite} />
+      <QaReleaseTrainEmergencySection canWrite={canWrite} openUnknown={!board.openRead} />
       <QaReleaseTrainCargoSection canWrite={canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
       <QaReleaseTrainBoard rows={board.rows} pullsRead={board.pullsRead} nowMs={nowMs} />
     </div>

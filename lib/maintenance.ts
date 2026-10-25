@@ -1,4 +1,5 @@
 import "server-only";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 
 import {
   reclaimStaleUploadClaims,
@@ -59,6 +60,7 @@ import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   FOUNDING_TESTER_PASS_EXPIRED_STATUS,
   FOUNDING_TESTER_PASS_STATUS,
+  effectivePlanForAccess,
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
@@ -229,6 +231,8 @@ const expireFoundingTesterPasses = async (now: Date) => {
         data: { expiredAt: now },
       });
       if (marked.count !== 1) return { expired: false, downgraded: false };
+      await lockSubscriptionAccount(tx, row.userId);
+      const entitlement = await tx.user.findUniqueOrThrow({ where: { id: row.userId } });
       const user = await tx.user.updateMany({
         where: {
           id: row.userId,
@@ -237,7 +241,8 @@ const expireFoundingTesterPasses = async (now: Date) => {
           subscriptionCurrentPeriodEnd: { lte: now },
         },
         data: {
-          plan: "Free",
+          plan: effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" }),
+          webSubscriptionPlan: "Free",
           subscriptionStatus: FOUNDING_TESTER_PASS_EXPIRED_STATUS,
           subscriptionBillingInterval: null,
           subscriptionCancelAtPeriodEnd: true,

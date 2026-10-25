@@ -98,6 +98,8 @@ export async function runQaReleaseTrainRound(
   env: Readonly<Record<string, string | undefined>>,
   ports: QaReleaseTrainPorts,
   nowMs: number,
+  /** Set when this round already ran its emergency: the scheduled departure only. */
+  scheduledOnly = false,
 ): Promise<QaReleaseTrainOutcome> {
   const start = decideQaReleaseTrainStart(env);
   if (start === "disabled") return { exitCode: 0, train: "disabled" };
@@ -111,10 +113,12 @@ export async function runQaReleaseTrainRound(
   // An emergency request (owner, 2026-10-25) departs on the first round after
   // it, departure hour or not, and does not wait for an open train: it is
   // the operator's call that this cannot wait. Otherwise the scheduled
-  // departure, one open train at a time. An emergency none of whose pull
-  // requests can ride, or whose reads fail, never holds up a scheduled
-  // departure: the round falls through to it, and Admin still shows the
-  // request pending until it departs or is withdrawn.
+  // departure, one open train at a time. An emergency never holds up a
+  // scheduled departure that is due: when none of its pull requests can ride,
+  // its reads fail or it already left this minute, the round falls through
+  // to the scheduled one (the request stays pending in Admin until it departs
+  // or is withdrawn); when it departs and carries nothing, the round runs the
+  // scheduled one next.
   let departure: { slot: string; emergency: boolean; emergencyRequestId?: string };
   let branch: string;
   let cargo: QaReleaseTrainCandidate[] = [];
@@ -127,15 +131,18 @@ export async function runQaReleaseTrainRound(
     const selection = scheduledNow === null ? await ports.app.selection().catch(() => null) : await ports.app.selection();
     if (selection === null) return { exitCode: 0, train: "no_departure" };
     let emergency: { slot: string; branch: string; cargo: QaReleaseTrainCandidate[]; id: string } | null = null;
-    if (selection.emergency !== null && selection.emergency.numbers.length > 0) {
+    let emergencyLeft = false;
+    if (!scheduledOnly && selection.emergency !== null && selection.emergency.numbers.length > 0) {
       const slot = qaReleaseTrainEmergencySlot(nowMs, hours);
       const emergencyBranch = qaReleaseTrainBranch(slot);
       try {
         step = "branch";
-        if (await ports.github.branchExists(emergencyBranch)) return { exitCode: 0, train: "departure_done" };
-        step = "cargo";
-        const riders = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency.numbers));
-        if (riders.length > 0) emergency = { slot, branch: emergencyBranch, cargo: riders, id: selection.emergency.id };
+        emergencyLeft = await ports.github.branchExists(emergencyBranch);
+        if (!emergencyLeft) {
+          step = "cargo";
+          const riders = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency.numbers));
+          if (riders.length > 0) emergency = { slot, branch: emergencyBranch, cargo: riders, id: selection.emergency.id };
+        }
       } catch (error) {
         if (scheduledNow === null) throw error;
       }
@@ -145,7 +152,9 @@ export async function runQaReleaseTrainRound(
       branch = emergency.branch;
       cargo = emergency.cargo;
     } else {
-      if (scheduledNow === null) return { exitCode: 0, train: selection.emergency ? "no_cargo" : "no_departure" };
+      if (scheduledNow === null) {
+        return { exitCode: 0, train: emergencyLeft ? "departure_done" : selection.emergency && !scheduledOnly ? "no_cargo" : "no_departure" };
+      }
       departure = { slot: scheduledNow.slot, emergency: false };
       branch = qaReleaseTrainBranch(departure.slot);
       step = "branch";
@@ -193,6 +202,8 @@ export async function runQaReleaseTrainRound(
     } catch {
       return { exitCode: 1, train: "failed", failure: "report_failed" };
     }
+    // An empty emergency took no seat from a scheduled departure that is due.
+    if (departure.emergency && qaReleaseTrainDeparture(nowMs, hours) !== null) return runQaReleaseTrainRound(env, ports, nowMs, true);
     return { exitCode: 0, train: "empty", slot: departure.slot };
   }
 

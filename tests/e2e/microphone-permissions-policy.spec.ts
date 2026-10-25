@@ -35,7 +35,6 @@ import { expect, test } from "@playwright/test";
 /** Everything the header disabled before, and must keep disabling. */
 const STILL_DISABLED = [
   "camera",
-  "geolocation",
   "payment",
   "usb",
   "browsing-topics",

@@ -24,6 +24,14 @@ export type QaReleaseTrainView = {
   picks: Pick<QaReleaseTrainPick, "number" | "outcome">[];
 };
 
+/**
+ * A save on the release train tab (the cargo pick, an emergency request) says
+ * so; QaReleaseTrainRefresher reads the tab again on the server, so its
+ * summary is never older than what was just saved.
+ */
+export const QA_RELEASE_TRAIN_CHANGED_EVENT = "qa-release-train-changed";
+export const announceQaReleaseTrainChanged = () => window.dispatchEvent(new Event(QA_RELEASE_TRAIN_CHANGED_EVENT));
+
 /** The tab's card surface, shared by its sections. */
 export const card = "rounded-2xl border border-zinc-800 bg-zinc-900 p-4 sm:p-5";
 
