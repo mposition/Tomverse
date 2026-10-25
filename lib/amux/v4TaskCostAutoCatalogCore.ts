@@ -14,26 +14,25 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   for the Task roles its v22 profile actually runs -- the ready check reads
  *   the same roles, so a Task no worker can run gets no ceiling;
  * - prices: the chat model registry (Admin › Models) resolved the way Chat
- *   bills it, at the tier the grade's input cap reaches, valid from the
- *   moment the model's row last changed -- so usage that ended before a price
- *   change is never priced at the new rate. Cache reads use the resolved
- *   multiplier; cache writes use the verified write rate, and 0 marks a model
- *   with none (its cache writes are left unpriced, never invented). Tool
- *   costs are capped at zero;
+ *   bills it, at the tier the grade's input cap reaches. Cache reads use the
+ *   resolved multiplier; cache writes use the verified write rate, and 0
+ *   marks a model with none. Tool costs are capped at zero;
  * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code.
  *
- * Deterministic: the same registries give the same catalog digest, so a Task
- * reconfirms only when a worker or a model row actually changed. The ceiling it
- * gives is still reserved before every paid API call.
+ * Deterministic: the same prices give the same catalog digest, so a Task
+ * reconfirms only when a worker or a price actually changed. The catalog
+ * prices a Task before it runs; the price an assignment reserved against is
+ * recorded with it (amuxTaskRoutePrice) and its usage is settled at that
+ * price, never at a later one.
  */
 
 export const AMUX_TASK_CATALOG_GRADES = ["routine", "advanced", "frontier"] as const;
 /** Task roles a card may carry; review runs as independent review, not a Task. */
 export const AMUX_TASK_CATALOG_ROLES = ["design", "implement", "test",
   "verify", "investigate", "operate"] as const;
-/** A registry price stays valid until the row changes again. */
+/** The live registry price applies whenever the catalog is derived. */
+const PRICES_FROM = "2026-01-01T00:00:00.000Z";
 const PRICES_UNTIL = "2100-01-01T00:00:00.000Z";
-const UTC_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export type AmuxTaskCatalogGradeCaps = {
   inputTokens: number;
@@ -63,8 +62,6 @@ export type AmuxTaskCatalogResolvedPrice = {
   cachedInputPriceMultiplier: number;
   /** Null when no write rate was verified for the model. */
   cacheWriteUsdPerMillionTokens: number | null;
-  /** When the model's registry row last changed, to the millisecond, UTC. */
-  verifiedAt: string;
 };
 
 export type AmuxTaskAutoCatalog =
@@ -72,6 +69,16 @@ export type AmuxTaskAutoCatalog =
       /** The id receipts carry where an approval id used to be. */
       catalogId: string }
   | { ok: false; code: "no_priced_worker" };
+
+/** One route's per-token prices, as an assignment records them. */
+export type AmuxTaskRoutePrice = {
+  pricingVersion: string;
+  modelId: string;
+  uncachedInputMicroUsdPerMillion: number;
+  cacheReadMicroUsdPerMillion: number;
+  cacheWriteMicroUsdPerMillion: number;
+  outputMicroUsdPerMillion: number;
+};
 
 const sha256 = (tag: string, value: unknown) => createHash("sha256")
   .update(`${tag}\n`, "utf8").update(amuxCanonicalJson(value), "utf8").digest("hex");
@@ -101,8 +108,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const uncached = microUsd(price?.inputUsdPerMillionTokens);
     const output = microUsd(price?.outputUsdPerMillionTokens);
     // A zero or missing price never becomes a free route.
-    if (!price || uncached === null || output === null ||
-        !UTC_MS.test(price.verifiedAt) || price.verifiedAt >= PRICES_UNTIL) continue;
+    if (!price || uncached === null || output === null) continue;
     const multiplier = price.cachedInputPriceMultiplier;
     const identity = { workerName: worker.workerName, provider: "anthropic",
       modelId: worker.modelId, roles, grade };
@@ -118,7 +124,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       roles,
       grades: [grade],
       pricingSource: `model-registry:${worker.modelId}`,
-      pricingVerifiedAt: price.verifiedAt,
+      pricingVerifiedAt: PRICES_FROM,
       pricingExpiresAt: PRICES_UNTIL,
       uncachedInputMicroUsdPerMillion: uncached,
       outputMicroUsdPerMillion: output,
@@ -153,3 +159,33 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
   return { ok: true, catalog, catalogDigest: inspection.catalogDigest,
     catalogId: `registry:${inspection.catalogDigest.slice(0, 32)}` };
 }
+
+const nonnegative = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const PRICE_FIELDS = ["uncachedInputMicroUsdPerMillion", "cacheReadMicroUsdPerMillion",
+  "cacheWriteMicroUsdPerMillion", "outputMicroUsdPerMillion"] as const;
+
+/** The prices of one catalog route, for the assignment that reserves against it. */
+export function amuxTaskRoutePrice(catalog: unknown, routeId: string): AmuxTaskRoutePrice | null {
+  if (!catalog || typeof catalog !== "object") return null;
+  const { pricingVersion, routes } = catalog as { pricingVersion?: unknown; routes?: unknown };
+  if (typeof pricingVersion !== "string" || !Array.isArray(routes)) return null;
+  const matches = routes.filter((route) => route?.routeId === routeId);
+  return matches.length === 1 ? parseAmuxTaskRoutePrice({ ...pick(matches[0]), pricingVersion }) : null;
+}
+
+/** A recorded route price, or null when it is not exactly that shape. */
+export function parseAmuxTaskRoutePrice(value: unknown): AmuxTaskRoutePrice | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (Object.keys(row).length !== PRICE_FIELDS.length + 2 ||
+      typeof row.pricingVersion !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(row.pricingVersion) ||
+      typeof row.modelId !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(row.modelId) ||
+      !PRICE_FIELDS.every((field) => nonnegative(row[field])) ||
+      (row.uncachedInputMicroUsdPerMillion as number) <= 0 ||
+      (row.outputMicroUsdPerMillion as number) <= 0) return null;
+  return pick(row, ["pricingVersion", "modelId"]) as AmuxTaskRoutePrice;
+}
+
+const pick = (row: Record<string, unknown>, extra: string[] = ["modelId"]) =>
+  Object.fromEntries([...extra, ...PRICE_FIELDS].map((field) => [field, row[field]]));

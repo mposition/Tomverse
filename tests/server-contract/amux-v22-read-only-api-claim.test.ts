@@ -17,10 +17,15 @@ const receipt = {
     modelId: "claude-opus-5-5", routePolicyDigest: "d".repeat(64),
     perAttemptMicroUsd: "3400000" }],
 };
+// An assignment records the prices of the route it reserves against.
 const approved = { approvalId: "catalog-one", catalogDigest: receipt.catalogDigest,
-  catalog: {}, receipt };
+  catalog: { pricingVersion: "price-v1", routes: [{ routeId: "read-only-route",
+    modelId: "claude-opus-5-5", uncachedInputMicroUsdPerMillion: 1_000_000,
+    cacheReadMicroUsdPerMillion: 100_000, cacheWriteMicroUsdPerMillion: 200_000,
+    outputMicroUsdPerMillion: 2_000_000 }] }, receipt };
 let recovery: Record<string, unknown> | null = null;
 let assignmentWrites = 0;
+let assignedRoutePrice: unknown = null;
 let taskWrites = 0;
 let listedCapabilities = ["read_only_api_retry_v1"];
 let pinnedCapabilities = ["read_only_api_retry_v1"];
@@ -83,7 +88,10 @@ mock.module(mod("lib/prisma.ts"), { namedExports: {
   prisma: { $transaction: async (work: (client: unknown) => unknown) => work(tx) },
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
-  writeSystemAuditLog: async () => "assignment-audit",
+  writeSystemAuditLog: async (input: { metadata?: Record<string, unknown> }) => {
+    assignedRoutePrice = input.metadata?.routePrice;
+    return "assignment-audit";
+  },
 } });
 mock.module(mod("lib/amux/incident.ts"), { namedExports: {
   lockAmuxAdmissionAndReadIncident: async () => ({ blocks_admission: false }),
@@ -261,6 +269,10 @@ test("API gate and current frame fence claim before assignment mutation", async 
     assert.equal(on.workerName, workerName);
     assert.equal(assignmentWrites, 1);
     assert.equal(taskWrites, 1);
+    assert.deepEqual(assignedRoutePrice, { pricingVersion: "price-v1",
+      modelId: "claude-opus-5-5", uncachedInputMicroUsdPerMillion: 1_000_000,
+      cacheReadMicroUsdPerMillion: 100_000, cacheWriteMicroUsdPerMillion: 200_000,
+      outputMicroUsdPerMillion: 2_000_000 }, "the assignment records the price it reserves against");
   } finally {
     listedCapabilities = ["read_only_api_retry_v1"];
     pinnedCapabilities = ["read_only_api_retry_v1"];

@@ -4,13 +4,11 @@ import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
 // The Task cost catalog is derived from the registries (owner decision
-// 2026-10-25). These pin what an approved catalog row used to guarantee:
-// a pinned receipt either reproduces or reports a changed cost, and a past
-// price that cannot be proven is left unpriced.
+// 2026-10-25): the worker registry's v22 workers, priced from Admin › Models
+// the way Chat bills them.
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-const CHANGED_AT = new Date("2026-10-20T03:00:00.900Z");
 const NOW = new Date("2026-10-25T00:00:00.000Z");
 
 mock.module(mod("lib/amux/workerAssignmentCatalog.ts"), { namedExports: {
@@ -26,61 +24,52 @@ mock.module(mod("lib/modelRegistry.ts"), { namedExports: {
     reservationOutputTokens: undefined }),
 } });
 
+let rows: Array<Record<string, unknown>> = [];
 const tx = {
-  modelRegistryEntry: { findMany: async () => [{ id: "claude-draft-test",
-    apiModel: "claude-draft-test", provider: "anthropic", updatedAt: CHANGED_AT,
-    inputUsdPerMillionTokens: undefined, outputUsdPerMillionTokens: undefined,
-    cachedInputPriceMultiplier: undefined }] },
+  modelRegistryEntry: { findMany: async () => rows },
   $queryRaw: async () => [{ now: NOW }],
 };
+const row = (overrides: Record<string, unknown> = {}) => ({ id: "claude-draft-test",
+  apiModel: "claude-draft-test", provider: "anthropic",
+  inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15,
+  cachedInputPriceMultiplier: 0.1, ...overrides });
 const service = import(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"));
 
-test("a receipt pinned before a price change returns the live cost instead of throwing", async () => {
+test("a Task's ceiling comes from the registry price and reproduces at a pinned time", async () => {
+  rows = [row()];
   const { calculateCurrentApprovedAmuxV4TaskCost } = await service;
-  const before = await calculateCurrentApprovedAmuxV4TaskCost(tx as never,
-    "implement", "advanced", { asOf: new Date("2026-10-20T03:00:00.500Z") });
-  assert.equal(before.receipt.calculatedAtIso, NOW.toISOString(),
-    "the caller sees a changed receipt and takes its cost-changed path");
-  const after = await calculateCurrentApprovedAmuxV4TaskCost(tx as never,
-    "implement", "advanced", { asOf: new Date("2026-10-22T00:00:00.000Z") });
-  assert.equal(after.receipt.calculatedAtIso, "2026-10-22T00:00:00.000Z",
-    "a pin after the change still reproduces");
-  assert.match(after.approvalId, /^registry:[a-f0-9]{32}$/);
-  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never,
-    "test", "advanced"), { name: "AmuxV4TaskCatalogApprovalError" },
-  "no worker runs test Tasks, so there is no ceiling to reserve");
+  const live = await calculateCurrentApprovedAmuxV4TaskCost(tx as never, "implement", "advanced");
+  // advanced: 600k input x $3 + 60k output x $15, two attempts.
+  assert.equal(live.receipt.ceilingMicroUsd, String(2 * (1_800_000 + 900_000)));
+  assert.match(live.approvalId, /^registry:[a-f0-9]{32}$/);
+  const pinned = await calculateCurrentApprovedAmuxV4TaskCost(tx as never,
+    "implement", "advanced", { asOf: new Date("2026-10-20T00:00:00.000Z") });
+  assert.equal(pinned.receipt.calculatedAtIso, "2026-10-20T00:00:00.000Z");
+  assert.equal(pinned.catalogDigest, live.catalogDigest);
+  rows = [row({ inputUsdPerMillionTokens: 4 })];
+  const repriced = await calculateCurrentApprovedAmuxV4TaskCost(tx as never,
+    "implement", "advanced", { asOf: new Date("2026-10-20T00:00:00.000Z") });
+  assert.notEqual(repriced.catalogDigest, live.catalogDigest,
+    "a changed price shows as a changed catalog, so the caller reconfirms");
 });
 
-test("a price under an environment override is not used for past usage", async () => {
-  const { readAmuxV4TaskAutoCatalog } = await service;
-  const key = "CHAT_MODEL_CLAUDE_DRAFT_TEST_INPUT_USD_PER_MILLION";
-  const saved = process.env[key];
-  process.env[key] = "0.01";
-  try {
-    assert.equal((await readAmuxV4TaskAutoCatalog(tx as never)).ok, true,
-      "today's ceiling may use today's override");
-    assert.deepEqual(await readAmuxV4TaskAutoCatalog(tx as never,
-      { at: new Date("2026-10-21T00:00:00.000Z") }), { ok: false, code: "no_priced_worker" });
-  } finally {
-    if (saved === undefined) delete process.env[key]; else process.env[key] = saved;
-  }
-  assert.equal((await readAmuxV4TaskAutoCatalog(tx as never,
-    { at: new Date("2026-10-21T00:00:00.000Z") })).ok, true);
+test("no worker for the role, or no model in the registry, is a hold", async () => {
+  const { calculateCurrentApprovedAmuxV4TaskCost } = await service;
+  rows = [row()];
+  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "test", "advanced"),
+    { name: "AmuxV4TaskCatalogApprovalError" });
+  rows = [];
+  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "implement", "advanced"),
+    { name: "AmuxV4TaskCatalogApprovalError" });
 });
 
-test("a row that overrides one price while the environment sets another is not used for past usage", async () => {
+test("an API-model match takes the dearest row, so a duplicate never lowers the price", async () => {
   const { readAmuxV4TaskAutoCatalog } = await service;
-  const partial = { ...tx, modelRegistryEntry: { findMany: async () => [{
-    id: "claude-draft-test", apiModel: "claude-draft-test", provider: "anthropic",
-    updatedAt: CHANGED_AT, inputUsdPerMillionTokens: 3,
-    outputUsdPerMillionTokens: undefined, cachedInputPriceMultiplier: undefined }] } };
-  const key = "CHAT_MODEL_CLAUDE_DRAFT_TEST_OUTPUT_USD_PER_MILLION";
-  const saved = process.env[key];
-  process.env[key] = "1";
-  try {
-    assert.deepEqual(await readAmuxV4TaskAutoCatalog(partial as never,
-      { at: new Date("2026-10-21T00:00:00.000Z") }), { ok: false, code: "no_priced_worker" });
-  } finally {
-    if (saved === undefined) delete process.env[key]; else process.env[key] = saved;
-  }
+  rows = [row({ id: "row-cheap", inputUsdPerMillionTokens: 1 }),
+    row({ id: "row-dear", inputUsdPerMillionTokens: 5 })];
+  const result = await readAmuxV4TaskAutoCatalog(tx as never);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const routes = result.catalog.routes as Array<Record<string, unknown>>;
+  assert.equal(routes[0]?.uncachedInputMicroUsdPerMillion, 5_000_000);
 });

@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   AMUX_TASK_CATALOG_CAPS,
+  amuxTaskRoutePrice,
   deriveAmuxV4TaskAutoCatalog,
+  parseAmuxTaskRoutePrice,
 } from "../lib/amux/v4TaskCostAutoCatalogCore.ts";
 import {
   calculateV4TaskCeilingFromCatalog,
@@ -20,14 +22,13 @@ const workers = [
   { workerName: "claude-contract", modelId: "claude-opus-4-8",
     roles: ["design", "implement", "investigate"], roleCeiling: "contract" },
 ];
-const CHANGED = "2026-10-20T03:00:00.900Z";
 const flat = {
   "claude-haiku-4-5": { inputUsdPerMillionTokens: 0.5, outputUsdPerMillionTokens: 1,
-    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.625, verifiedAt: CHANGED },
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.625 },
   "claude-sonnet-5": { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 12,
-    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: null, verifiedAt: CHANGED },
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: null },
   "claude-opus-4-8": { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25,
-    cachedInputPriceMultiplier: 1, cacheWriteUsdPerMillionTokens: 6.25, verifiedAt: CHANGED },
+    cachedInputPriceMultiplier: 1, cacheWriteUsdPerMillionTokens: 6.25 },
 };
 const asked = [];
 const priceFor = (modelId, inputTokens) => {
@@ -73,8 +74,7 @@ test("each price is asked for at the input cap of the worker's grade", () => {
 test("prices round up to whole micro-USD and tool cost is capped at zero", () => {
   const { catalog } = derive({ workers: [workers[0]], priceFor: () => ({
     inputUsdPerMillionTokens: 0.0000015, outputUsdPerMillionTokens: 1,
-    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.0000025,
-    verifiedAt: CHANGED }) });
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.0000025 }) });
   const [route] = catalog.routes;
   assert.equal(route.uncachedInputMicroUsdPerMillion, 2);
   assert.equal(route.outputMicroUsdPerMillion, 1_000_000);
@@ -101,18 +101,27 @@ test("a cache write without a verified rate is never invented", () => {
     .cacheWriteMicroUsdPerMillion, 6_250_000);
 });
 
-test("a price holds from the model row's last change and does not expire", () => {
+test("live prices hold whenever the catalog is derived", () => {
   const { catalog } = derive();
-  assert.ok(catalog.routes.every((route) => route.pricingVerifiedAt === CHANGED));
   for (const asOf of ["2026-10-25T00:00:00.000Z", "2030-06-01T00:00:00.000Z"]) {
     assert.equal(ceiling(catalog, "implement", "advanced", asOf).ok, true, asOf);
   }
-  assert.equal(ceiling(catalog, "implement", "advanced", "2026-10-20T03:00:00.500Z").ok,
-    false, "usage that ended earlier in the same second is not priced at the new rate");
-  assert.equal(ceiling(catalog, "implement", "advanced", CHANGED).ok, true);
-  const odd = derive({ workers: [workers[0]], priceFor: () => ({
-    ...flat["claude-haiku-4-5"], verifiedAt: "2026-10-20" }) });
-  assert.equal(odd.ok, false, "a malformed change time never prices a route");
+});
+
+test("an assignment records exactly its route's prices, and only that shape reads back", () => {
+  const { catalog } = derive();
+  const price = amuxTaskRoutePrice(catalog, "v22:claude-impl");
+  assert.deepEqual(price, { pricingVersion: catalog.pricingVersion,
+    modelId: "claude-sonnet-5", uncachedInputMicroUsdPerMillion: 3_000_000,
+    cacheReadMicroUsdPerMillion: 300_000, cacheWriteMicroUsdPerMillion: 0,
+    outputMicroUsdPerMillion: 12_000_000 });
+  assert.deepEqual(parseAmuxTaskRoutePrice(price), price);
+  assert.equal(amuxTaskRoutePrice(catalog, "v22:nobody"), null);
+  for (const bad of [null, [], { ...price, extra: 1 },
+    { ...price, outputMicroUsdPerMillion: 0 }, { ...price, cacheReadMicroUsdPerMillion: -1 },
+    { ...price, uncachedInputMicroUsdPerMillion: 1.5 }, { ...price, modelId: "a b" }]) {
+    assert.equal(parseAmuxTaskRoutePrice(bad), null, JSON.stringify(bad));
+  }
 });
 
 test("a worker without a price, a role ceiling or a Task role is left out", () => {

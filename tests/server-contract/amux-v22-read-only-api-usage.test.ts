@@ -11,10 +11,8 @@ let auditInput: Record<string, unknown> | null = null;
 let auditCalls = 0;
 let authoritativeFrame: unknown = null;
 let authorityCalls = 0;
-let catalogReads = 0;
-let catalogModelId = "";
-let catalogAt: Date | undefined;
-let catalogCacheWrite = 400_000;
+let priceReads = 0;
+let routeCacheWrite = 400_000;
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   writeSystemAuditLog: async (input: Record<string, unknown>) => {
@@ -25,23 +23,6 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/v4TaskCostCatalogCore.ts"), { namedExports: {
   inspectV4TaskCostCatalog: () => ({ ok: true, catalogDigest }),
-} });
-// Task prices come from the registries (owner decision 2026-10-25).
-mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
-  readAmuxV4TaskAutoCatalog: async (_tx: unknown, options: { at?: Date } = {}) => {
-    catalogReads += 1;
-    catalogAt = options.at;
-    return { ok: true, catalogDigest, catalogId: "registry:one", catalog: {
-      pricingVersion: "price-v2",
-      routes: [{ enabled: true, workerName: "worker-one",
-        provider: "anthropic", modelId: catalogModelId,
-        pricingVerifiedAt: "2026-01-01T00:00:00.000Z",
-        pricingExpiresAt: "2100-01-01T00:00:00.000Z",
-        uncachedInputMicroUsdPerMillion: 2_000_000,
-        cacheReadMicroUsdPerMillion: 200_000,
-        cacheWriteMicroUsdPerMillion: catalogCacheWrite,
-        outputMicroUsdPerMillion: 4_000_000 }] } };
-  },
 } });
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   readAmuxV22RecoveryAuthority: async (_tx: unknown, readTaskId: string,
@@ -124,8 +105,7 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
       digest: p.amuxV22ReadOnlyApiExecutionReceiptDigest(receiptBody) };
     const existingDigests = new Map<string, string>();
     let boundTaskId = taskId;
-    catalogReads = 0;
-    catalogModelId = frame.modelId;
+    priceReads = 0;
     let inserts = 0;
     const insertedValues: unknown[][] = [];
     const tx = {
@@ -143,9 +123,23 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
           taskRevision: 5 },
         task: { sourceSystem: "admin-idea-v4",
           v22AssignmentId: "assignment-one",
-          v22AcceptedAssignment: { workerName: "worker-one",
+          v22AcceptedAssignment: { id: "assignment-one",
+            authorizationAuditLogId: "assignment-audit", workerName: "worker-one",
             provider: "anthropic", modelId: frame.modelId } },
       }) },
+      // The assignment recorded the prices it reserved against (owner
+      // decision 2026-10-25); ordinary CLI usage is settled at those.
+      adminAuditLog: { findUnique: async (query: { where: { id: string } }) => {
+        priceReads += 1;
+        return query.where.id !== "assignment-audit" ? null : {
+          action: "amux.v22.worker.assigned", targetType: "AmuxV22WorkerAssignment",
+          targetId: "assignment-one", entryHash: "a".repeat(64),
+          metadata: { routePrice: { pricingVersion: "price-v2", modelId: frame.modelId,
+            uncachedInputMicroUsdPerMillion: 2_000_000,
+            cacheReadMicroUsdPerMillion: 200_000,
+            cacheWriteMicroUsdPerMillion: routeCacheWrite,
+            outputMicroUsdPerMillion: 4_000_000 } } };
+      } },
       $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
         inserts += 1;
         insertedValues.push(values);
@@ -165,8 +159,8 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
     assert.equal(insertedValues[0]?.[18], "anthropic_messages_api");
     assert.equal(insertedValues[0]?.[28], "price-v1");
     assert.equal(insertedValues[0]?.[29], BigInt(receipt.projectedCostMicroUsd));
-    assert.equal(catalogReads, 0,
-      "native settlement must not consult a later catalogue");
+    assert.equal(priceReads, 0,
+      "native settlement must not consult the assignment price");
     existingDigests.set(attemptId, first.receiptDigest);
     const replay = await recordAmuxV22ReadOnlyApiUsage(tx as never, input);
     assert.equal(replay.duplicate, true);
@@ -277,16 +271,14 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
     };
     const { recordAmuxCliUsage } = await store;
     await recordAmuxCliUsage(tx as never, ordinaryReceipt);
-    assert.equal(catalogReads, 1,
-      "ordinary CLI projection must retain the approved catalogue lookup");
+    assert.equal(priceReads, 1,
+      "ordinary CLI projection reads the price the assignment reserved against");
     assert.equal(insertedValues[2]?.[28], "price-v2");
     assert.equal(insertedValues[2]?.[29], BigInt(6));
-    assert.equal(catalogAt?.toISOString(), ordinaryReceipt.endedAt,
-      "the price is the one in force when the usage ended");
     assert.ok(authorityCalls >= 5);
 
     // No verified cache-write rate: a run that wrote to the cache is unpriced.
-    catalogCacheWrite = 0;
+    routeCacheWrite = 0;
     await recordAmuxCliUsage(tx as never, { ...ordinaryReceipt,
       invocationId: "00000000-0000-4000-8000-000000000008",
       binding: { kind: "task_attempt" as const,
@@ -299,5 +291,5 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
         attemptId: "00000000-0000-4000-8000-000000000009" } });
     assert.equal(insertedValues[4]?.[29], BigInt(6),
       "a run with no cache writes is still priced");
-    catalogCacheWrite = 400_000;
+    routeCacheWrite = 400_000;
   });
