@@ -120,6 +120,7 @@ const EVENT_DOT: Record<CiAdmissionEvent["kind"], string> = {
   cancelled: "bg-zinc-400",
   failed: "bg-amber-300",
   stopped: "bg-rose-400",
+  updated: "bg-sky-400",
 };
 
 const STATUS_BADGE: Record<CiAdmissionEntryStatus, string> = {
@@ -130,6 +131,7 @@ const STATUS_BADGE: Record<CiAdmissionEntryStatus, string> = {
   checking: "bg-zinc-800 text-zinc-400",
   conflict: "bg-amber-300/15 text-amber-300",
   behind: "bg-amber-300/15 text-amber-300",
+  updating: "bg-sky-400/15 text-sky-300",
   hold: "bg-amber-300/15 text-amber-300",
   held: "bg-rose-400/15 text-rose-300",
 };
@@ -487,6 +489,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
     waiting: m.statusWaiting,
     conflict: m.statusConflict,
     behind: m.statusBehind,
+    updating: m.statusUpdating,
     hold: m.statusHold,
     checking: m.statusChecking,
     held: m.statusHeld,
@@ -820,6 +823,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                         cancelled: m.eventCancelled,
                         failed: m.eventFailed,
                         stopped: m.eventStopped,
+                        updated: m.eventUpdated,
                       }[event.kind]
                     }
                   </span>
