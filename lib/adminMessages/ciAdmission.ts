@@ -5,7 +5,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
   en: {
     title: "CI admission line",
     note:
-      "Every open pull request into develop or main, drafts included, in priority order. Runners go from the top down (40 by default, GitHub's limit). Each CI counts at the jobs it runs or queues right now, read from GitHub (at its measured peak for the first two minutes of a run, while its jobs are still being listed), so the next draft starts as soon as finished jobs leave room: a draft they reach is marked ready when it has no conflict, is not behind its base and has no ci:hold label; a pull request further down whose CI runs past the budget goes back to draft. Drag to reorder: the order is saved at once and audited.",
+      "Every open pull request into develop or main, drafts included, in priority order. Runners go from the top down (40 by default, GitHub's limit). Each CI counts at the jobs it runs or queues right now, read from GitHub (at its measured peak for the first two minutes of a run, while its jobs are still being listed), so the next draft starts as soon as finished jobs leave room: a draft they reach is marked ready when it has no conflict and is not behind its base (a draft behind develop waits until its branch is updated); a pull request further down whose CI runs past the budget goes back to draft. Pull requests labelled ci:hold are not listed. Drag to reorder: the order is saved at once and audited.",
     modeOff: "Off",
     modeShadow: "Shadow",
     modeOn: "On",
@@ -36,7 +36,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
     waitedFor: "in line {minutes} min",
     moveTop: "Move to top",
     remove: "Move to bottom",
-    removeNote: "Add the ci:hold label to keep a pull request a draft wherever it is in line.",
+    removeNote: "Add the ci:hold label to take a pull request out of the line; admission leaves it alone until the label is removed.",
     draft: "draft",
     ready: "ready",
     statusRunning: "CI running",
@@ -44,7 +44,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
     statusNext: "Next: being marked ready",
     statusWaiting: "Waiting for runners",
     statusConflict: "Conflict with base",
-    statusBehind: "Behind base",
+    statusBehind: "Behind base: update the branch",
     statusHold: "ci:hold",
     statusChecking: "Checking",
     statusHeld: "Sent back to draft",
@@ -89,7 +89,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
   ko: {
     title: "CI 입장 대기열",
     note:
-      "develop·main으로 가는 열린 PR 전체(draft 포함)를 우선순위대로 보여 줍니다. 러너는 위에서부터 배정됩니다(기본 40개, GitHub 한도). 각 CI는 GitHub에서 지금 실행·대기 중인 job 수로 셉니다(run이 시작된 뒤 2분 동안은 job이 다 뜨기 전이라 실측 최대치로 셉니다). 그래서 job이 끝나 자리가 나면 바로 다음 draft가 시작됩니다. 러너가 닿은 draft는 base와 충돌이 없고, base보다 뒤처지지 않았고, ci:hold 라벨이 없으면 ready로 바뀝니다. 아래쪽 PR의 CI가 예산을 넘어 돌면 draft로 되돌립니다. 끌어서 순서를 바꾸면 바로 저장되고 감사 기록에 남습니다.",
+      "develop·main으로 가는 열린 PR 전체(draft 포함)를 우선순위대로 보여 줍니다. 러너는 위에서부터 배정됩니다(기본 40개, GitHub 한도). 각 CI는 GitHub에서 지금 실행·대기 중인 job 수로 셉니다(run이 시작된 뒤 2분 동안은 job이 다 뜨기 전이라 실측 최대치로 셉니다). 그래서 job이 끝나 자리가 나면 바로 다음 draft가 시작됩니다. 러너가 닿은 draft는 base와 충돌이 없고 base보다 뒤처지지 않았으면 ready로 바뀝니다(develop보다 뒤처진 draft는 브랜치를 업데이트할 때까지 기다립니다). 아래쪽 PR의 CI가 예산을 넘어 돌면 draft로 되돌립니다. ci:hold 라벨이 붙은 PR은 목록에 넣지 않습니다. 끌어서 순서를 바꾸면 바로 저장되고 감사 기록에 남습니다.",
     modeOff: "꺼짐",
     modeShadow: "Shadow",
     modeOn: "켜짐",
@@ -120,7 +120,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
     waitedFor: "줄에 선 지 {minutes}분",
     moveTop: "맨 위로",
     remove: "맨 아래로",
-    removeNote: "순서와 상관없이 draft로 묶어 두려면 PR에 ci:hold 라벨을 붙이세요.",
+    removeNote: "대기열에서 빼려면 PR에 ci:hold 라벨을 붙이세요. 라벨을 뗄 때까지 입장 관리가 건드리지 않습니다.",
     draft: "draft",
     ready: "ready",
     statusRunning: "CI 실행 중",
@@ -128,7 +128,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
     statusNext: "다음 차례 · ready로 바꾸는 중",
     statusWaiting: "러너 대기",
     statusConflict: "base와 충돌",
-    statusBehind: "base보다 뒤처짐",
+    statusBehind: "base보다 뒤처짐 · 브랜치 업데이트 필요",
     statusHold: "ci:hold",
     statusChecking: "확인 중",
     statusHeld: "draft로 되돌림",
