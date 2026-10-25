@@ -594,6 +594,7 @@ test("fresh optional location reaches the provider without entering saved messag
 });
 
 test("located reasoning and tool inputs are not persisted or replayed after location is off", async () => {
+  world.providerContexts = [];
   const modelId = "gpt-6-luna";
   const selectedModels = conversationRow.selectedModels;
   conversationRow.selectedModels = JSON.stringify([modelId]);
