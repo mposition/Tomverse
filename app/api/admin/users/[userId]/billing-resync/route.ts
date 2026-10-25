@@ -102,11 +102,14 @@ export async function POST(req: Request, context: RouteContext) {
       : null;
     const planId = normalizePlanId(subscription.metadata.planId) || matchedPlan?.id || "free";
     const plan = activeStatuses.has(subscription.status) ? tierForPlanId(planId) : "Free";
-    await applyWebSubscriptionSnapshot({
+    const applied = await applyWebSubscriptionSnapshot({
       userId: user.id, plan, subscriptionId: subscription.id, priceId,
       status: subscription.status, periodEnd: subscriptionPeriodEnd(subscription),
       interval: subscriptionInterval(subscription), cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end), observedAt,
     });
+    if (!applied) {
+      return NextResponse.json({ code: "BILLING_STATE_CHANGED", error: "A newer billing update already applied. Refresh before resyncing again." }, { status: 409 });
+    }
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {

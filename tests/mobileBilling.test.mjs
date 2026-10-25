@@ -69,6 +69,7 @@ test("store access expires even if the expiration webhook is delayed", () => {
 const base = { billingId: "opaque-account", plan: "Pro", subscriptionStore: "play_store", productId: "pro:monthly", interval: "monthly", active: true, cancelAtPeriodEnd: false, products, purchasedCredits: 0 };
 test("subscription changes cannot create duplicate or cross-provider subscriptions or silently resume renewal", () => {
   assert.equal(canPurchaseMobileProduct(base, products[3], "play_store"), true);
+  assert.equal(canPurchaseMobileProduct({ ...base, verificationPending: true }, products[3], "play_store"), false);
   for (const state of [{ ...base, subscriptionStore: "web" }, { ...base, cancelAtPeriodEnd: true }, { ...base, interval: "annual" }, { ...base, plan: "Max" }]) {
     assert.equal(canPurchaseMobileProduct(state, products[3], "play_store"), false);
   }

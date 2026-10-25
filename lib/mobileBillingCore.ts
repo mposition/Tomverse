@@ -26,6 +26,7 @@ export type MobileBillingState = {
   purchasedCredits: number;
   webSubscription?: { active: boolean; cancelAtPeriodEnd: boolean; expiresAt: string | null };
   storeSubscriptions?: MobileStoreSubscriptionView[];
+  verificationPending?: boolean;
   products: (MobileBillingProduct & { credits?: number; monthlyCredits?: number; maxModels?: number })[];
 };
 

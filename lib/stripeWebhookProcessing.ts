@@ -264,7 +264,7 @@ export async function resyncAccountBillingFromStripe({
   if (!subscription) {
     const cleared = await applyWebSubscriptionSnapshot({
       userId, subscriptionId: null, priceId: null, plan: "Free",
-      status: "canceled", periodEnd: null, interval: null, cancelAtPeriodEnd: false, observedAt,
+      status: null, interval: null, cancelAtPeriodEnd: false, observedAt,
     });
     return {
       result: cleared ? "cleared" : "no_subscription",

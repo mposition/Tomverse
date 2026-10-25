@@ -56,9 +56,7 @@ export async function syncMobileSubscription(userId: string, billingId: string) 
     if (ownership.ownerHash !== mobileStoreOwnerHash(billingId) || ownership.kind !== "subscription") { ownershipConflict = true; continue; }
     owned.push(candidate);
   }
-  if (!owned.length && ownershipConflict) throw storeOwnershipRefusal();
-  // Keep the previous paid period while a new transaction awaits its webhook.
-  if (candidates.length && !owned.length) return;
+  const verificationPending = candidates.length > owned.length;
   const current = owned[0] || null;
   await prisma.$transaction(async (tx) => {
     await lockSubscriptionAccount(tx, userId);
@@ -76,6 +74,10 @@ export async function syncMobileSubscription(userId: string, billingId: string) 
     };
     await tx.user.update({ where: { id: userId }, data: { ...data, plan: effectivePlanForAccess({ ...user, ...data, plan: data.webSubscriptionPlan }) } });
   });
+  // Revoke absent/refunded rights even when another receipt is not yet bound
+  // or has a different owner. A refusal must never preserve an old paid tier.
+  if (!owned.length && ownershipConflict) throw storeOwnershipRefusal();
+  return { verificationPending };
 }
 
 export async function readMobileBillingState(userId: string, store: MobileStore): Promise<MobileBillingState> {

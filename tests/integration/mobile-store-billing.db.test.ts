@@ -61,6 +61,30 @@ test("each paid store stays manageable and an overlapping lower tier survives th
     assert.equal(effectivePlanForAccess(account, new Date(expires.getTime() + 1000)), "Pro");
   } finally { globalThis.fetch = originalFetch; }
 });
+test("a refunded tier is revoked even when the remaining store receipt is unbound or owned by another account", async () => {
+  const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const appleTransaction = `apple-refund-${user.id}`; await bindSubscription(billingId, appleTransaction);
+  const playTransaction = `play-pending-${user.id}`;
+  const play = { store: "play_store", is_sandbox: false, store_transaction_id: playTransaction, expires_date: "2099-01-01T00:00:00Z" };
+  const apple = { store: "app_store", is_sandbox: false, store_transaction_id: appleTransaction, expires_date: "2099-01-01T00:00:00Z" };
+  let subscriptions: Record<string, unknown> = { "pro.month": apple, "play.max:monthly": play };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ subscriber: { subscriptions } });
+  try {
+    await syncMobileSubscription(user.id, billingId);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).plan, "Pro");
+    subscriptions = { "play.max:monthly": play };
+    const result = await syncMobileSubscription(user.id, billingId);
+    assert.equal(result.verificationPending, true);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).plan, "Free");
+    subscriptions = { "pro.month": apple }; await syncMobileSubscription(user.id, billingId);
+    const other = await createUser("other"); const otherBillingId = await ensureMobileBillingId(other.id);
+    await bindSubscription(otherBillingId, playTransaction, "PLAY_STORE", "play.max:monthly");
+    subscriptions = { "play.max:monthly": play };
+    await assert.rejects(syncMobileSubscription(user.id, billingId), /another account/);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).plan, "Free");
+  } finally { globalThis.fetch = originalFetch; }
+});
 test("purchased store credits remain spendable with an old compatibility date and never expire", async () => {
   const user = await createUser(); await deliver(user.id);
   await prisma.creditLot.updateMany({ where: { userId: user.id }, data: { expiresAt: new Date("2000-01-01") } });

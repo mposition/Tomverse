@@ -114,7 +114,10 @@ transaction to one billing identity. These keyed-hash ownership tombstones have
 no user foreign key and survive account deletion. Restoring or transferring a
 receipt cannot grant it to another account, even if the provider restore setting
 is changed. Subscription access waits for a verified webhook to bind its current
-transaction; an SDK success alone cannot grant it. Configure webhooks before
+transaction; an SDK success alone cannot grant it. An unbound receipt is shown
+as pending and cannot start another subscription purchase. Refund/revocation
+always removes absent old entitlements even when a different receipt is pending
+or belongs to another account. Configure webhooks before
 allowing purchases. Keep the ownership key stable for retained tombstones;
 rotation requires compatible lookup of the previous key, never deleting the
 ownership records. No raw receipt or account ID is retained in that registry.

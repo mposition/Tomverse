@@ -54,3 +54,10 @@ test("an unauthenticated resync cannot alter either source", async () => {
   authorized = false; const before = { ...account }; const response = await run();
   assert.equal(response.status, 404); assert.deepEqual(account, before);
 });
+test("a stale admin snapshot is refused without rewriting the customer or auditing a false application", async () => {
+  authorized = true;
+  Object.assign(account, baseline, { subscriptionSyncedAt: new Date("2099-01-01") });
+  const before = { ...account };
+  const response = await run();
+  assert.equal(response.status, 409); assert.deepEqual(account, before);
+});

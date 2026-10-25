@@ -59,6 +59,7 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
     <div className="native-billing-heading"><h2 id="native-billing-title">Plans & credits</h2><button type="button" onClick={onClose} disabled={busy}>Back to chat</button></div>
     {busy && <p role="status">Connecting to {storeName}…</p>}
     {state && <>
+      {state.verificationPending && <p role="status">Store verification is pending. Refresh your balance before starting another subscription purchase.</p>}
       <div className="native-billing-current"><h3>Current plan: {state.plan}</h3><p>Purchased credits: {state.purchasedCredits.toLocaleString()}</p>
         {state.active && state.expiresAt && <p>{state.cancelAtPeriodEnd ? "Access until" : "Renews"}: {new Date(state.expiresAt).toLocaleDateString()}</p>}
         {state.active && state.subscriptionStore && state.subscriptionStore !== "web" && <button type="button" disabled={busy} onClick={() => { void manage().catch(() => setError("Unable to open subscription management.")); }}>Manage or cancel subscription</button>}
