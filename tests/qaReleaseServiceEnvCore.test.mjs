@@ -15,6 +15,8 @@ const runtime = { PATH: "/usr/bin", HOME: "/root", NODE_ENV: "production", RAILW
 test("only a runtime-only environment with no operator configuration is dormant", () => {
   const own = ["SUPPORT_TRIAGE_RETENTION_SECRET"];
   assert.equal(isUnconfiguredAgentService(runtime, own), true);
+  for (const environment of ["production", "dev", "pr-1", undefined])
+    assert.equal(isUnconfiguredAgentService({ ...runtime, RAILWAY_ENVIRONMENT_NAME: environment }, own), false);
   for (const value of ["", " ", "synthetic"])
     assert.equal(isUnconfiguredAgentService({ ...runtime, SUPPORT_TRIAGE_RETENTION_SECRET: value }, own), false);
   for (const name of ["DATABASE_URL", "RAILWAY_TOKEN", "GITHUB_TOKEN", "QA_RELEASE_MONITOR_SECRET"])

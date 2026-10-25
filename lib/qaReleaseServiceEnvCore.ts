@@ -152,12 +152,13 @@ export function checkQaReleaseServiceEnv(service: QaReleaseService, names: reado
   return unexpected.length === 0 ? { ok: true } : { ok: false, unexpectedCount: unexpected.length };
 }
 
-/** A provisioned cron with no operator configuration is dormant, not a run.
+/** A provisioned Test cron with no operator configuration is dormant, not a run.
  * Partial configuration and unexpected names still use the failing start path. */
 export function isUnconfiguredAgentService(
   env: Readonly<Record<string, string | undefined>>,
   ownVariables: readonly string[],
 ): boolean {
+  if (env.RAILWAY_ENVIRONMENT_NAME !== "staging") return false;
   if (ownVariables.some((name) => env[name] !== undefined)) return false;
   const runtime = new Set([...QA_RELEASE_RUNTIME_VARIABLES, ...QA_RELEASE_RAILWAY_VARIABLES]);
   return Object.keys(env).every((name) => env[name] === undefined || runtime.has(name));
