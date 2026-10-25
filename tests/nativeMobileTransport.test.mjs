@@ -116,6 +116,18 @@ test("consent withdrawn while persistence is pending is removed from native exec
   assert.equal(JSON.parse(f.calls.find(call => call.path === "/api/chat").body).currentLocation, undefined);
 });
 
+test("confirmed account deletion clears the native location identity and consent", async () => {
+  const location = createChatLocationSession(async () => ({ latitude: 1, longitude: 2, accuracy: 10, timestamp: Date.now() }));
+  const f = fixture({ location });
+  await f.transport.account();
+  await location.enable("location-owner");
+  await assert.rejects(f.transport.deleteAccount("wrong confirmation"), /CONFIRMATION_REQUIRED/);
+  assert.equal(location.isEnabled("location-owner"), true);
+  await f.transport.deleteAccount("DELETE MY ACCOUNT");
+  assert.equal(location.isEnabled("location-owner"), false);
+  assert.equal(location.getSnapshot().enabled, false);
+});
+
 test("native Stop cancels a pending location read before provider dispatch", async () => {
   let release;
   const fix = () => ({ latitude: 1, longitude: 2, accuracy: 10, timestamp: Date.now() });

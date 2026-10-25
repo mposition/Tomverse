@@ -6650,7 +6650,11 @@ async function handleChatPost(
                                 /*
                                   Provider-private state for replaying a
                                   reasoning model exactly -- and not stored at
-                                  all on a turn that called the artifact tool.
+                                  all on a turn that called the artifact tool
+                                  or received an ephemeral device location.
+                                  Private reasoning and tool inputs can echo
+                                  that fix; keeping them would replay it after
+                                  location is disabled or the tab reloads.
 
                                   `response.messages` carries that turn's tool
                                   call and its result verbatim. Replaying them
@@ -6668,7 +6672,8 @@ async function handleChatPost(
                                 const providerContext =
                                     dispatched.reasoning !== undefined &&
                                     responseResult.status === "fulfilled" &&
-                                    !artifactCollector?.wasInvoked
+                                    !artifactCollector?.wasInvoked &&
+                                    !currentLocation
                                         ? serializeProviderResponseMessages(
                                               responseResult.value.messages
                                           )

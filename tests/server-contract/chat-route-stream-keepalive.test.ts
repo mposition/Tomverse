@@ -121,6 +121,7 @@ type Script = {
   textThenStall?: boolean;
   /** Abort after the provider stream exists but before the route resumes dispatch setup. */
   abortAfterStreamCreation?: boolean;
+  responseMessages?: unknown[];
 };
 
 let script: Script = { text: "The answer." };
@@ -181,7 +182,7 @@ mock.module("ai", {
           id: "resp-keepalive-1",
           modelId: MODEL_ID,
           headers: {},
-          messages: [],
+          messages: script.responseMessages ?? [],
         }),
         usage: Promise.resolve({
           inputTokens: 100,
@@ -209,6 +210,7 @@ mock.module("ai", {
 
 const world = {
   messages: [] as Array<{ id: string; status: string; content?: unknown }>,
+  providerContexts: [] as Array<{ messageId: string; modelId: string; responseMessages: unknown }>,
 };
 
 const DEFAULTS: Record<string, () => unknown> = {
@@ -247,6 +249,15 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     findFirst: () => ({ id: "user-message-1" }),
     create: (args: { data: { id: string; status: string } }) => {
       world.messages.push({ ...args.data });
+      return args.data;
+    },
+  },
+  messageProviderContext: {
+    findMany: () => world.providerContexts.map((context) => ({
+      ...context, message: { content: "The answer." },
+    })),
+    create: (args: { data: typeof world.providerContexts[number] }) => {
+      world.providerContexts.push(args.data);
       return args.data;
     },
   },
@@ -579,6 +590,40 @@ test("fresh optional location reaches the provider without entering saved messag
     await ask({ text: "The answer." }, { currentLocation });
     assert.equal(providerInstructions, cachedInstructions);
     assert.ok(!JSON.stringify(providerRequestMessages).includes("latitude"));
+  }
+});
+
+test("located reasoning and tool inputs are not persisted or replayed after location is off", async () => {
+  const modelId = "gpt-6-luna";
+  const selectedModels = conversationRow.selectedModels;
+  conversationRow.selectedModels = JSON.stringify([modelId]);
+  const responseMessages = [
+    { role: "assistant", content: [
+      { type: "reasoning", text: "Device fix -27.47, 153.025" },
+      { type: "tool-call", toolCallId: "search-1", toolName: "web_search", input: { query: "near -27.47, 153.025" } },
+      { type: "text", text: "The answer." },
+    ] },
+    { role: "tool", content: [{ type: "tool-result", toolCallId: "search-1", toolName: "web_search", output: { type: "text", value: "Nearby results" } }] },
+  ];
+  try {
+    await ask({ text: "The answer.", responseMessages }, { modelId, currentLocation: {
+      latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now(),
+    } });
+    assert.ok(JSON.stringify(providerRequestMessages).includes("latitude"));
+    assert.deepEqual(world.providerContexts, []);
+    await ask({ text: "The answer.", responseMessages }, { modelId, messages: [
+      { role: "user", content: "Nearby?" }, { role: "assistant", content: "The answer." },
+      { role: "user", content: "Another question without device location" },
+    ] });
+    assert.ok(!JSON.stringify(providerRequestMessages).includes("-27.47"));
+    assert.ok(!JSON.stringify(providerRequestMessages).includes("latitude"));
+    // Ordinary reasoning turns still retain provider context; the fix must
+    // disable persistence only for a turn that received a current device fix.
+    assert.equal(world.providerContexts.length, 1);
+    assert.deepEqual(world.providerContexts[0].responseMessages, responseMessages);
+  } finally {
+    conversationRow.selectedModels = selectedModels;
+    world.providerContexts = [];
   }
 });
 

@@ -306,6 +306,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     deleteAccount: async (confirmationText) => {
       if (confirmationText !== "DELETE MY ACCOUNT") throw Error("CONFIRMATION_REQUIRED");
       await request("/api/user/account", json("DELETE", { confirm: true, confirmationText }));
+      clearSessionState();
     },
     downloadArtifact: async (artifact) => {
       if (artifact.status !== "ready") throw Error("ARTIFACT_UNAVAILABLE");

@@ -98,10 +98,11 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
 > = {
   // Here rather than in the sitemap's table while its effective date is in the
   // future (lib/sitemapContentDates.ts).
-  // Moved 2026-10-24 by the memory section rewrite (free automatic extraction).
+  // Observed page includes the memory rewrite and optional-location disclosure.
+  // This is evidence of current content, not approval to publish the amendment.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "17c31294913b39aafd4ff6570ff3c245538b02523b85c1a50ace9608ac793fcc",
+    contentSha256: "e9b7d283be7b8dcca54bf288b67b405e37c5f761cea9d283a0f1cc60264b2c62",
   },
   "/terms": {
     date: "2026-11-16",

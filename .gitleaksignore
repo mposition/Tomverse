@@ -1123,3 +1123,8 @@ f942c9e83457a075b9a7b921868a75103fd98eeb:tests/engineeringAgentPublisher.test.mj
 #
 # Scope: exactly this one finding in that one commit.
 e2dfa01a6963bee109ad65f022cb831ca2e663da:tests/integration/marketing-competitor-registry.db.test.ts:generic-api-key:24
+
+# Synthetic iOS application identifier A1B2C3D4E5.app.tomverse.shell in the
+# removed browser-login fixture, not an API key or a signing credential.
+# Scope: exactly this one historical finding; current scans remain enabled.
+9e1632617ca035bf0b59ac37ff2a11751dfc3121:tests/mobileBrowserLogin.test.mjs:generic-api-key:44

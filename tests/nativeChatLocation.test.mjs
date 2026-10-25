@@ -75,3 +75,29 @@ test("native permission prompts do not consume the foreground acquisition deadli
   assert.equal((await result).latitude, 1);
   assert.equal(reads, 1);
 });
+
+test("a plugin rejection after the acquisition deadline is still handled", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let rejectAcquisition;
+  const reader = createNativeLocationReader({
+    checkPermissions: async () => ({ coarseLocation: "granted" }),
+    getCurrentPosition: () => new Promise((_, reject) => { rejectAcquisition = reject; }),
+  }, true);
+  const result = reader(false);
+  const rejected = assert.rejects(result, /timeout/);
+  await Promise.resolve();
+  t.mock.timers.tick(11_000);
+  await rejected;
+  rejectAcquisition(new Error("late plugin failure"));
+  // node:test also fails on a late unhandled rejection from the losing promise.
+  await new Promise(setImmediate);
+});
+
+test("iOS location descriptions follow nested URL-type dictionaries in the root", () => {
+  const source = '<plist><dict><key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>tomverse</string></array></dict></array></dict></plist>';
+  const result = withIosLocationPermission(source);
+  for (const key of ["NSLocationWhenInUseUsageDescription", "NSLocationAlwaysAndWhenInUseUsageDescription", "NSLocationDefaultAccuracyReduced"]) {
+    assert.ok(result.indexOf(`<key>${key}</key>`) > result.lastIndexOf("</array>"));
+    assert.ok(result.indexOf(`<key>${key}</key>`) < result.lastIndexOf("</dict>"));
+  }
+});
