@@ -1,10 +1,4 @@
-/** Live enrollment is a separate switch from building the native client. */
-export const MOBILE_CHAT_PATH = "/api/mobile/chat";
-
-export const mobileChatEnabled = (environment: Record<string, string | undefined> = process.env) =>
-  environment.MOBILE_CHAT_ENABLED === "true";
-
-export const mobileChatBearerRoutes = () => mobileChatEnabled() ? [MOBILE_CHAT_PATH] : [];
+export { MOBILE_CHAT_PATH, mobileChatEnabled, mobileChatBearerRoutes } from "./mobileAuthContract";
 
 /** Initial native chat is text-only and keeps its transcript on the device. */
 export const isNativeChatPayload = (body: unknown): boolean => {

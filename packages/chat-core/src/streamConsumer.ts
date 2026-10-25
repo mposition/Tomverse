@@ -1,4 +1,6 @@
 /**
+ * Fallback announcement contract: docs/policy/tomverse-chat-routing.md §7.
+ *
  * Reading the chat response stream: what the user sees, and what the
  * liveness watchdog is told about it.
  *

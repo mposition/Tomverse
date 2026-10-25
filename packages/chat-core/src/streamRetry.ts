@@ -1,4 +1,6 @@
 /**
+ * Fallback announcement contract: docs/policy/tomverse-chat-routing.md §7.
+ *
  * §7's `retrying_with_another_model`, as a chunk in the answer stream.
  *
  * ## Why it is in the stream and not a header

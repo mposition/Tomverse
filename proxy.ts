@@ -40,8 +40,7 @@ import {
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
-import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
-import { mobileChatBearerRoutes } from "@/lib/mobileChatContract";
+import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES, mobileChatBearerRoutes } from "@/lib/mobileAuthContract";
 import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
