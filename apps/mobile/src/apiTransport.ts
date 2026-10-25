@@ -1,4 +1,4 @@
-import { createApiClient, ApiClientError } from "@tomverse/api-client";
+import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
 import { consumeChatStream } from "../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
 import { toChatRequestMessage } from "../../../lib/chatMessageSerialization";
@@ -139,7 +139,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     const revision = sessionRevision;
     let watchdog: ReturnType<typeof createChatLivenessWatchdog> | undefined;
     try {
-      const fix = await location.readForTurn(scope, controller.signal);
+      const fix = await location.readForTurn(scope, controller.signal, {
+        turnId: sourceId,
+        requiresLocation: () => requestChatLocationIntent(String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? ""), (path, init) => run(path, () => {
+          if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+          return init ?? {};
+        })),
+      });
       controller.signal.throwIfAborted();
       watchdog = createChatLivenessWatchdog({ onExpire: abort });
       const response = await run("/api/chat", () => {

@@ -14,7 +14,8 @@ let package = Package(
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.3"),
         .package(name: "TomverseMobileAuth", path: "../../../native-auth"),
         .package(name: "RevenuecatPurchasesCapacitor", path: "../../../../../node_modules/@revenuecat/purchases-capacitor"),
-        .package(name: "CapacitorBrowser", path: "../../../../../node_modules/@capacitor/browser")
+        .package(name: "CapacitorBrowser", path: "../../../../../node_modules/@capacitor/browser"),
+        .package(name: "CapacitorGeolocation", path: "../../../../../node_modules/@capacitor/geolocation")
     ],
     targets: [
         .target(
@@ -24,7 +25,8 @@ let package = Package(
                 .product(name: "Cordova", package: "capacitor-swift-pm"),
                 .product(name: "TomverseMobileAuth", package: "TomverseMobileAuth"),
                 .product(name: "RevenuecatPurchasesCapacitor", package: "RevenuecatPurchasesCapacitor"),
-                .product(name: "CapacitorBrowser", package: "CapacitorBrowser")
+                .product(name: "CapacitorBrowser", package: "CapacitorBrowser"),
+                .product(name: "CapacitorGeolocation", package: "CapacitorGeolocation")
             ]
         )
     ]

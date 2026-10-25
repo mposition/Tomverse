@@ -202,6 +202,7 @@ export async function mockPublicProofMetrics(page: Page) {
 }
 
 export async function prepareGuestPage(page: Page, language: QaLanguage = "ko", reviewAppearance: "classic" | "studio" = "classic", chatAppearance: "classic" | "studio" = "classic") {
+  await page.route("**/api/chat/location-intent", route => route.fulfill(json({ requiresLocation: false })));
   // Existing workspace contracts exercise the retained Classic appearance.
   // Studio has its own responsive coverage in review-studio.spec.ts.
   await mockPublicBillingConfig(page);
@@ -676,6 +677,7 @@ export async function mockAuthenticatedApi(
     }>;
   } = {}
 ): Promise<AuthenticatedQaState> {
+  await page.route("**/api/chat/location-intent", route => route.fulfill(json({ requiresLocation: false })));
   await page.addInitScript((showSidebarTour) => {
     // Existing shell contracts exercise Classic; Studio suites explicitly seed
     // their appearance. Preserve that seed regardless of init-script order.

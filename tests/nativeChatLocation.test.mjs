@@ -1,9 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { createNativeLocationReader } from "../apps/mobile/src/location.ts";
 import { withAndroidLocationPermission, withIosLocationPermission } from "../apps/mobile/scripts/configure-location-permissions.mjs";
 
 const position = { coords: { latitude: 1, longitude: 2, accuracy: 3 }, timestamp: Date.now() };
+
+test("packaged native projects register geolocation and retain only coarse foreground location authority", () => {
+  const read = path => readFileSync(new URL(`../apps/mobile/${path}`, import.meta.url), "utf8");
+  const manifest = read("android/app/src/main/AndroidManifest.xml");
+  assert.ok(manifest.includes("android.permission.ACCESS_COARSE_LOCATION"));
+  assert.ok(!manifest.includes("ACCESS_FINE_LOCATION"));
+  assert.ok(!manifest.includes("ACCESS_BACKGROUND_LOCATION"));
+  assert.ok(read("android/app/capacitor.build.gradle").includes("project(':capacitor-geolocation')"));
+  assert.ok(read("android/capacitor.settings.gradle").includes("@capacitor/geolocation/android"));
+  const swift = read("ios/App/CapApp-SPM/Package.swift");
+  assert.ok(swift.includes('.package(name: "CapacitorGeolocation"'));
+  assert.ok(swift.includes('.product(name: "CapacitorGeolocation"'));
+  const plist = read("ios/App/App/Info.plist");
+  assert.equal(withIosLocationPermission(plist), plist);
+  assert.ok(!plist.includes("<string>location</string>"));
+});
+
+test("a device's existing always-allow grant never requests permission again, even after app reload", async () => {
+  let reads = 0;
+  const reader = createNativeLocationReader({
+    checkPermissions: async () => ({ coarseLocation: "granted", location: "granted" }),
+    requestPermissions: async () => { throw Error("must not re-prompt an existing device grant"); },
+    getCurrentPosition: async () => { reads++; return position; },
+  }, true);
+  await reader(true); await reader(false); await reader(true);
+  assert.equal(reads, 3);
+});
 
 test("native opt-in requests only coarse permission and each read asks for a fresh fix", async () => {
   const calls = [];
