@@ -41,7 +41,8 @@ test("the departure board shows each train's time, load, pull request and status
   assert.match(html, /▲ 1/);
   assert.match(html, /▼ 1/);
   assert.match(html, /aria-expanded="false"/);
-  assert.match(html, /aria-label="Train 20261025-1100: show details"/);
+  // The flap digits are hidden from assistive technology; the row's name carries what it shows.
+  assert.ok(html.includes('aria-label="Train 20261025-1100, departed 11:02, Arrived, 1 rode, 1 left out, main PR #2986: show details"'));
   // Details open on a click only.
   assert.doesNotMatch(html, /qa-release-train-board-detail/);
   assert.doesNotMatch(html, /GitHub could not be read/);

@@ -114,5 +114,6 @@ test("a train whose state GitHub did not give is unknown, never boarding; a clos
     nowMs: NOW,
   });
   assert.deepEqual(rows.map((r) => r.status), ["unknown", "cancelled"]);
-  assert.equal(QA_RELEASE_TRAIN_BOARD_RUNNING_MS, 30 * 60 * 1000);
+  // The service is killed at ten minutes: past eleven, a train with no report never will have one.
+  assert.equal(QA_RELEASE_TRAIN_BOARD_RUNNING_MS, 11 * 60 * 1000);
 });
