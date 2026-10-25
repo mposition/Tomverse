@@ -8,7 +8,9 @@ import { ciAdmissionGithubConfig, createCiAdmissionGithub } from "@/lib/ciAdmiss
  * throws `github_<status>`.
  *
  * With the CI admission GitHub App configured it reads with the App's
- * read-only installation token (5,000 requests an hour). Without it, it reads
+ * read-only installation token (5,000 requests an hour), asking only for the
+ * permission the path needs; when no such token can be had it falls back to
+ * the read below. Without the App, it reads
  * without a credential, as these pages first did: GitHub allows that 60 times
  * an hour per address, and the production server shares its address with
  * other Railway services -- on 2026-10-25 those reads ran out and the page
@@ -20,22 +22,28 @@ import { ciAdmissionGithubConfig, createCiAdmissionGithub } from "@/lib/ciAdmiss
 const API = "https://api.github.com/repos/mposition/Tomverse";
 const TIMEOUT_MS = 5_000;
 
+const readWithoutCredential = async (path: string): Promise<unknown> => {
+  const response = await fetch(`${API}${path}`, {
+    headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`github_${response.status}`);
+  return response.json();
+};
+
 export function createGithubRepoReader(): (path: string) => Promise<unknown> {
   const config = ciAdmissionGithubConfig();
-  if (config) {
-    const github = createCiAdmissionGithub(config);
-    return (path) => github.readRepo(path);
-  }
-  return async (path) => {
-    const response = await fetch(`${API}${path}`, {
-      headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-      cache: "no-store",
-      redirect: "error",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+  if (!config) return readWithoutCredential;
+  const github = createCiAdmissionGithub(config);
+  return (path) =>
+    github.readRepo(path).catch((error: unknown) => {
+      // No token for this path (the installation lacks the permission, or the
+      // App cannot be reached): read as before rather than not at all.
+      if (error instanceof Error && /^github_(token|installation)_/.test(error.message)) return readWithoutCredential(path);
+      throw error;
     });
-    if (!response.ok) throw new Error(`github_${response.status}`);
-    return response.json();
-  };
 }
 
 /** A failure as a short code for the page: `github_403`, `timeout`, `unknown`. */

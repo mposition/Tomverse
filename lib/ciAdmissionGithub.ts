@@ -340,7 +340,10 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     },
     async readRepo(path) {
       if (!path.startsWith("/") || path.includes("..")) throw new Error("github_path");
-      const answer = await call("GET", `${REPO}${path}`, await installationToken({ contents: "read", pull_requests: "read", metadata: "read" }));
+      // Only the permission the path needs: an installation without Contents
+      // still reads pull requests.
+      const permissions = path.startsWith("/pulls") ? { pull_requests: "read", metadata: "read" } : { contents: "read", metadata: "read" };
+      const answer = await call("GET", `${REPO}${path}`, await installationToken(permissions));
       if (answer.status !== 200) throw new Error(`github_${answer.status}`);
       return answer.json();
     },
