@@ -4,6 +4,8 @@ import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { chatStreamDisplayText } from "../packages/chat-core/src/streamText.ts";
 import { nativeChatBearerRoute } from "../lib/nativeBearerGate.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
+import { createChatLocationSession } from "../packages/chat-core/src/location.ts";
+import { authenticatedFetch } from "../apps/mobile/src/authenticatedFetch.ts";
 
 const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () => {}, signOut: async () => {} };
 
@@ -32,6 +34,7 @@ test("a fresh transport restores actual answer models from durable attempts and 
 test("new mobile Chat and Review conversations enable web search without rewriting an existing choice", async () => {
   const calls = []; let webSearchMode = "off";
   const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
     calls.push({ path, ...init });
     if (path === "/api/products/mobile/capabilities") return Response.json({ reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" });
     if (path === "/api/products/chat/conversations" || path === "/api/products/review/conversations") {
@@ -47,23 +50,28 @@ test("new mobile Chat and Review conversations enable web search without rewriti
     { webSearchMode: "always", title: "New question" }, { selectedModels: ["fixture-model"], webSearchMode: "always" },
   ]);
 });
-function fixture({ unknown = false, routedModel = null } = {}) {
+function fixture({ unknown = false, routedModel = null, location, authenticate, beforePersist = async () => {} } = {}) {
   const calls = []; let turns = 0;
+  let sourceSequence = 0; let latestSourceId = "saved-source";
   const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: [] };
   const run = async (path, init = {}) => {
+    if (typeof init === "function") init = init();
     calls.push({ path, ...init });
+    if (path === "/api/user/account") return Response.json({ id: "location-owner", actionsEnabled: false });
     if (path === "/api/products/chat/conversations") return Response.json({ id: conversation.id });
     if (path === "/api/conversations/conversation-a/messages") {
+      await beforePersist();
       const input = JSON.parse(init.body).messages[0];
-      conversation.messages.push({ id: "saved-source", role: "user", content: input.content });
-      return Response.json({ messageMappings: [{ requestId: input.clientRequestId, messageId: "saved-source" }] });
+      latestSourceId = sourceSequence++ === 0 ? "saved-source" : `saved-source-${sourceSequence}`;
+      conversation.messages.push({ id: latestSourceId, role: "user", content: input.content });
+      return Response.json({ messageMappings: [{ requestId: input.clientRequestId, messageId: latestSourceId }] });
     }
     if (path === "/api/conversations/conversation-a") return Response.json(conversation);
     if (path.startsWith("/api/products/chat/attempts/")) return Response.json({ attempt: conversation.responseAttempts[0] });
     if (path === "/api/chat") {
       turns++; const input = JSON.parse(init.body);
-      assert.equal(input.sourceUserMessageId, "saved-source");
-      assert.equal(input.messages.at(-1).id, "saved-source");
+      assert.equal(input.sourceUserMessageId, latestSourceId);
+      assert.equal(input.messages.at(-1).id, latestSourceId);
       assert.equal(input.modelId, "fixture-model");
       if (unknown) {
         conversation.responseAttempts = [{ assistantMessageId: input.assistantMessageId, requestedModelId: "fixture-model", status: "streaming", partialContent: "Saved partial" }];
@@ -76,8 +84,107 @@ function fixture({ unknown = false, routedModel = null } = {}) {
     }
     throw Error(`Unexpected request ${path}`);
   };
-  return { transport: createApiTransport(run, bridge), conversation, calls, turns: () => turns };
+  const source = (path, init) => path === "/api/chat" && authenticate ? authenticate(path, init, run) : run(path, init);
+  return { transport: createApiTransport(source, bridge, undefined, undefined, location), conversation, calls, turns: () => turns };
 }
+
+test("native Chat refreshes approximate location per turn without persisting it in the question", async () => {
+  let latitude = -27.46977;
+  const location = createChatLocationSession(async () => ({ latitude, longitude: 153.02512, accuracy: 10, timestamp: Date.now() }));
+  const f = fixture({ location });
+  await f.transport.account();
+  await f.transport.send(f.conversation, "No location", [], new AbortController().signal, () => {});
+  await location.enable("location-owner");
+  await f.transport.send(f.conversation, "Near here", [], new AbortController().signal, () => {});
+  latitude = -33.8688;
+  await f.transport.send(f.conversation, "And here", [], new AbortController().signal, () => {});
+  const requests = f.calls.filter(call => call.path === "/api/chat").map(call => JSON.parse(call.body));
+  assert.equal(requests[0].currentLocation, undefined);
+  assert.equal(requests[1].currentLocation.latitude, -27.47);
+  assert.equal(requests[2].currentLocation.latitude, -33.869);
+  assert.equal(requests[2].currentLocation.accuracy, 150);
+  assert.equal(JSON.stringify(f.calls.filter(call => call.path.endsWith("/messages"))).includes("latitude"), false);
+  await f.transport.signOut();
+  assert.equal(location.getSnapshot().enabled, false);
+});
+
+test("consent withdrawn while persistence is pending is removed from native execution", async () => {
+  const location = createChatLocationSession(async () => ({ latitude: 1, longitude: 2, accuracy: 10, timestamp: Date.now() }));
+  const f = fixture({ location, beforePersist: async () => location.disable() });
+  await f.transport.account(); await location.enable("location-owner");
+  await f.transport.send(f.conversation, "Without location now", [], new AbortController().signal, () => {});
+  assert.equal(JSON.parse(f.calls.find(call => call.path === "/api/chat").body).currentLocation, undefined);
+});
+
+test("confirmed account deletion clears the native location identity and consent", async () => {
+  const location = createChatLocationSession(async () => ({ latitude: 1, longitude: 2, accuracy: 10, timestamp: Date.now() }));
+  const f = fixture({ location });
+  await f.transport.account();
+  await location.enable("location-owner");
+  await assert.rejects(f.transport.deleteAccount("wrong confirmation"), /CONFIRMATION_REQUIRED/);
+  assert.equal(location.isEnabled("location-owner"), true);
+  await f.transport.deleteAccount("DELETE MY ACCOUNT");
+  assert.equal(location.isEnabled("location-owner"), false);
+  assert.equal(location.getSnapshot().enabled, false);
+});
+
+test("native Stop cancels a pending location read before provider dispatch", async () => {
+  let release;
+  const fix = () => ({ latitude: 1, longitude: 2, accuracy: 10, timestamp: Date.now() });
+  let reads = 0;
+  const location = createChatLocationSession(async () => ++reads === 1 ? fix() : new Promise(resolve => { release = resolve; }));
+  const f = fixture({ location }); await f.transport.account(); await location.enable("location-owner");
+  const controller = new AbortController();
+  const pending = f.transport.send(f.conversation, "Stop", [], controller.signal, () => {});
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(f.turns(), 0); release(fix());
+});
+
+for (const action of ["disable", "signOut", "abort"]) {
+  test(`native ${action} while credential acquisition is pending fences location at actual dispatch`, async () => {
+    let release;
+    const location = createChatLocationSession(async () => ({ latitude: 1, longitude: 2, accuracy: 10, timestamp: Date.now() }));
+    const f = fixture({ location, authenticate: (path, init, run) => authenticatedFetch(path, init, {
+      apiOrigin: "https://tomverse.app",
+      bridge: { getAccessToken: () => new Promise(resolve => { release = resolve; }) },
+      fetchImpl: (_url, request) => run(path, request),
+    }) });
+    await f.transport.account(); await location.enable("location-owner");
+    const controller = new AbortController();
+    const pending = f.transport.send(f.conversation, "Pending credentials", [], controller.signal, () => {});
+    while (!release) await new Promise(resolve => setImmediate(resolve));
+    if (action === "disable") location.disable();
+    else if (action === "signOut") await f.transport.signOut();
+    else controller.abort();
+    release({ accessToken: "fixture-access", expiresAt: Date.now() + 60_000 });
+    if (action === "disable") {
+      await pending;
+      assert.equal(JSON.parse(f.calls.find(call => call.path === "/api/chat").body).currentLocation, undefined);
+    } else {
+      await assert.rejects(pending, { name: "AbortError" }); assert.equal(f.turns(), 0);
+    }
+  });
+}
+
+test("native credential retry rechecks consent before constructing its second chat payload", async () => {
+  let grants = 0; const payloads = [];
+  const location = createChatLocationSession(async () => ({ latitude: 1, longitude: 2, accuracy: 10, timestamp: Date.now() }));
+  const f = fixture({ location, authenticate: (path, init, run) => authenticatedFetch(path, init, {
+    apiOrigin: "https://tomverse.app",
+    bridge: { getAccessToken: async () => ({ accessToken: `fixture-${++grants}`, expiresAt: Date.now() + 60_000 }) },
+    fetchImpl: (_url, request) => {
+      payloads.push(JSON.parse(request.body));
+      if (payloads.length === 1) { location.disable(); return Promise.resolve(new Response(null, { status: 401 })); }
+      return run(path, request);
+    },
+  }) });
+  await f.transport.account(); await location.enable("location-owner");
+  await f.transport.send(f.conversation, "One safe retry", [], new AbortController().signal, () => {});
+  assert.equal(payloads.length, 2); assert.equal(payloads[0].currentLocation.latitude, 1);
+  assert.equal(payloads[1].currentLocation, undefined);
+});
 
 test("native enrollment is default-off, exact-path and method limited", () => {
   assert.equal(nativeChatBearerRoute("/api/chat/voice", "POST"), false);
@@ -138,6 +245,7 @@ test("Auto's choice from the response header is attached to that answer after re
 test("an answer report goes to /api/feedback for that answer and returns its reference", async () => {
   const calls = [];
   const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
     calls.push({ path, body: init.body ? JSON.parse(init.body) : null });
     if (path === "/api/products/mobile/capabilities") return Response.json({ reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" });
     if (path === "/api/feedback") return Response.json({ ok: true, reference: "TV-ABC123" });

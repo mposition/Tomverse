@@ -1,6 +1,8 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { parseChatLocation } from "@tomverse/chat-core";
+import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
 import {
     buildAttachmentPromptText,
     inertFilename,
@@ -112,6 +114,7 @@ import {
 } from "@/lib/modelGenerationCompatibility";
 import {
     ANTHROPIC_PROMPT_CACHE_TTL,
+    anthropicPromptCacheApplies,
     type AnthropicPromptCachePath,
 } from "@/lib/anthropicPromptCaching";
 import {
@@ -1301,6 +1304,9 @@ async function handleChatPost(
         if (routeAuth.response) return routeAuth.response;
         const session = routeAuth.session;
         const body = await readChatJsonBody(req);
+        const currentLocation = parseChatLocation(
+            (body as { currentLocation?: unknown } | null)?.currentLocation
+        );
         const {
             messages,
             modelId,
@@ -3206,6 +3212,7 @@ async function handleChatPost(
             }
         }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
+            currentLocation,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             autoRouted,
@@ -4029,6 +4036,12 @@ async function handleChatPost(
                 ],
             });
         }
+        const uncachedLocationMessages = [...formattedMessages];
+        appendChatLocationContext(uncachedLocationMessages, currentLocation);
+        const locationCacheBreakpoint = appendChatLocationContext(
+            formattedMessages, currentLocation,
+            anthropicPromptCacheApplies(modelConfig, promptCachePath)
+        );
         /*
           Fail closed on files that are gone and have not been acknowledged.
 
@@ -4744,7 +4757,7 @@ async function handleChatPost(
             // The same value the budget above was given -- see there. A no-op
             // for every provider but Anthropic, and a no-op on a searching turn
             // whatever the provider: see lib/anthropicPromptCaching.ts.
-            promptCachePath,
+            promptCachePath: locationCacheBreakpoint ? undefined : promptCachePath,
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -4768,6 +4781,9 @@ async function handleChatPost(
          */
         const { messages: sdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
+        const fallbackSdkMessages = locationCacheBreakpoint
+            ? splitProviderInstructions(uncachedLocationMessages).messages
+            : sdkMessages;
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -4845,7 +4861,9 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             maxOutputTokens: requestMaxOutputTokens,
-            settings: generationSettings as Record<string, unknown>,
+            settings: { ...generationSettings, ...(locationCacheBreakpoint?.historyBreakpoint != null ? {
+                locationCacheBreakpoint: { position: "stable_history", messageIndex: locationCacheBreakpoint.historyBreakpoint, ttl: ANTHROPIC_PROMPT_CACHE_TTL },
+            } : {}) } as Record<string, unknown>,
             // Named rather than embedded when the artifact tool is present:
             // the tool object carries an `execute` closure and a Zod schema,
             // neither of which survives `JSON.stringify`, and one of which can
@@ -6032,7 +6050,7 @@ async function handleChatPost(
                 await recordDispatchStarted(nextRecord);
                 nextStream = await streamText({
                     model: plan.activeModel,
-                    messages: sdkMessages,
+                    messages: fallbackSdkMessages,
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     abortSignal: AbortSignal.any([
                         req.signal,
@@ -6632,7 +6650,11 @@ async function handleChatPost(
                                 /*
                                   Provider-private state for replaying a
                                   reasoning model exactly -- and not stored at
-                                  all on a turn that called the artifact tool.
+                                  all on a turn that called the artifact tool
+                                  or received an ephemeral device location.
+                                  Private reasoning and tool inputs can echo
+                                  that fix; keeping them would replay it after
+                                  location is disabled or the tab reloads.
 
                                   `response.messages` carries that turn's tool
                                   call and its result verbatim. Replaying them
@@ -6650,7 +6672,8 @@ async function handleChatPost(
                                 const providerContext =
                                     dispatched.reasoning !== undefined &&
                                     responseResult.status === "fulfilled" &&
-                                    !artifactCollector?.wasInvoked
+                                    !artifactCollector?.wasInvoked &&
+                                    !currentLocation
                                         ? serializeProviderResponseMessages(
                                               responseResult.value.messages
                                           )

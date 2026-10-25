@@ -22,3 +22,5 @@ export {
 } from "./completionStatus";
 export { chatStreamDisplayText } from "./streamText";
 export * from "./voiceConversation";
+
+export * from "./location";

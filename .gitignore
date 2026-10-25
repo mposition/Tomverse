@@ -147,3 +147,5 @@ docs/ops/*-staging-verification-records/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-
 
 /apps/mobile/test-results/
 /apps/mobile/playwright-report/
+
+/apps/mobile/native-auth/.build/

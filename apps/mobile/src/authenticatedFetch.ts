@@ -38,6 +38,9 @@
 
 import type { MobileAccessGrant, MobileAuthBridge } from "./authBridgeContract";
 
+/** Re-evaluate ephemeral consent after native credential acquisition and on retry. */
+export type MobileRequestInit = RequestInit | (() => RequestInit);
+
 export type AuthenticatedFetchOptions = {
   bridge: Pick<MobileAuthBridge, "getAccessToken">;
   /**
@@ -178,7 +181,7 @@ const withBearer = (init: RequestInit | undefined, token: string) => {
  */
 export const authenticatedFetch = async (
   path: string,
-  init: RequestInit | (() => RequestInit) | undefined,
+  init: MobileRequestInit | undefined,
   options: AuthenticatedFetchOptions
 ): Promise<Response> => {
   const run = options.fetchImpl ?? fetch;
