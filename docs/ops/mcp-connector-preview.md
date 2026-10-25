@@ -44,19 +44,32 @@ Tomverse login permissions are not connector permissions.
   user. Catalog descriptions and annotations are never instructions or grants.
 - Only a reviewed server `readTools` list can bypass per-call human approval.
   Every other selected tool proposes an encrypted, exact, one-use action.
+- Argument fields are closed to undeclared properties. Literal enum/const
+  constraints are enforced server-side and withheld from the model definition.
+  Unsupported input/output schemas disable that tool, not the entire catalog.
 - Pending actions expire after 10 minutes. Terminal payloads are erased;
   expired ciphertext is removed on inventory reads and existing maintenance.
   Running/unknown writes cannot be replayed, including after reauthentication.
   Only the owner can record a verified external outcome to clear that fence.
-- Foreground calls: 6 per Chat turn, 8 seconds per protocol session,
+- Foreground calls: 6 per Chat model request, 8 seconds per protocol session,
   45 seconds per tool sequence, one in-flight call per connection, 24 admitted
   actions per user per minute, 128 KiB per HTTP response, 8 KiB arguments,
   8 KiB per model result and 24 KiB returned data per turn. Model steps share
   the existing reservation and total output allowance. Speculative result
   tokens widen internal cost reservations, not authored-input credit weight.
+  Four model passes reserve all repeated input plus re-sent assistant output;
+  the per-request context ceiling stays separate from that aggregate cost hold.
+  Comparison panels keep their existing separate model reservations and share
+  the connection lease and per-user admission limit.
+- Raw MCP calls/results are neither persisted as provider reasoning context nor
+  restored from historical context. Only the visible answer/source cards remain.
 - Fresh DNS validation pins the actual socket address. Redirects are refused.
   Credentials are sent only to the exact configured endpoint over validated
   TLS. Loopback is available only through the explicit non-production fixture.
+  Credentialed requests use fresh agents and explicit certificate verification.
+  Echo checks cover split content parts and separator/fragment obfuscation.
+  Registered credential recipients still require operator trust: no text filter
+  can prove that a deliberately malicious recipient used no covert encoding.
 - Source cards reuse existing Chat citation persistence/export. Only embedded
   resources actually returned with text are collected; search hits alone are
   not citations. Plain-text providers need a verified source mapping before
@@ -126,6 +139,15 @@ enabling authentication/external execution boundaries. Review is not activation,
 merge or deployment approval. Product paid-model calls in local verification: 0.
 
 ## References
+
+Review `r-20261025-142320-299ef2` rejected the first diff. The follow-up fixes
+repeated-input reservations, provider-context retention, undeclared arguments,
+untrusted schema literals, split credential echoes, fresh TLS agents, callback
+binding and approval expiry. It also serializes a model's parallel tool calls,
+skips unsupported catalog tools and counts only active connection capacity.
+The installed Next generator explicitly writes the retained `##` heading.
+Read-invocation audit events retain the existing transactional chain; batching
+or replacing that chain is outside this preview.
 
 - SDK client and Streamable HTTP examples: https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x
 - GitHub remote MCP/authentication: https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md

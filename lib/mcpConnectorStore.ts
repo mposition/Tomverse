@@ -8,6 +8,7 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { decryptOAuthToken, encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { withMcpClient } from "@/lib/mcpConnectorClient";
 import { connectorInputSchema } from "@/lib/mcpConnectorSchema";
+import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
 import { MCP_LIMITS, McpConnectorError, mcpServer, mcpServers, type McpGrant, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 
 export const mcpPolicyDigest = (server: McpServerPolicy) => createHash("sha256").update(JSON.stringify(server)).digest("hex");
@@ -52,9 +53,9 @@ export async function listMcpConnections(userId: string) {
 export async function connectMcp(userId: string, serverId: string, credential?: string, signal?: AbortSignal,
   oauthSession?: { tokens: OAuthTokens; clientInformation?: OAuthClientInformationMixed; expectedVersion: number | null }) {
   const server = mcpServer(serverId);
-  const previous = await prisma.mcpConnection.findUnique({ where: { userId_serverId: { userId, serverId } }, select: { id: true, version: true } });
+  const previous = await prisma.mcpConnection.findUnique({ where: { userId_serverId: { userId, serverId } }, select: { id: true, version: true, status: true } });
   if (server.auth === "oauth" && (!oauthSession || (previous?.version ?? null) !== oauthSession.expectedVersion)) throw new McpConnectorError("oauth_required", 409);
-  if (!previous && await prisma.mcpConnection.count({ where: { userId } }) >= MCP_LIMITS.connections) throw new McpConnectorError("connection_limit", 429);
+  if ((!previous || previous.status === "disconnected") && await prisma.mcpConnection.count({ where: { userId, status: { not: "disconnected" } } }) >= MCP_LIMITS.connections) throw new McpConnectorError("connection_limit", 429);
   if (server.auth === "bearer" && (!credential || credential.length > 4096 || /[\s\r\n]/.test(credential))) throw new McpConnectorError("credential_required");
   // No Tomverse session or login credential is reused. OAuth sessions come
   // only from the owner-bound, one-use authorization-code callback.
@@ -62,18 +63,23 @@ export async function connectMcp(userId: string, serverId: string, credential?: 
   const catalog = await withMcpClient({ server, token, signal }, async (client, signal) => {
     const result = await client.listTools({}, { signal });
     if (result.tools.length > MCP_LIMITS.catalogTools || result.nextCursor) throw new McpConnectorError("tool_catalog_limit");
-    return result.tools.map(t => ({ name: z.string().regex(/^[A-Za-z0-9_.:-]{1,128}$/).parse(t.name),
-      mode: server.readTools.includes(t.name) ? "read" as const : "confirm" as const,
-      inputSchema: connectorInputSchema(t.inputSchema) }));
+    return result.tools.flatMap(t => {
+      try {
+        if (t.outputSchema) connectorInputSchema(t.outputSchema, "output");
+        return [{ name: z.string().regex(/^[A-Za-z0-9_.:-]{1,128}$/).parse(t.name),
+          mode: server.readTools.includes(t.name) ? "read" as const : "confirm" as const,
+          inputSchema: connectorInputSchema(t.inputSchema) }];
+      } catch { return []; }
+    });
   });
   signal?.throwIfAborted();
-  if (token && JSON.stringify(catalog).includes(token)) throw new McpConnectorError("credential_echo_refused");
+  if (containsMcpCredential(catalog, token)) throw new McpConnectorError("credential_echo_refused");
   const ciphertext = token ? encryptMcpSecret(token) : null;
   const row = await prisma.$transaction(async tx => {
     await takeAuditChainLock(tx);
     const current = await tx.mcpConnection.findUnique({ where: { userId_serverId: { userId, serverId } }, select: { id: true, version: true } });
     if (previous ? current?.version !== previous.version : current !== null) throw new McpConnectorError("connection_changed", 409);
-    if (!previous && await tx.mcpConnection.count({ where: { userId } }) >= MCP_LIMITS.connections) throw new McpConnectorError("connection_limit", 429);
+    if ((!previous || previous.status === "disconnected") && await tx.mcpConnection.count({ where: { userId, status: { not: "disconnected" } } }) >= MCP_LIMITS.connections) throw new McpConnectorError("connection_limit", 429);
     const data = { status: "connected", policyDigest: mcpPolicyDigest(server), credentialCiphertext: ciphertext,
       oauthCiphertext: oauthSession ? encryptMcpSecret(JSON.stringify({ tokens: oauthSession.tokens, clientInformation: oauthSession.clientInformation })) : null,
       catalog: catalog as Prisma.InputJsonValue };

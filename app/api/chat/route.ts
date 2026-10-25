@@ -4161,6 +4161,7 @@ async function handleChatPost(
                 promptCachePath,
                 reservationOnlyInputTokens,
                 additionalToolInputTokens: mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0,
+                toolInputPasses: mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -4177,9 +4178,10 @@ async function handleChatPost(
         // That figure is clamped to the plan's input ceiling, so a request over
         // *that* limit was already refused by `createChatBudget` with
         // CHAT_INPUT_TOKEN_LIMIT before reaching here.
+        const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;
         const outputBudget = fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            reservedInputTokens: budget.inputTokens,
+            reservedInputTokens: contextInputTokens,
             requestOutputCapTokens: budget.maxOutputTokens,
             providerMaxOutputTokens: budget.providerMaxOutputTokens,
         });
@@ -4866,7 +4868,7 @@ async function handleChatPost(
             provider: modelConfig.provider,
             messages: manifestMessages,
             tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
-            tokenCount: budget.inputTokens,
+            tokenCount: contextInputTokens,
             // An unbounded budget means the model declares no window. The
             // manifest still needs a number for its within-window CHECK, and
             // the honest one is the request itself: a request cannot exceed a
@@ -4875,7 +4877,7 @@ async function handleChatPost(
             contextWindowTokens:
                 outputBudget.kind === "fitted"
                     ? outputBudget.limitTokens
-                    : budget.inputTokens + requestMaxOutputTokens,
+                    : contextInputTokens + requestMaxOutputTokens,
             estimatedInputTokens,
             reservedInputTokens: budget.inputTokens,
             requestOutputCapTokens: budget.maxOutputTokens,
@@ -6715,6 +6717,7 @@ async function handleChatPost(
                                     dispatched.reasoning !== undefined &&
                                     responseResult.status === "fulfilled" &&
                                     !artifactCollector?.wasInvoked &&
+                                    !mcpConnector &&
                                     !currentLocation
                                         ? serializeProviderResponseMessages(
                                               responseResult.value.messages

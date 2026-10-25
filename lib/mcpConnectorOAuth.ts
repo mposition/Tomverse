@@ -4,7 +4,7 @@ import { auth, type OAuthClientProvider, type OAuthDiscoveryState } from "@model
 import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock } from "@/lib/adminAudit";
-import { guardedMcpFetch, validateMcpEndpoint } from "@/lib/mcpConnectorClient";
+import { guardedMcpFetch, resolvePublicMcpEndpoint, validateMcpEndpoint } from "@/lib/mcpConnectorClient";
 import { MCP_LIMITS, McpConnectorError, mcpServer, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 import { auditMcp, connectMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest } from "@/lib/mcpConnectorStore";
 
@@ -37,6 +37,8 @@ function discovery(server: McpServerPolicy): OAuthDiscoveryState {
 async function runOAuth(input: { flowId: string; userId: string; server: McpServerPolicy; redirectUri: string; state: string;
   secrets: OAuthSecrets; code?: string; signal?: AbortSignal }) {
   const oauth = ownOAuth(input.server), state = input.secrets;
+  const signal = AbortSignal.any([AbortSignal.timeout(MCP_LIMITS.requestMs), ...(input.signal ? [input.signal] : [])]);
+  await resolvePublicMcpEndpoint({ ...input.server, url: oauth.authorizationUrl }, signal, true);
   let redirect: string | undefined;
   const save = async () => {
     const serialized = JSON.stringify(state);
@@ -62,7 +64,7 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
     },
     redirectToAuthorization: url => {
       const allowed = new URL(oauth.authorizationUrl);
-      if (url.origin !== allowed.origin || url.pathname !== allowed.pathname || url.username || url.password || url.hash || url.searchParams.get("state") !== input.state || url.searchParams.get("code_challenge_method") !== "S256")
+      if (url.origin !== allowed.origin || url.pathname !== allowed.pathname || url.username || url.password || url.hash || url.searchParams.get("redirect_uri") !== input.redirectUri || url.searchParams.get("state") !== input.state || url.searchParams.get("code_challenge_method") !== "S256")
         throw new McpConnectorError("oauth_redirect_refused");
       redirect = url.href;
     },
@@ -77,7 +79,6 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
       await save();
     },
   };
-  const signal = AbortSignal.any([AbortSignal.timeout(MCP_LIMITS.requestMs), ...(input.signal ? [input.signal] : [])]);
   const endpoints = [oauth.tokenUrl, ...(oauth.registrationUrl ? [oauth.registrationUrl] : [])];
   const fetchers = new Map(endpoints.map(url => [new URL(url).href, guardedMcpFetch({ ...input.server, url }, null, signal, true)]));
   const outcome = await auth(provider, { serverUrl: input.server.url, scope: oauth.scope, authorizationCode: input.code,

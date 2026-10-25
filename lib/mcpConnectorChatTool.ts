@@ -4,11 +4,11 @@ import { estimatePromptTokens, estimateTokenBreakdown, toReservedInputTokens } f
 import { getArtifactToolSupport } from "@/lib/generatedArtifactToolPolicy";
 import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError } from "@/lib/mcpConnectorPolicy";
 import { invokeMcpTool } from "@/lib/mcpConnectorExecution";
-import { mcpToolName, type McpReadSource } from "@/lib/mcpConnectorSchema";
+import { mcpModelSchema, mcpToolName, type McpReadSource } from "@/lib/mcpConnectorSchema";
 import { ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
 
 export type McpProgress = "searching" | "reading" | "approval_required" | "no_results" | "reauth_required" | "server_error" | "done";
-export const MCP_CHAT_MAX_STEPS = 8;
+export const MCP_CHAT_MAX_STEPS = 4;
 export async function buildMcpChatTools(input: {
   userId: string; connectionId: string; modelId: string; nativeSearch: boolean;
   signal: AbortSignal; onState?: (state: McpProgress) => void;
@@ -18,14 +18,16 @@ export async function buildMcpChatTools(input: {
   const grants = parseMcpGrants(connection.grants);
   if (!grants.length) throw new McpConnectorError("no_tools_selected");
   const controller = new AbortController();
+  let serial: Promise<unknown> = Promise.resolve();
   let startedAt: number | null = null, calls = 0, returnedBytes = 0;
   const sources = new Map<string, McpReadSource>();
   const tools: ToolSet = {};
   for (const grant of grants) {
     tools[mcpToolName(connection.id, grant.name)] = tool({
       description: `User-selected connector tool ${JSON.stringify(grant.name)}. ${grant.mode === "read" ? "Read access." : "Propose an action for exact human approval; this does not execute it."} ${MCP_UNTRUSTED_NOTICE}`,
-      inputSchema: jsonSchema<Record<string, unknown>>(grant.inputSchema),
-      execute: async args => {
+      inputSchema: jsonSchema<Record<string, unknown>>(mcpModelSchema(grant.inputSchema)),
+      execute: args => {
+        const run = async () => {
         startedAt ??= Date.now();
         if (++calls > MCP_LIMITS.calls || Date.now() - startedAt > MCP_LIMITS.turnMs || returnedBytes >= MCP_LIMITS.turnCharacters) return { status: "limit_reached", notice: MCP_UNTRUSTED_NOTICE };
         const signal = AbortSignal.any([input.signal, controller.signal, AbortSignal.timeout(Math.max(1, MCP_LIMITS.turnMs - (Date.now() - startedAt)))]);
@@ -43,6 +45,10 @@ export async function buildMcpChatTools(input: {
           input.onState?.(code === "reauth_required" ? "reauth_required" : "server_error");
           return { status: code, content: "The connector could not complete this call. Do not invent an answer or citation.", notice: MCP_UNTRUSTED_NOTICE };
         }
+        };
+        const result = serial.then(run, run);
+        serial = result.catch(() => {});
+        return result;
       },
     });
   }
@@ -57,14 +63,16 @@ export async function buildMcpChatTools(input: {
     setBudget: (input: { inputTokens: number; outputTokens: number; instructions: string }) => {
       inputCeiling = input.inputTokens; outputCeiling = input.outputTokens; instructions = input.instructions;
     },
-    prepareStep: ({ messages, steps }: { messages: ModelMessage[]; steps: Array<{ usage: { outputTokens?: number } }> }) => {
+    prepareStep: ({ messages, steps }: { messages: ModelMessage[]; steps: Array<{ usage: { inputTokens?: number; outputTokens?: number } }> }) => {
       input.signal.throwIfAborted(); controller.signal.throwIfAborted();
+      if (steps.length >= MCP_CHAT_MAX_STEPS) throw new McpConnectorError("model_step_limit");
       if (Buffer.byteLength(JSON.stringify(messages)) > 256_000) throw new McpConnectorError("model_input_limit");
-      cumulativeInput += toReservedInputTokens(estimateTokenBreakdown(JSON.stringify(messages) + instructions)) + definitionTokens;
+      cumulativeInput = Math.max(cumulativeInput, steps.reduce((sum, step) => sum + (step.usage.inputTokens || 0), 0)) +
+        toReservedInputTokens(estimateTokenBreakdown(JSON.stringify(messages) + instructions)) + definitionTokens;
       if (cumulativeInput > inputCeiling) throw new McpConnectorError("model_input_budget");
       const used = steps.reduce((sum, step) => sum + (step.usage.outputTokens || 0), 0);
       if (used >= outputCeiling) throw new McpConnectorError("model_output_limit");
-      return { maxOutputTokens: outputCeiling - used };
+      return { maxOutputTokens: outputCeiling - used, ...(steps.length === MCP_CHAT_MAX_STEPS - 1 ? { toolChoice: "none" as const } : {}) };
     },
   };
 }

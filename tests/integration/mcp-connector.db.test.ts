@@ -10,6 +10,9 @@ import { buildMcpChatTools } from "@/lib/mcpConnectorChatTool";
 import { mcpToolName } from "@/lib/mcpConnectorSchema";
 import { streamText, stepCountIs } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
+import { createChatBudget } from "@/lib/chatSecurity";
+import { estimateTokenBreakdown } from "@/lib/chatTokenEstimate";
+import { getModel } from "@/lib/models";
 
 let fixture: Awaited<ReturnType<typeof startMcpSyntheticServer>>;
 const alice = `mcp-test-${randomUUID()}`, bob = `mcp-test-${randomUUID()}`;
@@ -100,7 +103,10 @@ test("mock Chat model completes search/read/answer with real MCP and no paid pro
   await grantMcpTools(alice, row.id, ["search", "read"], row.version);
   const config = await buildMcpChatTools({ userId: alice, connectionId: row.id,
     modelId: "gpt-5-6-sol", nativeSearch: false, signal: new AbortController().signal });
-  config.setBudget({ inputTokens: 30_000, outputTokens: 1000, instructions: "Synthetic task" });
+  const prompt = "Synthetic context for the release checklist. ".repeat(1800) + " Name the owner and blocker.";
+  const budget = createChatBudget("user", getModel("gpt-5-6-sol")!, estimateTokenBreakdown(prompt), {
+    additionalToolInputTokens: config.definitionTokens + config.resultInputAllowance, toolInputPasses: 4 });
+  config.setBudget({ inputTokens: budget.inputTokens, outputTokens: 1000, instructions: "Synthetic task" });
   let step = 0;
   const model = new MockLanguageModelV4({ doStream: async () => ({ stream: new ReadableStream({ start(controller) {
     const index = step++;
@@ -115,10 +121,12 @@ test("mock Chat model completes search/read/answer with real MCP and no paid pro
       usage: { inputTokens: { total: 100, noCache: 100, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 10, text: 10, reasoning: 0 } } });
     controller.close();
   } }) }) });
-  const result = streamText({ model, prompt: "Read the Atlas checklist and name the owner and blocker.", tools: config.tools,
+  const result = streamText({ model, prompt, tools: config.tools,
     stopWhen: stepCountIs(4), prepareStep: config.prepareStep, maxRetries: 0 });
   let answer = ""; for await (const chunk of result.textStream) answer += chunk;
   assert.match(answer, /Mina/); assert.equal(step, 3);
+  assert.equal((await result.usage).inputTokens, 300);
+  assert.equal((await result.usage).outputTokens, 30);
   assert.deepEqual(config.sources().map(s => s.url), ["https://example.com/docs/release"]);
   config.cancel();
 });
@@ -169,4 +177,46 @@ test("a reconnect started before disconnect cannot resurrect the revoked connect
   } finally { fixture.resume(); }
   await rejected;
   assert.equal((await ownMcpConnection(alice, row.id, false)).status, "disconnected");
+});
+
+test("unsupported catalog schemas do not break compatible tools", async () => {
+  fixture.setUnsupportedTools(true);
+  try {
+    const row = await connectMcp(alice, "synthetic");
+    assert.equal(row.catalog.some(tool => tool.name.startsWith("unsupported_")), false);
+    await grantMcpTools(alice, row.id, ["search"], row.version);
+    const own = await ownMcpConnection(alice, row.id);
+    const result = await invokeMcpTool({ userId: alice, connectionId: row.id, version: own.version, name: "search", args: { query: "Atlas" } });
+    assert.equal(result.status, "ok");
+  } finally { fixture.setUnsupportedTools(false); }
+});
+test("parallel model calls are serialized within the existing connection bound", async () => {
+  const row = await prisma.mcpConnection.findFirstOrThrow({ where: { userId: alice, serverId: "synthetic" } });
+  const config = await buildMcpChatTools({ userId: alice, connectionId: row.id, modelId: "gpt-5-6-sol", nativeSearch: false, signal: new AbortController().signal });
+  const execute = config.tools[mcpToolName(row.id, "search")].execute!;
+  const results = await Promise.all(["Atlas", "missing"].map(query => execute({ query }, { toolCallId: query, messages: [], context: {} })));
+  assert.deepEqual(results.map(result => (result as { status: string }).status), ["ok", "no_results"]);
+});
+test("approving near expiry starts a new execution deadline before maintenance can fence success", async () => {
+  const row = await connectMcp(alice, "synthetic");
+  await grantMcpTools(alice, row.id, ["create_note"], row.version);
+  const own = await ownMcpConnection(alice, row.id);
+  const pending = await invokeMcpTool({ userId: alice, connectionId: own.id, version: own.version, name: "create_note", args: { text: "slow" } });
+  await prisma.mcpInvocation.update({ where: { id: pending.approvalId }, data: { expiresAt: new Date(Date.now() + 150) } });
+  const approved = decideMcpInvocation(alice, pending.approvalId!, true);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const swept = await prisma.mcpInvocation.updateMany({ where: { id: pending.approvalId, state: "running", expiresAt: { lte: new Date() } }, data: { state: "unknown" } });
+  assert.equal(swept.count, 0); assert.equal((await approved).status, "ok");
+  assert.equal((await prisma.mcpInvocation.findUniqueOrThrow({ where: { id: pending.approvalId } })).state, "completed");
+});
+test("disconnected servers do not consume active connection capacity", async () => {
+  const userId = `mcp-capacity-${randomUUID()}`;
+  await prisma.user.create({ data: { id: userId } });
+  try {
+    await prisma.mcpConnection.createMany({ data: Array.from({ length: 8 }, (_, index) => ({ userId, serverId: `retired-${index}`, policyDigest: "fixture", status: "disconnected", catalog: [] })) });
+    const row = await connectMcp(userId, "synthetic");
+    await disconnectMcp(userId, row.id);
+    await prisma.mcpConnection.updateMany({ where: { userId, serverId: { startsWith: "retired-" } }, data: { status: "connected" } });
+    await assert.rejects(() => connectMcp(userId, "synthetic"), { code: "connection_limit" });
+  } finally { await prisma.user.delete({ where: { id: userId } }); }
 });

@@ -7,6 +7,7 @@ import { withMcpClient } from "@/lib/mcpConnectorClient";
 import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError, mcpServer } from "@/lib/mcpConnectorPolicy";
 import { connectorInputSchema, normalizeMcpResult, validateMcpArguments } from "@/lib/mcpConnectorSchema";
 import { auditMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest, ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
+import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
 
 export type McpToolOutcome = Awaited<ReturnType<typeof normalizeMcpResult>> & { notice: string; approvalId?: string };
 const safeError = (e: unknown) => e instanceof McpConnectorError ? e.code :
@@ -71,12 +72,13 @@ async function performMcp(input: { userId: string; connectionId: string; version
     const normalized = normalizeMcpResult(result);
     if (grant.mode === "confirm" && normalized.status === "server_error") throw new McpConnectorError("outcome_unknown");
     const token = decryptMcpSecret(connection.credentialCiphertext);
-    if (token && JSON.stringify(normalized).includes(token)) throw new McpConnectorError("credential_echo_refused");
+    if (containsMcpCredential(result, token)) throw new McpConnectorError("credential_echo_refused");
     await prisma.$transaction(async tx => {
       await takeAuditChainLock(tx);
       if (!await tx.mcpConnection.findFirst({ where: { id: connectionId, userId, version, status: "connected" }, select: { id: true } })) throw new McpConnectorError("connection_changed", 409);
-      await tx.mcpInvocation.updateMany({ where: { id: invocationId, userId, state: "running" },
+      const finished = await tx.mcpInvocation.updateMany({ where: { id: invocationId, userId, state: "running" },
         data: { state: normalized.status === "server_error" ? "failed" : "completed", argumentsCiphertext: null } });
+      if (!finished.count) throw new McpConnectorError("outcome_unknown");
       await auditMcp(tx, userId, "call_finished", invocationId, "McpInvocation");
     });
     // Do not let an upstream server echo its bearer credential into the model,
@@ -119,7 +121,8 @@ export async function decideMcpInvocation(userId: string, id: string, approve: b
       throw new McpConnectorError("previous_outcome_unknown", 409);
     const own = await tx.mcpConnection.findFirst({ where: { id: row.connectionId, userId, version: row.connectionVersion, status: "connected" } });
     if (!own) throw new McpConnectorError("connection_changed", 409);
-    await tx.mcpInvocation.update({ where: { id }, data: { state: approve ? "running" : "rejected", argumentsCiphertext: null } });
+    await tx.mcpInvocation.update({ where: { id }, data: { state: approve ? "running" : "rejected", argumentsCiphertext: null,
+      ...(approve ? { expiresAt: new Date(Date.now() + MCP_LIMITS.requestMs + 30_000) } : {}) } });
     await auditMcp(tx, userId, approve ? "action_approved" : "action_rejected", id, "McpInvocation");
     return row;
   });

@@ -37,6 +37,19 @@ export function validateMcpEndpoint(server: McpServerPolicy, oauthEndpoint = fal
   return { url, synthetic };
 }
 
+export async function resolvePublicMcpEndpoint(server: McpServerPolicy, signal: AbortSignal, oauthEndpoint = false) {
+  const { url, synthetic } = validateMcpEndpoint(server, oauthEndpoint);
+  signal.throwIfAborted();
+  const addresses = synthetic ? [{ address: "127.0.0.1", family: 4 }] : await new Promise<Array<{ address: string; family: number }>>((resolve, reject) => {
+    const abort = () => reject(new McpConnectorError("cancelled_or_timeout"));
+    signal.addEventListener("abort", abort, { once: true });
+    void lookup(url.hostname.replace(/^\[|\]$/g, ""), { all: true }).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+  signal.throwIfAborted();
+  if (!addresses.length || (!synthetic && addresses.some(a => !publicMcpAddress(a.address)))) throw new McpConnectorError("unsafe_address");
+  return { url, synthetic, addresses };
+}
+
 // DNS is checked and the selected address is pinned to the actual socket.
 // No automatic redirects, discovery, OAuth, cookies, SSE reconnection or retry.
 export function guardedMcpFetch(server: McpServerPolicy, token: string | null, signal: AbortSignal, oauthEndpoint = false) {
@@ -50,10 +63,7 @@ export function guardedMcpFetch(server: McpServerPolicy, token: string | null, s
     if (!["POST", "DELETE"].includes(method) || ++requests > 8) throw new McpConnectorError("request_limit");
     const combined = AbortSignal.any([signal, ...(init?.signal ? [init.signal] : [])]);
     combined.throwIfAborted();
-    const addresses = synthetic ? [{ address: "127.0.0.1", family: 4 }] :
-      await lookup(url.hostname.replace(/^\[|\]$/g, ""), { all: true });
-    combined.throwIfAborted();
-    if (!addresses.length || (!synthetic && addresses.some(a => !publicMcpAddress(a.address)))) throw new McpConnectorError("unsafe_address");
+    const { addresses } = await resolvePublicMcpEndpoint(server, combined, oauthEndpoint);
     const headers = new Headers(init?.headers);
     headers.delete("cookie"); headers.delete("authorization");
     if (token) headers.set("authorization", `Bearer ${token}`);
@@ -64,6 +74,9 @@ export function guardedMcpFetch(server: McpServerPolicy, token: string | null, s
       const request = (synthetic ? httpRequest : httpsRequest)({
         hostname: addresses[0].address, port: url.port || (synthetic ? 80 : 443),
         servername: url.hostname, path: url.pathname, method,
+        // Each credentialed request gets a fresh, name-verified TLS session.
+        agent: false,
+        rejectUnauthorized: true,
         headers: Object.fromEntries(headers), signal: combined,
       }, response => {
         const status = response.statusCode || 500;
