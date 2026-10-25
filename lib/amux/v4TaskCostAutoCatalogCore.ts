@@ -14,13 +14,16 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   for the Task roles its v22 profile actually runs -- the ready check reads
  *   the same roles, so a Task no worker can run gets no ceiling;
  * - prices: the chat model registry (Admin › Models) resolved the way Chat
- *   bills it, at the tier the grade's input cap reaches. Cache reads use the
- *   resolved cached-input multiplier; cache writes and tool costs are capped
- *   at zero;
+ *   bills it, at the tier the grade's input cap reaches, valid from the time
+ *   the model's row last changed -- so usage that ended before a price change
+ *   is never priced at the new rate. Cache reads use the resolved multiplier;
+ *   cache writes use the verified write rate, or twice the input rate (the
+ *   dearest Anthropic write) when none is verified. Tool costs are capped at
+ *   zero;
  * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code.
  *
  * Deterministic: the same registries give the same catalog digest, so a Task
- * reconfirms only when a worker or a price actually changed. The ceiling it
+ * reconfirms only when a worker or a model row actually changed. The ceiling it
  * gives is still reserved before every paid API call.
  */
 
@@ -28,9 +31,9 @@ export const AMUX_TASK_CATALOG_GRADES = ["routine", "advanced", "frontier"] as c
 /** Task roles a card may carry; review runs as independent review, not a Task. */
 export const AMUX_TASK_CATALOG_ROLES = ["design", "implement", "test",
   "verify", "investigate", "operate"] as const;
-/** Live prices have no review date of their own; the window is always open. */
-const PRICES_FROM = "2026-01-01T00:00:00.000Z";
+/** A registry price stays valid until the row changes again. */
 const PRICES_UNTIL = "2100-01-01T00:00:00.000Z";
+const UTC_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export type AmuxTaskCatalogGradeCaps = {
   inputTokens: number;
@@ -58,6 +61,10 @@ export type AmuxTaskCatalogResolvedPrice = {
   inputUsdPerMillionTokens: number;
   outputUsdPerMillionTokens: number;
   cachedInputPriceMultiplier: number;
+  /** Null when no write rate was verified for the model. */
+  cacheWriteUsdPerMillionTokens: number | null;
+  /** When the model's registry row last changed, to the millisecond, UTC. */
+  verifiedAt: string;
 };
 
 export type AmuxTaskAutoCatalog =
@@ -94,7 +101,8 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const uncached = microUsd(price?.inputUsdPerMillionTokens);
     const output = microUsd(price?.outputUsdPerMillionTokens);
     // A zero or missing price never becomes a free route.
-    if (!price || uncached === null || output === null) continue;
+    if (!price || uncached === null || output === null ||
+        !UTC_MS.test(price.verifiedAt) || price.verifiedAt >= PRICES_UNTIL) continue;
     const multiplier = price.cachedInputPriceMultiplier;
     const identity = { workerName: worker.workerName, provider: "anthropic",
       modelId: worker.modelId, roles, grade };
@@ -110,13 +118,14 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       roles,
       grades: [grade],
       pricingSource: `model-registry:${worker.modelId}`,
-      pricingVerifiedAt: PRICES_FROM,
+      pricingVerifiedAt: price.verifiedAt,
       pricingExpiresAt: PRICES_UNTIL,
       uncachedInputMicroUsdPerMillion: uncached,
       outputMicroUsdPerMillion: output,
       cacheReadMicroUsdPerMillion: Number.isFinite(multiplier) && multiplier > 0
         ? Math.ceil(uncached * multiplier) : uncached,
-      cacheWriteMicroUsdPerMillion: 0,
+      cacheWriteMicroUsdPerMillion: microUsd(price.cacheWriteUsdPerMillionTokens) ??
+        uncached * 2,
       toolCostCapMicroUsdPerAttempt: 0,
     });
   }

@@ -83,10 +83,12 @@ async function approvedTaskPrice(tx: Prisma.TransactionClient,
   receipt: Receipt): Promise<AmuxCliApiPrice | null> {
   if (receipt.binding.kind !== "task_attempt" || !receipt.actualModelId ||
       receipt.actualModelId === "multi_model") return null;
-  // The price the registries give now (owner decision 2026-10-25); a worker or
-  // model the catalog no longer prices records the usage unpriced.
-  const current = await readAmuxV4TaskAutoCatalog(tx).catch(() => null);
-  if (!current?.ok) return null;
+  // The price the registries give (owner decision 2026-10-25), valid only for
+  // usage that ended after the model's row last changed. A worker or model
+  // the catalog does not price records the usage unpriced; a registry that
+  // cannot be read fails the write rather than recording it unpriced.
+  const current = await readAmuxV4TaskAutoCatalog(tx);
+  if (!current.ok) return null;
   const catalog = current.catalog as unknown as V4TaskCostCatalog;
   const candidates = catalog.routes.filter((route) => route.enabled &&
     route.workerName === receipt.worker && route.provider === receipt.provider &&

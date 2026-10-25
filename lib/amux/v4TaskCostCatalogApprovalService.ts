@@ -44,6 +44,7 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
     [registration.workerName, registration.roleCeiling]));
   const rows = await tx.modelRegistryEntry.findMany({
     where: { provider: "anthropic", catalogDeleted: false } });
+  const updatedAt = new Map(rows.map((row) => [row.id, row.updatedAt.getTime()]));
   const models = rows.flatMap((row) => {
     try { return [registryRowToModel(row)]; } catch { return []; }
   });
@@ -55,7 +56,16 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
     if (candidates.length === 0) return null;
     const resolved = candidates.map((model) =>
       resolveModelPricing(model, { estimatedPromptTokens: inputTokens }));
+    const writes = resolved.flatMap((row) =>
+      row.cacheWriteUsdPerMillionTokens === null ? [] : [row.cacheWriteUsdPerMillionTokens]);
+    // The rows' last change, to the whole second so the app clock that set it
+    // never sits ahead of the database clock that prices against it.
+    const changedAt = Math.max(...candidates.map((model) =>
+      updatedAt.get(model.id) ?? 0));
     return {
+      cacheWriteUsdPerMillionTokens: writes.length === candidates.length ?
+        Math.max(...writes) : null,
+      verifiedAt: new Date(Math.floor(changedAt / 1000) * 1000).toISOString(),
       inputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.inputUsdPerMillionTokens)),
       outputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.outputUsdPerMillionTokens)),
       cachedInputPriceMultiplier: Math.max(...resolved.map((row) => row.cachedInputPriceMultiplier)),

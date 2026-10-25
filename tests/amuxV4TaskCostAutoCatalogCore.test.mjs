@@ -20,13 +20,14 @@ const workers = [
   { workerName: "claude-contract", modelId: "claude-opus-4-8",
     roles: ["design", "implement", "investigate"], roleCeiling: "contract" },
 ];
+const CHANGED = "2026-10-20T03:00:00.000Z";
 const flat = {
   "claude-haiku-4-5": { inputUsdPerMillionTokens: 0.5, outputUsdPerMillionTokens: 1,
-    cachedInputPriceMultiplier: 0.1 },
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.625, verifiedAt: CHANGED },
   "claude-sonnet-5": { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 12,
-    cachedInputPriceMultiplier: 0.1 },
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: null, verifiedAt: CHANGED },
   "claude-opus-4-8": { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25,
-    cachedInputPriceMultiplier: 1 },
+    cachedInputPriceMultiplier: 1, cacheWriteUsdPerMillionTokens: 6.25, verifiedAt: CHANGED },
 };
 const asked = [];
 const priceFor = (modelId, inputTokens) => {
@@ -69,15 +70,16 @@ test("each price is asked for at the input cap of the worker's grade", () => {
     ["claude-opus-4-8", 1_000_000], ["claude-sonnet-5", 600_000]]);
 });
 
-test("prices round up to whole micro-USD; cache writes and tools are capped at zero", () => {
+test("prices round up to whole micro-USD and tool cost is capped at zero", () => {
   const { catalog } = derive({ workers: [workers[0]], priceFor: () => ({
     inputUsdPerMillionTokens: 0.0000015, outputUsdPerMillionTokens: 1,
-    cachedInputPriceMultiplier: 0.1 }) });
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.0000025,
+    verifiedAt: CHANGED }) });
   const [route] = catalog.routes;
   assert.equal(route.uncachedInputMicroUsdPerMillion, 2);
   assert.equal(route.outputMicroUsdPerMillion, 1_000_000);
   assert.equal(route.cacheReadMicroUsdPerMillion, 1, "cached input uses the multiplier");
-  assert.equal(route.cacheWriteMicroUsdPerMillion, 0);
+  assert.equal(route.cacheWriteMicroUsdPerMillion, 3, "the verified write rate");
   assert.equal(route.toolCostCapMicroUsdPerAttempt, 0);
   assert.equal(route.pricingSource, "model-registry:claude-haiku-4-5");
 });
@@ -91,11 +93,25 @@ test("the ceiling is the grade caps times the dearest route at the grade", () =>
     { inputTokens: 1_000_000, outputTokens: 128_000, maxAttempts: 3 });
 });
 
-test("prices never expire on their own: the catalog is valid at any time", () => {
+test("a cache write without a verified rate is priced at twice the input rate", () => {
   const { catalog } = derive();
+  const route = catalog.routes.find((entry) => entry.modelId === "claude-sonnet-5");
+  assert.equal(route.cacheWriteMicroUsdPerMillion, 2 * 3_000_000);
+  assert.equal(catalog.routes.find((entry) => entry.modelId === "claude-opus-4-8")
+    .cacheWriteMicroUsdPerMillion, 6_250_000);
+});
+
+test("a price holds from the model row's last change and does not expire", () => {
+  const { catalog } = derive();
+  assert.ok(catalog.routes.every((route) => route.pricingVerifiedAt === CHANGED));
   for (const asOf of ["2026-10-25T00:00:00.000Z", "2030-06-01T00:00:00.000Z"]) {
     assert.equal(ceiling(catalog, "implement", "advanced", asOf).ok, true, asOf);
   }
+  assert.equal(ceiling(catalog, "implement", "advanced", "2026-10-20T02:59:59.999Z").ok,
+    false, "usage before the price change is not priced at the new rate");
+  const odd = derive({ workers: [workers[0]], priceFor: () => ({
+    ...flat["claude-haiku-4-5"], verifiedAt: "2026-10-20" }) });
+  assert.equal(odd.ok, false, "a malformed change time never prices a route");
 });
 
 test("a worker without a price, a role ceiling or a Task role is left out", () => {
