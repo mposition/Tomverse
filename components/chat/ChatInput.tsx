@@ -1569,6 +1569,12 @@ export function ChatInput({
   });
   const isVoiceSubmissionBlocked =
     blockSubmitWhileVoiceBusy && isVoiceRecorderBusy(voice.state);
+  const isVoiceConversationPrimary =
+    Boolean(voiceConversationControl) &&
+    !value.trim() &&
+    attachments.length === 0 &&
+    !isSending &&
+    !isVoiceRecorderBusy(voice.state);
 
   // Why Send is unavailable, for the cases a user cannot work out from the
   // button itself. `title` alone does not reach a screen reader or a keyboard
@@ -3841,7 +3847,6 @@ export function ChatInput({
             Placed before the send/stop branch so it is the neighbour of
             whichever of the two is rendered.
           */}
-          {voiceConversationControl}
           {voiceInputEnabled && (
             <VoiceInputButton
               state={voice.state}
@@ -3854,18 +3859,24 @@ export function ChatInput({
               onStop={voice.stop}
             />
           )}
+          <div
+            className={isVoiceConversationPrimary ? "contents" : "hidden"}
+          >
+            {/* Keep the session mounted while switching its trigger with Send. */}
+            {voiceConversationControl}
+          </div>
           {isSending && !allowEditingWhileSending ? (
             <button
               type="button"
               data-testid="chat-stop-all-button"
               onClick={onCancel}
-              className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-red-600 text-white hover:bg-red-500 md:[@media(pointer:fine)]:h-9 md:[@media(pointer:fine)]:w-9"
+              className={`flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-red-600 text-white hover:bg-red-500 ${voiceConversationControl ? "" : "md:[@media(pointer:fine)]:h-9 md:[@media(pointer:fine)]:w-9"}`}
               title={t("chat.stopAllResponses")}
               aria-label={t("chat.stopAllResponses")}
             >
               <Square className="h-3.5 w-3.5 fill-current" />
             </button>
-          ) : !isSending ? (
+          ) : !isSending && !isVoiceConversationPrimary ? (
             <button
               type="button"
               data-testid="chat-send-button"
@@ -3884,7 +3895,7 @@ export function ChatInput({
                 activeSelectedModels.length === 0 ||
                 (!value.trim() && attachments.length === 0)
               }
-              className={`flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-white disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:[@media(pointer:fine)]:h-9 md:[@media(pointer:fine)]:w-9 ${
+              className={`flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-white disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${voiceConversationControl ? "" : "md:[@media(pointer:fine)]:h-9 md:[@media(pointer:fine)]:w-9"} ${
                 isReviewProduct
                   ? "bg-blue-600 hover:bg-blue-500"
                   : "bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-300"
