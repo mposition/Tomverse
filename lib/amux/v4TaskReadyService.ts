@@ -293,9 +293,12 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       try {
         const current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
           role, card.executionGrade);
-        cost = checkV4TaskApprovedCeiling(
+        const decision = checkV4TaskApprovedCeiling(
           approvedCost, { ok: true,
             receipt: current.receipt }).decision;
+        // Owner decision 2026-10-25: a higher cost is no stop for an ordinary
+        // Task. An owner-approved recovery is checked again at claim.
+        cost = decision === "reconfirm" ? "allow" : decision;
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
         // retry, whose final consent is that reconfirmation, could never pass.

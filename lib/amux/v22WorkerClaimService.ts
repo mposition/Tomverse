@@ -224,7 +224,9 @@ async function claimCandidate(taskId: string, assignmentId: string,
         amuxV22RecoveryAddedRouteConsented(approvedCost, approved.receipt, recovery.routeId);
       if (reconfirmOnly && !addedRouteConsented)
         throw new BoardImportError("task_not_ready", 409);
-      if (checkV4TaskApprovedCeiling(approvedCost,
+      // Owner decision 2026-10-25: only an owner-approved recovery keeps the
+      // cost it was approved at; an ordinary claim has no cost stop.
+      if (recovery && checkV4TaskApprovedCeiling(approvedCost,
         { ok: true, receipt: approved.receipt }).decision !== "allow" && !addedRouteConsented) {
         throw new BoardImportError("cost_reconfirmation_required", 409);
       }

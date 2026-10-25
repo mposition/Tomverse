@@ -17,15 +17,13 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   bills it, at the tier the grade's input cap reaches. Cache reads use the
  *   resolved multiplier; cache writes use the verified five-minute write rate,
  *   the lifetime the app and the one-shot CLI cache with (no one-hour TTL is
- *   set), so the CLI's dollar budget and the settled rates agree. A model with
- *   no verified write rate is not priced at all. Tool costs are capped at
+ *   set). A model with no verified write rate is not priced at all. Tool costs are capped at
  *   zero;
  * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code. They bound
  *   cache reads and writes as well, because the Claude CLI reports them
  *   apart from input, so the reservation covers what an attempt settles.
- *   One attempt's reservation is the dollar budget the one-shot launcher
- *   hands the CLI; there is no fixed cap above it (owner decision
- *   2026-10-25).
+ *   The reservation is recorded and reported; an ordinary run is not stopped
+ *   by it (owner decision 2026-10-25).
  *
  * Deterministic: the same prices give the same catalog digest, so a Task
  * reconfirms only when a worker or a price actually changed. The catalog
@@ -55,8 +53,8 @@ export type AmuxTaskCatalogGradeCaps = {
  * prompt is written to the cache at most once. */
 export const AMUX_TASK_CATALOG_CAPS: Readonly<Record<AmuxExecutionGrade,
   AmuxTaskCatalogGradeCaps>> = Object.freeze({
-  routine: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 2_000_000,
-    cacheWriteTokens: 200_000, outputTokens: 30_000, maxAttempts: 2 }),
+  routine: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 3_000_000,
+    cacheWriteTokens: 300_000, outputTokens: 30_000, maxAttempts: 2 }),
   advanced: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 3_000_000,
     cacheWriteTokens: 300_000, outputTokens: 40_000, maxAttempts: 2 }),
   frontier: Object.freeze({ inputTokens: 200_000, cacheReadTokens: 2_000_000,
