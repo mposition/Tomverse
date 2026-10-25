@@ -14,7 +14,8 @@ import { prisma } from "@/lib/prisma";
  *
  * No provider is contacted. `analyzeExtractionChunk()` decides what each
  * candidate is; these tests feed those decisions in directly, because what is
- * under test is what the database ends up holding.
+ * under test is what the database ends up holding. Since 2026-10-24 that is
+ * active memories only: there is no review queue.
  */
 
 const resetData = () =>
@@ -92,12 +93,14 @@ const decision = (
     overrides: {
         sensitivity?: "standard" | "sensitive";
         candidateSensitivity?: "standard" | "sensitive";
+        canonicalKey?: string;
     } = {}
 ): ExtractionDecision =>
     ({
         candidate: {
             kind: "preference",
             polarity: "affirmed" as const,
+            canonicalKey: overrides.canonicalKey ?? null,
             statement,
             confidence: 0.9,
             sensitivity: overrides.candidateSensitivity ?? "standard",
@@ -118,7 +121,9 @@ const decision = (
             disposition:
                 outcome === "store_candidate" ? "accepted" : "manual_review_required",
             sensitivity: overrides.sensitivity ?? "standard",
-            bulkSafe: outcome === "store_candidate",
+            bulkSafe:
+                outcome === "store_candidate" &&
+                (overrides.sensitivity ?? "standard") === "standard",
             violations: [],
         },
         outcome,
@@ -141,26 +146,25 @@ const persist = (
         })
     );
 
-test("stored candidates carry their provenance, terms and evidence (§9, §12)", async () => {
+test("a safe candidate is stored active with its provenance, terms and evidence", async () => {
     const { user, message } = await seed();
     const result = await persist(user.id, [
         decision("the user prefers formal Korean", "store_candidate", message),
     ]);
     assert.equal(result.stored, 1);
     assert.equal(result.discarded, 0);
-    assert.equal(result.replaced, 0);
 
     const item = await prisma.memoryItem.findFirstOrThrow({
         where: { userId: user.id },
         include: { evidences: true },
     });
-    assert.equal(item.status, "candidate");
+    // No review queue (owner decision 2026-10-24).
+    assert.equal(item.status, "active");
+    assert.ok(item.approvedAt);
     assert.equal(item.extractionRunId, "run-1");
     assert.equal(item.extractionChunkIndex, 0);
     assert.equal(item.extractionModelId, "gpt-5-6-luna");
     assert.equal(item.promptVersion, "mem-extract-v1");
-    // Extraction proposes; only a human approves (§8.1).
-    assert.equal(item.approvedAt, null);
     assert.equal(item.userEdited, false);
     // Indexed at write time, not lazily on first search (§9).
     assert.equal(item.retrievalVersion, MEMORY_RETRIEVAL_VERSION);
@@ -191,110 +195,109 @@ test("a discarded candidate is not stored at all (§8.4)", async () => {
     assert.equal(await prisma.memoryEvidence.count({ where: { userId: user.id } }), 1);
 });
 
-test("a demoted candidate lands in manual_review_required (§8.3)", async () => {
+test("a candidate that needs a judgement is not stored at all", async () => {
+    // Without a review queue nobody would ever be shown it.
     const { user, message } = await seed();
     const result = await persist(user.id, [
         decision("the user takes medication daily", "store_for_individual_review", message, {
             sensitivity: "sensitive",
         }),
     ]);
-    assert.equal(result.individualReview, 1);
-    const item = await prisma.memoryItem.findFirstOrThrow({
-        where: { userId: user.id },
-    });
-    assert.equal(item.status, "manual_review_required");
-    assert.equal(item.sensitivity, "sensitive");
+    assert.equal(result.withheld, 1);
+    assert.equal(result.stored, 0);
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 0);
+    assert.equal(await prisma.memoryEvidence.count({ where: { userId: user.id } }), 0);
 });
 
 test("the validator's sensitivity wins over the candidate's claim (§8.4)", async () => {
-    // A model that labels a sensitive statement "standard" would otherwise opt
-    // itself out of individual review and into bulk approval.
+    // A model that labels a sensitive statement "standard" must not get it
+    // activated: the validator's verdict is what the storage step reads.
     const { user, message } = await seed();
-    await persist(user.id, [
-        decision("the user takes medication daily", "store_for_individual_review", message, {
+    const result = await persist(user.id, [
+        decision("the user takes medication daily", "store_candidate", message, {
             candidateSensitivity: "standard",
             sensitivity: "sensitive",
         }),
     ]);
-    const item = await prisma.memoryItem.findFirstOrThrow({
-        where: { userId: user.id },
-    });
-    assert.equal(item.sensitivity, "sensitive");
+    assert.equal(result.withheld, 1);
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 0);
 });
 
-test("a retried chunk replaces its own rows rather than duplicating them (§11)", async () => {
+test("a retried chunk keeps what it stored and adds only what is new", async () => {
     const { user, message } = await seed();
     await persist(user.id, [
         decision("the user prefers formal Korean", "store_candidate", message),
     ]);
-    // The worker died after the provider answered; the chunk is re-claimed and
-    // re-run, and the model's second answer is not identical.
+    // The worker died after the commit and before the report; the chunk is
+    // re-run and the model's second answer is not identical.
     const second = await persist(user.id, [
         decision("the user prefers formal Korean", "store_candidate", message),
         decision("the user works in Seoul", "store_candidate", message),
     ]);
-    assert.equal(second.replaced, 1);
-    assert.equal(second.stored, 2);
+    assert.equal(second.stored, 1);
+    assert.equal(second.outranked, 1, "the repeat is a duplicate");
 
     const items = await prisma.memoryItem.findMany({ where: { userId: user.id } });
     assert.equal(items.length, 2);
-    // The evidence rows of the replaced item went with it.
     assert.equal(await prisma.memoryEvidence.count({ where: { userId: user.id } }), 2);
 });
 
-test("a retry never takes back a row the user already acted on (§8.1)", async () => {
+test("a retry never deletes what the first attempt stored, whatever became of it", async () => {
+    // The first attempt's row may already be suspended by a source lock, or
+    // superseding something; deleting it on retry would lose both.
     const { user, message } = await seed();
     await persist(user.id, [
         decision("the user prefers formal Korean", "store_candidate", message),
-        decision("the user works in Seoul", "store_candidate", message),
     ]);
-    const approved = await prisma.memoryItem.findFirstOrThrow({
-        where: { userId: user.id, statement: "the user prefers formal Korean" },
+    await prisma.memoryItem.updateMany({
+        where: { userId: user.id },
+        data: { status: "suspended_by_source_lock" },
     });
-    await prisma.memoryItem.update({
-        where: { id: approved.id },
-        data: { status: "active", approvedAt: new Date() },
-    });
-    const edited = await prisma.memoryItem.findFirstOrThrow({
-        where: { userId: user.id, statement: "the user works in Seoul" },
-    });
-    await prisma.memoryItem.update({
-        where: { id: edited.id },
-        data: { userEdited: true },
-    });
-
-    const retry = await persist(user.id, [
+    await persist(user.id, [
         decision("something else entirely", "store_candidate", message),
     ]);
-    // Neither of the user's rows was replaced.
-    assert.equal(retry.replaced, 0);
-    const kept = await prisma.memoryItem.findMany({ where: { userId: user.id } });
-    assert.equal(kept.length, 3);
-    assert.ok(kept.some((item) => item.id === approved.id));
-    assert.ok(kept.some((item) => item.id === edited.id));
-});
-
-test("another chunk of the same run is untouched by a retry (§11)", async () => {
-    const { user, message } = await seed();
-    await persist(user.id, [
-        decision("chunk zero statement", "store_candidate", message),
-    ], 0);
-    await persist(user.id, [
-        decision("chunk one statement", "store_candidate", message),
-    ], 1);
-
-    const retry = await persist(user.id, [
-        decision("chunk zero rewritten", "store_candidate", message),
-    ], 0);
-    assert.equal(retry.replaced, 1);
-
-    const statements = (
+    const statuses = (
         await prisma.memoryItem.findMany({
             where: { userId: user.id },
             orderBy: { statement: "asc" },
         })
-    ).map((item) => item.statement);
-    assert.deepEqual(statements, ["chunk one statement", "chunk zero rewritten"]);
+    ).map((item) => [item.statement, item.status]);
+    assert.deepEqual(statuses, [
+        ["something else entirely", "active"],
+        ["the user prefers formal Korean", "suspended_by_source_lock"],
+    ]);
+});
+
+test("nothing is stored once the account has turned memory off", async () => {
+    const { user, message } = await seed();
+    await prisma.userMemorySettings.create({
+        data: { userId: user.id, masterEnabled: false },
+    });
+    const result = await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ]);
+    // Reported as memory off, not as an ordinary empty chunk, so the chunk
+    // is not recorded done and runs again once memory is back on.
+    assert.equal(result.memoryOff, true);
+    assert.equal(result.stored, 0);
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 0);
+});
+
+test("a retry does not store a second copy beside a row that was suspended since", async () => {
+    const { user, message } = await seed();
+    await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ]);
+    await prisma.memoryItem.updateMany({
+        where: { userId: user.id },
+        data: { status: "suspended_by_source_lock" },
+    });
+    const retry = await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ]);
+    assert.equal(retry.stored, 0);
+    assert.equal(retry.outranked, 1);
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 1);
 });
 
 test("the provenance columns are set together or not at all", async () => {
@@ -426,4 +429,109 @@ test("losing one reference of several keeps the candidate on what remains", asyn
     });
     assert.equal(item.evidences.length, 1);
     assert.equal(item.evidences[0].externalMessageId, message.id);
+});
+
+/* ------------------------------------------- newest statement wins a topic -- */
+
+const messageAt = async (
+    source: { userId: string; externalConversationId: string },
+    content: string,
+    ordinal: number,
+    sourceTimestamp: Date
+) =>
+    prisma.externalMessage.create({
+        data: {
+            userId: source.userId,
+            externalConversationId: source.externalConversationId,
+            externalStableId: randomUUID().replaceAll("-", ""),
+            role: "user",
+            content,
+            contentDigest: externalContentDigest(content),
+            digestVersion: 1,
+            ordinal,
+            sourceTimestamp,
+        },
+    });
+
+const topicDecision = (statement: string, source: EvidenceSource) => {
+    const base = decision(statement, "store_candidate", source, {
+        canonicalKey: "drink.coffee",
+    });
+    return {
+        ...base,
+        candidate: {
+            ...base.candidate,
+            evidence: [{ ...base.candidate.evidence[0], evidenceQuote: statement }],
+        },
+    } as ExtractionDecision;
+};
+
+test("a newer statement on a topic supersedes the older memory", async () => {
+    const { user, message } = await seed();
+    const older = await messageAt(message, "the user drinks coffee", 1, new Date("2025-01-01T00:00:00Z"));
+    const newer = await messageAt(message, "the user does not drink coffee", 2, new Date("2026-01-01T00:00:00Z"));
+
+    await persist(user.id, [topicDecision("the user drinks coffee", older)], 0);
+    const result = await persist(user.id, [topicDecision("the user does not drink coffee", newer)], 1);
+    assert.equal(result.stored, 1);
+    assert.equal(result.superseded, 1);
+
+    const rows = await prisma.memoryItem.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: "asc" },
+    });
+    assert.deepEqual(
+        rows.map((row) => [row.statement, row.status]),
+        [
+            ["the user drinks coffee", "superseded"],
+            ["the user does not drink coffee", "active"],
+        ]
+    );
+});
+
+test("an older statement on a topic does not replace a newer memory", async () => {
+    // Chunks run in id order, not in the order the conversations happened,
+    // so the newer memory can be the one already stored.
+    const { user, message } = await seed();
+    const older = await messageAt(message, "the user drinks coffee", 1, new Date("2025-01-01T00:00:00Z"));
+    const newer = await messageAt(message, "the user does not drink coffee", 2, new Date("2026-01-01T00:00:00Z"));
+
+    await persist(user.id, [topicDecision("the user does not drink coffee", newer)], 0);
+    const result = await persist(user.id, [topicDecision("the user drinks coffee", older)], 1);
+    assert.equal(result.stored, 0);
+    assert.equal(result.outranked, 1);
+
+    const active = await prisma.memoryItem.findMany({
+        where: { userId: user.id, status: "active" },
+    });
+    assert.deepEqual(active.map((row) => row.statement), ["the user does not drink coffee"]);
+});
+
+test("extraction never supersedes a memory the user wrote, edited or pinned", async () => {
+    const { user, message } = await seed();
+    const older = await messageAt(message, "the user drinks coffee", 1, new Date("2025-01-01T00:00:00Z"));
+    const newer = await messageAt(message, "the user does not drink coffee", 2, new Date("2026-01-01T00:00:00Z"));
+    await persist(user.id, [topicDecision("the user drinks coffee", older)], 0);
+    for (const data of [{ userEdited: true }, { userEdited: false, pinned: true }]) {
+        await prisma.memoryItem.updateMany({ where: { userId: user.id }, data });
+        const result = await persist(user.id, [topicDecision("the user does not drink coffee", newer)], 1);
+        assert.equal(result.outranked, 1);
+        const active = await prisma.memoryItem.findMany({
+            where: { userId: user.id, status: "active" },
+        });
+        assert.deepEqual(active.map((row) => row.statement), ["the user drinks coffee"]);
+    }
+});
+
+test("a duplicate of an active memory adds nothing", async () => {
+    const { user, message } = await seed();
+    await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ], 0);
+    const result = await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ], 1);
+    assert.equal(result.stored, 0);
+    assert.equal(result.outranked, 1);
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 1);
 });

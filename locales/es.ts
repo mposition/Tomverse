@@ -1895,18 +1895,9 @@ export const es = {
     },
     memoryReview: {
         restoreGrounds: "Añadir nuevos fundamentos",
-        restoreGroundsNotice: "Escribe tus propios fundamentos para volver a revisar este recuerdo. Apruébalo por separado antes de usarlo.",
+        restoreGroundsNotice: "Volver a usar este recuerdo, con lo que escribas como fundamento.",
 
         reportAnswer: "Informar de un problema con esta respuesta",
-        conflictReview: "Revisar recuerdos relacionados",
-        conflictChoose: "Elegir un recuerdo para comparar",
-        conflictKeep: "Conservar los recuerdos existentes",
-        conflictBoth: "Conservar ambos",
-        conflictExpire: "Marcar los recuerdos existentes como vencidos",
-        conflictMerge: "Fusionar en un recuerdo",
-        conflictMergedStatement: "Contenido fusionado",
-        conflictMergeGrounds: "Explica por qué el contenido fusionado es correcto",
-        conflictLoading: "Cargando recuerdos relacionados…",
 
         sourceDeleteDerivedImport:
             "También se eliminarán {count} recuerdos creados a partir de esta importación.",
@@ -1921,44 +1912,28 @@ export const es = {
         sourceLockBacked: "{count} recuerdos respaldados por otras pruebas se siguen usando.",
         sourceLockRestoreNote: "Al quitar el bloqueo vuelven a usarse los recuerdos que se detuvieron por esta conversación.",
         dataTabTitle: "Memoria de la cuenta",
-        dataTabDescription:
-            "Revisa los recuerdos candidatos extraídos de conversaciones importadas y decide si los recuerdos aprobados se usan en los chats nuevos.",
+        dataTabDescription: "Consulta los recuerdos organizados automáticamente a partir de las conversaciones importadas y los que añadiste tú, y elige si los chats nuevos los usan.",
         dataTabOpen: "Gestionar memoria",
         dataTabStatusOn: "Se usa en los chats nuevos",
         dataTabStatusOff: "No se usa en los chats nuevos",
-        dataTabStatusPending: "{count} pendientes de revisión",
         pageTitle: "Memoria de la cuenta",
-        pageDescription:
-            "Aprueba o rechaza los recuerdos candidatos pendientes de revisión, y edita, fija o elimina los recuerdos en uso.",
+        pageDescription: "Edita, fija o elimina los recuerdos organizados automáticamente a partir de las conversaciones importadas y los que añadiste tú.",
         signInRequired:
             "Inicia sesión para gestionar la memoria de tu cuenta.",
-        privacyNote:
-            "Solo los recuerdos que hayas revisado y aprobado se usan en los chats nuevos. Los recuerdos aprobados y las preferencias de estilo de respuesta se envían como referencia al modelo de Tomverse seleccionado actualmente, y puedes consultarlos, editarlos, desactivarlos o eliminarlos en cualquier momento.",
-        disabledNotice:
-            "La revisión y creación de recuerdos no están disponibles ahora mismo. Los recuerdos ya guardados siguen siendo visibles y eliminables.",
+        privacyNote: "Al terminar una importación, Tomverse organiza automáticamente recuerdos a partir de ella mediante un proveedor de IA, sin descontar créditos. El contenido sensible, como la información de salud, no se guarda como recuerdo. Los recuerdos en uso y las preferencias de estilo de respuesta se pasan como material de referencia al modelo de Tomverse que responde, y puedes consultarlos, editarlos, desactivarlos o eliminarlos en cualquier momento.",
+        disabledNotice: "Editar y añadir recuerdos no está disponible ahora mismo. Puedes seguir consultando y eliminando los recuerdos ya guardados.",
         settingsTitle: "Ajustes de uso de la memoria",
-        masterToggleLabel: "Usar recuerdos aprobados en chats nuevos",
-        masterToggleDescription:
-            "Al desactivarlo, ningún chat usa recuerdos. Los recuerdos guardados no se eliminan.",
+        masterToggleLabel: "Usar recuerdos en los chats nuevos",
+        masterToggleDescription: "Si la desactivas, ningún chat usa recuerdos y las conversaciones importadas no crean recuerdos nuevos. Los recuerdos guardados no se eliminan.",
         styleToggleLabel: "Usar recuerdos de estilo de respuesta",
         styleToggleDescription:
             "Permite que las respuestas tengan en cuenta las preferencias de tono, longitud y estructura deducidas de conversaciones anteriores.",
         defaultModeLabel: "Valor predeterminado para chats nuevos",
         defaultModeOn: "Usar memoria",
         defaultModeOff: "No usar memoria",
-        reviewTitle: "Recuerdos pendientes de revisión",
-        reviewDescription:
-            "Los candidatos extraídos solo se usan en chats nuevos después de que los apruebes. Los candidatos sensibles y los que requieren revisión individual nunca se incluyen en la aprobación masiva.",
-        reviewEmpty: "No hay recuerdos pendientes de revisión.",
-        bulkApprove: "Aprobar todos los candidatos no sensibles",
-        bulkResult:
-            "{approved} aprobados · {skipped} requieren revisión individual",
-        approve: "Aprobar",
-        reject: "Rechazar",
         edit: "Editar",
         save: "Guardar",
         cancel: "Cancelar",
-        needsIndividualReview: "Requiere revisión individual",
         sensitiveBadge: "Sensible",
         pinnedBadge: "Fijado",
         expires: "Caduca: {date}",
@@ -1971,8 +1946,6 @@ export const es = {
         unpin: "Dejar de fijar",
         delete: "Eliminar",
         deleteArmed: "Pulsa de nuevo para eliminar",
-        editParkedNotice:
-            "Tu edición necesita otra revisión, así que el recuerdo volvió a la lista de revisión.",
         validationFailed:
             "Este contenido no se puede guardar como recuerdo. Escríbelo como una afirmación declarativa de un hecho, por ejemplo «El usuario prefiere respuestas concisas».",
         errorGeneric: "Algo salió mal. Inténtalo de nuevo.",
@@ -2010,14 +1983,14 @@ export const es = {
         deleteAllSubmit: "Eliminar todos los recuerdos",
         deleteAllDone: "Se han eliminado todos los recuerdos.",
         status: {
-            candidate: "Pendiente de revisión",
+            candidate: "Candidato anterior · sin usar",
             active: "En uso",
             rejected: "Rechazado",
             superseded: "Sustituido",
             expired: "Caducado",
             suspended_by_source_lock: "Suspendido: origen bloqueado",
             suspended_by_source_delete: "Suspendido: origen eliminado",
-            manual_review_required: "Requiere revisión individual",
+            manual_review_required: "Candidato anterior · sin usar",
         },
         kind: {
             identity: "Identidad",
@@ -2040,48 +2013,18 @@ export const es = {
             citation_preference: "Preferencia de citas",
             code_style: "Estilo de código",
         },
+        organisingNotice: "Organizando recuerdos a partir de tus conversaciones importadas.",
+        organisingView: "Ver progreso",
+        restoreConflict: "Ya hay un recuerdo en uso sobre el mismo tema. Elimínalo y vuelve a intentarlo.",
+        importNotice: "Al terminar esta importación, Tomverse organiza automáticamente recuerdos a partir de las conversaciones importadas, sin descontar créditos. Para ello, su contenido se envía a un proveedor de IA, y el contenido sensible, como la información de salud, no se guarda como recuerdo.",
+        importNoticeSettings: "Ajustes de memoria",
+        importNoticePrivacy: "Política de privacidad",
     },
     // Inicio de la extracción (Release B, §11 confirmación previa, §21).
     memoryExtraction: {
-        launchTitle: "Extraer recuerdos de las conversaciones importadas",
-        launchDescription:
-            "Elige las conversaciones importadas de las que extraer candidatos. Los candidatos no se usan en las respuestas hasta que los revisas y apruebas.",
-        modelTitle: "Modelo usado para la extracción",
-        modelUnavailable: "Ahora mismo no hay ningún modelo de extracción disponible.",
-        modelUnavailableDescription:
-            "Un modelo de extracción solo se habilita tras superar una evaluación de calidad. Cuando ocurra, podrás elegirlo aquí.",
-        modelCredits: "{credits} créditos por lote",
-        conversationsTitle: "Elegir conversaciones",
-        conversationsDescription:
-            "Solo se usan las conversaciones que selecciones. Se procesan en lotes según su tamaño y los créditos se cuentan por lote.",
-        conversationsEmpty: "Todavía no has importado ninguna conversación.",
-        conversationsEmptyCta: "Importar conversaciones",
-        selectAllVisible: "Seleccionar todo lo mostrado",
-        clearSelection: "Quitar selección",
-        selectionSummary: "{count} seleccionadas · unos {size}",
-        selectionHidden: "{count} conversaciones seleccionadas no aparecen en esta lista.",
-        selectionTooLarge: "Puedes seleccionar hasta {max} conversaciones a la vez.",
-        conversationMeta: "{messages} mensajes · {size}",
-        loadMore: "Ver más",
         estimate: "Ver créditos necesarios",
-        estimating: "Calculando…",
-        estimateResult: "{chunks} lotes · unos {credits} créditos",
-        estimateDescription:
-            "{conversations} conversaciones se procesarán en {chunks} lotes. El cargo final se liquida tras la ejecución y nunca supera el importe que confirmaste.",
-        estimateStale: "La selección ha cambiado. Vuelve a comprobar los créditos.",
         start: "Iniciar extracción por {credits} créditos",
         starting: "Iniciando…",
-        runInProgress: "Ya hay una extracción en curso.",
-        runInProgressOpen: "Ver progreso",
-        errorGeneric: "Algo ha salido mal. Inténtalo de nuevo.",
-        errorEstimateChanged:
-            "Las conversaciones seleccionadas han cambiado y la estimación ya no coincide. Compruébala antes de iniciar.",
-        errorPairUnavailable: "Ese modelo no está disponible ahora mismo.",
-        errorLocked:
-            "Una de las conversaciones seleccionadas está bloqueada, así que la extracción no puede empezar. Actualiza la lista y vuelve a seleccionar.",
-        lockedRowHint: "Las conversaciones bloqueadas no se pueden usar para la extracción.",
-        errorBudget:
-            "La capacidad de extracción está temporalmente completa. Inténtalo de nuevo en un momento.",
         runTitle: "Progreso de la extracción",
         runBack: "Volver a los ajustes de memoria",
         runNotFound: "No se ha encontrado esta extracción.",
@@ -2105,8 +2048,6 @@ export const es = {
         cancel: "Cancelar extracción",
         cancelArmed: "Pulsa otra vez para cancelar",
         cancelling: "Cancelando…",
-        recentRunsTitle: "Extracciones recientes",
-        recentRunOpen: "Ver detalles",
         status: {
             pending: "En espera",
             running: "En curso",
@@ -2238,7 +2179,7 @@ export const es = {
         externalImportTitle: "Conversaciones importadas de otros servicios de IA",
         externalImport: "Puedes guardar en tu cuenta de Tomverse las conversaciones anteriores que selecciones de un archivo de exportación descargado de otro servicio de IA, como ChatGPT, Claude o Gemini (Google Takeout). El archivo de exportación se abre únicamente en tu navegador; el archivo original nunca se sube ni se conserva en los servidores o el almacenamiento de Tomverse. Solo se guarda como material privado de la cuenta el texto normalizado de las conversaciones que selecciones, junto con los datos de procedencia (servicio de origen, marcas de tiempo originales, nombres de modelo solo para mostrar). Las imágenes, el audio y los archivos adjuntos no se importan. Las conversaciones importadas pueden contener información personal de otras personas, por lo que es tu responsabilidad confirmar que tienes derecho a importar esos datos. Puedes consultar, eliminar y exportar el material importado en cualquier momento, y se elimina junto con tu cuenta. Eliminarlo de Tomverse no elimina los datos que conserva el servicio original.",
         memoryTitle: "Memoria a largo plazo de la cuenta",
-        memory: "Si decides usar la función de memoria, Tomverse envía las partes de tus conversaciones importadas que selecciones al proveedor de IA que confirmes, con el fin de extraer recuerdos candidatos. La extracción utiliza el modelo y la cantidad de créditos que se te muestran antes de ejecutarla. Los candidatos extraídos no se usan para generar respuestas hasta que los revisas y apruebas. Los candidatos clasificados como sensibles y los que requieren revisión individual quedan excluidos de la aprobación masiva y deben confirmarse uno a uno. Los candidatos, los recuerdos aprobados y sus fundamentos se conservan en tu cuenta hasta que los elimines o se eliminen los datos de tu cuenta. Los recuerdos aprobados y las preferencias de estilo de respuesta se envían como material de referencia al proveedor de IA que genera cada nueva respuesta, es decir, al proveedor de cada modelo cuando comparas varios. Puedes consultar, editar y desactivar los recuerdos guardados en cualquier momento, descargar la lista completa como archivo o eliminarlos todos de una vez. Si desactivas la memoria, deja de usarse en los chats nuevos.",
+        memory: "Cuando guardas conversaciones importadas en tu cuenta de Tomverse, Tomverse organiza automáticamente recuerdos a partir de ellas mientras la función de memoria esté activada. Para ello, el contenido de esas conversaciones se envía a un proveedor de IA elegido por Tomverse, sin descontar créditos. El contenido sensible, como la información de salud, no se guarda como recuerdo; solo se guarda el contenido que supera la validación, y se usa de inmediato. Sobre un mismo tema, lo que dice una conversación más reciente sustituye al recuerdo anterior. Los recuerdos y sus fundamentos se conservan en tu cuenta hasta que los elimines o se eliminen los datos de tu cuenta. Los recuerdos y las preferencias de estilo de respuesta se envían como material de referencia al proveedor de IA que genera cada nueva respuesta, es decir, al proveedor de cada modelo cuando comparas varios. Puedes consultar, editar y eliminar los recuerdos guardados en cualquier momento, descargar la lista completa como archivo o eliminarlos todos de una vez. Si desactivas la memoria, deja de usarse en los chats nuevos y no se crean recuerdos nuevos a partir de las conversaciones importadas.",
         assistantProfilesTitle: "Asistentes de IA personalizados y archivos de conocimiento",
         assistantProfiles: "Si creas un asistente de IA, Tomverse guarda el nombre, la descripción, las instrucciones, la elección de modelo y las frases de inicio que introduces, y conserva cada revisión publicada para que una conversación pueda mostrar con cuál se ejecutó realmente. Los archivos de conocimiento que adjuntas se guardan de forma privada para tu cuenta; Tomverse extrae su texto, lo divide en pasajes y crea un índice de búsqueda para encontrar los fragmentos pertinentes. Cuando conversas con un asistente, sus instrucciones y los fragmentos que coinciden con tu mensaje se envían como material de referencia al proveedor de IA que genera la respuesta. Los fragmentos se tratan como material de referencia y nunca como instrucciones para el asistente. Los asistentes son privados: no se comparten con otras personas, no aparecen en listados públicos y no se venden. Al eliminar un asistente se eliminan sus revisiones y sus archivos de conocimiento, y los archivos guardados se borran poco después; las conversaciones que lo usaron siguen siendo legibles en tu cuenta. Desactivar o eliminar un asistente hace que deje de usarse en conversaciones nuevas. Si crea un asistente importando un paquete, Tomverse guarda además lo que usted compuso antes de publicarlo, el origen declarado por el paquete o por usted, y cuándo lo confirmó. Tomverse nunca abre una dirección que nombre un paquete. Una importación que abandone caduca por sí sola, y los archivos preparados para ella se van con ella.",
         emailTitle: "Correos que le enviamos",

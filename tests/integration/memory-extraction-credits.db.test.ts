@@ -23,14 +23,14 @@ import { deleteAllMemories } from "@/lib/memoryService";
 import { prisma } from "@/lib/prisma";
 
 /**
- * Entitlement for an extraction run (§11), against a real database because
- * every rule here is about what the account actually holds afterwards.
+ * The reservation row of an extraction run (§11), against a real database
+ * because every rule here is about what the account actually holds afterwards.
  *
- * The reservation is per run rather than per chunk: §11 shows the plan and its
- * credit total before the run starts and refuses a stale confirmation, so the
- * run is the unit the user agreed to. What these tests pin is the other half
- * of that promise -- a run that does not finish gives back what it did not
- * spend, exactly once.
+ * Extraction is free to the account since 2026-10-24 (owner decision): a run
+ * reserves zero credits and its row records the provider cost Tomverse pays.
+ * What these tests pin is that nothing is ever charged, that the cost record
+ * follows the chunks that really called the provider, and that the row is
+ * still settled exactly once under the account's credit lock.
  */
 
 const resetData = () =>
@@ -148,7 +148,6 @@ const baseInput = (userId: string, conversationIds: string[]) => ({
     userId,
     extractionModelId: "gpt-5-6-luna",
     promptVersion: "mem-extract-v1",
-    plan: "Pro" as const,
     selectedConversationIds: conversationIds,
     register: APPROVED_REGISTER,
 });
@@ -157,10 +156,9 @@ const createRun = async (userId: string, conversationIds: string[]) => {
     const estimate = await estimateMemoryExtraction(
         baseInput(userId, conversationIds)
     );
-    const run = await createMemoryExtractionRun({
-        ...baseInput(userId, conversationIds),
-        confirmedCredits: estimate.estimatedCredits,
-    });
+    const run = await createMemoryExtractionRun(
+        baseInput(userId, conversationIds)
+    );
     return { run, estimate };
 };
 
@@ -175,7 +173,7 @@ const monthlyUsed = async (userId: string) => {
     return Number(row?.count ?? 0);
 };
 
-test("creating a run reserves the confirmed credits in the same transaction (§11)", async () => {
+test("creating a run reserves no credits and records the provider cost (§11)", async () => {
     const { user, conversationIds } = await seed();
     const { run, estimate } = await createRun(user.id, conversationIds);
 
@@ -184,21 +182,22 @@ test("creating a run reserves the confirmed credits in the same transaction (§1
     );
     assert.equal(reservation.status, "reserved");
     assert.equal(reservation.outcome, null);
-    assert.equal(reservation.reservedCredits, estimate.estimatedCredits);
+    assert.equal(reservation.reservedCredits, 0);
+    assert.equal(reservation.planReservedCredits, 0);
+    assert.equal(reservation.addOnReservedCredits, 0);
     assert.equal(reservation.chunkTotal, estimate.chunkCount);
+    // The cost Tomverse pays is still recorded, frozen at creation.
     assert.equal(
-        reservation.planReservedCredits + reservation.addOnReservedCredits,
-        reservation.reservedCredits
+        Number(reservation.reservedCostMicroUsd),
+        Math.round(estimate.estimatedCostMicroUsd)
     );
-    // Frozen at reservation: a price change afterwards must not re-settle a
-    // run the user already confirmed at these numbers.
     assert.ok(reservation.pricingVersion.length > 0);
     assert.ok(reservation.costSource.length > 0);
 
-    assert.equal(await monthlyUsed(user.id), reservation.planReservedCredits);
+    assert.equal(await monthlyUsed(user.id), 0);
 });
 
-test("a refused reservation leaves no run, no chunks and no charge", async () => {
+test("an account with no credits left still gets a run, and is charged nothing", async () => {
     const { user, conversationIds } = await seed();
     // Spend the plan's monthly allowance first.
     await prisma.chatUsageBucket.create({
@@ -209,33 +208,14 @@ test("a refused reservation leaves no run, no chunks and no charge", async () =>
             count: 1_000_000,
         },
     });
-    const estimate = await estimateMemoryExtraction(
-        baseInput(user.id, conversationIds)
-    );
-    await assert.rejects(
-        createMemoryExtractionRun({
-            ...baseInput(user.id, conversationIds),
-            confirmedCredits: estimate.estimatedCredits,
-        }),
-        (error: unknown) =>
-            error instanceof ApiSecurityError &&
-            error.code === "CREDIT_BALANCE_INSUFFICIENT"
-    );
-
-    // The whole transaction rolled back, so the account is not left holding an
-    // unrunnable run it can never start another one behind.
-    assert.equal(await prisma.memoryExtractionRun.count(), 0);
-    assert.equal(await prisma.memoryExtractionChunk.count(), 0);
-    assert.equal(await prisma.memoryExtractionCreditReservation.count(), 0);
+    const { run } = await createRun(user.id, conversationIds);
+    assert.equal(run.status, "pending");
+    assert.equal(await monthlyUsed(user.id), 1_000_000);
 });
 
-test("cancelling before any chunk ran refunds everything (§11)", async () => {
+test("cancelling before any chunk ran settles at zero cost (§11)", async () => {
     const { user, conversationIds } = await seed();
     const { run } = await createRun(user.id, conversationIds);
-    const reserved = await prisma.memoryExtractionCreditReservation.findUniqueOrThrow(
-        { where: { runId: run.id } }
-    );
-    assert.ok(reserved.planReservedCredits > 0);
 
     await cancelMemoryExtractionRun(user.id, run.id);
 
@@ -246,7 +226,7 @@ test("cancelling before any chunk ran refunds everything (§11)", async () => {
     assert.equal(settled.outcome, "cancelled");
     assert.equal(settled.settledCredits, 0);
     assert.equal(settled.chunksCharged, 0);
-    assert.ok(settled.refundedAt);
+    assert.equal(Number(settled.settledCostMicroUsd), 0);
     assert.equal(await monthlyUsed(user.id), 0);
 });
 
@@ -300,7 +280,7 @@ test("settling twice is claimed once, whatever the second call asks for", async 
     assert.equal(await monthlyUsed(user.id), 0);
 });
 
-test("a partly-run run keeps the chunks it spent and refunds the rest", async () => {
+test("a partly-run run records the cost of the chunks it ran, and charges nothing", async () => {
     const { user, conversationIds } = await seed(2);
     const { run } = await createRun(user.id, conversationIds);
     const reservation = await prisma.memoryExtractionCreditReservation.findUniqueOrThrow(
@@ -318,15 +298,16 @@ test("a partly-run run keeps the chunks it spent and refunds the rest", async ()
     );
     assert.equal(result.applied, true);
 
-    const expected = Math.floor(
-        (reservation.reservedCredits * charged) / chunkTotal
+    assert.equal(result.settledCredits, 0);
+    assert.equal(result.refundedCredits, 0);
+    const settled = await prisma.memoryExtractionCreditReservation.findUniqueOrThrow(
+        { where: { runId: run.id } }
     );
-    assert.equal(result.settledCredits, expected);
     assert.equal(
-        result.refundedCredits,
-        reservation.reservedCredits - expected
+        Number(settled.settledCostMicroUsd),
+        Math.floor((Number(reservation.reservedCostMicroUsd) * charged) / chunkTotal)
     );
-    assert.equal(await monthlyUsed(user.id), expected);
+    assert.equal(await monthlyUsed(user.id), 0);
 });
 
 test("settlement can never charge more than was reserved", async () => {
@@ -422,17 +403,10 @@ const whileCreditAccountLocked = async <T>(
 
 test("creating a run waits for the account's credit lock (§9 lock order)", async () => {
     const { user, conversationIds } = await seed();
-    const estimate = await estimateMemoryExtraction(
-        baseInput(user.id, conversationIds)
-    );
 
     const { blocked, result: run } = await whileCreditAccountLocked(
         user.id,
-        () =>
-            createMemoryExtractionRun({
-                ...baseInput(user.id, conversationIds),
-                confirmedCredits: estimate.estimatedCredits,
-            })
+        () => createMemoryExtractionRun(baseInput(user.id, conversationIds))
     );
 
     assert.equal(
@@ -737,13 +711,10 @@ test("a chunk that called no provider finishes the run and is not charged", asyn
     assert.equal(reservation.outcome, "completed");
     assert.equal(reservation.chunksCharged, 0, "nothing called the provider");
     assert.equal(reservation.settledCredits, 0);
-    assert.ok(
-        reservation.reservedCredits > 0,
-        "fixture: there was something to refund"
-    );
+    assert.equal(Number(reservation.settledCostMicroUsd), 0);
 });
 
-test("a run that skipped one chunk and ran another is charged for one", async () => {
+test("a run that skipped one chunk and ran another records the cost of one", async () => {
     const { user, conversationIds } = await seed(11);
     const { run } = await createRun(user.id, conversationIds);
     assert.ok(run.chunkTotal >= 2, "fixture: more than one chunk");
@@ -772,9 +743,11 @@ test("a run that skipped one chunk and ran another is charged for one", async ()
 
     const reservation = await reservationFor(run.id);
     assert.equal(reservation.chunksCharged, charged);
+    assert.equal(reservation.settledCredits, 0);
     assert.ok(
-        reservation.settledCredits < reservation.reservedCredits,
-        "the chunks that did not run were refunded"
+        Number(reservation.settledCostMicroUsd) <
+            Number(reservation.reservedCostMicroUsd),
+        "the chunks that did not run cost nothing"
     );
 });
 
@@ -855,19 +828,15 @@ test("a snapshot locked between the estimate and the run is refused inside the t
       only the in-transaction read can see it.
     */
     const { user, conversationIds } = await seed(2);
-    const estimate = await estimateMemoryExtraction(
-        baseInput(user.id, conversationIds)
-    );
 
     const holder = holdLock((tx) =>
         tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit-account:${user.id}`}))`
     );
     await holder.holding;
 
-    const creating = createMemoryExtractionRun({
-        ...baseInput(user.id, conversationIds),
-        confirmedCredits: estimate.estimatedCredits,
-    });
+    const creating = createMemoryExtractionRun(
+        baseInput(user.id, conversationIds)
+    );
     // Attached before the wait, so a rejection is never unhandled.
     const outcome = creating.then(
         () => "created" as const,

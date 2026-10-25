@@ -47,9 +47,12 @@ export type ExtractionDecision = {
     candidate: ParsedExtractionCandidate;
     validation: MemoryValidationResult;
     /**
-     * What the storage step in a later slice would do. `rejected` candidates
-     * are never stored at all — a credential or an injection payload does not
-     * become safer by being kept for review (§8.4).
+     * The validator's verdict in the storage step's terms. Since 2026-10-24
+     * only `store_candidate` with a bulk-safe validation is stored, and it is
+     * stored active; `store_for_individual_review` is withheld, because there
+     * is no review queue to hold it (lib/memoryExtractionPersistence.ts).
+     * `discard` is never stored at all
+     * (docs/policy/external-conversation-import-and-memory.md §8.4).
      */
     outcome: "store_candidate" | "store_for_individual_review" | "discard";
 };
@@ -73,8 +76,9 @@ const outcomeFor = (
     if (validation.disposition === "accepted") return "store_candidate";
     if (validation.disposition === "rejected") return "discard";
     // manual_review_required and sensitive_review_required both mean the same
-    // thing downstream: it may be stored, but only a human may activate it,
-    // and it is never part of a bulk approval.
+    // thing downstream: a person would have had to decide, and with no review
+    // queue the storage step withholds it. The eval harness still scores the
+    // two outcomes apart, so the vocabulary stays.
     return "store_for_individual_review";
 };
 
