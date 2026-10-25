@@ -137,10 +137,7 @@ export async function prepareMobileCreditPurchase(userId: string, store: MobileS
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (!pack.allowedPlans.includes(effectivePlanForAccess(user))) throw new Error("Credit pack is not available for this plan.");
     if (await tx.mobileStoreTransaction.count({ where: { userId, needsReview: true, refunded: false } })) throw new Error("Resolve the previous store credit payment before purchasing again.");
-    await tx.mobileStorePurchaseAuthorization.upsert({
-      where: { userId_store_productId: { userId, store, productId } },
-      create: { userId, store, productId }, update: { createdAt: new Date() },
-    });
+    await tx.mobileStorePurchaseAuthorization.create({ data: { userId, store, productId } });
   });
 }
 

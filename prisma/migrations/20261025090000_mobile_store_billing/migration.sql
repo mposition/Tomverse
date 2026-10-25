@@ -19,8 +19,6 @@ CREATE TABLE "MobileStorePurchaseAuthorization" (
 );
 CREATE INDEX "mobile_store_purchase_auth_lookup_idx"
   ON "MobileStorePurchaseAuthorization"("userId", "store", "productId", "createdAt");
-CREATE UNIQUE INDEX "mobile_store_purchase_auth_open_key"
-  ON "MobileStorePurchaseAuthorization"("userId", "store", "productId");
 CREATE TABLE "MobileStoreTransaction" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,

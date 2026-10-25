@@ -63,10 +63,20 @@ test("credit pack plan eligibility is server-authorized before payment and survi
   await assert.rejects(deliver(user.id, { product_id: "unmapped" }), /Unmapped/);
 });
 
-test("only one open authorization is kept per SKU and expired authorizations retain paid purchases for support", async () => {
+test("independent approvals let sequential same-SKU purchases complete before any webhook and tolerate reverse delivery", async () => {
   const user = await createUser();
-  await Promise.all([prepareMobileCreditPurchase(user.id, "app_store", "credits500"), prepareMobileCreditPurchase(user.id, "app_store", "credits500")]);
-  assert.equal(await prisma.mobileStorePurchaseAuthorization.count({ where: { userId: user.id } }), 1);
+  await prepareMobileCreditPurchase(user.id, "app_store", "credits500");
+  const first = { transaction_id: randomUUID(), purchased_at_ms: Date.now() };
+  const second = { transaction_id: randomUUID(), purchased_at_ms: Date.now() + 1000 };
+  assert.equal(await prisma.mobileStorePurchaseAuthorization.count({ where: { userId: user.id } }), 2);
+  await deliver(user.id, second); await deliver(user.id, first); await deliver(user.id, second);
+  assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 1000);
+  assert.equal(await prisma.mobileStoreTransaction.count({ where: { userId: user.id, needsReview: true } }), 0);
+  assert.equal(await prisma.mobileStorePurchaseAuthorization.count({ where: { userId: user.id } }), 0);
+});
+
+test("expired authorizations retain paid purchases for support without granting credits", async () => {
+  const user = await createUser();
   await prisma.mobileStorePurchaseAuthorization.updateMany({ where: { userId: user.id }, data: { createdAt: new Date(Date.now() - 172800000) } });
   await deliver(user.id, { purchased_at_ms: Date.now() });
   const paid = await prisma.mobileStoreTransaction.findFirstOrThrow({ where: { userId: user.id } });
@@ -74,6 +84,19 @@ test("only one open authorization is kept per SKU and expired authorizations ret
   assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 0);
   await deliver(user.id, { type: "CANCELLATION", purchased_at_ms: Date.now() });
   assert.equal((await prisma.mobileStoreTransaction.findUniqueOrThrow({ where: { id: paid.id } })).needsReview, false);
+});
+
+test("account export includes store purchases and pending approvals while withholding receipt and authorization identifiers", async () => {
+  const user = await createUser(); await deliver(user.id);
+  await prepareMobileCreditPurchase(user.id, "app_store", "credits500");
+  const authorization = await prisma.mobileStorePurchaseAuthorization.findFirstOrThrow({ where: { userId: user.id } });
+  const { buildAccountDataExport } = await import("@/lib/accountDataExport");
+  const result = await buildAccountDataExport(user.id);
+  const serialized = JSON.stringify(result, (_key, value) => typeof value === "bigint" ? value.toString() : value);
+  assert.match(serialized, /store_credit_purchases/); assert.match(serialized, /pending_store_credit_purchases/);
+  assert.match(serialized, /credits500/);
+  assert.equal(serialized.includes(event.transaction_id), false);
+  assert.equal(serialized.includes(authorization.id), false);
 });
 
 test("concurrent purchase delivery grants once and a second account cannot replay the store transaction", async () => {
