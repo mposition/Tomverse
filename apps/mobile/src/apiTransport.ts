@@ -13,23 +13,28 @@ import { askReviewRoute } from "../../../lib/reviewRoutingClient";
 import { uploadMobileFile } from "./nativeUpload";
 import type { ChatTransport, Conversation, MobileAttachment, MobileCapabilities } from "./chatTransport";
 
-type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+import { nativeChatLocation } from "./chatLocation";
+import type { MobileRequestInit } from "./authenticatedFetch";
+
+/** A factory is evaluated by the credential boundary immediately before dispatch. */
+type ApiFetch = (path: string, init?: MobileRequestInit) => Promise<Response>;
 type Attempt = { assistantMessageId: string; partialContent: string; status: string; actualModelId?: string; requestedModelId: string };
-export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth, saveFile = saveMobileResponse, uploadFile = uploadMobileFile): ChatTransport {
+export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth, saveFile = saveMobileResponse, uploadFile = uploadMobileFile, location = nativeChatLocation): ChatTransport {
   const requestedTitles = new Set<string>();
   const listeners = new Set<() => void>();
   const unlockGrants = new Map<string, string>();
   const pinSequences = new Map<string, number>();
+  let locationIdentity: string | null = null;
   let sessionRevision = 0;
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
   let capabilityRequest: Promise<MobileCapabilities> | null = null;
   const routedModelByMessage = new Map<string, string>();
-  const clearSessionState = () => { sessionRevision++; capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
+  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
-  const run: ApiFetch = async (path, init) => {
+  const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (unlockGrants.size && /^\/api\/conversations(?:\/|\?)/.test(path)) {
+      if (typeof init !== "function" && unlockGrants.size && /^\/api\/conversations(?:\/|\?)/.test(path)) {
         const headers = new Headers(init?.headers);
         headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
         init = { ...init, headers };
@@ -130,10 +135,20 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     const controller = new AbortController();
     const abort = () => controller.abort(); signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) controller.abort();
-    const watchdog = createChatLivenessWatchdog({ onExpire: abort });
+    const scope = locationIdentity;
+    const revision = sessionRevision;
+    let watchdog: ReturnType<typeof createChatLivenessWatchdog> | undefined;
     try {
-      const response = await run("/api/chat", { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
-        assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}) }), signal: controller.signal });
+      const fix = await location.readForTurn(scope, controller.signal);
+      controller.signal.throwIfAborted();
+      watchdog = createChatLivenessWatchdog({ onExpire: abort });
+      const response = await run("/api/chat", () => {
+        controller.signal.throwIfAborted();
+        if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+        return { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
+          assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
+          ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }), signal: controller.signal };
+      });
       watchdog.noteHeaders();
       // Auto's choice arrives only as a header, as on the web; it is kept for
       // this session and attached to the message when the conversation reloads.
@@ -162,9 +177,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       finally { reader.releaseLock(); }
       const final = await load(persisted.id);
       if (!final.messages.some(message => message.id === assistantMessageId && ["normal", "incomplete"].includes(message.status ?? ""))) throw Error("CHAT_OUTCOME_PENDING");
-    } finally { watchdog.stop(); signal.removeEventListener("abort", abort); }
+    } finally { watchdog?.stop(); signal.removeEventListener("abort", abort); }
   }
   return {
+    location,
     history: {
       projects: async () => { await historySupport(); return (await request<{ projects: import("./chatTransport").HistoryProject[] }>("/api/projects")).projects; },
       saveProject: (id, name) => historyWrite(id ? `/api/projects/${encodeURIComponent(id)}` : "/api/projects", id ? "PATCH" : "POST", { name }),
@@ -273,7 +289,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     imageHistory: async id => { await requireParity(); return request(`${pathFor(id)}/generations`); },
     imageRequest: async key => { await requireParity(); return request(`/api/images/generations?requestKey=${encodeURIComponent(key)}`); },
     imageGroup: async (id) => { await requireParity(); return request(`/api/images/groups/${encodeURIComponent(id)}`); },
-    account: () => request("/api/user/account"),
+    account: async () => {
+      const revision = sessionRevision;
+      const profile = await request<{ id: string; name?: string | null; email?: string | null; actionsEnabled: boolean }>("/api/user/account");
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      locationIdentity = profile.id; location.setIdentity(profile.id);
+      return profile;
+    },
     exportAccount: async () => {
       const ticket = await request<{ downloadPath: string }>("/api/user/account/export", json("POST", {}));
       if (!/^\/api\/user\/account\/export\/[A-Za-z0-9_-]{32,128}$/.test(ticket.downloadPath)) throw Error("EXPORT_PATH_INVALID");
@@ -284,6 +306,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     deleteAccount: async (confirmationText) => {
       if (confirmationText !== "DELETE MY ACCOUNT") throw Error("CONFIRMATION_REQUIRED");
       await request("/api/user/account", json("DELETE", { confirm: true, confirmationText }));
+      clearSessionState();
     },
     downloadArtifact: async (artifact) => {
       if (artifact.status !== "ready") throw Error("ARTIFACT_UNAVAILABLE");
@@ -294,10 +317,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       await saveFile(new Response(bytes, { headers: response.headers }), artifact.filename);
     },
     onSessionLost: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    session: async () => (await bridge.hasSession()).signedIn,
-    signIn: async () => { await bridge.signIn(); },
+    session: async () => { const active = (await bridge.hasSession()).signedIn; if (!active) clearSessionState(); return active; },
+    signIn: async () => { clearSessionState(); await bridge.signIn(); },
     requestEmailCode: (email, language) => bridge.requestEmailCode({ email, language }),
-    verifyEmailCode: (email, code) => bridge.verifyEmailCode({ email, code }),
+    verifyEmailCode: (email, code) => { clearSessionState(); return bridge.verifyEmailCode({ email, code }); },
     signOut: () => { clearSessionState(); return bridge.signOut(); },
     list: async () => {
       const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean }>>("/api/conversations");

@@ -38,6 +38,9 @@
 
 import type { MobileAccessGrant, MobileAuthBridge } from "./authBridgeContract";
 
+/** Re-evaluate ephemeral consent after native credential acquisition and on retry. */
+export type MobileRequestInit = RequestInit | (() => RequestInit);
+
 export type AuthenticatedFetchOptions = {
   bridge: Pick<MobileAuthBridge, "getAccessToken">;
   /**
@@ -178,7 +181,7 @@ const withBearer = (init: RequestInit | undefined, token: string) => {
  */
 export const authenticatedFetch = async (
   path: string,
-  init: RequestInit | undefined,
+  init: MobileRequestInit | undefined,
   options: AuthenticatedFetchOptions
 ): Promise<Response> => {
   const run = options.fetchImpl ?? fetch;
@@ -195,7 +198,7 @@ export const authenticatedFetch = async (
   }
 
   const response = await run(input, {
-    ...withBearer(init, first.accessToken),
+    ...withBearer(typeof init === "function" ? init() : init, first.accessToken),
     credentials: "omit",
     // A redirect on an authenticated API call is a bug, not a flow. Browsers
     // strip `Authorization` across origins, but a same-origin hop to another
@@ -213,7 +216,7 @@ export const authenticatedFetch = async (
   }
 
   return run(input, {
-    ...withBearer(init, second.accessToken),
+    ...withBearer(typeof init === "function" ? init() : init, second.accessToken),
     credentials: "omit",
     redirect: "error",
   });

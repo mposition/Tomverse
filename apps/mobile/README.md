@@ -42,6 +42,13 @@ The file saver was also exercised in a fresh Android emulator with networking
 disabled: path refusal, user cancellation, concurrent-save refusal and saving
 the exact 29-byte synthetic fixture through the system picker all passed.
 
+## Store billing
+
+Native store subscriptions, plan changes, cancellation, restoration and credit
+packs are available behind default-off billing switches. See
+[store billing setup](../../docs/ops/mobile-store-billing.md) for configuration,
+verification and activation requirements. Store credit purchases do not expire.
+
 ## Local development
 
 From the repository root, using local PowerShell, without production credentials:
@@ -273,3 +280,9 @@ the corrected authentication boundary; no live endpoint was enabled by this work
 Do not hand a local validation APK over as a production-login fix. Real-account
 testing requires separately approved publication/deployment and server enrollment,
 followed by a supported capability response from the actual target server.
+
+## Foreground location
+
+The current Chat and Review composers offer an off-by-default Current location switch in Tools. Each message reads a fresh approximate fix and shares it only while that account's consent remains active. Location is excluded from stored messages and device drafts. Switching accounts, signing out, or reloading clears consent. Permission denial and acquisition failures leave ordinary chat available.
+
+The existing native chat enrollment, browser login, secure store and product navigation are unchanged. Run the workspace cap:sync script after dependency changes; its post-sync hook configures foreground coarse Android location and reduced-accuracy iOS usage descriptions. Physical-device permission and GPS observations remain separate from browser fixtures.

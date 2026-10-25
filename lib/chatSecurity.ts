@@ -2081,7 +2081,7 @@ export const preflightChatComparisonAccess = async (
             where: {
                 userId: access.userId!,
                 status: "active",
-                expiresAt: { gt: now },
+                AND: [{ OR: [{ nonExpiring: true }, { expiresAt: { gt: now } }] }],
                 OR: [
                     { remainingCredits: { gt: 0 } },
                     { remainingFundedCostMicroUsd: { gt: 0 } },

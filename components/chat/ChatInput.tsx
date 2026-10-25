@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import { ChatLocationControl } from "./ChatLocationControl";
 import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
@@ -3373,6 +3374,7 @@ export function ChatInput({
             row below them. Only the label length is shell-specific, which
             `data-label-variant` states so tests read it from the DOM.
           */}
+          <ChatLocationControl identityKey={identityKey} compact />
           {hasToolStatusChips && (
             <div
               data-testid="tool-status-chip-row"
@@ -4000,6 +4002,7 @@ export function ChatInput({
               )}
               {menuView === "actions" ? (
                 <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain">
+                  <ChatLocationControl identityKey={identityKey} enableDisabled={isSending || draftLocked} />
                   {/*
                     One row, not two. Where a file comes from is a question
                     about attaching, so it is asked after the user says they
