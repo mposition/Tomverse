@@ -495,6 +495,15 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
     held: m.statusHeld,
   };
 
+  // A draft "next" in line whose latest release GitHub refused: each round
+  // asks again and fails again, so say why rather than "being marked ready"
+  // for ever (2026-10-25: #2968 and #2969 stayed "next" with runners free).
+  const releaseFailure = new Map<number, string>();
+  for (const event of state.events) {
+    if (event.kind === "released") releaseFailure.delete(event.number);
+    else if (event.kind === "failed" && event.detail?.startsWith("release:")) releaseFailure.set(event.number, event.detail.slice("release:".length));
+  }
+
   const rowBody = (entry: CiAdmissionQueueEntry, rank: number, floating: boolean) => {
     const kind = kindOf(entry);
     return (
@@ -515,10 +524,15 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           </span>
         </div>
         <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[entry.status]}`}
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+            entry.status === "next" && releaseFailure.has(entry.number) ? "bg-rose-400/15 text-rose-300" : STATUS_BADGE[entry.status]
+          }`}
           data-testid={floating ? undefined : `ci-admission-status-${entry.number}`}
+          title={entry.status === "next" ? releaseFailure.get(entry.number) : undefined}
         >
-          {statusText[entry.status]}
+          {entry.status === "next" && releaseFailure.has(entry.number)
+            ? fill(m.statusReleaseFailed, { failure: releaseFailure.get(entry.number)! })
+            : statusText[entry.status]}
         </span>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[kind]}`}>{badgeText(kind)}</span>
       </>
