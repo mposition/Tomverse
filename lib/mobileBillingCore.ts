@@ -42,6 +42,7 @@ const subscription = z.object({
   grace_period_expires_date: z.string().datetime({ offset: true }).nullable().optional(),
   refunded_at: z.string().nullable().optional(), unsubscribe_detected_at: z.string().nullable().optional(),
   billing_issues_detected_at: z.string().nullable().optional(),
+  product_plan_identifier: z.string().nullable().optional(),
 });
 export const revenueCatCustomerSchema = z.object({ subscriber: z.object({
   subscriptions: z.record(z.string(), z.unknown()),
@@ -54,7 +55,9 @@ export function resolveMobileSubscription(raw: unknown, products: MobileBillingP
     const parsed = subscription.safeParse(value);
     if (!parsed.success) return [];
     const current = parsed.data;
-    const item = products.find((p) => p.kind === "subscription" && p.store === current.store && p.productId === productId);
+    const identifier = current.store === "play_store" && current.product_plan_identifier && !productId.includes(":")
+      ? `${productId}:${current.product_plan_identifier}` : productId;
+    const item = products.find((p) => p.kind === "subscription" && p.store === current.store && p.productId === identifier);
     if (!item || item.kind !== "subscription" || current.refunded_at || current.is_sandbox !== (environment === "SANDBOX")) return [];
     const expiry = new Date(current.grace_period_expires_date || current.expires_date || 0);
     if (expiry <= now) return [];

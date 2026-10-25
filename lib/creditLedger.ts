@@ -227,6 +227,12 @@ export const settleAddOnCredits = async (
           metadata: { outcome, refundedLotId: entry.lotId },
         } });
       }
+      await tx.creditLedgerEntry.create({ data: {
+        userId, creditLotId: entry.lotId, type: "settle", reservationId,
+        creditsDelta: 0, fundedCostMicroUsdDelta: BigInt(0),
+        balanceAfterCredits: lot.remainingCredits, balanceAfterFundedCostMicroUsd: lot.remainingFundedCostMicroUsd,
+        metadata: { outcome, settledCredits: usedCredits, storeRefund: true },
+      } });
       creditsLeft -= usedCredits; costLeft -= usedCost;
       continue;
     }

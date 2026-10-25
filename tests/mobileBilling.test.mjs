@@ -42,6 +42,7 @@ test("only a mapped, paid, unexpired store subscription grants access", () => {
   assert.throws(() => resolveMobileSubscription({}, products, "PRODUCTION", now));
 });
 test("cancellation preserves paid access; grace uses the verified grace deadline", () => {
+  assert.equal(resolve({ pro: subscription({ store: "play_store", product_plan_identifier: "monthly" }) }).productId, "pro:monthly");
   const cancelled = resolve({ "pro.month": subscription({ unsubscribe_detected_at: now.toISOString() }) });
   assert.equal(cancelled.plan, "Pro"); assert.equal(cancelled.cancelAtPeriodEnd, true);
   const grace = resolve({ "pro.month": subscription({ expires_date: "2026-10-24T00:00:00Z", grace_period_expires_date: "2026-10-26T00:00:00Z", billing_issues_detected_at: now.toISOString() }) });

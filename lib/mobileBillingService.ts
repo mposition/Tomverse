@@ -38,26 +38,29 @@ async function readRevenueCatCustomer(billingId: string) {
 
 export async function syncMobileSubscription(userId: string, billingId: string) {
   const products = mobileBillingProducts();
-  // Read while holding the account lock: a slow older response cannot overwrite
-  // a newer refund/renewal. Failure rolls back and is retried by webhook delivery.
+  // Serialize current-state reads with a billing-only lock, so provider latency
+  // cannot block chat reservations or credit settlements.
   await prisma.$transaction(async (tx) => {
-    await lockCreditAccount(tx, userId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`mobile-billing:${userId}`}))`;
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.mobileBillingId !== billingId) throw new Error("Billing identity changed.");
-    const current = resolveMobileSubscription(await readRevenueCatCustomer(billingId), products, mobileBillingEnvironment());
     // Web subscriptions retain their own execution and cancellation authority.
     if (!user.subscriptionStore && user.stripeSubscriptionId && ["active", "trialing", "past_due"].includes(user.subscriptionStatus || "")) return;
+    const current = resolveMobileSubscription(await readRevenueCatCustomer(billingId), products, mobileBillingEnvironment());
     if (current) {
-      await tx.user.update({ where: { id: userId }, data: {
+      await tx.user.updateMany({ where: { id: userId, OR: [
+        { subscriptionStore: { not: null } }, { stripeSubscriptionId: null },
+        { subscriptionStatus: { notIn: ["active", "trialing", "past_due"] } }, { subscriptionStatus: null },
+      ] }, data: {
         plan: current.plan, subscriptionStore: current.store, subscriptionStoreProductId: current.productId,
         subscriptionStatus: current.status === "past_due" ? "mobile_store_grace" : "mobile_store_active",
         subscriptionCurrentPeriodEnd: current.expiresAt, subscriptionBillingInterval: current.interval,
-        subscriptionCancelAtPeriodEnd: current.cancelAtPeriodEnd, subscriptionSyncedAt: new Date(),
+        subscriptionCancelAtPeriodEnd: current.cancelAtPeriodEnd,
       } });
     } else if (user.subscriptionStore) {
-      await tx.user.update({ where: { id: userId }, data: { plan: "Free", subscriptionStatus: "mobile_store_expired",
+      await tx.user.updateMany({ where: { id: userId, subscriptionStore: user.subscriptionStore }, data: { plan: "Free", subscriptionStatus: "mobile_store_expired",
         subscriptionStore: null, subscriptionStoreProductId: null,
-        subscriptionCancelAtPeriodEnd: true, subscriptionCurrentPeriodEnd: new Date(), subscriptionSyncedAt: new Date(),
+        subscriptionCancelAtPeriodEnd: true, subscriptionCurrentPeriodEnd: new Date(),
       } });
     }
   }, { timeout: 20_000 });
@@ -150,7 +153,12 @@ export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userI
 
 export async function processMobileStoreWebhook(event: StoreEvent) {
   const user = await prisma.user.findUnique({ where: { mobileBillingId: event.app_user_id }, select: { id: true } });
-  if (!user) throw new Error("Store customer is not linked to an active account.");
+  if (!user) {
+    // IDs are issued before the SDK can purchase. An unknown ID cannot become
+    // valid on retry (e.g. account deletion); never remap its store receipt.
+    console.warn("Unlinked mobile store notification ignored.");
+    return;
+  }
   await prisma.$transaction(async (tx) => {
     await lockCreditAccount(tx, user.id);
     await applyMobileCreditEvent(tx, user.id, event);

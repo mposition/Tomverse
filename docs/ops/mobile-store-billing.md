@@ -4,7 +4,7 @@ Implementation uses RevenueCat's Capacitor SDK as the StoreKit / Google Play
 Billing adapter. Tomverse remains the entitlement and credit ledger owner.
 The SDK verifies/finishes store purchases; an authenticated RevenueCat webhook
 grants consumable credits exactly once. Subscription sync reads the current
-RevenueCat server snapshot, never the client's entitlements. A pending payment
+RevenueCat server snapshot under a separate billing lock, never the client's entitlements. A pending payment
 does not grant access. Failed webhook processing returns 503 for redelivery.
 
 ## Product behavior

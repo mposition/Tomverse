@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { after, beforeEach, test } from "node:test";
+import { after, beforeEach, test, mock } from "node:test";
+import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription } from "@/lib/mobileBillingService";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import { getPurchasedCreditSummary, expireCreditLots, reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
+import { getStripe } from "@/lib/stripe";
+import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
 
 process.env.MOBILE_BILLING_PRODUCTS_JSON = JSON.stringify([
   { store: "app_store", productId: "credits500", kind: "credits", packId: "starter_500" },
@@ -68,6 +71,7 @@ test("releasing an in-flight reservation after a store refund clears debt withou
   });
   assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).creditDebtCredits, 0);
   assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 0);
+  assert.equal(await prisma.creditLedgerEntry.count({ where: { userId: user.id, type: "settle", reservationId: "use-2" } }), 1);
 });
 test("subscription sync preserves credit usage, protects web subscriptions and rereads current store state", async () => {
   const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
@@ -79,6 +83,7 @@ test("subscription sync preserves credit usage, protects web subscriptions and r
     let account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     assert.equal(account.plan, "Pro"); assert.equal(account.subscriptionCancelAtPeriodEnd, true);
     assert.equal(account.subscriptionStore, "app_store");
+    assert.equal(account.subscriptionSyncedAt, null, "mobile sync must not advance the Stripe observation clock");
     subscriptions = {};
     await syncMobileSubscription(user.id, billingId);
     account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -87,4 +92,38 @@ test("subscription sync preserves credit usage, protects web subscriptions and r
     await syncMobileSubscription(user.id, billingId);
     assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).plan, "Max");
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test("a paid web subscription applies immediately after store expiry, including concurrent mobile reads", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_local_mock_only";
+  const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const customer = "cus_mobile_transition";
+  await prisma.user.update({ where: { id: user.id }, data: {
+    plan: "Max", subscriptionStore: "app_store", subscriptionStatus: "mobile_store_active",
+    subscriptionStoreProductId: "old.max", subscriptionCurrentPeriodEnd: new Date("2000-01-01"), stripeCustomerId: customer,
+  } });
+  const subscription = { id: "sub_mobile_transition", customer, status: "active", cancel_at_period_end: false,
+    metadata: { planId: "pro" }, current_period_end: Math.floor(Date.now() / 1000) + 86400,
+    items: { data: [{ id: "item", price: { id: "price_test_mobile", product: "prod_test", recurring: { interval: "month" } } }] },
+  } as unknown as Stripe.Subscription;
+  const retrieve = mock.method(getStripe().subscriptions, "retrieve", async () => subscription);
+  const originalFetch = globalThis.fetch;
+  let release!: (value: Response) => void; let entered!: () => void;
+  const waiting = new Promise<void>((resolve) => { entered = resolve; });
+  globalThis.fetch = async () => { entered(); return new Promise<Response>((resolve) => { release = resolve; }); };
+  try {
+    const mobile = syncMobileSubscription(user.id, billingId);
+    await waiting;
+    const synced = await resyncSubscriptionFromStripe(subscription.id);
+    assert.equal(synced?.plan, "Pro");
+    release(Response.json({ subscriber: { subscriptions: { "pro.month": {
+      store: "app_store", is_sandbox: false, expires_date: "2099-01-01T00:00:00Z",
+    } } } }));
+    await mobile;
+    const current = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    assert.equal(current.plan, "Pro"); assert.equal(current.subscriptionStore, null);
+    assert.equal(current.stripeSubscriptionId, subscription.id);
+    // The earlier mobile response must not reclaim a paid web subscription.
+    assert.equal(current.subscriptionStatus, "active");
+  } finally { retrieve.mock.restore(); globalThis.fetch = originalFetch; }
 });

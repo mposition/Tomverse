@@ -43,6 +43,7 @@ import {
   shouldApplySubscriptionSnapshot,
   subscriptionIdFromEventObject,
 } from "@/lib/stripeWebhookSyncCore";
+import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 
 const subscriptionActiveStatuses = new Set(["active", "trialing", "past_due"]);
 
@@ -135,6 +136,9 @@ async function syncSubscription(
       id: true,
       email: true,
       subscriptionStore: true,
+      plan: true,
+      subscriptionStatus: true,
+      subscriptionCurrentPeriodEnd: true,
       subscriptionSyncedAt: true,
       settings: {
         select: { language: true },
@@ -142,7 +146,7 @@ async function syncSubscription(
     },
   });
   if (!user) return null;
-  if (user.subscriptionStore) return null;
+  if (user.subscriptionStore && effectivePlanForAccess(user, observedAt) !== "Free") return null;
 
   const decision = shouldApplySubscriptionSnapshot({
     storedObservedAt: user.subscriptionSyncedAt,
@@ -160,7 +164,7 @@ async function syncSubscription(
   const applied = await prisma.user.updateMany({
     where: {
       id: user.id,
-      subscriptionStore: null,
+      AND: [{ OR: [{ subscriptionStore: null }, { subscriptionCurrentPeriodEnd: { lte: observedAt } }] }],
       OR: [
         { subscriptionSyncedAt: null },
         { subscriptionSyncedAt: { lte: observedAt } },
@@ -168,6 +172,8 @@ async function syncSubscription(
     },
     data: {
       plan,
+      subscriptionStore: null,
+      subscriptionStoreProductId: null,
       stripeSubscriptionId: subscription.id,
       stripePriceId: priceId,
       subscriptionStatus: subscription.status,
