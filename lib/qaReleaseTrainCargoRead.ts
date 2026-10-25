@@ -84,8 +84,11 @@ let cached: { atMs: number; value: QaReleaseTrainCargoCandidatesRead } | null = 
 
 /**
  * The candidates, from the shared read while it is fresh enough. `fresh` (the
- * overview's Refresh) reads GitHub again unless a read is under
- * FRESH_MIN_MS old, so several operators pressing it spend one read.
+ * train tab's "Read GitHub again", or a save on it) reads GitHub again unless
+ * a read is under FRESH_MIN_MS old, so several operators pressing it spend
+ * one read. A read already under way answers every caller that arrives
+ * meanwhile: one press starts several at once (the tab, its picker and its
+ * emergency panel), and each would otherwise read GitHub in full.
  */
 export async function readQaReleaseTrainCargoCandidates(
   nowMs = Date.now(),
@@ -93,6 +96,33 @@ export async function readQaReleaseTrainCargoCandidates(
 ): Promise<QaReleaseTrainCargoCandidatesRead> {
   const keepMs = options.fresh ? FRESH_MIN_MS : cached?.value.status === "ok" ? CACHE_MS : FAILURE_CACHE_MS;
   if (cached && nowMs - cached.atMs < keepMs) return cached.value;
+  if (inFlight) return inFlight;
+  inFlight = readFromGithub(nowMs).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+let inFlight: Promise<QaReleaseTrainCargoCandidatesRead> | null = null;
+
+/**
+ * Every open main pull request, page by page, as the train service and the
+ * departure board read them: one past the first hundred can still carry a
+ * candidate. A list longer than the cap is a failed read, never a partial one.
+ */
+const OPEN_PAGE_CAP = 3;
+async function readOpenMain(readJson: (path: string) => Promise<unknown>): Promise<unknown[]> {
+  const pulls: unknown[] = [];
+  for (let page = 1; page <= OPEN_PAGE_CAP; page += 1) {
+    const list = await readJson(`/pulls?state=open&base=main&per_page=100&page=${page}`);
+    if (!Array.isArray(list)) throw new Error("github_shape");
+    pulls.push(...list);
+    if (list.length < 100) return pulls;
+  }
+  throw new Error("github_pages");
+}
+
+async function readFromGithub(nowMs: number): Promise<QaReleaseTrainCargoCandidatesRead> {
   const readJson = createGithubRepoReader();
   try {
     const sinceMs = nowMs - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
@@ -100,7 +130,7 @@ export async function readQaReleaseTrainCargoCandidates(
       readClosedSince(readJson, "develop", sinceMs),
       // A release that carried a candidate was merged after it, so inside the window too.
       readClosedSince(readJson, "main", sinceMs),
-      readJson("/pulls?state=open&base=main&per_page=100"),
+      readOpenMain(readJson),
     ]);
     // What each main pull request in the window really carries: its commits,
     // beside the numbers its title names.
@@ -109,7 +139,7 @@ export async function readQaReleaseTrainCargoCandidates(
         const mergedAt = (pull as { merged_at?: unknown }).merged_at;
         return typeof mergedAt === "string" && Date.parse(mergedAt) >= sinceMs;
       }),
-      ...(Array.isArray(openMainJson) ? openMainJson : []),
+      ...openMainJson,
     ]
       .map((pull) => (pull as { number?: unknown }).number)
       .filter((number): number is number => typeof number === "number");
