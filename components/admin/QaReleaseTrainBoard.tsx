@@ -129,7 +129,14 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
                       type="button"
                       className={`${GRID} w-full rounded-lg px-2 py-2 text-left hover:bg-[#2a2a27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#f5c46b]`}
                       aria-expanded={expanded}
-                      aria-label={m.boardRowLabel.replace("{slot}", row.slot)}
+                      // The flap digits are hidden from assistive technology: the name carries all a row shows.
+                      aria-label={m.boardRowLabel
+                        .replace("{slot}", row.slot)
+                        .replace("{time}", aestClock(row.admittedAt))
+                        .replace("{status}", status(row.status))
+                        .replace("{rode}", String(row.included.length))
+                        .replace("{left}", String(row.leftOut.length))
+                        .replace("{pull}", row.pullRequestNumber !== null ? `#${row.pullRequestNumber}` : "—")}
                       onClick={() => setOpen(expanded ? null : key)}
                       data-testid={`qa-release-train-board-row-${row.slot}`}
                     >

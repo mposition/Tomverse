@@ -8,8 +8,13 @@
  */
 import { qaReleaseTrainIsTrainPull, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
 
-/** How long a train may run between its admission and its report before the board calls it unreported. */
-export const QA_RELEASE_TRAIN_BOARD_RUNNING_MS = 30 * 60 * 1000;
+/**
+ * How long a train may run between its admission and its report before the
+ * board calls it unreported: the train service is killed at ten minutes
+ * (HARD_TIMEOUT_MS in scripts/qa-release-train-service.mjs), so one not
+ * reported a minute after that never will be.
+ */
+export const QA_RELEASE_TRAIN_BOARD_RUNNING_MS = 11 * 60 * 1000;
 
 export type QaReleaseTrainBoardStatus =
   /** Admitted, assembling; no report yet. */
