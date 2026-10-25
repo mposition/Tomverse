@@ -95,11 +95,16 @@ test("primary sign-in waits for the native browser return without requesting an 
     email: (window as unknown as { loginRequests?: number }).loginRequests ?? 0 }))).toEqual({ browser: 1, email: 0 });
 });
 
-test("unavailable browser sign-in keeps in-app email sign-in usable", async ({ page }) => {
-  await page.addInitScript(() => { (window as unknown as { browserLoginFailure: string }).browserLoginFailure = "MOBILE_LOGIN_UNAVAILABLE"; });
+for (const [code, message] of [
+  ["MOBILE_LOGIN_UNAVAILABLE", "브라우저 로그인을 아직 사용할 수 없습니다"],
+  ["LOGIN_UNAVAILABLE", "이 기기에서 브라우저 로그인을 사용할 수 없습니다"],
+  ["LOGIN_VERIFICATION_FAILED", "앱에서 브라우저 로그인을 확인할 수 없습니다"],
+  ["LOGIN_IN_PROGRESS", "이전 로그인 창을 닫은 뒤"],
+]) test(code + " keeps in-app email sign-in usable with the appropriate recovery message", async ({ page }) => {
+  await page.addInitScript((code) => { (window as unknown as { browserLoginFailure: string }).browserLoginFailure = code; }, code);
   await page.goto("/");
   await page.getByRole("button", { name: "Tomverse로 계속" }).click();
-  await expect(page.getByRole("alert")).toContainText("브라우저 로그인을 아직 사용할 수 없습니다");
+  await expect(page.getByRole("alert")).toContainText(message);
   await page.getByRole("button", { name: "앱에서 이메일 코드로 로그인" }).click();
   await page.getByLabel("이메일 주소").fill("user@example.com");
   await page.getByRole("button", { name: "인증 코드 받기", exact: true }).click();

@@ -2,6 +2,7 @@
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
 import { chatLocationSession } from "@/lib/chatLocationClient";
+import { requestChatLocationIntent } from "@tomverse/api-client";
 import {
   memo,
   useCallback,
@@ -1640,7 +1641,7 @@ function ChatAppComponent({
       // settling owns the key now, and this watchdog must not end it.
       abortChatRuntimeRun(runKey, controller, expiry.cause);
     };
-    const liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
+    let liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
     // The signed error report token from the response headers, when the
     // server issued one. Lives only in this closure and in the error
     // message's runtime `errorReport` context -- never persisted.
@@ -1860,9 +1861,16 @@ function ChatAppComponent({
     }
 
     try {
-      const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal);
       const sendChatRequest = async (turnstileToken?: string) => {
+        // Human permission and guest verification happen before provider wait
+        // time starts. The same source turn is continued after either prompt.
+        liveness.stop();
+        const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, {
+          turnId: sourceUserMessageId,
+          requiresLocation: () => requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }),
+        });
         controller.signal.throwIfAborted();
+        liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
         onDispatchStarted?.();
         if (isGuestMode && guestAutoCapability) {
           guestAutoRequestStarted = true;
