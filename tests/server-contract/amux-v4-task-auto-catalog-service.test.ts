@@ -3,6 +3,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
+import { AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD, AMUX_TASK_CATALOG_CAPS } from
+  "../../lib/amux/v4TaskCostAutoCatalogCore.ts";
+
 // The Task cost catalog is derived from the registries (owner decision
 // 2026-10-25): the worker registry's v22 workers, priced from Admin › Models
 // the way Chat bills them.
@@ -48,19 +51,30 @@ test("a Task's ceiling comes from the registry price and reproduces at a pinned 
   assert.equal(route.outputMicroUsdPerMillion, 15_000_000);
   assert.ok(route.cacheWriteMicroUsdPerMillion >= 6_000_000, "at least the one-hour rate");
   const perAttempt = BigInt(live.receipt.routes[0]!.perAttemptMicroUsd);
-  assert.ok(perAttempt >= BigInt(Math.ceil((600_000 * 3_000_000 + 6_000_000 * 300_000 +
-    600_000 * route.cacheWriteMicroUsdPerMillion! + 60_000 * 15_000_000) / 1_000_000)));
+  const caps = AMUX_TASK_CATALOG_CAPS.advanced;
+  assert.ok(perAttempt >= BigInt(Math.ceil((caps.inputTokens * 3_000_000 +
+    caps.cacheReadTokens * 300_000 + caps.cacheWriteTokens * route.cacheWriteMicroUsdPerMillion! +
+    caps.outputTokens * 15_000_000) / 1_000_000)));
+  assert.ok(perAttempt <= BigInt(AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD),
+    "one attempt fits the launcher's budget");
   assert.equal(live.receipt.ceilingMicroUsd, String(perAttempt * BigInt(2)));
   assert.match(live.approvalId, /^registry:[a-f0-9]{32}$/);
   const pinned = await calculateCurrentApprovedAmuxV4TaskCost(tx as never,
     "implement", "advanced", { asOf: new Date("2026-10-20T00:00:00.000Z") });
   assert.equal(pinned.receipt.calculatedAtIso, "2026-10-20T00:00:00.000Z");
   assert.equal(pinned.catalogDigest, live.catalogDigest);
-  rows = [row({ inputUsdPerMillionTokens: 4 })];
+  rows = [row({ inputUsdPerMillionTokens: 3.5 })];
   const repriced = await calculateCurrentApprovedAmuxV4TaskCost(tx as never,
     "implement", "advanced", { asOf: new Date("2026-10-20T00:00:00.000Z") });
   assert.notEqual(repriced.catalogDigest, live.catalogDigest,
     "a changed price shows as a changed catalog, so the caller reconfirms");
+});
+
+test("a price too dear for one attempt's budget is a hold, not an assignment", async () => {
+  const { calculateCurrentApprovedAmuxV4TaskCost } = await service;
+  rows = [row({ inputUsdPerMillionTokens: 10, outputUsdPerMillionTokens: 50 })];
+  await assert.rejects(calculateCurrentApprovedAmuxV4TaskCost(tx as never, "implement", "advanced"),
+    { name: "AmuxV4TaskCatalogApprovalError" });
 });
 
 test("no worker for the role, or no model in the registry, is a hold", async () => {
@@ -78,14 +92,14 @@ test("an API-model match takes the dearest row, so a duplicate never lowers the 
   // Two real model profiles (each with a verified write rate) both calling
   // the API model the worker names; neither row has its id.
   rows = [row({ id: "claude-opus-4-8", inputUsdPerMillionTokens: 1 }),
-    row({ id: "claude-fable-5", inputUsdPerMillionTokens: 5 })].map((entry) =>
+    row({ id: "claude-haiku-4-5", inputUsdPerMillionTokens: 2 })].map((entry) =>
     ({ ...entry, apiModel: "claude-sonnet-5" }));
   for (const entry of rows) assert.notEqual(entry.id, "claude-sonnet-5");
   const result = await readAmuxV4TaskAutoCatalog(tx as never);
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const routes = result.catalog.routes as Array<Record<string, unknown>>;
-  assert.equal(routes[0]?.uncachedInputMicroUsdPerMillion, 5_000_000);
+  assert.equal(routes[0]?.uncachedInputMicroUsdPerMillion, 2_000_000);
 });
 
 test("an unreadable row that might be the dearest prices nothing", async () => {

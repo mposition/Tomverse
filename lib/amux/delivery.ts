@@ -35,6 +35,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
+import { AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD } from "@/lib/amux/v4TaskCostAutoCatalogCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -386,7 +387,7 @@ export async function pullAmuxWorkDelivery(input: {
         assignment?.workerInstanceId !== delivery.workerInstanceId ||
         assignment?.workerGeneration !== delivery.workerGeneration ||
         !Number.isSafeInteger(budgetMicrousd) ||
-        budgetMicrousd < 1 || budgetMicrousd > 5_000_000)
+        budgetMicrousd < 1 || budgetMicrousd > AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD)
       throw new Error("v22 delivery assignment profile is invalid");
     const assignmentAudit = await tx.adminAuditLog.findUnique({
       where: { id: assignment.authorizationAuditLogId },

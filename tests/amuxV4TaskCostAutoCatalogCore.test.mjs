@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD,
   AMUX_TASK_CATALOG_CAPS,
   amuxTaskRoutePrice,
   deriveAmuxV4TaskAutoCatalog,
@@ -70,7 +72,7 @@ test("each price is asked for at the input cap of the worker's grade", () => {
   asked.length = 0;
   derive();
   assert.deepEqual(asked.sort(), [["claude-haiku-4-5", 300_000],
-    ["claude-opus-4-8", 1_000_000], ["claude-sonnet-5", 600_000]]);
+    ["claude-opus-4-8", 200_000], ["claude-sonnet-5", 300_000]]);
 });
 
 test("prices round up to whole micro-USD and tool cost is capped at zero", () => {
@@ -170,4 +172,28 @@ test("the same prices give the same digest; a real change gives a new one", () =
   assert.deepEqual(repriced.catalog.routes.map((route) => route.routePolicyDigest),
     first.catalog.routes.map((route) => route.routePolicyDigest),
     "a price change never asks a Task to reconfirm its route");
+});
+
+test("a route dearer than one attempt's launch budget is left out, not assigned", () => {
+  const dear = derive({ workers: [workers[2]], priceFor: () => ({
+    inputUsdPerMillionTokens: 10, outputUsdPerMillionTokens: 50,
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 12.5 }) });
+  assert.deepEqual(dear, { ok: false, code: "no_priced_worker" });
+  const { catalog } = derive();
+  for (const grade of ["routine", "advanced", "frontier"]) {
+    const role = grade === "routine" ? "investigate" : grade === "advanced" ? "implement" : "design";
+    const result = ceiling(catalog, role, grade);
+    for (const route of result.receipt.routes) {
+      assert.ok(BigInt(route.perAttemptMicroUsd) <= BigInt(AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD),
+        `${grade} ${route.modelId}: ${route.perAttemptMicroUsd}`);
+    }
+  }
+});
+
+test("the one-shot launcher and this catalog agree on one attempt's budget", () => {
+  const sidecar = readFileSync(new URL("../lib/amux/v22OneShotSidecar.mjs", import.meta.url), "utf8");
+  assert.match(sidecar, /const MAX_BUDGET_MICROUSD = 5_000_000;/);
+  assert.equal(AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD, 5_000_000);
+  const delivery = readFileSync(new URL("../lib/amux/delivery.ts", import.meta.url), "utf8");
+  assert.match(delivery, /budgetMicrousd > AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD/);
 });

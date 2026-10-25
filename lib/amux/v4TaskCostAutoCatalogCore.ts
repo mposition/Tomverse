@@ -22,6 +22,9 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code. They bound
  *   cache reads and writes as well, because the Claude CLI reports them
  *   apart from input, so the reservation covers what an attempt settles.
+ *   One attempt may reserve at most AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD,
+ *   the budget the one-shot launcher hands the CLI; a route dearer than that
+ *   at its grade's caps is left out rather than assigned and then refused.
  *
  * Deterministic: the same prices give the same catalog digest, so a Task
  * reconfirms only when a worker or a price actually changed. The catalog
@@ -46,17 +49,23 @@ export type AmuxTaskCatalogGradeCaps = {
   maxAttempts: number;
 };
 
-/** The most one Task of each grade may use, every attempt included. */
+/** The one-shot launcher's per-attempt CLI budget (lib/amux/delivery.ts,
+ * lib/amux/v22OneShotSidecar.mjs). */
+export const AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD = 5_000_000;
+
+/** The most one Task attempt of each grade may use. A CLI session rereads its
+ * context every turn, so cache reads run to ten times the fresh input; each
+ * prompt is written to the cache at most once. Sized so the grade's usual
+ * model fits one attempt's budget: Haiku at routine, Sonnet at advanced,
+ * Opus at frontier. */
 export const AMUX_TASK_CATALOG_CAPS: Readonly<Record<AmuxExecutionGrade,
   AmuxTaskCatalogGradeCaps>> = Object.freeze({
-  // A CLI session rereads its context every turn, so reads run to ten times
-  // the fresh input; each prompt is written to the cache at most once.
-  routine: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 3_000_000,
-    cacheWriteTokens: 300_000, outputTokens: 30_000, maxAttempts: 2 }),
-  advanced: Object.freeze({ inputTokens: 600_000, cacheReadTokens: 6_000_000,
-    cacheWriteTokens: 600_000, outputTokens: 60_000, maxAttempts: 2 }),
-  frontier: Object.freeze({ inputTokens: 1_000_000, cacheReadTokens: 10_000_000,
-    cacheWriteTokens: 1_000_000, outputTokens: 128_000, maxAttempts: 3 }),
+  routine: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 2_000_000,
+    cacheWriteTokens: 200_000, outputTokens: 30_000, maxAttempts: 2 }),
+  advanced: Object.freeze({ inputTokens: 300_000, cacheReadTokens: 3_000_000,
+    cacheWriteTokens: 300_000, outputTokens: 40_000, maxAttempts: 2 }),
+  frontier: Object.freeze({ inputTokens: 200_000, cacheReadTokens: 2_000_000,
+    cacheWriteTokens: 200_000, outputTokens: 32_000, maxAttempts: 3 }),
 });
 
 export type AmuxTaskCatalogWorker = {
@@ -122,6 +131,16 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     // A zero or missing price never becomes a free route.
     if (!price || uncached === null || output === null || verifiedWrite === null) continue;
     const multiplier = price.cachedInputPriceMultiplier;
+    const cacheRead = Number.isFinite(multiplier) && multiplier > 0
+      ? Math.ceil(uncached * multiplier) : uncached;
+    const cacheWrite = Math.max(verifiedWrite, uncached * 2);
+    const attempt = caps[grade];
+    // Each term rounds up on its own, as the ceiling calculation does.
+    const term = (tokens: number, rate: number) =>
+      (BigInt(tokens) * BigInt(rate) + BigInt(999_999)) / BigInt(1_000_000);
+    if (term(attempt.inputTokens, uncached) + term(attempt.cacheReadTokens, cacheRead) +
+        term(attempt.cacheWriteTokens, cacheWrite) + term(attempt.outputTokens, output) >
+        BigInt(AMUX_TASK_ATTEMPT_BUDGET_MAX_MICROUSD)) continue;
     const identity = { workerName: worker.workerName, provider: "anthropic",
       modelId: worker.modelId, roles, grade };
     routes.push({
@@ -140,9 +159,8 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       pricingExpiresAt: PRICES_UNTIL,
       uncachedInputMicroUsdPerMillion: uncached,
       outputMicroUsdPerMillion: output,
-      cacheReadMicroUsdPerMillion: Number.isFinite(multiplier) && multiplier > 0
-        ? Math.ceil(uncached * multiplier) : uncached,
-      cacheWriteMicroUsdPerMillion: Math.max(verifiedWrite, uncached * 2),
+      cacheReadMicroUsdPerMillion: cacheRead,
+      cacheWriteMicroUsdPerMillion: cacheWrite,
       toolCostCapMicroUsdPerAttempt: 0,
     });
   }
