@@ -36,7 +36,10 @@ export function QaReleaseMainCandidatesSection({ data, id }: { data: QaReleaseMa
         </span>
       </p>
       {pullRequests === null ? (
-        <p className="text-sm text-amber-300">{m.mainUnread}</p>
+        <p className="text-sm text-amber-300">
+          {m.mainUnread}
+          {data.readFailure ? m.githubFailure.replace("{failure}", data.readFailure) : ""}
+        </p>
       ) : pullRequests.length === 0 ? (
         <p className="text-sm text-zinc-400">{m.mainNone}</p>
       ) : (
