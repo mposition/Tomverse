@@ -1,4 +1,6 @@
 import "server-only";
+import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 
 import { findRefundForRequestAtProvider } from "@/lib/refundProviderLookup";
 import {
@@ -228,10 +230,13 @@ export const reconcileProcessingRefundRequests = async ({
         });
 
         if (request.userId) {
+          await lockSubscriptionAccount(tx, request.userId);
+          const entitlement = await tx.user.findUniqueOrThrow({ where: { id: request.userId } });
           await tx.user.update({
             where: { id: request.userId },
             data: {
-              plan: "Free",
+              plan: effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" }),
+              webSubscriptionPlan: "Free",
               stripeCustomerId: null,
               stripeSubscriptionId: null,
               stripePriceId: null,

@@ -1,4 +1,6 @@
 export const dynamic = "force-dynamic";
+import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
@@ -15,6 +17,7 @@ import { ADMIN_PLAN_CHANGED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   apiSecurityResponse,
+  ApiSecurityError,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
@@ -59,6 +62,7 @@ export async function PATCH(req: Request, context: RouteContext) {
         id: true,
         email: true,
         plan: true,
+        ...STORE_ENTITLEMENT_SELECT,
         subscriptionStatus: true,
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
@@ -71,6 +75,13 @@ export async function PATCH(req: Request, context: RouteContext) {
     if (!before) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
+    const paidStorePlan = effectivePlanForAccess({ plan: "Free", webSubscriptionPlan: "Free",
+      storeSubscriptionPlan: before.storeSubscriptionPlan, storeSubscriptionExpiresAt: before.storeSubscriptionExpiresAt,
+      storeSubscriptionSnapshot: before.storeSubscriptionSnapshot });
+    if (["Free", "Pro", "Max"].indexOf(body.plan) < ["Free", "Pro", "Max"].indexOf(paidStorePlan)) {
+      return NextResponse.json({ code: "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY",
+        error: "Cancel or refund the store subscription with its original provider before reducing this paid entitlement." }, { status: 409 });
+    }
 
     const user = await runWithAdminApproval(
       {
@@ -82,11 +93,19 @@ export async function PATCH(req: Request, context: RouteContext) {
         payload: body,
         reason: body.reason,
       },
-      () =>
-        prisma.user.update({
+      () => prisma.$transaction(async (tx) => {
+        await lockSubscriptionAccount(tx, userId);
+        const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+        const currentStorePlan = effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" });
+        if (["Free", "Pro", "Max"].indexOf(body.plan) < ["Free", "Pro", "Max"].indexOf(currentStorePlan)) {
+          throw new ApiSecurityError(409, "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", "The paid store entitlement must be cancelled or refunded by its provider first.");
+        }
+        return tx.user.update({
           where: { id: userId },
           data: {
-            plan: body.plan,
+            plan: effectivePlanForAccess({ ...entitlement, plan: body.plan, webSubscriptionPlan: body.plan,
+              subscriptionStatus: body.subscriptionStatus || "manually_adjusted" }),
+            webSubscriptionPlan: body.plan,
             subscriptionStatus: body.subscriptionStatus || "manually_adjusted",
             // Settled here, not in the browser: a clock-derived value in the
             // request body would differ between the first attempt and the
@@ -119,7 +138,8 @@ export async function PATCH(req: Request, context: RouteContext) {
             stripeSubscriptionId: true,
             stripePriceId: true,
           },
-        })
+        });
+      })
     );
 
     // Queued: the plan moved whether or not the notice reaches anybody, and

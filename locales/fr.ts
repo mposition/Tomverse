@@ -1253,7 +1253,7 @@ export const fr = {
         deleteAllChatsFailed: "Impossible de supprimer les conversations.",
         deleting: "Suppression...",
         deleteAccountImmediateTitle: "La suppression du compte comporte un délai de sécurité de 7 jours.",
-        deleteAccountImmediateDescription: "Vous serez immédiatement déconnecté et tout abonnement payant sera annulé. La suppression définitive aura lieu après 7 jours. Contactez le support si vous n'êtes pas à l'origine de cette demande.",
+        deleteAccountImmediateDescription: "Vous serez immédiatement déconnecté et tout abonnement facturé directement par Tomverse sera annulé. La suppression définitive aura lieu après 7 jours. Contactez le support si vous n'êtes pas à l'origine de cette demande.",
         deleteAccountConsent: "Je comprends que toutes les conversations et préférences seront définitivement supprimées et ne pourront pas être restaurées.",
         deleteAccountConsentRequired: "Veuillez confirmer que vous comprenez que toutes les conversations, préférences et informations du compte seront supprimées.",
         deleteAccountConfirmationPrompt: "Saisissez DELETE MY ACCOUNT pour confirmer.",

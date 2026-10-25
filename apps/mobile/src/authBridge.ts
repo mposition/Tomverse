@@ -37,7 +37,7 @@ export const MobileAuth = registerPlugin<MobileAuthBridge>("MobileAuth", {
 export const TOMVERSE_API_ORIGIN =
   import.meta.env?.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app";
 
-export const mobileApiFetch = (path: string, init?: RequestInit) =>
+export const mobileApiFetch = (path: string, init?: RequestInit | (() => RequestInit)) =>
   authenticatedFetch(path, init, {
     bridge: MobileAuth,
     apiOrigin: TOMVERSE_API_ORIGIN,

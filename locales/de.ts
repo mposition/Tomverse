@@ -1253,7 +1253,7 @@ export const de = {
         deleteAllChatsFailed: "Unterhaltungen konnten nicht gelöscht werden.",
         deleting: "Wird gelöscht...",
         deleteAccountImmediateTitle: "Für die Kontolöschung gilt eine Sicherheitsfrist von 7 Tagen.",
-        deleteAccountImmediateDescription: "Sie werden sofort abgemeldet und ein kostenpflichtiges Abonnement wird gekündigt. Die endgültige Löschung erfolgt nach 7 Tagen. Wenden Sie sich sofort an den Support, falls Sie dies nicht angefordert haben.",
+        deleteAccountImmediateDescription: "Sie werden sofort abgemeldet und ein direkt von Tomverse abgerechnetes Abonnement wird gekündigt. Die endgültige Löschung erfolgt nach 7 Tagen. Wenden Sie sich sofort an den Support, falls Sie dies nicht angefordert haben.",
         deleteAccountConsent: "Ich verstehe, dass alle Unterhaltungen und Einstellungen dauerhaft gelöscht und nicht wiederhergestellt werden können.",
         deleteAccountConsentRequired: "Bitte bestätigen Sie, dass alle Unterhaltungen, Einstellungen und Kontoinformationen gelöscht werden.",
         deleteAccountConfirmationPrompt: "Geben Sie zur Bestätigung DELETE MY ACCOUNT ein.",
