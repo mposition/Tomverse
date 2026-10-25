@@ -21,7 +21,7 @@ import { QA_RELEASE_TRAIN_DEFAULT_SLOTS } from "@/lib/qaReleaseTrainCore";
 import type { QaReleaseTrainSchedule } from "@/lib/qaReleaseTrainStore";
 
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
-const PAGE_PATH = "/admin/qa-release";
+const PAGE_PATH = "/admin/qa-release?tab=train";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 
 const BADGE: Record<QaReleaseTrainCargoStatus, string> = {

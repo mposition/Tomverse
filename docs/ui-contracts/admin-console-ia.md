@@ -61,7 +61,7 @@ owner-only (rule 14).
 | Operations | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | SRE agent | `/admin/sre-ops` | — |
-| Operations | QA and release | `/admin/qa-release` | `overview`, `lane`, `ci-admission` |
+| Operations | QA and release | `/admin/qa-release` | `overview`, `train`, `lane`, `ci-admission` |
 | Operations | Agent digests | `/admin/agent-digests` | `billing-finance-ops` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |

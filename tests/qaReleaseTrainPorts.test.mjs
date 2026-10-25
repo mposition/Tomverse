@@ -116,17 +116,21 @@ test("the app port reads an emergency request and asks for an emergency admissio
         return { status: 200, text: JSON.stringify(body) };
       },
     });
-  assert.deepEqual(await answerWith({ numbers: [1, 2], emergency: [3] }).selection(), { numbers: [1, 2], emergency: [3] });
+  assert.deepEqual(await answerWith({ numbers: [1, 2], emergency: { id: "cm123", numbers: [3] } }).selection(), {
+    numbers: [1, 2],
+    emergency: { id: "cm123", numbers: [3] },
+  });
   // An app older than emergency trains says nothing of them.
   assert.deepEqual(await answerWith({ numbers: [1] }).selection(), { numbers: [1], emergency: null });
-  await assert.rejects(answerWith({ numbers: [1], emergency: ["x"] }).selection(), /app_selection_shape/);
+  await assert.rejects(answerWith({ numbers: [1], emergency: { id: "cm123", numbers: ["x"] } }).selection(), /app_selection_shape/);
+  await assert.rejects(answerWith({ numbers: [1], emergency: { id: "a b", numbers: [3] } }).selection(), /app_selection_shape/);
 
   sent.length = 0;
   const ports = answerWith({ admitted: true });
-  await ports.admit("20261020-1237", true);
+  await ports.admit("20261020-1237", "cm123");
   await ports.admit("20261020-1100");
   assert.deepEqual(sent, [
-    { phase: "admit", slot: "20261020-1237", emergency: true },
+    { phase: "admit", slot: "20261020-1237", emergencyRequestId: "cm123" },
     { phase: "admit", slot: "20261020-1100" },
   ]);
 });

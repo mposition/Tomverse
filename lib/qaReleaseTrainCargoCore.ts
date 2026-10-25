@@ -243,15 +243,19 @@ export function parseQaReleaseTrainEmergencyReason(value: unknown): string | nul
 }
 
 export type QaReleaseTrainEmergency = {
-  /** The pending request's numbers, or null when none is waiting. */
-  pending: { numbers: number[]; reason: string; requestedAt: string; requestedBy: string | null } | null;
+  /**
+   * The pending request, or null when none is waiting. `id` is its audit row:
+   * the train names it when admitted, so a request replaced meanwhile is
+   * never spent by a train assembled from the one before it.
+   */
+  pending: { id: string; numbers: number[]; reason: string; requestedAt: string; requestedBy: string | null } | null;
   /** The emergency departure that took the newest request, when one did. */
   departedWith: string | null;
 };
 
 /** The emergency state from the newest request and the newest emergency admission. */
 export function qaReleaseTrainEmergencyFrom(input: {
-  request: { numbers: unknown; reason: unknown; at: Date; by: string | null } | null;
+  request: { id: string; numbers: unknown; reason: unknown; at: Date; by: string | null } | null;
   admission: { slot: string; at: Date } | null;
 }): QaReleaseTrainEmergency {
   const { request, admission } = input;
@@ -260,7 +264,7 @@ export function qaReleaseTrainEmergencyFrom(input: {
   const numbers = parseQaReleaseTrainCargoPick(request.numbers) ?? [];
   const reason = parseQaReleaseTrainEmergencyReason(request.reason);
   return {
-    pending: numbers.length > 0 && reason !== null ? { numbers, reason, requestedAt: request.at.toISOString(), requestedBy: request.by } : null,
+    pending: numbers.length > 0 && reason !== null ? { id: request.id, numbers, reason, requestedAt: request.at.toISOString(), requestedBy: request.by } : null,
     departedWith: null,
   };
 }

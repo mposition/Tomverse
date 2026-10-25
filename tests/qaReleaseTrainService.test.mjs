@@ -60,9 +60,9 @@ function ports(overrides = {}) {
         if (overrides.scheduleFails) throw new Error("app_500");
       },
       selection: async () =>
-        note("selection", { numbers: overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number), emergency: overrides.emergency ?? null }),
-      admit: async (slot, emergency) =>
-        note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot, emergency === true]), overrides.admit ?? { admitted: true }),
+        note("selection", { numbers: overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number), emergency: overrides.emergency ? { id: overrides.emergencyId ?? "req-1", numbers: overrides.emergency } : null }),
+      admit: async (slot, emergencyRequestId) =>
+        note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot, emergencyRequestId ?? null]), overrides.admit ?? { admitted: true }),
       report: async (report) => void note("report", report),
     },
   };
@@ -219,7 +219,7 @@ test("an emergency request departs off the hours, on its own minute's branch, wi
   assert.equal(outcome.slot, "20261020-1237");
   assert.deepEqual(
     calls.find(([n]) => n === "admitSlot"),
-    ["admitSlot", "20261020-1237", true],
+    ["admitSlot", "20261020-1237", "req-1"],
   );
   assert.deepEqual(calls.find(([n]) => n === "assemble")[1], { branch: "release/train-20261020-1237", numbers: [12], capacity: 30 });
   assert.ok(!calls.some(([n]) => n === "openTrains"), "an emergency does not wait for an open train");
@@ -251,4 +251,28 @@ test("off the hours an app that cannot answer is no departure, not a failed roun
     throw new Error("app_503");
   };
   assert.deepEqual(await runQaReleaseTrainRound(env(), p, Date.parse("2026-10-20T02:37:00Z")), { exitCode: 0, train: "no_departure" });
+});
+
+test("an emergency none of whose pull requests can ride, or whose read fails, never holds up the scheduled departure", async () => {
+  // In the 11:00 window: the scheduled train still goes, with the scheduled pick.
+  const unmerged = ports({ emergency: [999] });
+  const outcome = await runQaReleaseTrainRound(env(), unmerged.p, NOW);
+  assert.equal(outcome.slot, "20261020-1100");
+  assert.deepEqual(unmerged.calls.find(([n]) => n === "admitSlot"), ["admitSlot", "20261020-1100", null]);
+
+  const failing = ports({ emergency: [12] });
+  failing.p.github.cargo = async (numbers) => {
+    if (numbers.includes(12) && numbers.length === 1) throw new Error("github_502");
+    return cargo.filter((c) => numbers.includes(c.number));
+  };
+  assert.equal((await runQaReleaseTrainRound(env(), failing.p, NOW)).slot, "20261020-1100");
+
+  // Off the hours there is nothing to fall back to.
+  const off = Date.parse("2026-10-20T02:37:00Z");
+  assert.deepEqual(await runQaReleaseTrainRound(env(), ports({ emergency: [999] }).p, off), { exitCode: 0, train: "no_cargo" });
+  const offFailing = ports({ emergency: [12] });
+  offFailing.p.github.cargo = async () => {
+    throw new Error("github_502");
+  };
+  assert.deepEqual(await runQaReleaseTrainRound(env(), offFailing.p, off), { exitCode: 1, train: "read_failed", failure: "cargo:github_502" });
 });

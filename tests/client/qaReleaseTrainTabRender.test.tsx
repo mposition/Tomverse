@@ -54,12 +54,14 @@ test("an empty board says so, and an unread GitHub is named instead of guessed",
 
 test("the summary shows the next departure, what rides it, and the open train", () => {
   const html = renderToStaticMarkup(
-    <QaReleaseTrainSummary nextDepartureAt="2026-10-25T07:00:00Z" riding={16} carried={12} openTrain={2998} emergencyPending={true} />,
+    <QaReleaseTrainSummary nextDepartureAt="2026-10-25T07:00:00Z" riding={16} carried={12} openTrain={2998} emergencyPulls={2} />,
   );
   assert.match(html, /16/);
   assert.match(html, /12 carried · 4 new/);
   assert.match(html, /href="https:\/\/github.com\/mposition\/Tomverse\/pull\/2998"/);
-  assert.match(html, /Emergency requested/);
+  // A pending emergency departs first, and the scheduled time still shows.
+  assert.match(html, /Emergency: next round/);
+  assert.ok(html.includes("with 2 PR(s); the scheduled train follows at"));
 });
 
 test("only a writer is offered the emergency train", () => {

@@ -153,9 +153,13 @@ export function qaReleaseTrainPullRequest(input: {
   const included = input.picks.filter((p) => p.outcome === "included");
   const left = input.picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome));
   const already = input.picks.filter((p) => p.outcome === "already_in_main");
+  // A scheduled train's left-out pull requests ride the next scheduled train
+  // again; an emergency train's do not (its request is spent).
   const reason = {
-    conflict: "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs first",
-    over_capacity: "train full; it rides the next train",
+    conflict: input.emergency
+      ? "cherry-pick conflict on main; pick it for a later train, with the develop pull requests Admin names it needs first"
+      : "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs first",
+    over_capacity: input.emergency ? "train full; pick it for a later train" : "train full; it rides the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;
   const lines = [

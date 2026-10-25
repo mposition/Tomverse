@@ -18,6 +18,8 @@ export type QaReleaseTrainBoardStatus =
   | "unreported"
   /** Its main pull request is open. */
   | "boarding"
+  /** It opened a main pull request whose state GitHub did not give (outside the list read, or the read failed). */
+  | "unknown"
   /** Its main pull request was merged. */
   | "arrived"
   /** Its main pull request was closed without merging. */
@@ -90,7 +92,9 @@ export function qaReleaseTrainBoardRows(input: {
             ? "arrived"
             : state?.state === "closed"
               ? "cancelled"
-              : "boarding";
+              : state?.state === "open"
+                ? "boarding"
+                : "unknown";
     return {
       ...base,
       reportedAt: found.at.toISOString(),

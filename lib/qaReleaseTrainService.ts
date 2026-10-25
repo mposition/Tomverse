@@ -58,10 +58,12 @@ export type QaReleaseTrainPorts = {
     schedule(hours: number[]): Promise<void>;
     /**
      * The pull request numbers the operator picked for the next scheduled
-     * train in Admin, and an emergency request's numbers when one is waiting.
+     * train in Admin, and the emergency request waiting, if one is (its id is
+     * its audit row).
      */
-    selection(): Promise<{ numbers: number[]; emergency: number[] | null }>;
-    admit(slot: string, emergency?: boolean): Promise<{ admitted: boolean; reason?: string }>;
+    selection(): Promise<{ numbers: number[]; emergency: { id: string; numbers: number[] } | null }>;
+    /** An emergency admission names the request it was assembled from; the app refuses one since replaced. */
+    admit(slot: string, emergencyRequestId?: string): Promise<{ admitted: boolean; reason?: string }>;
     report(report: {
       slot: string;
       outcome: "opened" | "empty" | "failed";
@@ -109,11 +111,14 @@ export async function runQaReleaseTrainRound(
   // An emergency request (owner, 2026-10-25) departs on the first round after
   // it, departure hour or not, and does not wait for an open train: it is
   // the operator's call that this cannot wait. Otherwise the scheduled
-  // departure, one open train at a time.
-  let departure: { slot: string; emergency: boolean };
+  // departure, one open train at a time. An emergency none of whose pull
+  // requests can ride, or whose reads fail, never holds up a scheduled
+  // departure: the round falls through to it, and Admin still shows the
+  // request pending until it departs or is withdrawn.
+  let departure: { slot: string; emergency: boolean; emergencyRequestId?: string };
   let branch: string;
-  let cargo: QaReleaseTrainCandidate[];
-  let openTrains: number;
+  let cargo: QaReleaseTrainCandidate[] = [];
+  let openTrains = 0;
   let step = "selection";
   try {
     const scheduledNow = qaReleaseTrainDeparture(nowMs, hours);
@@ -121,16 +126,26 @@ export async function runQaReleaseTrainRound(
     // app that cannot answer then means no emergency, not a failed round.
     const selection = scheduledNow === null ? await ports.app.selection().catch(() => null) : await ports.app.selection();
     if (selection === null) return { exitCode: 0, train: "no_departure" };
-    if (selection.emergency !== null && selection.emergency.length > 0) {
-      departure = { slot: qaReleaseTrainEmergencySlot(nowMs, hours), emergency: true };
-      branch = qaReleaseTrainBranch(departure.slot);
-      step = "branch";
-      if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
-      openTrains = 0;
-      step = "cargo";
-      cargo = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency));
+    let emergency: { slot: string; branch: string; cargo: QaReleaseTrainCandidate[]; id: string } | null = null;
+    if (selection.emergency !== null && selection.emergency.numbers.length > 0) {
+      const slot = qaReleaseTrainEmergencySlot(nowMs, hours);
+      const emergencyBranch = qaReleaseTrainBranch(slot);
+      try {
+        step = "branch";
+        if (await ports.github.branchExists(emergencyBranch)) return { exitCode: 0, train: "departure_done" };
+        step = "cargo";
+        const riders = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency.numbers));
+        if (riders.length > 0) emergency = { slot, branch: emergencyBranch, cargo: riders, id: selection.emergency.id };
+      } catch (error) {
+        if (scheduledNow === null) throw error;
+      }
+    }
+    if (emergency !== null) {
+      departure = { slot: emergency.slot, emergency: true, emergencyRequestId: emergency.id };
+      branch = emergency.branch;
+      cargo = emergency.cargo;
     } else {
-      if (scheduledNow === null) return { exitCode: 0, train: "no_departure" };
+      if (scheduledNow === null) return { exitCode: 0, train: selection.emergency ? "no_cargo" : "no_departure" };
       departure = { slot: scheduledNow.slot, emergency: false };
       branch = qaReleaseTrainBranch(departure.slot);
       step = "branch";
@@ -148,7 +163,7 @@ export async function runQaReleaseTrainRound(
 
   let admission;
   try {
-    admission = await ports.app.admit(departure.slot, departure.emergency);
+    admission = await ports.app.admit(departure.slot, departure.emergencyRequestId);
   } catch (error) {
     return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure("admit", error) };
   }

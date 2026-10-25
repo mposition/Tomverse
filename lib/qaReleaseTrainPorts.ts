@@ -227,12 +227,15 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
       const numbers = answer.status === 200 ? answer.body.numbers : null;
       if (!isNumbers(numbers)) throw new Error("app_selection_shape");
       // An app older than emergency trains sends no `emergency`: none is waiting.
-      const emergency = answer.body.emergency ?? null;
-      if (emergency !== null && !isNumbers(emergency)) throw new Error("app_selection_shape");
-      return { numbers, emergency };
+      const emergency = (answer.body.emergency ?? null) as { id?: unknown; numbers?: unknown } | null;
+      if (emergency === null) return { numbers, emergency: null };
+      if (typeof emergency !== "object" || typeof emergency.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(emergency.id) || !isNumbers(emergency.numbers)) {
+        throw new Error("app_selection_shape");
+      }
+      return { numbers, emergency: { id: emergency.id, numbers: emergency.numbers } };
     },
-    async admit(slot, emergency) {
-      const answer = await call({ phase: "admit", slot, ...(emergency ? { emergency: true } : {}) });
+    async admit(slot, emergencyRequestId) {
+      const answer = await call({ phase: "admit", slot, ...(emergencyRequestId ? { emergencyRequestId } : {}) });
       return answer.status === 200 && answer.body.admitted === true
         ? { admitted: true }
         : { admitted: false, reason: typeof answer.body.reason === "string" ? answer.body.reason : "unknown" };

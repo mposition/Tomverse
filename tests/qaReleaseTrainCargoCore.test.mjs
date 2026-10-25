@@ -218,10 +218,10 @@ test("what the last train left out rides the next one until a new pick is saved"
 // Emergency trains (owner request 2026-10-25).
 test("an emergency request waits until an emergency admission after it takes it; an empty one withdraws it", () => {
   const at = new Date("2026-10-25T03:00:00Z");
-  const request = { numbers: [2988], reason: "  app sign-in\n fix ", at, by: "owner@example.com" };
+  const request = { id: "req-1", numbers: [2988], reason: "  app sign-in\n fix ", at, by: "owner@example.com" };
   assert.deepEqual(qaReleaseTrainEmergencyFrom({ request: null, admission: null }), { pending: null, departedWith: null });
   assert.deepEqual(qaReleaseTrainEmergencyFrom({ request, admission: { slot: "20261025-1000", at: new Date("2026-10-25T00:00:00Z") } }), {
-    pending: { numbers: [2988], reason: "app sign-in fix", requestedAt: at.toISOString(), requestedBy: "owner@example.com" },
+    pending: { id: "req-1", numbers: [2988], reason: "app sign-in fix", requestedAt: at.toISOString(), requestedBy: "owner@example.com" },
     departedWith: null,
   });
   assert.deepEqual(qaReleaseTrainEmergencyFrom({ request, admission: { slot: "20261025-1305", at: new Date("2026-10-25T03:05:00Z") } }), {

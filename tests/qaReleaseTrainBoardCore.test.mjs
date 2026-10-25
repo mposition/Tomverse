@@ -83,7 +83,7 @@ test("each admitted train is a row: what rode, what was left out and why, and wh
   assert.equal(rows[4].failure, "push_failed");
 });
 
-test("an open train whose state GitHub did not give is still boarding; a closed one is cancelled", () => {
+test("a train whose state GitHub did not give is unknown, never boarding; a closed one is cancelled", () => {
   const rows = qaReleaseTrainBoardRows({
     admissions: [
       { slot: "a", at: ago(10), emergency: false },
@@ -97,6 +97,6 @@ test("an open train whose state GitHub did not give is still boarding; a closed 
     titles: new Map(),
     nowMs: NOW,
   });
-  assert.deepEqual(rows.map((r) => r.status), ["boarding", "cancelled"]);
+  assert.deepEqual(rows.map((r) => r.status), ["unknown", "cancelled"]);
   assert.equal(QA_RELEASE_TRAIN_BOARD_RUNNING_MS, 30 * 60 * 1000);
 });

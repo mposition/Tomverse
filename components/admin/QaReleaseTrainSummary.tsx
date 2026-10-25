@@ -12,22 +12,30 @@ export function QaReleaseTrainSummary({
   riding,
   carried,
   openTrain,
-  emergencyPending,
+  emergencyPulls,
 }: {
   nextDepartureAt: string | null;
   riding: number;
   carried: number;
   openTrain: number | null;
-  emergencyPending: boolean;
+  /** A pending emergency request's pull request count: it departs before the scheduled train. */
+  emergencyPulls: number | null;
 }) {
   const m = useAdminMessages(adminQaReleaseTrainMessages);
   const tile = "flex min-w-0 flex-col gap-0.5 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3";
+  const scheduled = nextDepartureAt ? aestStamp(nextDepartureAt) : m.summaryNextUnknown;
   return (
     <div className="grid min-w-0 gap-3 sm:grid-cols-3" data-testid="qa-release-train-summary">
       <div className={tile}>
         <span className="text-xs text-zinc-400">{m.summaryNext}</span>
-        <span className="font-mono text-xl font-semibold text-zinc-100">{nextDepartureAt ? aestStamp(nextDepartureAt) : m.summaryNextUnknown}</span>
-        {emergencyPending ? <span className="text-xs text-red-300">{m.summaryEmergency}</span> : null}
+        {emergencyPulls !== null ? (
+          <>
+            <span className="font-mono text-xl font-semibold text-red-300">{m.summaryEmergencyNext}</span>
+            <span className="text-xs text-zinc-400">{m.summaryEmergencyNote.replace("{count}", String(emergencyPulls)).replace("{at}", scheduled)}</span>
+          </>
+        ) : (
+          <span className="font-mono text-xl font-semibold text-zinc-100">{scheduled}</span>
+        )}
       </div>
       <div className={tile}>
         <span className="text-xs text-zinc-400">{m.summaryRiding}</span>

@@ -15,6 +15,7 @@ const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
 const STATUS_STYLE: Record<QaReleaseTrainBoardStatus, string> = {
   running: "bg-[#13314f] text-[#9cc6f0]",
   boarding: "bg-[#4a3510] text-[#fac775]",
+  unknown: "bg-[#3a3936] text-[#c9c7bd]",
   arrived: "bg-[#24361a] text-[#a8d672]",
   cancelled: "bg-[#3a3936] text-[#c9c7bd]",
   empty: "bg-[#3a3936] text-[#c9c7bd]",
@@ -68,6 +69,7 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
       running: m.statusRunning,
       unreported: m.statusUnreported,
       boarding: m.statusBoarding,
+      unknown: m.statusUnknown,
       arrived: m.statusArrived,
       cancelled: m.statusCancelled,
       empty: m.statusEmpty,

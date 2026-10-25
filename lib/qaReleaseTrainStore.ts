@@ -33,8 +33,9 @@ export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "alread
 /**
  * Whether this departure may run: the caller's revision is the newest and this
  * departure was not admitted before (as either kind). An emergency departure
- * also needs an emergency request still pending, so a replayed or stale call
- * cannot start one. All of it is read after the audit chain lock, so nothing
+ * also needs the very request the train read to be the one still pending, so
+ * a replayed or stale call, or one assembled from a request since replaced or
+ * withdrawn, cannot start one. All of it is read after the audit chain lock, so nothing
  * can change between the read and the admission. A refusal writes nothing.
  * The develop merge lane's latch is not read (owner decision 2026-10-23): a
  * dev deploy problem says nothing about the picked pull requests, which run
@@ -43,7 +44,8 @@ export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "alread
 export async function admitQaReleaseTrain(input: {
   callerRevision: number | null;
   slot: string;
-  emergency?: boolean;
+  /** The pending emergency request the train read and assembled from (its audit row id). */
+  emergencyRequestId?: string;
 }): Promise<{ admitted: true; controlRevision: number } | { admitted: false; reason: QaReleaseTrainRefusal }> {
   return prisma.$transaction(
     async (tx) => {
@@ -58,16 +60,17 @@ export async function admitQaReleaseTrain(input: {
         select: { id: true },
       });
       if (earlier) return { admitted: false as const, reason: "already_admitted" as const };
-      const pending = input.emergency ? (await readQaReleaseTrainEmergency(tx)).pending : null;
-      if (input.emergency && pending === null) return { admitted: false as const, reason: "no_emergency" as const };
+      const emergency = input.emergencyRequestId !== undefined;
+      const pending = emergency ? (await readQaReleaseTrainEmergency(tx)).pending : null;
+      if (emergency && pending?.id !== input.emergencyRequestId) return { admitted: false as const, reason: "no_emergency" as const };
       await writeSystemAuditLog({
         tx,
         systemActor: "qa-release-merge-lane",
-        action: input.emergency ? QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION : QA_RELEASE_TRAIN_ADMITTED_ACTION,
+        action: emergency ? QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION : QA_RELEASE_TRAIN_ADMITTED_ACTION,
         targetType: TARGET_TYPE,
         targetId: input.slot,
-        summary: input.emergency ? `Emergency release train ${input.slot} admitted.` : `Release train ${input.slot} admitted.`,
-        metadata: { slot: input.slot, controlRevision: control.revision, ...(pending ? { emergency: true, numbers: pending.numbers } : {}) },
+        summary: emergency ? `Emergency release train ${input.slot} admitted.` : `Release train ${input.slot} admitted.`,
+        metadata: { slot: input.slot, controlRevision: control.revision, ...(pending ? { emergency: true, requestId: pending.id, numbers: pending.numbers } : {}) },
       });
       return { admitted: true as const, controlRevision: control.revision };
     },
@@ -193,7 +196,7 @@ export async function readQaReleaseTrainEmergency(db: Prisma.TransactionClient =
     db.adminAuditLog.findFirst({
       where: { action: QA_RELEASE_TRAIN_EMERGENCY_ACTION, targetType: QA_RELEASE_TRAIN_EMERGENCY_TARGET_TYPE, targetId: QA_RELEASE_TRAIN_EMERGENCY_TARGET_ID },
       orderBy: { createdAt: "desc" },
-      select: { createdAt: true, actorEmail: true, metadata: true },
+      select: { id: true, createdAt: true, actorEmail: true, metadata: true },
     }),
     db.adminAuditLog.findFirst({
       where: { action: QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION, targetType: TARGET_TYPE },
@@ -203,7 +206,9 @@ export async function readQaReleaseTrainEmergency(db: Prisma.TransactionClient =
   ]);
   const metadata = request?.metadata as { numbers?: unknown; reason?: unknown } | null | undefined;
   return qaReleaseTrainEmergencyFrom({
-    request: request ? { numbers: metadata?.numbers ?? null, reason: metadata?.reason ?? null, at: request.createdAt, by: request.actorEmail } : null,
+    request: request
+      ? { id: request.id, numbers: metadata?.numbers ?? null, reason: metadata?.reason ?? null, at: request.createdAt, by: request.actorEmail }
+      : null,
     admission: admission && typeof admission.targetId === "string" ? { slot: admission.targetId, at: admission.createdAt } : null,
   });
 }

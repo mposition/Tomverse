@@ -103,7 +103,7 @@ async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number 
         riding={next.numbers.length}
         carried={carried}
         openTrain={board.rows.find((row) => row.status === "boarding")?.pullRequestNumber ?? null}
-        emergencyPending={next.emergency.pending !== null}
+        emergencyPulls={next.emergency.pending?.numbers.length ?? null}
       />
       <QaReleaseTrainEmergencySection canWrite={canWrite} />
       <QaReleaseTrainCargoSection canWrite={canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
