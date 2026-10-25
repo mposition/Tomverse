@@ -22,6 +22,28 @@ export function filenameFromContentDisposition(
 }
 
 export type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+/** An intent signal can request permission; it never contains device data. */
+export async function requestChatLocationIntent(text: string, transport: ApiFetch, options: { turnstileToken?: string } = {}): Promise<boolean> {
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await transport("/api/chat/location-intent", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.slice(0, 8_000), ...options }), signal: controller.signal,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      if (body?.code === "TURNSTILE_REQUIRED") throw new ApiClientError(response.status, body.code);
+      return false;
+    }
+    return (await response.json())?.requiresLocation === true;
+  } catch (error) {
+    if (error instanceof ApiClientError && error.code === "TURNSTILE_REQUIRED") throw error;
+    return false;
+  }
+  finally { clearTimeout(deadline); }
+}
 export class ApiClientError extends Error {
   constructor(public status: number, public code: string) { super(code); }
 }

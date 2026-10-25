@@ -5,6 +5,17 @@ import { withAndroidLocationPermission, withIosLocationPermission } from "../app
 
 const position = { coords: { latitude: 1, longitude: 2, accuracy: 3 }, timestamp: Date.now() };
 
+test("a device's existing always-allow grant never requests permission again, even after app reload", async () => {
+  let reads = 0;
+  const reader = createNativeLocationReader({
+    checkPermissions: async () => ({ coarseLocation: "granted", location: "granted" }),
+    requestPermissions: async () => { throw Error("must not re-prompt an existing device grant"); },
+    getCurrentPosition: async () => { reads++; return position; },
+  }, true);
+  await reader(true); await reader(false); await reader(true);
+  assert.equal(reads, 3);
+});
+
 test("native opt-in requests only coarse permission and each read asks for a fresh fix", async () => {
   const calls = [];
   const reader = createNativeLocationReader({
