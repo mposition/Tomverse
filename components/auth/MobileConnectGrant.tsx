@@ -5,7 +5,7 @@ import { mobileChatCopy } from "@/locales/mobileChat";
 import { useLanguage } from "@/components/LanguageProvider";
 import { mobileAuthReturnPath } from "@/lib/mobileBrowserLogin";
 
-export const MobileConnectGrant = ({ challenge, returnToApp = false }: { challenge: string; returnToApp?: boolean }) => {
+export const MobileConnectGrant = ({ challenge, returnToApp = false, returnOrigin = "" }: { challenge: string; returnToApp?: boolean; returnOrigin?: string }) => {
   const { lang } = useLanguage();
   const copy = mobileChatCopy(lang);
   const [grant, setGrant] = useState("");
@@ -42,7 +42,7 @@ export const MobileConnectGrant = ({ challenge, returnToApp = false }: { challen
     <label className="mb-4 flex items-center gap-3"><input type="checkbox" checked={matched} onChange={(event) => setMatched(event.target.checked)} />{copy.requestMatch}</label>
     <button type="button" disabled={pending || !matched} onClick={() => { void create(); }} className="min-h-11 rounded-xl bg-blue-600 px-5 py-2 text-white disabled:opacity-50" data-testid="mobile-create-code">{copy.createCode}</button>
     {grant && <div className="mt-6 space-y-3" role="status">
-      {returnToApp && <a href={mobileAuthReturnPath(challenge, grant)} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-11 items-center rounded-xl bg-blue-600 px-5 py-2 text-white" data-testid="mobile-return-to-app">{copy.returnToApp}</a>}
+      {returnToApp && <a href={returnOrigin + mobileAuthReturnPath(challenge, grant)} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-11 items-center rounded-xl bg-blue-600 px-5 py-2 text-white" data-testid="mobile-return-to-app">{copy.returnToApp}</a>}
       <label htmlFor="mobile-pairing-code">{copy.code}</label>
       <input id="mobile-pairing-code" readOnly value={grant} autoComplete="off" spellCheck={false} onFocus={(event) => event.target.select()} className="w-full rounded-lg border p-3 font-mono" />
       <p>{copy.codeNote}</p>

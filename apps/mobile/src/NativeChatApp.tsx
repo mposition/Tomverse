@@ -8,6 +8,7 @@ import { nativeChatLocation } from "./chatLocation";
 import { NativeChatError, sendNativeChat, type NativeChatMessage } from "./chatClient";
 
 const appLinksEnabled = import.meta.env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED === "true";
+const authReturnOrigin = import.meta.env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? TOMVERSE_API_ORIGIN;
 
 export const NativeChatApp = () => {
   const copy = mobileChatCopy(navigator.language);
@@ -123,7 +124,7 @@ export const NativeChatApp = () => {
     let disposed = false;
     const onReturn = ({ url }: { url: string }) => {
       if (disposed) return;
-      const grant = readMobileAuthReturn(url, TOMVERSE_API_ORIGIN, pendingChallenge.current);
+      const grant = readMobileAuthReturn(url, authReturnOrigin, pendingChallenge.current);
       if (grant) void completeConnection(grant, true);
     };
     const listener = App.addListener("appUrlOpen", onReturn);

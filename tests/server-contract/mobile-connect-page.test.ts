@@ -42,11 +42,12 @@ test("browser pairing stays disabled by default and validates its public challen
 });
 
 test("system-browser login keeps its app return destination through the ordinary web sign-in page", async () => {
-  const keys = ["MOBILE_CHAT_ENABLED", "MOBILE_AUTH_APP_LINKS_ENABLED", "MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS"] as const;
+  const keys = ["MOBILE_CHAT_ENABLED", "MOBILE_AUTH_APP_LINKS_ENABLED", "MOBILE_AUTH_APP_LINK_ORIGIN", "MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS"] as const;
   const previous = keys.map((key) => process.env[key]);
   try {
     process.env.MOBILE_CHAT_ENABLED = "true";
     process.env.MOBILE_AUTH_APP_LINKS_ENABLED = "true";
+    process.env.MOBILE_AUTH_APP_LINK_ORIGIN = "https://links.tomverse.test";
     process.env.MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS = Array(32).fill("AB").join(":");
     ready = true; signedIn = false;
     const query = { codeChallenge: challenge, returnTo: "app" };
@@ -55,6 +56,7 @@ test("system-browser login keeps its app return destination through the ordinary
     signedIn = true;
     const element = await Page({ searchParams: Promise.resolve(query) });
     assert.equal(element.props.returnToApp, true);
+    assert.equal(element.props.returnOrigin, "https://links.tomverse.test");
     delete process.env.MOBILE_AUTH_APP_LINKS_ENABLED;
     assert.equal((await Page({ searchParams: Promise.resolve(query) })).props.returnToApp, false);
     process.env.MOBILE_AUTH_APP_LINKS_ENABLED = "true";

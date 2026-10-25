@@ -6,6 +6,8 @@ const callbackPath = "/mobile/auth/callback";
 const start = "<!-- tomverse-auth-app-link -->";
 const end = "<!-- /tomverse-auth-app-link -->";
 const managed = /<!-- tomverse-auth-app-link -->[\s\S]*?<!-- \/tomverse-auth-app-link -->/g;
+const managedDomains = /<!-- tomverse-auth-domains -->[\s\S]*?<!-- \/tomverse-auth-domains -->/g;
+const managedSigning = /\s*CODE_SIGN_ENTITLEMENTS = App\/TomverseAuth\.entitlements; \/\* tomverse-auth-app-link \*\//g;
 
 export const authLinkHost = (origin) => {
   const url = new URL(origin);
@@ -29,21 +31,22 @@ export const withAndroidAuthAppLink = (xml, host) => {
 };
 
 export const withIosAuthAppLink = (xml, host) => {
-  if (!host) return xml.replace(managed, "");
+  if (!host) return xml.replace(managedDomains, "").replace(managed, "");
   if (!/^[a-z0-9.-]+$/.test(host)) throw new Error("Invalid app-link host.");
   const entry = `${start}\n        <string>applinks:${host}</string>\n        ${end}`;
   if (xml.includes(start)) return xml.replace(managed, entry);
   const source = xml;
   const existing = /(<key>com\.apple\.developer\.associated-domains<\/key>\s*<array>)([\s\S]*?)(<\/array>)/;
   if (existing.test(source)) return source.replace(existing, `$1$2\n        ${entry}\n    $3`);
+  if (source.includes("<key>com.apple.developer.associated-domains</key>")) throw new Error("Associated Domains must be an array.");
   const close = source.lastIndexOf("</dict>");
   if (close < 0) throw new Error("Invalid entitlements plist.");
-  return `${source.slice(0, close)}    <key>com.apple.developer.associated-domains</key>\n    <array>\n        ${entry}\n    </array>\n${source.slice(close)}`;
+  return `${source.slice(0, close)}    <!-- tomverse-auth-domains -->\n    <key>com.apple.developer.associated-domains</key>\n    <array>\n        ${entry}\n    </array>\n    <!-- /tomverse-auth-domains -->\n${source.slice(close)}`;
 };
 
 export const configureAuthAppLinks = (root, env = process.env) => {
   const host = env.NATIVE_AUTH_APP_LINKS_ENABLED === "true"
-    ? authLinkHost(env.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app") : null;
+    ? authLinkHost(env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? env.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app") : null;
   const update = (path, transform) => {
     if (!existsSync(path)) return;
     const source = readFileSync(path, "utf8");
@@ -55,13 +58,14 @@ export const configureAuthAppLinks = (root, env = process.env) => {
   if (!existsSync(project)) return;
   // Keep any existing entitlements file rather than replacing the app's other capabilities.
   const source = readFileSync(project, "utf8");
+  if (!host) update(project, (text) => text.replace(managedSigning, ""));
   const settings = [...source.matchAll(/CODE_SIGN_ENTITLEMENTS = "?([^";]+)"?;/g)].map((match) => match[1]);
   const names = [...new Set(settings)];
   if (names.length > 1 || (names.length && !/^App\/[A-Za-z0-9_.-]+\.entitlements$/.test(names[0]))) {
     if (host) throw new Error("Select a single App/*.entitlements file for the iOS target before enabling auth links.");
     return;
   }
-  const name = names[0] ?? "App/App.entitlements";
+  const name = names[0] ?? "App/TomverseAuth.entitlements";
   const entitlements = resolve(root, "ios/App", name);
   if (host && !existsSync(entitlements)) writeFileSync(entitlements, '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n', "utf8");
   update(entitlements, (xml) => withIosAuthAppLink(xml, host));
@@ -72,7 +76,7 @@ export const configureAuthAppLinks = (root, env = process.env) => {
     const updated = source.replace(blocks, (block) => {
       if (!block.includes("PRODUCT_BUNDLE_IDENTIFIER")) return block;
       count++;
-      return block.replace("buildSettings = {", `buildSettings = {\n\t\t\t\tCODE_SIGN_ENTITLEMENTS = ${name};`);
+      return block.replace("buildSettings = {", `buildSettings = {\n\t\t\t\tCODE_SIGN_ENTITLEMENTS = ${name}; /* tomverse-auth-app-link */`);
     });
     if (!count) throw new Error("iOS app build settings were not found.");
     writeFileSync(project, updated, "utf8");

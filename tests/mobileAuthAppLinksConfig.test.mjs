@@ -25,6 +25,10 @@ test("native links enroll only HTTPS on the exact callback and preserve other ca
   assert.match(entitlements, /applinks:tomverse.app/);
   assert.equal(withIosAuthAppLink(entitlements, "tomverse.app"), entitlements);
   assert.doesNotMatch(withIosAuthAppLink(entitlements, null), /applinks:/);
+  assert.doesNotMatch(withIosAuthAppLink(entitlements, null), /com.apple.developer.associated-domains/);
+  const existing = '<plist><dict><key>com.apple.developer.associated-domains</key><array><string>webcredentials:existing.test</string></array></dict></plist>';
+  const preserved = withIosAuthAppLink(withIosAuthAppLink(existing, "tomverse.app"), null);
+  assert.match(preserved, /webcredentials:existing.test/);
 });
 
 test("sync configures generated projects idempotently and disabling removes only managed links", () => {
@@ -35,7 +39,7 @@ test("sync configures generated projects idempotently and disabling removes only
     mkdirSync(join(root, "ios/App/App"), { recursive: true });
     const manifest = join(root, "android/app/src/main/AndroidManifest.xml");
     const project = join(root, "ios/App/App.xcodeproj/project.pbxproj");
-    const entitlements = join(root, "ios/App/App/App.entitlements");
+    const entitlements = join(root, "ios/App/App/TomverseAuth.entitlements");
     writeFileSync(manifest, android);
     writeFileSync(project, 'buildSettings = {\nPRODUCT_BUNDLE_IDENTIFIER = app.tomverse.shell;\n};');
     const env = { NATIVE_AUTH_APP_LINKS_ENABLED: "true", VITE_TOMVERSE_API_ORIGIN: "https://tomverse.app" };
@@ -43,9 +47,11 @@ test("sync configures generated projects idempotently and disabling removes only
     const before = [manifest, project, entitlements].map((path) => readFileSync(path, "utf8"));
     configureAuthAppLinks(root, env);
     assert.deepEqual([manifest, project, entitlements].map((path) => readFileSync(path, "utf8")), before);
-    assert.match(before[1], /CODE_SIGN_ENTITLEMENTS = App\/App.entitlements/);
+    assert.match(before[1], /CODE_SIGN_ENTITLEMENTS = App\/TomverseAuth.entitlements/);
     configureAuthAppLinks(root, {});
     assert.doesNotMatch(readFileSync(manifest, "utf8"), /autoVerify/);
     assert.doesNotMatch(readFileSync(entitlements, "utf8"), /applinks:/);
+    assert.doesNotMatch(readFileSync(entitlements, "utf8"), /com.apple.developer.associated-domains/);
+    assert.doesNotMatch(readFileSync(project, "utf8"), /CODE_SIGN_ENTITLEMENTS/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

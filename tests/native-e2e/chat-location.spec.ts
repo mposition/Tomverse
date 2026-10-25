@@ -113,23 +113,23 @@ const returnFromBrowser = async (page: Page, url: string, twice = false) => page
 test("browser sign-in returns to the pending device and duplicate links exchange exactly once", async ({ page }) => {
   await installDevice(page, false);
   await page.getByTestId("native-sign-in").click();
-  await returnFromBrowser(page, `https://api.native-chat.test/mobile/auth/callback#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`, true);
+  await returnFromBrowser(page, `https://links.native-chat.test/mobile/auth/callback#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`, true);
   await expect(page.getByTestId("native-chat-input")).toBeVisible();
   const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);
   expect(calls.filter((call) => call === "MobileAuth.completeSignIn")).toHaveLength(1);
   expect(calls).toContain("Browser.close");
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
-  await returnFromBrowser(page, `https://api.native-chat.test/mobile/auth/callback#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`);
+  await returnFromBrowser(page, `https://links.native-chat.test/mobile/auth/callback#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`);
   await expect(page.getByTestId("native-sign-in")).toBeVisible();
 });
 
 test("untrusted and unrelated browser returns cannot connect or consume the current request", async ({ page }) => {
   await installDevice(page, false);
   const fragment = `#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`;
-  await returnFromBrowser(page, "https://api.native-chat.test/mobile/auth/callback" + fragment);
+  await returnFromBrowser(page, "https://links.native-chat.test/mobile/auth/callback" + fragment);
   await page.getByTestId("native-sign-in").click();
   await returnFromBrowser(page, "https://evil.test/mobile/auth/callback" + fragment);
-  await returnFromBrowser(page, "https://api.native-chat.test/mobile/auth/callback" + fragment.replace("a".repeat(43), "b".repeat(43)));
+  await returnFromBrowser(page, "https://links.native-chat.test/mobile/auth/callback" + fragment.replace("a".repeat(43), "b".repeat(43)));
   await expect(page.getByTestId("native-chat-input")).toHaveCount(0);
   const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);
   expect(calls).not.toContain("MobileAuth.completeSignIn");

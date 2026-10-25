@@ -7,7 +7,7 @@ import { isPkceChallenge } from "@/lib/mobileLoginGrant";
 import { mobileAuthReady } from "@/lib/mobileAccessToken";
 import { mobileChatEnabled } from "@/lib/mobileChatContract";
 import { MobileConnectGrant } from "@/components/auth/MobileConnectGrant";
-import { mobileAppLinks } from "@/lib/mobileAppLinks";
+import { mobileAppLinkOrigin, mobileAppLinks } from "@/lib/mobileAppLinks";
 
 export const metadata = { title: "Connect your Tomverse app", robots: { index: false, follow: false } };
 
@@ -25,5 +25,5 @@ export default async function MobileConnectPage({ searchParams }: {
     const callback = `/mobile/connect?codeChallenge=${encodeURIComponent(challenge)}${returnToApp ? "&returnTo=app" : ""}`;
     redirect(`/auth/signin?callbackUrl=${encodeURIComponent(callback)}`);
   }
-  return <MobileConnectGrant challenge={challenge} returnToApp={returnToApp} />;
+  return <MobileConnectGrant challenge={challenge} returnToApp={returnToApp} returnOrigin={mobileAppLinkOrigin() ?? ""} />;
 }

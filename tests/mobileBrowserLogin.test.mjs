@@ -6,6 +6,8 @@ import { mobileAppLinks } from "../lib/mobileAppLinks.ts";
 import { GET as callbackPage } from "../app/mobile/auth/callback/route.ts";
 import { GET as androidAssociation } from "../app/.well-known/assetlinks.json/route.ts";
 import { GET as iosAssociation } from "../app/.well-known/apple-app-site-association/route.ts";
+import { NextRequest } from "next/server";
+import { proxy } from "../proxy.ts";
 
 const origin = "https://tomverse.app";
 const challenge = "a".repeat(43);
@@ -36,11 +38,13 @@ test("the browser handoff accepts only the exact pending request and carries no 
 test("associations are default-off and publish only configured release signing identities", async () => {
   assert.deepEqual(mobileAppLinks({}), { android: [], ios: [] });
   assert.deepEqual(mobileAppLinks({ MOBILE_AUTH_APP_LINKS_ENABLED: "true" }), { android: [], ios: [] });
-  const config = { MOBILE_AUTH_APP_LINKS_ENABLED: "true", MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS: fingerprint,
+  const config = { MOBILE_AUTH_APP_LINKS_ENABLED: "true", MOBILE_AUTH_APP_LINK_ORIGIN: "https://links.tomverse.test", MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS: fingerprint,
     MOBILE_AUTH_IOS_APP_ID: "A1B2C3D4E5.app.tomverse.shell" };
   const result = mobileAppLinks(config);
   assert.deepEqual(result.android[0].target, { namespace: "android_app", package_name: "app.tomverse.shell", sha256_cert_fingerprints: [fingerprint] });
   assert.deepEqual(result.ios, [{ appID: config.MOBILE_AUTH_IOS_APP_ID, paths: ["/mobile/auth/callback"] }]);
+  assert.deepEqual(mobileAppLinks({ ...config, MOBILE_AUTH_APP_LINK_ORIGIN: origin }).ios, []);
+  assert.deepEqual(mobileAppLinks({ ...config, MOBILE_AUTH_APP_LINK_ORIGIN: "https://links.tomverse.test/evil" }), { android: [], ios: [] });
   assert.deepEqual(mobileAppLinks({ ...config, MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS: fingerprint + ",invalid", MOBILE_AUTH_IOS_APP_ID: "A1B2C3D4E5.other.app" }), { android: [], ios: [] });
   const previous = Object.fromEntries(Object.keys(config).map((key) => [key, process.env[key]]));
   try {
@@ -75,4 +79,28 @@ test("the browser fallback clears the URL, shows only a short-lived code, and lo
   assert.equal(input.value, grant);
   expire();
   assert.equal(input.value, "");
+});
+
+test("the deployed proxy preserves callback isolation while retaining host and origin-secret gates", () => {
+  const previousMode = process.env.CSP_MODE;
+  const previousRequired = process.env.REQUIRE_CLOUDFLARE_ORIGIN_SECRET;
+  const previousSecret = process.env.CLOUDFLARE_ORIGIN_SECRET;
+  try {
+    process.env.CSP_MODE = "enforce";
+    delete process.env.REQUIRE_CLOUDFLARE_ORIGIN_SECRET;
+    const request = (host = "tomverse.app", path = "/mobile/auth/callback") => new NextRequest(origin + path, { headers: { host, "x-nonce": "forged" } });
+    const forwarded = proxy(request());
+    assert.equal(forwarded.headers.get("x-middleware-next"), "1");
+    assert.equal(forwarded.headers.get("content-security-policy"), null);
+    assert.equal(forwarded.headers.get("x-middleware-request-x-nonce"), null);
+    assert.match(proxy(request("tomverse.app", "/chat")).headers.get("content-security-policy"), /script-src/);
+    assert.equal(proxy(request("evil.test")).status, 421);
+    process.env.REQUIRE_CLOUDFLARE_ORIGIN_SECRET = "true";
+    process.env.CLOUDFLARE_ORIGIN_SECRET = "fixture-origin-secret";
+    assert.equal(proxy(request()).status, 421);
+  } finally {
+    for (const [key, value] of Object.entries({ CSP_MODE: previousMode, REQUIRE_CLOUDFLARE_ORIGIN_SECRET: previousRequired, CLOUDFLARE_ORIGIN_SECRET: previousSecret })) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 });

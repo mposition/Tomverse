@@ -72,9 +72,11 @@ signed build and its matching API deployment:
 | Location | Setting |
 |---|---|
 | API server | `MOBILE_AUTH_APP_LINKS_ENABLED=true` |
+| API server | `MOBILE_AUTH_APP_LINK_ORIGIN`: a dedicated HTTPS return origin on this deployment, different from the web login host for iOS |
 | API server, Android | `MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS`: comma-separated SHA-256 fingerprints of the installed app's signing certificates (Play App Signing certificate for Play builds) |
 | API server, iOS | `MOBILE_AUTH_IOS_APP_ID`: the actual App ID prefix plus `.app.tomverse.shell` |
 | Vite build | `VITE_MOBILE_AUTH_APP_LINKS_ENABLED=true` |
+| Vite build and Capacitor sync | `VITE_MOBILE_AUTH_APP_LINK_ORIGIN`: the same dedicated return origin |
 | Capacitor sync | `NATIVE_AUTH_APP_LINKS_ENABLED=true` |
 
 Use the same `VITE_TOMVERSE_API_ORIGIN` for build and sync. The sync hook adds
@@ -82,6 +84,11 @@ an Android auto-verified intent filter for only the callback path and configures
 iOS Associated Domains in the app's entitlements/build settings. Existing
 capabilities are preserved; disabling the sync switch removes only managed
 entries. Enable Associated Domains for the iOS App ID and signing profile too.
+Attach the return hostname to this API deployment and explicitly add it to
+`ALLOWED_REQUEST_HOSTS`, retaining the existing Cloudflare origin-secret gate.
+Serve the two association paths and callback over HTTPS with no redirect.
+iOS [keeps same-host browser links in Safari](https://developer.apple.com/documentation/technotes/tn3155-debugging-universal-links), so an iOS association is withheld
+when the return origin matches `NEXTAUTH_URL` (or its production default).
 The API publishes `/.well-known/assetlinks.json` and
 `/.well-known/apple-app-site-association` only with valid, configured signing
 identities. No placeholder signing identity is published.

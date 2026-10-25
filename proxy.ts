@@ -372,6 +372,13 @@ export function proxy(request: NextRequest) {
     return redirect;
   }
 
+  // This standalone callback owns a resource-free CSP and loads no app layout.
+  // Preserve its policy after the normal host, origin-secret and auth checks.
+  if (request.nextUrl.pathname === "/mobile/auth/callback") {
+    requestHeaders.delete("x-nonce");
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   const isStaticMarketingRequest = marketing.staticMarketing;
   const staticMarketingHashes = isStaticMarketingRequest
     ? getStaticMarketingCspHashes(request.nextUrl.pathname)
