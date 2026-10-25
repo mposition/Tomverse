@@ -14,12 +14,12 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   for the Task roles its v22 profile actually runs -- the ready check reads
  *   the same roles, so a Task no worker can run gets no ceiling;
  * - prices: the chat model registry (Admin › Models) resolved the way Chat
- *   bills it, at the tier the grade's input cap reaches, valid from the time
- *   the model's row last changed -- so usage that ended before a price change
- *   is never priced at the new rate. Cache reads use the resolved multiplier;
- *   cache writes use the verified write rate, or twice the input rate (the
- *   dearest Anthropic write) when none is verified. Tool costs are capped at
- *   zero;
+ *   bills it, at the tier the grade's input cap reaches, valid from the
+ *   moment the model's row last changed -- so usage that ended before a price
+ *   change is never priced at the new rate. Cache reads use the resolved
+ *   multiplier; cache writes use the verified write rate, and 0 marks a model
+ *   with none (its cache writes are left unpriced, never invented). Tool
+ *   costs are capped at zero;
  * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code.
  *
  * Deterministic: the same registries give the same catalog digest, so a Task
@@ -124,8 +124,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       outputMicroUsdPerMillion: output,
       cacheReadMicroUsdPerMillion: Number.isFinite(multiplier) && multiplier > 0
         ? Math.ceil(uncached * multiplier) : uncached,
-      cacheWriteMicroUsdPerMillion: microUsd(price.cacheWriteUsdPerMillionTokens) ??
-        uncached * 2,
+      cacheWriteMicroUsdPerMillion: microUsd(price.cacheWriteUsdPerMillionTokens) ?? 0,
       toolCostCapMicroUsdPerAttempt: 0,
     });
   }

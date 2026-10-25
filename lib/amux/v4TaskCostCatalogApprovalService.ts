@@ -32,10 +32,12 @@ async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {
  * The Task cost catalog as the registries give it in this transaction (owner
  * decision 2026-10-25: no separate price approval): v22 workers from the
  * worker registry, prices from Admin › Models resolved the way Chat bills
- * them. A model id is matched exactly first; a model named only as another
+ * them, at `options.at` when given (the price schedule in force then). A
+ * model id is matched exactly first; a model named only as another
  * row's API model takes the dearest such row, so a duplicate never lowers it.
  */
-export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
+export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient,
+  options: { at?: Date } = {}) {
   const { registrations, derived } = await readAmuxRegistryAndDerivedCatalog(tx);
   if (!registrations || !derived) {
     throw new AmuxV4TaskCatalogApprovalError("worker_registry_unavailable");
@@ -55,17 +57,17 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
       models.filter((model) => model.apiModel === modelId);
     if (candidates.length === 0) return null;
     const resolved = candidates.map((model) =>
-      resolveModelPricing(model, { estimatedPromptTokens: inputTokens }));
+      resolveModelPricing(model, { estimatedPromptTokens: inputTokens, at: options.at }));
     const writes = resolved.flatMap((row) =>
       row.cacheWriteUsdPerMillionTokens === null ? [] : [row.cacheWriteUsdPerMillionTokens]);
-    // The rows' last change, to the whole second so the app clock that set it
-    // never sits ahead of the database clock that prices against it.
+    // The rows' last change, exactly: rounding it down would price usage that
+    // ended just before a change at the new rate.
     const changedAt = Math.max(...candidates.map((model) =>
       updatedAt.get(model.id) ?? 0));
     return {
       cacheWriteUsdPerMillionTokens: writes.length === candidates.length ?
         Math.max(...writes) : null,
-      verifiedAt: new Date(Math.floor(changedAt / 1000) * 1000).toISOString(),
+      verifiedAt: new Date(changedAt).toISOString(),
       inputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.inputUsdPerMillionTokens)),
       outputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.outputUsdPerMillionTokens)),
       cachedInputPriceMultiplier: Math.max(...resolved.map((row) => row.cachedInputPriceMultiplier)),

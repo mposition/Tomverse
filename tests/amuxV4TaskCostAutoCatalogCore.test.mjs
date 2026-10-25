@@ -20,7 +20,7 @@ const workers = [
   { workerName: "claude-contract", modelId: "claude-opus-4-8",
     roles: ["design", "implement", "investigate"], roleCeiling: "contract" },
 ];
-const CHANGED = "2026-10-20T03:00:00.000Z";
+const CHANGED = "2026-10-20T03:00:00.900Z";
 const flat = {
   "claude-haiku-4-5": { inputUsdPerMillionTokens: 0.5, outputUsdPerMillionTokens: 1,
     cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 0.625, verifiedAt: CHANGED },
@@ -93,10 +93,10 @@ test("the ceiling is the grade caps times the dearest route at the grade", () =>
     { inputTokens: 1_000_000, outputTokens: 128_000, maxAttempts: 3 });
 });
 
-test("a cache write without a verified rate is priced at twice the input rate", () => {
+test("a cache write without a verified rate is never invented", () => {
   const { catalog } = derive();
   const route = catalog.routes.find((entry) => entry.modelId === "claude-sonnet-5");
-  assert.equal(route.cacheWriteMicroUsdPerMillion, 2 * 3_000_000);
+  assert.equal(route.cacheWriteMicroUsdPerMillion, 0, "0 marks no verified write rate");
   assert.equal(catalog.routes.find((entry) => entry.modelId === "claude-opus-4-8")
     .cacheWriteMicroUsdPerMillion, 6_250_000);
 });
@@ -107,8 +107,9 @@ test("a price holds from the model row's last change and does not expire", () =>
   for (const asOf of ["2026-10-25T00:00:00.000Z", "2030-06-01T00:00:00.000Z"]) {
     assert.equal(ceiling(catalog, "implement", "advanced", asOf).ok, true, asOf);
   }
-  assert.equal(ceiling(catalog, "implement", "advanced", "2026-10-20T02:59:59.999Z").ok,
-    false, "usage before the price change is not priced at the new rate");
+  assert.equal(ceiling(catalog, "implement", "advanced", "2026-10-20T03:00:00.500Z").ok,
+    false, "usage that ended earlier in the same second is not priced at the new rate");
+  assert.equal(ceiling(catalog, "implement", "advanced", CHANGED).ok, true);
   const odd = derive({ workers: [workers[0]], priceFor: () => ({
     ...flat["claude-haiku-4-5"], verifiedAt: "2026-10-20" }) });
   assert.equal(odd.ok, false, "a malformed change time never prices a route");

@@ -13,6 +13,8 @@ let authoritativeFrame: unknown = null;
 let authorityCalls = 0;
 let catalogReads = 0;
 let catalogModelId = "";
+let catalogAt: Date | undefined;
+let catalogCacheWrite = 400_000;
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   writeSystemAuditLog: async (input: Record<string, unknown>) => {
@@ -26,8 +28,9 @@ mock.module(mod("lib/amux/v4TaskCostCatalogCore.ts"), { namedExports: {
 } });
 // Task prices come from the registries (owner decision 2026-10-25).
 mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
-  readAmuxV4TaskAutoCatalog: async () => {
+  readAmuxV4TaskAutoCatalog: async (_tx: unknown, options: { at?: Date } = {}) => {
     catalogReads += 1;
+    catalogAt = options.at;
     return { ok: true, catalogDigest, catalogId: "registry:one", catalog: {
       pricingVersion: "price-v2",
       routes: [{ enabled: true, workerName: "worker-one",
@@ -36,7 +39,7 @@ mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports:
         pricingExpiresAt: "2100-01-01T00:00:00.000Z",
         uncachedInputMicroUsdPerMillion: 2_000_000,
         cacheReadMicroUsdPerMillion: 200_000,
-        cacheWriteMicroUsdPerMillion: 400_000,
+        cacheWriteMicroUsdPerMillion: catalogCacheWrite,
         outputMicroUsdPerMillion: 4_000_000 }] } };
   },
 } });
@@ -278,5 +281,23 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
       "ordinary CLI projection must retain the approved catalogue lookup");
     assert.equal(insertedValues[2]?.[28], "price-v2");
     assert.equal(insertedValues[2]?.[29], BigInt(6));
+    assert.equal(catalogAt?.toISOString(), ordinaryReceipt.endedAt,
+      "the price is the one in force when the usage ended");
     assert.ok(authorityCalls >= 5);
+
+    // No verified cache-write rate: a run that wrote to the cache is unpriced.
+    catalogCacheWrite = 0;
+    await recordAmuxCliUsage(tx as never, { ...ordinaryReceipt,
+      invocationId: "00000000-0000-4000-8000-000000000008",
+      binding: { kind: "task_attempt" as const,
+        attemptId: "00000000-0000-4000-8000-000000000008" },
+      observed: { ...ordinaryReceipt.observed, cacheCreationInputTokens: 5 } });
+    assert.equal(insertedValues[3]?.[29], null);
+    await recordAmuxCliUsage(tx as never, { ...ordinaryReceipt,
+      invocationId: "00000000-0000-4000-8000-000000000009",
+      binding: { kind: "task_attempt" as const,
+        attemptId: "00000000-0000-4000-8000-000000000009" } });
+    assert.equal(insertedValues[4]?.[29], BigInt(6),
+      "a run with no cache writes is still priced");
+    catalogCacheWrite = 400_000;
   });

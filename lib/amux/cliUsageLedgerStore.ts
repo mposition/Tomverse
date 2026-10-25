@@ -83,20 +83,24 @@ async function approvedTaskPrice(tx: Prisma.TransactionClient,
   receipt: Receipt): Promise<AmuxCliApiPrice | null> {
   if (receipt.binding.kind !== "task_attempt" || !receipt.actualModelId ||
       receipt.actualModelId === "multi_model") return null;
-  // The price the registries give (owner decision 2026-10-25), valid only for
-  // usage that ended after the model's row last changed. A worker or model
-  // the catalog does not price records the usage unpriced; a registry that
-  // cannot be read fails the write rather than recording it unpriced.
-  const current = await readAmuxV4TaskAutoCatalog(tx);
+  // The registry price in force when the usage ended (owner decision
+  // 2026-10-25): the price schedule at endedAt, and only from a row that had
+  // not changed since. A worker or model the catalog does not price records
+  // the usage unpriced; a registry that cannot be read fails the write.
+  const endedAt = Date.parse(receipt.endedAt);
+  const current = await readAmuxV4TaskAutoCatalog(tx, { at: new Date(endedAt) });
   if (!current.ok) return null;
   const catalog = current.catalog as unknown as V4TaskCostCatalog;
   const candidates = catalog.routes.filter((route) => route.enabled &&
     route.workerName === receipt.worker && route.provider === receipt.provider &&
     route.modelId === receipt.actualModelId &&
-    route.pricingVerifiedAt <= receipt.endedAt &&
-    route.pricingExpiresAt > receipt.endedAt);
+    Date.parse(route.pricingVerifiedAt) <= endedAt &&
+    Date.parse(route.pricingExpiresAt) > endedAt);
   if (candidates.length !== 1) return null;
   const route = candidates[0];
+  // No verified cache-write rate: a run that wrote to the cache stays unpriced.
+  if (route.cacheWriteMicroUsdPerMillion === 0 &&
+      (receipt.observed?.cacheCreationInputTokens ?? 0) > 0) return null;
   return { provider: receipt.provider, modelId: receipt.actualModelId,
     version: catalog.pricingVersion,
     uncachedInputMicroUsdPerMillion: route.uncachedInputMicroUsdPerMillion,
