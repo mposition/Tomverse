@@ -141,7 +141,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     try {
       const fix = await location.readForTurn(scope, controller.signal, {
         turnId: sourceId,
-        requiresLocation: () => requestChatLocationIntent(String(messages.at(-1)?.content ?? ""), (path, init) => run(path, () => {
+        requiresLocation: () => requestChatLocationIntent(String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? ""), (path, init) => run(path, () => {
           if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
           return init ?? {};
         })),

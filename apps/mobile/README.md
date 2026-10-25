@@ -51,6 +51,14 @@ verification and activation requirements. Store credit purchases do not expire.
 
 ## Local development
 
+Automatic current-location intent analysis additionally requires the server-side
+`TOMVERSE_CHAT_LOCATION_INTENT_ENABLED=true` switch (default off) and a configured
+Auto routing model. Enabling it permits one bounded routing-model call per
+eligible question, including manual models and verified guests, within the
+existing provider operational budget. Manual location and reuse of an already
+enabled location session do not need this extra call. Activation is a separate
+operator action; this change does not enable the switch.
+
 From the repository root, using local PowerShell, without production credentials:
 
 - `npm --workspace @tomverse/mobile run dev` opens the real native-auth client.
