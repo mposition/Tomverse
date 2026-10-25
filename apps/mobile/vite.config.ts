@@ -1,5 +1,4 @@
 import { defineConfig, loadEnv } from "vite";
-import { mobileAuthHttpsOrigin } from "../../lib/mobileBrowserLogin";
 
 /**
  * No plugins on purpose.
@@ -16,7 +15,10 @@ import { mobileAuthHttpsOrigin } from "../../lib/mobileBrowserLogin";
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
-  if (env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED === "true" && !mobileAuthHttpsOrigin(env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? "")) {
+  let returnOrigin: URL | null = null;
+  try { returnOrigin = new URL(env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? ""); } catch {}
+  if (env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED === "true" && (!returnOrigin || returnOrigin.protocol !== "https:" ||
+      returnOrigin.username || returnOrigin.password || returnOrigin.port || returnOrigin.pathname !== "/" || returnOrigin.search || returnOrigin.hash)) {
     throw new Error("VITE_MOBILE_AUTH_APP_LINK_ORIGIN must be an exact HTTPS origin when mobile auth app links are enabled.");
   }
   return {
