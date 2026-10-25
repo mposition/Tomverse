@@ -1,14 +1,18 @@
 # Agent Office CLI monitor selective release
 
-Release SHA:        2807e1c70064e103ac7435c30ac91bebb4786e23
+Release SHA:        b3c9d0dfcbfd4c06acf4fd8ea930b3614b02ed86
 
 This identifies the application candidate.
 The final RC is the release PR head including this record.
 
-- Main base / rollback SHA: `ba5d5437071fec58dfb89c50ddc37646ec0b5661`.
+- Main base: `e33bb658150bb5d5bad643ee502a37bb893282c9`.
+- Last observed serving rollback SHA: `ba5d5437071fec58dfb89c50ddc37646ec0b5661`.
 - Selected source: #3002, develop merge `de6dfde59e5facfefff2448680720d16cb2abda1`.
 - The merge-commit cherry-pick applied without conflict. Only this feature's
   21 files and this release record are included; other train cargo is preserved.
+- Main advanced through #2999 while RC validation was pending. Its changes
+  were merged without conflict; the CLI monitor's authentication, reauthentication,
+  secret scanner and polling helpers are unchanged. The final RC includes this base.
 - The owner explicitly authorized PR creation, merge, deployment and activation
   of the `codex-impl` collector on 2026-10-25, then selected a standalone release
   instead of the shared train. This is the authority for this release path.
@@ -49,6 +53,8 @@ Completed evidence:
   successful verified HTTPS and a real source capture with 43 events.
 - [x] Collector artifact SHA-256:
   `2073922f7b052f8778af466aac2a9c18923e43d900c957386bdd883c0d3cf88a`.
+  Built with existing local esbuild 0.28.2 and Zod 4.6.7; runtime verification
+  used the execution host's Node 22.22.1.
 
 Develop deployment/build-info, final-RC release CI, exact-RC Test deployment and
 synthetic ingest checks are recorded in the release PR before main merge.
