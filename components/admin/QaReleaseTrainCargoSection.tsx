@@ -27,6 +27,7 @@ const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   unchecked: "bg-zinc-800 text-zinc-300",
   in_main_pull_request: "bg-zinc-800 text-zinc-400",
   on_main: "bg-zinc-800 text-zinc-400",
+  mentioned: "bg-amber-300/15 text-amber-300",
   changes_workflows: "bg-amber-300/15 text-amber-300",
   back_merge: "bg-zinc-800 text-zinc-400",
 };
@@ -41,7 +42,11 @@ type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleas
  * train left out rides the next one, marked here with the develop pull
  * requests a conflict needs first.
  */
-export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean; id?: string }) {
+/**
+ * `reloadKey`: the overview's Refresh count. Each new value reads the
+ * candidates again from GitHub, past the shared ten-minute read.
+ */
+export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { canWrite: boolean; id?: string; reloadKey?: number }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
   const [view, setView] = useState<View | null>(null);
   const [failed, setFailed] = useState(false);
@@ -55,7 +60,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
 
   useEffect(() => {
     let cancelled = false;
-    adminFetch(API, { cache: "no-store" })
+    adminFetch(reloadKey > 0 ? `${API}?fresh=1` : API, { cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
         return response.json() as Promise<View>;
@@ -72,7 +77,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   const saved = useMemo(() => new Set(view?.selection.numbers ?? []), [view]);
   const changed = picked.size !== saved.size || [...picked].some((number) => !saved.has(number));
@@ -172,6 +177,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       unchecked: m.trainCargoUnchecked,
       in_main_pull_request: m.trainCargoInMainPull.replace("{number}", String(candidate.mainPullRequest ?? "")),
       on_main: m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
+      mentioned: m.trainCargoMentioned.replace("{number}", String(candidate.mainPullRequest ?? "")),
       changes_workflows: m.trainCargoWorkflows,
       back_merge: m.trainCargoBackMerge,
     })[candidate.status];

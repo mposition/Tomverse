@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
@@ -71,10 +71,34 @@ export function AdminAgentDigestsPanel({
   /** The server's clock when the page was read, so both renders agree. */
   nowMs: number;
 }) {
+  const m = useAdminMessages(adminAgentDigestsMessages);
+  const router = useRouter();
   const items = qaReleaseAttentionItems({ console: initial, main, trains, nowMs });
   const figures = qaReleaseStatusFigures({ digests: initial.digests, main });
+  // Refresh: the page is read again on the server (main's pull requests and
+  // production straight from GitHub) and the next train past its shared read.
+  const [refreshing, startRefresh] = useTransition();
+  const [reloadKey, setReloadKey] = useState(0);
+  const refresh = () => {
+    setReloadKey((key) => key + 1);
+    startRefresh(() => router.refresh());
+  };
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="qa-release-tab">
+      <div className="-mb-2 flex items-center justify-end gap-3">
+        <span className="text-xs text-zinc-500" data-testid="qa-release-read-at">
+          {m.overviewReadAt.replace("{at}", aestStamp(new Date(nowMs).toISOString()))}
+        </span>
+        <button
+          type="button"
+          className="inline-flex min-h-8 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50"
+          onClick={refresh}
+          disabled={refreshing}
+          data-testid="qa-release-refresh"
+        >
+          {refreshing ? m.overviewRefreshing : m.overviewRefresh}
+        </button>
+      </div>
       <AttentionStrip items={items} />
       <StatusCards figures={figures} />
       <div className="grid min-w-0 gap-5 lg:grid-cols-2">
@@ -82,7 +106,7 @@ export function AdminAgentDigestsPanel({
         <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.lane} />
       </div>
       <LatestDigest digests={initial.digests} limit={initial.limit} />
-      <QaReleaseTrainCargoSection canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
+      <QaReleaseTrainCargoSection canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.cargo} reloadKey={reloadKey} />
       <QaReleaseTrainSection trains={trains} id={QA_RELEASE_SECTION_IDS.train} />
       <AgentSettings initial={initial} />
     </section>

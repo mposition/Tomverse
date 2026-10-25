@@ -22,7 +22,11 @@ export async function GET(request: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) return NextResponse.json({ error: "Not found." }, { status: 404 });
     await consumeApiRateLimit(request, session.user.id, "qa-release-train-cargo-read", { minute: 30, day: 1000 });
-    const [candidates, selection] = await Promise.all([readQaReleaseTrainCargoCandidates(), readQaReleaseTrainSelection()]);
+    // `fresh=1`: the overview's Refresh, read from GitHub rather than the shared read.
+    const [candidates, selection] = await Promise.all([
+      readQaReleaseTrainCargoCandidates(Date.now(), { fresh: new URL(request.url).searchParams.get("fresh") === "1" }),
+      readQaReleaseTrainSelection(),
+    ]);
     return NextResponse.json({ candidates, selection });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
