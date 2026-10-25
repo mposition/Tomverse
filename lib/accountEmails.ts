@@ -1,9 +1,9 @@
 import "server-only";
-import { storeBillingDeletionNotice } from "@/locales/storeBilling";
 
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
+
 
 
 /**
@@ -28,6 +28,7 @@ type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
 type DeletionCopy = {
   subject: string;
+  renewal: string;
   stopped: (date: string) => string;
   cancel: string;
   notYou: string;
@@ -37,6 +38,7 @@ const SUPPORT = "support@tomverse.app";
 
 const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
   en: {
+    renewal: "Deleting your Tomverse account stops renewal only for subscriptions billed directly by Tomverse. App Store and Google Play subscriptions must be cancelled separately in that store; deleting the account does not stop store billing.",
     subject: "Tomverse account deletion scheduled",
     stopped: (date) =>
       `Your Tomverse account access has been stopped immediately, and permanent deletion (including all data) is scheduled for ${date}.`,
@@ -44,6 +46,7 @@ const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
     notYou: `If you did not request this, contact ${SUPPORT} immediately.`,
   },
   ko: {
+    renewal: "계정 삭제 시 Tomverse에서 직접 결제한 구독의 자동 갱신만 중지됩니다. App Store와 Google Play 구독은 해당 스토어에서 별도로 취소해야 하며, 계정을 삭제해도 스토어 결제는 중지되지 않습니다.",
     subject: "Tomverse 계정 삭제가 예정되었습니다",
     stopped: (date) =>
       `Tomverse 계정 접근이 즉시 중지되었으며, 모든 데이터를 포함한 영구 삭제가 ${date}에 예정되어 있습니다.`,
@@ -51,6 +54,7 @@ const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
     notYou: `요청하신 적이 없다면 즉시 ${SUPPORT}로 연락해 주십시오.`,
   },
   zh: {
+    renewal: "删除 Tomverse 账户只会停止通过 Tomverse 直接付费的订阅续订。App Store 和 Google Play 订阅必须在相应商店单独取消，删除账户不会停止商店扣款。",
     subject: "您的 Tomverse 账户已安排删除",
     stopped: (date) =>
       `您的 Tomverse 账户访问已立即停止，包含全部数据的永久删除安排在 ${date}。`,
@@ -58,6 +62,7 @@ const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
     notYou: `如果这不是您本人的请求，请立即联系 ${SUPPORT}。`,
   },
   fr: {
+    renewal: "La suppression du compte arrête uniquement le renouvellement des abonnements facturés directement par Tomverse. Les abonnements App Store et Google Play doivent être annulés séparément dans la boutique concernée ; supprimer le compte ne met pas fin à leur facturation.",
     subject: "Suppression de votre compte Tomverse programmée",
     stopped: (date) =>
       `L'accès à votre compte Tomverse a été interrompu immédiatement, et la suppression définitive (données comprises) est programmée pour le ${date}.`,
@@ -65,6 +70,7 @@ const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
     notYou: `Si vous n'êtes pas à l'origine de cette demande, contactez ${SUPPORT} immédiatement.`,
   },
   de: {
+    renewal: "Die Kontolöschung beendet nur die Verlängerung direkt über Tomverse abgerechneter Abonnements. App Store- und Google Play-Abonnements müssen separat im jeweiligen Store gekündigt werden; die Kontolöschung beendet deren Abrechnung nicht.",
     subject: "Löschung Ihres Tomverse-Kontos geplant",
     stopped: (date) =>
       `Der Zugang zu Ihrem Tomverse-Konto wurde sofort gesperrt, und die endgültige Löschung einschließlich aller Daten ist für den ${date} vorgesehen.`,
@@ -72,6 +78,7 @@ const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
     notYou: `Wenn diese Anfrage nicht von Ihnen stammt, wenden Sie sich sofort an ${SUPPORT}.`,
   },
   es: {
+    renewal: "Eliminar la cuenta solo detiene la renovación de las suscripciones facturadas directamente por Tomverse. Las suscripciones de App Store y Google Play deben cancelarse por separado en la tienda correspondiente; eliminar la cuenta no detiene esos cobros.",
     subject: "Eliminación programada de su cuenta de Tomverse",
     stopped: (date) =>
       `El acceso a su cuenta de Tomverse se ha detenido de inmediato y la eliminación permanente, incluidos todos los datos, está prevista para el ${date}.`,
@@ -79,6 +86,7 @@ const DELETION_COPY: Record<EmailLanguage, DeletionCopy> = {
     notYou: `Si usted no solicitó esto, escriba a ${SUPPORT} de inmediato.`,
   },
   pt: {
+    renewal: "Excluir a conta interrompe apenas a renovação de assinaturas cobradas diretamente pela Tomverse. Assinaturas da App Store e do Google Play devem ser canceladas separadamente na respectiva loja; excluir a conta não interrompe essas cobranças.",
     subject: "Exclusão da sua conta Tomverse agendada",
     stopped: (date) =>
       `O acesso à sua conta Tomverse foi interrompido imediatamente, e a exclusão permanente, incluindo todos os dados, está agendada para ${date}.`,
@@ -95,10 +103,10 @@ export function buildAccountDeletionScheduledEmail(input: {
   const date = input.scheduledFor;
   return {
     subject: copy.subject,
-    text: [copy.stopped(date), storeBillingDeletionNotice(normalizeLanguage(input.language)), copy.cancel, copy.notYou].join("\n\n"),
+    text: [copy.stopped(date), copy.renewal, copy.cancel, copy.notYou].join("\n\n"),
     html: [
       `<p>${copy.stopped(`<strong>${escapeHtml(date)}</strong>`)}</p>`,
-      `<p>${escapeHtml(storeBillingDeletionNotice(normalizeLanguage(input.language)))}</p>`,
+      `<p>${escapeHtml(copy.renewal)}</p>`,
       `<p>${escapeHtml(copy.cancel).replace(SUPPORT, `<a href="mailto:${SUPPORT}">${SUPPORT}</a>`)}</p>`,
       `<p>${escapeHtml(copy.notYou).replace(SUPPORT, `<a href="mailto:${SUPPORT}">${SUPPORT}</a>`)}</p>`,
     ].join(""),
