@@ -1,4 +1,5 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
+import { mobileAuthHttpsOrigin } from "../../lib/mobileBrowserLogin";
 
 /**
  * No plugins on purpose.
@@ -13,13 +14,19 @@ import { defineConfig } from "vite";
  * asset paths resolve differently between the two. Relative paths work on both
  * and in `vite preview`.
  */
-export default defineConfig({
-  base: "./",
-  build: {
-    outDir: "dist",
-    // A local bundle ships to a store; a source map in the binary publishes the
-    // source. The web app's own Sentry upload path is separate and unaffected.
-    sourcemap: false,
-    target: "es2022",
-  },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "VITE_");
+  if (env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED === "true" && !mobileAuthHttpsOrigin(env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? "")) {
+    throw new Error("VITE_MOBILE_AUTH_APP_LINK_ORIGIN must be an exact HTTPS origin when mobile auth app links are enabled.");
+  }
+  return {
+    base: "./",
+    build: {
+      outDir: "dist",
+      // A local bundle ships to a store; a source map in the binary publishes the
+      // source. The web app's own Sentry upload path is separate and unaffected.
+      sourcemap: false,
+      target: "es2022",
+    },
+  };
 });

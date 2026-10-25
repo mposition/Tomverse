@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { authLinkHost, configureAuthAppLinks, withAndroidAuthAppLink, withIosAuthAppLink } from "../apps/mobile/scripts/configure-auth-app-links.mjs";
+import viteConfig from "../apps/mobile/vite.config.ts";
 
 const android = '<manifest><application><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN" /></intent-filter></activity><activity android:name=".OtherActivity"></activity></application></manifest>';
 const ios = '<plist><dict><key>existing</key><true/></dict></plist>';
@@ -42,7 +43,7 @@ test("sync configures generated projects idempotently and disabling removes only
     const entitlements = join(root, "ios/App/App/TomverseAuth.entitlements");
     writeFileSync(manifest, android);
     writeFileSync(project, 'buildSettings = {\nPRODUCT_BUNDLE_IDENTIFIER = app.tomverse.shell;\n};');
-    const env = { NATIVE_AUTH_APP_LINKS_ENABLED: "true", VITE_TOMVERSE_API_ORIGIN: "https://tomverse.app" };
+    const env = { NATIVE_AUTH_APP_LINKS_ENABLED: "true", VITE_MOBILE_AUTH_APP_LINK_ORIGIN: "https://links.tomverse.test" };
     configureAuthAppLinks(root, env);
     const before = [manifest, project, entitlements].map((path) => readFileSync(path, "utf8"));
     configureAuthAppLinks(root, env);
@@ -53,5 +54,28 @@ test("sync configures generated projects idempotently and disabling removes only
     assert.doesNotMatch(readFileSync(entitlements, "utf8"), /applinks:/);
     assert.doesNotMatch(readFileSync(entitlements, "utf8"), /com.apple.developer.associated-domains/);
     assert.doesNotMatch(readFileSync(project, "utf8"), /CODE_SIGN_ENTITLEMENTS/);
+    configureAuthAppLinks(root, env);
+    const withCapability = readFileSync(entitlements, "utf8").replace("</dict>", "<key>aps-environment</key><string>development</string></dict>");
+    writeFileSync(entitlements, withCapability);
+    configureAuthAppLinks(root, {});
+    assert.match(readFileSync(project, "utf8"), /CODE_SIGN_ENTITLEMENTS/);
+    assert.match(readFileSync(entitlements, "utf8"), /aps-environment/);
+    assert.doesNotMatch(readFileSync(entitlements, "utf8"), /applinks:/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("enabled native auth links require an explicit return origin at build and sync", () => {
+  assert.throws(() => configureAuthAppLinks("unused", { NATIVE_AUTH_APP_LINKS_ENABLED: "true" }), /VITE_MOBILE_AUTH_APP_LINK_ORIGIN/);
+  const previous = [process.env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED, process.env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN];
+  try {
+    process.env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED = "true";
+    process.env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN = "";
+    assert.throws(() => viteConfig({ mode: "test", command: "build" }), /VITE_MOBILE_AUTH_APP_LINK_ORIGIN/);
+    process.env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN = "https://links.tomverse.test";
+    assert.ok(viteConfig({ mode: "test", command: "build" }));
+  } finally {
+    ["VITE_MOBILE_AUTH_APP_LINKS_ENABLED", "VITE_MOBILE_AUTH_APP_LINK_ORIGIN"].forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
+    });
+  }
 });

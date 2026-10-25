@@ -3,12 +3,12 @@ import { Browser } from "@capacitor/browser";
 import { App } from "@capacitor/app";
 import { mobileChatCopy } from "../../../locales/mobileChat";
 import { readMobileAuthReturn } from "../../../lib/mobileBrowserLogin";
-import { MobileAuth, mobileApiFetch, TOMVERSE_API_ORIGIN } from "./authBridge";
+import { MobileAuth, mobileApiFetch } from "./authBridge";
 import { nativeChatLocation } from "./chatLocation";
 import { NativeChatError, sendNativeChat, type NativeChatMessage } from "./chatClient";
 
 const appLinksEnabled = import.meta.env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED === "true";
-const authReturnOrigin = import.meta.env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? TOMVERSE_API_ORIGIN;
+const authReturnOrigin = import.meta.env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? "";
 
 export const NativeChatApp = () => {
   const copy = mobileChatCopy(navigator.language);

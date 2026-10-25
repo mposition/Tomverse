@@ -2,8 +2,13 @@ import { MOBILE_AUTH_CALLBACK_PATH, mobileAuthHttpsOrigin } from "./mobileBrowse
 
 const APP_ID = "app.tomverse.shell";
 
-export const mobileAppLinkOrigin = (env: NodeJS.ProcessEnv = process.env) =>
-  mobileAuthHttpsOrigin(env.MOBILE_AUTH_APP_LINK_ORIGIN ?? "");
+export const mobileAppLinkOrigin = (env: NodeJS.ProcessEnv = process.env) => {
+  const origin = mobileAuthHttpsOrigin(env.MOBILE_AUTH_APP_LINK_ORIGIN ?? "");
+  const loginOrigins = ["https://tomverse.app", "https://www.tomverse.app", env.NEXTAUTH_URL,
+    env.PUBLIC_APP_URL, env.NEXT_PUBLIC_APP_URL, env.NEXT_PUBLIC_SHARE_BASE_URL]
+    .filter((value): value is string => Boolean(value)).map(mobileAuthHttpsOrigin);
+  return origin && !loginOrigins.includes(origin) ? origin : null;
+};
 
 /** No association is published until actual release-signing identities are configured. */
 export const mobileAppLinks = (env: NodeJS.ProcessEnv = process.env) => {
@@ -16,8 +21,7 @@ export const mobileAppLinks = (env: NodeJS.ProcessEnv = process.env) => {
         namespace: "android_app", package_name: APP_ID, sha256_cert_fingerprints: [...new Set(fingerprints)],
       } }] : [];
   const iosId = env.MOBILE_AUTH_IOS_APP_ID ?? "";
-  const loginOrigin = mobileAuthHttpsOrigin(env.NEXTAUTH_URL ?? "https://tomverse.app");
-  const ios = loginOrigin && returnOrigin !== loginOrigin && new RegExp(`^[A-Z0-9]{10}\\.${APP_ID.replaceAll(".", "\\.")}$`).test(iosId)
+  const ios = new RegExp(`^[A-Z0-9]{10}\\.${APP_ID.replaceAll(".", "\\.")}$`).test(iosId)
     ? [{ appID: iosId, paths: [MOBILE_AUTH_CALLBACK_PATH] }] : [];
   return { android, ios };
 };

@@ -44,6 +44,7 @@ test("associations are default-off and publish only configured release signing i
   assert.deepEqual(result.android[0].target, { namespace: "android_app", package_name: "app.tomverse.shell", sha256_cert_fingerprints: [fingerprint] });
   assert.deepEqual(result.ios, [{ appID: config.MOBILE_AUTH_IOS_APP_ID, paths: ["/mobile/auth/callback"] }]);
   assert.deepEqual(mobileAppLinks({ ...config, MOBILE_AUTH_APP_LINK_ORIGIN: origin }).ios, []);
+  assert.deepEqual(mobileAppLinks({ ...config, PUBLIC_APP_URL: config.MOBILE_AUTH_APP_LINK_ORIGIN }), { android: [], ios: [] });
   assert.deepEqual(mobileAppLinks({ ...config, MOBILE_AUTH_APP_LINK_ORIGIN: "https://links.tomverse.test/evil" }), { android: [], ios: [] });
   assert.deepEqual(mobileAppLinks({ ...config, MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS: fingerprint + ",invalid", MOBILE_AUTH_IOS_APP_ID: "A1B2C3D4E5.other.app" }), { android: [], ios: [] });
   const previous = Object.fromEntries(Object.keys(config).map((key) => [key, process.env[key]]));
@@ -100,6 +101,27 @@ test("the deployed proxy preserves callback isolation while retaining host and o
     assert.equal(proxy(request()).status, 421);
   } finally {
     for (const [key, value] of Object.entries({ CSP_MODE: previousMode, REQUIRE_CLOUDFLARE_ORIGIN_SECRET: previousRequired, CLOUDFLARE_ORIGIN_SECRET: previousSecret })) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
+
+test("the dedicated return host serves only read-only callback and association paths", () => {
+  const config = { MOBILE_AUTH_APP_LINKS_ENABLED: "true", MOBILE_AUTH_APP_LINK_ORIGIN: "https://links.tomverse.test",
+    ALLOWED_REQUEST_HOSTS: "links.tomverse.test", REQUIRE_CLOUDFLARE_ORIGIN_SECRET: "false" };
+  const previous = Object.fromEntries(Object.keys(config).map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, config);
+    const request = (path, method = "GET") => new NextRequest(config.MOBILE_AUTH_APP_LINK_ORIGIN + path, { method, headers: { host: "links.tomverse.test" } });
+    for (const path of ["/chat", "/auth/signin", "/api/mobile/chat", "/api/health"]) {
+      assert.equal(proxy(request(path)).status, 404);
+    }
+    for (const path of ["/mobile/auth/callback", "/.well-known/assetlinks.json", "/.well-known/apple-app-site-association"]) {
+      assert.equal(proxy(request(path)).headers.get("x-middleware-next"), "1");
+      assert.equal(proxy(request(path, "POST")).status, 404);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
   }

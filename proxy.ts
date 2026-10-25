@@ -40,6 +40,7 @@ import {
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
+import { mobileAppLinkOrigin } from "@/lib/mobileAppLinks";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES, mobileChatBearerRoutes } from "@/lib/mobileAuthContract";
 import {
   applyMobileIdentityHeaders,
@@ -159,6 +160,15 @@ const withNativeCors = <T extends NextResponse>(
 };
 
 export function proxy(request: NextRequest) {
+  // A dedicated return host must not become another login, page or API origin.
+  // Allowed return requests still face every normal host/origin-secret check below.
+  const mobileReturnOrigin = process.env.MOBILE_AUTH_APP_LINKS_ENABLED === "true" ? mobileAppLinkOrigin() : null;
+  if (mobileReturnOrigin && request.headers.get("host")?.toLowerCase() === new URL(mobileReturnOrigin).host) {
+    const allowed = ["/mobile/auth/callback", "/.well-known/assetlinks.json", "/.well-known/apple-app-site-association"];
+    if (!allowed.includes(request.nextUrl.pathname) || !["GET", "HEAD"].includes(request.method)) {
+      return new NextResponse("Not Found", { status: 404, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+    }
+  }
   // Container liveness must remain directly reachable by Railway. Readiness
   // performs database and monitoring work, so it goes through the same host
   // and Cloudflare origin-secret boundary as every other dynamic endpoint.

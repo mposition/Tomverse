@@ -72,7 +72,7 @@ signed build and its matching API deployment:
 | Location | Setting |
 |---|---|
 | API server | `MOBILE_AUTH_APP_LINKS_ENABLED=true` |
-| API server | `MOBILE_AUTH_APP_LINK_ORIGIN`: a dedicated HTTPS return origin on this deployment, different from the web login host for iOS |
+| API server | `MOBILE_AUTH_APP_LINK_ORIGIN`: a dedicated HTTPS return origin on this deployment, different from all web login hosts |
 | API server, Android | `MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS`: comma-separated SHA-256 fingerprints of the installed app's signing certificates (Play App Signing certificate for Play builds) |
 | API server, iOS | `MOBILE_AUTH_IOS_APP_ID`: the actual App ID prefix plus `.app.tomverse.shell` |
 | Vite build | `VITE_MOBILE_AUTH_APP_LINKS_ENABLED=true` |
@@ -84,11 +84,16 @@ an Android auto-verified intent filter for only the callback path and configures
 iOS Associated Domains in the app's entitlements/build settings. Existing
 capabilities are preserved; disabling the sync switch removes only managed
 entries. Enable Associated Domains for the iOS App ID and signing profile too.
+When other capabilities have since been added to a generated entitlements file,
+disabling keeps that file's signing reference so those capabilities stay intact.
 Attach the return hostname to this API deployment and explicitly add it to
 `ALLOWED_REQUEST_HOSTS`, retaining the existing Cloudflare origin-secret gate.
 Serve the two association paths and callback over HTTPS with no redirect.
-iOS [keeps same-host browser links in Safari](https://developer.apple.com/documentation/technotes/tn3155-debugging-universal-links), so an iOS association is withheld
-when the return origin matches `NEXTAUTH_URL` (or its production default).
+The return host serves only those three read-only paths; chat, sign-in and API
+routes are refused on that host. Build and sync fail if the explicit return
+origin is missing. iOS [keeps same-host browser links in Safari](https://developer.apple.com/documentation/technotes/tn3155-debugging-universal-links),
+so configured login/share aliases and production login hosts cannot be used
+as the dedicated return origin.
 The API publishes `/.well-known/assetlinks.json` and
 `/.well-known/apple-app-site-association` only with valid, configured signing
 identities. No placeholder signing identity is published.

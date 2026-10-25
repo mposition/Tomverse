@@ -45,8 +45,11 @@ export const withIosAuthAppLink = (xml, host) => {
 };
 
 export const configureAuthAppLinks = (root, env = process.env) => {
+  if (env.NATIVE_AUTH_APP_LINKS_ENABLED === "true" && !env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN) {
+    throw new Error("VITE_MOBILE_AUTH_APP_LINK_ORIGIN is required when native auth app links are enabled.");
+  }
   const host = env.NATIVE_AUTH_APP_LINKS_ENABLED === "true"
-    ? authLinkHost(env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN ?? env.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app") : null;
+    ? authLinkHost(env.VITE_MOBILE_AUTH_APP_LINK_ORIGIN) : null;
   const update = (path, transform) => {
     if (!existsSync(path)) return;
     const source = readFileSync(path, "utf8");
@@ -58,7 +61,6 @@ export const configureAuthAppLinks = (root, env = process.env) => {
   if (!existsSync(project)) return;
   // Keep any existing entitlements file rather than replacing the app's other capabilities.
   const source = readFileSync(project, "utf8");
-  if (!host) update(project, (text) => text.replace(managedSigning, ""));
   const settings = [...source.matchAll(/CODE_SIGN_ENTITLEMENTS = "?([^";]+)"?;/g)].map((match) => match[1]);
   const names = [...new Set(settings)];
   if (names.length > 1 || (names.length && !/^App\/[A-Za-z0-9_.-]+\.entitlements$/.test(names[0]))) {
@@ -69,6 +71,10 @@ export const configureAuthAppLinks = (root, env = process.env) => {
   const entitlements = resolve(root, "ios/App", name);
   if (host && !existsSync(entitlements)) writeFileSync(entitlements, '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n', "utf8");
   update(entitlements, (xml) => withIosAuthAppLink(xml, host));
+  // Capabilities added by an operator after setup must keep their signing file.
+  if (!host && existsSync(entitlements) && !/<key>/.test(readFileSync(entitlements, "utf8"))) {
+    update(project, (text) => text.replace(managedSigning, ""));
+  }
   if (host && !names.length) {
     // Limit signing changes to the app target's configurations.
     const blocks = /buildSettings = \{([\s\S]*?)\n\s*\};/g;
