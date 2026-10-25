@@ -610,7 +610,7 @@ test("located reasoning and tool inputs are not persisted or replayed after loca
       latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now(),
     } });
     assert.ok(JSON.stringify(providerRequestMessages).includes("latitude"));
-    assert.deepEqual(world.providerContexts, []);
+    assert.equal(world.providerContexts.length, 0);
     await ask({ text: "The answer.", responseMessages }, { modelId, messages: [
       { role: "user", content: "Nearby?" }, { role: "assistant", content: "The answer." },
       { role: "user", content: "Another question without device location" },
