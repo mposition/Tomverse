@@ -156,6 +156,8 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
     resolve: async () => ["104.18.6.192"],
     dial: () => connectTcp({ host: "127.0.0.1", port: echoPort }),
   });
+  const proxyClients = [];
+  proxy.on("connection", (socket) => proxyClients.push(socket));
   const proxyPort = await listen(proxy);
   const request = "CONNECT api.openai.com:443 HTTP/1.1\r\nHost: api.openai.com:443\r\n\r\n";
   const sockets = [];
