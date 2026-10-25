@@ -10083,9 +10083,14 @@ export function ChatPageClient({
     start: startReviewFork,
     status: reviewForkStatus,
     errorMessage: reviewForkError,
-  } = useContinuationLauncher({
-    reviewFromConversationId: shellConversationId ?? "",
-  });
+  } = useContinuationLauncher(
+    { reviewFromConversationId: shellConversationId ?? "" },
+    {
+      // The selection moves before `shellConversationId` follows it; an
+      // answer for the conversation the user just left must not navigate.
+      isOwnerCurrent: () => currentChatIdRef.current === shellConversationId,
+    }
+  );
   const compareInReview = useMemo(
     () =>
       routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode &&

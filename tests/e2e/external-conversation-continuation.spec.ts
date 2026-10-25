@@ -2346,15 +2346,8 @@ test.describe("a continuation opens in its product's workspace", () => {
         );
     });
 
-    test("an attempt for one continuation is never replayed on another", async ({
-        page,
-    }) => {
-        /*
-          Independent review, 2026-10-25. Moving between two Chat continuations
-          keeps the same client mounted, so a launcher that held one key for
-          its whole life sent A's key to B -- answered by the server with A's
-          fork -- and A's late response could navigate B's screen.
-        */
+    /** Two Chat continuations; A's Compare-in-Review answer is held until released. */
+    const setUpTwoChatContinuations = async (page: Page) => {
         const SECOND_ID = "qa-second-chat-continuation";
         const SECOND_TITLE = "A second imported conversation";
         await prepareGuestPage(page, "ko");
@@ -2471,6 +2464,21 @@ test.describe("a continuation opens in its product's workspace", () => {
             await expect(page).toHaveURL(new RegExp(`/continuations/${id}$`));
         };
 
+        return { SECOND_ID, SECOND_TITLE, forkKeys, releaseFirst: () => releaseFirst(), openRow };
+    };
+
+    test("an attempt for one continuation is never replayed on another", async ({
+        page,
+    }) => {
+        /*
+          Independent review, 2026-10-25. Moving between two Chat continuations
+          keeps the same client mounted, so a launcher that held one key for
+          its whole life sent A's key to B -- answered by the server with A's
+          fork -- and A's late response could navigate B's screen.
+        */
+        const { SECOND_ID, SECOND_TITLE, forkKeys, releaseFirst, openRow } =
+            await setUpTwoChatContinuations(page);
+
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         await page.getByTestId("continuation-compare-in-review").click();
         await expect.poll(() => forkKeys.first.length).toBe(1);
@@ -2490,6 +2498,38 @@ test.describe("a continuation opens in its product's workspace", () => {
         await expect(page).toHaveURL(/\/continuations\/qa-second-review-fork$/);
         expect(forkKeys.second).toHaveLength(1);
         expect(forkKeys.second[0]).not.toBe(forkKeys.first[0]);
+    });
+
+    test("an answer landing while the next continuation is still loading moves nobody", async ({
+        page,
+    }) => {
+        /*
+          Independent review round 3. Selecting B moves the selection at once,
+          but the launcher's source follows only when B's route has rendered.
+          A's answer in that window must not navigate B away.
+        */
+        const { SECOND_ID, SECOND_TITLE, forkKeys, releaseFirst } =
+            await setUpTwoChatContinuations(page);
+        // B's route renders slowly, which holds the window open.
+        await page.route(`**/continuations/${SECOND_ID}*`, async (route) => {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            await route.continue().catch(() => {});
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await page.getByTestId("continuation-compare-in-review").click();
+        await expect.poll(() => forkKeys.first.length).toBe(1);
+
+        const list = await openConversationList(page);
+        await list
+            .getByTestId("sidebar-conversation-item")
+            .filter({ hasText: SECOND_TITLE })
+            .last()
+            .click();
+        releaseFirst();
+        await expect(page).toHaveURL(new RegExp(`/continuations/${SECOND_ID}$`));
+        await page.waitForTimeout(500);
+        await expect(page).toHaveURL(new RegExp(`/continuations/${SECOND_ID}$`));
     });
 
     test("a late answer after leaving the continuation moves nobody", async ({ page }) => {

@@ -34,9 +34,12 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
  *     retry: a double click, a dropped response and a "try again" all send the
  *     same key, and the server resolves them to the one conversation the first
  *     request created.
- *   - Cleared only by `cancel()`. Arming again after an explicit cancel is a
- *     second, deliberate fork, which §3 allows.
- *   - Never cleared by a failure. That is the case the whole thing exists for.
+ *   - Cleared by `cancel()` -- arming again after an explicit cancel is a
+ *     second, deliberate fork, which §3 allows -- and by a success this screen
+ *     acted on, which ends the attempt.
+ *   - Never cleared by a failure, nor by leaving the screen while the answer
+ *     is unknown. That is the case the whole thing exists for, so the key is
+ *     held per endpoint outside the component and outlives a remount.
  *
  * The server decides everything else: `createExternalContinuation` reads by
  * `(userId, idempotencyKey)`, creates, and re-reads on a unique violation, so
@@ -74,15 +77,35 @@ export type ContinuationLaunchSource =
     | { externalConversationId: string }
     | { reviewFromConversationId: string };
 
+/**
+ * The open attempt's key per endpoint, for this tab. Outside the component so
+ * an attempt whose answer never reached the screen keeps its key across an
+ * unmount: pressing again replays it rather than making a second conversation.
+ */
+const openAttemptKeys = new Map<string, string>();
+
 const launchEndpoint = (source: ContinuationLaunchSource): string =>
     "externalConversationId" in source
         ? `/api/external-conversations/${encodeURIComponent(source.externalConversationId)}/continuations`
         : `/api/conversations/${encodeURIComponent(source.reviewFromConversationId)}/continuation/review`;
 
 export function useContinuationLauncher(
-    source: ContinuationLaunchSource
+    source: ContinuationLaunchSource,
+    options: {
+        /**
+         * Whether the screen that pressed is still the one on show, read when
+         * the answer lands. The Compare-in-Review caller moves its selection
+         * before `source` follows it, and an answer in that window must not
+         * navigate the conversation the user has just opened.
+         */
+        isOwnerCurrent?: () => boolean;
+    } = {}
 ): ContinuationLauncher {
     const endpoint = launchEndpoint(source);
+    const isOwnerCurrentRef = useRef(options.isOwnerCurrent);
+    useLayoutEffect(() => {
+        isOwnerCurrentRef.current = options.isOwnerCurrent;
+    });
     const { t } = useLanguage();
     const router = useRouter();
     const [status, setStatus] = useState<ContinuationLauncherStatus>("idle");
@@ -103,7 +126,6 @@ export function useContinuationLauncher(
       string": A -> B -> A must not revive A's first response, so every
       endpoint change and the unmount start a new generation.
     */
-    const attemptRef = useRef<{ endpoint: string; key: string } | null>(null);
     const generationRef = useRef(0);
     const [stateEndpoint, setStateEndpoint] = useState(endpoint);
     if (stateEndpoint !== endpoint) {
@@ -130,18 +152,18 @@ export function useContinuationLauncher(
         // supports; the fallback keeps a non-secure context (an http://
         // preview) failing by creating one conversation rather than by
         // throwing before the click does anything.
-        if (attemptRef.current?.endpoint !== endpoint) {
-            attemptRef.current = {
-                endpoint,
-                key:
-                    typeof crypto !== "undefined" && "randomUUID" in crypto
-                        ? crypto.randomUUID()
-                        : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            };
+        let idempotencyKey = openAttemptKeys.get(endpoint);
+        if (!idempotencyKey) {
+            idempotencyKey =
+                typeof crypto !== "undefined" && "randomUUID" in crypto
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            openAttemptKeys.set(endpoint, idempotencyKey);
         }
-        const idempotencyKey = attemptRef.current.key;
         const generation = generationRef.current;
-        const isCurrent = () => generationRef.current === generation;
+        const isCurrent = () =>
+            generationRef.current === generation &&
+            (isOwnerCurrentRef.current?.() ?? true);
 
         setStatus("creating");
         setErrorMessage(null);
@@ -160,6 +182,7 @@ export function useContinuationLauncher(
             }
             if (!response.ok) {
                 await discardResponseBody(response);
+                if (!isCurrent()) return false;
                 setStatus("failed");
                 setErrorMessage(refusalMessage(response.status, t));
                 return false;
@@ -171,6 +194,7 @@ export function useContinuationLauncher(
                 setErrorMessage(t("continuation.createFailed"));
                 return false;
             }
+            openAttemptKeys.delete(endpoint);
             router.push(continuationPath(body.conversationId));
             return true;
         } catch {
@@ -185,10 +209,10 @@ export function useContinuationLauncher(
     }, [creating, endpoint, router, t]);
 
     const cancel = useCallback(() => {
-        attemptRef.current = null;
+        openAttemptKeys.delete(endpoint);
         setStatus("idle");
         setErrorMessage(null);
-    }, []);
+    }, [endpoint]);
 
     return { status, errorMessage, start, cancel };
 }

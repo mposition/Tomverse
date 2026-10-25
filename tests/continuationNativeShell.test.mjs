@@ -79,7 +79,12 @@ test("a continuation renders its stored product's workspace, never a third one",
 
 test("only a Chat continuation offers Compare in Review", () => {
     const client = code(CLIENT);
-    assert.match(client, /useContinuationLauncher\(\{\s*reviewFromConversationId:/);
+    assert.match(client, /useContinuationLauncher\(\s*\{ reviewFromConversationId:/);
+    // An answer for the conversation the user just left never navigates.
+    assert.match(
+        client,
+        /isOwnerCurrent: \(\) => currentChatIdRef\.current === shellConversationId/
+    );
     assert.match(
         client,
         /routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode &&\s*shellConversationId && continuationSource\.timeline\?\.source\.status === "available"/

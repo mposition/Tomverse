@@ -424,8 +424,8 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 
 여섯 번째는 이 개정이 추가한 것이고 다른 다섯과 성격이 다릅니다 — 앞의 다섯은
 무엇이 보존되는지에 대한 고지이고, 이것은 **비용이 몇 배가 되는지**에 대한
-고지입니다(§4.4). 계정의 새 대화 기본 조합이 모델 셋이면 첫 turn부터 세 번
-청구되므로, 그 사실을 만들기 전에 말합니다.
+고지입니다(§4.4). Chat 이어가기는 답변 하나에 한 번이지만, Review 갈래는 계정의 새 대화
+기본 조합이 모델 셋이면 첫 turn부터 세 번 청구되므로, 그 사실을 만들기 전에 말합니다.
 
 - 성공하면 새 Conversation의 `/continuations/[id]`로 이동합니다.
 - 실패해도 **중복 생성 없이 재시도**할 수 있습니다: idempotency key는 고지를 연
@@ -582,10 +582,11 @@ finalized snapshot의 저장된 원문**(`ExternalMessage`)을 찾습니다. 구
   `effectivePlanModelLimit()`로 플랜 상한을 판정합니다. 상한 초과는
   `modelLimitResponse()`이고, 이어가기 전용 상한이나 전용 오류 코드를 만들지
   않습니다.
-- **초기 `selectedModels`는 일반 새 Review 대화와 같은 규칙으로 정합니다** —
+- **초기 `selectedModels`는 같은 계정 조합에서 정합니다** —
   `resolveNewConversationModels()`(계정의 새 대화 기본 조합, `NULL`이면
-  `[defaultModel]`) → `clampRuntimeSelectedModels()` → 플랜 상한. 이어가기 전용
-  기본 조합을 두지 않습니다.
+  `[defaultModel]`) → `clampRuntimeSelectedModels()` → 플랜 상한. Review 갈래는 그 조합
+  전체, Chat 이어가기는 빈 Chat 초안과 같이 그 첫 모델 하나입니다
+  (`newWorkspaceDraftModels`, 2026-10-25). 이어가기 전용 기본 조합을 두지 않습니다.
 - **읽기 경로는 저장값을 다시 쓰지 않습니다.** 비활성 모델이 저장돼 있어도
   `effective` 상태만 보여 주고 저장값은 보존합니다
   (`docs/policy/default-model-luna-migration.md` §1.2).
@@ -781,8 +782,8 @@ USD를 싣지 않습니다.
 1. **전용 route의 수명.** continuation은 Chat·Review workspace를 렌더하면서도
    `/continuations/[id]`에서 열립니다(§8.2). 두 workspace의 URL로 합칠지는 사람의
    결정이며, 그때 옮길 자리는 `CONTINUATION_SURFACE_PATH` 한 곳입니다.
-2. **기본 조합의 크기.** 새 continuation은 계정의 새 대화 기본 조합으로
-   시작하므로(§8.3), 그 조합이 셋이면 첫 turn부터 세 번 청구됩니다. 이어가기만
+2. **기본 조합의 크기.** 새 Review 갈래는 계정의 새 대화 기본 조합으로
+   시작하므로(§8.3), 그 조합이 셋이면 첫 turn부터 세 번 청구됩니다(Chat 이어가기는 한 모델). 이어가기만
    더 작은 기본값을 쓸지는 제품 결정이고, 지금은 **일반 Review와 같게** 두는 쪽을
    택했습니다 — 이어가기에만 다른 기본값을 두면 사용자가 저장한 조합이 화면마다
    다르게 해석됩니다.
@@ -796,8 +797,11 @@ USD를 싣지 않습니다.
 
 ## 15. 기존 continuation 교정 migration
 
-개정 이전에 만들어진 continuation은 `productKey = "chat"`으로 저장돼 있습니다.
-그 행들은 **틀린 제품을 기록한 것**이므로 교정합니다.
+2026-09-01 개정 이전에 만들어진 continuation은 `productKey = "chat"`으로 저장돼 있습니다.
+당시 계약에서 그 행들은 **틀린 제품을 기록한 것**이었으므로 이 migration이 교정했습니다.
+이 절은 그 이미 적용된 migration의 기록입니다. 2026-10-25 개정 뒤에는 bridge + `chat`이
+정상 Chat 이어가기이므로, **이 교정을 다시 실행하거나 같은 조건으로 새 migration을
+만들지 않습니다** — 새 Chat 이어가기를 Review로 바꾸게 됩니다.
 
 ### 15.1 대상 — bridge 존재 **그리고** `productKey = 'chat'`
 
