@@ -17,18 +17,18 @@ export function canPurchaseMobileProduct(state: MobileBillingState, product: Mob
   if (product.kind === "credits") return state.products.some((p) => p.productId === product.productId);
   if (state.verificationPending) return false;
   if (state.webSubscription?.active) return false;
-  if (!state.active) return true;
+  if (!state.active) return ({ Free: 0, Pro: 1, Max: 2 }[product.plan] || 0) > ({ Free: 0, Pro: 1, Max: 2 }[state.plan as "Free" | "Pro" | "Max"] || 0);
   return state.subscriptionStore === store && !state.cancelAtPeriodEnd && state.interval === product.interval && state.plan !== product.plan;
 }
 export function createNativeBillingClient(input: {
   sdk: PurchasesPlugin; api: NativeChatTransport; store: MobileStore; apiKey: string; isCurrent: () => boolean;
 }) {
   const current = () => { if (!input.isCurrent()) throw new Error("BILLING_ACCOUNT_CHANGED"); };
-  const sync = async (action: "sync" | "cancel_web" = "sync") => {
+  const sync = async (action: "sync" | "cancel_web" | "prepare_credit_purchase" = "sync", productId?: string) => {
     current();
     const response = await input.api("/api/mobile/billing", () => {
       current();
-      return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, store: input.store }) };
+      return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, store: input.store, ...(productId ? { productId } : {}) }) };
     });
     current();
     if (!response.ok) throw new Error(response.status === 503 ? "BILLING_UNAVAILABLE" : "BILLING_SYNC_FAILED");
@@ -61,11 +61,13 @@ export function createNativeBillingClient(input: {
       const item = state.products.find((p) => p.productId === product.identifier);
       if (!item || !canPurchaseMobileProduct(state, item, input.store)) throw new Error("BILLING_PLAN_CHANGED");
       await identify(state); current();
+      if (item.kind === "credits") await sync("prepare_credit_purchase", item.productId);
+      current();
       await input.sdk.purchaseStoreProduct({ product, ...(input.store === "play_store" && item.kind === "subscription" && state.active && state.productId ? {
         storeProductChangeInfo: { oldProductIdentifier: state.productId,
           replacementMode: item.plan === "Max" ? STORE_REPLACEMENT_MODE.CHARGE_PRORATED_PRICE : STORE_REPLACEMENT_MODE.DEFERRED },
       } : {}) });
-      // Only the server/webhook grants access; pending payment keeps the old plan.
+      // Only current server/webhook evidence can grant access after payment.
       current(); return sync();
     }),
     restore: () => serialized(async () => {

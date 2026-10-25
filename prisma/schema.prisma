@@ -79,6 +79,7 @@ model User {
   creditLedgerEntries                  CreditLedgerEntry[]
   creditDebtEntries                    CreditDebtEntry[]
   mobileStoreTransactions              MobileStoreTransaction[]
+  mobileStorePurchaseAuthorizations    MobileStorePurchaseAuthorization[]
   chatCreditReservations               ChatCreditReservation[]
   imageGenerations                     ImageGeneration[]
   messageArtifacts                     MessageArtifact[]
@@ -1725,6 +1726,17 @@ model CreditLot {
 
   @@index([userId, status, expiresAt])
   @@index([purchaseId])
+}
+
+model MobileStorePurchaseAuthorization {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store     String
+  productId String
+  createdAt DateTime @default(now())
+
+  @@index([userId, store, productId, createdAt], map: "mobile_store_purchase_auth_lookup_idx")
 }
 
 model MobileStoreTransaction {

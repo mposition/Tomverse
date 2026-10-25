@@ -10,6 +10,15 @@ ALTER TABLE "User" ADD COLUMN "webSubscriptionPlan" TEXT,
   ADD COLUMN "storeSubscriptionSyncedAt" TIMESTAMP(3);
 ALTER TABLE "User" ADD COLUMN "storeSubscriptionSnapshot" JSONB;
 ALTER TABLE "CreditLot" ADD COLUMN "nonExpiring" BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE "MobileStorePurchaseAuthorization" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  "store" TEXT NOT NULL,
+  "productId" TEXT NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX "mobile_store_purchase_auth_lookup_idx"
+  ON "MobileStorePurchaseAuthorization"("userId", "store", "productId", "createdAt");
 CREATE TABLE "MobileStoreTransaction" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,

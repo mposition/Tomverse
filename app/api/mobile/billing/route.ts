@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { requireMobileBearer } from "@/lib/mobileAuthRoute";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { mobileBillingEnabled, mobileBillingRequestSchema } from "@/lib/mobileBillingCore";
-import { cancelMobileWebSubscription, ensureMobileBillingId, readMobileBillingState, syncMobileSubscription } from "@/lib/mobileBillingService";
+import { cancelMobileWebSubscription, ensureMobileBillingId, prepareMobileCreditPurchase, readMobileBillingState, syncMobileSubscription } from "@/lib/mobileBillingService";
 
 export async function POST(request: Request) {
   if (!mobileBillingEnabled()) return Response.json({ code: "MOBILE_BILLING_DISABLED" }, { status: 503 });
@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     const billingId = await ensureMobileBillingId(auth.identity.userId);
     if (body.action === "cancel_web") await cancelMobileWebSubscription(auth.identity.userId);
     const verification = body.action !== "cancel_web" ? await syncMobileSubscription(auth.identity.userId, billingId) : null;
+    if (body.action === "prepare_credit_purchase") await prepareMobileCreditPurchase(auth.identity.userId, body.store, body.productId);
     return Response.json({ ...await readMobileBillingState(auth.identity.userId, body.store), ...verification }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const response = apiSecurityResponse(error);

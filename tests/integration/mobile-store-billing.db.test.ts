@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test, mock } from "node:test";
 import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
-import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription, readMobileBillingState, cancelMobileWebSubscription, processMobileStoreWebhook } from "@/lib/mobileBillingService";
+import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription, readMobileBillingState, cancelMobileWebSubscription, processMobileStoreWebhook, prepareMobileCreditPurchase } from "@/lib/mobileBillingService";
 import { claimMobileStoreOwnership } from "@/lib/mobileStoreOwnership";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { lockCreditAccount } from "@/lib/creditDebt";
@@ -13,6 +13,7 @@ import { resyncSubscriptionFromStripe, processStripeEvent } from "@/lib/stripeWe
 
 process.env.MOBILE_BILLING_PRODUCTS_JSON = JSON.stringify([
   { store: "app_store", productId: "credits500", kind: "credits", packId: "starter_500" },
+  { store: "app_store", productId: "credits1500", kind: "credits", packId: "project_1500" },
   { store: "app_store", productId: "pro.month", kind: "subscription", plan: "Pro", interval: "monthly" },
   { store: "play_store", productId: "play.max:monthly", kind: "subscription", plan: "Max", interval: "monthly" },
 ]);
@@ -23,7 +24,11 @@ const event = { id: "event-1", app_id: "app-test", app_user_id: "account-test", 
 const reset = async () => { await prisma.user.deleteMany({ where: { email: { endsWith: "@mobile-billing.example.test" } } }); };
 beforeEach(async () => { await reset(); event.transaction_id = randomUUID(); });
 after(async () => { await reset(); await prisma.$disconnect(); });
-const createUser = (suffix = "one") => prisma.user.create({ data: { email: `${suffix}@mobile-billing.example.test` } });
+const createUser = async (suffix = "one") => {
+  const user = await prisma.user.create({ data: { email: `${suffix}@mobile-billing.example.test` } });
+  await prepareMobileCreditPurchase(user.id, "app_store", "credits500");
+  return user;
+};
 const deliver = (userId: string, overrides = {}) => prisma.$transaction(async (tx) => {
   await lockCreditAccount(tx, userId); await applyMobileCreditEvent(tx, userId, { ...event, ...overrides });
 });
@@ -31,6 +36,23 @@ const bindSubscription = (billingId: string, transactionId: string, store: "APP_
   ...event, store, type: "INITIAL_PURCHASE", product_id: productId, app_user_id: billingId,
   transaction_id: transactionId, original_transaction_id: transactionId,
 }));
+
+test("credit pack plan eligibility is server-authorized before payment and survives a delayed plan change", async () => {
+  const user = await createUser();
+  await assert.rejects(prepareMobileCreditPurchase(user.id, "app_store", "credits1500"), /not available/);
+  await assert.rejects(deliver(user.id, { product_id: "credits1500" }), /no server plan authorization/);
+  assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 0);
+  await prisma.user.update({ where: { id: user.id }, data: { plan: "Pro" } });
+  await prepareMobileCreditPurchase(user.id, "app_store", "credits1500");
+  await prisma.user.update({ where: { id: user.id }, data: { plan: "Free" } });
+  const purchase = { product_id: "credits1500", purchased_at_ms: Date.now() };
+  await Promise.all([deliver(user.id, purchase), deliver(user.id, purchase)]);
+  assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 1500);
+  await assert.rejects(deliver(user.id, { ...purchase, transaction_id: randomUUID() }), /no server plan authorization/);
+  await deliver(user.id, { ...purchase, type: "CANCELLATION" });
+  assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 0);
+  await assert.rejects(deliver(user.id, { product_id: "unmapped" }), /Unmapped/);
+});
 
 test("concurrent purchase delivery grants once and a second account cannot replay the store transaction", async () => {
   const user = await createUser();

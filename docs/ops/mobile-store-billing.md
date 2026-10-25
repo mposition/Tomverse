@@ -51,6 +51,13 @@ does not grant access. Failed webhook processing returns 503 for redelivery.
   tombstone prevents reordered purchase events from granting refunded credits.
   Reservation releases after a refund settle that debt instead of reviving the
   refunded lot. Account export includes filtered store purchase records.
+  Before the store sheet opens, the server records one credit-purchase
+  authorization after checking the effective plan's pack eligibility. A verified
+  credit webhook atomically consumes one matching authorization. A pending
+  payment remains authorized if the plan changes before delivery; direct SKU
+  purchases without authorization cannot grant credits. Duplicate and refund
+  events never need a second authorization. Pending authorizations are deleted
+  with the account and are included in its filtered data export.
 
 ## Configuration before activation
 

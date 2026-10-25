@@ -17,6 +17,7 @@ mock.module(mod("lib/mobileBillingService.ts"), { namedExports: {
   syncMobileSubscription: async (id: string) => { calls.push(id); },
   readMobileBillingState: async (id: string) => { calls.push(id); return { plan: "Free" }; },
   cancelMobileWebSubscription: async (id: string) => { calls.push(`cancel:${id}`); },
+  prepareMobileCreditPurchase: async (id: string, store: string, product: string) => { calls.push(`prepare:${id}:${store}:${product}`); },
   processMobileStoreWebhook: async () => { calls.push("webhook"); },
 } });
 const require = createRequire(import.meta.url);
@@ -37,6 +38,11 @@ test("mobile billing refuses by default and authenticates bearer independently w
   calls.length = 0;
   await route.POST(request("cancel_web"));
   assert.ok(calls.includes("cancel:verified-user"));
+  const prepared = await route.POST(new Request("https://tomverse.app/api/mobile/billing", {
+    method: "POST", body: JSON.stringify({ action: "prepare_credit_purchase", store: "app_store", productId: "credits500" }),
+  }));
+  assert.equal(prepared.status, 200);
+  assert.ok(calls.includes("prepare:verified-user:app_store:credits500"));
 });
 test("webhook requires an exact secret, configured app and environment before touching balances", async () => {
   calls.length = 0;

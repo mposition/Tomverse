@@ -126,11 +126,25 @@ export async function cancelMobileWebSubscription(userId: string) {
 
 type StoreEvent = z.infer<typeof revenueCatWebhookSchema>["event"];
 
+/** Authorize one credit purchase before opening the store payment sheet. */
+export async function prepareMobileCreditPurchase(userId: string, store: MobileStore, productId: string) {
+  const product = mobileBillingProducts().find((p) => p.store === store && p.productId === productId);
+  const pack = product?.kind === "credits" ? getCreditPack(product.packId) : null;
+  if (!pack) throw new Error("Unknown credit pack.");
+  await prisma.$transaction(async (tx) => {
+    await lockSubscriptionAccount(tx, userId);
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!pack.allowedPlans.includes(effectivePlanForAccess(user))) throw new Error("Credit pack is not available for this plan.");
+    await tx.mobileStorePurchaseAuthorization.create({ data: { userId, store, productId } });
+  });
+}
+
 /** Verified webhook only; the client cannot choose a quantity, owner or price. */
 export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userId: string, event: StoreEvent) {
   const store: MobileStore = event.store === "APP_STORE" ? "app_store" : "play_store";
   const product = mobileBillingProducts().find((p) => p.store === store && p.productId === event.product_id);
-  if (!product || product.kind !== "credits") return;
+  if (!product) throw new Error("Unmapped store product; configure the catalog before redelivery.");
+  if (product.kind !== "credits") return;
   if (event.type !== "NON_RENEWING_PURCHASE" && event.type !== "CANCELLATION") return;
   const pack = getCreditPack(product.packId);
   if (!pack) throw new Error("Unknown credit pack.");
@@ -142,6 +156,16 @@ export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userI
   }
   // A cancellation tombstone also handles refund-before-purchase delivery.
   if (existing?.refunded || (existing && event.type === "NON_RENEWING_PURCHASE")) return;
+  if (event.type === "NON_RENEWING_PURCHASE") {
+    // A delayed/pending payment retains the plan authorization made before
+    // its store sheet opened. Refunds and duplicate delivery need no new approval.
+    const authorization = await tx.mobileStorePurchaseAuthorization.findFirst({
+      where: { userId, store, productId: event.product_id, createdAt: { lte: new Date(event.purchased_at_ms + 60_000) } },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!authorization) throw new Error("Credit purchase has no server plan authorization.");
+    await tx.mobileStorePurchaseAuthorization.delete({ where: { id: authorization.id } });
+  }
   const purchase = existing || await tx.mobileStoreTransaction.create({ data: {
     userId, store, environment: event.environment, transactionId: event.transaction_id, productId: event.product_id,
     packId: pack.id, credits: pack.credits, fundedCostMicroUsd: BigInt(pack.fundedCostMicroUsd),
