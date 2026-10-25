@@ -42,6 +42,8 @@ export type QaReleaseTrainBoardRow = {
   included: QaReleaseTrainBoardPull[];
   leftOut: (QaReleaseTrainBoardPull & { outcome: Exclude<QaReleaseTrainPick["outcome"], "included" | "already_in_main">; predecessors: number[] | null })[];
   alreadyOnMain: number[];
+  /** An emergency train's pull requests already riding an open train. */
+  onOpenTrain: number[];
   rcSha: string | null;
   failure: string | null;
 };
@@ -87,7 +89,19 @@ export function qaReleaseTrainBoardRows(input: {
     const base = { slot: admission.slot, emergency: admission.emergency, admittedAt: admission.at.toISOString() };
     if (!found) {
       const running = input.nowMs - admission.at.getTime() < QA_RELEASE_TRAIN_BOARD_RUNNING_MS;
-      return { ...base, reportedAt: null, status: running ? "running" : "unreported", pullRequestNumber: null, settledAt: null, included: [], leftOut: [], alreadyOnMain: [], rcSha: null, failure: null };
+      return {
+        ...base,
+        reportedAt: null,
+        status: running ? "running" : "unreported",
+        pullRequestNumber: null,
+        settledAt: null,
+        included: [],
+        leftOut: [],
+        alreadyOnMain: [],
+        onOpenTrain: [],
+        rcSha: null,
+        failure: null,
+      };
     }
     const { report } = found;
     const picks = (Array.isArray(report.picks) ? report.picks : []).map(record).filter((p): p is Json => p !== null && typeof p.number === "number");
@@ -119,6 +133,7 @@ export function qaReleaseTrainBoardRows(input: {
           predecessors: Array.isArray(p.predecessors) ? p.predecessors.filter((n): n is number => Number.isInteger(n) && n > 0) : null,
         })),
       alreadyOnMain: picks.filter((p) => p.outcome === "already_in_main").map((p) => p.number as number),
+      onOpenTrain: picks.filter((p) => p.outcome === "in_open_train").map((p) => p.number as number),
       rcSha: typeof report.rcSha === "string" ? report.rcSha : null,
       failure: report.failure,
     };

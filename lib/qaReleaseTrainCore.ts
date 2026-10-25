@@ -119,8 +119,11 @@ export type QaReleaseTrainPick = {
    * lane's App may not push (no workflows permission, by design); it is left
    * out and released on its own.
    */
-  outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows";
+  outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows" | "in_open_train";
   /**
+   * `in_open_train`: an emergency train's pull request already riding an
+   * open train; never picked onto a second release branch.
+   *
    * For a conflict: develop pull requests merged before it that changed a
    * conflicted file, newest first. Some may be on main already; Admin shows
    * only those that are not.
@@ -153,6 +156,7 @@ export function qaReleaseTrainPullRequest(input: {
   const included = input.picks.filter((p) => p.outcome === "included");
   const left = input.picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome));
   const already = input.picks.filter((p) => p.outcome === "already_in_main");
+  const onOpenTrain = input.picks.filter((p) => p.outcome === "in_open_train");
   // A scheduled train's left-out pull requests ride the next scheduled train
   // again; an emergency train's do not (its request is spent).
   const reason = {
@@ -174,6 +178,7 @@ export function qaReleaseTrainPullRequest(input: {
     ...(left.length === 0 ? ["None."] : left.map((p) => `- #${p.number} ${title(p.number)} — ${reason[p.outcome as keyof typeof reason]}`)),
     "",
     `Already on main, skipped: ${already.length === 0 ? "none" : already.map((p) => `#${p.number}`).join(", ")}.`,
+    ...(onOpenTrain.length === 0 ? [] : ["", `Already on an open train, skipped: ${onOpenTrain.map((p) => `#${p.number}`).join(", ")}.`]),
     "",
     "## 7.9.1",
     "",

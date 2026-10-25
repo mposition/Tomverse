@@ -78,10 +78,22 @@ export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }
     setBusy(true);
     setNotice(null);
     try {
-      const response = await adminFetch(API, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      // The request this page saw pending: the server refuses if it is no longer the one.
+      const pendingId = emergency?.pending?.id ?? null;
+      const response = await adminFetch(API, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...body, pendingId }),
+      });
       const payload = (await response.json().catch(() => ({}))) as { code?: unknown; result?: QaReleaseTrainEmergency };
       if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
         setReauthenticationRequired(true);
+        return;
+      }
+      if (payload.code === "emergency_changed") {
+        setNotice({ tone: "error", text: m.emergencyChanged });
+        setEditing(false);
+        announceQaReleaseTrainChanged();
         return;
       }
       if (!response.ok || !payload.result) {

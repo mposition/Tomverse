@@ -14,7 +14,10 @@ import { saveQaReleaseTrainEmergency } from "@/lib/qaReleaseTrainCargoStore";
 // An emergency release train (owner request 2026-10-25): owner or ops with a
 // recent sign-in names the pull requests and a reason, audited; the train
 // service departs with them on its next round. No numbers withdraws a
-// pending request. Reading the state is the train-cargo route's GET.
+// pending request. `pendingId` is the request the page saw pending (null for
+// none); a request or withdrawal made from a page that is out of date is
+// refused with `emergency_changed`. Reading the state is the train-cargo
+// route's GET.
 
 const schema = z
   .object({
@@ -30,6 +33,7 @@ const schema = z
         }
         return reason;
       }),
+    pendingId: z.string().min(1).max(64).nullable(),
   })
   .strict();
 

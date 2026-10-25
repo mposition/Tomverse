@@ -66,7 +66,7 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
       {tab.id === "ci-admission" ? (
         <CiAdmissionSection key={tab.id} initial={admission} canWrite={canWrite} />
       ) : tab.id === "train" ? (
-        <TrainTab canWrite={canWrite} nowMs={now.getTime()} />
+        <TrainTab canWrite={canWrite} nowMs={now.getTime()} fresh={typeof query.fresh === "string"} />
       ) : tab.id === "lane" ? (
         <LaneTab rounds={laneRounds} canWrite={canWrite} />
       ) : (
@@ -93,8 +93,12 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
  * The release train (owner, 2026-10-25): where the next train stands, an
  * emergency departure, the next train's cargo and the departure board.
  */
-async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number }) {
-  const [board, next, schedule] = await Promise.all([readQaReleaseTrainBoard(nowMs), readQaReleaseTrainSelection(), readQaReleaseTrainSchedule()]);
+async function TrainTab({ canWrite, nowMs, fresh }: { canWrite: boolean; nowMs: number; fresh: boolean }) {
+  const [board, next, schedule] = await Promise.all([
+    readQaReleaseTrainBoard(nowMs, fresh),
+    readQaReleaseTrainSelection(),
+    readQaReleaseTrainSchedule(),
+  ]);
   const nextMs = schedule ? qaReleaseTrainNextDepartureMs(nowMs, schedule.hours) : null;
   const carried = next.departedWith && next.lastTrain?.slot === next.departedWith ? next.numbers.length : 0;
   return (

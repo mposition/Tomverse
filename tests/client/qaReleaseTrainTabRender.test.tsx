@@ -18,6 +18,7 @@ const row = (overrides: Partial<QaReleaseTrainBoardRow>): QaReleaseTrainBoardRow
   included: [{ number: 2978, title: "ci admission stop fast" }],
   leftOut: [{ number: 2913, title: "", outcome: "conflict", predecessors: [2726] }],
   alreadyOnMain: [2824],
+  onOpenTrain: [],
   rcSha: "f".repeat(40),
   failure: null,
   ...overrides,
@@ -61,8 +62,8 @@ test("the summary shows the next departure, what rides it, and the open train", 
   assert.match(html, /href="https:\/\/github.com\/mposition\/Tomverse\/pull\/2998"/);
   // A pending emergency departs first; the scheduled train waits while it is open.
   assert.match(html, /Emergency: next round/);
-  assert.ok(html.includes("with 2 PR(s). The "));
-  assert.ok(html.includes(" train waits while the emergency train is open"));
+  assert.ok(html.includes("with 2 PR(s). If it opens a train, the "));
+  assert.ok(html.includes(" train waits until it is merged"));
 });
 
 test("open main pull requests GitHub did not give are named unknown, never none, and the emergency train warns", () => {

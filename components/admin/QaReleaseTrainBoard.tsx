@@ -205,6 +205,9 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
                       {row.alreadyOnMain.length > 0 ? (
                         <p className="mt-3 text-xs text-[#a3a29b]">{m.detailAlready.replace("{numbers}", row.alreadyOnMain.map((n) => `#${n}`).join(" "))}</p>
                       ) : null}
+                      {row.onOpenTrain.length > 0 ? (
+                        <p className="mt-1 text-xs text-[#a3a29b]">{m.detailOnOpenTrain.replace("{numbers}", row.onOpenTrain.map((n) => `#${n}`).join(" "))}</p>
+                      ) : null}
                       {row.pullRequestNumber !== null ? (
                         <a
                           className="mt-3 inline-flex min-h-8 items-center rounded-md bg-[#1c1c1a] px-3 text-xs font-medium text-[#f5c46b] hover:underline"

@@ -4,6 +4,7 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
+import { QaReleaseOperatorControlRefusedError } from "@/lib/qaReleaseOperatorControlStore";
 import type { QaReleaseTrainEmergency, QaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoCore";
 import {
   QA_RELEASE_TRAIN_CARGO_ACTION,
@@ -47,14 +48,22 @@ export async function saveQaReleaseTrainSelection(actor: { session: Session; req
  * Requests an emergency train (owner request 2026-10-25), or withdraws a
  * pending one with no numbers, audited in the same transaction. The reason
  * stays in this row; the train's public pull request never carries it.
+ *
+ * `pendingId` is the request the operator saw pending (null for none). It is
+ * read again under the audit chain lock and must still be the one pending,
+ * so a page left open cannot withdraw a request the train has since taken,
+ * or replace or withdraw another operator's newer one; it is refused
+ * (`emergency_changed`) and the page reads again.
  */
 export async function saveQaReleaseTrainEmergency(
   actor: { session: Session; request: Request },
-  input: { numbers: number[]; reason: string },
+  input: { numbers: number[]; reason: string; pendingId: string | null },
 ): Promise<QaReleaseTrainEmergency> {
   await prisma.$transaction(
     async (tx) => {
       await takeAuditChainLock(tx);
+      const current = await readQaReleaseTrainEmergency(tx);
+      if ((current.pending?.id ?? null) !== input.pendingId) throw new QaReleaseOperatorControlRefusedError("emergency_changed");
       await writeAdminAuditLog({
         ...actor,
         tx,
