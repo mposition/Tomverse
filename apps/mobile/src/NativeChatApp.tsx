@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Browser } from "@capacitor/browser";
+import { App } from "@capacitor/app";
 import { mobileChatCopy } from "../../../locales/mobileChat";
-import { MobileAuth, mobileApiFetch } from "./authBridge";
+import { readMobileAuthReturn } from "../../../lib/mobileBrowserLogin";
+import { MobileAuth, mobileApiFetch, TOMVERSE_API_ORIGIN } from "./authBridge";
 import { nativeChatLocation } from "./chatLocation";
 import { NativeChatError, sendNativeChat, type NativeChatMessage } from "./chatClient";
+
+const appLinksEnabled = import.meta.env.VITE_MOBILE_AUTH_APP_LINKS_ENABLED === "true";
 
 export const NativeChatApp = () => {
   const copy = mobileChatCopy(navigator.language);
@@ -21,6 +25,8 @@ export const NativeChatApp = () => {
   const run = useRef<AbortController | null>(null);
   const epoch = useRef(0);
   const end = useRef<HTMLDivElement | null>(null);
+  const pendingChallenge = useRef<string | null>(null);
+  const connectionBusy = useRef(false);
 
   const invalidateRun = useCallback(() => {
     epoch.current++;
@@ -72,38 +78,66 @@ export const NativeChatApp = () => {
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [messages]);
 
   const connect = async () => {
-    if (sessionState !== "signed_out" || connecting) return;
+    if (sessionState !== "signed_out" || connectionBusy.current) return;
+    connectionBusy.current = true;
     setConnecting(true); setError("");
     try {
       clear();
+      pendingChallenge.current = null;
       setPairingRequestId(""); setCode("");
       const { url } = await MobileAuth.beginSignIn();
       const challenge = new URL(url).searchParams.get("codeChallenge");
       if (!challenge) throw new Error("missing connection request");
+      pendingChallenge.current = challenge;
       setPairingRequestId(challenge.slice(-8));
-      await Browser.open({ url });
+      const destination = new URL(url);
+      if (appLinksEnabled) destination.searchParams.set("returnTo", "app");
+      await Browser.open({ url: destination.toString() });
     } catch { setSessionState("restore_failed"); setError(copy.connectionError); }
-    finally { setConnecting(false); }
+    finally { connectionBusy.current = false; setConnecting(false); }
   };
-  const finishConnection = async () => {
-    if (sessionState !== "signed_out" || !pairingRequestId || !code.trim() || connecting) return;
+  const completeConnection = useCallback(async (grant: string, closeBrowser = false) => {
+    if (connectionBusy.current || !pendingChallenge.current) return;
+    connectionBusy.current = true;
+    // Consume the pending callback before any async work: duplicates cannot exchange twice.
+    pendingChallenge.current = null;
     setConnecting(true); setError("");
-    const grant = code.trim(); setCode("");
+    setCode("");
     const ticket = epoch.current;
     let connected = false;
     try {
       await MobileAuth.completeSignIn({ grant }); connected = true;
+      if (closeBrowser) await Browser.close().catch(() => {});
       await readIdentity(ticket);
-      if (ticket === epoch.current) setSessionState("connected");
+      if (ticket === epoch.current) { setPairingRequestId(""); setSessionState("connected"); }
     } catch {
       if (ticket === epoch.current) {
         setPairingRequestId(""); setError(copy.connectionError);
         setSessionState(connected ? "restore_failed" : "signed_out");
       }
     }
-    finally { setConnecting(false); }
+    finally { connectionBusy.current = false; setConnecting(false); }
+  }, [copy.connectionError, readIdentity]);
+  useEffect(() => {
+    if (!appLinksEnabled) return;
+    let disposed = false;
+    const onReturn = ({ url }: { url: string }) => {
+      if (disposed) return;
+      const grant = readMobileAuthReturn(url, TOMVERSE_API_ORIGIN, pendingChallenge.current);
+      if (grant) void completeConnection(grant, true);
+    };
+    const listener = App.addListener("appUrlOpen", onReturn);
+    void listener.then(() => App.getLaunchUrl()).then((launch) => {
+      if (launch?.url) onReturn(launch);
+    }).catch(() => {});
+    return () => { disposed = true; void listener.then((handle) => handle.remove()).catch(() => {}); };
+  }, [completeConnection]);
+  const finishConnection = async () => {
+    if (sessionState !== "signed_out" || !pairingRequestId || !code.trim()) return;
+    await completeConnection(code.trim());
   };
   const disconnect = async () => {
+    pendingChallenge.current = null;
     clear(); setIdentity(null); setPairingRequestId(""); setCode("");
     nativeChatLocation.setIdentity(null); setSessionState("checking");
     const ticket = epoch.current;
@@ -151,7 +185,7 @@ export const NativeChatApp = () => {
       <p role="status">{sessionState === "checking" ? copy.restoring : copy.connectionError}</p>
       {sessionState === "restore_failed" && <button type="button" onClick={() => { void restoreSession(epoch.current); }}>{copy.retryConnection}</button>}
     </section> : <section className="native-connect">
-      <h2>{copy.connect}</h2><p>{copy.connectionNote}</p>
+      <h2>{copy.connect}</h2><p>{appLinksEnabled ? copy.browserConnectionNote : copy.connectionNote}</p>
       <button type="button" onClick={() => { void connect(); }} disabled={connecting} data-testid="native-sign-in">{connecting ? copy.connecting : copy.openBrowser}</button>
       {pairingRequestId && <p data-testid="native-pairing-request">{copy.requestId}: <strong>{pairingRequestId}</strong></p>}
       <form onSubmit={(event) => { event.preventDefault(); void finishConnection(); }}>

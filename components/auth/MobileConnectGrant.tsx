@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { mobileChatCopy } from "@/locales/mobileChat";
 import { useLanguage } from "@/components/LanguageProvider";
+import { mobileAuthReturnPath } from "@/lib/mobileBrowserLogin";
 
-export const MobileConnectGrant = ({ challenge }: { challenge: string }) => {
+export const MobileConnectGrant = ({ challenge, returnToApp = false }: { challenge: string; returnToApp?: boolean }) => {
   const { lang } = useLanguage();
   const copy = mobileChatCopy(lang);
   const [grant, setGrant] = useState("");
@@ -27,7 +28,8 @@ export const MobileConnectGrant = ({ challenge }: { challenge: string }) => {
       });
       if (!response.ok) throw new Error("grant refused");
       const result = await response.json() as { grant?: unknown; expiresIn?: unknown };
-      if (typeof result.grant !== "string" || typeof result.expiresIn !== "number") throw new Error("invalid grant");
+      if (typeof result.grant !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(result.grant) ||
+          typeof result.expiresIn !== "number" || !Number.isFinite(result.expiresIn) || result.expiresIn <= 0) throw new Error("invalid grant");
       setGrant(result.grant); setExpiresAt(Date.now() + Math.min(result.expiresIn, 60) * 1_000);
     } catch { setError(copy.createError); }
     finally { setPending(false); }
@@ -40,6 +42,7 @@ export const MobileConnectGrant = ({ challenge }: { challenge: string }) => {
     <label className="mb-4 flex items-center gap-3"><input type="checkbox" checked={matched} onChange={(event) => setMatched(event.target.checked)} />{copy.requestMatch}</label>
     <button type="button" disabled={pending || !matched} onClick={() => { void create(); }} className="min-h-11 rounded-xl bg-blue-600 px-5 py-2 text-white disabled:opacity-50" data-testid="mobile-create-code">{copy.createCode}</button>
     {grant && <div className="mt-6 space-y-3" role="status">
+      {returnToApp && <a href={mobileAuthReturnPath(challenge, grant)} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-11 items-center rounded-xl bg-blue-600 px-5 py-2 text-white" data-testid="mobile-return-to-app">{copy.returnToApp}</a>}
       <label htmlFor="mobile-pairing-code">{copy.code}</label>
       <input id="mobile-pairing-code" readOnly value={grant} autoComplete="off" spellCheck={false} onFocus={(event) => event.target.select()} className="w-full rounded-lg border p-3 font-mono" />
       <p>{copy.codeNote}</p>

@@ -6,6 +6,6 @@ export default defineConfig({
   webServer: {
     command: "npm run dev --workspace @tomverse/mobile -- --host 127.0.0.1 --port 3191 --strictPort",
     url: "http://127.0.0.1:3191", reuseExistingServer: false,
-    env: { VITE_NATIVE_CHAT_ENABLED: "true", VITE_TOMVERSE_API_ORIGIN: "https://api.native-chat.test" },
+    env: { VITE_NATIVE_CHAT_ENABLED: "true", VITE_MOBILE_AUTH_APP_LINKS_ENABLED: "true", VITE_TOMVERSE_API_ORIGIN: "https://api.native-chat.test" },
   },
 });

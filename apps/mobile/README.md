@@ -10,7 +10,10 @@ There is no remote `server.url` or browser session fallback.
   one-time code. Compare the request ID in the app with the browser page and
   explicitly confirm the match before creating the code. The app creates its PKCE proof natively; only the public
   challenge enters the browser URL. Code creation requires an explicit click
-  on the authenticated `/mobile/connect` page. Paste the code back into the app.
+  on the authenticated `/mobile/connect` page, after the ordinary web login
+  (Google, Microsoft or email). With verified auth links configured, choose
+  **Return to Tomverse app** to complete sign-in without pasting a code.
+  Manual code entry remains available when the link cannot open the app.
 - Native Swift/Java `MobileAuth` exchanges and rotates credentials directly
   over HTTPS, with redirects disabled and no cookies. Keychain on iOS and
   Android Keystore AES-GCM protect the stored session. Only short-lived access
@@ -52,6 +55,43 @@ Vite transport and native auth. Rebuild and sync together when changing it.
 The app uses native code, not JavaScript, for credential exchange/rotation.
 These switches have not been set on a deployed service by this change.
 
+## System-browser sign-in return
+
+The browser uses the existing `/auth/signin` page and cookie session. The app
+receives only a 60-second, single-use grant in the fragment of the exact HTTPS
+`/mobile/auth/callback` link, bound to its in-memory PKCE request. It refuses
+other origins, paths, query credentials, unrelated requests and duplicate
+callbacks. The verifier and rotating session stay native. An app restart
+requires a new connection request; a cold-start link cannot resume lost proof.
+If link verification fails, the standalone fallback clears the fragment from
+browser history, loads no analytics/resources and offers manual code entry.
+
+App returns stay off by default. Configure these together when preparing a
+signed build and its matching API deployment:
+
+| Location | Setting |
+|---|---|
+| API server | `MOBILE_AUTH_APP_LINKS_ENABLED=true` |
+| API server, Android | `MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS`: comma-separated SHA-256 fingerprints of the installed app's signing certificates (Play App Signing certificate for Play builds) |
+| API server, iOS | `MOBILE_AUTH_IOS_APP_ID`: the actual App ID prefix plus `.app.tomverse.shell` |
+| Vite build | `VITE_MOBILE_AUTH_APP_LINKS_ENABLED=true` |
+| Capacitor sync | `NATIVE_AUTH_APP_LINKS_ENABLED=true` |
+
+Use the same `VITE_TOMVERSE_API_ORIGIN` for build and sync. The sync hook adds
+an Android auto-verified intent filter for only the callback path and configures
+iOS Associated Domains in the app's entitlements/build settings. Existing
+capabilities are preserved; disabling the sync switch removes only managed
+entries. Enable Associated Domains for the iOS App ID and signing profile too.
+The API publishes `/.well-known/assetlinks.json` and
+`/.well-known/apple-app-site-association` only with valid, configured signing
+identities. No placeholder signing identity is published.
+
+Physical Android/iOS verification of the signed app's association and
+browser-to-app return remains required. Local tests mock OS link delivery;
+they do not establish that a release certificate or Apple provisioning profile
+has been configured. No production setting or signing identity is changed by
+the implementation.
+
 ## Local checks
 
 Run on the local PC, PowerShell, from the repository root. These checks write
@@ -92,8 +132,8 @@ npm --workspace @tomverse/mobile run cap:sync
 
 The Android release application ID is `app.tomverse.shell`, confirmed by the
 owner on 2026-10-25. Keep the generated Android project and Google Play
-registration aligned with this ID. The manual pairing path needs no
-universal-link association files.
+registration aligned with this ID. Manual code pairing needs no association
+files; browser-to-app return uses the verified links described above.
 
 Release signing, iOS build, device secure-store checks,
 permission prompts and foreground keyboard behavior remain device/release

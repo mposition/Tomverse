@@ -6,14 +6,17 @@ const installDevice = async (page: Page, signedIn = true, scenario: { holdSessio
   const requests: Array<{ body: Record<string, unknown>; authorization: string | undefined }> = [];
   await page.addInitScript(({ signedIn, holdSession, lockedStore }) => {
     const sessionWaiters: Array<() => void> = [];
-    const state = { signedIn, holdSession, lockedStore, releaseSession: null as (() => void) | null, calls: [] as string[], latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, holdAuth: false, releaseAuth: null as (() => void) | null, hold: false, release: null as (() => void) | null };
+    const state = { signedIn, holdSession, lockedStore, releaseSession: null as (() => void) | null, calls: [] as string[], latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, holdAuth: false, releaseAuth: null as (() => void) | null, hold: false, release: null as (() => void) | null, listeners: {} as Record<string, (data: { url: string }) => void> };
     const device = window as unknown as { androidBridge: object; __nativeFixture: typeof state; Capacitor: object };
     device.__nativeFixture = state; device.androidBridge = {};
     const methods = { MobileAuth: ["hasSession", "getAccessToken", "beginSignIn", "completeSignIn", "signOut"],
-      Geolocation: ["checkPermissions", "requestPermissions", "getCurrentPosition"], Browser: ["open"] };
+      Geolocation: ["checkPermissions", "requestPermissions", "getCurrentPosition"], Browser: ["open", "close"], App: ["addListener", "removeListener", "getLaunchUrl"] };
     device.Capacitor = {
-      PluginHeaders: Object.entries(methods).map(([name, names]) => ({ name, methods: names.map((name) => ({ name, rtype: "promise" })) })),
-      nativePromise: async (plugin: string, method: string, options: { url?: string; grant?: string; permissions?: string[] }) => {
+      PluginHeaders: Object.entries(methods).map(([name, names]) => ({ name, methods: names.map((name) => ({ name, rtype: name === "addListener" ? "callback" : "promise" })) })),
+      nativeCallback: (_plugin: string, _method: string, _options: unknown, callback: (data: { url: string }) => void) => {
+        const id = crypto.randomUUID(); state.listeners[id] = callback; return id;
+      },
+      nativePromise: async (plugin: string, method: string, options: { url?: string; grant?: string; permissions?: string[]; callbackId?: string }) => {
         state.calls.push(`${plugin}.${method}`);
         if (plugin === "MobileAuth") {
           if (method === "hasSession") {
@@ -24,11 +27,12 @@ const installDevice = async (page: Page, signedIn = true, scenario: { holdSessio
             return { signedIn: state.signedIn };
           }
           if (method === "getAccessToken") { if (state.holdAuth) await new Promise<void>((resolve) => { state.releaseAuth = resolve; }); if (!state.signedIn) throw new Error("no session"); return { accessToken: "native-fixture-access", expiresAt: Date.now() + 600_000 }; }
-          if (method === "beginSignIn") { state.proof = true; return { url: "https://api.native-chat.test/mobile/connect?codeChallenge=public-fixture-challenge" }; }
-          if (method === "completeSignIn") { if (!state.proof || options.grant !== "one-time-fixture") throw new Error("invalid code"); state.proof = false; state.signedIn = true; return; }
+          if (method === "beginSignIn") { state.proof = true; return { url: "https://api.native-chat.test/mobile/connect?codeChallenge=" + "a".repeat(43) }; }
+          if (method === "completeSignIn") { if (!state.proof || (options.grant !== "one-time-fixture" && options.grant !== "g".repeat(43))) throw new Error("invalid code"); state.proof = false; state.signedIn = true; return; }
           if (method === "signOut") { state.signedIn = false; return; }
         }
-        if (plugin === "Browser") { state.browserUrls.push(options.url!); return; }
+        if (plugin === "App") { if (method === "removeListener") delete state.listeners[options.callbackId!]; return; }
+        if (plugin === "Browser") { if (method === "open") state.browserUrls.push(options.url!); return; }
         if (method === "checkPermissions" || method === "requestPermissions") {
           if (method === "requestPermissions" && JSON.stringify(options.permissions) !== '["coarseLocation"]') throw new Error("unexpected permission");
           return { coarseLocation: state.denied ? "denied" : "granted", location: "denied" };
@@ -94,11 +98,44 @@ test("native chat defaults off, obtains fresh foreground fixes per message, and 
 test("device pairing opens a public challenge and completes with a one-time code", async ({ page }) => {
   await installDevice(page, false);
   await page.getByTestId("native-sign-in").click();
-  expect(await page.evaluate(() => (window as unknown as { __nativeFixture: { browserUrls: string[] } }).__nativeFixture.browserUrls)).toEqual(["https://api.native-chat.test/mobile/connect?codeChallenge=public-fixture-challenge"]);
+  expect(await page.evaluate(() => (window as unknown as { __nativeFixture: { browserUrls: string[] } }).__nativeFixture.browserUrls)).toEqual(["https://api.native-chat.test/mobile/connect?codeChallenge=" + "a".repeat(43) + "&returnTo=app"]);
   await page.getByLabel("Connection code", { exact: true }).fill("one-time-fixture");
   await page.getByRole("button", { name: "Connect device", exact: true }).click();
   await expect(page.getByTestId("native-chat-input")).toBeVisible();
   await expect(page.getByTestId("native-location-toggle")).not.toBeChecked();
+});
+
+const returnFromBrowser = async (page: Page, url: string, twice = false) => page.evaluate(({ url, twice }) => {
+  const state = (window as unknown as { __nativeFixture: { listeners: Record<string, (data: { url: string }) => void> } }).__nativeFixture;
+  for (const callback of Object.values(state.listeners)) { callback({ url }); if (twice) callback({ url }); }
+}, { url, twice });
+
+test("browser sign-in returns to the pending device and duplicate links exchange exactly once", async ({ page }) => {
+  await installDevice(page, false);
+  await page.getByTestId("native-sign-in").click();
+  await returnFromBrowser(page, `https://api.native-chat.test/mobile/auth/callback#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`, true);
+  await expect(page.getByTestId("native-chat-input")).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);
+  expect(calls.filter((call) => call === "MobileAuth.completeSignIn")).toHaveLength(1);
+  expect(calls).toContain("Browser.close");
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await returnFromBrowser(page, `https://api.native-chat.test/mobile/auth/callback#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`);
+  await expect(page.getByTestId("native-sign-in")).toBeVisible();
+});
+
+test("untrusted and unrelated browser returns cannot connect or consume the current request", async ({ page }) => {
+  await installDevice(page, false);
+  const fragment = `#codeChallenge=${"a".repeat(43)}&grant=${"g".repeat(43)}`;
+  await returnFromBrowser(page, "https://api.native-chat.test/mobile/auth/callback" + fragment);
+  await page.getByTestId("native-sign-in").click();
+  await returnFromBrowser(page, "https://evil.test/mobile/auth/callback" + fragment);
+  await returnFromBrowser(page, "https://api.native-chat.test/mobile/auth/callback" + fragment.replace("a".repeat(43), "b".repeat(43)));
+  await expect(page.getByTestId("native-chat-input")).toHaveCount(0);
+  const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);
+  expect(calls).not.toContain("MobileAuth.completeSignIn");
+  await page.getByLabel("Connection code", { exact: true }).fill("one-time-fixture");
+  await page.getByRole("button", { name: "Connect device", exact: true }).click();
+  await expect(page.getByTestId("native-chat-input")).toBeVisible();
 });
 
 test("denied location still permits chat and stop fences an in-flight location read", async ({ page }) => {

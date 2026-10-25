@@ -10,9 +10,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --project tsconfig.json",
     "cap:sync": "cap sync",
-    "capacitor:sync:after": "node scripts/configure-location-permissions.mjs"
+    "capacitor:sync:after": "node scripts/configure-location-permissions.mjs && node scripts/configure-auth-app-links.mjs"
   },
   "dependencies": {
+    "@capacitor/app": "^8.1.2",
     "@capacitor/browser": "^8.0.5",
     "@capacitor/core": "^8.5.2",
     "@capacitor/geolocation": "^8.2.4",

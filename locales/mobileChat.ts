@@ -2,6 +2,8 @@
 const en = {
   title: "Tomverse Chat", connect: "Connect your account", openBrowser: "Sign in in your browser",
   connectionNote: "Sign in on the page that opens, create a one-time connection code, then paste it here. The code only works for this device's connection request.",
+  browserConnectionNote: "Sign in with your usual Tomverse login, confirm this device's connection request, then choose Return to Tomverse app. You can also paste the connection code here.",
+  returnToApp: "Return to Tomverse app", returnFallback: "If the app did not open, return to your Tomverse app and paste this connection code. If you restarted the app, start a new sign-in request.",
   code: "Connection code", confirm: "Connect device", disconnect: "Sign out", newChat: "New chat",
   prompt: "Ask anything…", send: "Send", stop: "Stop", location: "Current location", search: "Web search",
   locationNote: "While on, share your approximate location with AI providers on each message. Used when relevant. No background tracking.",
@@ -21,6 +23,8 @@ const en = {
 };
 
 const ko: typeof en = {
+  browserConnectionNote: "평소 사용하는 Tomverse 로그인으로 인증하고 이 기기의 연결 요청을 확인한 뒤 앱으로 돌아가기를 선택하세요. 연결 코드를 여기에 붙여 넣어도 됩니다.",
+  returnToApp: "Tomverse 앱으로 돌아가기", returnFallback: "앱이 열리지 않으면 Tomverse 앱으로 돌아가 이 연결 코드를 붙여 넣으세요. 앱을 다시 실행했다면 새 로그인 요청을 시작하세요.",
   title: "Tomverse Chat", connect: "계정 연결", openBrowser: "브라우저에서 로그인",
   connectionNote: "열린 페이지에서 로그인하고 일회용 연결 코드를 만든 뒤 여기에 붙여 넣으세요. 코드는 이 기기에서 시작한 연결에만 사용할 수 있습니다.",
   code: "연결 코드", confirm: "기기 연결", disconnect: "로그아웃", newChat: "새 대화",

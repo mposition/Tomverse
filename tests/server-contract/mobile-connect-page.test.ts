@@ -40,3 +40,26 @@ test("browser pairing stays disabled by default and validates its public challen
     assert.equal(element.props.challenge, challenge);
   } finally { if (previous === undefined) delete process.env.MOBILE_CHAT_ENABLED; else process.env.MOBILE_CHAT_ENABLED = previous; }
 });
+
+test("system-browser login keeps its app return destination through the ordinary web sign-in page", async () => {
+  const keys = ["MOBILE_CHAT_ENABLED", "MOBILE_AUTH_APP_LINKS_ENABLED", "MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS"] as const;
+  const previous = keys.map((key) => process.env[key]);
+  try {
+    process.env.MOBILE_CHAT_ENABLED = "true";
+    process.env.MOBILE_AUTH_APP_LINKS_ENABLED = "true";
+    process.env.MOBILE_AUTH_ANDROID_SHA256_CERT_FINGERPRINTS = Array(32).fill("AB").join(":");
+    ready = true; signedIn = false;
+    const query = { codeChallenge: challenge, returnTo: "app" };
+    await assert.rejects(Page({ searchParams: Promise.resolve(query) }), (error: Error) =>
+      error.message === `/auth/signin?callbackUrl=${encodeURIComponent(`/mobile/connect?codeChallenge=${challenge}&returnTo=app`)}`);
+    signedIn = true;
+    const element = await Page({ searchParams: Promise.resolve(query) });
+    assert.equal(element.props.returnToApp, true);
+    delete process.env.MOBILE_AUTH_APP_LINKS_ENABLED;
+    assert.equal((await Page({ searchParams: Promise.resolve(query) })).props.returnToApp, false);
+    process.env.MOBILE_AUTH_APP_LINKS_ENABLED = "true";
+    assert.equal((await Page({ searchParams: Promise.resolve({ ...query, returnTo: "https://evil.test" }) })).props.returnToApp, false);
+  } finally {
+    keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; });
+  }
+});
