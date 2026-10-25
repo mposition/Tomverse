@@ -102,7 +102,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // This is evidence of current content, not approval to publish the amendment.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "e9b7d283be7b8dcca54bf288b67b405e37c5f761cea9d283a0f1cc60264b2c62",
+    contentSha256: "1506a36acb255b94c02201a12014e6a2b16f2a45d677899e26ceda2c0096519d",
   },
   "/terms": {
     date: "2026-11-16",

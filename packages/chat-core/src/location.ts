@@ -39,6 +39,11 @@ export type ChatLocationState = {
   error: ChatLocationError | null;
 };
 export type ChatLocationReader = (requestPermission: boolean) => Promise<ChatLocation>;
+export type ChatLocationIntent = {
+  /** The saved user-message id, shared by comparison panels. */
+  turnId: string;
+  requiresLocation: () => Promise<boolean>;
+};
 /** Minimal cancellation port, independent of browser/Node AbortSignal types. */
 export type ChatLocationReadSignal = {
   readonly aborted: boolean;
@@ -56,21 +61,26 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
   let identity: string | null = null;
   let generation = 0;
   let inFlight: Promise<ChatLocation | null> | null = null;
+  let automaticSuppressed = false;
+  const intentReads = new Map<string, Promise<boolean>>();
   const grants = new WeakMap<ChatLocation, number>();
   const listeners = new Set<() => void>();
   const update = (next: ChatLocationState) => {
     state = next;
     for (const listener of listeners) listener();
   };
-  const disable = () => {
+  const reset = (suppressed: boolean) => {
     generation++;
     inFlight = null;
+    automaticSuppressed = suppressed;
+    intentReads.clear();
     update(CHAT_LOCATION_OFF);
   };
+  const disable = () => reset(true);
   const setIdentity = (next: string | null) => {
     if (identity === next) return;
     identity = next;
-    disable();
+    reset(false);
   };
   const isEnabled = (scope: string | null) =>
     scope !== null && scope === identity && state.enabled;
@@ -88,6 +98,7 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
         return location;
       }).catch((error: unknown) => {
         if (generation !== capturedGeneration) return null;
+        automaticSuppressed = true;
         const code = error instanceof Error ? error.message : "unavailable";
         update({ enabled: false, pending: false,
           error: code === "denied" || code === "timeout" ? code : "unavailable" });
@@ -112,12 +123,35 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
     enable: async (scope: string | null) => {
       setIdentity(scope);
       if (!scope) return;
+      automaticSuppressed = false;
       await read(true);
     },
-    readForTurn: (scope: string | null, signal?: ChatLocationReadSignal): Promise<ChatLocation | null> => {
+    readForTurn: (scope: string | null, signal?: ChatLocationReadSignal, intent?: ChatLocationIntent): Promise<ChatLocation | null> => {
       const aborted = () => signal?.reason ?? new Error("aborted");
       if (signal?.aborted) return Promise.reject(aborted());
-      const pending = isEnabled(scope) ? read(false) : Promise.resolve(null);
+      const capturedGeneration = generation;
+      const automaticRead = () => {
+        if (!intent || !scope || scope !== identity || automaticSuppressed) return Promise.resolve(null);
+        let decision = intentReads.get(intent.turnId);
+        if (!decision) {
+          decision = Promise.resolve().then(intent.requiresLocation).catch(error => {
+            // A guest verification challenge must reach the existing client
+            // coordinator. Its verified retry gets a fresh intent request.
+            if (intentReads.get(intent.turnId) === decision) intentReads.delete(intent.turnId);
+            throw error;
+          });
+          intentReads.set(intent.turnId, decision);
+          // Keep only decisions, never fixes. Late comparison panels share the
+          // same analysis, while later messages still read a fresh position.
+          if (intentReads.size > 16) intentReads.delete(intentReads.keys().next().value!);
+        }
+        return decision.then(required => {
+          if (!required || signal?.aborted || capturedGeneration !== generation ||
+              scope !== identity || automaticSuppressed) return null;
+          return read(true);
+        });
+      };
+      const pending = isEnabled(scope) ? read(false) : automaticRead();
       if (!signal) return pending;
       return new Promise((resolve, reject) => {
         const cancel = () => { signal.removeEventListener("abort", cancel); reject(aborted()); };

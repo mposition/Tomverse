@@ -19,6 +19,50 @@ const send = async (page: Page, text: string) => {
   return payload;
 };
 
+test("a location question automatically acquires permission and answers without opening tools", { tag: "@ui-risk" }, async ({ page, context }) => {
+  await context.grantPermissions(["geolocation"]);
+  await context.setGeolocation({ latitude: -27.46977, longitude: 153.02512, accuracy: 10 });
+  await openChat(page);
+  let analyses = 0;
+  await page.route("**/api/chat/location-intent", async route => {
+    analyses++;
+    expect(route.request().postDataJSON().text).toBe("지금 제가 있는 위치가 어디인가요?");
+    await route.fulfill({ json: { requiresLocation: true } });
+  });
+  await expect(page.getByTestId("chat-location-status")).toHaveCount(0);
+  expect((await send(page, "지금 제가 있는 위치가 어디인가요?")).currentLocation.latitude).toBe(-27.47);
+  await expect(page.getByTestId("chat-location-status")).toBeVisible();
+  await context.setGeolocation({ latitude: -33.8688, longitude: 151.2093 });
+  expect((await send(page, "What is nearby now?")).currentLocation.latitude).toBe(-33.869);
+  expect(analyses).toBe(1);
+  await page.reload();
+  expect((await send(page, "지금 제가 있는 위치가 어디인가요?")).currentLocation.latitude).toBe(-33.869);
+  expect(analyses).toBe(2);
+  await page.getByTestId("chat-location-disable").click();
+  expect((await send(page, "Continue without my location")).currentLocation).toBeUndefined();
+  expect(analyses).toBe(2);
+});
+
+test("an automatic permission denial continues without coordinates and never re-prompts", { tag: "@ui-risk" }, async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "locationRequests", { configurable: true, writable: true, value: 0 });
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+      getCurrentPosition: (_success: unknown, failure: (error: { code: number }) => void) => {
+        (window as unknown as { locationRequests: number }).locationRequests++;
+        failure({ code: 1 });
+      },
+    } });
+  });
+  await openChat(page);
+  let analyses = 0;
+  await page.route("**/api/chat/location-intent", route => { analyses++; return route.fulfill({ json: { requiresLocation: true } }); });
+  expect((await send(page, "Where am I?")).currentLocation).toBeUndefined();
+  await expect(page.getByTestId("chat-location-status")).toContainText("permission denied");
+  expect((await send(page, "What is nearby?")).currentLocation).toBeUndefined();
+  expect(analyses).toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { locationRequests: number }).locationRequests)).toBe(1);
+});
+
 test("foreground location is off by default, refreshed on each send, removable, and not restored on reload", { tag: "@ui-risk" }, async ({ page, context }) => {
   await context.grantPermissions(["geolocation"]);
   await context.setGeolocation({ latitude: -27.4697701, longitude: 153.0251234, accuracy: 10 });

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
-const usage = "Use your approximate current location for location-based chat answers when you turn on Current location. Location is refreshed when sending a message and is not tracked in the background.";
+const usage = "When you ask a location-dependent question or turn on Current location, share your approximate position with AI providers to answer it. Existing device permission is reused. Location is refreshed when sending a message and is not tracked in the background.";
 
 export const withAndroidLocationPermission = (xml) => {
   if (xml.includes('android.permission.ACCESS_COARSE_LOCATION')) return xml;
