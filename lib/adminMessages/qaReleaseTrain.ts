@@ -13,7 +13,7 @@ export const adminQaReleaseTrainMessages = defineAdminMessages({
     summaryOpenUnknownNote: "GitHub's open pull requests could not be read; a train may be open",
     emergencyOpenUnknown: "GitHub's open pull requests could not be read, so a train may be open. An emergency train departs even then; check GitHub first.",
     summaryEmergencyNext: "Emergency: next round",
-    summaryEmergencyNote: "Within 30 minutes, with {count} PR(s); the scheduled train follows at {at}",
+    summaryEmergencyNote: "Within 30 minutes, with {count} PR(s). The {at} train waits while the emergency train is open",
     summaryRiding: "Next scheduled train carries",
 
     emergencyOpen: "Emergency train",
@@ -97,7 +97,7 @@ export const adminQaReleaseTrainMessages = defineAdminMessages({
     summaryOpenUnknownNote: "GitHub의 열린 PR을 읽지 못했습니다. 열린 열차가 있을 수 있습니다",
     emergencyOpenUnknown: "GitHub의 열린 PR을 읽지 못해 열린 열차가 있을 수 있습니다. 긴급 열차는 그래도 출발하니 GitHub를 먼저 확인하세요.",
     summaryEmergencyNext: "긴급: 다음 회차",
-    summaryEmergencyNote: "30분 안에 PR {count}개로 출발, 정기 열차는 {at}",
+    summaryEmergencyNote: "30분 안에 PR {count}개로 출발. 긴급 열차가 열려 있는 동안 {at} 정기 열차는 기다립니다",
     summaryRiding: "다음 정기 열차에 실림",
 
     emergencyOpen: "긴급 열차 편성",

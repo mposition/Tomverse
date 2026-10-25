@@ -128,6 +128,9 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
   };
   return {
     async assemble(branch, cargo, capacity) {
+      // A round that assembles twice (an empty emergency, then the scheduled
+      // train) keeps one clone: the first is removed before the second.
+      if (dir) await rm(dir, { recursive: true, force: true });
       dir = await mkdtemp(join(tmpdir(), "qa-release-train-"));
       await git(["clone", "--quiet", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", "main", input.remote ?? `https://github.com/${REPOSITORY}.git`, dir], { cwd: tmpdir() });
       await git(["config", "user.name", "tomverse-qa-release-train"]);

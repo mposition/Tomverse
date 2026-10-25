@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { QA_RELEASE_TRAIN_BOARD_RUNNING_MS, qaReleaseTrainBoardRows, qaReleaseTrainPullStates } from "../lib/qaReleaseTrainBoardCore.ts";
+import { QA_RELEASE_TRAIN_BOARD_RUNNING_MS, qaReleaseTrainBoardRows, qaReleaseTrainOpenTrains, qaReleaseTrainPullStates } from "../lib/qaReleaseTrainBoardCore.ts";
+
+test("the open trains come from GitHub's open list, whatever the board's history holds", () => {
+  assert.deepEqual(
+    qaReleaseTrainOpenTrains([
+      { number: 2998, head: { ref: "release/train-20261025-1400" } },
+      { number: 2987, head: { ref: "claude/to-develop/back-merge-main-20261025" } },
+      { number: 3010, head: { ref: "release/train-20261025-1237" } },
+      { number: 2990, head: { ref: "hotfix/x" } },
+      { head: { ref: "release/train-x" } },
+    ]),
+    [3010, 2998],
+  );
+  assert.deepEqual(qaReleaseTrainOpenTrains([]), []);
+});
 
 const NOW = Date.parse("2026-10-25T05:00:00Z");
 const ago = (minutes) => new Date(NOW - minutes * 60_000);

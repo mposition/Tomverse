@@ -6,7 +6,7 @@
  *
  * Pure: the read (lib/qaReleaseTrainBoardRead.ts) passes what it read.
  */
-import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
+import { QA_RELEASE_TRAIN_BRANCH_PREFIX, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
 
 /** How long a train may run between its admission and its report before the board calls it unreported. */
 export const QA_RELEASE_TRAIN_BOARD_RUNNING_MS = 30 * 60 * 1000;
@@ -51,6 +51,15 @@ const record = (value: unknown): Json | null => (typeof value === "object" && va
 
 /** A main pull request's state as GitHub lists it: `null` when the list did not include it or could not be read. */
 export type QaReleaseTrainPullState = { state: "open" | "merged" | "closed"; settledAt: string | null };
+
+/** The open train pull requests in a GitHub list of open main pull requests, newest first. */
+export function qaReleaseTrainOpenTrains(openPullsJson: readonly unknown[]): number[] {
+  return openPullsJson
+    .map(record)
+    .filter((pull): pull is Json => pull !== null && typeof pull.number === "number" && String(record(pull.head)?.ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX))
+    .map((pull) => pull.number as number)
+    .sort((a, b) => b - a);
+}
 
 /** The train pull requests in a GitHub list of main pull requests, by number. */
 export function qaReleaseTrainPullStates(pullsJson: unknown): Map<number, QaReleaseTrainPullState> {

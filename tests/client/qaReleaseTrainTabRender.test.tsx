@@ -59,9 +59,10 @@ test("the summary shows the next departure, what rides it, and the open train", 
   assert.match(html, /16/);
   assert.match(html, /12 carried · 4 new/);
   assert.match(html, /href="https:\/\/github.com\/mposition\/Tomverse\/pull\/2998"/);
-  // A pending emergency departs first, and the scheduled time still shows.
+  // A pending emergency departs first; the scheduled train waits while it is open.
   assert.match(html, /Emergency: next round/);
-  assert.ok(html.includes("with 2 PR(s); the scheduled train follows at"));
+  assert.ok(html.includes("with 2 PR(s). The "));
+  assert.ok(html.includes(" train waits while the emergency train is open"));
 });
 
 test("open main pull requests GitHub did not give are named unknown, never none, and the emergency train warns", () => {

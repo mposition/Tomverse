@@ -104,7 +104,7 @@ async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number 
         nextDepartureAt={nextMs === null ? null : new Date(nextMs).toISOString()}
         riding={next.numbers.length}
         carried={carried}
-        openTrain={board.rows.find((row) => row.status === "boarding")?.pullRequestNumber ?? null}
+        openTrain={board.openTrains[0] ?? null}
         openUnknown={!board.openRead}
         emergencyPulls={next.emergency.pending?.numbers.length ?? null}
       />
