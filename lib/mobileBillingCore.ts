@@ -14,6 +14,7 @@ export const mobileStoreSnapshotSchema = z.object({
   interval: z.enum(["monthly", "annual"]), expiresAt: z.string().datetime({ offset: true }), cancelAtPeriodEnd: z.boolean(),
 });
 export type MobileStoreSubscriptionView = z.infer<typeof mobileStoreSnapshotSchema>;
+export const mobileSubscriptionAttemptSchema = z.object({ id: z.string(), store, productId: z.string(), startedAt: z.string().datetime(), confirmed: z.boolean().optional() });
 export type MobileBillingState = {
   billingId: string;
   plan: string;
@@ -28,6 +29,7 @@ export type MobileBillingState = {
   storeSubscriptions?: MobileStoreSubscriptionView[];
   verificationPending?: boolean;
   creditPurchasesNeedingReview?: number;
+  subscriptionPurchaseAttempt?: z.infer<typeof mobileSubscriptionAttemptSchema> | null;
   products: (MobileBillingProduct & { credits?: number; monthlyCredits?: number; maxModels?: number })[];
 };
 
@@ -83,8 +85,14 @@ export function resolveMobileSubscription(raw: unknown, products: MobileBillingP
 export const mobileBillingRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.enum(["sync", "cancel_web"]), store }).strict(),
   z.object({ action: z.literal("prepare_credit_purchase"), store, productId: z.string().min(1).max(200) }).strict(),
+  z.object({ action: z.literal("prepare_subscription_purchase"), store, productId: z.string().min(1).max(200) }).strict(),
+  z.object({ action: z.literal("cancel_subscription_purchase"), store, attemptId: z.string().min(1).max(200) }).strict(),
 ]);
 
+export const revenueCatWebhookEnvelopeSchema = z.object({ api_version: z.literal("1.0"), event: z.object({
+  type: z.string().min(1).max(200), app_id: z.string().min(1).max(200),
+  environment: z.enum(["PRODUCTION", "SANDBOX"]), store: z.string().max(200).optional(),
+}).passthrough() });
 export const revenueCatWebhookSchema = z.object({ api_version: z.literal("1.0"), event: z.object({
   id: z.string().min(1).max(200), type: z.string().min(1), app_id: z.string().min(1),
   app_user_id: z.string().min(1).max(200), store: z.enum(["APP_STORE", "PLAY_STORE"]),

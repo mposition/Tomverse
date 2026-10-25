@@ -11,6 +11,20 @@ does not grant access. Failed webhook processing returns 503 for redelivery.
 
 ## Product behavior
 
+Open Settings → Privacy & data → Account, export & deletion → Plans & credits
+in the current native MVP. The billing screen uses the same native bearer session
+and is unavailable in ordinary browser/demo mode.
+
+A server-persisted subscription request blocks another subscription payment
+sheet across reloads/devices while payment or ownership verification is pending.
+Only a matching verified store event plus current owned entitlement clears a
+successful request. Explicit cancellation or a definite pre-payment SDK refusal
+can release that request; ambiguous/network/pending outcomes require verification
+or support, and never automatically start another payment. A newly unbound
+renewal retains the already verified same-SKU period without extending its end.
+Refunded/absent products are still removed; new/unverified paid periods await
+their authenticated webhook before access is granted.
+
 - Pro and Max monthly/annual subscriptions reuse the web plan's model access,
   monthly credit allowance and usage counters. No extra allowance is issued or
   usage reset on upgrade. Monthly allowance resets on the UTC calendar month.
@@ -90,7 +104,7 @@ Native Vite build:
 - VITE_NATIVE_BILLING_ENABLED=true
 - VITE_REVENUECAT_APPLE_API_KEY (public appl_ SDK key)
 - VITE_REVENUECAT_GOOGLE_API_KEY (public goog_ SDK key)
-- Existing native chat/auth switches and API origin remain required.
+- Existing native session configuration and API origin remain required.
 
 Mapping example (replace all identifiers with the registered store IDs):
 

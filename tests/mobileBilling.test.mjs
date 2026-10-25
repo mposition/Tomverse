@@ -93,7 +93,7 @@ test("Android changes pass replacement modes; account changes fence any later au
   sdk.purchaseStoreProduct = async () => { active = false; };
   const before = requests.length;
   await assert.rejects(client.purchase({ identifier: "pro:monthly" }), /BILLING_ACCOUNT_CHANGED/);
-  assert.equal(requests.length, before + 1);
+  assert.equal(requests.length, before + 2);
 });
 test("pending/cancelled payments cannot grant client entitlements or repeat the purchase", async () => {
   let calls = 0; let syncs = 0;
@@ -101,5 +101,19 @@ test("pending/cancelled payments cannot grant client entitlements or repeat the 
     api: async () => { syncs++; return Response.json(base); },
     sdk: { logIn: async () => {}, purchaseStoreProduct: async () => { calls++; throw { code: "20" }; } } });
   await assert.rejects(client.purchase({ identifier: "max:monthly" }));
-  assert.equal(calls, 1); assert.equal(syncs, 1);
+  assert.equal(calls, 1); assert.equal(syncs, 2);
+});
+
+test("pending store approval persists across clients and prevents a second subscription sheet", async () => {
+  let state = { ...base, active: false, plan: "Free", subscriptionStore: null }; let purchases = 0;
+  const api = async (_path, build) => {
+    const body = JSON.parse(build().body);
+    if (body.action === "prepare_subscription_purchase") state = { ...state, subscriptionPurchaseAttempt: { id: "attempt", store: "play_store", productId: body.productId, startedAt: new Date().toISOString() } };
+    return Response.json(state);
+  };
+  const sdk = { logIn: async () => {}, purchaseStoreProduct: async () => { purchases++; throw { code: "20" }; } };
+  const options = { sdk, api, store: "play_store", apiKey: "public-test-key", isCurrent: () => true };
+  await assert.rejects(createNativeBillingClient(options).purchase({ identifier: "pro:monthly" }));
+  await assert.rejects(createNativeBillingClient(options).purchase({ identifier: "max:monthly" }), /BILLING_PLAN_CHANGED/);
+  assert.equal(purchases, 1);
 });

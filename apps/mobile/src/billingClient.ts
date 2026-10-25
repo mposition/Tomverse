@@ -1,7 +1,7 @@
 import type { PurchasesPlugin, PurchasesStoreProduct } from "@revenuecat/purchases-capacitor";
 import { PRODUCT_CATEGORY, STORE_REPLACEMENT_MODE } from "@revenuecat/purchases-capacitor";
 import type { MobileBillingProduct, MobileBillingState, MobileStore } from "../../../lib/mobileBillingCore";
-import type { NativeChatTransport } from "./chatClient";
+type NativeBillingTransport = (path: string, init: () => RequestInit) => Promise<Response>;
 
 export type { MobileBillingProduct, MobileBillingState, MobileStore };
 // Serialize SDK identity changes and purchases across accounts and StrictMode remounts.
@@ -15,20 +15,20 @@ const serialized = <T,>(work: () => Promise<T>): Promise<T> => {
 export function canPurchaseMobileProduct(state: MobileBillingState, product: MobileBillingProduct, store: MobileStore) {
   if (product.store !== store) return false;
   if (product.kind === "credits") return !state.creditPurchasesNeedingReview && state.products.some((p) => p.productId === product.productId);
-  if (state.verificationPending) return false;
+  if (state.verificationPending || state.subscriptionPurchaseAttempt) return false;
   if (state.webSubscription?.active) return false;
   if (!state.active) return ({ Free: 0, Pro: 1, Max: 2 }[product.plan] || 0) > ({ Free: 0, Pro: 1, Max: 2 }[state.plan as "Free" | "Pro" | "Max"] || 0);
   return state.subscriptionStore === store && !state.cancelAtPeriodEnd && state.interval === product.interval && state.plan !== product.plan;
 }
 export function createNativeBillingClient(input: {
-  sdk: PurchasesPlugin; api: NativeChatTransport; store: MobileStore; apiKey: string; isCurrent: () => boolean;
+  sdk: PurchasesPlugin; api: NativeBillingTransport; store: MobileStore; apiKey: string; isCurrent: () => boolean;
 }) {
   const current = () => { if (!input.isCurrent()) throw new Error("BILLING_ACCOUNT_CHANGED"); };
-  const sync = async (action: "sync" | "cancel_web" | "prepare_credit_purchase" = "sync", productId?: string) => {
+  const sync = async (action: "sync" | "cancel_web" | "prepare_credit_purchase" | "prepare_subscription_purchase" | "cancel_subscription_purchase" = "sync", productId?: string) => {
     current();
     const response = await input.api("/api/mobile/billing", () => {
       current();
-      return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, store: input.store, ...(productId ? { productId } : {}) }) };
+      return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, store: input.store, ...(productId ? action === "cancel_subscription_purchase" ? { attemptId: productId } : { productId } : {}) }) };
     });
     current();
     if (!response.ok) throw new Error(response.status === 503 ? "BILLING_UNAVAILABLE" : "BILLING_SYNC_FAILED");
@@ -61,12 +61,18 @@ export function createNativeBillingClient(input: {
       const item = state.products.find((p) => p.productId === product.identifier);
       if (!item || !canPurchaseMobileProduct(state, item, input.store)) throw new Error("BILLING_PLAN_CHANGED");
       await identify(state); current();
-      if (item.kind === "credits") await sync("prepare_credit_purchase", item.productId);
+      const prepared = await sync(item.kind === "credits" ? "prepare_credit_purchase" : "prepare_subscription_purchase", item.productId);
       current();
-      await input.sdk.purchaseStoreProduct({ product, ...(input.store === "play_store" && item.kind === "subscription" && state.active && state.productId ? {
+      try { await input.sdk.purchaseStoreProduct({ product, ...(input.store === "play_store" && item.kind === "subscription" && state.active && state.productId ? {
         storeProductChangeInfo: { oldProductIdentifier: state.productId,
           replacementMode: item.plan === "Max" ? STORE_REPLACEMENT_MODE.CHARGE_PRORATED_PRICE : STORE_REPLACEMENT_MODE.DEFERRED },
-      } : {}) });
+      } : {}) }); } catch (error) {
+        // Only an explicit store cancellation proves no payment will complete.
+        if (["1", "3", "4", "5", "11", "14", "18", "19", "23", "24"].includes(String((error as { code?: unknown })?.code)) && prepared.subscriptionPurchaseAttempt && input.isCurrent()) {
+          await sync("cancel_subscription_purchase", prepared.subscriptionPurchaseAttempt.id);
+        }
+        throw error;
+      }
       // Only current server/webhook evidence can grant access after payment.
       current(); return sync();
     }),

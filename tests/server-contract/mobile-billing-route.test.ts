@@ -18,6 +18,8 @@ mock.module(mod("lib/mobileBillingService.ts"), { namedExports: {
   readMobileBillingState: async (id: string) => { calls.push(id); return { plan: "Free" }; },
   cancelMobileWebSubscription: async (id: string) => { calls.push(`cancel:${id}`); },
   prepareMobileCreditPurchase: async (id: string, store: string, product: string) => { calls.push(`prepare:${id}:${store}:${product}`); },
+  prepareMobileSubscriptionPurchase: async (id: string) => { calls.push(`prepare-subscription:${id}`); },
+  cancelMobileSubscriptionPurchase: async (id: string) => { calls.push(`cancel-subscription:${id}`); },
   processMobileStoreWebhook: async () => { calls.push("webhook"); },
 } });
 const require = createRequire(import.meta.url);
@@ -55,8 +57,10 @@ test("webhook requires an exact secret, configured app and environment before to
   }));
   assert.equal((await post("forged")).status, 401);
   const secret = process.env.REVENUECAT_WEBHOOK_AUTHORIZATION;
-  assert.equal((await post(secret, { environment: "SANDBOX" })).status, 400);
-  assert.equal((await post(secret, { app_id: "other-project" })).status, 400);
+  assert.equal((await post(secret, { environment: "SANDBOX" })).status, 200);
+  assert.equal((await post(secret, { app_id: "other-project" })).status, 200);
+  const transfer = await post(secret, { type: "TRANSFER", app_user_id: undefined, transaction_id: undefined, product_id: undefined, purchased_at_ms: undefined });
+  assert.equal((await transfer.json()).ignored, "UNSUPPORTED_STORE_EVENT");
   assert.equal(calls.length, 0);
   assert.equal((await post(secret)).status, 200); assert.deepEqual(calls, ["webhook"]);
 });

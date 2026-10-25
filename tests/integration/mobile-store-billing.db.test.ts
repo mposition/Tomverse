@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test, mock } from "node:test";
 import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
-import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription, readMobileBillingState, cancelMobileWebSubscription, processMobileStoreWebhook, prepareMobileCreditPurchase } from "@/lib/mobileBillingService";
+import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription, readMobileBillingState, cancelMobileWebSubscription, processMobileStoreWebhook, prepareMobileCreditPurchase, prepareMobileSubscriptionPurchase, cancelMobileSubscriptionPurchase } from "@/lib/mobileBillingService";
 import { claimMobileStoreOwnership } from "@/lib/mobileStoreOwnership";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { lockCreditAccount } from "@/lib/creditDebt";
@@ -36,6 +36,45 @@ const bindSubscription = (billingId: string, transactionId: string, store: "APP_
   ...event, store, type: "INITIAL_PURCHASE", product_id: productId, app_user_id: billingId,
   transaction_id: transactionId, original_transaction_id: transactionId,
 }));
+
+test("a pending subscription blocks another device or store until cancellation or a verified purchase", async () => {
+  const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const prepared = await Promise.allSettled([prepareMobileSubscriptionPurchase(user.id, "app_store", "pro.month"), prepareMobileSubscriptionPurchase(user.id, "play_store", "play.max:monthly")]);
+  assert.equal(prepared.filter((entry) => entry.status === "fulfilled").length, 1);
+  const state = await readMobileBillingState(user.id, "app_store"); const attempt = state.subscriptionPurchaseAttempt!;
+  await assert.rejects(prepareMobileSubscriptionPurchase(user.id, "app_store", "pro.month"), /previous store request/);
+  await cancelMobileSubscriptionPurchase(user.id, "wrong-id");
+  assert.ok((await readMobileBillingState(user.id, "app_store")).subscriptionPurchaseAttempt);
+  await cancelMobileSubscriptionPurchase(user.id, attempt.id);
+  await prepareMobileSubscriptionPurchase(user.id, "app_store", "pro.month");
+  const transaction = randomUUID(); const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ subscriber: { subscriptions: { "pro.month": {
+    store: "app_store", is_sandbox: false, store_transaction_id: transaction, expires_date: "2099-01-01T00:00:00Z",
+  } } } });
+  try {
+    await processMobileStoreWebhook({ ...event, app_user_id: billingId, type: "INITIAL_PURCHASE", product_id: "pro.month", transaction_id: transaction, original_transaction_id: transaction, purchased_at_ms: Date.now() });
+    const verified = await readMobileBillingState(user.id, "app_store");
+    assert.equal(verified.plan, "Pro"); assert.equal(verified.subscriptionPurchaseAttempt, null);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("an unbound renewal retains only its previously verified period and a refund with incomplete remaining evidence revokes it", async () => {
+  const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const transaction = randomUUID(); await bindSubscription(billingId, transaction);
+  const expiry = new Date(Date.now() + 86400000).toISOString();
+  let subscriptions: Record<string, unknown> = { "pro.month": { store: "app_store", is_sandbox: false, store_transaction_id: transaction, expires_date: expiry } };
+  const originalFetch = globalThis.fetch; globalThis.fetch = async () => Response.json({ subscriber: { subscriptions } });
+  try {
+    await syncMobileSubscription(user.id, billingId);
+    subscriptions = { "pro.month": { store: "app_store", is_sandbox: false, store_transaction_id: randomUUID(), expires_date: "2099-01-01T00:00:00Z" } };
+    assert.equal((await syncMobileSubscription(user.id, billingId)).verificationPending, true);
+    const renewed = await readMobileBillingState(user.id, "app_store");
+    assert.equal(renewed.plan, "Pro"); assert.equal(renewed.expiresAt, expiry);
+    subscriptions = { "play.max:monthly": { store: "play_store", is_sandbox: false, expires_date: "2099-01-01T00:00:00Z" } };
+    await syncMobileSubscription(user.id, billingId);
+    assert.equal((await readMobileBillingState(user.id, "app_store")).plan, "Free");
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("credit pack plan eligibility is server-authorized before payment and survives a delayed plan change", async () => {
   const user = await createUser();
@@ -73,6 +112,19 @@ test("independent approvals let sequential same-SKU purchases complete before an
   assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 1000);
   assert.equal(await prisma.mobileStoreTransaction.count({ where: { userId: user.id, needsReview: true } }), 0);
   assert.equal(await prisma.mobileStorePurchaseAuthorization.count({ where: { userId: user.id } }), 0);
+});
+
+test("reverse delivery of purchases twenty hours apart uses the most recent matching approval", async () => {
+  const user = await createUser(); const firstTime = Date.now() - 21 * 3600000;
+  await prisma.mobileStorePurchaseAuthorization.updateMany({ where: { userId: user.id }, data: { createdAt: new Date(firstTime) } });
+  await prepareMobileCreditPurchase(user.id, "app_store", "credits500");
+  await deliver(user.id, { transaction_id: randomUUID(), purchased_at_ms: Date.now() });
+  await deliver(user.id, { transaction_id: randomUUID(), purchased_at_ms: firstTime + 3600000 });
+  assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 1000);
+  assert.equal(await prisma.mobileStoreTransaction.count({ where: { userId: user.id, needsReview: true } }), 0);
+  await prisma.mobileStorePurchaseAuthorization.create({ data: { userId: user.id, store: "app_store", productId: "credits500", createdAt: new Date(Date.now() - 32 * 86400000) } });
+  await prepareMobileCreditPurchase(user.id, "app_store", "credits500");
+  assert.equal(await prisma.mobileStorePurchaseAuthorization.count({ where: { userId: user.id } }), 1);
 });
 
 test("expired authorizations retain paid purchases for support without granting credits", async () => {

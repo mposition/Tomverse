@@ -3,7 +3,8 @@ export const dynamic = "force-dynamic";
 import { requireMobileBearer } from "@/lib/mobileAuthRoute";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { mobileBillingEnabled, mobileBillingRequestSchema } from "@/lib/mobileBillingCore";
-import { cancelMobileWebSubscription, ensureMobileBillingId, prepareMobileCreditPurchase, readMobileBillingState, syncMobileSubscription } from "@/lib/mobileBillingService";
+import { cancelMobileWebSubscription, cancelMobileSubscriptionPurchase, ensureMobileBillingId, prepareMobileCreditPurchase, prepareMobileSubscriptionPurchase, readMobileBillingState, syncMobileSubscription } from "@/lib/mobileBillingService";
+import { ApiSecurityError } from "@/lib/apiSecurity";
 
 export async function POST(request: Request) {
   if (!mobileBillingEnabled()) return Response.json({ code: "MOBILE_BILLING_DISABLED" }, { status: 503 });
@@ -16,6 +17,11 @@ export async function POST(request: Request) {
     if (body.action === "cancel_web") await cancelMobileWebSubscription(auth.identity.userId);
     const verification = body.action !== "cancel_web" ? await syncMobileSubscription(auth.identity.userId, billingId) : null;
     if (body.action === "prepare_credit_purchase") await prepareMobileCreditPurchase(auth.identity.userId, body.store, body.productId);
+    if (body.action === "prepare_subscription_purchase") {
+      if (verification?.verificationPending) throw new ApiSecurityError(409, "SUBSCRIPTION_VERIFICATION_PENDING", "Wait for store verification before another purchase.");
+      await prepareMobileSubscriptionPurchase(auth.identity.userId, body.store, body.productId);
+    }
+    if (body.action === "cancel_subscription_purchase") await cancelMobileSubscriptionPurchase(auth.identity.userId, body.attemptId);
     return Response.json({ ...await readMobileBillingState(auth.identity.userId, body.store), ...verification }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const response = apiSecurityResponse(error);

@@ -618,7 +618,7 @@ export const requestImageGeneration = async (
           userId: input.userId,
           status: "active",
           remainingCredits: { gt: 0 },
-          expiresAt: { gt: now },
+          OR: [{ nonExpiring: true }, { expiresAt: { gt: now } }],
         },
         _sum: { remainingCredits: true },
       });

@@ -4,6 +4,7 @@ import { Browser } from "@capacitor/browser";
 import { Purchases, type PurchasesStoreProduct } from "@revenuecat/purchases-capacitor";
 import { mobileApiFetch } from "./authBridge";
 import { canPurchaseMobileProduct, createNativeBillingClient, type MobileBillingState, type MobileStore } from "./billingClient";
+import "./billing.css";
 
 export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<MobileBillingState | null>(null);
@@ -44,6 +45,7 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
       if (alive.current) setProducts(available);
     }
     catch (cause) {
+      try { const latest = await client.current!.refresh(); if (alive.current) setState(latest); } catch { /* Keep the last verified view if the server is unavailable. */ }
       const code = typeof cause === "object" && cause ? String((cause as { code?: unknown }).code) : "";
       if (alive.current && code !== "1") {
         if (code === "20") setMessage("Payment is pending approval. Your plan and balance will update after the store confirms payment.");
@@ -56,10 +58,11 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
     await Browser.open({ url: state.subscriptionStore === "app_store" ? "https://apps.apple.com/account/subscriptions" : "https://play.google.com/store/account/subscriptions" });
   };
   return <section className="native-billing" aria-labelledby="native-billing-title" data-testid="native-billing">
-    <div className="native-billing-heading"><h2 id="native-billing-title">Plans & credits</h2><button type="button" onClick={onClose} disabled={busy}>Back to chat</button></div>
+    <div className="native-billing-heading"><h2 id="native-billing-title">Plans & credits</h2><button type="button" onClick={onClose} disabled={busy}>Back to account</button></div>
     {busy && <p role="status">Connecting to {storeName}…</p>}
     {state && <>
       {state.verificationPending && <p role="status">Store verification is pending. Refresh your balance before starting another subscription purchase.</p>}
+      {state.subscriptionPurchaseAttempt && <p role="status">A subscription request is awaiting store verification. Another subscription purchase is blocked. Refresh or restore after approval; contact support@tomverse.app if the store has cancelled the request.</p>}
       {!!state.creditPurchasesNeedingReview && <p role="alert">A store credit payment needs support review. Contact support@tomverse.app before making another credit purchase. Your payment record has been retained.</p>}
       <div className="native-billing-current"><h3>Current plan: {state.plan}</h3><p>Purchased credits: {state.purchasedCredits.toLocaleString()}</p>
         {state.active && state.expiresAt && <p>{state.cancelAtPeriodEnd ? "Access until" : "Renews"}: {new Date(state.expiresAt).toLocaleDateString()}</p>}
