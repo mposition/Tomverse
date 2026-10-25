@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { Suspense } from "react";
 import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
@@ -10,7 +11,7 @@ import { QaReleaseTrainBoard } from "@/components/admin/QaReleaseTrainBoard";
 import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
 import { QaReleaseTrainEmergencySection } from "@/components/admin/QaReleaseTrainEmergencySection";
 import { QaReleaseTrainRefresher } from "@/components/admin/QaReleaseTrainRefresher";
-import { QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
+import { QaReleaseTrainLoading, QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
 import { QA_RELEASE_SECTION_IDS } from "@/components/admin/qaReleaseTabParts";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
@@ -66,7 +67,11 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
       {tab.id === "ci-admission" ? (
         <CiAdmissionSection key={tab.id} initial={admission} canWrite={canWrite} />
       ) : tab.id === "train" ? (
-        <TrainTab canWrite={canWrite} nowMs={now.getTime()} />
+        // The tab changes at once and says it is reading; what reads GitHub
+        // streams in after (on 2026-10-25 a cold read held the click 20-28 s).
+        <Suspense key={tab.id} fallback={<QaReleaseTrainLoading />}>
+          <TrainTab canWrite={canWrite} nowMs={now.getTime()} />
+        </Suspense>
       ) : tab.id === "lane" ? (
         <LaneTab rounds={laneRounds} canWrite={canWrite} />
       ) : (

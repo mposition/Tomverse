@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { QaReleaseTrainBoard } from "@/components/admin/QaReleaseTrainBoard";
 import { QaReleaseTrainEmergencySection } from "@/components/admin/QaReleaseTrainEmergencySection";
-import { QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
+import { QaReleaseTrainLoading, QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
 import type { QaReleaseTrainBoardRow } from "@/lib/qaReleaseTrainBoardCore";
 
 const row = (overrides: Partial<QaReleaseTrainBoardRow>): QaReleaseTrainBoardRow => ({
@@ -79,4 +79,10 @@ test("open main pull requests GitHub did not give are named unknown, never none,
 test("only a writer is offered the emergency train", () => {
   assert.match(renderToStaticMarkup(<QaReleaseTrainEmergencySection canWrite={true} />), /data-testid="qa-release-train-emergency-open"/);
   assert.doesNotMatch(renderToStaticMarkup(<QaReleaseTrainEmergencySection canWrite={false} />), /qa-release-train-emergency-open/);
+});
+
+test("while the tab reads, it says so (the click is never left without an answer)", () => {
+  const html = renderToStaticMarkup(<QaReleaseTrainLoading />);
+  assert.match(html, /role="status"/);
+  assert.match(html, /Reading the release train/);
 });
