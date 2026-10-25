@@ -58,6 +58,11 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient,
     if (candidates.length === 0) return null;
     const resolved = candidates.map((model) =>
       resolveModelPricing(model, { estimatedPromptTokens: inputTokens, at: options.at }));
+    // An environment override replaces the price without moving the row's
+    // change time, so a past price under one cannot be proven: unpriced.
+    if (options.at && resolved.some((row) => row.costSource.endsWith("env_override"))) {
+      return null;
+    }
     const writes = resolved.flatMap((row) =>
       row.cacheWriteUsdPerMillionTokens === null ? [] : [row.cacheWriteUsdPerMillionTokens]);
     // The rows' last change, exactly: rounding it down would price usage that
@@ -89,13 +94,16 @@ export async function calculateCurrentApprovedAmuxV4TaskCost(
   const now = await databaseNow(tx);
   // The receipt digest includes its calculation time. A caller that must match
   // a receipt stored earlier (the v39 read-only retry chain) pins that time;
-  // the live calculation always runs too.
+  // the live calculation always runs too. A price that changed after the
+  // pinned time cannot reproduce that receipt, so the live receipt is
+  // returned and the caller sees a changed cost, never an error.
   const live = calculateV4TaskCeilingFromCatalog({
     rawCatalog: current.catalog, role, grade, asOfIso: now.toISOString(),
   });
-  const result = options.asOf && live.ok ? calculateV4TaskCeilingFromCatalog({
+  const pinned = options.asOf && live.ok ? calculateV4TaskCeilingFromCatalog({
     rawCatalog: current.catalog, role, grade, asOfIso: options.asOf.toISOString(),
   }) : live;
+  const result = !pinned.ok && pinned.code === "pricing_unverified" ? live : pinned;
   if (!live.ok || !result.ok) {
     throw new AmuxV4TaskCatalogApprovalError("evidence_unverified");
   }
