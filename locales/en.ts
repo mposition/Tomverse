@@ -1265,7 +1265,7 @@ export const en = {
         deleteAllChatsFailed: "Could not delete conversations.",
         deleting: "Deleting...",
         deleteAccountImmediateTitle: "Account deletion has a 7-day safety period.",
-        deleteAccountImmediateDescription: "You will be signed out immediately and access stays blocked while deletion is pending. Any paid plan stops auto-renewing but is not refunded. Permanent deletion (including all data) happens after 7 days. Cancelling this request is not self-service -- contact support@tomverse.app before then; if restored, plan access resumes only until its original expiration date and auto-renewal is not restored.",
+        deleteAccountImmediateDescription: "You will be signed out immediately and access stays blocked while deletion is pending. Any plan billed directly by Tomverse stops auto-renewing but is not refunded. Permanent deletion (including all data) happens after 7 days. Cancelling this request is not self-service -- contact support@tomverse.app before then; if restored, plan access resumes only until its original expiration date and auto-renewal is not restored.",
         deleteAccountConsent: "I understand that all conversations and settings will be permanently deleted and cannot be restored.",
         deleteAccountConsentRequired: "Please confirm that you understand all conversations, settings, and account information will be deleted.",
         deleteAccountConfirmationPrompt: "Type DELETE MY ACCOUNT to confirm.",

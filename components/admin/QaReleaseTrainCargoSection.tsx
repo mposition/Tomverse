@@ -17,6 +17,8 @@ import {
   type QaReleaseTrainSelection,
 } from "@/lib/qaReleaseTrainCargoCore";
 import type { QaReleaseTrainCargoCandidatesRead } from "@/lib/qaReleaseTrainCargoRead";
+import { QA_RELEASE_TRAIN_DEFAULT_SLOTS } from "@/lib/qaReleaseTrainCore";
+import type { QaReleaseTrainSchedule } from "@/lib/qaReleaseTrainStore";
 
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
 const PAGE_PATH = "/admin/qa-release";
@@ -31,7 +33,9 @@ const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   back_merge: "bg-zinc-800 text-zinc-400",
 };
 
-type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleaseTrainSelection };
+type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleaseTrainSelection; schedule: (QaReleaseTrainSchedule & { nextDepartureAt: string | null }) | null };
+
+const hoursText = (hours: readonly number[]) => hours.map((hour) => String(hour).padStart(2, "0")).join("·");
 
 /**
  * The next release train's cargo (lib/qaReleaseTrainCargoCore.ts): merged
@@ -179,11 +183,23 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
   const button =
     "inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50";
 
+  // The hours the train service said it runs on (QA_RELEASE_TRAIN_SLOTS), not
+  // the default: the service reports them every round.
+  const schedule = view?.schedule ?? null;
+  const departures = schedule
+    ? m.trainCargoSchedule
+        .replace("{hours}", hoursText(schedule.hours))
+        .replace("{next}", schedule.nextDepartureAt ? aestStamp(schedule.nextDepartureAt) : "-")
+        .replace("{at}", aestStamp(schedule.reportedAt))
+    : m.trainCargoScheduleUnknown.replace("{hours}", hoursText(QA_RELEASE_TRAIN_DEFAULT_SLOTS.split(",").map(Number)));
+
   return (
     <section className={card} id={id} data-testid="qa-release-train-cargo">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h3 className="text-base font-semibold text-zinc-100">{m.trainCargoTitle}</h3>
-        <span className="text-xs text-zinc-400">{m.trainCargoDepartures}</span>
+        <span className="text-xs text-zinc-400" data-testid="qa-release-train-schedule">
+          {departures}
+        </span>
         {view?.selection.savedAt ? (
           <span className="ml-auto text-xs text-zinc-500">
             {m.trainCargoLastSaved.replace("{at}", aestStamp(view.selection.savedAt)).replace("{by}", view.selection.savedBy ?? "-")}

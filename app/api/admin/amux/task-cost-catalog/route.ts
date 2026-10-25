@@ -10,13 +10,18 @@ import { assertRecentAdminAuthentication,
 import { apiSecurityResponse, consumeApiRateLimit,
   readLimitedText } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { AmuxV4TaskCatalogApprovalError,
-  approveAmuxV4TaskCatalog, previewAmuxV4TaskCatalog } from
+import { AmuxV4TaskCatalogApprovalError, approveAmuxV4TaskCatalog,
+  draftAmuxV4TaskCatalog, previewAmuxV4TaskCatalog } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const gradeCaps = z.object({ inputTokens: z.number().int().min(1).max(10_000_000),
+  outputTokens: z.number().int().min(1).max(1_000_000),
+  maxAttempts: z.number().int().min(1).max(10) }).strict();
+const draftBody = z.object({ action: z.literal("draft"), caps: z.object({
+  routine: gradeCaps, advanced: gradeCaps, frontier: gradeCaps }).strict() }).strict();
 const previewBody = z.object({ action: z.literal("preview"), catalog: z.unknown() }).strict();
 const approveBody = z.object({ action: z.literal("approve"), catalog: z.unknown(),
   approvalId: z.uuid().regex(/^[a-f0-9-]+$/),
@@ -24,8 +29,9 @@ const approveBody = z.object({ action: z.literal("approve"), catalog: z.unknown(
   expectedPreviousVersion: z.number().int().min(0).max(2_147_483_646),
   ownerConfirmedEvidence: z.literal(true) }).strict();
 
-/** Owner preview is read-only. A separate dark write path records the exact
- * reviewed version; no API request can seed a default price or start work. */
+/** Owner draft and preview are read-only: a draft takes its prices from the
+ * model registry and only its grade caps from the request. A separate dark
+ * write path records the exact reviewed version; nothing here starts work. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -47,12 +53,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "content_type_refused" },
         { status: 415, headers: noStore });
     }
+    // Every request counts before its body is read. Changing a cap redrafts,
+    // so a draft counts only against this looser limit; anything else also
+    // counts against the write limit below.
     await consumeApiRateLimit(request, session.user.id,
-      "admin-amux-v4-task-cost-catalog", { minute: 2, day: 20 });
+      "admin-amux-v4-task-cost-catalog-draft", { minute: 10, day: 200 });
     let raw: unknown;
     try { raw = JSON.parse(await readLimitedText(request, 280_000)); }
-    catch { return NextResponse.json({ error: "schema_rejected" },
-      { status: 400, headers: noStore }); }
+    catch { raw = null; }
+    const draft = draftBody.safeParse(raw);
+    if (!draft.success) {
+      await consumeApiRateLimit(request, session.user.id,
+        "admin-amux-v4-task-cost-catalog", { minute: 2, day: 20 });
+    }
+    if (raw === null) {
+      return NextResponse.json({ error: "schema_rejected" },
+        { status: 400, headers: noStore });
+    }
+    if (draft.success) {
+      const result = await draftAmuxV4TaskCatalog(draft.data.caps);
+      return NextResponse.json(result, { status: result.ok ? 200 : 409,
+        headers: noStore });
+    }
     const preview = previewBody.safeParse(raw);
     if (preview.success) {
       return NextResponse.json(await previewAmuxV4TaskCatalog(preview.data.catalog),

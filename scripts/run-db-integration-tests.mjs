@@ -222,6 +222,7 @@ run(
     "--test",
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
+    "tests/integration/mobile-store-billing.db.test.ts",
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
@@ -260,6 +261,9 @@ run(
     // Policy v46: a legacy safe stop binds the live runtime after re-registration.
     "tests/integration/amuxV22LegacySafeStopLiveRuntime.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    // The catalog drafted from the worker and model registries is approved
+    // as drafted and prices a Task at registration.
+    "tests/integration/amux-v4-task-catalog-draft.db.test.ts",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // The shared AgentDigestItem table: closed agent and kind lists, the
     // idempotency prefix, rows born with their body, and the expiry and purge
@@ -503,6 +507,9 @@ run(
     "tests/integration/amux-v4-resolution-catalog.db.test.ts",
     "tests/integration/amuxV4DerivationService.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    // The catalog drafted from the worker and model registries is approved
+    // as drafted and prices a Task at registration.
+    "tests/integration/amux-v4-task-catalog-draft.db.test.ts",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // sre-ops transition ledger: a row per advance in its own transaction, no
     // skipped generation, the signed audit entry's hash, append-only with

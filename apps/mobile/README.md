@@ -42,6 +42,13 @@ The file saver was also exercised in a fresh Android emulator with networking
 disabled: path refusal, user cancellation, concurrent-save refusal and saving
 the exact 29-byte synthetic fixture through the system picker all passed.
 
+## Store billing
+
+Native store subscriptions, plan changes, cancellation, restoration and credit
+packs are available behind default-off billing switches. See
+[store billing setup](../../docs/ops/mobile-store-billing.md) for configuration,
+verification and activation requirements. Store credit purchases do not expire.
+
 ## Local development
 
 From the repository root, using local PowerShell, without production credentials:

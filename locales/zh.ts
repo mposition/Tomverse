@@ -1277,7 +1277,7 @@ export const zh = {
         deleteAllChatsFailed: "无法删除对话。",
         deleting: "正在删除...",
         deleteAccountImmediateTitle: "账号删除设有 7 天安全等待期。",
-        deleteAccountImmediateDescription: "系统会立即退出登录并取消付费订阅，账号将在 7 天后永久删除。如非本人操作，请立即联系支持团队。",
+        deleteAccountImmediateDescription: "系统会立即退出登录并取消由 Tomverse 直接收取费用的订阅，账号将在 7 天后永久删除。如非本人操作，请立即联系支持团队。",
         deleteAccountConsent: "我了解所有对话和设置将被永久删除，且无法恢复。",
         deleteAccountConsentRequired: "请确认你了解所有对话、设置和账号信息都会被删除。",
         deleteAccountConfirmationPrompt: "请输入 DELETE MY ACCOUNT 进行确认。",
