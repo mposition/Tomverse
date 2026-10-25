@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
@@ -3765,6 +3766,7 @@ export function ChatInput({
             useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
           } max-[360px]:gap-x-0.5 max-[240px]:contents`}
         >
+          {currentProduct === "chat" && !isGuestMode && <McpChatPicker conversationId={currentChatId} disabled={draftLocked || isSending} />}
           <button
             ref={actionMenuButtonRef}
             type="button"
