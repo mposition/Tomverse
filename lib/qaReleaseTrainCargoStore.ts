@@ -64,6 +64,8 @@ export async function saveQaReleaseTrainEmergency(
       await takeAuditChainLock(tx);
       const current = await readQaReleaseTrainEmergency(tx);
       if ((current.pending?.id ?? null) !== input.pendingId) throw new QaReleaseOperatorControlRefusedError("emergency_changed");
+      // Nothing pending to withdraw: no row, so the last departure stays named.
+      if (input.numbers.length === 0 && current.pending === null) return;
       await writeAdminAuditLog({
         ...actor,
         tx,

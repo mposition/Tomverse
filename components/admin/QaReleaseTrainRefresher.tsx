@@ -12,6 +12,11 @@ import { QA_RELEASE_TRAIN_CHANGED_EVENT, QA_RELEASE_TRAIN_RELOAD_EVENT, QA_RELEA
  */
 export function QaReleaseTrainRefresher() {
   const router = useRouter();
+  // `fresh` is for the one read it asked for: kept in the address, a reload,
+  // a copied link or a later visit would keep reading GitHub past the shared read.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("fresh")) window.history.replaceState(null, "", QA_RELEASE_TRAIN_TAB_HREF);
+  });
   useEffect(() => {
     const refresh = () => router.refresh();
     const reload = () => router.replace(`${QA_RELEASE_TRAIN_TAB_HREF}&fresh=${Date.now()}`, { scroll: false });

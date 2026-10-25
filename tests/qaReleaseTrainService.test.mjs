@@ -277,7 +277,7 @@ test("an emergency none of whose pull requests can ride, or whose read fails, ne
   assert.deepEqual(await runQaReleaseTrainRound(env(), offFailing.p, off), { exitCode: 1, train: "read_failed", failure: "cargo:github_502" });
 });
 
-test("an emergency that already left this minute, or left with nothing on board, hands the due scheduled departure its round", async () => {
+test("an emergency that already left this minute hands the due scheduled departure its round; one assembled empty ends it", async () => {
   // 11:05: the emergency's own 11:05 branch exists; the 11:00 one does not.
   const left = ports({ emergency: [12] });
   left.p.github.branchExists = async (branch) => (left.calls.push(["branchExists", branch]), branch === "release/train-20261020-1105");
@@ -285,24 +285,16 @@ test("an emergency that already left this minute, or left with nothing on board,
   assert.equal(outcome.slot, "20261020-1100");
   assert.deepEqual(left.calls.find(([n]) => n === "admitSlot"), ["admitSlot", "20261020-1100", null]);
 
-  // The emergency departs and everything conflicts: the scheduled train runs next, in the same round.
+  // The emergency is cloned and everything conflicts: the round ends there.
+  // A second clone could outrun the service's ten-minute limit after the
+  // scheduled pick was spent; the next round takes the scheduled train.
   const empty = ports({ emergency: [12], outcomes: { 12: "conflict" } });
-  let emergencyRead = false;
-  empty.p.app.selection = async () => {
-    // The app spends the request at the emergency admission; the second read finds none.
-    const answer = { numbers: [10, 11], emergency: emergencyRead ? null : { id: "req-1", numbers: [12] } };
-    emergencyRead = true;
-    return answer;
-  };
-  const second = await runQaReleaseTrainRound(env(), empty.p, NOW);
-  assert.equal(second.slot, "20261020-1100");
+  assert.deepEqual(await runQaReleaseTrainRound(env(), empty.p, NOW), { exitCode: 0, train: "empty", slot: "20261020-1105" });
   assert.deepEqual(
     empty.calls.filter(([n]) => n === "admitSlot"),
-    [
-      ["admitSlot", "20261020-1105", "req-1"],
-      ["admitSlot", "20261020-1100", null],
-    ],
+    [["admitSlot", "20261020-1105", "req-1"]],
   );
+  assert.equal(empty.calls.filter(([n]) => n === "assemble").length, 1);
 });
 
 test("a refused emergency admission hands the due scheduled departure its round", async () => {
@@ -338,7 +330,20 @@ test("an emergency leaves out what an open train already carries, and says so", 
     { number: 10, outcome: "in_open_train" },
   ]);
   assert.match(calls.find(([n]) => n === "openPullRequest")[1].body, /Already on an open train, skipped: #10\./);
-  // When everything it names already rides, nothing departs.
+  // When everything it names already rides, the request is admitted and
+  // reported empty without a clone -- spent, not left pending.
   const all = ports({ emergency: [10], riders: [10] });
-  assert.deepEqual(await runQaReleaseTrainRound(env(), all.p, at), { exitCode: 0, train: "no_cargo" });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), all.p, at), { exitCode: 0, train: "empty", slot: "20261020-1237" });
+  assert.deepEqual(all.calls.find(([n]) => n === "admitSlot"), ["admitSlot", "20261020-1237", "req-1"]);
+  assert.deepEqual(all.calls.find(([n]) => n === "report")[1].picks, [{ number: 10, outcome: "in_open_train" }]);
+  assert.ok(!all.names().includes("assemble"));
+  // In a departure window the scheduled train then goes in the same round (nothing was cloned).
+  const inWindow = ports({ emergency: [10], riders: [10] });
+  let read = false;
+  inWindow.p.app.selection = async () => {
+    const answer = { numbers: [11, 12], emergency: read ? null : { id: "req-1", numbers: [10] } };
+    read = true;
+    return answer;
+  };
+  assert.equal((await runQaReleaseTrainRound(env(), inWindow.p, NOW)).slot, "20261020-1100");
 });

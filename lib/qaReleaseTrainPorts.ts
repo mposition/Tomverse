@@ -14,10 +14,11 @@ import { promisify } from "node:util";
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint } from "./qaReleaseDigestEndpointCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
-import { QA_RELEASE_TRAIN_CANDIDATE_DAYS, qaReleaseTrainReferencedNumbers } from "./qaReleaseTrainCargoCore.ts";
+import { QA_RELEASE_TRAIN_CANDIDATE_DAYS } from "./qaReleaseTrainCargoCore.ts";
 import {
   QA_RELEASE_TRAIN_BRANCH_PREFIX,
   QA_RELEASE_TRAIN_MAX_PREDECESSORS,
+  qaReleaseTrainIncludedNumbers,
   qaReleaseTrainMergedPullNumber,
   type QaReleaseTrainCandidate,
   type QaReleaseTrainPick,
@@ -85,7 +86,8 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
         for (const pull of list) {
           if (!String(record(record(pull).head).ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX)) continue;
           count += 1;
-          for (const number of qaReleaseTrainReferencedNumbers(record(pull))) riders.add(number);
+          const body = record(pull).body;
+          for (const number of qaReleaseTrainIncludedNumbers(typeof body === "string" ? body : "")) riders.add(number);
         }
         if (list.length < 100) return { count, riders: [...riders] };
       }

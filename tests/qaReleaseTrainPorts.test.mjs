@@ -152,12 +152,13 @@ test("open trains are counted across every page of open main pull requests", asy
   assert.equal((await answerWith([pages(100).map((p) => ({ ...p, head: { ref: "feature/x" } })), pages(3)]).openTrains()).count, 1);
   assert.equal((await answerWith([pages(5)]).openTrains()).count, 1);
   await assert.rejects(answerWith([pages(100), pages(100), pages(100)]).openTrains(), /github_pages/);
-  // What each open train carries is what its Included section names, never its other text.
+  // What each open train carries is the number leading each Included item:
+  // not a number its titles mention (review r-20261025-074805), nor its other sections.
   const train = {
     number: 2998,
-    title: "release: train 20261025-1400 (2 PRs)",
+    title: "release: train 20261025-1400 (2 PRs) #4444",
     head: { ref: "release/train-20261025-1400" },
-    body: "## Included (2)\n\n- #2985 fix\n- #2988 fix\n\n## Left out (1)\n\n- #2659 conflict\n",
+    body: "## Included (2)\n\n- #2985 follow up on #2988\n- #2989 fix\n\n## Left out (1)\n\n- #2659 conflict\n",
   };
-  assert.deepEqual(await answerWith([[train, { number: 1, head: { ref: "feature/x" }, body: "## Included\n- #7" }]]).openTrains(), { count: 1, riders: [2985, 2988] });
+  assert.deepEqual(await answerWith([[train, { number: 1, head: { ref: "feature/x" }, body: "## Included\n- #7" }]]).openTrains(), { count: 1, riders: [2985, 2989] });
 });

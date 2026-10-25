@@ -140,6 +140,18 @@ export function qaReleaseTrainMergedPullNumber(subject: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/**
+ * The pull requests a train's body says rode: the number leading each item
+ * of its Included section (`- #2985 title`), as qaReleaseTrainPullRequest
+ * writes it. A number inside an item's title ("follow up on #2988") is a
+ * reference, not a rider.
+ */
+export function qaReleaseTrainIncludedNumbers(body: string): number[] {
+  const included = /^## Included\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body);
+  if (!included) return [];
+  return [...new Set([...included[1].matchAll(/^- #(\d{1,7})\b/gm)].map((match) => Number(match[1])))];
+}
+
 /** Outcomes that leave a picked pull request for a later release. */
 export const QA_RELEASE_TRAIN_LEFT_OUT: ReadonlySet<QaReleaseTrainPick["outcome"]> = new Set(["conflict", "over_capacity", "changes_workflows"]);
 
