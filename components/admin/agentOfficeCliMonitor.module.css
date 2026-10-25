@@ -35,7 +35,9 @@
 .footer { padding: 13px 16px; border-top: 1px solid var(--line-soft); background: var(--surface-2); }
 .footer p { margin: 0 0 5px; color: var(--text-soft); font-size: 11px; }
 .footer small { color: var(--text-faint); font-size: 10px; }
-.expanded { position: fixed; inset: 80px 24px 24px; z-index: 60; height: auto; box-shadow: 0 0 0 100vmax rgba(0,0,0,.55); }
+.docked { display: contents; }
+.backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.55); }
+.expanded { position: fixed; inset: 80px 24px 24px; z-index: 61; height: auto; }
 @media (max-width: 700px) {
   .monitor { position: fixed; inset: 0; z-index: 60; height: 100dvh; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
   .identity h2 { font-size: 18px; }

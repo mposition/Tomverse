@@ -43,7 +43,14 @@ no production credentials and no external writes:
 
 ```powershell
 node --conditions=react-server --import tsx --test tests/agentOfficeCliMonitor.test.mjs
+node scripts/verify-agent-office-cli-monitor.mjs
 ```
+
+The browser check uses installed Playwright Chromium, compiles the actual office
+and monitor components, and serves synthetic telemetry on loopback. It verifies
+entry, read-only controls, literal text rendering, search/raw tabs, pause/resume,
+expansion/Escape, stale output, mobile width and reauthentication content clearing.
+It prints the temporary screenshot/report directory on success.
 
 Ubuntu execution host, bash, a checkout containing this patch with Node 22 and
 `tsx` installed. This reads the real `codex-impl` source and prints only

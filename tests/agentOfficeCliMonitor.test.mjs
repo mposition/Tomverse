@@ -54,6 +54,8 @@ test("sensitive events are hidden before truncation, including ANSI and private-
   assert.equal(JSON.stringify(value).includes("private bytes"), false);
   assert.match(value.events[0].text, /REDACTED/);
   assert.equal(maskAgentOfficeCliText("\x1b[32msafe output\x1b[0m"), "safe output");
+  assert.match(maskAgentOfficeCliText("remaining key bytes\n-----END PRIVATE KEY-----"), /REDACTED/);
+  assert.match(maskAgentOfficeCliText("MIIE" + "aB3+".repeat(15) + "\n"), /REDACTED/);
   assert.equal(maskAgentOfficeCliText("<script>untrusted()</script>"), "<script>untrusted()</script>");
 });
 

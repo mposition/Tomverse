@@ -19,6 +19,7 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
   const { locale } = useAdminLocale();
   const [reading, setReading] = useState<AgentOfficeCliReading | null>(null);
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
+  const [accessBlocked, setAccessBlocked] = useState(false);
   const [paused, setPaused] = useState(false);
   const [following, setFollowing] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -64,14 +65,16 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
         if (!response.ok) {
           if ([401, 403, 404, 428].includes(response.status)) {
             blocked = true;
+            setAccessBlocked(true);
             setReading(null);
-          }
+          } else setAccessBlocked(false);
           setFailure(describeAdminApiFailure({ status: response.status, fallback: m.failed, locale }));
           return;
         }
         const next = await response.json() as AgentOfficeCliReading;
         if (disposed) return;
         setReading(next);
+        setAccessBlocked(false);
         setFailure(null);
       } catch (error) {
         if (!disposed && !isAdminFetchAbort(error)) setFailure(describeAdminApiFailure({
@@ -91,11 +94,15 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
   useEffect(() => {
     if (following && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [snapshot, following, tab]);
-  const state = failure ? "stale" : reading?.state;
-  const label = paused ? m.paused : state === "live" ? m.live : state === "stale" ? m.stale : m.unavailable;
+  const state = accessBlocked ? "unavailable" : failure ? "stale" : reading?.state;
+  const label = failure?.requiresReauthentication ? m.authenticationRequired : accessBlocked ? m.accessUnavailable :
+    paused ? m.paused : state === "live" ? m.live : state === "stale" ? m.stale : m.unavailable;
   const events = (snapshot?.events ?? []).filter(event => !query || event.text.toLowerCase().includes(query.toLowerCase()));
 
   return (
+    <div className={modal ? styles.backdrop : styles.docked} onMouseDown={event => {
+      if (event.target === event.currentTarget) { if (expanded) collapse(); else onClose(); }
+    }}>
     <section ref={panelRef} className={`${styles.monitor} ${expanded ? styles.expanded : ""}`}
       role={modal ? "dialog" : "region"} aria-modal={modal || undefined}
       aria-labelledby="office-cli-title" data-testid="agent-office-cli-monitor"
@@ -151,5 +158,6 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
       </div>
       <footer className={styles.footer}><p>{m.footer}</p><small>{m.masking}</small></footer>
     </section>
+    </div>
   );
 }

@@ -35,7 +35,11 @@ export function maskAgentOfficeCliText(text: string): string {
   const plain = text.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
-  return detectSecrets(plain).length ? "[REDACTED: sensitive output]" : plain;
+  // A viewport can begin after the BEGIN line. Hide key footers and long
+  // base64 lines too; false positives are preferable to displaying key bytes.
+  const partialKey = /-----END (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/.test(plain) ||
+    /(?:^|\n)[ \t]*[A-Za-z0-9+/]{48,}={0,2}[ \t]*(?:\r?\n|$)/.test(plain);
+  return partialKey || detectSecrets(plain).length ? "[REDACTED: sensitive output]" : plain;
 }
 
 export function sanitizeAgentOfficeCliSnapshot(input: AgentOfficeCliSnapshot): AgentOfficeCliSnapshot {
