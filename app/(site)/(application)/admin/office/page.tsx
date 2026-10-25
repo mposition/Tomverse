@@ -4,6 +4,10 @@ import { AgentOfficePanel } from "@/components/admin/AgentOfficePanel";
 import { getAdminLocale } from "@/lib/adminLocaleServer";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { readAgentOfficeLiveRooms } from "@/lib/agentOfficeLiveRead";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { getAdminRole } from "@/lib/adminAuth";
+import { agentOfficeCliMonitorCredential } from "@/lib/agentOfficeCliMonitor";
 
 const TABS = adminNavItemTabs("office");
 
@@ -30,12 +34,15 @@ const TABS = adminNavItemTabs("office");
 export default async function AdminAgentOfficePage({ searchParams }: PageProps<"/admin/office">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
-  const [locale, live] = await Promise.all([getAdminLocale(), readAgentOfficeLiveRooms()]);
+  const [locale, live, session] = await Promise.all([
+    getAdminLocale(), readAgentOfficeLiveRooms(), getServerSession(authOptions),
+  ]);
   return (
     <AgentOfficePanel
       key={locale}
       view={tab.id === "dashboard" ? "dashboard" : "live"}
       live={live}
+      cliMonitorEnabled={getAdminRole(session) === "owner" && agentOfficeCliMonitorCredential() !== null}
     />
   );
 }
