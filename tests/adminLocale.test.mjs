@@ -153,6 +153,8 @@ const COMPONENTS_WITHOUT_COPY = new Set([
   // panel that does know already does the choosing. Pinned below so the claim
   // is checked rather than trusted.
   "MarketingActions.tsx",
+  // Renders nothing: it reads the release train tab again after a save on it.
+  "QaReleaseTrainRefresher.tsx",
 ]);
 
 test("every admin component reads its copy from a message catalog", () => {

@@ -6,6 +6,7 @@
  *
  * Pure: the read and the store pass what they read.
  */
+import { QA_RELEASE_TRAIN_REPOSITORY, qaReleaseTrainIncludedNumbers } from "./qaReleaseTrainCore.ts";
 
 export const QA_RELEASE_TRAIN_CARGO_MAX = 30;
 /** How far back merged develop pull requests are offered. */
@@ -53,18 +54,27 @@ const list = (value: unknown): Json[] => (Array.isArray(value) ? value.map(recor
 
 /**
  * Pull request numbers a release pull request says it carries, beside its
- * commits: those its title names (`#2873`), and a train's `## Included`
- * section. Free text in a body is not read: it names
- * what a release refers to as well as what it carries (2026-10-23: #2906's
- * left-out list; 2026-10-25: #2941 named the checklist #2940 to run on
- * staging, and #2940 read as on main).
+ * commits: those its title names (`#2873`), and the number leading each item
+ * of a train's `## Included` section -- the train service reads riders the
+ * same way (qaReleaseTrainIncludedNumbers). Free text in a body, an item's
+ * own title included ("follow up on #2988"), is not read: it names what a
+ * release refers to as well as what it carries (2026-10-23: #2906's left-out
+ * list; 2026-10-25: #2941 named the checklist #2940 to run on staging, and
+ * #2940 read as on main).
  */
 export function qaReleaseTrainReferencedNumbers(pull: Json): number[] {
-  const body = typeof pull.body === "string" ? pull.body : "";
-  const included = /^## Included\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body);
-  const text = `${typeof pull.title === "string" ? pull.title : ""}\n${included ? included[1] : ""}`;
-  return [...new Set([...text.matchAll(/#(\d{1,7})\b/g)].map((match) => Number(match[1])))];
+  const title = typeof pull.title === "string" ? pull.title : "";
+  const fromTitle = [...title.matchAll(/#(\d{1,7})\b/g)].map((match) => Number(match[1]));
+  return [...new Set([...fromTitle, ...qaReleaseTrainIncludedNumbers(typeof pull.body === "string" ? pull.body : "")])];
 }
+
+/**
+ * An open main pull request that can hold a candidate back: one from a
+ * branch of this repository. Anyone can open one on the public repository
+ * from a fork, with any title or body; a fork's open pull request is not
+ * believed. A merged one was merged by a person and is.
+ */
+const fromThisRepository = (pull: Json): boolean => record(record(pull.head)?.repo)?.full_name === QA_RELEASE_TRAIN_REPOSITORY;
 
 /**
  * What a release pull request really carries, from its commits: a develop pull
@@ -130,8 +140,9 @@ export function qaReleaseTrainCargoCandidates(input: {
     }
     return { byNumber, bySha, mentioned };
   };
+  const openMain = list(input.openMainJson).filter(fromThisRepository);
   const onMain = named(list(input.mergedMainJson), true);
-  const inMainPull = named(list(input.openMainJson), false);
+  const inMainPull = named(openMain, false);
   // Carried: named by number, its merge commit cherry-picked, or every one of
   // its own commits there (merged or cherry-picked one by one).
   const carriedBy = (carried: ReturnType<typeof named>, pull: Json) => {
@@ -153,7 +164,7 @@ export function qaReleaseTrainCargoCandidates(input: {
     return byTail;
   };
   const onMainBranches = branches(list(input.mergedMainJson), true);
-  const inMainPullBranches = branches(list(input.openMainJson), false);
+  const inMainPullBranches = branches(openMain, false);
   return list(input.mergedDevelopJson)
     .filter((pull) => record(pull.base)?.ref === "develop" && typeof pull.merged_at === "string" && typeof pull.number === "number")
     .filter((pull) => Date.parse(pull.merged_at as string) >= since)
@@ -279,5 +290,57 @@ export function qaReleaseTrainSelectionFrom(input: {
     savedBy: pick.by,
     departedWith: spent ? admission.slot : null,
     lastTrain,
+  };
+}
+
+/*
+ * Emergency trains (owner request 2026-10-25): the operator names pull
+ * requests and a reason in Admin, and the train service departs with them on
+ * its next round instead of waiting for a departure hour. The request is an
+ * audited Admin action; the train's emergency admission spends it. An empty
+ * request withdraws a pending one.
+ */
+export const QA_RELEASE_TRAIN_EMERGENCY_REASON_MIN = 5;
+export const QA_RELEASE_TRAIN_EMERGENCY_REASON_MAX = 300;
+
+/** A reason as saved: trimmed, one line, within bounds. Null when not one. */
+export function parseQaReleaseTrainEmergencyReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const reason = value.replace(/\s+/g, " ").trim();
+  return reason.length >= QA_RELEASE_TRAIN_EMERGENCY_REASON_MIN && reason.length <= QA_RELEASE_TRAIN_EMERGENCY_REASON_MAX ? reason : null;
+}
+
+export type QaReleaseTrainEmergency = {
+  /**
+   * The pending request, or null when none is waiting. `id` is its audit row:
+   * the train names it when admitted, so a request replaced meanwhile is
+   * never spent by a train assembled from the one before it.
+   */
+  pending: { id: string; numbers: number[]; reason: string; requestedAt: string; requestedBy: string | null } | null;
+  /** The emergency departure that took the newest request, when one did. */
+  departedWith: string | null;
+};
+
+/**
+ * Whether an emergency admission may proceed: the request the train read and
+ * assembled from is the very one still pending. A request withdrawn, already
+ * spent, or replaced since the train read it is refused.
+ */
+export const qaReleaseTrainEmergencyAdmissible = (pending: QaReleaseTrainEmergency["pending"], requestId: string): boolean =>
+  pending !== null && pending.id === requestId;
+
+/** The emergency state from the newest request and the newest emergency admission. */
+export function qaReleaseTrainEmergencyFrom(input: {
+  request: { id: string; numbers: unknown; reason: unknown; at: Date; by: string | null } | null;
+  admission: { slot: string; at: Date } | null;
+}): QaReleaseTrainEmergency {
+  const { request, admission } = input;
+  if (!request) return { pending: null, departedWith: null };
+  if (admission !== null && admission.at.getTime() > request.at.getTime()) return { pending: null, departedWith: admission.slot };
+  const numbers = parseQaReleaseTrainCargoPick(request.numbers) ?? [];
+  const reason = parseQaReleaseTrainEmergencyReason(request.reason);
+  return {
+    pending: numbers.length > 0 && reason !== null ? { id: request.id, numbers, reason, requestedAt: request.at.toISOString(), requestedBy: request.by } : null,
+    departedWith: null,
   };
 }

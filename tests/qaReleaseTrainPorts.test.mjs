@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
+import { createQaReleaseTrainAppPorts, createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
 import { qaReleaseTrainPullRequest } from "../lib/qaReleaseTrainCore.ts";
 
 // The two defects left by the train's review: a rider that changes a workflow
@@ -101,4 +101,73 @@ test("the picked numbers are read one by one; one not merged into develop, or go
   const github = createQaReleaseTrainGithubPorts({ http, token: async () => "t" });
   const cargo = await github.cargo([1, 2, 3, 404, 1]);
   assert.deepEqual(cargo.map((c) => c.number), [1]);
+});
+
+// The app's answer to the train (owner request 2026-10-25): the scheduled
+// pick, and an emergency request's numbers when one is waiting.
+test("the app port reads an emergency request and asks for an emergency admission by name", async () => {
+  const env = { RAILWAY_ENVIRONMENT_NAME: "production", QA_RELEASE_MERGE_LANE_SECRET: "lane-secret", QA_RELEASE_CONTROL_REVISION: "3" };
+  const sent = [];
+  const answerWith = (body) =>
+    createQaReleaseTrainAppPorts({
+      env,
+      http: async (request) => {
+        sent.push(JSON.parse(request.body));
+        return { status: 200, text: JSON.stringify(body) };
+      },
+    });
+  assert.deepEqual(await answerWith({ numbers: [1, 2], emergency: { id: "cm123", numbers: [3] } }).selection(), {
+    numbers: [1, 2],
+    emergency: { id: "cm123", numbers: [3] },
+  });
+  // An app older than emergency trains says nothing of them.
+  assert.deepEqual(await answerWith({ numbers: [1] }).selection(), { numbers: [1], emergency: null });
+  await assert.rejects(answerWith({ numbers: [1], emergency: { id: "cm123", numbers: ["x"] } }).selection(), /app_selection_shape/);
+  await assert.rejects(answerWith({ numbers: [1], emergency: { id: "a b", numbers: [3] } }).selection(), /app_selection_shape/);
+
+  sent.length = 0;
+  const ports = answerWith({ admitted: true });
+  await ports.admit("20261020-1237", "cm123");
+  await ports.admit("20261020-1100");
+  assert.deepEqual(sent, [
+    { phase: "admit", slot: "20261020-1237", emergencyRequestId: "cm123" },
+    { phase: "admit", slot: "20261020-1100" },
+  ]);
+});
+
+// Review r-20261025-064617: a train past the first hundred open main pull
+// requests still holds the next one, and a list past the cap is a failed read.
+test("open trains are counted across every page of open main pull requests", async () => {
+  const pages = (count) =>
+    Array.from({ length: count }, (_, i) => ({
+      number: 5000 + i,
+      head: { ref: i === count - 1 ? "release/train-20261025-1400" : `feature/${i}`, repo: { full_name: "mposition/Tomverse" } },
+    }));
+  const answerWith = (byPage) =>
+    createQaReleaseTrainGithubPorts({
+      token: async () => "t",
+      http: async (request) => {
+        const page = Number(new URL(request.url).searchParams.get("page"));
+        return { status: 200, text: JSON.stringify(byPage[page - 1] ?? []) };
+      },
+    });
+  // 100 others, then a train on page two.
+  assert.equal((await answerWith([pages(100).map((p) => ({ ...p, head: { ref: "feature/x" } })), pages(3)]).openTrains()).count, 1);
+  assert.equal((await answerWith([pages(5)]).openTrains()).count, 1);
+  await assert.rejects(answerWith([pages(100), pages(100), pages(100)]).openTrains(), /github_pages/);
+  // What each open train carries is the number leading each Included item:
+  // not a number its titles mention (review r-20261025-074805), nor its other sections.
+  const train = {
+    number: 2998,
+    title: "release: train 20261025-1400 (2 PRs) #4444",
+    head: { ref: "release/train-20261025-1400", repo: { full_name: "mposition/Tomverse" } },
+    body: "## Included (2)\n\n- #2985 follow up on #2988\n- #2989 fix\n\n## Left out (1)\n\n- #2659 conflict\n",
+  };
+  // A fork's pull request from a branch of the same name is not a train (review r-20261025-082156).
+  const fork = { number: 9, head: { ref: "release/train-20261025-1500", repo: { full_name: "someone/Tomverse" } }, body: "## Included (1)\n\n- #3001 forged\n" };
+  const goneFork = { number: 8, head: { ref: "release/train-20261025-1600", repo: null }, body: "## Included (1)\n\n- #3002 x\n" };
+  assert.deepEqual(
+    await answerWith([[train, fork, goneFork, { number: 1, head: { ref: "feature/x" }, body: "## Included\n- #7" }]]).openTrains(),
+    { count: 1, riders: [2985, 2989] },
+  );
 });

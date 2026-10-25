@@ -10,6 +10,7 @@ import { authOptions } from "@/lib/auth";
 import { runQaReleaseControlAdminMutation } from "@/lib/qaReleaseOperatorControlAdmin";
 import { QA_RELEASE_TRAIN_CARGO_MAX } from "@/lib/qaReleaseTrainCargoCore";
 import { qaReleaseTrainNextDepartureMs } from "@/lib/qaReleaseTrainCore";
+import { expireQaReleaseTrainBoardReads } from "@/lib/qaReleaseTrainBoardRead";
 import { readQaReleaseTrainCargoCandidates } from "@/lib/qaReleaseTrainCargoRead";
 import { saveQaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoStore";
 import { readQaReleaseTrainSchedule, readQaReleaseTrainSelection } from "@/lib/qaReleaseTrainStore";
@@ -23,9 +24,13 @@ export async function GET(request: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) return NextResponse.json({ error: "Not found." }, { status: 404 });
     await consumeApiRateLimit(request, session.user.id, "qa-release-train-cargo-read", { minute: 30, day: 1000 });
-    // `fresh=1`: the overview's Refresh, read from GitHub rather than the shared read.
+    // `fresh=1`: the train tab's "Read GitHub again" (or a save on it), read
+    // from GitHub rather than the shared read -- and the departure board's
+    // reads expire too, for the page's next server read.
+    const fresh = new URL(request.url).searchParams.get("fresh") === "1";
+    if (fresh) expireQaReleaseTrainBoardReads(Date.now());
     const [candidates, selection, schedule] = await Promise.all([
-      readQaReleaseTrainCargoCandidates(Date.now(), { fresh: new URL(request.url).searchParams.get("fresh") === "1" }),
+      readQaReleaseTrainCargoCandidates(Date.now(), { fresh }),
       readQaReleaseTrainSelection(),
       readQaReleaseTrainSchedule(),
     ]);

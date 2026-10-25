@@ -730,7 +730,8 @@ test("QA and release left Agent digests; its old tab links land on the same sect
     adminRedirectTarget(ADMIN_AGENT_DIGESTS_LEGACY_TABS["ci-admission"], { tab: "ci-admission", pr: "2890" }),
     "/admin/qa-release?tab=ci-admission&pr=2890"
   );
-  assert.deepEqual(adminNavItemTabs("qa-release").map((tab) => tab.id), ["overview", "lane", "ci-admission"]);
+  // The release train has its own tab (owner, 2026-10-25).
+  assert.deepEqual(adminNavItemTabs("qa-release").map((tab) => tab.id), ["overview", "train", "lane", "ci-admission"]);
   assert.deepEqual(adminNavItemTabs("agent-digests").map((tab) => tab.id), ["billing-finance-ops"]);
   const page = readFileSync(join(process.cwd(), "app/(site)/(application)/admin/agent-digests/page.tsx"), "utf8");
   assert.ok(page.includes("ADMIN_AGENT_DIGESTS_LEGACY_TABS[query.tab]"));

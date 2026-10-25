@@ -67,6 +67,20 @@ export function qaReleaseTrainNextDepartureMs(nowMs: number, hours: readonly num
   return null;
 }
 
+/**
+ * An emergency train's id (owner request 2026-10-25): the AEST minute it
+ * departs, on the same `release/train-` branch scheme. A minute that would
+ * read as a scheduled departure (`HH00` for a departure hour) moves to `HH01`,
+ * so the two never share a branch.
+ */
+export function qaReleaseTrainEmergencySlot(nowMs: number, hours: readonly number[]): string {
+  const aest = new Date(nowMs + AEST_OFFSET_MS);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hour = aest.getUTCHours();
+  const minute = aest.getUTCMinutes() === 0 && hours.includes(hour) ? 1 : aest.getUTCMinutes();
+  return `${aest.getUTCFullYear()}${pad(aest.getUTCMonth() + 1)}${pad(aest.getUTCDate())}-${pad(hour)}${pad(minute)}`;
+}
+
 export const qaReleaseTrainBranch = (slot: string): string => {
   if (!SLOT.test(slot)) throw new Error("train slot");
   return `${QA_RELEASE_TRAIN_BRANCH_PREFIX}${slot}`;
@@ -105,8 +119,11 @@ export type QaReleaseTrainPick = {
    * lane's App may not push (no workflows permission, by design); it is left
    * out and released on its own.
    */
-  outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows";
+  outcome: "included" | "already_in_main" | "conflict" | "over_capacity" | "changes_workflows" | "in_open_train";
   /**
+   * `in_open_train`: an emergency train's pull request already riding an
+   * open train; never picked onto a second release branch.
+   *
    * For a conflict: develop pull requests merged before it that changed a
    * conflicted file, newest first. Some may be on main already; Admin shows
    * only those that are not.
@@ -123,6 +140,33 @@ export function qaReleaseTrainMergedPullNumber(subject: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** The repository the train runs in; a train's branch lives in it, never in a fork. */
+export const QA_RELEASE_TRAIN_REPOSITORY = "mposition/Tomverse";
+
+/**
+ * Whether a pull request (as GitHub lists it) is a release train: its head is
+ * a `release/train-` branch of this repository. The repository is public, so
+ * anyone can open a pull request from a fork's branch of that name with any
+ * body; such a one is not a train, and its Included list is not believed.
+ */
+export function qaReleaseTrainIsTrainPull(pull: unknown): boolean {
+  if (typeof pull !== "object" || pull === null) return false;
+  const head = (pull as { head?: { ref?: unknown; repo?: { full_name?: unknown } | null } }).head;
+  return typeof head?.ref === "string" && head.ref.startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX) && head.repo?.full_name === QA_RELEASE_TRAIN_REPOSITORY;
+}
+
+/**
+ * The pull requests a train's body says rode: the number leading each item
+ * of its Included section (`- #2985 title`), as qaReleaseTrainPullRequest
+ * writes it. A number inside an item's title ("follow up on #2988") is a
+ * reference, not a rider.
+ */
+export function qaReleaseTrainIncludedNumbers(body: string): number[] {
+  const included = /^## Included\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body);
+  if (!included) return [];
+  return [...new Set([...included[1].matchAll(/^- #(\d{1,7})\b/gm)].map((match) => Number(match[1])))];
+}
+
 /** Outcomes that leave a picked pull request for a later release. */
 export const QA_RELEASE_TRAIN_LEFT_OUT: ReadonlySet<QaReleaseTrainPick["outcome"]> = new Set(["conflict", "over_capacity", "changes_workflows"]);
 
@@ -132,18 +176,25 @@ export function qaReleaseTrainPullRequest(input: {
   picks: readonly QaReleaseTrainPick[];
   rcSha: string;
   rollbackSha: string;
+  /** Requested in Admin outside the departure hours. The operator's reason stays in the audit row, never in this public body. */
+  emergency?: boolean;
 }): { title: string; body: string } {
   const title = (n: number) => input.candidates.find((c) => c.number === n)?.title.replace(/\s+/g, " ").slice(0, 120) ?? "";
   const included = input.picks.filter((p) => p.outcome === "included");
   const left = input.picks.filter((p) => QA_RELEASE_TRAIN_LEFT_OUT.has(p.outcome));
   const already = input.picks.filter((p) => p.outcome === "already_in_main");
+  const onOpenTrain = input.picks.filter((p) => p.outcome === "in_open_train");
+  // A scheduled train's left-out pull requests ride the next scheduled train
+  // again; an emergency train's do not (its request is spent).
   const reason = {
-    conflict: "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs first",
-    over_capacity: "train full; it rides the next train",
+    conflict: input.emergency
+      ? "cherry-pick conflict on main; pick it for a later train, with the develop pull requests Admin names it needs first"
+      : "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs first",
+    over_capacity: input.emergency ? "train full; pick it for a later train" : "train full; it rides the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;
   const lines = [
-    `Release train ${input.slot} (AEST), opened by the QA-release agent. Selective release, \`.github/RELEASE_CHECKLIST.md\` 7.9.1: each pull request below was cherry-picked onto main with \`-m 1\` in develop merge order. A person merges this pull request.`,
+    `${input.emergency ? "Emergency release train" : "Release train"} ${input.slot} (AEST), opened by the QA-release agent${input.emergency ? " on an operator's emergency request in Admin" : ""}. Selective release, \`.github/RELEASE_CHECKLIST.md\` 7.9.1: each pull request below was cherry-picked onto main with \`-m 1\` in develop merge order. A person merges this pull request.`,
     "",
     `## Included (${included.length})`,
     "",
@@ -154,6 +205,7 @@ export function qaReleaseTrainPullRequest(input: {
     ...(left.length === 0 ? ["None."] : left.map((p) => `- #${p.number} ${title(p.number)} — ${reason[p.outcome as keyof typeof reason]}`)),
     "",
     `Already on main, skipped: ${already.length === 0 ? "none" : already.map((p) => `#${p.number}`).join(", ")}.`,
+    ...(onOpenTrain.length === 0 ? [] : ["", `Already on an open train, skipped: ${onOpenTrain.map((p) => `#${p.number}`).join(", ")}.`]),
     "",
     "## 7.9.1",
     "",
@@ -167,5 +219,6 @@ export function qaReleaseTrainPullRequest(input: {
     "",
     "🤖 Generated by the QA-release agent's release train",
   ];
-  return { title: `release: train ${input.slot} (${included.length} PR${included.length === 1 ? "" : "s"})`, body: lines.join("\n") };
+  const kind = input.emergency ? "emergency train" : "train";
+  return { title: `release: ${kind} ${input.slot} (${included.length} PR${included.length === 1 ? "" : "s"})`, body: lines.join("\n") };
 }
