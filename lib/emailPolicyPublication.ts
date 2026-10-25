@@ -65,7 +65,12 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
   // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
   // mposition on 2026-10-03: the email clause in seven languages, the terms
   // clause in en, ko and zh, both effective 2026-11-16.
-  "/privacy": ["5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7"],
+  //
+  // /privacy moved on 2026-10-24 with the memory-section rewrite (owner
+  // decision in chat: free automatic extraction, notice in the privacy
+  // policy). Only privacyPolicy.memory changed; the approved email clause and
+  // the effective date are byte-for-byte the 2026-10-03 version (5052379184eb).
+  "/privacy": ["eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8"],
   "/terms": ["5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709"],
 };
 
@@ -82,7 +87,7 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
  *
  * Both documents are effective 2026-11-16. The current-location disclosure
  * changed /privacy after the S10 approval: its observed digest is recorded
- * here, while the approved digest above remains the owner's original record.
+ * here, while the approved digest above retains main's approved memory rewrite.
  * Release notes therefore remain closed pending a separate approval of the
  * changed page. `/privacy` is here, not in the sitemap table, while that
  * date is in the future: a sitemap lastmod may not be a day that has not come
@@ -93,11 +98,11 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
 > = {
   // Here rather than in the sitemap's table while its effective date is in the
   // future (lib/sitemapContentDates.ts).
-  // Observed page includes the optional-location disclosure.
+  // Observed page includes the memory rewrite and optional-location disclosure.
   // This is evidence of current content, not approval to publish the amendment.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "fe3a534b137c4c00b2bd5df2670db1186f47c9b4075f3bfdf1ba0bd902ba8002",
+    contentSha256: "e9b7d283be7b8dcca54bf288b67b405e37c5f761cea9d283a0f1cc60264b2c62",
   },
   "/terms": {
     date: "2026-11-16",
