@@ -106,10 +106,16 @@ test("Ideas holds only the idea flow; portfolio, cleanup and the cost catalogue 
   assert.doesNotMatch(page, /AmuxTaskCostCatalogApprovalPanel/, "the catalogue lives in Operations settings");
   const settings = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-settings/page.tsx"), "utf8");
   const analysis = settings.slice(settings.indexOf('if (tab.id === "analysis")'));
-  for (const panel of ["<AmuxAnalysisMonthlyBudgetPanel", "<AmuxFrontierModelRegistrationPanel",
-    "<AmuxTaskCostCatalogApprovalPanel"]) {
+  for (const panel of ["<AmuxAnalysisMonthlyBudgetPanel", "<AmuxFrontierModelRegistrationPanel"]) {
     assert.ok(analysis.slice(0, 1200).includes(panel), `${panel} is in Analysis settings`);
   }
+  // Owner decision 2026-10-25: the catalogue prices the workers, so it sits
+  // on the Workers tab, for the owner only.
+  const workers = settings.slice(settings.indexOf('if (tab.id === "workers")'),
+    settings.indexOf('if (tab.id === "analysis")'));
+  assert.ok(workers.includes("isOwner ? <AmuxTaskCostCatalogApprovalPanel"),
+    "the catalogue is on the Workers tab, for the owner only");
+  assert.doesNotMatch(analysis.slice(0, 1600), /AmuxTaskCostCatalogApprovalPanel/);
 });
 
 test("List reads the normalized filter and page only after recent authentication", async () => {

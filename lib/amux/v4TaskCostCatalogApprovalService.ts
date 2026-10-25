@@ -15,6 +15,9 @@ import { calculateV4TaskCeilingFromCatalog,
   type V4TaskCostCatalog } from
   "./v4TaskCostCatalogCore.ts";
 import { readAmuxRegistryAndDerivedCatalog } from "./workerAssignmentCatalog.ts";
+import { AMUX_TASK_CATALOG_GRADES, draftAmuxV4TaskCostCatalog,
+  type AmuxTaskCatalogGradeCaps } from "./v4TaskCostCatalogDraftCore.ts";
+import type { AmuxExecutionGrade } from "./executionGradeCore.ts";
 
 const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -69,8 +72,9 @@ async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {
   return rows[0].now;
 }
 
-/** Read-only cost evidence preview. Prices and routes are supplied by the
- * owner, never inferred from Chat pricing or a model's analysis text. */
+/** Read-only cost evidence preview. Routes come from the worker registry and
+ * prices from the model registry the owner manages (owner decision
+ * 2026-10-25), never from a model's analysis text. */
 export async function previewAmuxV4TaskCatalog(raw: unknown) {
   const { inspection, catalog } = inspectedCatalog(raw);
   const latest = await prisma.amuxV4TaskCostCatalogApproval.findFirst({
@@ -181,6 +185,76 @@ export async function approveAmuxV4TaskCatalog(input: {
     }
     throw new AmuxV4TaskCatalogApprovalError("outcome_unknown");
   }
+}
+
+/** A catalog drafted from the worker registry and the model registry prices,
+ * with the owner's grade caps, plus the preview the approval needs. Nothing
+ * is written: approving the returned catalog is the existing audited step. */
+export async function draftAmuxV4TaskCatalog(
+  caps: Readonly<Record<AmuxExecutionGrade, AmuxTaskCatalogGradeCaps>>) {
+  const inputs = await prisma.$transaction(async (tx) => {
+    const { registrations, derived } = await readAmuxRegistryAndDerivedCatalog(tx);
+    if (!registrations || !derived) {
+      throw new AmuxV4TaskCatalogApprovalError("worker_registry_unavailable");
+    }
+    const ceilings = new Map(registrations.map((registration) =>
+      [registration.workerName, registration.roleCeiling]));
+    const workers = derived.v22.map((entry) => ({ workerName: entry.worker_name,
+      modelId: entry.model,
+      roleCeiling: ceilings.get(entry.worker_name) ?? null }));
+    const models = [...new Set(workers.map((worker) => worker.modelId))];
+    const rows = models.length === 0 ? [] : await tx.modelRegistryEntry.findMany({
+      where: { catalogDeleted: false, provider: "anthropic",
+        OR: [{ id: { in: models } }, { apiModel: { in: models } }] },
+      select: { id: true, apiModel: true, inputUsdPerMillionTokens: true,
+        outputUsdPerMillionTokens: true, cachedInputPriceMultiplier: true },
+    });
+    // A worker names the provider's model id; the registry row may carry it
+    // as its id or as the API model it calls. An exact id match wins.
+    const prices = models.flatMap((modelId) => {
+      const row = rows.find((candidate) => candidate.id === modelId) ??
+        rows.find((candidate) => candidate.apiModel === modelId);
+      return row ? [{ modelId, inputUsdPerMillionTokens: row.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: row.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: row.cachedInputPriceMultiplier }] : [];
+    });
+    return { workers, prices, now: await databaseNow(tx) };
+  });
+  const draft = draftAmuxV4TaskCostCatalog({ workers: inputs.workers,
+    prices: inputs.prices, caps, nowIso: inputs.now.toISOString() });
+  if (!draft.ok) return draft;
+  return { ...draft, preview: await previewAmuxV4TaskCatalog(draft.catalog) };
+}
+
+/** What the owner sees before drafting: the latest version, its state, when
+ * its prices expire and the caps it set. Never the raw catalog JSON. */
+export async function readCurrentAmuxV4TaskCatalog() {
+  const latest = await prisma.amuxV4TaskCostCatalogApproval.findFirst({
+    orderBy: { version: "desc" },
+    select: { version: true, catalogVersion: true, status: true,
+      revokedAt: true, approvedAt: true, catalog: true },
+  });
+  if (!latest) return { status: "none" as const };
+  let catalog: V4TaskCostCatalog;
+  try { ({ catalog } = inspectedCatalog(latest.catalog)); }
+  catch { return { status: "unreadable" as const, version: latest.version }; }
+  const now = await prisma.$transaction((tx) => databaseNow(tx));
+  const enabled = catalog.routes.filter((route) => route.enabled);
+  const expiresAt = enabled.map((route) => route.pricingExpiresAt).sort()[0] ?? null;
+  const status = latest.status !== "approved" || latest.revokedAt ? "revoked" as const
+    : expiresAt === null || expiresAt <= now.toISOString() ? "expired" as const
+      : "approved" as const;
+  const caps = Object.fromEntries(AMUX_TASK_CATALOG_GRADES.flatMap((grade) => {
+    const rule = catalog.gradeRules.find((entry) => entry.grade === grade);
+    return rule ? [[grade, { inputTokens: rule.caps.uncachedInputTokens,
+      outputTokens: rule.caps.outputTokens, maxAttempts: rule.caps.maxAttempts }]] : [];
+  }));
+  return { status, version: latest.version, catalogVersion: latest.catalogVersion,
+    approvedAt: latest.approvedAt.toISOString(), pricesExpireAt: expiresAt, caps,
+    routes: enabled.map((route) => ({ workerName: route.workerName,
+      modelId: route.modelId, grade: route.grades[0] ?? null,
+      inputUsdPerMillion: route.uncachedInputMicroUsdPerMillion / 1_000_000,
+      outputUsdPerMillion: route.outputMicroUsdPerMillion / 1_000_000 })) };
 }
 
 /** Exact-ID read-back after a lost approval response. Absence does not grant
