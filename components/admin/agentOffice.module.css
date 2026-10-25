@@ -593,6 +593,7 @@ a.integration-row:hover { border-color: var(--accent); }
 .lc.blocked { border-color: transparent; background: var(--blocked-bg); }
 
 .live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
+.live-grid.cli-open { grid-template-columns: minmax(0, 1fr) minmax(400px, 1.15fr); }
 
 /* ── World ─────────────────────────────────────────────── */
 .world-frame {
@@ -1035,7 +1036,7 @@ a.integration-row:hover { border-color: var(--accent); }
   .office *, .office *::before, .office *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 @media (max-width: 1100px) {
-  .live-grid { grid-template-columns: 1fr; }
+  .live-grid, .live-grid.cli-open { grid-template-columns: 1fr; }
   .world-viewport { height: min(62vh, 560px); }
 }
 @media (max-width: 1040px) {

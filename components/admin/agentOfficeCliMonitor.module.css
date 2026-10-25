@@ -1,0 +1,48 @@
+.monitor { display: flex; flex-direction: column; min-width: 0; height: 720px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.header { display: grid; gap: 12px; padding: 20px; border-bottom: 1px solid var(--line-soft); }
+.identity { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.identity h2 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.avatar { position: relative; display: grid; width: 32px; height: 36px; flex-shrink: 0; place-items: center; border-radius: 6px; background: var(--accent-soft); color: var(--accent-text); font-family: var(--font-code); }
+.avatar > span { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(.48); }
+.status { padding: 4px 8px; border-radius: 6px; color: var(--text-soft); background: var(--surface-3); font-size: 11px; }
+.status[data-state="live"] { color: #047857; background: #d1fae5; }
+.status[data-state="stale"] { color: #92400e; background: #fef3c7; }
+.windowControls { display: flex; gap: 4px; margin-left: auto; }
+.windowControls button { width: 36px; }
+.monitor button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 6px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.monitor button:hover { background: var(--surface-3); }
+.monitor :is(button,input,select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--text-soft); font-size: 11px; }
+.readOnly { padding: 5px 8px; border-radius: 5px; background: var(--surface-3); }
+.meta select { max-width: 100%; padding: 7px; border: 1px solid var(--line-soft); border-radius: 5px; background: var(--surface-2); color: var(--text); font: inherit; }
+.toolbar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; padding: 10px 14px; }
+.toolbar [role="tablist"] { display: flex; gap: 2px; }
+.toolbar [aria-selected="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.search { display: flex; align-items: center; gap: 8px; padding: 0 16px 12px; color: var(--text-faint); }
+.search input { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid var(--line-soft); border-radius: 5px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; }
+.log { flex: 1; min-height: 140px; overflow: auto; padding: 16px; background: #101114; color: #e4e4e7; scrollbar-gutter: stable; }
+.log pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--font-code); }
+.event { margin-bottom: 17px; }
+.event > span { display: block; margin-bottom: 5px; font: 10px/1.5 var(--font-ui); color: #a1a1aa; }
+.event[data-kind="prompt"] { color: #93c5fd; }
+.event[data-kind="prompt"] > span { color: #93c5fd; }
+.event[data-kind="tool"], .event[data-kind="output"] { color: #c0c0c7; }
+.empty { margin: 12px 0; font-size: 13px; line-height: 1.6; color: #c0c0c7; }
+.follow { display: flex; min-height: 40px; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; background: #101114; color: #93c5fd; font-size: 11px; }
+.follow button { color: #93c5fd; }
+.follow button:hover { background: #27272a; }
+.follow > span:last-child:not(:first-child) { color: #a1a1aa; font-size: 10px; }
+.footer { padding: 13px 16px; border-top: 1px solid var(--line-soft); background: var(--surface-2); }
+.footer p { margin: 0 0 5px; color: var(--text-soft); font-size: 11px; }
+.footer small { color: var(--text-faint); font-size: 10px; }
+.docked { display: contents; }
+.backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.55); }
+.expanded { position: fixed; inset: 80px 24px 24px; z-index: 61; height: auto; }
+@media (max-width: 700px) {
+  .monitor { position: fixed; inset: 0; z-index: 60; height: 100dvh; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .identity h2 { font-size: 18px; }
+  .header { padding: 16px; }
+  .monitor button { min-height: 44px; }
+  .windowControls button { width: 44px; }
+  .toolbar { padding: 5px 10px; }
+}
