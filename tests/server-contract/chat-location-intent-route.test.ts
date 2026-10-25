@@ -26,7 +26,7 @@ mock.module(mod("lib/turnstile.ts"), { namedExports: { ensureGuestVerified: asyn
   verified = true; return "synthetic-grant=1; HttpOnly; Secure";
 } } });
 const load = () => import(mod("app/api/chat/location-intent/route.ts"));
-const ask = async (body: unknown = { text: "Where am I?" }, cookie?: string) => (await load()).POST(new Request("https://tomverse.app/api/chat/location-intent", {
+const ask = async (body: unknown = { text: "Where am I?" }, cookie?: string): Promise<Response> => (await load()).POST(new Request("https://tomverse.app/api/chat/location-intent", {
   method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body),
 }));
 const reset = () => { user = "owner"; refused = false; verified = false; limited = false; analysed = 0; subjects.length = 0; };
