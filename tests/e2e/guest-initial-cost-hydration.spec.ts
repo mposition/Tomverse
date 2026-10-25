@@ -515,7 +515,7 @@ test.describe("guest initial cost hydration", () => {
 
     await page.goto("/review?lang=en");
     await settleComposer(page);
-    await expect(page.getByTestId("composer-active-model-count")).toHaveText("3 models");
+    await expect(page.getByTestId("composer-active-model-count")).toHaveText("3 AIs");
     expect(await page.evaluate(() => ({
       conversations: localStorage.getItem("guest_conversations"),
       activeId: sessionStorage.getItem("tomverse_active_chat_id"),
@@ -1171,7 +1171,7 @@ test.describe("guest initial cost hydration", () => {
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
-    await expect(modelMenu.getByTestId("composer-active-model-count")).toHaveText(`${GUEST_MODEL_COUNT} models`);
+    await expect(modelMenu.getByTestId("composer-active-model-count")).toHaveText(`${GUEST_MODEL_COUNT} AIs`);
 
     await expect(estimate).toHaveCount(0);
   });
