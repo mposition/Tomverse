@@ -120,12 +120,14 @@ the app release and dedicated credential are ready. This starts the one fixed
 collector; it does not activate any other worker.
 
 From the Ubuntu operator account's bash, verify the installed bundle without
-credentials or external writes (this reads only the existing worker output):
+credentials or external writes (this reads only the existing worker output).
+Store the verified public certificate at
+`~/.config/tomverse-cli-monitor/amux-source.pem`. The check clears its environment
+and receives only this public certificate; do not load `collector.env` for it:
 
 ```bash
 systemd-run --user --wait --pipe -p NoNewPrivileges=yes \
   -p 'RestrictAddressFamilies=AF_INET AF_INET6' \
-  -p EnvironmentFile="$HOME/.config/tomverse-cli-monitor/collector.env" \
   /usr/bin/bwrap --die-with-parent --new-session \
   --unshare-pid --unshare-ipc --unshare-uts \
   --ro-bind /usr /usr --symlink usr/bin /bin \
@@ -134,7 +136,8 @@ systemd-run --user --wait --pipe -p NoNewPrivileges=yes \
   --ro-bind /etc/resolv.conf /etc/resolv.conf --ro-bind /etc/ssl /etc/ssl \
   --ro-bind "$HOME/.local/share/tomverse-cli-monitor" /app \
   --proc /proc --dev /dev --tmpfs /tmp --chdir /app \
-  --unsetenv SSH_AUTH_SOCK --unsetenv DBUS_SESSION_BUS_ADDRESS \
-  --unsetenv GPG_AGENT_INFO --setenv HOME /tmp --setenv PATH /usr/bin \
+  --clearenv --setenv HOME /tmp --setenv PATH /usr/bin \
+  --setenv TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64 \
+    "$(base64 -w0 "$HOME/.config/tomverse-cli-monitor/amux-source.pem")" \
   /usr/bin/node /app/collector.mjs --check-source
 ```

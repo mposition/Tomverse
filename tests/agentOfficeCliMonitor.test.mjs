@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import https from "node:https";
+import { syncBuiltinESMExports } from "node:module";
+import { EventEmitter } from "node:events";
+import { checkServerIdentity, rootCertificates } from "node:tls";
 import {
   AGENT_OFFICE_CLI_MAX_BYTES, AGENT_OFFICE_CLI_STALE_MS, AGENT_OFFICE_CLI_TTL_MS,
   AGENT_OFFICE_CLI_WORKER, agentOfficeCliSnapshotSchema, maskAgentOfficeCliText,
@@ -26,6 +30,54 @@ test("source reads fail closed without an explicit AMUX trust certificate", () =
         /source_ca_unconfigured/);
   for (const kind of ["send", "constructor", "toString", "__proto__"])
     assert.throws(() => readAgentOfficeCliSource(kind, {}), /invalid source/);
+});
+
+test("source TLS verification stays enabled and its private CA never reaches ingestion", async (t) => {
+  const certificate = rootCertificates[0];
+  const options = [];
+  t.mock.method(https, "get", (value, callback) => {
+    options.push(value);
+    const response = new EventEmitter();
+    response.statusCode = 200;
+    const request = new EventEmitter();
+    queueMicrotask(() => {
+      callback(response);
+      response.emit("data", Buffer.from('{"ok":true}'));
+      response.emit("end");
+    });
+    return request;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  for (const kind of ["transcript", "pane"])
+    assert.deepEqual(await readAgentOfficeCliSource(kind, {
+      TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64: Buffer.from(certificate).toString("base64"),
+    }), { ok: true });
+  for (const value of options) {
+    assert.equal(value.hostname, "127.0.0.1");
+    assert.equal(value.port, 8824);
+    assert.equal(value.ca.toString(), certificate);
+    assert.equal(value.rejectUnauthorized, true);
+    assert.equal(value.checkServerIdentity, undefined);
+    assert.equal(value.agent, undefined);
+  }
+  assert.equal(checkServerIdentity("127.0.0.1", { subjectaltname: "IP Address:127.0.0.1" }), undefined);
+  assert.equal(checkServerIdentity("127.0.0.1", { subjectaltname: "DNS:other.example" }).code,
+    "ERR_TLS_CERT_ALTNAME_INVALID");
+  let ingestion;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    ingestion = { url, init };
+    return new Response(null, { status: 200 });
+  });
+  await sendAgentOfficeCliSnapshot(snapshot(), { TOMVERSE_AMUX_CLI_MONITOR: "1",
+    TOMVERSE_AMUX_CLI_MONITOR_SECRET: "synthetic-collector-credential-for-tls-test",
+    TOMVERSE_INTERNAL_URL: "https://app.example",
+    TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64: Buffer.from(certificate).toString("base64"),
+  });
+  assert.equal(ingestion.url.protocol, "https:");
+  assert.deepEqual(Object.keys(ingestion.init).sort(), ["body", "headers", "method", "redirect", "signal"]);
+  assert.equal(ingestion.init.redirect, "error");
+  assert.equal(JSON.stringify(ingestion).includes(certificate), false);
 });
 
 test("the collector reuses two GET projections and omits reasoning and unknown fields", async () => {
