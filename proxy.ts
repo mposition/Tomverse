@@ -16,6 +16,7 @@ import {
   hasValidOriginSecret,
   isAllowedAmuxReviewPrivateHost,
   isAllowedRequestHost,
+  mobileAppLinkOrigin,
 } from "@/lib/originProtection";
 import {
   apiRouteChoosesOwnCaching,
@@ -40,7 +41,6 @@ import {
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
-import { mobileAppLinkOrigin } from "@/lib/mobileAppLinks";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES, mobileChatBearerRoutes } from "@/lib/mobileAuthContract";
 import {
   applyMobileIdentityHeaders,

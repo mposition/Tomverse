@@ -1,13 +1,7 @@
 /** Shared URL contract for the system-browser login handoff. */
 export const MOBILE_AUTH_CALLBACK_PATH = "/mobile/auth/callback";
 
-export const mobileAuthHttpsOrigin = (value: string): string | null => {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password && !url.port &&
-      url.pathname === "/" && !url.search && !url.hash ? url.origin : null;
-  } catch { return null; }
-};
+export { mobileAuthHttpsOrigin } from "./originProtection";
 
 const isSecret = (value: string | null): value is string =>
   value !== null && /^[A-Za-z0-9_-]{43}$/.test(value);

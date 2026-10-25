@@ -1,14 +1,8 @@
-import { MOBILE_AUTH_CALLBACK_PATH, mobileAuthHttpsOrigin } from "./mobileBrowserLogin";
+import { MOBILE_AUTH_CALLBACK_PATH } from "./mobileBrowserLogin";
+import { mobileAppLinkOrigin } from "./originProtection";
+export { mobileAppLinkOrigin } from "./originProtection";
 
 const APP_ID = "app.tomverse.shell";
-
-export const mobileAppLinkOrigin = (env: NodeJS.ProcessEnv = process.env) => {
-  const origin = mobileAuthHttpsOrigin(env.MOBILE_AUTH_APP_LINK_ORIGIN ?? "");
-  const loginOrigins = ["https://tomverse.app", "https://www.tomverse.app", env.NEXTAUTH_URL,
-    env.PUBLIC_APP_URL, env.NEXT_PUBLIC_APP_URL, env.NEXT_PUBLIC_SHARE_BASE_URL]
-    .filter((value): value is string => Boolean(value)).map(mobileAuthHttpsOrigin);
-  return origin && !loginOrigins.includes(origin) ? origin : null;
-};
 
 /** No association is published until actual release-signing identities are configured. */
 export const mobileAppLinks = (env: NodeJS.ProcessEnv = process.env) => {
