@@ -1034,7 +1034,16 @@ test("no in-conversation image path starts on a continuation route", () => {
     assert.match(client, /const imageIntentRoutedOnSend =\s*inConversationImagesAllowed &&/);
     assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*reviewWorkspace\.mode === "professional" &&\s*options === undefined && reviewWorkspace\.imagePromptMode/);
     assert.match(client, /const professionalImageRouting = mountedSurface === "workspace" &&\s*inConversationImagesAllowed &&/);
-    assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*\(reviewWorkspace\.mode === "easy" \|\| professionalImageRouting\)/);
+    // Easy still routes text per question (review round 6); only an image
+    // outcome is refused, before anything is saved.
+    assert.match(client, /if \(mountedSurface === "workspace" && \(reviewWorkspace\.mode === "easy" \|\| professionalImageRouting\) &&/);
+    assert.match(client, /if \(decision\.kind === "image"\) \{\s*if \(!inConversationImagesAllowed\) \{\s*\/\/[^\n]*\n[^\n]*\n\s*reviewWorkspace\.setError\(t\("continuation\.imagesUnavailable"\)\); return;/);
+    // The Review image tools never enter this conversation's image mode.
+    assert.match(client, /if \(mountedSurface === "workspace"\) \{\s*\/\/[^\n]*\n\s*if \(!inConversationImagesAllowed\) return;/);
+    assert.equal(
+        client.split('onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ?').length - 1,
+        2
+    );
     // A failed product read is an error, never a guessed Review composer.
     const page = readFileSync("app/(site)/(application)/continuations/[conversationId]/page.tsx", "utf8");
     assert.doesNotMatch(page, /catch \{\s*return "review";/);
@@ -1047,6 +1056,11 @@ test("a Compare-in-Review answer is owned by the press's selection", () => {
     assert.match(client, /reviewForkTicketRef\.current === conversationSelectionTicketRef\.current &&/);
     assert.match(client, /reviewForkTicketRef\.current = conversationSelectionTicketRef\.current;\s*void startReviewFork\(\);/);
     assert.match(client, /if \(admitted\) reviewForkTicketRef\.current = null;/);
+    // Leaving for Review preserves drafts like the switcher, and is blocked in
+    // the same states (review round 6).
+    assert.match(client, /beforeNavigate: \(\) => reviewForkAdmissionRef\.current\(\),/);
+    assert.match(client, /reviewForkAdmissionRef\.current = \(\) =>\s*!productSwitchDisabled && preserveDraftsForProductSwitch\(\);/);
+    assert.match(client, /pending: reviewForkStatus === "creating" \|\| compareBlocked,/);
     const launcher = readFileSync("components/imports/useContinuationLauncher.ts", "utf8");
     // A stale answer never touches a newer attempt's state.
     assert.match(launcher, /if \(generationRef\.current === generation\) setStatus\("idle"\);/);

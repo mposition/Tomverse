@@ -1372,6 +1372,7 @@ export const zh = {
         readOnlyLabel: "只读",
         compareInReview: "在 Review 中比较模型",
         compareInReviewPending: "正在打开 Review…",
+        imagesUnavailable: "继续的对话中无法生成图片。请从侧边栏开始新的图片。",
         importedMessageDescription: "这是从 {provider} 导入的只读消息，无法在此编辑、重发或重新生成。",
         importedYou: "你 · 在 {provider}",
         showOlderImported: "查看之前导入的 {count} 条消息",

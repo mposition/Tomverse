@@ -4550,6 +4550,8 @@ export function ChatPageClient({
         }
     ) => {
         if (mountedSurface === "workspace") {
+            // A Review continuation has no in-conversation image mode (§5.1).
+            if (!inConversationImagesAllowed) return;
             setReviewImageModelId(modelId ?? options?.modelIds?.[0] ?? DEFAULT_IMAGE_MODEL_ID);
             reviewWorkspace.setImagePromptMode(true);
             setInputValue(draftText);
@@ -5791,8 +5793,7 @@ export function ChatPageClient({
       options === undefined &&
       reviewWorkspace.mode === "professional" && chatImageIntentEnabled && imageGenerationEnabled &&
       !isGuestMode && attachments.length === 0 && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
-    if (mountedSurface === "workspace" && inConversationImagesAllowed &&
-      (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
+    if (mountedSurface === "workspace" && (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
       !options?.reviewRouteChecked && !isImageDraftActiveRef.current) {
       if (!isModelSelectionReady || !isInitialConversationResolved) return;
       if ((!reviewEasyAvailable && !professionalImageRouting) || isGuestMode) {
@@ -5853,6 +5854,11 @@ export function ChatPageClient({
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
+        if (!inConversationImagesAllowed) {
+          // Easy still picks text models per question on a continuation; an
+          // image answer is refused before anything is saved (§5.1).
+          reviewWorkspace.setError(t("continuation.imagesUnavailable")); return;
+        }
         if (chosen.length > imageGroupMaxModelsProp) {
           reviewWorkspace.setError(t("chat.imageGenerationModelLimitNotice").replace("{max}", String(imageGroupMaxModelsProp))); return;
         }
@@ -10098,6 +10104,9 @@ export function ChatPageClient({
     chat or a product switch is leaving.
   */
   const reviewForkTicketRef = useRef<number | null>(null);
+  // The product switch's own admission, read when the fork's answer lands:
+  // leaving for Review preserves the drafts the same way the switcher does.
+  const reviewForkAdmissionRef = useRef<() => boolean>(() => false);
   const {
     start: startReviewFork,
     status: reviewForkStatus,
@@ -10108,8 +10117,14 @@ export function ChatPageClient({
       isOwnerCurrent: () =>
         reviewForkTicketRef.current === conversationSelectionTicketRef.current &&
         currentChatIdRef.current === shellConversationId,
+      beforeNavigate: () => reviewForkAdmissionRef.current(),
     }
   );
+  // Same blocking states as the product switcher (unknown writes, sends,
+  // draft conflicts or failed draft sync); computed here because the switch's
+  // own value is defined further down.
+  const compareBlocked =
+    Boolean(pendingSubmission) || selectionModePending || draftConflict || draftSyncFailed;
   const compareInReview = useMemo(
     () =>
       routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode &&
@@ -10119,7 +10134,7 @@ export function ChatPageClient({
               reviewForkTicketRef.current = conversationSelectionTicketRef.current;
               void startReviewFork();
             },
-            pending: reviewForkStatus === "creating",
+            pending: reviewForkStatus === "creating" || compareBlocked,
             error: reviewForkError,
           }
         : undefined,
@@ -10127,6 +10142,7 @@ export function ChatPageClient({
       continuationSource.timeline,
       isGuestMode,
       mountedSurface,
+      compareBlocked,
       reviewForkError,
       reviewForkStatus,
       startReviewFork,
@@ -10206,6 +10222,10 @@ export function ChatPageClient({
     if (admitted) reviewForkTicketRef.current = null;
     return admitted;
   };
+  useLayoutEffect(() => {
+    reviewForkAdmissionRef.current = () =>
+      !productSwitchDisabled && preserveDraftsForProductSwitch();
+  });
   const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
     ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
     : selectedModels;
@@ -10306,7 +10326,7 @@ export function ChatPageClient({
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
+          onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);
@@ -10480,7 +10500,7 @@ export function ChatPageClient({
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
+          onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);

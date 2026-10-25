@@ -99,12 +99,21 @@ export function useContinuationLauncher(
          * navigate the conversation the user has just opened.
          */
         isOwnerCurrent?: () => boolean;
+        /**
+         * Asked just before navigating to the created conversation. `false`
+         * keeps this screen (and the attempt's key, so the next press replays
+         * the same conversation): the Compare-in-Review caller refuses while
+         * a draft cannot be preserved, as the product switch does.
+         */
+        beforeNavigate?: () => boolean;
     } = {}
 ): ContinuationLauncher {
     const endpoint = launchEndpoint(source);
     const isOwnerCurrentRef = useRef(options.isOwnerCurrent);
+    const beforeNavigateRef = useRef(options.beforeNavigate);
     useLayoutEffect(() => {
         isOwnerCurrentRef.current = options.isOwnerCurrent;
+        beforeNavigateRef.current = options.beforeNavigate;
     });
     const { t } = useLanguage();
     const router = useRouter();
@@ -206,6 +215,10 @@ export function useContinuationLauncher(
             if (!body.conversationId) {
                 setStatus("failed");
                 setErrorMessage(t("continuation.createFailed"));
+                return false;
+            }
+            if (beforeNavigateRef.current && !beforeNavigateRef.current()) {
+                setStatus("idle");
                 return false;
             }
             openAttemptKeys.delete(endpoint);

@@ -1367,6 +1367,7 @@ export const ko = {
         readOnlyLabel: "읽기 전용",
         compareInReview: "Review에서 여러 모델로 비교",
         compareInReviewPending: "Review를 여는 중…",
+        imagesUnavailable: "이어진 대화에서는 이미지를 만들 수 없습니다. 사이드바에서 새 이미지를 시작하세요.",
         importedMessageDescription: "{provider}에서 가져온 읽기 전용 메시지입니다. 여기서는 수정·재전송·재생성할 수 없습니다.",
         importedYou: "나 · {provider}에서",
         showOlderImported: "이전 가져온 메시지 {count}개 보기",

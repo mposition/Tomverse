@@ -1356,6 +1356,7 @@ export const es = {
         readOnlyLabel: "Solo lectura",
         compareInReview: "Comparar modelos en Review",
         compareInReviewPending: "Abriendo Review…",
+        imagesUnavailable: "No se pueden crear imágenes en una conversación continuada. Empieza una imagen nueva desde la barra lateral.",
         importedMessageDescription: "Mensaje de solo lectura importado de {provider}. Aquí no se puede editar, reenviar ni volver a generar.",
         importedYou: "Tú · en {provider}",
         showOlderImported: "Ver los {count} mensajes importados anteriores",

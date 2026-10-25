@@ -1372,6 +1372,7 @@ export const en = {
         readOnlyLabel: "Read-only",
         compareInReview: "Compare models in Review",
         compareInReviewPending: "Opening Review…",
+        imagesUnavailable: "Images can't be made in a continued conversation. Start a new image from the sidebar.",
         importedMessageDescription: "Read-only message imported from {provider}. It cannot be edited, resent or regenerated here.",
         importedYou: "You · in {provider}",
         showOlderImported: "Show {count} earlier imported messages",

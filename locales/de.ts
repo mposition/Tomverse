@@ -1356,6 +1356,7 @@ export const de = {
         readOnlyLabel: "Nur lesbar",
         compareInReview: "In Review Modelle vergleichen",
         compareInReviewPending: "Review wird geöffnet…",
+        imagesUnavailable: "In einer fortgesetzten Unterhaltung können keine Bilder erstellt werden. Starte ein neues Bild über die Seitenleiste.",
         importedMessageDescription: "Nur lesbare Nachricht, aus {provider} importiert. Sie lässt sich hier nicht bearbeiten, erneut senden oder neu erzeugen.",
         importedYou: "Du · in {provider}",
         showOlderImported: "{count} frühere importierte Nachrichten anzeigen",
