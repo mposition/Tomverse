@@ -19,6 +19,7 @@ import { Sheet } from "./Sheet";
 import { AnswerReport } from "./AnswerReport";
 import { mobileErrorText } from "../../../locales/mobileErrors";
 import { EmailLogin } from "./EmailLogin";
+import { mobileLoginCopy, mobileLoginError } from "../../../locales/mobileLogin";
 import { AnswerContent } from "./AnswerContent";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import { AccountScreen } from "./AccountScreen";
@@ -41,6 +42,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   });
   const [theme, setTheme] = useState(() => localStorage.getItem("tomverse-theme") ?? "system");
   const copy = mobileCopy[language];
+  const loginCopy = mobileLoginCopy[language];
   const workspaceCopy = mobileWorkspaceCopy[language];
   const [signedIn, setSignedIn] = useState(false);
   const [voiceRevision, setVoiceRevision] = useState(0);
@@ -139,7 +141,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         const list = await transport.list();
       if (current !== requestEpoch.current) return;
       setSignedIn(true); setChats(list);
-    } catch { if (current === requestEpoch.current) setError(demo ? copy.error : copy.native); }
+    } catch (failure) { if (current === requestEpoch.current) setError(mobileLoginError(failure, language, "browser")); }
     finally { if (current === requestEpoch.current) setLoading(false); }
   }
   async function signOut() {
@@ -267,7 +269,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     {error && <div role="alert" className="notice error">{error}</div>}
     {!signedIn ? <section className="welcome">
       <div className="welcome-mark"><AppIcon name="logo" /></div><h1>{copy.welcome}</h1><p>{copy.intro}</p>
-      <button className="primary" onClick={() => { if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true); else void signIn(); }} disabled={loading}>{copy.signIn} <span aria-hidden="true">→</span></button>
+      <button className="primary" onClick={() => void signIn()} disabled={loading} aria-describedby="browser-sign-in-note">{copy.signIn} <span aria-hidden="true">→</span></button>
+      <p id="browser-sign-in-note" className="browser-sign-in-note">{loginCopy.browserIntro}</p>
+      {transport.requestEmailCode && transport.verifyEmailCode && <button type="button" className="sign-in-email" disabled={loading} onClick={() => { setError(""); setEmailLogin(true); }}>{loginCopy.inAppEmail}</button>}
     </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={() => setView("chat")} onBusyChange={setReviewBusy} historyFooter={accountFooter} newConversationRequest={newReviewRequest} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
       <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
         const scope = epoch.current; const rows = await transport.list();

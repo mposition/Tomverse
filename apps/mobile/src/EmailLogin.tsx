@@ -33,7 +33,7 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
         if (active.current) { setSent(true); setCode(""); setCooldown(60); }
       }
     } catch (failure) {
-      if (active.current) { setError(mobileLoginError(failure, language, verify ? "verify" : "request")); setCode(""); }
+      if (active.current) { setError(mobileLoginError(failure, language, verify === "browser" ? "browser" : verify ? "verify" : "request")); setCode(""); }
     } finally { inFlight.current = false; if (active.current) setBusy(false); }
   }
   return <Sheet title={copy.title} closeLabel={mobileCopy[language].close} onClose={() => { if (!inFlight.current) onClose(); }}>
@@ -45,7 +45,6 @@ export function EmailLogin({ transport, language, onClose, onComplete }: {
       <button className="primary" type="submit" disabled={busy || (sent && code.length !== 6)}>{busy ? mobileCopy[language].loading : sent ? copy.verify : copy.send}</button>
       {sent && <div className="login-actions"><button type="button" disabled={busy} onClick={() => { setSent(false); setCode(""); setError(""); }}>{copy.change}</button><button type="button" disabled={busy || cooldown > 0} onClick={() => void submit(false)}>{copy.resend}{cooldown > 0 && ` (${cooldown})`}</button></div>}
       <button type="button" disabled={busy} onClick={() => void submit("browser")}>{copy.otherSignIn}</button>
-      <a href="https://tomverse.app/auth/signin" target="_blank" rel="noreferrer">tomverse.app ↗</a>
     </form>
   </Sheet>;
 }
