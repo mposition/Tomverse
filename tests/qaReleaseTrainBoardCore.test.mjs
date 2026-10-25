@@ -6,11 +6,13 @@ import { QA_RELEASE_TRAIN_BOARD_RUNNING_MS, qaReleaseTrainBoardRows, qaReleaseTr
 test("the open trains come from GitHub's open list, whatever the board's history holds", () => {
   assert.deepEqual(
     qaReleaseTrainOpenTrains([
-      { number: 2998, head: { ref: "release/train-20261025-1400" } },
-      { number: 2987, head: { ref: "claude/to-develop/back-merge-main-20261025" } },
-      { number: 3010, head: { ref: "release/train-20261025-1237" } },
-      { number: 2990, head: { ref: "hotfix/x" } },
-      { head: { ref: "release/train-x" } },
+      { number: 2998, head: { ref: "release/train-20261025-1400", repo: { full_name: "mposition/Tomverse" } } },
+      { number: 2987, head: { ref: "claude/to-develop/back-merge-main-20261025", repo: { full_name: "mposition/Tomverse" } } },
+      { number: 3010, head: { ref: "release/train-20261025-1237", repo: { full_name: "mposition/Tomverse" } } },
+      // A fork's branch of the same name is not a train.
+      { number: 3011, head: { ref: "release/train-20261025-1238", repo: { full_name: "someone/Tomverse" } } },
+      { number: 2990, head: { ref: "hotfix/x", repo: { full_name: "mposition/Tomverse" } } },
+      { head: { ref: "release/train-x", repo: { full_name: "mposition/Tomverse" } } },
     ]),
     [3010, 2998],
   );

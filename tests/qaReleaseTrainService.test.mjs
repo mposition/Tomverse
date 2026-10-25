@@ -332,18 +332,28 @@ test("an emergency leaves out what an open train already carries, and says so", 
   assert.match(calls.find(([n]) => n === "openPullRequest")[1].body, /Already on an open train, skipped: #10\./);
   // When everything it names already rides, the request is admitted and
   // reported empty without a clone -- spent, not left pending.
-  const all = ports({ emergency: [10], riders: [10] });
+  const all = ports({ emergency: [10], openTrains: 1, riders: [10] });
   assert.deepEqual(await runQaReleaseTrainRound(env(), all.p, at), { exitCode: 0, train: "empty", slot: "20261020-1237" });
   assert.deepEqual(all.calls.find(([n]) => n === "admitSlot"), ["admitSlot", "20261020-1237", "req-1"]);
   assert.deepEqual(all.calls.find(([n]) => n === "report")[1].picks, [{ number: 10, outcome: "in_open_train" }]);
   assert.ok(!all.names().includes("assemble"));
-  // In a departure window the scheduled train then goes in the same round (nothing was cloned).
-  const inWindow = ports({ emergency: [10], riders: [10] });
+  // In a departure window the round goes on to the scheduled departure, which
+  // then waits for the open train that carries #10, as any scheduled one does.
+  const inWindow = ports({ emergency: [10], openTrains: 1, riders: [10] });
   let read = false;
   inWindow.p.app.selection = async () => {
     const answer = { numbers: [11, 12], emergency: read ? null : { id: "req-1", numbers: [10] } };
     read = true;
     return answer;
   };
-  assert.equal((await runQaReleaseTrainRound(env(), inWindow.p, NOW)).slot, "20261020-1100");
+  assert.deepEqual(await runQaReleaseTrainRound(env(), inWindow.p, NOW), { exitCode: 0, train: "train_open" });
+  assert.deepEqual(
+    inWindow.calls.filter(([n]) => n === "admitSlot"),
+    [["admitSlot", "20261020-1105", "req-1"]],
+  );
+  // Review r-20261025-082156: a requested number not yet merged into develop
+  // (cargo() does not return it) keeps the request pending, not spent.
+  const unmerged = ports({ emergency: [10, 999], openTrains: 1, riders: [10] });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), unmerged.p, at), { exitCode: 0, train: "no_cargo" });
+  assert.ok(!unmerged.names().includes("admit"));
 });

@@ -139,7 +139,10 @@ test("the app port reads an emergency request and asks for an emergency admissio
 // requests still holds the next one, and a list past the cap is a failed read.
 test("open trains are counted across every page of open main pull requests", async () => {
   const pages = (count) =>
-    Array.from({ length: count }, (_, i) => ({ number: 5000 + i, head: { ref: i === count - 1 ? "release/train-20261025-1400" : `feature/${i}` } }));
+    Array.from({ length: count }, (_, i) => ({
+      number: 5000 + i,
+      head: { ref: i === count - 1 ? "release/train-20261025-1400" : `feature/${i}`, repo: { full_name: "mposition/Tomverse" } },
+    }));
   const answerWith = (byPage) =>
     createQaReleaseTrainGithubPorts({
       token: async () => "t",
@@ -157,8 +160,14 @@ test("open trains are counted across every page of open main pull requests", asy
   const train = {
     number: 2998,
     title: "release: train 20261025-1400 (2 PRs) #4444",
-    head: { ref: "release/train-20261025-1400" },
+    head: { ref: "release/train-20261025-1400", repo: { full_name: "mposition/Tomverse" } },
     body: "## Included (2)\n\n- #2985 follow up on #2988\n- #2989 fix\n\n## Left out (1)\n\n- #2659 conflict\n",
   };
-  assert.deepEqual(await answerWith([[train, { number: 1, head: { ref: "feature/x" }, body: "## Included\n- #7" }]]).openTrains(), { count: 1, riders: [2985, 2989] });
+  // A fork's pull request from a branch of the same name is not a train (review r-20261025-082156).
+  const fork = { number: 9, head: { ref: "release/train-20261025-1500", repo: { full_name: "someone/Tomverse" } }, body: "## Included (1)\n\n- #3001 forged\n" };
+  const goneFork = { number: 8, head: { ref: "release/train-20261025-1600", repo: null }, body: "## Included (1)\n\n- #3002 x\n" };
+  assert.deepEqual(
+    await answerWith([[train, fork, goneFork, { number: 1, head: { ref: "feature/x" }, body: "## Included\n- #7" }]]).openTrains(),
+    { count: 1, riders: [2985, 2989] },
+  );
 });

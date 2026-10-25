@@ -6,7 +6,7 @@
  *
  * Pure: the read (lib/qaReleaseTrainBoardRead.ts) passes what it read.
  */
-import { QA_RELEASE_TRAIN_BRANCH_PREFIX, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
+import { qaReleaseTrainIsTrainPull, type QaReleaseTrainPick } from "./qaReleaseTrainCore.ts";
 
 /** How long a train may run between its admission and its report before the board calls it unreported. */
 export const QA_RELEASE_TRAIN_BOARD_RUNNING_MS = 30 * 60 * 1000;
@@ -58,7 +58,7 @@ export type QaReleaseTrainPullState = { state: "open" | "merged" | "closed"; set
 export function qaReleaseTrainOpenTrains(openPullsJson: readonly unknown[]): number[] {
   return openPullsJson
     .map(record)
-    .filter((pull): pull is Json => pull !== null && typeof pull.number === "number" && String(record(pull.head)?.ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX))
+    .filter((pull): pull is Json => pull !== null && typeof pull.number === "number" && qaReleaseTrainIsTrainPull(pull))
     .map((pull) => pull.number as number)
     .sort((a, b) => b - a);
 }

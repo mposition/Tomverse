@@ -152,7 +152,13 @@ export async function runQaReleaseTrainRound(
           const merged = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency.numbers));
           const riders = merged.filter((c) => !riding.has(c.number));
           const skipped = merged.filter((c) => riding.has(c.number)).map((c) => c.number);
-          if (riders.length > 0 || skipped.length > 0) emergency = { slot, branch: emergencyBranch, cargo: riders, id: selection.emergency.id, onOpenTrain: skipped };
+          // With nothing to ride, the request is spent only when every number
+          // it names already rides an open train; one not yet merged into
+          // develop keeps it pending.
+          const allRiding = selection.emergency.numbers.every((number) => riding.has(number));
+          if (riders.length > 0 || (skipped.length > 0 && allRiding)) {
+            emergency = { slot, branch: emergencyBranch, cargo: riders, id: selection.emergency.id, onOpenTrain: skipped };
+          }
         }
       } catch (error) {
         if (scheduledNow === null) throw error;

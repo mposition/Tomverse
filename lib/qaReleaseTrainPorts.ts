@@ -16,16 +16,17 @@ import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts";
 import { QA_RELEASE_TRAIN_CANDIDATE_DAYS } from "./qaReleaseTrainCargoCore.ts";
 import {
-  QA_RELEASE_TRAIN_BRANCH_PREFIX,
   QA_RELEASE_TRAIN_MAX_PREDECESSORS,
+  QA_RELEASE_TRAIN_REPOSITORY,
   qaReleaseTrainIncludedNumbers,
+  qaReleaseTrainIsTrainPull,
   qaReleaseTrainMergedPullNumber,
   type QaReleaseTrainCandidate,
   type QaReleaseTrainPick,
 } from "./qaReleaseTrainCore.ts";
 import type { QaReleaseTrainPorts } from "./qaReleaseTrainService.ts";
 
-const REPOSITORY = "mposition/Tomverse";
+const REPOSITORY = QA_RELEASE_TRAIN_REPOSITORY;
 const API = `https://api.github.com/repos/${REPOSITORY}`;
 const SHA = /^[0-9a-f]{40}$/;
 const PULL_READS_AT_ONCE = 8;
@@ -74,7 +75,7 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
     // Every open main pull request, page by page: a train past the first
     // hundred still holds the next one. A list longer than the cap is a
     // failed read, never "no open train". The riders are what each open train
-    // names under its Included heading.
+    // names under its Included heading; a fork's pull request is not a train.
     async openTrains() {
       let count = 0;
       const riders = new Set<number>();
@@ -84,7 +85,7 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
         const list = answer.json();
         if (!Array.isArray(list)) throw new Error("github_shape");
         for (const pull of list) {
-          if (!String(record(record(pull).head).ref ?? "").startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX)) continue;
+          if (!qaReleaseTrainIsTrainPull(pull)) continue;
           count += 1;
           const body = record(pull).body;
           for (const number of qaReleaseTrainIncludedNumbers(typeof body === "string" ? body : "")) riders.add(number);

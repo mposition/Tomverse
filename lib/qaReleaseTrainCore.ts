@@ -140,6 +140,21 @@ export function qaReleaseTrainMergedPullNumber(subject: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** The repository the train runs in; a train's branch lives in it, never in a fork. */
+export const QA_RELEASE_TRAIN_REPOSITORY = "mposition/Tomverse";
+
+/**
+ * Whether a pull request (as GitHub lists it) is a release train: its head is
+ * a `release/train-` branch of this repository. The repository is public, so
+ * anyone can open a pull request from a fork's branch of that name with any
+ * body; such a one is not a train, and its Included list is not believed.
+ */
+export function qaReleaseTrainIsTrainPull(pull: unknown): boolean {
+  if (typeof pull !== "object" || pull === null) return false;
+  const head = (pull as { head?: { ref?: unknown; repo?: { full_name?: unknown } | null } }).head;
+  return typeof head?.ref === "string" && head.ref.startsWith(QA_RELEASE_TRAIN_BRANCH_PREFIX) && head.repo?.full_name === QA_RELEASE_TRAIN_REPOSITORY;
+}
+
 /**
  * The pull requests a train's body says rode: the number leading each item
  * of its Included section (`- #2985 title`), as qaReleaseTrainPullRequest
