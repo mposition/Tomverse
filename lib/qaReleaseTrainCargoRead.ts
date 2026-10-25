@@ -83,6 +83,16 @@ async function inBatches<T>(items: readonly T[], work: (item: T) => Promise<void
 let cached: { atMs: number; value: QaReleaseTrainCargoCandidatesRead } | null = null;
 
 /**
+ * The last candidates read, whatever their age, without reading GitHub: for
+ * a page that only wants titles and must not wait on the full read (it took
+ * 20-28 seconds on a cold production server on 2026-10-25, and the release
+ * train tab waited on it). Null before the first read.
+ */
+export function peekQaReleaseTrainCargoCandidates(): QaReleaseTrainCargoCandidatesRead | null {
+  return cached?.value ?? null;
+}
+
+/**
  * The candidates, from the shared read while it is fresh enough. `fresh` (the
  * train tab's "Read GitHub again", or a save on it) reads GitHub again unless
  * a read is under FRESH_MIN_MS old, so several operators pressing it spend
