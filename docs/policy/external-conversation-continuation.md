@@ -13,9 +13,16 @@ approvalTicket: N/A
 사용자의 명시적 선택으로 새 Tomverse Conversation을 만들어 같은 화면에서 대화를
 이어가는 기능의 계약입니다.
 
-**이어진 대화는 Review 대화입니다**(`productKey = "review"`, `kind = "chat"`).
-가져온 원본을 여러 모델에게 같은 자리에서 다시 물어보는 것이 이 기능이 답하는
-질문이고, 그것이 Review가 하는 일입니다. 2026-09-01 개정 이전의 v1은 이어가기를
+**이어진 대화는 기본으로 Tomverse Chat 대화입니다**(`productKey = "chat"`,
+Smart Adaptive, `kind = "chat"`). 운영자 결정 2026-10-25: 가져온 대화를 이어가면
+현재 Chat 화면으로 열리고, 같은 원본을 여러 모델로 비교하려면 그 화면의
+"Review에서 여러 모델로 비교" 버튼으로 Review 대화(`productKey = "review"`)를 새
+갈래로 만듭니다. Auto가 제공되지 않는 계정은 지금처럼 Review로 이어집니다(§3.1).
+아래 2026-09-01 개정의 "이어가기는 Review" 서술은 이 결정으로 기본값만 바뀌었고,
+Review 갈래의 계약(다중 모델 seed, 비용 고지)은 그대로입니다.
+
+2026-09-01 개정 당시의 판단: 가져온 원본을 여러 모델에게 같은 자리에서 다시
+물어보는 것이 이 기능이 답하는 질문이고, 그것이 Review가 하는 일입니다. 그 이전의 v1은 이어가기를
 단일 모델 Chat으로 정의하면서 모델 선택을 "Chat surface의 문제"로 미뤘고, 그
 결과 Review와 같은 화면 계약을 쓰면서 제품만 `chat`으로 기록된 행이 만들어졌습니다.
 이 개정은 정책과 구현을 같은 변경에서 함께 고칩니다 — 제품 정체성은 §3.1, turn은
@@ -65,7 +72,7 @@ viewer의 즉흥 bridge, 전체 transcript의 첫 요청 첨부.
 |---|---|
 | Source snapshot | 사용자가 지목한 하나의 immutable `ExternalConversation`(import 정책 §4.2) |
 | Bridge | source snapshot과 새 Conversation을 잇는 provenance row |
-| Continuation | bridge를 가진 Tomverse Review Conversation(`productKey = "review"`) |
+| Continuation | bridge를 가진 Tomverse Chat 또는 Review Conversation(기본 `chat`, 비교 갈래 `review`) |
 | Context seed | 이 대화의 각 turn이 싣는, source에서 결정적으로 뽑은 제한된 발췌 |
 | Tombstone | source가 삭제된 뒤 continuation 화면이 그 사실을 말하는 상태 |
 
@@ -93,11 +100,22 @@ viewer의 즉흥 bridge, 전체 transcript의 첫 요청 첨부.
 - 계정 삭제는 `userId` FK Cascade로 함께 지워집니다.
 - bridge가 없는 일반 Conversation은 이 변경의 영향을 받지 않습니다.
 
-### 3.1 제품 정체성 — `productKey = "review"`, `kind = "chat"`
+### 3.1 제품 정체성 — 기본 `productKey = "chat"`, 비교 갈래 `"review"`, `kind = "chat"`
 
-**continuation은 Review 대화입니다.** 생성 경로는 공통 생성 서비스
-`createConversation()`에 서버 상수 `REVIEW_PRODUCT_KEY`를 **행과 같은
-statement로** 넘깁니다 — docs/policy/conversation-product-key.md §5.2.
+**제품은 endpoint가 정합니다**(2026-10-25 개정). 생성 경로는 공통 생성 서비스
+`createConversation()`에 endpoint가 정한 제품을 **행과 같은 statement로** 넘깁니다 —
+docs/policy/conversation-product-key.md §5.2. 요청 본문은 idempotency key만 싣습니다.
+
+| endpoint | productKey | selectionMode | 모델 |
+|---|---|---|---|
+| `POST /api/external-conversations/[id]/continuations` | Chat 진입이 제공되면(`chatSurfaceAvailable`) `chat`, 아니거나 읽지 못하면 `review` | chat이면 `auto`, review면 `manual` | chat은 계정 새 대화 조합의 첫 모델 하나, review는 조합 전체 |
+| `POST /api/conversations/[id]/continuation/review` | `review` | `manual` | 조합 전체 |
+
+두 번째 endpoint는 Chat 이어가기 화면의 "Review에서 여러 모델로 비교" 버튼입니다.
+그 대화 자신의 bridge(`userId` 범위)에서 snapshot을 찾아 **새 Review 갈래**를 만들며,
+Chat 대화의 `productKey`를 바꾸지 않습니다. bridge 없음·남의 대화·삭제된 원본은 한
+404이고, snapshot lock·flag·rate limit·idempotency 규칙은 첫 생성과 같습니다
+(`lib/externalContinuationCreateRoute.ts`).
 요청 본문이 제품을 실어 보내는 경로는 없고, 앞으로도 만들지 않습니다.
 
 - **bridge는 provenance이지 제품이 아닙니다.** bridge가 있다는 사실이 정하는 것은
@@ -110,7 +128,7 @@ statement로** 넘깁니다 — docs/policy/conversation-product-key.md §5.2.
   경계이고(`docs/policy/conversation-product-key.md` §1), Chat과 Review는 둘 다
   `chat` modality입니다. `PRODUCT_MODALITY`가 이 조합을 애플리케이션에서 먼저
   거부하고 `Conversation_product_modality_check`가 뒤를 받칩니다.
-- **`selectionMode`는 `manual`입니다.** Auto는 Chat 전용이므로
+- **Review 갈래의 `selectionMode`는 `manual`입니다.** Auto는 Chat 전용이므로
   (`AUTO_SELECTION_PRODUCT`) Review 제품에서는 제공되지 않습니다. 이것은 거절이
   아니라 부재이며 `product_not_chat`으로 관측됩니다
   (`docs/ui-contracts/auto-model-selection.md`). `Conversation_auto_only_chat_check`
@@ -264,7 +282,8 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
   아래 §8.2의 view model 규칙을 봅니다.
 - **Deep Research는 기존 제약을 유지합니다** — system block을 싣지 않으므로
   가져온 seed가 전달되지 않습니다. 이 개정이 그 제약을 풀지 않습니다.
-- **이미지 생성은 이 대화에서 실행되지 않습니다.** 별도 이미지 대화 draft로
+- **이미지 생성은 이 대화에서 실행되지 않습니다.** Chat 이어가기도 Smart Adaptive의
+  이미지 판정을 하지 않습니다(`/api/chat`의 `autoImageTurnEligible`이 bridge를 제외). 별도 이미지 대화 draft로
   넘기며, 그 draft에 원본 transcript를 전달하지 않습니다
   (`docs/policy/image-generation.md`).
 - **Web Search · 첨부 · Assistant profile · Memory는 기존 Review 계약을 그대로
@@ -401,14 +420,15 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 
 실행 전에 여섯 문장을 보여 줍니다: 새 대화가 만들어짐 · 원본은 읽기 전용 유지 ·
 외부 메시지는 Tomverse 답변이 아님 · 첨부와 잘린 메시지가 있을 수 있음 · 선택한
-일부만 AI context로 사용됨 · **여러 모델이 답하며 모델마다 크레딧이 든다**.
+일부만 AI context로 사용됨 · **답변마다 크레딧이 들고, Review에서 비교하면 선택한
+모델마다 든다**.
 
 여섯 번째는 이 개정이 추가한 것이고 다른 다섯과 성격이 다릅니다 — 앞의 다섯은
 무엇이 보존되는지에 대한 고지이고, 이것은 **비용이 몇 배가 되는지**에 대한
-고지입니다(§4.4). 계정의 새 대화 기본 조합이 모델 셋이면 첫 turn부터 세 번
-청구되므로, 그 사실을 만들기 전에 말합니다.
+고지입니다(§4.4). Chat 이어가기는 답변 하나에 한 번이지만, Review 갈래는 계정의 새 대화
+기본 조합이 모델 셋이면 첫 turn부터 세 번 청구되므로, 그 사실을 만들기 전에 말합니다.
 
-- 성공하면 새 Conversation workspace로 이동합니다.
+- 성공하면 새 Conversation의 `/continuations/[id]`로 이동합니다.
 - 실패해도 **중복 생성 없이 재시도**할 수 있습니다: idempotency key는 고지를 연
   시점에 한 번 만들어지고 그 시도 내내 재사용됩니다. 취소 후 다시 열면 새 key —
   그것이 두 번째 갈래이고 §3이 허용하는 것입니다.
@@ -418,9 +438,12 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 
 `/continuations/[conversationId]` (`lib/continuationRoutes.ts`).
 
-`/chat`과 `/review`는 Tomverse Review workspace를 렌더합니다
-(`lib/productSurfaceRoutes.ts`). **continuation도 같은 workspace를 렌더합니다**
-(2026-09-02 개정). route만 다르고 화면은 하나입니다 — 같은 사이드바, 같은
+**continuation은 저장된 제품의 workspace를 렌더합니다**(2026-10-25 개정). route는
+서버가 소유 행에서 읽은 `productKey`를 shell에 넘기고, `chat`이면 `/chat`의 Chat
+workspace(Smart Adaptive), 그 밖에는 `/review`의 Review workspace입니다. 이 개정 전에는
+route surface와 workspace가 한 값이어서 continuation이 어느 제품의 workspace도 아닌
+옛 비교 화면으로 열렸습니다. navigation은 계속 route surface(`continuation`)로
+판정합니다(`ChatPageClient`의 `routeSurface`). 2026-09-02 개정의 문장:  route만 다르고 화면은 하나입니다 — 같은 사이드바, 같은
 timeline, 같은 composer이며, continuation이 더하는 것은 **timeline 위의 읽기
 전용 prelude 하나**뿐입니다.
 
@@ -484,12 +507,15 @@ native assistant   일반 bubble
 그리고 그 아래는 **일반 Tomverse composer**입니다 — 첨부·web search·전송·중단·
 재시도·모델 picker·IME 처리가 전부 일반 대화의 것과 같은 컴포넌트입니다.
 
-**허용되는 시각적 차이는 넷뿐입니다.**
+**허용되는 시각적 차이는 다섯뿐입니다**(다섯 번째는 2026-10-25 운영자 결정).
 
 1. 사이드바 항목의 provider 아이콘(§8.4)
 2. 가져온 bubble의 점선 border — shape·padding·font·정렬은 일반 bubble과 같습니다
 3. divider 한 줄
 4. 위 provenance 한 줄과, 가져온 assistant의 provider·원본 model 라벨
+5. Chat continuation에서만 provenance 아래의 "Review에서 여러 모델로 비교" 버튼 하나
+   (`continuation-compare-in-review`). 원본을 읽을 수 있을 때만 보이고, 누르면 §3.1의
+   Review 갈래를 만들어 그 `/continuations/[id]`로 이동합니다
 
 그 밖의 shell·header·timeline·model rail·composer·간격·scroll 동작은 일반 Chat과
 같아야 합니다. **중첩 scrollbar를 만들지 않습니다** — 대화 영역의 세로 스크롤은
@@ -557,10 +583,11 @@ finalized snapshot의 저장된 원문**(`ExternalMessage`)을 찾습니다. 구
   `effectivePlanModelLimit()`로 플랜 상한을 판정합니다. 상한 초과는
   `modelLimitResponse()`이고, 이어가기 전용 상한이나 전용 오류 코드를 만들지
   않습니다.
-- **초기 `selectedModels`는 일반 새 Review 대화와 같은 규칙으로 정합니다** —
+- **초기 `selectedModels`는 같은 계정 조합에서 정합니다** —
   `resolveNewConversationModels()`(계정의 새 대화 기본 조합, `NULL`이면
-  `[defaultModel]`) → `clampRuntimeSelectedModels()` → 플랜 상한. 이어가기 전용
-  기본 조합을 두지 않습니다.
+  `[defaultModel]`) → `clampRuntimeSelectedModels()` → 플랜 상한. Review 갈래는 그 조합
+  전체, Chat 이어가기는 빈 Chat 초안과 같이 그 첫 모델 하나입니다
+  (`newWorkspaceDraftModels`, 2026-10-25). 이어가기 전용 기본 조합을 두지 않습니다.
 - **읽기 경로는 저장값을 다시 쓰지 않습니다.** 비활성 모델이 저장돼 있어도
   `effective` 상태만 보여 주고 저장값은 보존합니다
   (`docs/policy/default-model-luna-migration.md` §1.2).
@@ -731,8 +758,8 @@ USD를 싣지 않습니다.
 - source 삭제가 새 Tomverse `Message`를 함께 삭제함
 - 계정 삭제가 bridge를 남김
 - imported prompt가 system/developer 경계를 넘음
-- `productKey`가 `review`가 아니거나 누락됨(§3.1), 또는 bridge·`selectedModels`
-  개수·`selectionMode`·제목·route에서 `productKey`가 유도됨
+- `productKey`가 endpoint가 정한 값(§3.1)이 아니거나 누락됨, 또는 bridge·`selectedModels`
+  개수·`selectionMode`·제목·route·요청 본문에서 `productKey`가 유도됨
 - 가져온 원본이 모델 패널마다 복제되거나 `Message`로 복제됨(§5.1)
 - 같은 turn의 모델들이 서로 다른 발췌를 받거나, 한 요청이 만든 seed가 다른
   요청에 복사됨(§5.1)
@@ -753,13 +780,11 @@ USD를 싣지 않습니다.
 
 ## 14. 알려진 제약과 사람 판단이 필요한 항목
 
-1. **전용 surface의 수명.** continuation은 `productKey=review`이면서도 Review
-   workspace가 아니라 `/continuations/[id]`에서 열립니다(§8.2). Review workspace가
-   외부 transcript·provenance·tombstone·lock을 다룰 수 있게 되는 날 두 화면을
-   합칠지는 사람의 결정이며, 그때 옮길 자리는 `CONTINUATION_SURFACE_PATH`
-   한 곳입니다.
-2. **기본 조합의 크기.** 새 continuation은 계정의 새 대화 기본 조합으로
-   시작하므로(§8.3), 그 조합이 셋이면 첫 turn부터 세 번 청구됩니다. 이어가기만
+1. **전용 route의 수명.** continuation은 Chat·Review workspace를 렌더하면서도
+   `/continuations/[id]`에서 열립니다(§8.2). 두 workspace의 URL로 합칠지는 사람의
+   결정이며, 그때 옮길 자리는 `CONTINUATION_SURFACE_PATH` 한 곳입니다.
+2. **기본 조합의 크기.** 새 Review 갈래는 계정의 새 대화 기본 조합으로
+   시작하므로(§8.3), 그 조합이 셋이면 첫 turn부터 세 번 청구됩니다(Chat 이어가기는 한 모델). 이어가기만
    더 작은 기본값을 쓸지는 제품 결정이고, 지금은 **일반 Review와 같게** 두는 쪽을
    택했습니다 — 이어가기에만 다른 기본값을 두면 사용자가 저장한 조합이 화면마다
    다르게 해석됩니다.
@@ -773,8 +798,11 @@ USD를 싣지 않습니다.
 
 ## 15. 기존 continuation 교정 migration
 
-개정 이전에 만들어진 continuation은 `productKey = "chat"`으로 저장돼 있습니다.
-그 행들은 **틀린 제품을 기록한 것**이므로 교정합니다.
+2026-09-01 개정 이전에 만들어진 continuation은 `productKey = "chat"`으로 저장돼 있습니다.
+당시 계약에서 그 행들은 **틀린 제품을 기록한 것**이었으므로 이 migration이 교정했습니다.
+이 절은 그 이미 적용된 migration의 기록입니다. 2026-10-25 개정 뒤에는 bridge + `chat`이
+정상 Chat 이어가기이므로, **이 교정을 다시 실행하거나 같은 조건으로 새 migration을
+만들지 않습니다** — 새 Chat 이어가기를 Review로 바꾸게 됩니다.
 
 ### 15.1 대상 — bridge 존재 **그리고** `productKey = 'chat'`
 

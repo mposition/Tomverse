@@ -120,9 +120,9 @@ export function ContinueInTomverseCard({
                         <li>{t("continuation.disclosureNotOurAnswer")}</li>
                         <li>{t("continuation.disclosureAttachments")}</li>
                         <li>{t("continuation.disclosurePartialContext")}</li>
-                        {/* The sixth, and the only one about money: a
-                            continuation is a Review conversation, so every
-                            selected model answers and each one is charged
+                        {/* The sixth, and the only one about money: every
+                            answer is charged, and comparing in Review charges
+                            every selected model
                             (docs/policy/external-conversation-continuation.md
                             §8.1). The other five say what is preserved; this
                             one says what it costs, and it is said before the

@@ -27,6 +27,13 @@ An existing conversation continues to use its stored product. Deep-link routing
 and ownership checks remain server-owned. A route transition is never evidence
 that a stored conversation changed product.
 
+A Chat continuation of an imported conversation also offers "Compare models in
+Review" beside its provenance line (owner decision 2026-10-25). That is not the
+switcher: it is an explicit, labelled action that creates a new Review
+conversation from the same imported original and opens it, and the Chat
+conversation keeps its product (`docs/policy/external-conversation-continuation.md`
+§3.1).
+
 The navigation callback may stage one idle in-memory draft snapshot immediately
 before following a product link. It does not persist, publish or copy that draft
 into the other product. While a send, stream, mode write, recovered unknown
