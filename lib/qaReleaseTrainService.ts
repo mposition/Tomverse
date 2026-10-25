@@ -52,6 +52,8 @@ export type QaReleaseTrainPorts = {
     push(branch: string): Promise<void>;
   };
   app: {
+    /** Tells the app the departure hours this service runs on, for Admin's next-train line. */
+    schedule(hours: number[]): Promise<void>;
     /** The pull request numbers the operator picked for the next train in Admin. */
     selection(): Promise<number[]>;
     admit(slot: string): Promise<{ admitted: boolean; reason?: string }>;
@@ -95,6 +97,9 @@ export async function runQaReleaseTrainRound(
   if (start === "refuse") return { exitCode: 1, train: "refused_to_start" };
   const hours = parseQaReleaseTrainSlots(env.QA_RELEASE_TRAIN_SLOTS);
   if (hours === null) return { exitCode: 1, train: "refused_to_start" };
+  // Every round, departure or not, so Admin shows the hours really in use
+  // (owner, 2026-10-25). Display only: a failure never stops the train.
+  await ports.app.schedule(hours).catch(() => undefined);
   const departure = qaReleaseTrainDeparture(nowMs, hours);
   if (departure === null) return { exitCode: 0, train: "no_departure" };
   const branch = qaReleaseTrainBranch(departure.slot);

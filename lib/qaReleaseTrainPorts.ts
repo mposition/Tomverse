@@ -218,6 +218,9 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
     return { status: response.status, body: record(JSON.parse(response.text)) };
   };
   return {
+    async schedule(hours) {
+      await call({ phase: "schedule", hours });
+    },
     async selection() {
       const answer = await call({ phase: "selection" });
       const numbers = answer.status === 200 ? answer.body.numbers : null;

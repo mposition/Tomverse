@@ -154,3 +154,34 @@ export async function readQaReleaseTrainSelection(db: Prisma.TransactionClient =
     lastTrain: report ? qaReleaseTrainLastTrainFrom(report.metadata) : null,
   });
 }
+
+/**
+ * The departure hours the train service last said it runs on, and when (it
+ * says so every round, every 10 minutes). Display only, for Admin's next
+ * train: one AppSetting row it overwrites, never an audit event, never read
+ * by the train.
+ */
+export const QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY = "qa_release.train.schedule";
+
+export type QaReleaseTrainSchedule = { hours: number[]; reportedAt: string };
+
+export async function recordQaReleaseTrainSchedule(hours: readonly number[]): Promise<void> {
+  const value = JSON.stringify({ hours: [...hours].sort((a, b) => a - b), reportedAt: new Date().toISOString() });
+  await prisma.appSetting.upsert({
+    where: { key: QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY },
+    create: { key: QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY, value },
+    update: { value },
+  });
+}
+
+export async function readQaReleaseTrainSchedule(): Promise<QaReleaseTrainSchedule | null> {
+  const row = await prisma.appSetting.findUnique({ where: { key: QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY }, select: { value: true } });
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.value) as { hours?: unknown; reportedAt?: unknown };
+    const hours = Array.isArray(parsed.hours) ? parsed.hours.filter((hour): hour is number => Number.isInteger(hour) && hour >= 0 && hour <= 23) : [];
+    return hours.length > 0 && typeof parsed.reportedAt === "string" ? { hours, reportedAt: parsed.reportedAt } : null;
+  } catch {
+    return null;
+  }
+}
