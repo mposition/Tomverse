@@ -7,6 +7,16 @@ import { adminQaReleaseTrainMessages } from "@/lib/adminMessages/qaReleaseTrain"
 
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 
+/** What the release train tab shows while it reads: the tab has changed, and says so. */
+export function QaReleaseTrainLoading() {
+  const m = useAdminMessages(adminQaReleaseTrainMessages);
+  return (
+    <p role="status" className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-400" data-testid="qa-release-train-loading">
+      {m.tabLoading}
+    </p>
+  );
+}
+
 /** The release train tab's three figures: when the next train leaves, what rides it, and the train still open. */
 export function QaReleaseTrainSummary({
   nextDepartureAt,
