@@ -28,6 +28,9 @@ const cargo = [
 
 function ports(overrides = {}) {
   const calls = [];
+  // The schedule report is kept apart: every round sends it, and the call
+  // sequences below are about what a departure does.
+  const scheduled = [];
   const note = (name, value) => (calls.push([name, value]), value);
   const p = {
     github: {
@@ -52,12 +55,16 @@ function ports(overrides = {}) {
       },
     },
     app: {
+      schedule: async (hours) => {
+        scheduled.push(hours);
+        if (overrides.scheduleFails) throw new Error("app_500");
+      },
       selection: async () => note("selection", overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number)),
       admit: async (slot) => note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot]), overrides.admit ?? { admitted: true }),
       report: async (report) => void note("report", report),
     },
   };
-  return { p, calls, names: () => calls.map(([n]) => n) };
+  return { p, calls, scheduled, names: () => calls.map(([n]) => n) };
 }
 
 test("off, or a bad departure list, does nothing at all", async () => {
@@ -182,4 +189,19 @@ test("an assembly failure says why: the port's git code reaches the report and t
     throw new Error("fetch failed: https://x");
   };
   assert.equal((await runQaReleaseTrainRound(env(), other.p, NOW)).failure, "assemble_failed");
+});
+
+test("every running round tells the app its departure hours; off or misconfigured tells nothing; a failed report stops nothing", async () => {
+  const outside = ports();
+  await runQaReleaseTrainRound(env({ QA_RELEASE_TRAIN_SLOTS: "9,15" }), outside.p, Date.parse("2026-10-20T00:59:00Z"));
+  assert.deepEqual(outside.scheduled, [[9, 15]]);
+  const off = ports();
+  await runQaReleaseTrainRound(env({ QA_RELEASE_TRAIN_ENABLED: "false" }), off.p, NOW);
+  await runQaReleaseTrainRound(env({ QA_RELEASE_TRAIN_SLOTS: "8,8" }), off.p, NOW);
+  assert.deepEqual(off.scheduled, []);
+  const failing = ports({ scheduleFails: true });
+  const outcome = await runQaReleaseTrainRound(env(), failing.p, NOW);
+  assert.equal(failing.scheduled.length, 1);
+  assert.notEqual(outcome.train, "failed");
+  assert.ok(failing.names().includes("admitSlot"), "the departure still runs");
 });

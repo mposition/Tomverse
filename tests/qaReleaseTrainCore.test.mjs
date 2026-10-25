@@ -8,6 +8,7 @@ import {
   qaReleaseTrainDeparture,
   qaReleaseTrainPullRequest,
   qaReleaseTrainShouldDepart,
+  qaReleaseTrainNextDepartureMs,
 } from "../lib/qaReleaseTrainCore.ts";
 
 const A = "a".repeat(40);
@@ -82,4 +83,15 @@ test("the main pull request names what rode, what was left out and why, and the 
   assert.match(body, new RegExp(`RC SHA: +${B}`));
   assert.match(body, new RegExp(`Rollback SHA: +${C}`));
   for (const field of ["Verified on:", "Verified by / how:", "Back-merge run:"]) assert.ok(body.includes(field), field);
+});
+
+test("the next departure is the first hour after now in AEST, today's or tomorrow's", () => {
+  const at = (iso) => new Date(qaReleaseTrainNextDepartureMs(Date.parse(iso), [8, 11, 14, 17, 20])).toISOString();
+  // 09:30 AEST -> 11:00 AEST (01:00Z).
+  assert.equal(at("2026-10-24T23:30:00Z"), "2026-10-25T01:00:00.000Z");
+  // Exactly 11:00 AEST has departed: next is 14:00 AEST.
+  assert.equal(at("2026-10-25T01:00:00Z"), "2026-10-25T04:00:00.000Z");
+  // 21:00 AEST -> tomorrow 08:00 AEST (22:00Z the same UTC day).
+  assert.equal(at("2026-10-25T11:00:00Z"), "2026-10-25T22:00:00.000Z");
+  assert.equal(qaReleaseTrainNextDepartureMs(0, []), null);
 });
