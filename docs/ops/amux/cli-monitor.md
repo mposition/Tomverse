@@ -54,7 +54,8 @@ It prints the temporary screenshot/report directory on success.
 
 Ubuntu execution host, bash, a checkout containing this patch with Node 22 and
 `tsx` installed. This reads the real `codex-impl` source and prints only
-counts/kinds, never transcript content. No product credentials or paid calls:
+counts/kinds, never transcript content. First provision the public AMUX trust
+certificate as described below. No product credentials or paid calls:
 
 ```bash
 node --import tsx scripts/amux-cli-monitor.mjs --check-source
@@ -67,11 +68,21 @@ activation. For the single-worker pilot, configure the app and collector with
 characters) in `TOMVERSE_AMUX_CLI_MONITOR_SECRET`. On the collector only, set
 `TOMVERSE_INTERNAL_URL` to the app's HTTPS origin. Never paste secrets into chat.
 
+On the collector only, set `TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64` to the
+base64-encoded public AMUX certificate obtained through trusted host
+administration. Verify its SHA-256 fingerprint before provisioning it. This
+trust anchor is used only by the fixed loopback HTTPS reads. Certificate chain
+and hostname verification remain enabled; a missing or untrusted certificate
+stops capture. No global TLS trust setting is changed, and ingestion to Tomverse
+continues to use normal public CA verification. Never supply the AMUX private key.
+Certificate rotation requires the operator to verify and update this trust
+anchor, then restart the collector. `--check-source` also requires this setting.
+
 The provided systemd unit expects an operator-installed checkout at
 `/opt/tomverse-cli-monitor` and a root-owned mode-600 environment file at
 `/etc/tomverse-cli-monitor.env`. It runs under a dynamic account, accepts no
-stdin and does not read worker homes. Only the existing loopback AMUX
-self-signed certificate is accepted; ingestion to Tomverse verifies TLS and
+stdin and does not read worker homes. The explicitly trusted loopback AMUX
+certificate is verified; ingestion to Tomverse verifies TLS and
 rejects redirects. Stop the collector or turn the app switch off to disable
 the view. Disabling and credential rotation make the old buffer unreadable.
 
@@ -89,7 +100,8 @@ Bundling avoids installing a checkout and npm dependencies on this account;
 the system unit above uses an operator-managed checkout with `tsx` instead.
 Keep that directory and `~/.config/tomverse-cli-monitor/` mode 700, the bundle
 and `collector.env` mode 600, and copy the unit to `~/.config/systemd/user/`.
-The environment file contains only the three collector settings above.
+The environment file contains only the three collector settings above and the
+public AMUX trust certificate setting.
 
 The user unit runs Bubblewrap directly: only `/usr`, DNS/hosts/TLS files and
 the collector directory are mounted read-only. Home directories and the host's
@@ -113,6 +125,7 @@ credentials or external writes (this reads only the existing worker output):
 ```bash
 systemd-run --user --wait --pipe -p NoNewPrivileges=yes \
   -p 'RestrictAddressFamilies=AF_INET AF_INET6' \
+  -p EnvironmentFile="$HOME/.config/tomverse-cli-monitor/collector.env" \
   /usr/bin/bwrap --die-with-parent --new-session \
   --unshare-pid --unshare-ipc --unshare-uts \
   --ro-bind /usr /usr --symlink usr/bin /bin \

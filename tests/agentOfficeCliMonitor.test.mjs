@@ -9,7 +9,7 @@ import { createAgentOfficeCliBuffer, agentOfficeCliBuffer } from "../lib/agentOf
 import { agentOfficeCliMonitorCredential, recordAgentOfficeCliMonitor } from "../lib/agentOfficeCliMonitor.ts";
 import { readAgentOfficeCliMonitor } from "../lib/agentOfficeCliMonitorRead.ts";
 import { collectAgentOfficeCliSnapshot, projectAgentOfficeCliSource,
-  sendAgentOfficeCliSnapshot } from "../lib/agentOfficeCliMonitorCollector.mjs";
+  readAgentOfficeCliSource, sendAgentOfficeCliSnapshot } from "../lib/agentOfficeCliMonitorCollector.mjs";
 
 const source = (events = []) => ({ name: AGENT_OFFICE_CLI_WORKER, provider: "codex", events });
 const pane = (output = "$ npm test\n24 passed") => ({ name: AGENT_OFFICE_CLI_WORKER, output });
@@ -18,6 +18,15 @@ const snapshot = () => projectAgentOfficeCliSource(source([
   { kind: "assistant", text: "I will inspect its existing tests." },
   { kind: "tool", tool: "exec_command", detail: "npm test", output: "24 passed" },
 ]), pane());
+
+test("source reads fail closed without an explicit AMUX trust certificate", () => {
+  for (const kind of ["transcript", "pane"])
+    for (const value of [undefined, "", "x".repeat(65_537)])
+      assert.throws(() => readAgentOfficeCliSource(kind, { TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64: value }),
+        /source_ca_unconfigured/);
+  for (const kind of ["send", "constructor", "toString", "__proto__"])
+    assert.throws(() => readAgentOfficeCliSource(kind, {}), /invalid source/);
+});
 
 test("the collector reuses two GET projections and omits reasoning and unknown fields", async () => {
   const reads = [];
