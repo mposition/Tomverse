@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createChatLocationSession } from "../packages/chat-core/src/location.ts";
 import { sendNativeChat, NativeChatError } from "../apps/mobile/src/chatClient.ts";
+import { authenticatedFetch } from "../apps/mobile/src/authenticatedFetch.ts";
 import { isNativeChatPayload, mobileChatEnabled, mobileChatBearerRoutes } from "../lib/mobileChatContract.ts";
 
 const fix = (latitude = 1) => ({ latitude, longitude: 2, accuracy: 10, timestamp: Date.now() });
@@ -11,7 +12,7 @@ const fixture = (read = async () => fix()) => {
   const location = createChatLocationSession(read);
   const input = { location, identityKey: "account:a", messages: [{ role: "user", content: "Near me?" }],
     webSearch: false, signal: new AbortController().signal, onText: (value) => text.push(value),
-    transport: async (path, init) => { requests.push({ path, init, body: JSON.parse(init.body) }); return new Response("Nearby places."); } };
+    transport: async (path, request) => { const init = typeof request === "function" ? request() : request; requests.push({ path, init, body: JSON.parse(init.body) }); return new Response("Nearby places."); } };
   return { input, requests, text };
 };
 
@@ -82,5 +83,36 @@ test("the mobile gateway is exact-path and default off, and accepts only text co
     { messages: [{ role: "user", content: [{ type: "image" }] }] },
     { messages: [{ role: "user", content: "Hi", userId: "other" }] }]) {
     assert.equal(isNativeChatPayload({ ...body, ...extra }), false);
+  }
+});
+
+
+test("opt-out or account change while the native token is pending is fenced at actual dispatch, including 401 retries", async () => {
+  for (const retry of [false, true]) {
+    for (const change of [(s) => s.disable(), (s) => s.setIdentity("account:b")]) {
+      const f = fixture();
+      await f.input.location.enable("account:a");
+      let resolveToken;
+      const pending = new Promise((resolve) => { resolveToken = resolve; });
+      let tokenReads = 0;
+      const bodies = [];
+      const sending = sendNativeChat({ ...f.input, transport: (path, init) => authenticatedFetch(path, init, {
+        apiOrigin: "https://api.example.test",
+        bridge: { getAccessToken: () => {
+          tokenReads++;
+          return retry && tokenReads === 1 ? Promise.resolve({ accessToken: "first", expiresAt: Date.now() + 60_000 }) : pending;
+        } },
+        fetchImpl: async (_url, init) => {
+          bodies.push(JSON.parse(init.body));
+          return retry && bodies.length === 1 ? new Response(null, { status: 401 }) : new Response("Answer");
+        },
+      }) });
+      while (tokenReads < (retry ? 2 : 1)) await new Promise((resolve) => setImmediate(resolve));
+      change(f.input.location);
+      resolveToken({ accessToken: "new", expiresAt: Date.now() + 60_000 });
+      await sending;
+      assert.equal(bodies.at(-1).currentLocation, undefined);
+      assert.equal(bodies.length, retry ? 2 : 1);
+    }
   }
 });

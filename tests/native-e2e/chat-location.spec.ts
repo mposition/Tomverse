@@ -4,7 +4,7 @@ import { buildStreamKeepaliveChunk } from "../../lib/chatStreamKeepalive";
 const installDevice = async (page: Page, signedIn = true) => {
   const requests: Array<{ body: Record<string, unknown>; authorization: string | undefined }> = [];
   await page.addInitScript(({ signedIn }) => {
-    const state = { signedIn, latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, hold: false, release: null as (() => void) | null };
+    const state = { signedIn, latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, holdAuth: false, releaseAuth: null as (() => void) | null, hold: false, release: null as (() => void) | null };
     const device = window as unknown as { androidBridge: object; __nativeFixture: typeof state; Capacitor: object };
     device.__nativeFixture = state; device.androidBridge = {};
     const methods = { MobileAuth: ["hasSession", "getAccessToken", "beginSignIn", "completeSignIn", "signOut"],
@@ -14,7 +14,7 @@ const installDevice = async (page: Page, signedIn = true) => {
       nativePromise: async (plugin: string, method: string, options: { url?: string; grant?: string; permissions?: string[] }) => {
         if (plugin === "MobileAuth") {
           if (method === "hasSession") return { signedIn: state.signedIn };
-          if (method === "getAccessToken") { if (!state.signedIn) throw new Error("no session"); return { accessToken: "native-fixture-access", expiresAt: Date.now() + 600_000 }; }
+          if (method === "getAccessToken") { if (state.holdAuth) await new Promise<void>((resolve) => { state.releaseAuth = resolve; }); if (!state.signedIn) throw new Error("no session"); return { accessToken: "native-fixture-access", expiresAt: Date.now() + 600_000 }; }
           if (method === "beginSignIn") { state.proof = true; return { url: "https://api.native-chat.test/mobile/connect?codeChallenge=public-fixture-challenge" }; }
           if (method === "completeSignIn") { if (!state.proof || options.grant !== "one-time-fixture") throw new Error("invalid code"); state.proof = false; state.signedIn = true; return; }
           if (method === "signOut") { state.signedIn = false; return; }
@@ -117,4 +117,20 @@ test("the composer fits a narrow viewport and remains reachable with enlarged te
   await page.getByTestId("native-chat-send").scrollIntoViewIfNeeded();
   await expect(page.getByTestId("native-chat-send")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+
+test("opting out while native authentication is pending removes location before network dispatch", async ({ page }) => {
+  const requests = await installDevice(page);
+  await page.getByTestId("native-location-toggle").check();
+  await expect(page.getByTestId("native-location-status")).toContainText("refreshed");
+  await device(page, { holdAuth: true });
+  await page.getByTestId("native-chat-input").fill("Nearby?");
+  await page.getByTestId("native-chat-send").click();
+  await page.waitForFunction(() => typeof (window as unknown as { __nativeFixture: { releaseAuth: unknown } }).__nativeFixture.releaseAuth === "function");
+  await page.getByTestId("native-location-toggle").uncheck();
+  await page.evaluate(() => (window as unknown as { __nativeFixture: { releaseAuth: () => void } }).__nativeFixture.releaseAuth());
+  await expect(page.getByTestId("native-chat-send")).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body.currentLocation).toBeUndefined();
 });

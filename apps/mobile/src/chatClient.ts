@@ -1,8 +1,10 @@
 import { consumeChatStreamCore, type createChatLocationSession } from "@tomverse/chat-core";
 
+import type { MobileRequestInit } from "./authenticatedFetch";
+
 export type NativeChatMessage = { role: "user" | "assistant"; content: string };
 export type NativeChatLocationSession = ReturnType<typeof createChatLocationSession>;
-export type NativeChatTransport = (path: string, init?: RequestInit) => Promise<Response>;
+export type NativeChatTransport = (path: string, init?: MobileRequestInit) => Promise<Response>;
 
 export class NativeChatError extends Error {
   constructor(public readonly status: number, public readonly code: string) {
@@ -21,13 +23,16 @@ export const sendNativeChat = async (input: {
 }) => {
   const fix = await input.location.readForTurn(input.identityKey);
   input.signal.throwIfAborted();
-  const response = await input.transport("/api/mobile/chat", {
-    method: "POST", headers: { "Content-Type": "application/json" }, signal: input.signal,
+  const response = await input.transport("/api/mobile/chat", () => {
+    input.signal.throwIfAborted();
+    return {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: input.signal,
     body: JSON.stringify({
       messages: input.messages,
       webSearchMode: input.webSearch ? "always" : "off",
       ...(fix && input.location.canShare(fix, input.identityKey) ? { currentLocation: fix } : {}),
     }),
+    };
   });
   if (!response.ok) {
     const data = await response.json().catch(() => null) as { code?: unknown } | null;

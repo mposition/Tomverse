@@ -27,7 +27,8 @@ There is no remote `server.url` or browser session fallback.
   web use the same `@tomverse/chat-core` stream consumer.
 - Current location defaults off. Enabling requests approximate foreground
   access. Each send acquires a fresh fix, coarsens it and sends `currentLocation`
-  only while consent and account identity still match. Denial/timeout continues
+  only while consent and account identity still match, rechecking after native
+  token acquisition and before any 401 retry. Denial/timeout continues
   without location. There is no background watch, saved fix or JS credential
   storage. Web search is separately opt-in for live weather/place facts.
 

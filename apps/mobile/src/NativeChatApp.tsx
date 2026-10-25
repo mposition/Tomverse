@@ -30,6 +30,7 @@ export const NativeChatApp = () => {
     nativeChatLocation.disable();
     setMessages([]);
     setDraft("");
+    setWebSearch(false);
     setBusy(false);
     setError("");
   };
