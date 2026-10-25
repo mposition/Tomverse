@@ -80,8 +80,11 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
  * verifier that recomputes it. This table is read first; a sitemap entry would
  * answer only for a document not listed here.
  *
- * Both documents today: the S10 amendment as approved on 2026-10-03, effective
- * 2026-11-16. `/privacy` is here too, not in the sitemap table, while that
+ * Both documents are effective 2026-11-16. The current-location disclosure
+ * changed /privacy after the S10 approval: its observed digest is recorded
+ * here, while the approved digest above remains the owner's original record.
+ * Release notes therefore remain closed pending a separate approval of the
+ * changed page. `/privacy` is here, not in the sitemap table, while that
  * date is in the future: a sitemap lastmod may not be a day that has not come
  * (lib/sitemapContentDates.ts).
  */
@@ -92,7 +95,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // future (lib/sitemapContentDates.ts).
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7",
+    contentSha256: "c5c56e1943d4b4b9fd630db5c4843f35f7f4f8eeb26c35584fe38fb43cd99cce",
   },
   "/terms": {
     date: "2026-11-16",

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import {
@@ -15,8 +16,8 @@ import {
   stickyStateFor,
   storedSelectionMode,
 } from "../lib/conversationSelectionMode.ts";
-import { mintChatRefinerInitialAutoRouterAuthority } from
-  "../lib/chatRefinerInitialAutoRouterAuthority.ts";
+const { mintChatRefinerInitialAutoRouterAuthority } =
+  createRequire(import.meta.url)("../lib/chatRefinerInitialAutoRouterAuthority.ts");
 
 // The seam decides which model answers. Most of what matters is what it does
 // when it declines, because every decline has to land on the same behaviour --

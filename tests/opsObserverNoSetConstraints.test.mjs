@@ -4,9 +4,10 @@
 // refuse that to the code that holds the connection. So no source may issue
 // it.
 //
-// The sweep reads every code, SQL and shell file outside tests/ and
-// node_modules -- root files such as proxy.ts, tools/, prisma/ and vendor/
-// included -- as raw text. It does not try to tell comments from code: every
+// The sweep reads tracked and new non-ignored code, SQL and shell files outside
+// tests/ and node_modules, including root files, tools/, prisma/ and vendor/.
+// Local ignored backups are not deployable source. It reads raw text rather
+// than trying to tell comments from code: every
 // language draws that line differently, and a stripper that guessed wrong
 // would hide the statement it exists to find. Instead a file may mention the
 // phrase only where REVIEWED_MENTIONS names it, with the exact count; each of
@@ -14,10 +15,11 @@
 // reviewer adds it here.
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { repositoryFiles } from "./support/repositoryFiles.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const SOURCE_FILE = /\.(ts|tsx|mts|cts|mjs|js|cjs|sql|rs|py|sh|bash|ps1|psm1)$/i;
@@ -45,21 +47,16 @@ const REVIEWED_MENTIONS = {
   "prisma/migrations/20261004030000_ops_observer_transition/migration.sql": 1,
 };
 
-function* walk(dir) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (SKIPPED.has(entry.name)) continue;
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) yield* walk(path);
-    else if (SOURCE_FILE.test(entry.name)) yield path;
-  }
-}
+const sourceFiles = () => repositoryFiles(root)
+  .filter((path) => SOURCE_FILE.test(path) && !path.split("/").some((part) => SKIPPED.has(part)))
+  .map((path) => join(root, path));
 
 const count = (text) => (text.match(STATEMENT) ?? []).length;
 
 test("no source outside tests mentions SET CONSTRAINTS beyond the reviewed comments", () => {
   const found = {};
   const scanned = new Set();
-  for (const file of walk(root)) {
+  for (const file of sourceFiles()) {
     const rel = file.slice(root.length).split(sep).join("/");
     scanned.add(rel);
     const n = count(readFileSync(file, "utf8"));

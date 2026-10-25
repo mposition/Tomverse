@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 import {
   AUTO_COHORT_VERSION,
@@ -14,10 +15,12 @@ import {
   autoRolloutReadiness,
   autoRolloutReadinessProblems,
 } from "../lib/autoRolloutReadiness.ts";
-import {
+// Match the CJS module instance used by tsx for the production TypeScript graph.
+// An ESM bridge has its own WeakSet and cannot mint proof for that instance.
+const {
   CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS,
   mintChatRefinerInitialAutoRouterAuthority,
-} from "../lib/chatRefinerInitialAutoRouterAuthority.ts";
+} = createRequire(import.meta.url)("../lib/chatRefinerInitialAutoRouterAuthority.ts");
 
 // The cohort boundary is the only thing standing between "Auto works in
 // shadow" and "Auto answers a real person". These tests are about the ways it

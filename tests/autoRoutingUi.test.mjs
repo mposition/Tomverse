@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 import { MARKETING_SUPERLATIVE_WORDS } from "../lib/marketingBannedClaims.ts";
 
@@ -18,8 +19,8 @@ import {
 } from "../lib/autoRoutingCopy.ts";
 import { SELECTION_REASONS } from "../lib/routerSelection.ts";
 import { SELECTION_MODES } from "../lib/conversationSelectionMode.ts";
-import { mintChatRefinerInitialAutoRouterAuthority } from
-  "../lib/chatRefinerInitialAutoRouterAuthority.ts";
+const { mintChatRefinerInitialAutoRouterAuthority } =
+  createRequire(import.meta.url)("../lib/chatRefinerInitialAutoRouterAuthority.ts");
 
 // The UI is the last step of the rollout and the first thing a user reads as a
 // promise. These tests are mostly about not making one the product cannot keep.

@@ -8,8 +8,8 @@
 // value can leave only by a migration that says so here.
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
+import { readMigrationSqlFiles } from "./support/repositoryFiles.mjs";
 
 const CONSTRAINT = '"EmailDelivery_skip_reason_check"';
 
@@ -17,11 +17,8 @@ const CONSTRAINT = '"EmailDelivery_skip_reason_check"';
 const DELIBERATELY_REMOVED = new Map();
 
 const definitions = () =>
-  readdirSync("prisma/migrations")
-    .filter((dir) => /^\d{14}_/.test(dir))
-    .sort()
-    .flatMap((dir) => {
-      const sql = readFileSync(`prisma/migrations/${dir}/migration.sql`, "utf8");
+  readMigrationSqlFiles()
+    .flatMap(({ name: dir, sql }) => {
       const start = sql.indexOf(`ADD CONSTRAINT ${CONSTRAINT}`);
       if (start < 0) return [];
       const end = sql.indexOf("));", start);

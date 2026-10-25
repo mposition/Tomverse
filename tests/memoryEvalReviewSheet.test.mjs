@@ -163,7 +163,10 @@ test("the committed record matches what the generator produces", () => {
         // first case heading, which is the last line the generator owns
         // outright. Slicing on a section title would break the day a title
         // changes for one category.
-        const upTo = (value) => value.slice(0, value.indexOf("\n### "));
+        const upTo = (value) => {
+            const normalized = value.replaceAll("\r\n", "\n");
+            return normalized.slice(0, normalized.indexOf("\n### "));
+        };
         assert.equal(
             upTo(onDisk),
             upTo(sheet(batch.id)),
