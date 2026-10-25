@@ -131,20 +131,19 @@ test("location changes leave the cached instructions and history byte-identical,
 });
 
 
-test("the reusable cache breakpoint excludes the ephemeral fix across successive turns", () => {
+test("location caching stops before the whole current turn, including on a first turn", () => {
   const first = [{ role: "user", content: "Near me?" }];
-  assert.equal(appendChatLocationContext(first, fix(), true), true);
-  const original = first[0].content[0];
-  assert.deepEqual(original.providerOptions.anthropic.cacheControl, { type: "ephemeral", ttl: "5m" });
-  assert.equal(first[0].content[1].providerOptions, undefined);
-  const second = [{ role: "user", content: "Near me?" }, { role: "assistant", content: "Nearby places." }, { role: "user", content: "And now?" }];
+  assert.deepEqual(appendChatLocationContext(first, fix(), true), { historyBreakpoint: null });
+  assert.ok(!JSON.stringify(first).includes("cacheControl"));
+  const history = [{ role: "user", content: "Near me?" }, { role: "assistant", content: "Nearby places." }];
+  const second = [...history, { role: "user", content: "And now?" }];
   appendChatLocationContext(second, fix({ latitude: 1 }), true);
-  assert.equal(second[0].content, original.text);
-  assert.ok(!JSON.stringify(second).includes("-27.47"));
-  assert.equal(second[2].content[0].text, "And now?");
-  assert.equal(second[2].content[1].providerOptions, undefined);
+  assert.deepEqual(second[1].providerOptions.anthropic.cacheControl, { type: "ephemeral", ttl: "5m" });
+  assert.equal(second[2].providerOptions, undefined);
+  assert.ok(!JSON.stringify(second[2]).includes("cacheControl"));
+  assert.ok(!JSON.stringify(history).includes("cacheControl"));
+  assert.deepEqual(second.slice(0, 1), history.slice(0, 1));
 });
-
 
 test("stopping a turn cancels its location wait immediately without cancelling another panel's acquisition", async () => {
   let resolve;

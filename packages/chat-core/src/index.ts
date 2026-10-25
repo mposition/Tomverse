@@ -27,6 +27,7 @@ export {
 export {
   LENGTH_RAW_FINISH_REASONS,
   isChatCompletionStatus,
+  parseChatCompletionOutcome,
   isLengthRawFinishReason,
   resolveChatCompletionOutcome,
   type ChatCompletionOutcome,

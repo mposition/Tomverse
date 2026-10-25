@@ -37,7 +37,7 @@ public class MobileAuthPlugin extends Plugin {
     private String verifier;
     private long verifierExpiresAt;
 
-    private boolean enabled() { return getConfig().getBoolean("enabled", false); }
+    boolean enabled() { return getConfig().getBoolean("enabled", false); }
 
     private String origin() throws Exception {
         URI uri = new URI(getConfig().getString("apiOrigin", "https://tomverse.app"));
@@ -65,7 +65,7 @@ public class MobileAuthPlugin extends Plugin {
         return (SecretKey) store.getKey(KEY_ALIAS, null);
     }
 
-    private void save(String credential) throws Exception {
+    void save(String credential) throws Exception {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, key());
         byte[] data = new JSONObject().put("origin", origin()).put("credential", credential)
@@ -75,7 +75,7 @@ public class MobileAuthPlugin extends Plugin {
         if (!preferences().edit().putString("sealed", value).commit()) throw new Exception("Store failed");
     }
 
-    private String stored() throws Exception {
+    String stored() throws Exception {
         String value = preferences().getString("sealed", null);
         if (value == null) return null;
         String[] parts = value.split("\\.", 2);
@@ -87,8 +87,9 @@ public class MobileAuthPlugin extends Plugin {
         return data.getString("credential");
     }
 
-    private boolean clear() {
+    boolean clear() {
         accessToken = null; expiresAt = 0; verifier = null; verifierExpiresAt = 0;
+        // Either deleting the record or destroying its key makes it unusable.
         boolean removed = preferences().edit().remove("sealed").commit();
         try {
             KeyStore store = KeyStore.getInstance("AndroidKeyStore"); store.load(null);
@@ -97,7 +98,7 @@ public class MobileAuthPlugin extends Plugin {
         } catch (Exception ignored) { return removed; }
     }
 
-    private JSONObject post(String path, JSONObject body) throws Exception {
+    JSONObject post(String path, JSONObject body) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(origin() + path).openConnection();
         try {
             connection.setRequestMethod("POST");
@@ -141,10 +142,18 @@ public class MobileAuthPlugin extends Plugin {
                 if (!enabled()) throw new Exception("Disabled");
                 work.run();
             } catch (Exception ignored) {
-                // An exchange/rotation may already have succeeded. Never replay it.
-                clear(); call.reject("Mobile session unavailable. Connect your account again.", "MOBILE_AUTH_UNAVAILABLE");
+                // Validation and read failures must preserve the existing session.
+                call.reject("Mobile session unavailable. Connect your account again.", "MOBILE_AUTH_UNAVAILABLE");
             }
         });
+    }
+
+    private void mutateSession(String path, JSONObject body) throws Exception {
+        try { accept(post(path, body)); }
+        catch (Exception failure) {
+            // A single-use mutation may have completed. Never retain/replay it.
+            clear(); throw failure;
+        }
     }
 
     @PluginMethod public void beginSignIn(PluginCall call) {
@@ -161,12 +170,13 @@ public class MobileAuthPlugin extends Plugin {
 
     @PluginMethod public void completeSignIn(PluginCall call) {
         perform(call, () -> {
+            if (stored() != null) throw new Exception("Already signed in");
             String grant = call.getString("grant");
             if (grant == null || grant.isEmpty() || grant.length() > 512 || verifier == null ||
                 verifierExpiresAt <= System.currentTimeMillis()) throw new Exception("Invalid pairing");
             String proof = verifier; verifier = null; verifierExpiresAt = 0;
-            accept(post("/api/auth/mobile/exchange", new JSONObject().put("grant", grant)
-                .put("codeVerifier", proof).put("platform", "android").put("deviceLabel", "Android")));
+            mutateSession("/api/auth/mobile/exchange", new JSONObject().put("grant", grant)
+                .put("codeVerifier", proof).put("platform", "android").put("deviceLabel", "Android"));
             call.resolve();
         });
     }
@@ -178,7 +188,7 @@ public class MobileAuthPlugin extends Plugin {
                 if (credential == null) throw new Exception("No session");
                 // Consume local state before the remote single-use write, including crash recovery.
                 if (!clear()) throw new Exception("Could not consume local session");
-                accept(post("/api/auth/mobile/refresh", new JSONObject().put("refreshToken", credential)));
+                mutateSession("/api/auth/mobile/refresh", new JSONObject().put("refreshToken", credential));
             }
             call.resolve(new JSObject().put("accessToken", accessToken).put("expiresAt", expiresAt));
         });
@@ -187,7 +197,7 @@ public class MobileAuthPlugin extends Plugin {
     @PluginMethod public void hasSession(PluginCall call) {
         queue.execute(() -> {
             boolean signedIn = false;
-            try { signedIn = enabled() && stored() != null; } catch (Exception ignored) { clear(); }
+            try { signedIn = enabled() && stored() != null; } catch (Exception ignored) { /* A locked store is not a sign-out request. */ }
             call.resolve(new JSObject().put("signedIn", signedIn));
         });
     }

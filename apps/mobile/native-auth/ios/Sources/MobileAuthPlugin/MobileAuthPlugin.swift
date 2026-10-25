@@ -131,10 +131,17 @@ public class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 guard self.enabled && self.installationReady else { throw SessionFailure.unavailable }
                 try work()
             } catch {
-                // A single-use mutation may have succeeded remotely. Never replay it.
-                try? self.clear()
+                // Validation and read failures preserve the existing session.
                 call.reject("Mobile session unavailable. Connect your account again.", "MOBILE_AUTH_UNAVAILABLE")
             }
+        }
+    }
+
+    private func mutateSession(_ path: String, _ body: [String: Any]) throws {
+        do { try accept(post(path, body)) }
+        catch {
+            // A single-use mutation may have completed. Never retain/replay it.
+            try? clear(); throw error
         }
     }
 
@@ -153,10 +160,11 @@ public class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc public func completeSignIn(_ call: CAPPluginCall) {
         perform(call) {
+            guard try self.stored() == nil else { throw SessionFailure.unavailable }
             guard let grant = call.getString("grant"), !grant.isEmpty, grant.count <= 512,
                   let proof = self.verifier, self.verifierExpiresAt > Date().timeIntervalSince1970 else { throw SessionFailure.unavailable }
             self.verifier = nil; self.verifierExpiresAt = 0
-            try self.accept(self.post("/api/auth/mobile/exchange", ["grant": grant, "codeVerifier": proof, "platform": "ios", "deviceLabel": "iPhone or iPad"]))
+            try self.mutateSession("/api/auth/mobile/exchange", ["grant": grant, "codeVerifier": proof, "platform": "ios", "deviceLabel": "iPhone or iPad"])
             call.resolve()
         }
     }
@@ -166,7 +174,7 @@ public class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             if self.accessToken == nil || self.expiresAt <= Date().timeIntervalSince1970 * 1_000 + 5_000 {
                 guard let credential = try self.stored() else { throw SessionFailure.unavailable }
                 try self.clear()
-                try self.accept(self.post("/api/auth/mobile/refresh", ["refreshToken": credential]))
+                try self.mutateSession("/api/auth/mobile/refresh", ["refreshToken": credential])
             }
             guard let access = self.accessToken else { throw SessionFailure.unavailable }
             call.resolve(["accessToken": access, "expiresAt": self.expiresAt])
@@ -181,7 +189,7 @@ public class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 let signedIn = try self.stored() != nil
                 call.resolve(["signedIn": signedIn])
-            } catch { try? self.clear(); call.resolve(["signedIn": false]) }
+            } catch { call.resolve(["signedIn": false]) }
         }
     }
 

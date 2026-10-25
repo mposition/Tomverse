@@ -156,10 +156,13 @@ write로 잡힙니다(같은 문서).
   판단해야 하고, 그 추정이 맞아야만 안전한 판단이 됩니다.
 
 현재 위치를 공유하는 `chat_turn`은 예외적으로 같은 5분 TTL의 explicit
-breakpoint를 마지막 원본 user block에 둡니다. 다음 턴에 재전송하지 않는 위치
-block은 그 뒤에 붙이고 top-level automatic marker는 생략합니다. 다음 요청은
-이전 원본 대화 prefix를 재사용할 수 있습니다. fallback·native search에는 이
-marker를 전달하지 않습니다. 허용 경로와 최악 입력 예약은 그대로 유지합니다.
+breakpoint를 **현재 user 턴 이전의 마지막 캐시 가능한 대화 메시지**에 둡니다.
+위치가 붙는 현재 턴 전체는 캐시 범위에서 빼고 top-level automatic marker도
+생략합니다. 재사용할 대화 기록이 없는 첫 턴에는 marker가 없습니다. 이렇게
+다음 요청에서도 모양이 바뀌지 않는 기록만 prefix에 포함합니다. fallback과
+native search에는 이 marker를 전달하지 않습니다. 허용 경로와 최악 입력
+예약은 그대로 유지합니다. `tests/chatLocationProviderWire.test.mjs`가 실제 SDK
+변환 이후의 연속 요청 본문을 모의 HTTP로 비교합니다.
 
 ## 3. TTL은 5분 하나입니다
 

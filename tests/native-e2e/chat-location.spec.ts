@@ -1,10 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
+import { buildSearchMetadataTrailerChunk } from "../../packages/chat-core/src/streamTrailer";
 import { buildStreamKeepaliveChunk } from "../../lib/chatStreamKeepalive";
 
-const installDevice = async (page: Page, signedIn = true) => {
+const installDevice = async (page: Page, signedIn = true, scenario: { holdSession?: boolean; failIdentityOnce?: boolean; incomplete?: boolean } = {}) => {
   const requests: Array<{ body: Record<string, unknown>; authorization: string | undefined }> = [];
-  await page.addInitScript(({ signedIn }) => {
-    const state = { signedIn, latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, holdAuth: false, releaseAuth: null as (() => void) | null, hold: false, release: null as (() => void) | null };
+  await page.addInitScript(({ signedIn, holdSession }) => {
+    const sessionWaiters: Array<() => void> = [];
+    const state = { signedIn, holdSession, releaseSession: null as (() => void) | null, calls: [] as string[], latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, holdAuth: false, releaseAuth: null as (() => void) | null, hold: false, release: null as (() => void) | null };
     const device = window as unknown as { androidBridge: object; __nativeFixture: typeof state; Capacitor: object };
     device.__nativeFixture = state; device.androidBridge = {};
     const methods = { MobileAuth: ["hasSession", "getAccessToken", "beginSignIn", "completeSignIn", "signOut"],
@@ -12,8 +14,14 @@ const installDevice = async (page: Page, signedIn = true) => {
     device.Capacitor = {
       PluginHeaders: Object.entries(methods).map(([name, names]) => ({ name, methods: names.map((name) => ({ name, rtype: "promise" })) })),
       nativePromise: async (plugin: string, method: string, options: { url?: string; grant?: string; permissions?: string[] }) => {
+        state.calls.push(`${plugin}.${method}`);
         if (plugin === "MobileAuth") {
-          if (method === "hasSession") return { signedIn: state.signedIn };
+          if (method === "hasSession") {
+            if (state.holdSession) await new Promise<void>((resolve) => {
+              sessionWaiters.push(resolve); state.releaseSession = () => sessionWaiters.splice(0).forEach((done) => done());
+            });
+            return { signedIn: state.signedIn };
+          }
           if (method === "getAccessToken") { if (state.holdAuth) await new Promise<void>((resolve) => { state.releaseAuth = resolve; }); if (!state.signedIn) throw new Error("no session"); return { accessToken: "native-fixture-access", expiresAt: Date.now() + 600_000 }; }
           if (method === "beginSignIn") { state.proof = true; return { url: "https://api.native-chat.test/mobile/connect?codeChallenge=public-fixture-challenge" }; }
           if (method === "completeSignIn") { if (!state.proof || options.grant !== "one-time-fixture") throw new Error("invalid code"); state.proof = false; state.signedIn = true; return; }
@@ -32,15 +40,21 @@ const installDevice = async (page: Page, signedIn = true) => {
         throw new Error("unexpected native call");
       },
     };
-  }, { signedIn });
+  }, { signedIn, holdSession: scenario.holdSession ?? false });
+  let failedIdentity = false;
   await page.route("https://api.native-chat.test/**", async (route) => {
     const request = route.request();
     const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Authorization,Content-Type", "Access-Control-Allow-Methods": "GET,POST,OPTIONS" };
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     if (new URL(request.url()).pathname !== "/api/mobile/chat") throw new Error(`Unexpected API call: ${request.url()}`);
-    if (request.method() === "GET") return route.fulfill({ json: { userId: "native-user" }, headers });
+    if (request.method() === "GET") {
+      if (scenario.failIdentityOnce && !failedIdentity) {
+        failedIdentity = true; return route.fulfill({ status: 503, json: { code: "TEMPORARILY_UNAVAILABLE" }, headers });
+      }
+      return route.fulfill({ json: { userId: "native-user" }, headers });
+    }
     requests.push({ body: request.postDataJSON(), authorization: request.headers().authorization });
-    await route.fulfill({ body: buildStreamKeepaliveChunk({ state: "awaiting_first_token", elapsedMs: 1 }) + "Nearby places.", headers: { ...headers, "Content-Type": "text/plain" } });
+    await route.fulfill({ body: buildStreamKeepaliveChunk({ state: "awaiting_first_token", elapsedMs: 1 }) + "Nearby places." + (scenario.incomplete ? buildSearchMetadataTrailerChunk({ completion: { status: "incomplete", incompleteReason: "length" } }) : ""), headers: { ...headers, "Content-Type": "text/plain" } });
   });
   await page.goto("/");
   return requests;
@@ -133,4 +147,34 @@ test("opting out while native authentication is pending removes location before 
   await expect(page.getByTestId("native-chat-send")).toBeVisible();
   expect(requests).toHaveLength(1);
   expect(requests[0].body.currentLocation).toBeUndefined();
+});
+
+
+test("session restoration never exposes destructive reconnect controls while the native session check is pending", async ({ page }) => {
+  await installDevice(page, true, { holdSession: true });
+  await expect(page.getByText("Checking device session…", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("native-sign-in")).toHaveCount(0);
+  await page.waitForFunction(() => typeof (window as unknown as { __nativeFixture: { releaseSession: unknown } }).__nativeFixture.releaseSession === "function");
+  await page.evaluate(() => (window as unknown as { __nativeFixture: { releaseSession: () => void } }).__nativeFixture.releaseSession());
+  await expect(page.getByTestId("native-chat-input")).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);
+  expect(calls).not.toContain("MobileAuth.beginSignIn"); expect(calls).not.toContain("MobileAuth.signOut");
+});
+
+test("a transient identity failure retries the existing session without replacing or signing it out", async ({ page }) => {
+  await installDevice(page, true, { failIdentityOnce: true });
+  await expect(page.getByRole("button", { name: "Retry connection", exact: true })).toBeVisible();
+  await expect(page.getByTestId("native-sign-in")).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry connection", exact: true }).click();
+  await expect(page.getByTestId("native-chat-input")).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);
+  expect(calls).not.toContain("MobileAuth.beginSignIn"); expect(calls).not.toContain("MobileAuth.signOut");
+});
+
+test("native chat labels a length-limited answer and keeps its outcome out of the next request", async ({ page }) => {
+  const requests = await installDevice(page, true, { incomplete: true });
+  await send(page, "A long answer");
+  await expect(page.getByTestId("native-answer-incomplete")).toBeVisible();
+  await send(page, "Continue");
+  expect(JSON.stringify(requests[1].body.messages)).not.toContain("completion");
 });

@@ -9,6 +9,7 @@ export const MobileConnectGrant = ({ challenge }: { challenge: string }) => {
   const copy = mobileChatCopy(lang);
   const [grant, setGrant] = useState("");
   const [expiresAt, setExpiresAt] = useState(0);
+  const [matched, setMatched] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -17,7 +18,7 @@ export const MobileConnectGrant = ({ challenge }: { challenge: string }) => {
     return () => clearTimeout(timer);
   }, [expiresAt, copy.expired]);
   const create = async () => {
-    if (pending) return;
+    if (pending || !matched) return;
     setPending(true); setError(""); setGrant("");
     try {
       const response = await fetch("/api/auth/mobile/login-grant", {
@@ -34,7 +35,10 @@ export const MobileConnectGrant = ({ challenge }: { challenge: string }) => {
   return <main className="mx-auto max-w-xl p-6">
     <h1 className="mb-4 text-2xl font-semibold">{copy.grantTitle}</h1>
     <p className="mb-6">{copy.grantNote}</p>
-    <button type="button" disabled={pending} onClick={() => { void create(); }} className="min-h-11 rounded-xl bg-blue-600 px-5 py-2 text-white disabled:opacity-50" data-testid="mobile-create-code">{copy.createCode}</button>
+    <p className="mb-3">{copy.requestId}: <strong data-testid="mobile-pairing-request">{challenge.slice(-8)}</strong></p>
+    <p className="mb-4">{copy.requestNote}</p>
+    <label className="mb-4 flex items-center gap-3"><input type="checkbox" checked={matched} onChange={(event) => setMatched(event.target.checked)} />{copy.requestMatch}</label>
+    <button type="button" disabled={pending || !matched} onClick={() => { void create(); }} className="min-h-11 rounded-xl bg-blue-600 px-5 py-2 text-white disabled:opacity-50" data-testid="mobile-create-code">{copy.createCode}</button>
     {grant && <div className="mt-6 space-y-3" role="status">
       <label htmlFor="mobile-pairing-code">{copy.code}</label>
       <input id="mobile-pairing-code" readOnly value={grant} autoComplete="off" spellCheck={false} onFocus={(event) => event.target.select()} className="w-full rounded-lg border p-3 font-mono" />

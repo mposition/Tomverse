@@ -553,14 +553,19 @@ test("giving up cancels the provider stream, settles and releases the lease", as
 });
 
 test("fresh optional location reaches the provider without entering saved messages", async () => {
-  await ask({ text: "The answer." }, { currentLocation: {
+  await ask({ text: "The answer." }, { messages: [
+    { role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" },
+    { role: "user", content: "What is nearby?" },
+  ], currentLocation: {
     latitude: -27.4697701, longitude: 153.0251234, accuracy: 10,
     timestamp: Date.now(), instruction: "LOCATION_INJECTION",
   } });
   const cachedInstructions = providerInstructions;
   assert.equal(providerOptions?.anthropic?.cacheControl, undefined);
   const enriched = providerRequestMessages.at(-1) as { content: Array<{ text?: string; providerOptions?: { anthropic?: { cacheControl?: unknown } } }> };
-  assert.deepEqual(enriched.content[0].providerOptions?.anthropic?.cacheControl, { type: "ephemeral", ttl: "5m" });
+  assert.equal(enriched.content[0].providerOptions, undefined);
+  const history = providerRequestMessages.at(-2) as { providerOptions?: { anthropic?: { cacheControl?: unknown } } };
+  assert.deepEqual(history.providerOptions?.anthropic?.cacheControl, { type: "ephemeral", ttl: "5m" });
   assert.equal(enriched.content.at(-1)?.providerOptions, undefined);
   assert.ok(JSON.stringify(providerRequestMessages).includes('\\"latitude\\":-27.47'));
   assert.ok(JSON.stringify(providerRequestMessages).includes('\\"accuracy\\":150'));

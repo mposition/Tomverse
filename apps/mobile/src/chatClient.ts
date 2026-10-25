@@ -1,8 +1,8 @@
-import { consumeChatStreamCore, type createChatLocationSession } from "@tomverse/chat-core";
+import { consumeChatStreamCore, parseChatCompletionOutcome, type ChatCompletionOutcome, type createChatLocationSession } from "@tomverse/chat-core";
 
 import type { MobileRequestInit } from "./authenticatedFetch";
 
-export type NativeChatMessage = { role: "user" | "assistant"; content: string };
+export type NativeChatMessage = { role: "user" | "assistant"; content: string; completion?: ChatCompletionOutcome };
 export type NativeChatLocationSession = ReturnType<typeof createChatLocationSession>;
 export type NativeChatTransport = (path: string, init?: MobileRequestInit) => Promise<Response>;
 
@@ -20,6 +20,7 @@ export const sendNativeChat = async (input: {
   webSearch: boolean;
   signal: AbortSignal;
   onText: (text: string) => void;
+  onCompletion?: (completion: ChatCompletionOutcome) => void;
 }) => {
   const fix = await input.location.readForTurn(input.identityKey, input.signal);
   input.signal.throwIfAborted();
@@ -28,7 +29,7 @@ export const sendNativeChat = async (input: {
     return {
       method: "POST", headers: { "Content-Type": "application/json" }, signal: input.signal,
       body: JSON.stringify({
-        messages: input.messages,
+        messages: input.messages.map(({ role, content }) => ({ role, content })),
         webSearchMode: input.webSearch ? "always" : "off",
         ...(fix && input.location.canShare(fix, input.identityKey) ? { currentLocation: fix } : {}),
       }),
@@ -49,6 +50,11 @@ export const sendNativeChat = async (input: {
     if (result.serverStallCode) throw new NativeChatError(504, result.serverStallCode);
     if (!result.displayText.trim()) throw new NativeChatError(502, "EMPTY_RESPONSE");
     input.onText(result.displayText);
+    let trailer: unknown;
+    try { trailer = JSON.parse(result.searchMetadataJson ?? "null"); } catch { trailer = null; }
+    const completion = parseChatCompletionOutcome(
+      trailer && typeof trailer === "object" ? (trailer as Record<string, unknown>).completion : null);
+    if (completion) input.onCompletion?.(completion);
     return result.displayText;
   } finally {
     await reader.cancel().catch(() => {});

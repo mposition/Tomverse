@@ -4737,8 +4737,8 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             maxOutputTokens: requestMaxOutputTokens,
-            settings: { ...generationSettings, ...(locationCacheBreakpoint ? {
-                locationCacheBreakpoint: { position: "before_current_fix", ttl: ANTHROPIC_PROMPT_CACHE_TTL },
+            settings: { ...generationSettings, ...(locationCacheBreakpoint?.historyBreakpoint != null ? {
+                locationCacheBreakpoint: { position: "stable_history", messageIndex: locationCacheBreakpoint.historyBreakpoint, ttl: ANTHROPIC_PROMPT_CACHE_TTL },
             } : {}) } as Record<string, unknown>,
             // Named rather than embedded when the artifact tool is present:
             // the tool object carries an `execute` closure and a Zod schema,

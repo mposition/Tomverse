@@ -10,7 +10,7 @@ export const buildChatLocationPrompt = () => rules;
 export const buildChatLocationContext = (value?: ChatLocation | null) => {
   const location = parseChatLocation(value);
   return location
-    ? `User-shared device fix for this turn: ${JSON.stringify(location)}. Timestamp is Unix milliseconds; accuracy is a radius in metres. Use this fix instead of any older location.`
+    ? `Approximate device location for this turn only: ${JSON.stringify(location)}. Timestamp: Unix ms; accuracy: metres. Use only for location-dependent questions; prefer a place named by the user. No continuous tracking or live-fact guarantee; search for current facts.`
     : "";
 };
 
@@ -24,19 +24,28 @@ export const appendChatLocationContext = (messages: ModelMessage[], value?: Chat
     const parts = typeof message.content === "string"
       ? [{ type: "text" as const, text: message.content }]
       : [...message.content];
-    // Cache only bytes that will be replayed next turn. The transient fix is
-    // a separate uncached block, and automatic last-block caching is disabled.
-    if (cacheStablePrefix && parts.length) {
-      const last = parts[parts.length - 1];
-      parts[parts.length - 1] = { ...last, providerOptions: {
-        ...last.providerOptions,
-        anthropic: { ...last.providerOptions?.anthropic,
-          cacheControl: { type: "ephemeral", ttl: ANTHROPIC_PROMPT_CACHE_TTL } },
-      } };
+    // Cache complete history messages only, before the current user turn.
+    // The current turn's part/message boundaries change when its transient
+    // fix is omitted on replay, so neither that turn nor the fix is cached.
+    let historyBreakpoint: number | null = null;
+    if (cacheStablePrefix) {
+      for (let previous = index - 1; previous >= 0; previous--) {
+        const history = messages[previous];
+        if ((history.role !== "user" && history.role !== "assistant") ||
+          (typeof history.content === "string" ? !history.content.trim() :
+            !history.content.some((part, partIndex) => partIndex === history.content.length - 1 && part.type === "text" && part.text.trim()))) continue;
+        messages[previous] = { ...history, providerOptions: {
+          ...history.providerOptions,
+          anthropic: { ...history.providerOptions?.anthropic,
+            cacheControl: { type: "ephemeral", ttl: ANTHROPIC_PROMPT_CACHE_TTL } },
+        } };
+        historyBreakpoint = previous;
+        break;
+      }
     }
     messages[index] = { ...message, content: [...parts, { type: "text", text: context }] };
-    return cacheStablePrefix;
-
+    // Also suppress automatic caching on a first turn with no reusable history.
+    return cacheStablePrefix ? { historyBreakpoint } : undefined;
   }
 };
 

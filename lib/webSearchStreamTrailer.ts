@@ -1,5 +1,5 @@
 import {
-  isChatCompletionStatus,
+  parseChatCompletionOutcome,
   type ChatCompletionStatus,
   type ChatIncompleteReason,
 } from "@tomverse/chat-core";
@@ -76,24 +76,11 @@ export function parseChatStreamTrailer(
   ) {
     return { searchMetadata: parsed };
   }
-  const completion = record.completion;
-  const completionRecord =
-    completion && typeof completion === "object"
-      ? (completion as Record<string, unknown>)
-      : null;
+  const completion = parseChatCompletionOutcome(record.completion);
   const artifacts = parseChatStreamArtifacts(record.artifacts);
   return {
     searchMetadata: record.searchMetadata ?? null,
-    ...(completionRecord && isChatCompletionStatus(completionRecord.status)
-      ? {
-          completion: {
-            status: completionRecord.status,
-            ...(completionRecord.incompleteReason === "length"
-              ? { incompleteReason: "length" as const }
-              : {}),
-          },
-        }
-      : {}),
+    ...(completion ? { completion } : {}),
     ...(artifacts ? { artifacts } : {}),
   };
 }

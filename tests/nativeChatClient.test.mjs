@@ -3,6 +3,7 @@ import test from "node:test";
 import { createChatLocationSession } from "../packages/chat-core/src/location.ts";
 import { sendNativeChat, NativeChatError } from "../apps/mobile/src/chatClient.ts";
 import { authenticatedFetch } from "../apps/mobile/src/authenticatedFetch.ts";
+import { buildSearchMetadataTrailerChunk } from "../packages/chat-core/src/streamTrailer.ts";
 import { isNativeChatPayload, mobileChatEnabled, mobileChatBearerRoutes } from "../lib/mobileChatContract.ts";
 
 const fix = (latitude = 1) => ({ latitude, longitude: 2, accuracy: 10, timestamp: Date.now() });
@@ -15,6 +16,23 @@ const fixture = (read = async () => fix()) => {
     transport: async (path, request) => { const init = typeof request === "function" ? request() : request; requests.push({ path, init, body: JSON.parse(init.body) }); return new Response("Nearby places."); } };
   return { input, requests, text };
 };
+
+test("native chat preserves a partial answer and exposes the shared length-limit outcome", async () => {
+  const f = fixture();
+  const completions = [];
+  const answer = await sendNativeChat({ ...f.input, onCompletion: (value) => completions.push(value),
+    transport: async () => new Response("Partial answer" + buildSearchMetadataTrailerChunk({
+      completion: { status: "incomplete", incompleteReason: "length" },
+    })),
+  });
+  assert.equal(answer, "Partial answer");
+  assert.deepEqual(completions, [{ status: "incomplete", incompleteReason: "length" }]);
+  await sendNativeChat({ ...f.input, messages: [
+    { role: "assistant", content: answer, completion: completions[0] },
+    { role: "user", content: "Continue" },
+  ] });
+  assert.ok(!JSON.stringify(f.requests[0].body).includes("completion"));
+});
 
 test("native chat sends through the bearer gateway and does not read location by default", async () => {
   let reads = 0;

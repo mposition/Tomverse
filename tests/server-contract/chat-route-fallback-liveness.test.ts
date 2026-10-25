@@ -1708,7 +1708,10 @@ test("a location-aware primary caches its stable prefix but fallback carries onl
   forceAnthropicPrimary = true;
   turnLocation = { latitude: -27.4697701, longitude: 153.0251234, accuracy: 10, timestamp: Date.now() };
   try {
-    await ask("answers");
+    await ask("answers", "claimed", 200, false, [
+      { role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" },
+      { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+    ]);
     assert.equal(attempts.length, 2);
     assert.ok(JSON.stringify(attempts[0].messages).includes("cacheControl"));
     assert.ok(JSON.stringify(attempts[0].messages).includes("-27.47"));

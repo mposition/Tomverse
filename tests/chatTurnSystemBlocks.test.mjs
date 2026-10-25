@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildChatTurnSystemBlocks } from "../lib/chatTurnSystemBlocks.ts";
 import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
-import { buildChatLocationPrompt } from "../lib/chatLocationPrompt.ts";
+import { buildChatLocationPrompt, buildChatLocationContext } from "../lib/chatLocationPrompt.ts";
 import {
   ARTIFACT_TOOL_DEFINITION_TOKENS,
 } from "../lib/generatedArtifactToolPolicy.ts";
@@ -111,10 +111,14 @@ test("the forced-search flag only matters while native search is enabled", () =>
   assert.notEqual(onForced.promptTokens, onUnforced.promptTokens);
 });
 
-test("deep research carries and prices location context without file or image tools", () => {
+test("deep research has no system blocks, and prices only a supplied ephemeral fix", () => {
   const blocks = build({ isDeepResearchTurn: true });
-  assert.equal(blocks.systemMessages.length, 1);
-  assert.equal(blocks.promptTokens, estimateTextTokens(buildChatLocationPrompt()));
+  assert.deepEqual(blocks.systemMessages, []);
+  assert.equal(blocks.promptTokens, 0);
+  const currentLocation = { latitude: 1, longitude: 2, accuracy: 150, timestamp: Date.now() };
+  const located = build({ isDeepResearchTurn: true, currentLocation });
+  assert.deepEqual(located.systemMessages, []);
+  assert.equal(located.promptTokens, estimateTextTokens(buildChatLocationContext(currentLocation)));
   assert.equal(blocks.artifactPlan, null);
   assert.equal(blocks.imageCapabilityPrompt, "");
 });

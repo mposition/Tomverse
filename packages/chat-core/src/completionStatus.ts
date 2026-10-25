@@ -23,6 +23,15 @@ export type ChatCompletionOutcome = {
   incompleteReason?: ChatIncompleteReason;
 };
 
+/** Validate the small completion object shared by web and native trailers. */
+export const parseChatCompletionOutcome = (value: unknown): ChatCompletionOutcome | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (!isChatCompletionStatus(record.status)) return null;
+  return { status: record.status,
+    ...(record.incompleteReason === "length" ? { incompleteReason: "length" as const } : {}) };
+};
+
 /**
  * Provider-raw finish reasons that mean "output token limit reached".
  *

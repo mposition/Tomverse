@@ -7,13 +7,16 @@ There is no remote `server.url` or browser session fallback.
 ## Implemented chat
 
 - Connect an account using the system browser and a client-bound, 60-second
-  one-time code. The app creates its PKCE proof natively; only the public
+  one-time code. Compare the request ID in the app with the browser page and
+  explicitly confirm the match before creating the code. The app creates its PKCE proof natively; only the public
   challenge enters the browser URL. Code creation requires an explicit click
   on the authenticated `/mobile/connect` page. Paste the code back into the app.
 - Native Swift/Java `MobileAuth` exchanges and rotates credentials directly
   over HTTPS, with redirects disabled and no cookies. Keychain on iOS and
   Android Keystore AES-GCM protect the stored session. Only short-lived access
-  tokens and expiry cross the bridge. Browser fallback always refuses auth.
+  tokens and expiry cross the bridge. Validation and secure-store read errors
+  preserve existing sessions. The UI checks/restores a session before showing
+  pairing controls, and a failed identity read offers a safe retry. Browser fallback always refuses auth.
 - Native mutation calls are serialized. Local single-use state is consumed
   before rotation; a timeout or unknown outcome signs out instead of replaying
   an exchange or rotation. Sign-out removes local state before remote logout.
@@ -24,7 +27,8 @@ There is no remote `server.url` or browser session fallback.
 - Text conversation and the opt-in location session live in memory. New chat,
   sign-out or reload clears them. This first native screen has no persisted
   conversation sync, attachments, generated files or model picker. Native and
-  web use the same `@tomverse/chat-core` stream consumer.
+  web use the same `@tomverse/chat-core` stream consumer and completion parser;
+  length-limited answers remain visible and are labeled incomplete.
 - Current location defaults off. Enabling requests approximate foreground
   access. Each send acquires a fresh fix, coarsens it and sends `currentLocation`
   only while consent and account identity still match, rechecking after native
@@ -64,8 +68,10 @@ npx playwright test --config playwright.native.config.ts
 ```
 
 The native screen tests use mocked native plugins and a mocked API. They test
-pairing, per-message location, denial, stop, sign-out, narrow screens and enlarged
-text. They are not physical-device evidence. Android debug compilation is
+pairing, session-restoration races, per-message location, denial, stop,
+sign-out, incomplete answers, narrow screens and enlarged text. The Android
+plugin also has JVM tests executing its real validation and rotation control
+flow with isolated secure-store and HTTP ports. They are not physical-device evidence. Android debug compilation is
 possible with JDK 21 and Android SDK 36. iOS compilation requires macOS/Xcode.
 
 ## Native projects
@@ -84,8 +90,11 @@ npm --workspace @tomverse/mobile exec cap add ios # macOS/Xcode
 npm --workspace @tomverse/mobile run cap:sync
 ```
 
-`app.tomverse.shell` remains the provisional spike identifier. This manual
-pairing path needs no universal-link association or production signing change.
-Release signing, final application IDs, iOS build, device secure-store checks,
+The Android release application ID is `app.tomverse.shell`, confirmed by the
+owner on 2026-10-25. Keep the generated Android project and Google Play
+registration aligned with this ID. The manual pairing path needs no
+universal-link association files.
+
+Release signing, iOS build, device secure-store checks,
 permission prompts and foreground keyboard behavior remain device/release
 validation. No merge, deployment or live activation is implied by local checks.
