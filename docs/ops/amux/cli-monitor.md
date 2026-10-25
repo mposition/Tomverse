@@ -82,7 +82,7 @@ user unit from `scripts/systemd/user/`. **Never install it as the AMUX worker
 account `tommy`, or any account running monitored workers.** The distinct UID
 keeps workers from reading the ingest credential, modifying the collector or
 signalling it. File modes and a sandbox alone do not protect against the same
-UID. It requires lingering and unprivileged user namespaces.
+UID. It requires lingering and the host's existing Bubblewrap installation.
 Bundle the exact release's `scripts/amux-cli-monitor.mjs` with esbuild for Node
 ESM, and install it as `~/.local/share/tomverse-cli-monitor/collector.mjs`.
 Bundling avoids installing a checkout and npm dependencies on this account;
@@ -91,12 +91,18 @@ Keep that directory and `~/.config/tomverse-cli-monitor/` mode 700, the bundle
 and `collector.env` mode 600, and copy the unit to `~/.config/systemd/user/`.
 The environment file contains only the three collector settings above.
 
-Within the separate operator account, this variant mounts only the bundle
-directory into an otherwise hidden home,
-makes the filesystem read-only, hides `/proc` (including other processes'
-credentials), and prohibits mount changes. It does not inherit a worker's
-environment or read worker homes. Before enabling it, run `--check-source` with
-the same sandbox and verify a `--once` ingest under the actual unit settings.
+The user unit runs Bubblewrap directly: only `/usr`, DNS/hosts/TLS files and
+the collector directory are mounted read-only. Home directories and the host's
+runtime sockets are absent. A private PID namespace and `/proc` expose only
+the sandbox's own processes; `/tmp` is private. It removes inherited SSH/GPG
+agent and user-bus variables. This explicit sandbox is required: the execution
+host's per-user systemd accepted filesystem-hardening properties without
+actually applying them during verification. Do not substitute those properties
+for Bubblewrap or fall back to an unsandboxed command.
+
+It does not inherit a worker's environment or read worker homes. Before
+enabling it, run `--check-source` with the same sandbox and verify a `--once`
+ingest under the actual unit settings.
 Use `systemctl --user enable --now tomverse-amux-cli-monitor.service` only after
 the app release and dedicated credential are ready. This starts the one fixed
 collector; it does not activate any other worker.
@@ -105,11 +111,17 @@ From the Ubuntu operator account's bash, verify the installed bundle without
 credentials or external writes (this reads only the existing worker output):
 
 ```bash
-systemd-run --user --wait --pipe \
-  -p PrivateUsers=yes -p ProtectHome=tmpfs \
-  -p BindReadOnlyPaths="$HOME/.local/share/tomverse-cli-monitor" \
-  -p ProtectSystem=strict -p PrivateTmp=yes -p NoNewPrivileges=yes \
-  -p InaccessiblePaths=/proc -p 'SystemCallFilter=~@mount' \
+systemd-run --user --wait --pipe -p NoNewPrivileges=yes \
   -p 'RestrictAddressFamilies=AF_INET AF_INET6' \
-  /usr/bin/node "$HOME/.local/share/tomverse-cli-monitor/collector.mjs" --check-source
+  /usr/bin/bwrap --die-with-parent --new-session \
+  --unshare-pid --unshare-ipc --unshare-uts \
+  --ro-bind /usr /usr --symlink usr/bin /bin \
+  --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+  --ro-bind /etc/hosts /etc/hosts \
+  --ro-bind /etc/resolv.conf /etc/resolv.conf --ro-bind /etc/ssl /etc/ssl \
+  --ro-bind "$HOME/.local/share/tomverse-cli-monitor" /app \
+  --proc /proc --dev /dev --tmpfs /tmp --chdir /app \
+  --unsetenv SSH_AUTH_SOCK --unsetenv DBUS_SESSION_BUS_ADDRESS \
+  --unsetenv GPG_AGENT_INFO --setenv HOME /tmp --setenv PATH /usr/bin \
+  /usr/bin/node /app/collector.mjs --check-source
 ```
