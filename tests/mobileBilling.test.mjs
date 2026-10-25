@@ -117,3 +117,15 @@ test("pending store approval persists across clients and prevents a second subsc
   await assert.rejects(createNativeBillingClient(options).purchase({ identifier: "max:monthly" }), /BILLING_PLAN_CHANGED/);
   assert.equal(purchases, 1);
 });
+
+test("cancelling a credit payment never clears an unrelated pending subscription", async () => {
+  const state = { ...base, subscriptionPurchaseAttempt: { id: "subscription-pending", store: "play_store", productId: "max:monthly", startedAt: new Date().toISOString() } };
+  const actions = [];
+  const client = createNativeBillingClient({ store: "play_store", apiKey: "public-test-key", isCurrent: () => true,
+    api: async (_path, build) => { actions.push(JSON.parse(build().body).action); return Response.json(state); },
+    sdk: { logIn: async () => {}, purchaseStoreProduct: async () => { throw { code: "1" }; } },
+  });
+  await assert.rejects(client.purchase({ identifier: "credits500" }));
+  assert.deepEqual(actions, ["sync", "prepare_credit_purchase"]);
+  assert.equal(canPurchaseMobileProduct(state, products[3], "play_store"), false);
+});

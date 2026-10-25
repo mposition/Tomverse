@@ -76,6 +76,50 @@ test("an unbound renewal retains only its previously verified period and a refun
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("a foreign receipt cannot erase a different product's verified unexpired renewal period", async () => {
+  const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const transaction = randomUUID(); await bindSubscription(billingId, transaction);
+  const expiry = new Date(Date.now() + 86400000).toISOString();
+  let subscriptions: Record<string, unknown> = { "pro.month": { store: "app_store", is_sandbox: false, store_transaction_id: transaction, expires_date: expiry } };
+  const originalFetch = globalThis.fetch; globalThis.fetch = async () => Response.json({ subscriber: { subscriptions } });
+  try {
+    await syncMobileSubscription(user.id, billingId);
+    const other = await createUser("other"); const otherBilling = await ensureMobileBillingId(other.id); const foreign = randomUUID();
+    await bindSubscription(otherBilling, foreign, "PLAY_STORE", "play.max:monthly");
+    subscriptions = {
+      "pro.month": { store: "app_store", is_sandbox: false, store_transaction_id: randomUUID(), expires_date: "2099-01-01T00:00:00Z" },
+      "play.max:monthly": { store: "play_store", is_sandbox: false, store_transaction_id: foreign, expires_date: "2099-01-01T00:00:00Z" },
+    };
+    await syncMobileSubscription(user.id, billingId); await syncMobileSubscription(user.id, billingId);
+    const state = await readMobileBillingState(user.id, "app_store");
+    assert.equal(state.plan, "Pro"); assert.equal(state.expiresAt, expiry);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("a stale sync returns committed verification state and subscription admission rechecks it under lock", async () => {
+  const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  let release!: (response: Response) => void; let entered!: () => void;
+  const firstRead = new Promise<void>((resolve) => { entered = resolve; });
+  const blocked = new Promise<Response>((resolve) => { release = resolve; });
+  const originalFetch = globalThis.fetch; let reads = 0;
+  globalThis.fetch = async () => {
+    if (++reads === 1) { entered(); return blocked; }
+    return Response.json({ subscriber: { subscriptions: { "pro.month": { store: "app_store", is_sandbox: false, store_transaction_id: randomUUID(), expires_date: "2099-01-01T00:00:00Z" } } } });
+  };
+  try {
+    const older = syncMobileSubscription(user.id, billingId); await firstRead;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await syncMobileSubscription(user.id, billingId);
+    release(Response.json({ subscriber: { subscriptions: {} } }));
+    assert.equal((await older).verificationPending, true);
+    assert.equal((await readMobileBillingState(user.id, "app_store")).verificationPending, true);
+    await assert.rejects(prepareMobileSubscriptionPurchase(user.id, "app_store", "pro.month"), /Wait for store verification/);
+    await prisma.user.update({ where: { id: user.id }, data: { storeSubscriptionVerificationPending: false, storeSubscriptionSyncedAt: new Date(Date.now() + 60_000) } });
+    assert.equal((await syncMobileSubscription(user.id, billingId)).verificationPending, true);
+    assert.equal((await readMobileBillingState(user.id, "app_store")).verificationPending, true, "an old unbound observation may tighten the gate but cannot grant access");
+  } finally { release(Response.json({ subscriber: { subscriptions: {} } })); globalThis.fetch = originalFetch; }
+});
+
 test("credit pack plan eligibility is server-authorized before payment and survives a delayed plan change", async () => {
   const user = await createUser();
   await assert.rejects(prepareMobileCreditPurchase(user.id, "app_store", "credits1500"), /not available/);

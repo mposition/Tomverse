@@ -26,6 +26,7 @@ model User {
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
   mobileBillingId               String?       @unique
   storeSubscriptionPurchaseAttempt Json?
+  storeSubscriptionVerificationPending Boolean @default(false)
   subscriptionStore             String?
   subscriptionStoreProductId    String?
   webSubscriptionPlan           String?

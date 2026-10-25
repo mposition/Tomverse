@@ -10,6 +10,7 @@ ALTER TABLE "User" ADD COLUMN "webSubscriptionPlan" TEXT,
   ADD COLUMN "storeSubscriptionSyncedAt" TIMESTAMP(3);
 ALTER TABLE "User" ADD COLUMN "storeSubscriptionSnapshot" JSONB;
 ALTER TABLE "User" ADD COLUMN "storeSubscriptionPurchaseAttempt" JSONB;
+ALTER TABLE "User" ADD COLUMN "storeSubscriptionVerificationPending" BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE "CreditLot" ADD COLUMN "nonExpiring" BOOLEAN NOT NULL DEFAULT false;
 CREATE TABLE "MobileStorePurchaseAuthorization" (
   "id" TEXT NOT NULL PRIMARY KEY,

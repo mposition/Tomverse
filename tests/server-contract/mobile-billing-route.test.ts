@@ -14,8 +14,8 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
 } });
 mock.module(mod("lib/mobileBillingService.ts"), { namedExports: {
   ensureMobileBillingId: async (id: string) => { calls.push(id); return "opaque-billing-id"; },
-  syncMobileSubscription: async (id: string) => { calls.push(id); },
-  readMobileBillingState: async (id: string) => { calls.push(id); return { plan: "Free" }; },
+  syncMobileSubscription: async (id: string) => { calls.push(id); return { verificationPending: false }; },
+  readMobileBillingState: async (id: string) => { calls.push(id); return { plan: "Free", verificationPending: true }; },
   cancelMobileWebSubscription: async (id: string) => { calls.push(`cancel:${id}`); },
   prepareMobileCreditPurchase: async (id: string, store: string, product: string) => { calls.push(`prepare:${id}:${store}:${product}`); },
   prepareMobileSubscriptionPurchase: async (id: string) => { calls.push(`prepare-subscription:${id}`); },
@@ -36,6 +36,7 @@ test("mobile billing refuses by default and authenticates bearer independently w
   valid = true;
   const response = await route.POST(request());
   assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal((await response.json()).verificationPending, true, "fresh readback must not be overwritten by an older sync result");
   assert.deepEqual(calls, ["verified-user", "verified-user", "verified-user"]);
   calls.length = 0;
   await route.POST(request("cancel_web"));

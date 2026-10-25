@@ -68,7 +68,7 @@ export function createNativeBillingClient(input: {
           replacementMode: item.plan === "Max" ? STORE_REPLACEMENT_MODE.CHARGE_PRORATED_PRICE : STORE_REPLACEMENT_MODE.DEFERRED },
       } : {}) }); } catch (error) {
         // Only an explicit store cancellation proves no payment will complete.
-        if (["1", "3", "4", "5", "11", "14", "18", "19", "23", "24"].includes(String((error as { code?: unknown })?.code)) && prepared.subscriptionPurchaseAttempt && input.isCurrent()) {
+        if (item.kind === "subscription" && ["1", "3", "4", "5", "11", "14", "18", "19", "23", "24"].includes(String((error as { code?: unknown })?.code)) && prepared.subscriptionPurchaseAttempt && input.isCurrent()) {
           await sync("cancel_subscription_purchase", prepared.subscriptionPurchaseAttempt.id);
         }
         throw error;

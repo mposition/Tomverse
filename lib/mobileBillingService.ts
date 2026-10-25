@@ -49,28 +49,35 @@ export async function syncMobileSubscription(userId: string, billingId: string) 
   const candidates = resolveMobileSubscriptions(providerSnapshot || { subscriber: { subscriptions: {} } }, products, mobileBillingEnvironment());
   const owned: typeof candidates = [];
   let ownershipConflict = false;
+  const conflictingProducts = new Set<string>();
   for (const candidate of candidates) {
     if (!candidate.transactionId) continue;
     const ownership = await prisma.mobileStoreOwnership.findUnique({ where: {
       store_environment_transactionHash: { store: candidate.store, environment: mobileBillingEnvironment(), transactionHash: mobileStoreTransactionHash(candidate.transactionId) },
     } });
     if (!ownership) continue;
-    if (ownership.ownerHash !== mobileStoreOwnerHash(billingId) || ownership.kind !== "subscription") { ownershipConflict = true; continue; }
+    if (ownership.ownerHash !== mobileStoreOwnerHash(billingId) || ownership.kind !== "subscription") {
+      ownershipConflict = true; conflictingProducts.add(`${candidate.store}:${candidate.productId}`); continue;
+    }
     owned.push(candidate);
   }
   const verificationPending = candidates.length > owned.length;
-  await prisma.$transaction(async (tx) => {
+  const applied = await prisma.$transaction(async (tx) => {
     await lockSubscriptionAccount(tx, userId);
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (!providerSnapshot && user.storeSubscriptionExpiresAt && user.storeSubscriptionExpiresAt > observedAt) throw new Error("Store customer lookup is temporarily unavailable.");
     if (user.mobileBillingId !== billingId) throw new Error("Billing identity changed.");
-    if (user.storeSubscriptionSyncedAt && user.storeSubscriptionSyncedAt > observedAt) return;
+    if (user.storeSubscriptionSyncedAt && user.storeSubscriptionSyncedAt >= observedAt) {
+      // Older/tied observations may tighten the payment gate, never reopen it.
+      if (verificationPending && !user.storeSubscriptionVerificationPending) await tx.user.update({ where: { id: userId }, data: { storeSubscriptionVerificationPending: true } });
+      return { verificationPending: user.storeSubscriptionVerificationPending || verificationPending, refused: false };
+    }
     const prior = mobileStoreSnapshotSchema.array().safeParse(user.storeSubscriptionSnapshot || []);
     // A new, unbound renewal cannot extend access, but must not shorten the
     // already verified, unexpired period of the same store product.
     const retained = prior.success ? prior.data.filter((old) => new Date(old.expiresAt) > observedAt &&
       candidates.some((candidate) => candidate.store === old.store && candidate.productId === old.productId) &&
-      !owned.some((candidate) => candidate.store === old.store && candidate.productId === old.productId) && !ownershipConflict) : [];
+      !owned.some((candidate) => candidate.store === old.store && candidate.productId === old.productId) && !conflictingProducts.has(`${old.store}:${old.productId}`)) : [];
     const snapshots = [...owned.map(({ store, productId, plan, interval, expiresAt, cancelAtPeriodEnd }) =>
       ({ store, productId, plan, interval, expiresAt: expiresAt.toISOString(), cancelAtPeriodEnd })), ...retained]
       .sort((a, b) => (b.plan === "Max" ? 1 : 0) - (a.plan === "Max" ? 1 : 0));
@@ -84,14 +91,16 @@ export async function syncMobileSubscription(userId: string, billingId: string) 
       storeSubscriptionBillingInterval: primary?.interval || null,
       storeSubscriptionCancelAtPeriodEnd: primary?.cancelAtPeriodEnd || false, storeSubscriptionSyncedAt: observedAt,
       storeSubscriptionSnapshot: snapshots,
+      storeSubscriptionVerificationPending: verificationPending,
       ...(verifiedAttempt ? { storeSubscriptionPurchaseAttempt: Prisma.JsonNull } : {}),
     };
     await tx.user.update({ where: { id: userId }, data: { ...data, plan: effectivePlanForAccess({ ...user, ...data, plan: data.webSubscriptionPlan }) } });
+    return { verificationPending, refused: ownershipConflict && snapshots.length === 0 };
   });
   // Revoke absent/refunded rights even when another receipt is not yet bound
   // or has a different owner. A refusal must never preserve an old paid tier.
-  if (!owned.length && ownershipConflict) throw storeOwnershipRefusal();
-  return { verificationPending };
+  if (applied.refused) throw storeOwnershipRefusal();
+  return { verificationPending: applied.verificationPending };
 }
 
 export async function readMobileBillingState(userId: string, store: MobileStore): Promise<MobileBillingState> {
@@ -117,6 +126,7 @@ export async function readMobileBillingState(userId: string, store: MobileStore)
     storeSubscriptions: stores,
     webSubscription: { active: webActive, cancelAtPeriodEnd: user.subscriptionCancelAtPeriodEnd, expiresAt: webActive ? user.subscriptionCurrentPeriodEnd?.toISOString() || null : null },
     active, purchasedCredits: summary.remainingCredits, creditPurchasesNeedingReview,
+    verificationPending: user.storeSubscriptionVerificationPending,
     subscriptionPurchaseAttempt: mobileSubscriptionAttemptSchema.safeParse(user.storeSubscriptionPurchaseAttempt).success
       ? mobileSubscriptionAttemptSchema.parse(user.storeSubscriptionPurchaseAttempt) : null,
     products: mobileBillingProducts().filter((p) => p.store === store).flatMap<MobileBillingState["products"][number]>((p) => {
@@ -149,6 +159,7 @@ export async function prepareMobileSubscriptionPurchase(userId: string, store: M
   await prisma.$transaction(async (tx) => {
     await lockSubscriptionAccount(tx, userId);
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.storeSubscriptionVerificationPending) throw new ApiSecurityError(409, "SUBSCRIPTION_VERIFICATION_PENDING", "Wait for store verification before another purchase.");
     if (mobileSubscriptionAttemptSchema.safeParse(user.storeSubscriptionPurchaseAttempt).success) throw new ApiSecurityError(409, "SUBSCRIPTION_PURCHASE_PENDING", "Verify the previous store request before another subscription purchase.");
     const snapshots = mobileStoreSnapshotSchema.array().parse(user.storeSubscriptionSnapshot || []).filter((entry) => new Date(entry.expiresAt) > new Date());
     const native = snapshots[0];
