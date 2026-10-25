@@ -28,7 +28,16 @@ mock.module(mod("lib/modelPricing.ts"), { namedExports: { resolveModelPricing: (
 mock.module(mod("lib/activeAiModel.ts"), { namedExports: { getActiveAiModel: () => ({}) } });
 const load = () => import(mod("lib/chatLocationIntent.ts"));
 const ask = async () => (await load()).detectChatLocationIntent("지금 제가 있는 위치가 어디인가요?");
-const reset = () => { configured = "gpt-6-luna"; held = true; fail = false; calls = 0; holds = 0; settlements.length = 0; output = { requiresLocation: true }; };
+const reset = () => { process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = "true"; configured = "gpt-6-luna"; held = true; fail = false; calls = 0; holds = 0; settlements.length = 0; output = { requiresLocation: true }; };
+
+test("a configured router never enables location spending without its separate explicit switch", async () => {
+  for (const value of [undefined, "false", "on", "TRUE"]) {
+    reset();
+    if (value === undefined) delete process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED;
+    else process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = value;
+    assert.equal(await ask(), false); assert.equal(calls, 0); assert.equal(holds, 0);
+  }
+});
 
 test("location analysis cannot call a provider when routing is disabled, unavailable or its budget refuses", async () => {
   for (const id of [null, "unavailable-model"]) {

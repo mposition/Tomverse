@@ -50,10 +50,11 @@ test("new mobile Chat and Review conversations enable web search without rewriti
     { webSearchMode: "always", title: "New question" }, { selectedModels: ["fixture-model"], webSearchMode: "always" },
   ]);
 });
-function fixture({ unknown = false, routedModel = null, location, authenticate, locationRequired = false, beforePersist = async () => {} } = {}) {
+function fixture({ unknown = false, routedModel = null, location, authenticate, locationRequired = false, orphanAttempt = false, beforePersist = async () => {} } = {}) {
   const calls = []; let turns = 0;
   let sourceSequence = 0; let latestSourceId = "saved-source";
-  const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: [] };
+  const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: orphanAttempt
+    ? [{ assistantMessageId: "old-attempt", requestedModelId: "fixture-model", status: "incomplete", partialContent: "An unrelated old answer" }] : [] };
   const run = async (path, init = {}) => {
     if (typeof init === "function") init = init();
     calls.push({ path, ...init });
@@ -72,7 +73,7 @@ function fixture({ unknown = false, routedModel = null, location, authenticate, 
     if (path === "/api/chat") {
       turns++; const input = JSON.parse(init.body);
       assert.equal(input.sourceUserMessageId, latestSourceId);
-      assert.equal(input.messages.at(-1).id, latestSourceId);
+      assert.equal(input.messages.filter(message => message.role === "user").at(-1).id, latestSourceId);
       assert.equal(input.modelId, "fixture-model");
       if (unknown) {
         conversation.responseAttempts = [{ assistantMessageId: input.assistantMessageId, requestedModelId: "fixture-model", status: "streaming", partialContent: "Saved partial" }];
@@ -125,6 +126,18 @@ test("native location-dependent questions request permission before dispatch and
   await f.transport.send(f.conversation, "Please continue", [], new AbortController().signal, () => {});
   assert.equal(permissions.length, 2);
   assert.equal(JSON.parse(f.calls.filter(call => call.path === "/api/chat").at(-1).body).currentLocation, undefined);
+});
+
+test("native intent uses the saved source question even when load appends an orphan assistant attempt", async () => {
+  const location = createChatLocationSession(async () => ({ latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now() }));
+  const f = fixture({ location, locationRequired: true, orphanAttempt: true });
+  await f.transport.account();
+  const question = "지금 제가 있는 위치가 어디인가요?";
+  await f.transport.send(f.conversation, question, [], new AbortController().signal, () => {});
+  assert.equal(JSON.parse(f.calls.find(call => call.path === "/api/chat/location-intent").body).text, question);
+  const chat = JSON.parse(f.calls.find(call => call.path === "/api/chat").body);
+  assert.equal(chat.messages.at(-1).content, "An unrelated old answer");
+  assert.equal(chat.currentLocation.latitude, -27.47);
 });
 
 test("consent withdrawn while persistence is pending is removed from native execution", async () => {
