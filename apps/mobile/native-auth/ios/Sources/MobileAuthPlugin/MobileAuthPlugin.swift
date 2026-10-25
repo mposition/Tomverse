@@ -175,8 +175,13 @@ public class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc public func hasSession(_ call: CAPPluginCall) {
         queue.async {
-            do { call.resolve(["signedIn": self.enabled && self.installationReady && (try self.stored()) != nil]) }
-            catch { try? self.clear(); call.resolve(["signedIn": false]) }
+            do {
+                guard self.enabled && self.installationReady else {
+                    call.resolve(["signedIn": false]); return
+                }
+                let signedIn = try self.stored() != nil
+                call.resolve(["signedIn": signedIn])
+            } catch { try? self.clear(); call.resolve(["signedIn": false]) }
         }
     }
 
