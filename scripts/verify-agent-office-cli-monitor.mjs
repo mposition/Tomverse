@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dir = await mkdtemp(join(tmpdir(), "tomverse-office-cli-ui-"));
-await build({ entryPoints: { ui: resolve(root, "tests/fixtures/agentOfficeCliMonitor.tsx") }, outdir: resolve(dir, "dist"), bundle: true,
+await build({ entryPoints: { ui: resolve(root, "tests/agentOfficeCliMonitor/fixture.tsx") }, outdir: resolve(dir, "dist"), bundle: true,
   format: "esm", platform: "browser", jsx: "automatic", define: { "process.env.NODE_ENV": '"development"' },
   plugins: [{ name: "next-browser-test-adapter", setup(b) {
     b.onResolve({ filter: /^next\/(navigation|link)$/ }, a => ({ path: a.path, namespace: "test-next" }));
