@@ -11,7 +11,7 @@ process.env.DATABASE_URL ||= "postgresql://e2e:e2e@127.0.0.1:1/e2e";
 process.env.NEXTAUTH_SECRET ||= "test-location-intent-secret";
 const security = require(resolve(root, "lib/chatSecurity.ts")) as typeof import("../../lib/chatSecurity");
 const apiSecurity = require(resolve(root, "lib/apiSecurity.ts")) as Record<string, unknown>;
-let user: string | null = "owner"; let refused = false; let verified = false; let limited = false; let analysed = 0;
+let user: string | null = "owner"; let refused = false; let limited = false; let analysed = 0;
 const subjects: string[] = [];
 mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => refused
   ? { response: Response.json({ code: "TOKEN_INVALID" }, { status: 401 }) } : { session: user ? { user: { id: user } } : null } } });
@@ -21,15 +21,17 @@ mock.module(mod("lib/chatSecurity.ts"), { namedExports: { ...security,
 } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ...apiSecurity, consumeApiRateLimit: async (_request: Request, subject: string) => { subjects.push(subject); if (limited) throw Error("rate limited"); } } });
 mock.module(mod("lib/chatLocationIntent.ts"), { namedExports: { detectChatLocationIntent: async () => { analysed++; return true; } } });
-mock.module(mod("lib/turnstile.ts"), { namedExports: { ensureGuestVerified: async (_request: Request, token: string | undefined, action: string) => {
-  assert.equal(action, "guest_chat"); if (!verified && token !== "valid-challenge") throw new security.ChatAccessError(403, "TURNSTILE_REQUIRED", "Verify");
-  verified = true; return "synthetic-grant=1; HttpOnly; Secure";
+mock.module(mod("lib/turnstile.ts"), { namedExports: { ensureGuestVerified: async (request: Request, token: string | undefined, action: string) => {
+  assert.equal(action, "guest_chat");
+  if ((request.headers.get("cookie") ?? "").split(";").some(cookie => cookie.trim() === "synthetic-grant=1")) return undefined;
+  if (token !== "valid-challenge") throw new security.ChatAccessError(403, "TURNSTILE_REQUIRED", "Verify");
+  return "synthetic-grant=1; HttpOnly; Secure";
 } } });
 const load = () => import(mod("app/api/chat/location-intent/route.ts"));
 const ask = async (body: unknown = { text: "Where am I?" }, cookie?: string): Promise<Response> => (await load()).POST(new Request("https://tomverse.app/api/chat/location-intent", {
   method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body),
 }));
-const reset = () => { user = "owner"; refused = false; verified = false; limited = false; analysed = 0; subjects.length = 0; };
+const reset = () => { user = "owner"; refused = false; limited = false; analysed = 0; subjects.length = 0; };
 test("invalid bearer, rate refusal and malformed payload reach no model", async () => {
   reset(); refused = true; assert.equal((await ask()).status, 401); assert.equal(analysed, 0);
   reset(); limited = true; await ask(); assert.equal(analysed, 0);
@@ -46,7 +48,9 @@ test("guests use the existing challenge before analysis, then reuse its grant", 
   const response = await ask({ text: "Where am I?", turnstileToken: "valid-challenge" });
   assert.equal(response.status, 200); assert.ok(response.headers.get("set-cookie")?.includes("synthetic-grant"));
   assert.deepEqual(await response.json(), { requiresLocation: false }); assert.equal(analysed, 0);
-  assert.equal((await ask()).status, 200); assert.equal(analysed, 1);
+  assert.equal((await ask()).status, 403); assert.equal(analysed, 0);
+  const cookies = response.headers.getSetCookie().map(cookie => cookie.split(";")[0]).join("; ");
+  assert.equal((await ask(undefined, cookies)).status, 200); assert.equal(analysed, 1);
 });
 
 test("guest identity cookies survive challenge errors and successful analysis so rate subjects remain stable", async () => {
@@ -58,10 +62,10 @@ test("guest identity cookies survive challenge errors and successful analysis so
   const response = await ask({ text: "Where am I?", turnstileToken: "valid-challenge" }, cookie);
   assert.equal(response.status, 200);
   assert.ok(response.headers.getSetCookie().some(value => value.startsWith("synthetic-grant=")));
-  assert.equal((await ask(undefined, cookie)).status, 200);
+  assert.equal((await ask(undefined, `${cookie}; synthetic-grant=1`)).status, 200);
   assert.equal(new Set(subjects).size, 1);
   reset(); user = null; limited = true;
   assert.ok((await ask()).headers.getSetCookie().some(value => value.startsWith("tomverse_guest=")));
-  reset(); user = null; verified = true;
-  assert.ok((await ask()).headers.getSetCookie().some(value => value.startsWith("tomverse_guest=")));
+  reset(); user = null;
+  assert.ok((await ask(undefined, "synthetic-grant=1")).headers.getSetCookie().some(value => value.startsWith("tomverse_guest=")));
 });

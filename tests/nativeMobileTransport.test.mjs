@@ -54,7 +54,7 @@ function fixture({ unknown = false, routedModel = null, location, authenticate, 
   const calls = []; let turns = 0;
   let sourceSequence = 0; let latestSourceId = "saved-source";
   const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: orphanAttempt
-    ? [{ assistantMessageId: "old-attempt", requestedModelId: "fixture-model", status: "failed", partialContent: "An unrelated old answer" }] : [] };
+    ? [{ assistantMessageId: "old-attempt", requestedModelId: "fixture-model", status: "incomplete", partialContent: "An unrelated old answer" }] : [] };
   const run = async (path, init = {}) => {
     if (typeof init === "function") init = init();
     calls.push({ path, ...init });
@@ -135,7 +135,9 @@ test("native intent uses the saved source question even when load appends an orp
   const question = "지금 제가 있는 위치가 어디인가요?";
   await f.transport.send(f.conversation, question, [], new AbortController().signal, () => {});
   assert.equal(JSON.parse(f.calls.find(call => call.path === "/api/chat/location-intent").body).text, question);
-  assert.equal(JSON.parse(f.calls.find(call => call.path === "/api/chat").body).currentLocation.latitude, -27.47);
+  const chat = JSON.parse(f.calls.find(call => call.path === "/api/chat").body);
+  assert.equal(chat.messages.at(-1).content, "An unrelated old answer");
+  assert.equal(chat.currentLocation.latitude, -27.47);
 });
 
 test("consent withdrawn while persistence is pending is removed from native execution", async () => {
