@@ -1,8 +1,12 @@
-// The Support Triage Retention cron service's entry point (docs/policy/support-triage.md §3).
-// Railway runs `node --experimental-strip-types scripts/support-triage-retention-service.mjs`.
-// Everything is in scripts/support-triage-service.mjs and
-// lib/supportTriageServiceCore.ts.
+// A selective release may not contain the unreleased retention supervisor.
+// An unconfigured cron stays dormant without importing it or making a call.
+// Configured deployments still require the real supervisor and its guards.
+import { isUnconfiguredAgentService } from "../lib/qaReleaseServiceEnvCore.ts";
 
-import { runSupportTriageServiceEntry } from "./support-triage-service.mjs";
-
-await runSupportTriageServiceEntry("retention");
+if (isUnconfiguredAgentService(process.env, ["SUPPORT_TRIAGE_RETENTION_SECRET"])) {
+  console.log(JSON.stringify({ event: "support_triage_service", service: "retention",
+    exitCode: 0, outcome: "unconfigured" }));
+} else {
+  const { runSupportTriageServiceEntry } = await import("./support-triage-service.mjs");
+  await runSupportTriageServiceEntry("retention");
+}
