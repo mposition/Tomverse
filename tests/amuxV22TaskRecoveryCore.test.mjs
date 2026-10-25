@@ -250,10 +250,10 @@ test("v39 launch authority is exact to the FIRST Task, one route, and the 6.80 U
     { priorAttemptId: uuid }, { additionalCapMicroUsd: "3400001" },
     { worstExposureMicroUsd: "6800001" }, { command: "claude --dangerously-skip-permissions" }])
     assert.equal(amuxV22ReadOnlyLaunchCheckSchema.safeParse({ ...check, ...changed }).success, false);
-  // A dearer route no longer stops the retry: it keeps the signed amount.
-  assert.equal(amuxV22ReadOnlyRetryRouteCost({ priorReservedMicroUsd: 3_400_000n,
+  // The one-off incident retry keeps the amounts its risk acceptance signed.
+  assert.throws(() => amuxV22ReadOnlyRetryRouteCost({ priorReservedMicroUsd: 3_400_000n,
     catalogApprovalId: "catalog-id", receipt: { ...investigateReceipt,
-      routes: [{ ...investigateReceipt.routes[0], perAttemptMicroUsd: "4050000" }] },
+      routes: [{ ...investigateReceipt.routes[0], perAttemptMicroUsd: "3400001" }] },
     routeId: "route-1", workerName: "claude-test", provider: "anthropic",
-    modelId: "claude-opus" }).additionalCapMicroUsd, "3400000");
+    modelId: "claude-opus" }));
 });

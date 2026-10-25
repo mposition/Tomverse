@@ -491,11 +491,14 @@ export function amuxV22ReadOnlyRetryRouteCost(input: {
     candidate.provider === input.provider && candidate.modelId === input.modelId);
   if (!route || input.priorReservedMicroUsd !== AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD)
     throw new Error("cost_unverified");
-  // The signed risk acceptance names this cap. It is the retry's recorded
-  // amount, not a stop: the route's own reservation may be larger (owner
-  // decision 2026-10-25).
-  const cap = AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD;
+  // The one-off risk acceptance for this incident Task was signed for these
+  // amounts; they bind its launch, delivery and frame, so they stay as signed
+  // (owner decision 2026-10-26 keeps no dollar stop while the run executes).
+  const cap = BigInt(route.perAttemptMicroUsd);
   const worst = input.priorReservedMicroUsd + cap;
+  if (cap <= BigInt(0) || cap > AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD ||
+      worst > AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD)
+    throw new Error("cost_unverified");
   const cost = { oldHeldMicroUsd: input.priorReservedMicroUsd.toString(),
     additionalCapMicroUsd: cap.toString(), worstExposureMicroUsd: worst.toString(),
     catalogApprovalId: input.catalogApprovalId,

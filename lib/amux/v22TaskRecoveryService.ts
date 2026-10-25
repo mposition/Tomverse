@@ -153,7 +153,8 @@ function apiExecutionBinding(input: {
   workerName: string; profileConfigDigest: string; now: Date;
 }): { frame: AmuxV22ReadOnlyApiExecutionFrame;
   launchScope: ReturnType<typeof amuxV22ReadOnlyApiNominalLaunchScope> } | null {
-  if (input.provider !== "anthropic" || input.maximumCostMicroUsd <= BigInt(0)) return null;
+  if (input.provider !== "anthropic" || input.maximumCostMicroUsd <= BigInt(0) ||
+      input.maximumCostMicroUsd > AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD) return null;
   const metadata = configuredAmuxV22ReadOnlyApiMetadata();
   if (!metadata) return null;
   const resolved = resolveV4TaskApiExecutionBasis({ rawCatalog: input.approved.catalog,
