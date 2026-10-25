@@ -192,7 +192,7 @@ test("additional cap comes from exact catalog routes and conservatively retains 
   }
   assert.throws(() => amuxV22RecoveryCost({ priorReservedMicroUsd: 0n, catalogApprovalId: "catalog-id", receipt }));
 });
-test("one approval cannot authorize another revision, route amount, catalog, or attempt", () => {
+test("one approval cannot authorize another revision or attempt; cost does not stop it", () => {
   const approval = { taskId: "task-1234", afterRevision: 9, historicalAttempts: 1,
     nextAttemptNumber: 2, oldHeldMicroUsd: 3_400_000n, additionalCapMicroUsd: 3_400_000n,
     catalogApprovalId: "catalog-id", costDigest: "a".repeat(64) };
@@ -202,8 +202,13 @@ test("one approval cannot authorize another revision, route amount, catalog, or 
   assert.equal(amuxV22RecoveryStartAllowed(input), true);
   for (const change of [{ taskId: "task-other" }, { assignmentRevision: 10 },
     { historicalAttempts: 2 }, { nextAttemptNumber: 3 }, { priorReservedMicroUsd: 0n },
-    { assignedMicroUsd: 3_400_001n }, { catalogApprovalId: "other" }, { costDigest: "f".repeat(64) }])
+    { assignedMicroUsd: 0n }])
     assert.equal(amuxV22RecoveryStartAllowed({ ...input, ...change }), false);
+  // Owner decision 2026-10-25: a higher amount or a changed price no longer
+  // stops an owner-approved recovery.
+  for (const change of [{ assignedMicroUsd: 3_400_001n }, { catalogApprovalId: "other" },
+    { costDigest: "f".repeat(64) }])
+    assert.equal(amuxV22RecoveryStartAllowed({ ...input, ...change }), true);
 });
 test("v39 launch authority is exact to the FIRST Task, one route, and the 6.80 USD exposure", () => {
   const investigateReceipt = { ...receipt, role: "investigate",
@@ -245,9 +250,10 @@ test("v39 launch authority is exact to the FIRST Task, one route, and the 6.80 U
     { priorAttemptId: uuid }, { additionalCapMicroUsd: "3400001" },
     { worstExposureMicroUsd: "6800001" }, { command: "claude --dangerously-skip-permissions" }])
     assert.equal(amuxV22ReadOnlyLaunchCheckSchema.safeParse({ ...check, ...changed }).success, false);
-  assert.throws(() => amuxV22ReadOnlyRetryRouteCost({ priorReservedMicroUsd: 3_400_000n,
+  // A dearer route no longer stops the retry: it keeps the signed amount.
+  assert.equal(amuxV22ReadOnlyRetryRouteCost({ priorReservedMicroUsd: 3_400_000n,
     catalogApprovalId: "catalog-id", receipt: { ...investigateReceipt,
-      routes: [{ ...investigateReceipt.routes[0], perAttemptMicroUsd: "3400001" }] },
+      routes: [{ ...investigateReceipt.routes[0], perAttemptMicroUsd: "4050000" }] },
     routeId: "route-1", workerName: "claude-test", provider: "anthropic",
-    modelId: "claude-opus" }));
+    modelId: "claude-opus" }).additionalCapMicroUsd, "3400000");
 });

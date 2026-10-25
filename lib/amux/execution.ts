@@ -400,12 +400,12 @@ export async function startAmuxV22TaskExecution(input: {
         return { started: false as const,
           reason: "cost_unverified" as const };
       }
-      // Owner decision 2026-10-25: a higher cost never stops an ordinary run;
-      // a route outside its confirmed receipt still does.
+      // Owner decision 2026-10-25: a higher cost never stops a run, ordinary or
+      // recovery; a route outside its confirmed receipt still does.
       // Policy v48: the FIRST Task retry's added route is reconfirmed by the
       // owner's final consent; that is checked once the recovery is read.
       const ceilingAllowed = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approved,
-        { ok: true, receipt: cost.receipt }), !!assignment.recoveryApprovalId) === "allow";
+        { ok: true, receipt: cost.receipt })) === "allow";
       if (!ceilingAllowed && !assignment.recoveryApprovalId) {
         return { started: false as const,
           reason: "cost_reconfirmation_required" as const };
@@ -468,12 +468,7 @@ export async function startAmuxV22TaskExecution(input: {
           apiFrame.provider === assignment.provider &&
           apiFrame.modelId === assignment.modelId &&
           apiFrame.routeId === assignment.routeId &&
-          apiFrame.routePolicyDigest === assignment.routePolicyDigest &&
-          apiFrame.catalogApprovalId === cost.approvalId &&
-          apiFrame.catalogVersion === cost.receipt.catalogVersion &&
-          apiFrame.catalogDigest === cost.catalogDigest &&
-          apiFrame.pricingVersion === cost.receipt.pricingVersion &&
-          BigInt(apiFrame.maximumCostMicroUsd) === assignment.perAttemptMicroUsd);
+          apiFrame.routePolicyDigest === assignment.routePolicyDigest);
       if (!route || !approved || typeof approved !== "object" ||
           !("ceilingMicroUsd" in approved) ||
           typeof approved.ceilingMicroUsd !== "string" ||
@@ -494,8 +489,7 @@ export async function startAmuxV22TaskExecution(input: {
             assignedMicroUsd: assignment.perAttemptMicroUsd,
             catalogApprovalId: cost.approvalId,
             costDigest: recoveryCost!.costDigest,
-          }) && BigInt(route.perAttemptMicroUsd) <= assignment.perAttemptMicroUsd :
-          true)) {
+          }) : true)) {
         return { started: false as const, reason: "cost_unverified" as const };
       }
       let publicationRunId: string | null = null;
@@ -1517,7 +1511,6 @@ export async function settleAmuxV22TaskExecution(input: {
         attemptId: attempt.id, invocationIds: expectedIds, events,
         outcome: input.outcome,
         reservedCostMicrousd: attempt.reservedCostMicrousd,
-        ownerApprovedRecovery: !!settlementAssignment?.recoveryApprovalId,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
         expectedExecutionSource: apiExecutionReceipt ?

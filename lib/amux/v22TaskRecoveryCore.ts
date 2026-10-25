@@ -491,11 +491,11 @@ export function amuxV22ReadOnlyRetryRouteCost(input: {
     candidate.provider === input.provider && candidate.modelId === input.modelId);
   if (!route || input.priorReservedMicroUsd !== AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD)
     throw new Error("cost_unverified");
-  const cap = BigInt(route.perAttemptMicroUsd);
+  // The signed risk acceptance names this cap. It is the retry's recorded
+  // amount, not a stop: the route's own reservation may be larger (owner
+  // decision 2026-10-25).
+  const cap = AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD;
   const worst = input.priorReservedMicroUsd + cap;
-  if (cap <= BigInt(0) || cap > AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD ||
-      worst > AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD)
-    throw new Error("cost_unverified");
   const cost = { oldHeldMicroUsd: input.priorReservedMicroUsd.toString(),
     additionalCapMicroUsd: cap.toString(), worstExposureMicroUsd: worst.toString(),
     catalogApprovalId: input.catalogApprovalId,
@@ -551,6 +551,7 @@ export function amuxV22RecoveryStartAllowed(input: {
     a.historicalAttempts === input.historicalAttempts &&
     a.nextAttemptNumber === input.nextAttemptNumber &&
     a.oldHeldMicroUsd === input.priorReservedMicroUsd &&
-    input.assignedMicroUsd > BigInt(0) && input.assignedMicroUsd <= a.additionalCapMicroUsd &&
-    a.catalogApprovalId === input.catalogApprovalId && a.costDigest === input.costDigest;
+    // Owner decision 2026-10-25: a recovery is not held to the cost it was
+    // approved at; a later price or cap does not stop it.
+    input.assignedMicroUsd > BigInt(0);
 }

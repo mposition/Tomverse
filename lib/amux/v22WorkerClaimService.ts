@@ -225,7 +225,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
       if (reconfirmOnly && !addedRouteConsented)
         throw new BoardImportError("task_not_ready", 409);
       if (v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approvedCost,
-        { ok: true, receipt: approved.receipt }), !!recovery) !== "allow" && !addedRouteConsented) {
+        { ok: true, receipt: approved.receipt })) !== "allow" && !addedRouteConsented) {
         throw new BoardImportError("cost_reconfirmation_required", 409);
       }
       const requiredTool = amuxV22RequiredTool(card.taskRole);

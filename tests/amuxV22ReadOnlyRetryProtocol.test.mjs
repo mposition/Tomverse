@@ -289,7 +289,7 @@ test("read-only CLI argv exposes only fixed inspect tools before provider launch
   assert.deepEqual(args, ["-p", "--output-format", "json", "--no-session-persistence",
     "--no-chrome", "--strict-mcp-config", "--restricted", "--permission-prompts", "none",
     "--permission-mode", "dontAsk", "--model", retry.modelId, "--max-turns", "8",
-    "--max-budget-usd", "3.400000", "--tools", "Glob,Grep,Read",
+    "--tools", "Glob,Grep,Read",
     "--allowedTools", "Glob,Grep,Read"]);
   assert.equal(args.some(value => /Bash|Edit|Write|MCP|WebFetch|WebSearch/.test(value)), false);
   assert.throws(() => amuxV22ReadOnlyClaudeArgs({ role: "investigate",

@@ -55,7 +55,7 @@ test("one verified invocation can settle review or a known Task failure", async 
       source: receipt.source,
       actualModelId: receipt.actualModelId,
       selectedModelId: receipt.selectedModelId }],
-    reservedCostMicrousd: 250n, resultStored: true, ownerApprovedRecovery: false };
+    reservedCostMicrousd: 250n, resultStored: true };
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "succeeded" }), true);
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,

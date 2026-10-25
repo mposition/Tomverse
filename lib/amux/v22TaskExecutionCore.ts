@@ -52,8 +52,6 @@ export function v22ExecutionReceiptVerified(input: {
   reservedCostMicrousd: bigint;
   resultStored: boolean;
   expectedExecutionSource?: "claude_result" | "anthropic_messages_api";
-  /** The attempt runs under an owner-approved recovery, which keeps its cap. */
-  ownerApprovedRecovery: boolean;
 }) {
   if (input.invocationIds.length !== 1 ||
       input.invocationIds[0] !== input.attemptId ||
@@ -72,12 +70,8 @@ export function v22ExecutionReceiptVerified(input: {
     event.cli === expectedExecutor && event.source === expectedSource &&
     event.actualModelId !== null &&
     event.actualModelId === event.selectedModelId &&
-    // Owner decision 2026-10-25: an ordinary run settles on its observed usage
-    // without a cost check; an owner-approved recovery keeps the cap it was
-    // approved at.
-    (!input.ownerApprovedRecovery ||
-      (event.projectedApiCostMicrousd !== null &&
-       event.projectedApiCostMicrousd <= input.reservedCostMicrousd)) &&
+    // Owner decision 2026-10-25: a run settles on its observed usage, with no
+    // cost check, whether ordinary or an owner-approved recovery.
     (input.outcome === "succeeded" ? event.status === "succeeded" :
       event.status === "succeeded" || event.status === "failed");
 }
