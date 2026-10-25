@@ -1517,6 +1517,7 @@ export async function settleAmuxV22TaskExecution(input: {
         attemptId: attempt.id, invocationIds: expectedIds, events,
         outcome: input.outcome,
         reservedCostMicrousd: attempt.reservedCostMicrousd,
+        ownerApprovedRecovery: !!settlementAssignment?.recoveryApprovalId,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
         expectedExecutionSource: apiExecutionReceipt ?

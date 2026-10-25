@@ -293,9 +293,13 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       try {
         const current = await calculateCurrentApprovedAmuxV4TaskCost(tx,
           role, card.executionGrade);
-        // A recovery is read and checked in full at claim.
+        // The recovery claim would read for this revision keeps every cost
+        // condition, so ready judges it the same way claim does.
+        const recovery = await tx.amuxV22TaskRecoveryApproval.findFirst({
+          where: { taskId, afterRevision: card.revision, assignment: null },
+          select: { id: true } });
         cost = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(
-          approvedCost, { ok: true, receipt: current.receipt }), false);
+          approvedCost, { ok: true, receipt: current.receipt }), !!recovery);
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
         // retry, whose final consent is that reconfirmation, could never pass.

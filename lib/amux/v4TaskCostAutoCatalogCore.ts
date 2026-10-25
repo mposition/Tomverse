@@ -25,8 +25,9 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   The reservation is recorded and reported; an ordinary run is not stopped
  *   by it (owner decision 2026-10-25).
  *
- * Deterministic: the same prices give the same catalog digest, so a Task
- * reconfirms only when a worker or a price actually changed. The catalog
+ * Deterministic: the same prices give the same catalog digest. An ordinary
+ * Task reconfirms only when its route leaves the confirmed receipt; a price
+ * or bound change alone does not stop it. The catalog
  * prices a Task before it runs; the price an assignment reserved against is
  * recorded with it (amuxTaskRoutePrice) and its usage is settled at that
  * price, never at a later one.

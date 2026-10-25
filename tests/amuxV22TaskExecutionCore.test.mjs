@@ -39,6 +39,7 @@ test("settlement refuses a patch inserted, removed, or changed after decrypt", (
 test("v22 settlement accepts only its one preallocated invocation receipt", () => {
   const base = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
     outcome: "succeeded", resultStored: true, reservedCostMicrousd: 1_000n,
+    ownerApprovedRecovery: false,
     events: [{ invocationId: "attempt-1", status: "succeeded",
       completeness: "reported_complete", projectedApiCostMicrousd: 700n,
       cli: "claude", source: "claude_result",
@@ -73,8 +74,14 @@ test("v22 settlement accepts only its one preallocated invocation receipt", () =
     assert.equal(v22ExecutionReceiptVerified({ ...base,
       events: [{ ...base.events[0], projectedApiCostMicrousd }] }), true);
   }
-  // The read-only API retry keeps the cap its recovery was approved at.
-  const api = { ...base, expectedExecutionSource: "anthropic_messages_api",
+  // An owner-approved recovery keeps the cap it was approved at, on the CLI
+  // as on the read-only API.
+  assert.equal(v22ExecutionReceiptVerified({ ...base, ownerApprovedRecovery: true,
+    events: [{ ...base.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base, ownerApprovedRecovery: true,
+    events: [{ ...base.events[0], projectedApiCostMicrousd: null }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base, ownerApprovedRecovery: true }), true);
+  const api = { ...base, ownerApprovedRecovery: true, expectedExecutionSource: "anthropic_messages_api",
     events: [{ ...base.events[0], cli: "anthropic_api", source: "anthropic_messages_api" }] };
   assert.equal(v22ExecutionReceiptVerified(api), true);
   assert.equal(v22ExecutionReceiptVerified({ ...api,
