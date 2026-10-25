@@ -212,7 +212,7 @@ async function activateInternalPass({
     await tx.user.update({
       where: { id: userId },
       data: {
-        plan: effectivePlanForAccess({ ...entitlement, webSubscriptionPlan: tierForPlanId(planId),
+        plan: effectivePlanForAccess({ ...entitlement, plan: tierForPlanId(planId), webSubscriptionPlan: tierForPlanId(planId),
           subscriptionStatus: FOUNDING_TESTER_PASS_STATUS, subscriptionCurrentPeriodEnd: periodEnd }),
         webSubscriptionPlan: tierForPlanId(planId),
         stripeSubscriptionId: null,
@@ -443,7 +443,7 @@ export async function POST(req: Request) {
     if (!user) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
-    if (user.subscriptionStore && user.storeSubscriptionExpiresAt && user.storeSubscriptionExpiresAt > new Date()) {
+    if (effectivePlanForAccess({ ...user, plan: "Free", webSubscriptionPlan: "Free" }) !== "Free") {
       return NextResponse.json({ code: "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", error: "Manage this subscription in the store where it was purchased." }, { status: 409 });
     }
     // The plan the account can actually use right now, not the raw column: a

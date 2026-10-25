@@ -241,7 +241,7 @@ const expireFoundingTesterPasses = async (now: Date) => {
           subscriptionCurrentPeriodEnd: { lte: now },
         },
         data: {
-          plan: effectivePlanForAccess({ ...entitlement, webSubscriptionPlan: "Free" }),
+          plan: effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" }),
           webSubscriptionPlan: "Free",
           subscriptionStatus: FOUNDING_TESTER_PASS_EXPIRED_STATUS,
           subscriptionBillingInterval: null,

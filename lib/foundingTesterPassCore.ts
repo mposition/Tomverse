@@ -19,6 +19,7 @@ const normalizePlan = (value: unknown): EffectivePlanTier =>
 
 export const STORE_ENTITLEMENT_SELECT = {
   webSubscriptionPlan: true, storeSubscriptionPlan: true, storeSubscriptionExpiresAt: true,
+  storeSubscriptionSnapshot: true,
 } as const;
 
 export const effectivePlanForAccess = (
@@ -29,17 +30,36 @@ export const effectivePlanForAccess = (
     webSubscriptionPlan?: string | null;
     storeSubscriptionPlan?: string | null;
     storeSubscriptionExpiresAt?: Date | string | null;
+    storeSubscriptionSnapshot?: unknown;
   },
   now = new Date()
 ): EffectivePlanTier => {
-  let plan = normalizePlan(input.webSubscriptionPlan ?? input.plan);
+  const hasStoreHistory = normalizePlan(input.storeSubscriptionPlan) !== "Free" ||
+    (Array.isArray(input.storeSubscriptionSnapshot) && input.storeSubscriptionSnapshot.slice(0, 30).some((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      const item = entry as { plan?: unknown; store?: unknown; expiresAt?: unknown };
+      return normalizePlan(item.plan) !== "Free" && (item.store === "app_store" || item.store === "play_store") &&
+        typeof item.expiresAt === "string" && Number.isFinite(Date.parse(item.expiresAt));
+    }));
+  // Before store activation, old and new application versions may both write
+  // web plans during rollout. The original column stays authoritative there.
+  let plan = normalizePlan(hasStoreHistory ? input.webSubscriptionPlan ?? input.plan : input.plan);
   const expiringAccess = input.subscriptionStatus === FOUNDING_TESTER_PASS_STATUS || input.subscriptionStatus?.startsWith("mobile_store_");
   if (expiringAccess) {
     const periodEnd = new Date(input.subscriptionCurrentPeriodEnd || 0);
     if (!Number.isFinite(periodEnd.getTime()) || periodEnd <= now) plan = "Free";
   }
   const storeExpiry = new Date(input.storeSubscriptionExpiresAt || 0);
-  const native = Number.isFinite(storeExpiry.getTime()) && storeExpiry > now ? normalizePlan(input.storeSubscriptionPlan) : "Free";
+  let native = Number.isFinite(storeExpiry.getTime()) && storeExpiry > now ? normalizePlan(input.storeSubscriptionPlan) : "Free";
+  // Preserve every verified store period, including a lower tier that outlives
+  // an overlapping higher tier on the other store.
+  if (Array.isArray(input.storeSubscriptionSnapshot)) for (const entry of input.storeSubscriptionSnapshot.slice(0, 30)) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as { store?: unknown; plan?: unknown; expiresAt?: unknown };
+    if ((item.store !== "app_store" && item.store !== "play_store") || typeof item.expiresAt !== "string" || new Date(item.expiresAt) <= now || !Number.isFinite(Date.parse(item.expiresAt))) continue;
+    const tier = normalizePlan(item.plan);
+    if (tier === "Max" || (tier === "Pro" && native === "Free")) native = tier;
+  }
   if (native === "Max" || plan === "Max") return "Max";
   if (native === "Pro" || plan === "Pro") return "Pro";
   return plan;

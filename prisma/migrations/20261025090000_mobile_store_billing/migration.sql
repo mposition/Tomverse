@@ -8,7 +8,7 @@ ALTER TABLE "User" ADD COLUMN "webSubscriptionPlan" TEXT,
   ADD COLUMN "storeSubscriptionBillingInterval" TEXT,
   ADD COLUMN "storeSubscriptionCancelAtPeriodEnd" BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN "storeSubscriptionSyncedAt" TIMESTAMP(3);
-UPDATE "User" SET "webSubscriptionPlan" = "plan";
+ALTER TABLE "User" ADD COLUMN "storeSubscriptionSnapshot" JSONB;
 ALTER TABLE "CreditLot" ADD COLUMN "nonExpiring" BOOLEAN NOT NULL DEFAULT false;
 CREATE TABLE "MobileStoreTransaction" (
   "id" TEXT NOT NULL PRIMARY KEY,
@@ -29,3 +29,12 @@ CREATE UNIQUE INDEX "MobileStoreTransaction_store_environment_transactionId_key"
   ON "MobileStoreTransaction"("store", "environment", "transactionId");
 CREATE UNIQUE INDEX "MobileStoreTransaction_creditLotId_key" ON "MobileStoreTransaction"("creditLotId");
 CREATE INDEX "MobileStoreTransaction_userId_purchasedAt_idx" ON "MobileStoreTransaction"("userId", "purchasedAt");
+CREATE TABLE "MobileStoreOwnership" (
+  "store" TEXT NOT NULL,
+  "environment" TEXT NOT NULL,
+  "transactionHash" TEXT NOT NULL,
+  "ownerHash" TEXT NOT NULL,
+  "kind" TEXT NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("store", "environment", "transactionHash")
+);

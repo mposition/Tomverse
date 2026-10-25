@@ -254,6 +254,7 @@ export const authOptions: NextAuthOptions = {
                     webSubscriptionPlan?: string | null;
                     storeSubscriptionPlan?: string | null;
                     storeSubscriptionExpiresAt?: Date | null;
+                    storeSubscriptionSnapshot?: unknown;
                 };
                 token.plan = effectivePlanForAccess({
                     ...analyticsUser,

@@ -62,6 +62,10 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
       <div className="native-billing-current"><h3>Current plan: {state.plan}</h3><p>Purchased credits: {state.purchasedCredits.toLocaleString()}</p>
         {state.active && state.expiresAt && <p>{state.cancelAtPeriodEnd ? "Access until" : "Renews"}: {new Date(state.expiresAt).toLocaleDateString()}</p>}
         {state.active && state.subscriptionStore && state.subscriptionStore !== "web" && <button type="button" disabled={busy} onClick={() => { void manage().catch(() => setError("Unable to open subscription management.")); }}>Manage or cancel subscription</button>}
+        {[...new Set(state.storeSubscriptions?.map((entry) => entry.store) || [])].filter((provider) => provider !== state.subscriptionStore).map((provider) =>
+          <button key={provider} type="button" disabled={busy} onClick={() => { void Browser.open({ url: provider === "app_store" ? "https://apps.apple.com/account/subscriptions" : "https://play.google.com/store/account/subscriptions" }).catch(() => setError("Unable to open subscription management.")); }}>
+            Manage {provider === "app_store" ? "App Store" : "Google Play"} subscription
+          </button>)}
         {state.active && (state.subscriptionStore === "web" || state.webSubscription?.active) && <><p>Your web subscription is managed by Tomverse. Cancel renewal here; access continues until the end of the paid period.</p>
           {state.webSubscription?.expiresAt && <p>Web subscription access until: {new Date(state.webSubscription.expiresAt).toLocaleDateString()}</p>}
           {!(state.webSubscription?.cancelAtPeriodEnd ?? state.cancelAtPeriodEnd) && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel subscription</button>}

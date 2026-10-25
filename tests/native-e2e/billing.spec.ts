@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-async function installBilling(page: Page, web = false, overlap = false) {
+async function installBilling(page: Page, web = false, overlap = false, bothStores = false) {
   const calls: { plugin: string; method: string; options: Record<string, unknown> }[] = [];
   await page.exposeFunction("billingCall", (call: typeof calls[number]) => { calls.push(call); });
   await page.addInitScript(() => {
@@ -29,6 +29,10 @@ async function installBilling(page: Page, web = false, overlap = false) {
       billingId: "billing-account", plan: "Pro", subscriptionStore: web ? "web" : "play_store", productId: "pro:monthly",
       interval: "monthly", expiresAt: "2026-11-25T00:00:00Z", active: true, cancelAtPeriodEnd: cancelled, purchasedCredits,
       webSubscription: { active: web || overlap, cancelAtPeriodEnd: cancelled, expiresAt: "2026-11-25T00:00:00Z" },
+      storeSubscriptions: bothStores ? [
+        { store: "play_store", productId: "pro:monthly", plan: "Pro", interval: "monthly", expiresAt: "2099-01-01T00:00:00Z", cancelAtPeriodEnd: false },
+        { store: "app_store", productId: "apple.pro", plan: "Pro", interval: "monthly", expiresAt: "2099-01-01T00:00:00Z", cancelAtPeriodEnd: false },
+      ] : [],
       products: [
         { store: "play_store", productId: "pro:monthly", kind: "subscription", plan: "Pro", interval: "monthly", monthlyCredits: 3000, maxModels: 3 },
         { store: "play_store", productId: "max:monthly", kind: "subscription", plan: "Max", interval: "monthly", monthlyCredits: 10000, maxModels: 5 },
@@ -75,4 +79,10 @@ test("overlapping web and store subscriptions both remain manageable without ano
   await page.getByRole("button", { name: "Confirm cancellation", exact: true }).click();
   await expect(page.getByText("Automatic renewal has been cancelled.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Manage or cancel subscription", exact: true })).toBeEnabled();
+});
+test("both stores expose cancellation when paid subscriptions overlap across devices", async ({ page }) => {
+  const calls = await installBilling(page, false, false, true);
+  await expect(page.getByRole("button", { name: "Manage or cancel subscription", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Manage App Store subscription", exact: true }).click();
+  await expect.poll(() => calls.some((c) => c.plugin === "Browser" && c.options.url === "https://apps.apple.com/account/subscriptions")).toBe(true);
 });

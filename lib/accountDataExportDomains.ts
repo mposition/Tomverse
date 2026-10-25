@@ -1104,6 +1104,13 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Which promotion was redeemed, for what plan, and the access period it bought. The client IP and payment-method fingerprint hashes and the risk flags are abuse signals: handing a user their own fraud assessment teaches whoever is abusing the promotion how the control works.",
   },
   {
+    domain: "mobileStoreOwnership",
+    publicName: "store_purchase_replay_protection",
+    prismaModel: "MobileStoreOwnership",
+    state: "excluded",
+    exclusionReason: "Account-independent keyed hashes prevent reusing a store receipt after account deletion. Raw store transaction IDs and account IDs are not retained in this tombstone.",
+  },
+  {
     domain: "mobileStoreTransaction",
     publicName: "store_credit_purchases",
     prismaModel: "MobileStoreTransaction",

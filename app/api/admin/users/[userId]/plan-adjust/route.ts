@@ -17,6 +17,7 @@ import { ADMIN_PLAN_CHANGED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   apiSecurityResponse,
+  ApiSecurityError,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
@@ -75,7 +76,8 @@ export async function PATCH(req: Request, context: RouteContext) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
     const paidStorePlan = effectivePlanForAccess({ plan: "Free", webSubscriptionPlan: "Free",
-      storeSubscriptionPlan: before.storeSubscriptionPlan, storeSubscriptionExpiresAt: before.storeSubscriptionExpiresAt });
+      storeSubscriptionPlan: before.storeSubscriptionPlan, storeSubscriptionExpiresAt: before.storeSubscriptionExpiresAt,
+      storeSubscriptionSnapshot: before.storeSubscriptionSnapshot });
     if (["Free", "Pro", "Max"].indexOf(body.plan) < ["Free", "Pro", "Max"].indexOf(paidStorePlan)) {
       return NextResponse.json({ code: "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY",
         error: "Cancel or refund the store subscription with its original provider before reducing this paid entitlement." }, { status: 409 });
@@ -94,6 +96,10 @@ export async function PATCH(req: Request, context: RouteContext) {
       () => prisma.$transaction(async (tx) => {
         await lockSubscriptionAccount(tx, userId);
         const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+        const currentStorePlan = effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" });
+        if (["Free", "Pro", "Max"].indexOf(body.plan) < ["Free", "Pro", "Max"].indexOf(currentStorePlan)) {
+          throw new ApiSecurityError(409, "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", "The paid store entitlement must be cancelled or refunded by its provider first.");
+        }
         return tx.user.update({
           where: { id: userId },
           data: {

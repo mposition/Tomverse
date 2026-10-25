@@ -23,7 +23,7 @@ export async function applyWebSubscriptionSnapshot(input: {
       subscriptionCancelAtPeriodEnd: input.cancelAtPeriodEnd, subscriptionSyncedAt: input.observedAt,
       stripeSubscriptionId: input.subscriptionId, stripePriceId: input.priceId,
     };
-    await tx.user.update({ where: { id: user.id }, data: { ...data, plan: effectivePlanForAccess({ ...user, ...data }) } });
+    await tx.user.update({ where: { id: user.id }, data: { ...data, plan: effectivePlanForAccess({ ...user, ...data, plan: input.plan }) } });
     return true;
   });
 }

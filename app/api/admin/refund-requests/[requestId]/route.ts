@@ -510,7 +510,7 @@ export async function PATCH(req: Request, context: RouteContext) {
           await tx.user.update({
             where: { id: refundRequest.userId },
             data: {
-              plan: effectivePlanForAccess({ ...entitlement, webSubscriptionPlan: "Free" }),
+              plan: effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" }),
               webSubscriptionPlan: "Free",
               stripeCustomerId: null,
               stripeSubscriptionId: null,

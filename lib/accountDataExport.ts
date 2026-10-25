@@ -192,6 +192,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         storeSubscriptionExpiresAt: true,
         storeSubscriptionBillingInterval: true,
         storeSubscriptionCancelAtPeriodEnd: true,
+        storeSubscriptionSnapshot: true,
         accountStatus: true,
         accountDeletionScheduledFor: true,
         emailLoginEnabled: true,

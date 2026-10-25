@@ -9,6 +9,11 @@ const product = z.discriminatedUnion("kind", [
     packId: z.enum(["starter_500", "project_1500", "power_4000"]) }).strict(),
 ]);
 export type MobileBillingProduct = z.infer<typeof product>;
+export const mobileStoreSnapshotSchema = z.object({
+  store, productId: z.string().min(1).max(200), plan: z.enum(["Pro", "Max"]),
+  interval: z.enum(["monthly", "annual"]), expiresAt: z.string().datetime({ offset: true }), cancelAtPeriodEnd: z.boolean(),
+});
+export type MobileStoreSubscriptionView = z.infer<typeof mobileStoreSnapshotSchema>;
 export type MobileBillingState = {
   billingId: string;
   plan: string;
@@ -20,6 +25,7 @@ export type MobileBillingState = {
   active: boolean;
   purchasedCredits: number;
   webSubscription?: { active: boolean; cancelAtPeriodEnd: boolean; expiresAt: string | null };
+  storeSubscriptions?: MobileStoreSubscriptionView[];
   products: (MobileBillingProduct & { credits?: number; monthlyCredits?: number; maxModels?: number })[];
 };
 
@@ -44,13 +50,14 @@ const subscription = z.object({
   refunded_at: z.string().nullable().optional(), unsubscribe_detected_at: z.string().nullable().optional(),
   billing_issues_detected_at: z.string().nullable().optional(),
   product_plan_identifier: z.string().nullable().optional(),
+  store_transaction_id: z.union([z.string().min(1).max(300), z.number().int().safe().positive()]).optional(),
 });
 export const revenueCatCustomerSchema = z.object({ subscriber: z.object({
   subscriptions: z.record(z.string(), z.unknown()),
 }) });
 
 /** Use the current server snapshot, never a client entitlement or webhook snapshot. */
-export function resolveMobileSubscription(raw: unknown, products: MobileBillingProduct[], environment: string, now = new Date()) {
+export function resolveMobileSubscriptions(raw: unknown, products: MobileBillingProduct[], environment: string, now = new Date()) {
   const customer = revenueCatCustomerSchema.parse(raw);
   return Object.entries(customer.subscriber.subscriptions).flatMap(([productId, value]) => {
     const parsed = subscription.safeParse(value);
@@ -63,8 +70,12 @@ export function resolveMobileSubscription(raw: unknown, products: MobileBillingP
     const expiry = new Date(current.grace_period_expires_date || current.expires_date || 0);
     if (expiry <= now) return [];
     return [{ ...item, expiresAt: expiry, cancelAtPeriodEnd: Boolean(current.unsubscribe_detected_at),
+      transactionId: current.store_transaction_id === undefined ? null : String(current.store_transaction_id),
       status: current.billing_issues_detected_at ? "past_due" : "active" }];
-  }).sort((a, b) => (b.plan === "Max" ? 1 : 0) - (a.plan === "Max" ? 1 : 0) || b.expiresAt.getTime() - a.expiresAt.getTime())[0] || null;
+  }).sort((a, b) => (b.plan === "Max" ? 1 : 0) - (a.plan === "Max" ? 1 : 0) || b.expiresAt.getTime() - a.expiresAt.getTime());
+}
+export function resolveMobileSubscription(raw: unknown, products: MobileBillingProduct[], environment: string, now = new Date()) {
+  return resolveMobileSubscriptions(raw, products, environment, now)[0] || null;
 }
 
 export const mobileBillingRequestSchema = z.object({
@@ -76,6 +87,7 @@ export const revenueCatWebhookSchema = z.object({ api_version: z.literal("1.0"),
   app_user_id: z.string().min(1).max(200), store: z.enum(["APP_STORE", "PLAY_STORE"]),
   environment: z.enum(["PRODUCTION", "SANDBOX"]), product_id: z.string().min(1).max(200),
   transaction_id: z.string().min(1).max(300), purchased_at_ms: z.number().int().positive(),
+  original_transaction_id: z.string().min(1).max(300).optional(),
   cancel_reason: z.string().optional(),
 }) });
 

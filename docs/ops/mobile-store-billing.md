@@ -34,6 +34,9 @@ does not grant access. Failed webhook processing returns 503 for redelivery.
   deletion can remove the other source's paid access. The effective tier is the
   highest currently entitled tier, with a shared monthly allowance rather than
   an extra allowance per subscription.
+  Every verified store period is retained, so a lower tier on the other store
+  stays available after an overlapping higher tier expires. Management links
+  are offered for each subscribed store.
 - Account deletion confirmation and scheduled-deletion mail disclose that App
   Store/Play billing must be cancelled separately; deleting the Tomverse account
   does not cancel a store subscription.
@@ -65,6 +68,7 @@ API server:
 | REVENUECAT_WEBHOOK_AUTHORIZATION | Exact authorization header configured in RevenueCat, at least 32 characters |
 | REVENUECAT_APPLE_APP_ID | RevenueCat app ID allowed for App Store events |
 | REVENUECAT_GOOGLE_APP_ID | RevenueCat app ID allowed for Play events |
+| MOBILE_BILLING_OWNERSHIP_KEY | Dedicated server-only key, at least 32 characters, for stable receipt/owner hashes |
 
 Native Vite build:
 
@@ -105,7 +109,21 @@ activation. A store receipt is never assigned to a different Tomverse account.
 If RevenueCat reports an unknown customer or transfer, investigate instead of
 changing ownership from the webhook.
 
+The server also binds each store transaction and subscription original
+transaction to one billing identity. These keyed-hash ownership tombstones have
+no user foreign key and survive account deletion. Restoring or transferring a
+receipt cannot grant it to another account, even if the provider restore setting
+is changed. Subscription access waits for a verified webhook to bind its current
+transaction; an SDK success alone cannot grant it. Configure webhooks before
+allowing purchases. Keep the ownership key stable for retained tombstones;
+rotation requires compatible lookup of the previous key, never deleting the
+ownership records. No raw receipt or account ID is retained in that registry.
+
 Apply the additive migration through the normal approved deployment workflow.
+The new web-plan column remains null for existing rows: old application
+instances can continue writing plan while migration and rollout overlap. New
+writers set the separate web snapshot explicitly; readers fall back to plan
+until then.
 Run cap sync after installing dependencies; the sync hook changes Android
 MainActivity to singleTop so banking-app confirmation does not cancel the
 purchase. Enable the In-App Purchase capability in the iOS Xcode target.

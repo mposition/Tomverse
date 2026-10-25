@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { after, beforeEach, test, mock } from "node:test";
 import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
-import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription, readMobileBillingState, cancelMobileWebSubscription } from "@/lib/mobileBillingService";
+import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription, readMobileBillingState, cancelMobileWebSubscription, processMobileStoreWebhook } from "@/lib/mobileBillingService";
+import { claimMobileStoreOwnership } from "@/lib/mobileStoreOwnership";
+import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import { getPurchasedCreditSummary, expireCreditLots, reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
 import { getStripe } from "@/lib/stripe";
@@ -11,17 +14,23 @@ import { resyncSubscriptionFromStripe, processStripeEvent } from "@/lib/stripeWe
 process.env.MOBILE_BILLING_PRODUCTS_JSON = JSON.stringify([
   { store: "app_store", productId: "credits500", kind: "credits", packId: "starter_500" },
   { store: "app_store", productId: "pro.month", kind: "subscription", plan: "Pro", interval: "monthly" },
+  { store: "play_store", productId: "play.max:monthly", kind: "subscription", plan: "Max", interval: "monthly" },
 ]);
 process.env.REVENUECAT_SECRET_API_KEY = "server-test-key";
+process.env.MOBILE_BILLING_OWNERSHIP_KEY = "local-mobile-billing-ownership-test-key-2026";
 const event = { id: "event-1", app_id: "app-test", app_user_id: "account-test", store: "APP_STORE" as const,
   environment: "PRODUCTION" as const, type: "NON_RENEWING_PURCHASE", product_id: "credits500", transaction_id: "tx-1", purchased_at_ms: Date.now() };
 const reset = async () => { await prisma.user.deleteMany({ where: { email: { endsWith: "@mobile-billing.example.test" } } }); };
-beforeEach(reset);
+beforeEach(async () => { await reset(); event.transaction_id = randomUUID(); });
 after(async () => { await reset(); await prisma.$disconnect(); });
 const createUser = (suffix = "one") => prisma.user.create({ data: { email: `${suffix}@mobile-billing.example.test` } });
 const deliver = (userId: string, overrides = {}) => prisma.$transaction(async (tx) => {
   await lockCreditAccount(tx, userId); await applyMobileCreditEvent(tx, userId, { ...event, ...overrides });
 });
+const bindSubscription = (billingId: string, transactionId: string, store: "APP_STORE" | "PLAY_STORE" = "APP_STORE", productId = "pro.month") => prisma.$transaction((tx) => claimMobileStoreOwnership(tx, {
+  ...event, store, type: "INITIAL_PURCHASE", product_id: productId, app_user_id: billingId,
+  transaction_id: transactionId, original_transaction_id: transactionId,
+}));
 
 test("concurrent purchase delivery grants once and a second account cannot replay the store transaction", async () => {
   const user = await createUser();
@@ -31,6 +40,26 @@ test("concurrent purchase delivery grants once and a second account cannot repla
   const second = await createUser("two");
   await assert.rejects(deliver(second.id), /another account/);
   assert.equal((await getPurchasedCreditSummary(second.id)).remainingCredits, 0);
+});
+test("each paid store stays manageable and an overlapping lower tier survives the higher tier's expiry", async () => {
+  const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const appleTransaction = `apple-${user.id}`; const playTransaction = `play-${user.id}`;
+  await bindSubscription(billingId, appleTransaction);
+  await bindSubscription(billingId, playTransaction, "PLAY_STORE", "play.max:monthly");
+  const expires = new Date(Date.now() + 86400000);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ subscriber: { subscriptions: {
+    "pro.month": { store: "app_store", is_sandbox: false, store_transaction_id: appleTransaction, expires_date: "2099-01-01T00:00:00Z" },
+    "play.max:monthly": { store: "play_store", is_sandbox: false, store_transaction_id: playTransaction, expires_date: expires.toISOString() },
+  } } });
+  try {
+    await syncMobileSubscription(user.id, billingId);
+    const account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    assert.equal(account.plan, "Max");
+    const state = await readMobileBillingState(user.id, "app_store");
+    assert.equal(state.storeSubscriptions?.length, 2);
+    assert.equal(effectivePlanForAccess(account, new Date(expires.getTime() + 1000)), "Pro");
+  } finally { globalThis.fetch = originalFetch; }
 });
 test("purchased store credits remain spendable with an old compatibility date and never expire", async () => {
   const user = await createUser(); await deliver(user.id);
@@ -75,8 +104,9 @@ test("releasing an in-flight reservation after a store refund clears debt withou
 });
 test("subscription sync preserves credit usage, protects web subscriptions and rereads current store state", async () => {
   const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const transactionId = `store-${user.id}`; await bindSubscription(billingId, transactionId);
   const originalFetch = globalThis.fetch;
-  let subscriptions = { "pro.month": { store: "app_store", is_sandbox: false, expires_date: "2099-01-01T00:00:00Z", unsubscribe_detected_at: "2026-10-25T00:00:00Z" } } as Record<string, unknown>;
+  let subscriptions = { "pro.month": { store: "app_store", is_sandbox: false, store_transaction_id: transactionId, expires_date: "2099-01-01T00:00:00Z", unsubscribe_detected_at: "2026-10-25T00:00:00Z" } } as Record<string, unknown>;
   globalThis.fetch = async () => Response.json({ subscriber: { subscriptions } });
   try {
     await syncMobileSubscription(user.id, billingId);
@@ -97,6 +127,7 @@ test("subscription sync preserves credit usage, protects web subscriptions and r
 test("a paid web subscription applies immediately after store expiry, including concurrent mobile reads", async () => {
   process.env.STRIPE_SECRET_KEY = "sk_test_local_mock_only";
   const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
+  const transactionId = `store-${user.id}`; await bindSubscription(billingId, transactionId);
   const customer = "cus_mobile_transition";
   await prisma.user.update({ where: { id: user.id }, data: {
     plan: "Max", webSubscriptionPlan: "Free", subscriptionStore: "app_store", storeSubscriptionPlan: "Max",
@@ -117,7 +148,7 @@ test("a paid web subscription applies immediately after store expiry, including 
     const synced = await resyncSubscriptionFromStripe(subscription.id);
     assert.equal(synced?.plan, "Pro");
     release(Response.json({ subscriber: { subscriptions: { "pro.month": {
-      store: "app_store", is_sandbox: false, expires_date: "2099-01-01T00:00:00Z",
+      store: "app_store", is_sandbox: false, store_transaction_id: transactionId, expires_date: "2099-01-01T00:00:00Z",
     } } } }));
     await mobile;
     const current = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -128,9 +159,40 @@ test("a paid web subscription applies immediately after store expiry, including 
   } finally { retrieve.mock.restore(); globalThis.fetch = originalFetch; }
 });
 
+test("deleting an account cannot make its paid consumable reusable by a new account", async () => {
+  const first = await createUser(); const firstBilling = await ensureMobileBillingId(first.id);
+  await deliver(first.id, { app_user_id: firstBilling });
+  await prisma.user.delete({ where: { id: first.id } });
+  const second = await createUser("replacement"); const secondBilling = await ensureMobileBillingId(second.id);
+  await assert.rejects(deliver(second.id, { app_user_id: secondBilling }), /another account/);
+  assert.equal((await getPurchasedCreditSummary(second.id)).remainingCredits, 0);
+});
+test("subscription access waits for a webhook and a transferred receipt cannot move after account deletion", async () => {
+  const first = await createUser(); const firstBilling = await ensureMobileBillingId(first.id);
+  const transactionId = `subscription-${first.id}`;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ subscriber: { subscriptions: { "pro.month": {
+    store: "app_store", is_sandbox: false, store_transaction_id: transactionId, expires_date: "2099-01-01T00:00:00Z",
+  } } } });
+  try {
+    await syncMobileSubscription(first.id, firstBilling);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: first.id } })).plan, "Free");
+    await processMobileStoreWebhook({ ...event, type: "INITIAL_PURCHASE", product_id: "pro.month",
+      app_user_id: firstBilling, transaction_id: transactionId, original_transaction_id: transactionId });
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: first.id } })).plan, "Pro");
+    await prisma.user.delete({ where: { id: first.id } });
+    const second = await createUser("replacement"); const secondBilling = await ensureMobileBillingId(second.id);
+    await assert.rejects(syncMobileSubscription(second.id, secondBilling), /another account/);
+    await assert.rejects(processMobileStoreWebhook({ ...event, type: "RENEWAL", product_id: "pro.month",
+      app_user_id: secondBilling, transaction_id: `${transactionId}-renewal`, original_transaction_id: transactionId }), /another account/);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: second.id } })).plan, "Free");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("checkout completing after a store purchase stays recorded and cancellable, and web deletion preserves store access", async () => {
   process.env.STRIPE_SECRET_KEY = "sk_test_local_mock_only";
   const user = await createUser(); await ensureMobileBillingId(user.id);
+  const checkoutId = `cs_mobile_overlap_${user.id}`;
   const customer = "cus_mobile_overlap";
   await prisma.user.update({ where: { id: user.id }, data: {
     plan: "Max", webSubscriptionPlan: "Free", subscriptionStore: "app_store",
@@ -145,13 +207,13 @@ test("checkout completing after a store purchase stays recorded and cancellable,
   const update = mock.method(stripe.subscriptions, "update", async () => { subscription.cancel_at_period_end = true; return subscription; });
   try {
     await processStripeEvent({ id: "evt_overlap", type: "checkout.session.completed", data: { object: {
-      id: "cs_mobile_overlap", subscription: subscription.id, amount_total: 1500, currency: "usd",
+      id: checkoutId, subscription: subscription.id, amount_total: 1500, currency: "usd",
       created: Math.floor(Date.now() / 1000), metadata: {},
     } } } as unknown as Stripe.Event);
     let account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     assert.equal(account.plan, "Max"); assert.equal(account.stripeSubscriptionId, subscription.id);
     assert.equal(account.webSubscriptionPlan, "Pro");
-    assert.equal(await prisma.billingTransaction.count({ where: { userId: user.id, stripeCheckoutSessionId: "cs_mobile_overlap" } }), 1);
+    assert.equal(await prisma.billingTransaction.count({ where: { userId: user.id, stripeCheckoutSessionId: checkoutId } }), 1);
     const state = await readMobileBillingState(user.id, "app_store");
     assert.equal(state.webSubscription?.active, true); assert.equal(state.subscriptionStore, "app_store");
     await cancelMobileWebSubscription(user.id);

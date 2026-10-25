@@ -235,7 +235,7 @@ export const reconcileProcessingRefundRequests = async ({
           await tx.user.update({
             where: { id: request.userId },
             data: {
-              plan: effectivePlanForAccess({ ...entitlement, webSubscriptionPlan: "Free" }),
+              plan: effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" }),
               webSubscriptionPlan: "Free",
               stripeCustomerId: null,
               stripeSubscriptionId: null,

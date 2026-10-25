@@ -33,6 +33,7 @@ model User {
   storeSubscriptionBillingInterval String?
   storeSubscriptionCancelAtPeriodEnd Boolean @default(false)
   storeSubscriptionSyncedAt     DateTime?
+  storeSubscriptionSnapshot     Json?
   /// When the stored subscription state was read from Stripe. Webhooks arrive
   /// out of order, so a snapshot read before this is refused rather than
   /// reverting the account to an older plan. See lib/stripeWebhookSyncCore.ts.
@@ -1744,6 +1745,17 @@ model MobileStoreTransaction {
 
   @@unique([store, environment, transactionId])
   @@index([userId, purchasedAt])
+}
+
+/// Financial replay tombstones deliberately have no account foreign key.
+model MobileStoreOwnership {
+  store           String
+  environment     String
+  transactionHash String
+  ownerHash       String
+  kind            String
+  createdAt       DateTime @default(now())
+  @@id([store, environment, transactionHash])
 }
 
 model CreditLedgerEntry {

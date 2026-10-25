@@ -11,8 +11,9 @@ import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { getStripe } from "@/lib/stripe";
 import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
 import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
+import { assertMobileOwnershipConfigured, claimMobileStoreOwnership, mobileStoreOwnerHash, mobileStoreTransactionHash, storeOwnershipRefusal } from "@/lib/mobileStoreOwnership";
 import {
-  mobileBillingEnvironment, parseMobileBillingProducts, resolveMobileSubscription,
+  mobileBillingEnvironment, parseMobileBillingProducts, resolveMobileSubscriptions, mobileStoreSnapshotSchema,
   type MobileBillingState, type MobileStore, type revenueCatWebhookSchema,
 } from "@/lib/mobileBillingCore";
 import type { z } from "zod";
@@ -39,10 +40,26 @@ async function readRevenueCatCustomer(billingId: string) {
 }
 
 export async function syncMobileSubscription(userId: string, billingId: string) {
+  assertMobileOwnershipConfigured();
   const products = mobileBillingProducts();
   // Timestamp before HTTP; stale responses cannot replace newer provider state.
   const observedAt = new Date();
-  const current = resolveMobileSubscription(await readRevenueCatCustomer(billingId), products, mobileBillingEnvironment());
+  const candidates = resolveMobileSubscriptions(await readRevenueCatCustomer(billingId), products, mobileBillingEnvironment());
+  const owned: typeof candidates = [];
+  let ownershipConflict = false;
+  for (const candidate of candidates) {
+    if (!candidate.transactionId) throw new Error("Store transaction evidence is incomplete.");
+    const ownership = await prisma.mobileStoreOwnership.findUnique({ where: {
+      store_environment_transactionHash: { store: candidate.store, environment: mobileBillingEnvironment(), transactionHash: mobileStoreTransactionHash(candidate.transactionId) },
+    } });
+    if (!ownership) continue;
+    if (ownership.ownerHash !== mobileStoreOwnerHash(billingId) || ownership.kind !== "subscription") { ownershipConflict = true; continue; }
+    owned.push(candidate);
+  }
+  if (!owned.length && ownershipConflict) throw storeOwnershipRefusal();
+  // Keep the previous paid period while a new transaction awaits its webhook.
+  if (candidates.length && !owned.length) return;
+  const current = owned[0] || null;
   await prisma.$transaction(async (tx) => {
     await lockSubscriptionAccount(tx, userId);
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
@@ -54,8 +71,10 @@ export async function syncMobileSubscription(userId: string, billingId: string) 
       storeSubscriptionPlan: current?.plan || "Free", storeSubscriptionExpiresAt: current?.expiresAt || null,
       storeSubscriptionBillingInterval: current?.interval || null,
       storeSubscriptionCancelAtPeriodEnd: current?.cancelAtPeriodEnd || false, storeSubscriptionSyncedAt: observedAt,
+      storeSubscriptionSnapshot: owned.map(({ store, productId, plan, interval, expiresAt, cancelAtPeriodEnd }) =>
+        ({ store, productId, plan, interval, expiresAt: expiresAt.toISOString(), cancelAtPeriodEnd })),
     };
-    await tx.user.update({ where: { id: userId }, data: { ...data, plan: effectivePlanForAccess({ ...user, ...data }) } });
+    await tx.user.update({ where: { id: userId }, data: { ...data, plan: effectivePlanForAccess({ ...user, ...data, plan: data.webSubscriptionPlan }) } });
   });
 }
 
@@ -65,16 +84,20 @@ export async function readMobileBillingState(userId: string, store: MobileStore)
   ]);
   if (!user.mobileBillingId) throw new Error("Billing identity unavailable.");
   const plan = effectivePlanForAccess(user);
-  const subscriptionStore = user.subscriptionStore === "app_store" || user.subscriptionStore === "play_store" ? user.subscriptionStore : null;
-  const nativeActive = Boolean(subscriptionStore && user.storeSubscriptionExpiresAt && user.storeSubscriptionExpiresAt > new Date());
+  const snapshots = mobileStoreSnapshotSchema.array().max(30).safeParse(user.storeSubscriptionSnapshot || []);
+  const stores = snapshots.success ? snapshots.data.filter((entry) => new Date(entry.expiresAt) > new Date()) : [];
+  const native = stores[0];
+  const subscriptionStore = native?.store || (user.subscriptionStore === "app_store" || user.subscriptionStore === "play_store" ? user.subscriptionStore : null);
+  const nativeActive = Boolean(native || (subscriptionStore && user.storeSubscriptionExpiresAt && user.storeSubscriptionExpiresAt > new Date()));
   const webActive = Boolean(user.stripeSubscriptionId && ["active", "trialing", "past_due"].includes(user.subscriptionStatus || ""));
   const active = nativeActive || webActive;
   return {
     billingId: user.mobileBillingId, plan, subscriptionStore: nativeActive ? subscriptionStore : webActive ? "web" : null,
-    productId: user.subscriptionStoreProductId,
-    interval: nativeActive ? user.storeSubscriptionBillingInterval : user.subscriptionBillingInterval,
-    expiresAt: (nativeActive ? user.storeSubscriptionExpiresAt : user.subscriptionCurrentPeriodEnd)?.toISOString() || null,
-    cancelAtPeriodEnd: nativeActive ? user.storeSubscriptionCancelAtPeriodEnd : user.subscriptionCancelAtPeriodEnd,
+    productId: native?.productId || user.subscriptionStoreProductId,
+    interval: native?.interval || (nativeActive ? user.storeSubscriptionBillingInterval : user.subscriptionBillingInterval),
+    expiresAt: native?.expiresAt || (nativeActive ? user.storeSubscriptionExpiresAt : user.subscriptionCurrentPeriodEnd)?.toISOString() || null,
+    cancelAtPeriodEnd: native?.cancelAtPeriodEnd ?? (nativeActive ? user.storeSubscriptionCancelAtPeriodEnd : user.subscriptionCancelAtPeriodEnd),
+    storeSubscriptions: stores,
     webSubscription: { active: webActive, cancelAtPeriodEnd: user.subscriptionCancelAtPeriodEnd, expiresAt: user.subscriptionCurrentPeriodEnd?.toISOString() || null },
     active, purchasedCredits: summary.remainingCredits,
     products: mobileBillingProducts().filter((p) => p.store === store).flatMap<MobileBillingState["products"][number]>((p) => {
@@ -109,12 +132,11 @@ export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userI
   if (event.type !== "NON_RENEWING_PURCHASE" && event.type !== "CANCELLATION") return;
   const pack = getCreditPack(product.packId);
   if (!pack) throw new Error("Unknown credit pack.");
+  await claimMobileStoreOwnership(tx, event);
   const where = { store_environment_transactionId: { store, environment: event.environment, transactionId: event.transaction_id } };
   const existing = await tx.mobileStoreTransaction.findUnique({ where });
   if (existing && existing.userId !== userId) {
-    const error = new Error("Store purchase belongs to another account.");
-    error.name = "StorePurchaseOwnershipError";
-    throw error;
+    throw storeOwnershipRefusal();
   }
   // A cancellation tombstone also handles refund-before-purchase delivery.
   if (existing?.refunded || (existing && event.type === "NON_RENEWING_PURCHASE")) return;
@@ -156,6 +178,8 @@ export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userI
 }
 
 export async function processMobileStoreWebhook(event: StoreEvent) {
+  // Retain the one-owner tombstone even if account deletion beat delivery.
+  await prisma.$transaction((tx) => claimMobileStoreOwnership(tx, event));
   const user = await prisma.user.findUnique({ where: { mobileBillingId: event.app_user_id }, select: { id: true } });
   if (!user) {
     // IDs are issued before the SDK can purchase. An unknown ID cannot become

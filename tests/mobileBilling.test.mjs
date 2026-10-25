@@ -4,6 +4,7 @@ import { parseMobileBillingProducts, resolveMobileSubscription, mobileBillingEna
 import { effectivePlanForAccess } from "../lib/foundingTesterPassCore.ts";
 import { canPurchaseMobileProduct, createNativeBillingClient } from "../apps/mobile/src/billingClient.ts";
 import { withBillingLaunchMode } from "../apps/mobile/scripts/configure-store-billing.mjs";
+import { assertMobileOwnershipConfigured } from "../lib/mobileStoreOwnership.ts";
 
 const products = [
   { store: "app_store", productId: "pro.month", kind: "subscription", plan: "Pro", interval: "monthly" },
@@ -13,6 +14,11 @@ const products = [
   { store: "play_store", productId: "credits500", kind: "credits", packId: "starter_500" },
 ];
 const now = new Date("2026-10-25T00:00:00Z");
+test("store ownership protection has no permissive default key", () => {
+  const prior = process.env.MOBILE_BILLING_OWNERSHIP_KEY;
+  try { delete process.env.MOBILE_BILLING_OWNERSHIP_KEY; assert.throws(assertMobileOwnershipConfigured, /not configured/); }
+  finally { if (prior === undefined) delete process.env.MOBILE_BILLING_OWNERSHIP_KEY; else process.env.MOBILE_BILLING_OWNERSHIP_KEY = prior; }
+});
 test("Android billing keeps banking-app confirmation alive and manifest sync is idempotent", () => {
   const source = '<application><activity android:name=".MainActivity" android:launchMode="singleTask"></activity><activity android:name=".Other" /></application>';
   const result = withBillingLaunchMode(source);
@@ -50,6 +56,8 @@ test("cancellation preserves paid access; grace uses the verified grace deadline
   assert.equal(resolve({ "pro.month": subscription(), "max.month": subscription() }).plan, "Max");
 });
 test("store access expires even if the expiration webhook is delayed", () => {
+  assert.equal(effectivePlanForAccess({ plan: "Pro", webSubscriptionPlan: "Free" }, now), "Pro", "old-code web upgrades during rollout remain authoritative before native activation");
+  assert.equal(effectivePlanForAccess({ plan: "Free", webSubscriptionPlan: "Pro" }, now), "Free", "old-code expiry during rollout cannot leave an unearned web tier");
   assert.equal(effectivePlanForAccess({ plan: "Max", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: "2026-10-24" }, now), "Free");
   assert.equal(effectivePlanForAccess({ plan: "Max", webSubscriptionPlan: "Pro", storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: "2026-10-24" }, now), "Pro");
   assert.equal(effectivePlanForAccess({ plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Pro", storeSubscriptionExpiresAt: "2026-11-24" }, now), "Pro");
