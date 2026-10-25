@@ -19,6 +19,7 @@ export {
   parseChatLocation,
   type ChatLocation,
   type ChatLocationReader,
+  type ChatLocationReadSignal,
   type ChatLocationState,
   type ChatLocationError,
 } from "./location";

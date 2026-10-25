@@ -144,3 +144,19 @@ test("the reusable cache breakpoint excludes the ephemeral fix across successive
   assert.equal(second[2].content[0].text, "And now?");
   assert.equal(second[2].content[1].providerOptions, undefined);
 });
+
+
+test("stopping a turn cancels its location wait immediately without cancelling another panel's acquisition", async () => {
+  let resolve;
+  let wait = false;
+  const session = createChatLocationSession(() => wait ? new Promise((done) => { resolve = done; }) : Promise.resolve(fix()));
+  await session.enable("account:a"); wait = true;
+  const controller = new AbortController();
+  const cancelled = session.readForTurn("account:a", controller.signal);
+  const otherPanel = session.readForTurn("account:a");
+  controller.abort();
+  await assert.rejects(cancelled, { name: "AbortError" });
+  resolve(fix());
+  assert.equal((await otherPanel).latitude, -27.47);
+  assert.equal(session.isEnabled("account:a"), true);
+});

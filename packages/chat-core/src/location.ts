@@ -39,6 +39,13 @@ export type ChatLocationState = {
   error: ChatLocationError | null;
 };
 export type ChatLocationReader = (requestPermission: boolean) => Promise<ChatLocation>;
+/** Minimal cancellation port, independent of browser/Node AbortSignal types. */
+export type ChatLocationReadSignal = {
+  readonly aborted: boolean;
+  readonly reason?: unknown;
+  addEventListener(type: "abort", listener: () => void, options?: { once: boolean }): void;
+  removeEventListener(type: "abort", listener: () => void): void;
+};
 export const CHAT_LOCATION_OFF: ChatLocationState = {
   enabled: false, pending: false, error: null,
 };
@@ -107,7 +114,18 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
       if (!scope) return;
       await read(true);
     },
-    readForTurn: (scope: string | null) =>
-      isEnabled(scope) ? read(false) : Promise.resolve(null),
+    readForTurn: (scope: string | null, signal?: ChatLocationReadSignal): Promise<ChatLocation | null> => {
+      const aborted = () => signal?.reason ?? new Error("aborted");
+      if (signal?.aborted) return Promise.reject(aborted());
+      const pending = isEnabled(scope) ? read(false) : Promise.resolve(null);
+      if (!signal) return pending;
+      return new Promise((resolve, reject) => {
+        const cancel = () => { signal.removeEventListener("abort", cancel); reject(aborted()); };
+        signal.addEventListener("abort", cancel, { once: true });
+        if (signal.aborted) cancel();
+        pending.then((fix) => { signal.removeEventListener("abort", cancel); resolve(fix); },
+          (error) => { signal.removeEventListener("abort", cancel); reject(error); });
+      });
+    },
   };
 };

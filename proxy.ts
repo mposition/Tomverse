@@ -272,11 +272,9 @@ export function proxy(request: NextRequest) {
   // mutation-origin check or N1b does not exist -- that ordering is the one
   // surviving reason the design rejected verifying only inside routes.
   //
-  // `N1B_BEARER_ROUTES` is empty by approval (decision 13), so today every
-  // verdict is `not_applicable` and this changes nothing about any request.
-  // The order is what is being put in place; opening it is a separate act, one
-  // route at a time, each with evidence that the route reads the bearer rather
-  // than the cookie session.
+  // The base N1B list stays empty. Only the exact native chat gateway can be
+  // enrolled by its separate, default-off activation switch. That route also
+  // independently verifies the bearer and revocation, never the cookie session.
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),

@@ -1718,7 +1718,7 @@ function ChatAppComponent({
     let guestAutoRequestStarted = false;
 
     try {
-      const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey);
+      const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal);
       const sendChatRequest = async (turnstileToken?: string) => {
         controller.signal.throwIfAborted();
         onDispatchStarted?.();

@@ -29,7 +29,8 @@ There is no remote `server.url` or browser session fallback.
   access. Each send acquires a fresh fix, coarsens it and sends `currentLocation`
   only while consent and account identity still match, rechecking after native
   token acquisition and before any 401 retry. Denial/timeout continues
-  without location. There is no background watch, saved fix or JS credential
+  without location. Permission decisions do not consume the acquisition timeout;
+  Stop cancels the caller’s pending read immediately. There is no background watch, saved fix or JS credential
   storage. Web search is separately opt-in for live weather/place facts.
 
 ## Enablement is separate from implementation
@@ -72,8 +73,10 @@ possible with JDK 21 and Android SDK 36. iOS compilation requires macOS/Xcode.
 Generated `apps/mobile/android` and `apps/mobile/ios` stay uncommitted. Auth
 plugin sources live in `native-auth`, while `cap:sync` also configures foreground
 location permissions idempotently. Android requests coarse location only; iOS
-includes the Geolocation plugin's two required usage descriptions without
-requesting background or always authorization.
+includes the Geolocation plugin's two required usage descriptions and reduced
+accuracy by default, without requesting background or always authorization.
+The installed Geolocation 8.2.4 manifest declares no permissions; the generated
+Android merged manifest was checked to contain only coarse location.
 
 ```powershell
 npm --workspace @tomverse/mobile exec cap add android

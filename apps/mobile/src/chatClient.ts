@@ -21,17 +21,17 @@ export const sendNativeChat = async (input: {
   signal: AbortSignal;
   onText: (text: string) => void;
 }) => {
-  const fix = await input.location.readForTurn(input.identityKey);
+  const fix = await input.location.readForTurn(input.identityKey, input.signal);
   input.signal.throwIfAborted();
   const response = await input.transport("/api/mobile/chat", () => {
     input.signal.throwIfAborted();
     return {
       method: "POST", headers: { "Content-Type": "application/json" }, signal: input.signal,
-    body: JSON.stringify({
-      messages: input.messages,
-      webSearchMode: input.webSearch ? "always" : "off",
-      ...(fix && input.location.canShare(fix, input.identityKey) ? { currentLocation: fix } : {}),
-    }),
+      body: JSON.stringify({
+        messages: input.messages,
+        webSearchMode: input.webSearch ? "always" : "off",
+        ...(fix && input.location.canShare(fix, input.identityKey) ? { currentLocation: fix } : {}),
+      }),
     };
   });
   if (!response.ok) {

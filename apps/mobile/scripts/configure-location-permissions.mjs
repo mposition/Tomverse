@@ -21,6 +21,11 @@ export const withIosLocationPermission = (xml) => {
     const end = result.lastIndexOf("</dict>");
     result = `${result.slice(0, end)}\t<key>${key}</key>\n\t<string>${usage}</string>\n${result.slice(end)}`;
   }
+  if (!result.includes("<key>NSLocationDefaultAccuracyReduced</key>")) {
+    const end = result.lastIndexOf("</dict>");
+    if (end < 0) throw new Error("iOS plist dictionary closing tag missing.");
+    result = `${result.slice(0, end)}\t<key>NSLocationDefaultAccuracyReduced</key>\n\t<true/>\n${result.slice(end)}`;
+  }
   return result;
 };
 

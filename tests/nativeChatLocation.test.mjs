@@ -49,6 +49,29 @@ test("native sync adds foreground permission declarations idempotently without b
   const ios = withIosLocationPermission("<plist><dict><key>Existing</key><dict></dict></dict></plist>");
   assert.ok(ios.includes("NSLocationWhenInUseUsageDescription"));
   assert.ok(!ios.includes("UIBackgroundModes"));
+  assert.ok(ios.includes("<key>NSLocationDefaultAccuracyReduced</key>\n\t<true/>"));
   assert.ok(ios.indexOf("NSLocationWhenInUseUsageDescription") > ios.indexOf("<dict></dict>"));
   assert.equal(withIosLocationPermission(ios), ios);
+});
+
+
+test("native permission prompts do not consume the foreground acquisition deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let grant;
+  let reads = 0;
+  const pendingPermission = new Promise((resolve) => { grant = resolve; });
+  const reader = createNativeLocationReader({
+    checkPermissions: async () => ({ coarseLocation: "prompt" }),
+    requestPermissions: () => pendingPermission,
+    getCurrentPosition: async () => { reads++; return position; },
+  }, true);
+  let outcome = "pending";
+  const result = reader(true).then((value) => { outcome = "resolved"; return value; });
+  await Promise.resolve();
+  t.mock.timers.tick(30_000);
+  await Promise.resolve();
+  assert.equal(outcome, "pending"); assert.equal(reads, 0);
+  grant({ coarseLocation: "granted" });
+  assert.equal((await result).latitude, 1);
+  assert.equal(reads, 1);
 });
