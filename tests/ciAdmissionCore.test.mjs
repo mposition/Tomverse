@@ -88,6 +88,8 @@ test("the line is every open handled pull request, drafts included: stored order
   const order = ciAdmissionOrder(lineOf(20, 99, 30), open).map((p) => p.number);
   // 99 is closed; 40 (stacked) and 50 (a fork) are not handled; 5 and 10 are new, by number.
   assert.deepEqual(order, [20, 30, 5, 10]);
+  // A ci:hold label takes a pull request out of the line wherever it was.
+  assert.deepEqual(ciAdmissionOrder(lineOf(20, 30), open.map((p) => (p.number === 20 ? { ...p, labels: [CI_ADMISSION_HOLD_LABEL] } : p))).map((p) => p.number), [30, 5, 10]);
 });
 
 test("the same GitHub snapshot judged again gives the same line: nothing appears and disappears", () => {
@@ -113,7 +115,7 @@ test("drafts the slots reach are marked ready from the top, within the budget", 
   assert.deepEqual(evaluation.state.queue.map((e) => e.draft), [false, false, false, true]);
 });
 
-test("a draft with a conflict, behind its base, held by label, or not checked yet is passed over and says why", () => {
+test("a draft with a conflict, behind its base, or not checked yet is passed over and says why; one labelled ci:hold is not in the line", () => {
   const open = [pull(1), pull(2), pull(3, { labels: [CI_ADMISSION_HOLD_LABEL] }), pull(4), pull(5), pull(6)];
   const checks = new Map([
     [1, { conflict: true, behind: false }],
@@ -122,8 +124,11 @@ test("a draft with a conflict, behind its base, held by label, or not checked ye
     [5, clean],
     [6, { conflict: false, behind: null }],
   ]);
-  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4, 5, 6) }), openPulls: open, checks });
-  assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "behind", 3: "hold", 4: "checking", 5: "next", 6: "next" });
+  const queue = lineOf(1, 2, 3, 4, 5, 6).map((entry) => ({ ...entry, title: `Pull ${entry.number}` }));
+  const evaluation = judge({ state: state({ queue }), openPulls: open, checks });
+  assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "behind", 4: "checking", 5: "next", 6: "next" });
+  // Left the line while open: not recorded as closed.
+  assert.equal(evaluation.state.events.filter((e) => e.kind === "dropped").length, 0);
   // Behind unknown (no permission to compare) does not block.
   assert.deepEqual(kinds(evaluation), ["release:5", "release:6"]);
 });
@@ -213,7 +218,7 @@ test("a pending status admission left is cleared once its pull request is ready 
   assert.deepEqual(kinds(evaluation).filter((k) => k.startsWith("clear_status")), ["clear_status:1", "clear_status:2", "clear_status:3"]);
 });
 
-test("GitHub is asked only about drafts the free slots reach, held ones skipped, at most the limit", () => {
+test("GitHub is asked only about drafts the free slots reach, ci:hold ones not in line, at most the limit", () => {
   const open = Array.from({ length: CI_ADMISSION_CHECK_LIMIT + 3 }, (_, i) =>
     pull(i + 1, i === 0 ? { labels: [CI_ADMISSION_HOLD_LABEL] } : i === 1 ? { draft: false } : {}),
   );

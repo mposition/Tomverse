@@ -151,7 +151,16 @@ export function parseQaReleaseTrainCargoPick(value: unknown): number[] | null {
  * is not carried.
  */
 export type QaReleaseTrainCarryReason = "conflict" | "over_capacity" | "train_failed";
-export type QaReleaseTrainCarried = { number: number; reason: QaReleaseTrainCarryReason; predecessors: number[] };
+export type QaReleaseTrainCarried = {
+  number: number;
+  reason: QaReleaseTrainCarryReason;
+  /**
+   * What the train named for a conflict; null when its report named nothing,
+   * as a train assembled before predecessors were looked up (#2964) did.
+   * An empty list means it looked and found none.
+   */
+  predecessors: number[] | null;
+};
 export type QaReleaseTrainLastTrain = { slot: string; pullRequestNumber: number | null; carried: QaReleaseTrainCarried[] };
 
 /** The last train's report (its audit metadata) as what it carries forward; null when it does not parse. */
@@ -169,7 +178,7 @@ export function qaReleaseTrainLastTrainFrom(report: unknown): QaReleaseTrainLast
           ? "train_failed"
           : null;
     if (reason === null) continue;
-    const predecessors = Array.isArray(pick.predecessors) ? pick.predecessors.filter(isNumber) : [];
+    const predecessors = Array.isArray(pick.predecessors) ? pick.predecessors.filter(isNumber) : null;
     carried.push({ number: pick.number, reason, predecessors });
   }
   return {

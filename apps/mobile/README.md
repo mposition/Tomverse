@@ -70,8 +70,16 @@ The iOS MVP targets iOS 17.4+ and requires macOS and Xcode. Signing and real dev
 
 ## Authentication and operational boundary
 
-The default app UI signs existing accounts in using an email address and a
-six-digit code entered inside the app. The native plugin calls the exact
+The primary sign-in action opens the existing web sign-in flow in the system
+browser and returns to the installed app through the native PKCE session.
+It uses the same sign-in options as the website. The welcome screen also offers
+an explicit email-code option inside the app. The email form's alternate sign-in
+action uses the same native browser flow; it does not open a standalone website
+login that cannot return a session to the app. Cancelled, expired and unavailable
+browser sign-ins retain the email-code option and show an appropriate message.
+
+The email option signs existing accounts in using a six-digit code entered
+inside the app. The native plugin calls the exact
 `/api/auth/mobile/email` path; the server reuses the existing email delivery,
 OTP verification, rate limits and mobile session issuer. Cookies cannot grant
 identity on this path. Signup and additional Turnstile verification are directed

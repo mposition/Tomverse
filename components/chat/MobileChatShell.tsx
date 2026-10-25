@@ -2026,14 +2026,14 @@ export function MobileChatShell({
               ref={drawerCloseButtonRef}
               type="button"
               onClick={closeDrawer}
-              // Above the sidebar's own sticky header (z-10), which the button
+              // Above the sidebar's own sticky header (z-30), which the button
               // deliberately floats over -- the header reserves pr-16 for it.
               //
               // The offset carries the top inset itself. Absolute positioning
               // resolves against the panel's border edge, so the panel's
               // `pt-[env(safe-area-inset-top)]` moves its content but not this
               // button, which otherwise settles under the notch.
-              className="absolute right-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-20 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
+              className="absolute right-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
               aria-label={t("auth.cancel")}
             >
               <X className="h-5 w-5" />

@@ -24,16 +24,17 @@
  *   running keeps its slots while they fit; one further down whose CI runs
  *   past the budget goes back to draft and its runs are cancelled. A draft
  *   that the slots reach is marked ready -- CI starts -- when it has no
- *   conflict with its base, is not behind it, and carries no hold label;
- *   otherwise it is passed over and says why. The first draft that does not
+ *   conflict with its base and is not behind it; otherwise it is passed over
+ *   and says why. The first draft that does not
  *   fit stops the walk for drafts: nothing jumps a higher one.
  * - A ready pull request whose CI is not running (finished, waiting to be
  *   merged) takes no slot and is left alone.
  * - A release reserves its slots until GitHub shows its runs or the grace
  *   period ends, so two rounds never fill the same free slot.
  * - A draft with a run queued or in progress is a replayed event: cancelled.
- * - Stacked pull requests (base other than develop or main) and forks are not
- *   handled.
+ * - Stacked pull requests (base other than develop or main), forks, and pull
+ *   requests labelled ci:hold are not handled: they are not in the line
+ *   (owner, 2026-10-25), and runners their CI holds count as other workflows'.
  *
  * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.
@@ -54,7 +55,7 @@ export const CI_ADMISSION_RAMP_MS = 2 * 60 * 1000;
 export const CI_ADMISSION_WAIT_RECHECK_MS = 60_000;
 /** How long a released pull request is reserved before GitHub shows its runs. */
 export const CI_ADMISSION_RELEASE_GRACE_MS = 5 * 60 * 1000;
-/** A pull request with this label is never marked ready by admission. */
+/** A pull request with this label is left out of the line: admission never marks it ready. */
 export const CI_ADMISSION_HOLD_LABEL = "ci:hold";
 /** How many drafts at the top of the line a round checks for conflicts and lag. */
 export const CI_ADMISSION_CHECK_LIMIT = 6;
@@ -131,8 +132,10 @@ export type CiAdmissionCheck = { conflict: boolean | null; behind: boolean | nul
  * running -- its CI runs inside the budget; done -- ready, CI not running;
  * next -- a draft the slots reached, released this round (or as soon as runs
  * being cancelled stop); waiting -- a draft the slots did not reach; conflict,
- * behind, hold -- a draft the slots reached but passed over; checking -- GitHub
+ * behind -- a draft the slots reached but passed over; checking -- GitHub
  * has not said yet whether it conflicts; held -- sent back to draft this round.
+ * hold is no longer given (ci:hold pull requests leave the line) but stays
+ * readable in a stored state.
  */
 export const CI_ADMISSION_ENTRY_STATUSES = ["running", "done", "next", "waiting", "conflict", "behind", "hold", "checking", "held"] as const;
 export type CiAdmissionEntryStatus = (typeof CI_ADMISSION_ENTRY_STATUSES)[number];
@@ -318,7 +321,11 @@ export type CiAdmissionEvaluation = {
  * new ones appended by number (oldest first). The only place order is decided.
  */
 export function ciAdmissionOrder(stored: readonly Pick<CiAdmissionQueueEntry, "number">[], openPulls: readonly CiAdmissionPull[]): CiAdmissionPull[] {
-  const handled = new Map(openPulls.filter((pull) => ciAdmissionUnits(pull) !== null).map((pull) => [pull.number, pull]));
+  const handled = new Map(
+    openPulls
+      .filter((pull) => ciAdmissionUnits(pull) !== null && !(pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL))
+      .map((pull) => [pull.number, pull]),
+  );
   const kept = stored.map((entry) => handled.get(entry.number)).filter((pull): pull is CiAdmissionPull => pull !== undefined);
   const seen = new Set(kept.map((pull) => pull.number));
   const added = [...handled.values()].filter((pull) => !seen.has(pull.number)).sort((a, b) => a.number - b.number);
@@ -438,10 +445,6 @@ export function evaluateCiAdmission(input: {
       actions.push({ kind: "cancel", pull });
       event("cancelled", pull.number, "draft_rerun");
     }
-    if ((pull.labels ?? []).includes(CI_ADMISSION_HOLD_LABEL)) {
-      status.set(pull.number, "hold");
-      continue;
-    }
     if (draftsBlocked || allotted + units > budget) {
       waitingOnRunners ||= !draftsBlocked;
       draftsBlocked = true;
@@ -508,7 +511,8 @@ export function evaluateCiAdmission(input: {
   }));
   const inLine = new Set(line.map((pull) => pull.number));
   for (const entry of state.queue) {
-    if (!inLine.has(entry.number) && entry.title !== "") event("dropped", entry.number, "closed");
+    // Only a closed one is "dropped": one still open left for a ci:hold label or another base.
+    if (!inLine.has(entry.number) && entry.title !== "" && !open.has(entry.number)) event("dropped", entry.number, "closed");
   }
 
   return {
