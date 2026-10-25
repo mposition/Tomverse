@@ -7,19 +7,15 @@
  *
  * `/chat` renders Tomverse Chat and `/review` renders Tomverse Review.
  *
- * A continuation is `productKey = "review"`
- * (docs/policy/external-conversation-continuation.md §3.1), so the product is
- * not what puts it here. The *screen* is: the Review workspace has no idea an
- * imported transcript exists -- no provenance section, no tombstone, no
- * snapshot lock -- and teaching it would mean rewiring a six-thousand-line
- * client for a feature that is off by default.
+ * A continuation is a Chat (Smart Adaptive, the default since 2026-10-25) or
+ * a Review conversation (docs/policy/external-conversation-continuation.md
+ * §3.1), and this route renders that stored product's own workspace with the
+ * imported transcript above it. The product is not what puts it here; the
+ * bridge is: the imported half is part of what the URL names, so the sidebar
+ * and search send a bridged row here whatever its product.
  *
- * The continuation screen remains additive: neither product workspace is
- * taught to render an imported transcript, and this constant remains the
- * single place that moves if that boundary changes.
- *
- * `PRODUCT_SURFACE_PATH.chat` is deliberately *not* reused. A continuation is
- * a Review product with a dedicated provenance screen, not a Chat workspace.
+ * `PRODUCT_SURFACE_PATH.chat` is deliberately *not* reused, and this constant
+ * remains the single place that moves if that boundary changes.
  */
 
 import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
