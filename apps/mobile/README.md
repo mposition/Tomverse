@@ -1,119 +1,87 @@
-# `apps/mobile` — locally bundled Capacitor shell (spike)
+# Native Tomverse shell
 
-A readiness spike, not the app. It exists to answer one question with a build
-rather than an opinion: **do the shared packages run in a browser bundle that
-Next.js did not produce?**
+A locally bundled Vite + Capacitor app. The default build still shows the
+readiness diagnostics. Native text chat is an explicitly enabled local build.
+There is no remote `server.url` or browser session fallback.
 
-It renders a diagnostic screen and nothing else. There is no sign-in, no
-request to the API, no conversation, no composer.
+## Implemented chat
 
-## Why it stops there
+- Connect an account using the system browser and a client-bound, 60-second
+  one-time code. The app creates its PKCE proof natively; only the public
+  challenge enters the browser URL. Code creation requires an explicit click
+  on the authenticated `/mobile/connect` page. Paste the code back into the app.
+- Native Swift/Java `MobileAuth` exchanges and rotates credentials directly
+  over HTTPS, with redirects disabled and no cookies. Keychain on iOS and
+  Android Keystore AES-GCM protect the stored session. Only short-lived access
+  tokens and expiry cross the bridge. Browser fallback always refuses auth.
+- Native mutation calls are serialized. Local single-use state is consumed
+  before rotation; a timeout or unknown outcome signs out instead of replaying
+  an exchange or rotation. Sign-out removes local state before remote logout.
+- `GET /api/mobile/chat` reads the verified account identity. `POST` uses the
+  existing chat execution, model access, moderation, budget, credit and stream
+  handling. Both independently verify the bearer and session revocation. There
+  is no cookie fallback. Only this exact endpoint is enrolled when enabled.
+- Text conversation and the opt-in location session live in memory. New chat,
+  sign-out or reload clears them. This first native screen has no persisted
+  conversation sync, attachments, generated files or model picker. Native and
+  web use the same `@tomverse/chat-core` stream consumer.
+- Current location defaults off. Enabling requests approximate foreground
+  access. Each send acquires a fresh fix, coarsens it and sends `currentLocation`
+  only while consent and account identity still match. Denial/timeout continues
+  without location. There is no background watch, saved fix or JS credential
+  storage. Web search is separately opt-in for live weather/place facts.
 
-`docs/policy/tomverse-chat-delivery-plan.md §4` names four packages —
-`chat-core`, `chat-ui`, `api-client`, `ui-tokens` — and `apps/mobile` as the
-Vite + Capacitor shell built on top of them. Two of the four exist. `chat-ui`
-and `api-client` do not.
+## Enablement is separate from implementation
 
-So a chat screen here could only be a copy of `components/chat/*`, and a copy is
-precisely the failure the packages exist to prevent: "two implementations of the
-same chat drifting apart until fixing a streaming bug means fixing it twice"
-(`docs/policy/shared-packages.md §1`). The same reasoning rules out an
-authenticated screen — the mobile bearer path in
-`docs/policy/tomverse-chat-mobile-authentication.md` is a decision, not yet an
-implementation, and a shell that authenticated some other way would be a second
-answer to it.
+All three switches are off unless explicitly set:
 
-## What it verifies
-
-Run against the built bundle, in a browser, with the values read back:
-
-| Check | What a failure would mean |
+| Setting | Boundary |
 |---|---|
-| `@tomverse/chat-core` resolves and evaluates | The package needs Next.js to compile it |
-| A finished answer reports `normal` | The package built but behaves differently outside Next.js |
-| A truncated answer reports `incomplete` / `length` | Same, on the path that matters to a user |
-| `@tomverse/ui-tokens` carries its values | The stylesheet compiled to nothing, or needs Tailwind |
-| Brand accent tokens resolve | A token depends on a variable only `app/globals.css` injects |
+| `MOBILE_CHAT_ENABLED=true` on the API server | Exact native bearer gateway and browser pairing page |
+| `VITE_NATIVE_CHAT_ENABLED=true` during Vite build | Native chat UI instead of readiness diagnostics |
+| `NATIVE_CHAT_ENABLED=true` during Capacitor sync | Native auth plugin permission |
 
-The last two are read with `getComputedStyle`, not by checking the file exists;
-`scripts/verify-package-build-matrix.mjs` explains why that distinction matters.
+`VITE_TOMVERSE_API_ORIGIN` must be one trusted HTTPS origin; it configures both
+Vite transport and native auth. Rebuild and sync together when changing it.
+The app uses native code, not JavaScript, for credential exchange/rotation.
+These switches have not been set on a deployed service by this change.
 
-## Commands
+## Local checks
 
-```bash
-npm run build:mobile-shell          # vite build -> apps/mobile/dist
-npm run check:capacitor-local-bundle # fails on server.url / cleartext / allowNavigation
+Run on the local PC, PowerShell, from the repository root. These checks write
+local build/test artifacts and require no production credentials or paid calls.
+
+```powershell
+npm --workspace @tomverse/chat-core run typecheck
 npm --workspace @tomverse/mobile run typecheck
-npm --workspace @tomverse/mobile run preview
+npm run check:shared-packages
+npm run check:native-token-boundary
+npm run check:capacitor-local-bundle
+npm run build:mobile-shell
+npx playwright test --config playwright.native.config.ts
 ```
 
-## Native projects are not committed
+The native screen tests use mocked native plugins and a mocked API. They test
+pairing, per-message location, denial, stop, sign-out, narrow screens and enlarged
+text. They are not physical-device evidence. Android debug compilation is
+possible with JDK 21 and Android SDK 36. iOS compilation requires macOS/Xcode.
 
-### Foreground chat location
+## Native projects
 
-The readiness screen can request an approximate foreground position through
-`@capacitor/geolocation`. It uses the same in-memory opt-in session and numeric
-request contract as web chat (`@tomverse/chat-core`). Each chat turn calls
-`readForTurn(identityKey)` and sends the result as `currentLocation`; no fix is
-saved in storage, and disabling or changing identity invalidates pending reads.
-The readiness screen only displays the local fix; the native chat surface is
-still pending and this diagnostic does not send API requests.
+Generated `apps/mobile/android` and `apps/mobile/ios` stay uncommitted. Auth
+plugin sources live in `native-auth`, while `cap:sync` also configures foreground
+location permissions idempotently. Android requests coarse location only; iOS
+includes the Geolocation plugin's two required usage descriptions without
+requesting background or always authorization.
 
-Every chat turn carries the fixed location-use instructions, including when
-location is off, so the model can explain how to share a location when needed.
-These instructions count as input tokens. Comparison preflight conservatively
-reserves up to 160 additional input tokens even while location is off, because
-consent can change before dispatch; settlement uses actual provider usage.
-
-After generating native projects, `cap:sync` runs `capacitor:sync:after` to add
-Android's `ACCESS_COARSE_LOCATION` and the iOS location usage descriptions.
-Neither background location nor precise Android location is requested. Native
-binary and real-device permission verification still require Android tooling
-or macOS/Xcode.
-
-`ios/` and `android/` are generated, not authored:
-
-```bash
+```powershell
 npm --workspace @tomverse/mobile exec cap add android
-npm --workspace @tomverse/mobile exec cap add ios      # macOS + Xcode only
-npm run build:mobile-shell && npm --workspace @tomverse/mobile run cap:sync
+npm --workspace @tomverse/mobile exec cap add ios # macOS/Xcode
+npm --workspace @tomverse/mobile run cap:sync
 ```
 
-Neither has been generated or built in this repository, and neither can be
-finished yet: `appId` here is the spike's identifier. The deep-link association
-files depend on the final one — `assetlinks.json` carries the final
-`applicationId` plus the SHA-256 fingerprint of the signing certificate, and
-`apple-app-site-association` carries `TEAMID.BUNDLEID`. A placeholder in either
-is worse than an absent file, because a failed verification is cached rather
-than retried.
-
-Verified requirements,
-read from the Capacitor 8.5.0 packages themselves:
-
-| | Value | Source |
-|---|---|---|
-| iOS deployment target | 15.0 | `@capacitor/ios` `Capacitor.podspec`, `scripts/pods_helpers.rb` |
-| Android `minSdk` | 24 | `@capacitor/android` `capacitor/build.gradle` |
-| Android `compileSdk` / `targetSdk` | 36 | same |
-| Android Gradle Plugin | 8.13.0 | same |
-| Java source/target | 21 | same |
-
-`targetSdk 36` matches what Google Play requires of new apps and updates from
-2026-08-31, so the default needs no override.
-
-## The origin this shell produces
-
-Capacitor's own configuration reference gives the defaults this config keeps:
-
-| Platform | Option | Default | Resulting origin |
-|---|---|---|---|
-| iOS | `server.iosScheme` | `capacitor` | `capacitor://localhost` |
-| Android | `server.androidScheme` | `https` | `https://localhost` |
-
-`lib/requestOrigin.ts` accepts neither: the first fails on protocol, the second
-on the host allowlist, which excludes `localhost`. So every non-`GET` request
-from this shell would be answered `403 INVALID_REQUEST_ORIGIN` by the
-mutation-origin check in `proxy.ts` before reaching a route. That is a real gap,
-recorded in
-`.github/audits/2026-08-30-native-mobile-readiness.md` rather than patched here —
-widening the check is an authentication-boundary decision, not a spike.
+`app.tomverse.shell` remains the provisional spike identifier. This manual
+pairing path needs no universal-link association or production signing change.
+Release signing, final application IDs, iOS build, device secure-store checks,
+permission prompts and foreground keyboard behavior remain device/release
+validation. No merge, deployment or live activation is implied by local checks.

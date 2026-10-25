@@ -2,6 +2,8 @@ import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
+import { resolveChatRequestSession } from "@/lib/chatRequestSession";
+import { isNativeChatPayload, MOBILE_CHAT_PATH } from "@/lib/mobileChatContract";
 import {
     buildAttachmentPromptText,
     inertFilename,
@@ -110,6 +112,7 @@ import {
 } from "@/lib/modelGenerationCompatibility";
 import {
     ANTHROPIC_PROMPT_CACHE_TTL,
+    anthropicPromptCacheApplies,
     type AnthropicPromptCachePath,
 } from "@/lib/anthropicPromptCaching";
 import {
@@ -1291,8 +1294,13 @@ async function handleChatPost(
     } | null = null;
     try {
         assertChatRequestSize(req);
-        const session = await getServerSession(authOptions);
+        const requestSession = await resolveChatRequestSession(req);
+        if (!requestSession.ok) return requestSession.response;
+        const session = requestSession.session;
         const body = await readChatJsonBody(req);
+        if (new URL(req.url).pathname === MOBILE_CHAT_PATH && !isNativeChatPayload(body)) {
+            return Response.json({ code: "INVALID_NATIVE_CHAT_REQUEST" }, { status: 400 });
+        }
         const currentLocation = parseChatLocation(
             (body as { currentLocation?: unknown } | null)?.currentLocation
         );
@@ -3905,7 +3913,12 @@ async function handleChatPost(
                 ],
             });
         }
-        appendChatLocationContext(formattedMessages, currentLocation);
+        const uncachedLocationMessages = [...formattedMessages];
+        appendChatLocationContext(uncachedLocationMessages, currentLocation);
+        const locationCacheBreakpoint = appendChatLocationContext(
+            formattedMessages, currentLocation,
+            anthropicPromptCacheApplies(modelConfig, promptCachePath)
+        );
         /*
           Fail closed on files that are gone and have not been acknowledged.
 
@@ -4620,7 +4633,7 @@ async function handleChatPost(
             // The same value the budget above was given -- see there. A no-op
             // for every provider but Anthropic, and a no-op on a searching turn
             // whatever the provider: see lib/anthropicPromptCaching.ts.
-            promptCachePath,
+            promptCachePath: locationCacheBreakpoint ? undefined : promptCachePath,
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -4644,6 +4657,9 @@ async function handleChatPost(
          */
         const { messages: sdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
+        const fallbackSdkMessages = locationCacheBreakpoint
+            ? splitProviderInstructions(uncachedLocationMessages).messages
+            : sdkMessages;
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -4721,7 +4737,9 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             maxOutputTokens: requestMaxOutputTokens,
-            settings: generationSettings as Record<string, unknown>,
+            settings: { ...generationSettings, ...(locationCacheBreakpoint ? {
+                locationCacheBreakpoint: { position: "before_current_fix", ttl: ANTHROPIC_PROMPT_CACHE_TTL },
+            } : {}) } as Record<string, unknown>,
             // Named rather than embedded when the artifact tool is present:
             // the tool object carries an `execute` closure and a Zod schema,
             // neither of which survives `JSON.stringify`, and one of which can
@@ -5908,7 +5926,7 @@ async function handleChatPost(
                 await recordDispatchStarted(nextRecord);
                 nextStream = await streamText({
                     model: plan.activeModel,
-                    messages: sdkMessages,
+                    messages: fallbackSdkMessages,
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     abortSignal: AbortSignal.any([
                         req.signal,

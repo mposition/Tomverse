@@ -188,9 +188,11 @@ export const buildChatTurnSystemBlocks = (
       // to explain being unable to.
       webSearchTurnState: "searching",
       webSearchCapabilityPrompt: "",
-      systemMessages: [{ role: "system", content: locationPrompt }],
+      systemMessages: [],
       untrustedDataMessages: [],
-      promptTokens: locationTokens,
+      // Deep research carries no application-authored system blocks.
+      promptTokens: estimateTextTokens(buildChatLocationContext(input.currentLocation)) +
+        (input.reserveLocationInput ? CHAT_LOCATION_INPUT_TOKEN_RESERVE : 0),
     };
   }
 

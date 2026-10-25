@@ -29,8 +29,10 @@ const withoutComments = SOURCE.replace(/\/\*[\s\S]*?\*\//g, "").replace(
   "$1"
 );
 
-test("the bridge exposes exactly three methods, and they are the approved three", () => {
+test("the bridge exposes access/session methods and client-bound browser pairing", () => {
   assert.deepEqual([...MOBILE_AUTH_BRIDGE_METHODS], [
+    "beginSignIn",
+    "completeSignIn",
     "getAccessToken",
     "hasSession",
     "signOut",

@@ -18,14 +18,9 @@
  * the app is not signed in. That is a real limitation of running the shell
  * outside a device, not a gap to be filled later.
  *
- * ## The native halves are unwritten
- *
- * There is no Swift and no Kotlin in this repository, and nothing here has run
- * on a device. `registerPlugin` names a plugin that does not exist yet; on a
- * device without it, every call rejects, which is the same answer as the web
- * fallback and for the same reason. `AUTH-03`'s evidence -- that no refresh
- * token is present in the WebView context -- is a physical-device check
- * (approved decision 16) and is not claimed by this file.
+ * Native implementations live in ../native-auth. They consume browser pairing
+ * codes, serialize rotation and store the session in Keychain / Android
+ * Keystore. Real-device AUTH-03 evidence remains a separate activation check.
  */
 
 import { registerPlugin } from "@capacitor/core";
@@ -43,6 +38,8 @@ import type { MobileAuthBridge } from "./authBridgeContract";
  * the moment this comment is for.
  */
 const unavailableBridge: MobileAuthBridge = {
+  beginSignIn: () => Promise.reject(new Error("Native authentication unavailable.")),
+  completeSignIn: () => Promise.reject(new Error("Native authentication unavailable.")),
   getAccessToken: () =>
     Promise.reject(
       new Error(
@@ -64,11 +61,8 @@ export const MobileAuth = registerPlugin<MobileAuthBridge>("MobileAuth", {
  * without a plugin; this binds it to the real one, once, so product code has a
  * single entry point and no reason to reach for `MobileAuth` itself.
  *
- * Nothing imports it yet. The screen this bundle ships is a readiness report
- * that deliberately makes no authenticated request, and the product surface it
- * will eventually carry is a later phase of the delivery plan. What exists now
- * is the boundary, checked by `npm run check:native-token-boundary`, so the
- * code written against it later cannot quietly widen it.
+ * NativeChatApp uses this transport for the exact default-off mobile gateway.
+ * The readiness screen makes no authenticated requests.
  */
 export const TOMVERSE_API_ORIGIN =
   import.meta.env.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app";

@@ -35,6 +35,8 @@ playwright.local-sandbox.config.ts
 
 # Rust workspace build output.
 /target/
+/apps/mobile/android/
+/apps/mobile/ios/
 
 # misc
 .DS_Store
@@ -132,3 +134,7 @@ docs/ops/*-staging-verification-records/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-
 # directory outside the repository, never in a commit (this repository is
 # public). Two were committed by mistake with marketing S2d2 and removed.
 /.*-review-r*.md
+
+/apps/mobile/native-auth/android/build/
+/apps/mobile/native-auth/android/.gradle/
+/apps/mobile/native-auth/.build/

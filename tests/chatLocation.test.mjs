@@ -119,8 +119,8 @@ test("location changes leave the cached instructions and history byte-identical,
   assert.equal(first.instructions, moved.instructions);
   assert.deepEqual(first.messages.slice(0, -1), moved.messages.slice(0, -1));
   assert.deepEqual(first.messages.slice(0, -1), history);
-  assert.ok(first.messages.at(-1).content.includes('"latitude":-27.47'));
-  assert.ok(moved.messages.at(-1).content.includes('"latitude":-33.869'));
+  assert.ok(first.messages.at(-1).content.at(-1).text.includes('"latitude":-27.47'));
+  assert.ok(moved.messages.at(-1).content.at(-1).text.includes('"latitude":-33.869'));
   assert.equal(source.content, "What is near me?");
   assert.equal(build(null).messages.at(-1), source);
   const parts = [{ type: "text", text: "Find this place" }, { type: "file", data: "example", mediaType: "image/png" }];
@@ -128,4 +128,19 @@ test("location changes leave the cached instructions and history byte-identical,
   appendChatLocationContext(multipart, fix());
   assert.deepEqual(multipart[0].content.slice(0, -1), parts);
   assert.equal(parts.length, 2);
+});
+
+
+test("the reusable cache breakpoint excludes the ephemeral fix across successive turns", () => {
+  const first = [{ role: "user", content: "Near me?" }];
+  assert.equal(appendChatLocationContext(first, fix(), true), true);
+  const original = first[0].content[0];
+  assert.deepEqual(original.providerOptions.anthropic.cacheControl, { type: "ephemeral", ttl: "5m" });
+  assert.equal(first[0].content[1].providerOptions, undefined);
+  const second = [{ role: "user", content: "Near me?" }, { role: "assistant", content: "Nearby places." }, { role: "user", content: "And now?" }];
+  appendChatLocationContext(second, fix({ latitude: 1 }), true);
+  assert.equal(second[0].content, original.text);
+  assert.ok(!JSON.stringify(second).includes("-27.47"));
+  assert.equal(second[2].content[0].text, "And now?");
+  assert.equal(second[2].content[1].providerOptions, undefined);
 });

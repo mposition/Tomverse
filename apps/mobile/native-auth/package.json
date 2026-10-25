@@ -1,0 +1,23 @@
+{
+  "name": "@tomverse/mobile-auth",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Native-only client-bound session bridge. No refresh credential enters JavaScript.",
+  "main": "index.js",
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  },
+  "files": [
+    "index.js",
+    "Package.swift",
+    "TomverseMobileAuth.podspec",
+    "android/build.gradle",
+    "android/src",
+    "ios/Sources"
+  ]
+}

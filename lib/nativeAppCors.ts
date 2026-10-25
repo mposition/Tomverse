@@ -188,6 +188,7 @@ export const nativeAppCorsHeaders = (
     // differed only by case or surrounding whitespace is answered with the
     // canonical form rather than with its own input echoed back.
     "Access-Control-Allow-Origin": (origin as string).trim().toLowerCase(),
+    "Access-Control-Expose-Headers": "X-Request-ID, X-Chat-Routed-Model, Retry-After",
   };
 };
 

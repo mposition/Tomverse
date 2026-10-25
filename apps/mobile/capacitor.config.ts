@@ -46,6 +46,12 @@ const config: CapacitorConfig = {
   // projects, which is what "locally bundled" means: the binary ships the web
   // assets rather than fetching them.
   webDir: "dist",
+  plugins: {
+    MobileAuth: {
+      enabled: process.env.NATIVE_CHAT_ENABLED === "true",
+      apiOrigin: process.env.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app",
+    },
+  },
 };
 
 export default config;

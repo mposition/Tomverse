@@ -55,6 +55,26 @@ const post = (headers, url) =>
 const get = (headers, url = "https://tomverse.app/chat") =>
   proxy(request({ headers: { host: "tomverse.app", ...headers } }, url));
 
+test("native chat enrollment is default off, exact-path, and requires a verified bearer", async () => {
+  const previous = process.env.MOBILE_CHAT_ENABLED;
+  const url = "https://tomverse.app/api/mobile/chat";
+  try {
+    delete process.env.MOBILE_CHAT_ENABLED;
+    assert.equal((await post({ origin: "https://localhost", authorization: validBearer() }, url)).status, 403);
+    process.env.MOBILE_CHAT_ENABLED = "true";
+    for (const origin of NATIVE_APP_ORIGINS) {
+      const rejected = await post({ origin, authorization: "Bearer invalid", ...forged }, url);
+      assert.equal(rejected.status, 401);
+      const accepted = await post({ origin, authorization: validBearer(), ...forged }, url);
+      assert.equal(accepted.headers.get("x-middleware-next"), "1");
+      assert.equal(forwardedHeaders(accepted).get(MOBILE_IDENTITY_HEADERS.subject), "user_1");
+      assert.equal(accepted.headers.get("access-control-allow-origin"), origin);
+      assert.equal((await post({ origin, authorization: validBearer() }, `${url}/other`)).status, 403);
+      assert.equal((await post({ origin, cookie: "authenticated" }, url)).status, 403);
+    }
+  } finally { if (previous === undefined) delete process.env.MOBILE_CHAT_ENABLED; else process.env.MOBILE_CHAT_ENABLED = previous; }
+});
+
 // --- 1. a bearer header never buys anything by existing ------------------
 
 test("a bearer header does not skip the mutation-origin check", async () => {

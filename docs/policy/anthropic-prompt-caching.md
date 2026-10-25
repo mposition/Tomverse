@@ -155,6 +155,12 @@ write로 잡힙니다(같은 문서).
   **marker를 억제하는 데 쓰지 않습니다** — 억제하려면 이 앱의 토큰 *추정치*로
   판단해야 하고, 그 추정이 맞아야만 안전한 판단이 됩니다.
 
+현재 위치를 공유하는 `chat_turn`은 예외적으로 같은 5분 TTL의 explicit
+breakpoint를 마지막 원본 user block에 둡니다. 다음 턴에 재전송하지 않는 위치
+block은 그 뒤에 붙이고 top-level automatic marker는 생략합니다. 다음 요청은
+이전 원본 대화 prefix를 재사용할 수 있습니다. fallback·native search에는 이
+marker를 전달하지 않습니다. 허용 경로와 최악 입력 예약은 그대로 유지합니다.
+
 ## 3. TTL은 5분 하나입니다
 
 `ANTHROPIC_PROMPT_CACHE_TTL = "5m"`. 1시간 캐시는 **구현하지 않습니다.**

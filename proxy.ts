@@ -41,6 +41,7 @@ import {
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
+import { mobileChatBearerRoutes } from "@/lib/mobileChatContract";
 import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
@@ -279,7 +280,7 @@ export function proxy(request: NextRequest) {
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),
-    registeredRoutes: N1B_BEARER_ROUTES,
+    registeredRoutes: [...N1B_BEARER_ROUTES, ...mobileChatBearerRoutes()],
     verify: (token) => {
       const verdict = verifyMobileAccessTokenString(token);
       return verdict.ok
