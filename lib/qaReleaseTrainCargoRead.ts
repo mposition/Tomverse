@@ -6,31 +6,22 @@ import {
   qaReleaseTrainCargoCandidates,
   type QaReleaseTrainCargoCandidate,
 } from "@/lib/qaReleaseTrainCargoCore";
+import { createGithubRepoReader, githubReadFailure } from "@/lib/githubRepoRead";
 
 /**
- * Reads the next train's candidates for Admin (lib/qaReleaseTrainCargoCore.ts).
- * The repository is public, so GitHub is read without a credential, as S-M3
- * does. Unauthenticated reads are rationed per address, so one read is kept
- * for ten minutes and shared by every viewer; files are read only for pull
- * requests that could ride. A failed read is "unread", never "none".
+ * Reads the next train's candidates for Admin (lib/qaReleaseTrainCargoCore.ts),
+ * GitHub through lib/githubRepoRead.ts. One read is kept for ten minutes and
+ * shared by every viewer; files are read only for pull requests that could
+ * ride. A failed read is "unread" with why, never "none", and is kept for a
+ * minute so a page left open does not spend the hourly allowance retrying.
  */
-const API = "https://api.github.com/repos/mposition/Tomverse";
-const TIMEOUT_MS = 5_000;
 const CACHE_MS = 10 * 60 * 1000;
+const FAILURE_CACHE_MS = 60 * 1000;
 const FILE_READS_AT_ONCE = 6;
 
-export type QaReleaseTrainCargoCandidatesRead = { status: "ok"; readAt: string; candidates: QaReleaseTrainCargoCandidate[] } | { status: "unread" };
-
-const readJson = async (path: string): Promise<unknown> => {
-  const response = await fetch(`${API}${path}`, {
-    headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-    cache: "no-store",
-    redirect: "error",
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`github_${response.status}`);
-  return response.json();
-};
+export type QaReleaseTrainCargoCandidatesRead =
+  | { status: "ok"; readAt: string; candidates: QaReleaseTrainCargoCandidate[] }
+  | { status: "unread"; failure: string };
 
 /**
  * Closed pull requests into `base`, newest update first, page by page until
@@ -40,7 +31,7 @@ const readJson = async (path: string): Promise<unknown> => {
  * main release would offer what it already carried.
  */
 const PAGE_CAP = 8;
-async function readClosedSince(base: string, sinceMs: number): Promise<unknown[]> {
+async function readClosedSince(readJson: (path: string) => Promise<unknown>, base: string, sinceMs: number): Promise<unknown[]> {
   const pulls: unknown[] = [];
   for (let page = 1; page <= PAGE_CAP; page += 1) {
     const list = await readJson(`/pulls?state=closed&base=${base}&sort=updated&direction=desc&per_page=100&page=${page}`);
@@ -55,13 +46,14 @@ async function readClosedSince(base: string, sinceMs: number): Promise<unknown[]
 let cached: { atMs: number; value: QaReleaseTrainCargoCandidatesRead } | null = null;
 
 export async function readQaReleaseTrainCargoCandidates(nowMs = Date.now()): Promise<QaReleaseTrainCargoCandidatesRead> {
-  if (cached && nowMs - cached.atMs < CACHE_MS) return cached.value;
+  if (cached && nowMs - cached.atMs < (cached.value.status === "ok" ? CACHE_MS : FAILURE_CACHE_MS)) return cached.value;
+  const readJson = createGithubRepoReader();
   try {
     const sinceMs = nowMs - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
     const [mergedDevelopJson, mergedMainJson, openMainJson] = await Promise.all([
-      readClosedSince("develop", sinceMs),
+      readClosedSince(readJson, "develop", sinceMs),
       // A release that carried a candidate was merged after it, so inside the window too.
-      readClosedSince("main", sinceMs),
+      readClosedSince(readJson, "main", sinceMs),
       readJson("/pulls?state=open&base=main&per_page=100"),
     ]);
     // First without files, to learn which could ride; only those are read.
@@ -88,7 +80,9 @@ export async function readQaReleaseTrainCargoCandidates(nowMs = Date.now()): Pro
     };
     cached = { atMs: nowMs, value };
     return value;
-  } catch {
-    return { status: "unread" };
+  } catch (error) {
+    const value: QaReleaseTrainCargoCandidatesRead = { status: "unread", failure: githubReadFailure(error) };
+    cached = { atMs: nowMs, value };
+    return value;
   }
 }

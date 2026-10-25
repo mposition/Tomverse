@@ -158,6 +158,12 @@ export type CiAdmissionGithub = {
   runnerUsage(): Promise<CiRunnerOwner[]>;
   /** The `CI admission` commit status on the pull request's head. */
   setStatus(sha: string, state: "pending" | "success", description: string): Promise<void>;
+  /**
+   * GET one path under the repository's API (`/pulls?...`, `/commits/main`)
+   * with a read-only token, for Admin pages that show the repository; throws
+   * `github_<status>`.
+   */
+  readRepo(path: string): Promise<unknown>;
 };
 
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
@@ -331,6 +337,12 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         pull.nodeId,
       );
       if (record(record(data.markPullRequestReadyForReview).pullRequest).isDraft !== false) throw new Error("github_still_draft");
+    },
+    async readRepo(path) {
+      if (!path.startsWith("/") || path.includes("..")) throw new Error("github_path");
+      const answer = await call("GET", `${REPO}${path}`, await installationToken({ contents: "read", pull_requests: "read", metadata: "read" }));
+      if (answer.status !== 200) throw new Error(`github_${answer.status}`);
+      return answer.json();
     },
     async runnerUsage() {
       const runs = new Map<number, Json>();

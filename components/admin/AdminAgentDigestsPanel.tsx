@@ -128,7 +128,12 @@ function AttentionStrip({ items }: { items: QaReleaseAttentionItem[] }) {
           urgent: true,
         };
       case "main_unread":
-        return { title: m.attentionMainUnread, detail: m.attentionMainUnreadDetail, action: null, urgent: false };
+        return {
+          title: m.attentionMainUnread,
+          detail: m.attentionMainUnreadDetail + (item.failure ? fill(m.githubFailure, { failure: item.failure }) : ""),
+          action: null,
+          urgent: false,
+        };
       case "ci_failed":
         return {
           title: fill(m.attentionCiFailed, { count: item.count }),

@@ -200,7 +200,10 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       ) : null}
 
       {failed || view?.candidates.status === "unread" ? (
-        <p className="mt-3 text-sm text-amber-300">{m.trainCargoUnread}</p>
+        <p className="mt-3 text-sm text-amber-300">
+          {m.trainCargoUnread}
+          {view?.candidates.status === "unread" ? m.githubFailure.replace("{failure}", view.candidates.failure) : ""}
+        </p>
       ) : view === null ? (
         <p className="mt-3 text-sm text-zinc-400">{m.trainCargoLoading}</p>
       ) : (
