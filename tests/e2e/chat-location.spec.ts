@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, mockChatStream, openRecentConversation } from "./support/app-fixtures";
+import { installTurnstileScript, mockAuthenticatedApi, mockChatStream, openRecentConversation, prepareGuestPage, readTurnstileState } from "./support/app-fixtures";
 
 const openChat = async (page: Page) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-6-luna"] });
@@ -18,6 +18,39 @@ const send = async (page: Page, text: string) => {
   await expect(page.getByTestId("chat-stop-all-button")).toHaveCount(0);
   return payload;
 };
+
+test("a guest receives the verification cookie before location analysis and the original answer", { tag: "@ui-risk" }, async ({ page, context }) => {
+  await context.grantPermissions(["geolocation"]);
+  await context.setGeolocation({ latitude: -27.47, longitude: 153.025, accuracy: 150 });
+  await prepareGuestPage(page, "en");
+  await installTurnstileScript(page, "silent");
+  const spentTokens: string[] = [];
+  let analyses = 0;
+  await page.route("**/api/chat/location-intent", async route => {
+    const { turnstileToken } = route.request().postDataJSON();
+    if (turnstileToken) {
+      expect(spentTokens).not.toContain(turnstileToken);
+      spentTokens.push(turnstileToken);
+      await route.fulfill({ json: { requiresLocation: false }, headers: { "Set-Cookie": "qa_location_grant=1; Path=/; HttpOnly; SameSite=Lax" } });
+    } else if (!(route.request().headers().cookie ?? "").includes("qa_location_grant=1")) {
+      await route.fulfill({ status: 403, json: { code: "TURNSTILE_REQUIRED" } });
+    } else {
+      analyses++;
+      await route.fulfill({ json: { requiresLocation: true } });
+    }
+  });
+  await page.route("**/api/chat", async route => {
+    expect(route.request().headers().cookie).toContain("qa_location_grant=1");
+    expect(route.request().postDataJSON().currentLocation.latitude).toBe(-27.47);
+    await route.fulfill({ contentType: "text/plain; charset=utf-8", body: "Location test reply." });
+  });
+  await page.goto("/review?lang=en&models=gemini-2-5-flash");
+  expect((await send(page, "Where am I?")).currentLocation.latitude).toBe(-27.47);
+  expect((await send(page, "What is nearby?")).currentLocation.latitude).toBe(-27.47);
+  expect(analyses).toBe(1);
+  expect(spentTokens).toHaveLength(1);
+  expect((await readTurnstileState(page))?.issuedTokens).toHaveLength(1);
+});
 
 test("a location question automatically acquires permission and answers without opening tools", { tag: "@ui-risk" }, async ({ page, context }) => {
   await context.grantPermissions(["geolocation"]);

@@ -16,6 +16,7 @@ const schema = z.object({ requiresLocation: z.boolean() }).strict();
 export async function detectChatLocationIntent(text: string): Promise<boolean> {
   let reserved: { provider: string; worst: number; at: Date } | undefined;
   try {
+    if (process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED !== "true") return false;
     const configured = await readAutoLlmRouterModelId();
     if (!configured) return false;
     const models = await getRuntimeModels();
