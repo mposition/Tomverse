@@ -85,6 +85,8 @@ signalling it. File modes and a sandbox alone do not protect against the same
 UID. It requires lingering and unprivileged user namespaces.
 Bundle the exact release's `scripts/amux-cli-monitor.mjs` with esbuild for Node
 ESM, and install it as `~/.local/share/tomverse-cli-monitor/collector.mjs`.
+Bundling avoids installing a checkout and npm dependencies on this account;
+the system unit above uses an operator-managed checkout with `tsx` instead.
 Keep that directory and `~/.config/tomverse-cli-monitor/` mode 700, the bundle
 and `collector.env` mode 600, and copy the unit to `~/.config/systemd/user/`.
 The environment file contains only the three collector settings above.
@@ -98,3 +100,16 @@ the same sandbox and verify a `--once` ingest under the actual unit settings.
 Use `systemctl --user enable --now tomverse-amux-cli-monitor.service` only after
 the app release and dedicated credential are ready. This starts the one fixed
 collector; it does not activate any other worker.
+
+From the Ubuntu operator account's bash, verify the installed bundle without
+credentials or external writes (this reads only the existing worker output):
+
+```bash
+systemd-run --user --wait --pipe \
+  -p PrivateUsers=yes -p ProtectHome=tmpfs \
+  -p BindReadOnlyPaths="$HOME/.local/share/tomverse-cli-monitor" \
+  -p ProtectSystem=strict -p PrivateTmp=yes -p NoNewPrivileges=yes \
+  -p InaccessiblePaths=/proc -p 'SystemCallFilter=~@mount' \
+  -p 'RestrictAddressFamilies=AF_INET AF_INET6' \
+  /usr/bin/node "$HOME/.local/share/tomverse-cli-monitor/collector.mjs" --check-source
+```

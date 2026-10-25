@@ -1,5 +1,6 @@
 [Unit]
 Description=Tomverse read-only CLI monitor (codex-impl pilot)
+ConditionUser=tomverse-admin
 
 [Service]
 # Install only under a dedicated operator UID, never the monitored worker UID.
