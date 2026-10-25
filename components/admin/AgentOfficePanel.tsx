@@ -1,15 +1,18 @@
 "use client";
 
-import type { CSSProperties, RefObject } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import AgentOfficeWorld from "@/components/admin/AgentOfficeWorld";
+import AgentOfficeCliMonitor from "@/components/admin/AgentOfficeCliMonitor";
 import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
+import { adminAgentOfficeCliMessages } from "@/lib/adminMessages/agentOfficeCliMonitor";
+import { AGENT_OFFICE_CLI_WORKER } from "@/lib/agentOfficeCliMonitorCore";
 import {
   amuxRoomView,
   engineeringLiveDept,
@@ -108,7 +111,9 @@ function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; a
  * screen for it, and links it when it does. Nothing here plays a scenario,
  * approves or sends anything.
  */
-export function AgentOfficePanel({ view, live }: { view: View; live: AgentOfficeLiveRooms }) {
+export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
+  view: View; live: AgentOfficeLiveRooms; cliMonitorEnabled?: boolean;
+}) {
   const m = useAdminMessages(adminAgentOfficeMessages);
   const router = useRouter();
   // The rooms that read a real record, in the console's language. Each
@@ -211,6 +216,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   // A seated figure is not an engine agent: it is named by its room and the
   // name its record gives it, and its profile is re-read from that record.
   const [seated, setSeated] = useState<{ room: AgentOfficeSeatedRoom; name: string } | null>(null);
+  const [cliOpen, setCliOpen] = useState(false);
   const onSelectSeated = useCallback((room: AgentOfficeSeatedRoom, name: string) => setSeated({ room, name }), []);
   // A room's name opens what its team does, written from its code and policy.
   const [teamInfo, setTeamInfo] = useState<AgentOfficeTeamId | null>(null);
@@ -369,6 +375,10 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               onSelectTeam={onSelectTeam}
               onCopyReport={copyReport}
               onDownloadReport={downloadReport}
+              cliMonitor={cliOpen && cliMonitorEnabled ? <AgentOfficeCliMonitor
+                avatar={<PixelEmployee {...agentOfficeSeatedClothes("amux", Math.max(0,
+                  amuxView.workers.findIndex(worker => worker.name === AGENT_OFFICE_CLI_WORKER)))} />}
+                onClose={() => setCliOpen(false)} /> : null}
             />
           ) : (
             <DashboardView
@@ -409,6 +419,8 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
           reviewView={reviewView}
           decisionView={decisionView}
           quotaView={quotaView}
+          onViewCli={cliMonitorEnabled && seated.room === "amux" && seated.name === AGENT_OFFICE_CLI_WORKER
+            ? () => { setSeated(null); setCliOpen(true); goLive(); } : undefined}
           onClose={() => setSeated(null)}
         />
       ) : null}
@@ -495,6 +507,7 @@ function LiveView({
   onSelectTeam,
   onCopyReport,
   onDownloadReport,
+  cliMonitor,
 }: {
   m: OfficeCopy;
   engine: AgentOffice;
@@ -515,6 +528,7 @@ function LiveView({
   onSelectTeam: (team: AgentOfficeTeamId) => void;
   onCopyReport: () => void;
   onDownloadReport: () => void;
+  cliMonitor: ReactNode;
 }) {
   const engineeringLive = engine.liveDept("engineering") !== null;
   const stale = useStaleReading(readAt);
@@ -571,7 +585,7 @@ function LiveView({
         </div>
       </section>
 
-      <section className={cx("live-grid")}>
+      <section className={cx("live-grid", !!cliMonitor && "cli-open")}>
         <AgentOfficeWorld
           engine={engine}
           amux={amuxView}
@@ -585,7 +599,7 @@ function LiveView({
           onSelectTeam={onSelectTeam}
         />
 
-        <aside className={cx("live-rail")}>
+        {cliMonitor || <aside className={cx("live-rail")}>
           <OperatorConsole m={m} engine={engine} snap={snap} />
 
           <section className={cx("win rail-card")} id="agent-office-approval">
@@ -602,7 +616,7 @@ function LiveView({
           </section>
 
           <QuotaCard m={m} view={quotaView} />
-        </aside>
+        </aside>}
       </section>
     </>
   );
@@ -852,6 +866,7 @@ function SeatedProfileModal({
   reviewView,
   decisionView,
   quotaView,
+  onViewCli,
   onClose,
 }: {
   m: OfficeCopy;
@@ -860,8 +875,10 @@ function SeatedProfileModal({
   reviewView: AgentOfficeReviewView;
   decisionView: AgentOfficeDecisionView;
   quotaView: AgentOfficeQuotaView;
+  onViewCli?: () => void;
   onClose: () => void;
 }) {
+  const cliCopy = useAdminMessages(adminAgentOfficeCliMessages);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useOfficeDialog(onClose, closeRef);
   const people: AgentOfficeSeatedView[] =
@@ -934,6 +951,8 @@ function SeatedProfileModal({
             </div>
           ) : null}
           <div className={cx("profile-actions")}>
+            {onViewCli ? <button type="button" className={cx("btn btn-primary")}
+              onClick={onViewCli} data-testid="agent-office-view-cli">{cliCopy.open}</button> : null}
             <button type="button" className={cx("btn btn-primary")} onClick={onClose}>
               {m.profile.close}
             </button>

@@ -1,0 +1,27 @@
+[Unit]
+Description=Tomverse read-only CLI monitor (codex-impl pilot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+EnvironmentFile=/etc/tomverse-cli-monitor.env
+WorkingDirectory=/opt/tomverse-cli-monitor
+ExecStart=/usr/bin/node --import tsx scripts/amux-cli-monitor.mjs
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=15
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+StandardInput=null
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
