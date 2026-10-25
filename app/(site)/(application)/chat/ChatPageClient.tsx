@@ -906,7 +906,7 @@ export function ChatPageClient({
       ? continuationProduct === "chat" ? "chat" : "workspace"
       : routeSurface;
   /*
-    A continuation stays text-only (continuation policy §5.1): the server
+    A continuation stays text-only (docs/policy/external-conversation-continuation.md §5.1): the server
     refuses an image turn on a bridged conversation after the question is
     saved, so no in-conversation image path may start here. The separate image
     draft, which carries no imported transcript, is unaffected.
@@ -4550,7 +4550,8 @@ export function ChatPageClient({
         }
     ) => {
         if (mountedSurface === "workspace") {
-            // A Review continuation has no in-conversation image mode (§5.1).
+            // A Review continuation has no in-conversation image mode
+            // (docs/policy/external-conversation-continuation.md §5.1).
             if (!inConversationImagesAllowed) return;
             setReviewImageModelId(modelId ?? options?.modelIds?.[0] ?? DEFAULT_IMAGE_MODEL_ID);
             reviewWorkspace.setImagePromptMode(true);
@@ -5856,7 +5857,8 @@ export function ChatPageClient({
       if (decision.kind === "image") {
         if (!inConversationImagesAllowed) {
           // Easy still picks text models per question on a continuation; an
-          // image answer is refused before anything is saved (§5.1).
+          // image answer is refused before anything is saved
+          // (docs/policy/external-conversation-continuation.md §5.1).
           reviewWorkspace.setError(t("continuation.imagesUnavailable")); return;
         }
         if (chosen.length > imageGroupMaxModelsProp) {

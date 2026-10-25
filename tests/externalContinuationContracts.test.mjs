@@ -1015,7 +1015,8 @@ test("the default continuation is Chat only where Chat is offered", () => {
 test("a Chat continuation never becomes a Smart Adaptive image turn", () => {
     // Independent review round 4: `startChatImageTurn` refuses a bridged
     // conversation with 409, so an image decision on a Chat continuation left
-    // the stored question with no answer. §5.1 keeps continuations text-only.
+    // the stored question with no answer; docs/policy/external-conversation-continuation.md §5.1
+    // keeps continuations text-only.
     const chat = readFileSync("app/api/chat/route.ts", "utf8");
     assert.match(chat, /continuationBridge: \{ select: \{ id: true \} \},/);
     const eligible = chat.slice(
@@ -1028,7 +1029,8 @@ test("a Chat continuation never becomes a Smart Adaptive image turn", () => {
 test("no in-conversation image path starts on a continuation route", () => {
     // Independent review round 5: the client image paths (manual Chat intent,
     // Review Professional image choice, Review routing) reached the same 409
-    // after the question was saved. A continuation is text-only (§5.1).
+    // after the question was saved. A continuation is text-only
+    // (docs/policy/external-conversation-continuation.md §5.1).
     const client = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
     assert.match(client, /const inConversationImagesAllowed = routeSurface !== "continuation";/);
     assert.match(client, /const imageIntentRoutedOnSend =\s*inConversationImagesAllowed &&/);
@@ -1037,9 +1039,9 @@ test("no in-conversation image path starts on a continuation route", () => {
     // Easy still routes text per question (review round 6); only an image
     // outcome is refused, before anything is saved.
     assert.match(client, /if \(mountedSurface === "workspace" && \(reviewWorkspace\.mode === "easy" \|\| professionalImageRouting\) &&/);
-    assert.match(client, /if \(decision\.kind === "image"\) \{\s*if \(!inConversationImagesAllowed\) \{\s*\/\/[^\n]*\n[^\n]*\n\s*reviewWorkspace\.setError\(t\("continuation\.imagesUnavailable"\)\); return;/);
+    assert.match(client, /if \(decision\.kind === "image"\) \{\s*if \(!inConversationImagesAllowed\) \{(?:\s*\/\/[^\n]*\n)+\s*reviewWorkspace\.setError\(t\("continuation\.imagesUnavailable"\)\); return;/);
     // The Review image tools never enter this conversation's image mode.
-    assert.match(client, /if \(mountedSurface === "workspace"\) \{\s*\/\/[^\n]*\n\s*if \(!inConversationImagesAllowed\) return;/);
+    assert.match(client, /if \(mountedSurface === "workspace"\) \{(?:\s*\/\/[^\n]*\n)+\s*if \(!inConversationImagesAllowed\) return;/);
     assert.equal(
         client.split('onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ?').length - 1,
         2

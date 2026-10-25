@@ -2089,7 +2089,7 @@ async function handleChatPost(
             conversationRouting?.productKey === "chat" &&
             // A Chat continuation stays text-only: `startChatImageTurn` refuses
             // a bridged conversation, so an image decision here would leave
-            // the question with no answer (continuation policy §5.1).
+            // the question with no answer (docs/policy/external-conversation-continuation.md §5.1).
             !conversationRouting?.continuationBridge &&
             !admissionToken &&
             !deepResearchDepth &&
