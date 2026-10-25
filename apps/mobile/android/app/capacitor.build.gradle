@@ -12,6 +12,7 @@ dependencies {
     implementation project(':tomverse-mobile-auth')
     implementation project(':revenuecat-purchases-capacitor')
     implementation project(':capacitor-browser')
+    implementation project(':capacitor-geolocation')
 
 }
 
