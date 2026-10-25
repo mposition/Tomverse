@@ -34,6 +34,9 @@ does not grant access. Failed webhook processing returns 503 for redelivery.
   deletion can remove the other source's paid access. The effective tier is the
   highest currently entitled tier, with a shared monthly allowance rather than
   an extra allowance per subscription.
+- Account deletion confirmation and scheduled-deletion mail disclose that App
+  Store/Play billing must be cancelled separately; deleting the Tomverse account
+  does not cancel a store subscription.
 - Starter 500 is offered to Free; Project 1,500 and Power 4,000 to Pro/Max, as on
   web. Store prices come from localized StoreKit/Play product data. An annual
   price is the complete annual charge, not a monthly equivalent.

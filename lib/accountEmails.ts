@@ -1,4 +1,5 @@
 import "server-only";
+import { storeBillingDeletionNotice } from "@/locales/storeBilling";
 
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 
@@ -109,10 +110,10 @@ export function buildAccountDeletionScheduledEmail(input: {
   const date = input.scheduledFor;
   return {
     subject: copy.subject,
-    text: [copy.stopped(date), copy.renewal, copy.cancel, copy.notYou].join("\n\n"),
+    text: [copy.stopped(date), storeBillingDeletionNotice(normalizeLanguage(input.language)), copy.cancel, copy.notYou].join("\n\n"),
     html: [
       `<p>${copy.stopped(`<strong>${escapeHtml(date)}</strong>`)}</p>`,
-      `<p>${escapeHtml(copy.renewal)}</p>`,
+      `<p>${escapeHtml(storeBillingDeletionNotice(normalizeLanguage(input.language)))}</p>`,
       `<p>${escapeHtml(copy.cancel).replace(SUPPORT, `<a href="mailto:${SUPPORT}">${SUPPORT}</a>`)}</p>`,
       `<p>${escapeHtml(copy.notYou).replace(SUPPORT, `<a href="mailto:${SUPPORT}">${SUPPORT}</a>`)}</p>`,
     ].join(""),

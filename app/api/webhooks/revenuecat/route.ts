@@ -22,6 +22,9 @@ export async function POST(request: Request) {
     return Response.json({ received: true });
   } catch (error) {
     console.warn("Store webhook rejected or deferred.", { errorName: error instanceof Error ? error.name : "UnknownError" });
+    if (error instanceof Error && error.name === "StorePurchaseOwnershipError") {
+      return Response.json({ received: true, ignored: "STORE_OWNERSHIP_CONFLICT" });
+    }
     const response = apiSecurityResponse(error);
     if (response) return response;
     console.warn("Store webhook processing failed.", { errorName: error instanceof Error ? error.name : "UnknownError" });

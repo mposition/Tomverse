@@ -74,6 +74,12 @@ export async function PATCH(req: Request, context: RouteContext) {
     if (!before) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
+    const paidStorePlan = effectivePlanForAccess({ plan: "Free", webSubscriptionPlan: "Free",
+      storeSubscriptionPlan: before.storeSubscriptionPlan, storeSubscriptionExpiresAt: before.storeSubscriptionExpiresAt });
+    if (["Free", "Pro", "Max"].indexOf(body.plan) < ["Free", "Pro", "Max"].indexOf(paidStorePlan)) {
+      return NextResponse.json({ code: "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY",
+        error: "Cancel or refund the store subscription with its original provider before reducing this paid entitlement." }, { status: 409 });
+    }
 
     const user = await runWithAdminApproval(
       {

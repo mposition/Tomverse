@@ -365,7 +365,7 @@ async function pendingRequest(userId: string) {
 async function loadAccount(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, stripeSubscriptionId: true, subscriptionStore: true },
+    select: { id: true, stripeSubscriptionId: true, subscriptionStore: true, storeSubscriptionExpiresAt: true },
   });
   if (!user) return null;
   return user;
@@ -382,7 +382,7 @@ async function loadContext(
   userId: string
 ): Promise<PlanChangeContext | PlanChangeFailure> {
   const user = await loadAccount(userId);
-  if (!user?.stripeSubscriptionId || user.subscriptionStore) {
+  if (!user?.stripeSubscriptionId || (user.subscriptionStore && user.storeSubscriptionExpiresAt && user.storeSubscriptionExpiresAt > new Date())) {
     return fail(
       "NO_ACTIVE_SUBSCRIPTION",
       "There is no subscription to change; this is a new purchase."

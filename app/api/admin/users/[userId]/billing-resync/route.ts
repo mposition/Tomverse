@@ -12,6 +12,7 @@ import {
 import { getBillingPlans, tierForPlanId, type BillingPlanId } from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { applyWebSubscriptionSnapshot } from "@/lib/subscriptionEntitlements";
 
 type RouteContext = {
   params: Promise<{ userId: string }>;
@@ -75,6 +76,7 @@ export async function POST(req: Request, context: RouteContext) {
       );
     }
 
+    const observedAt = new Date();
     const stripe = getStripe();
     const subscription = user.stripeSubscriptionId
       ? await stripe.subscriptions.retrieve(user.stripeSubscriptionId)
@@ -100,20 +102,18 @@ export async function POST(req: Request, context: RouteContext) {
       : null;
     const planId = normalizePlanId(subscription.metadata.planId) || matchedPlan?.id || "free";
     const plan = activeStatuses.has(subscription.status) ? tierForPlanId(planId) : "Free";
+    await applyWebSubscriptionSnapshot({
+      userId: user.id, plan, subscriptionId: subscription.id, priceId,
+      status: subscription.status, periodEnd: subscriptionPeriodEnd(subscription),
+      interval: subscriptionInterval(subscription), cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end), observedAt,
+    });
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
-        plan,
         stripeCustomerId:
           typeof subscription.customer === "string"
             ? subscription.customer
             : subscription.customer.id,
-        stripeSubscriptionId: subscription.id,
-        stripePriceId: priceId,
-        subscriptionStatus: subscription.status,
-        subscriptionCurrentPeriodEnd: subscriptionPeriodEnd(subscription),
-        subscriptionBillingInterval: subscriptionInterval(subscription),
-        subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
       },
       select: {
         id: true,
@@ -126,6 +126,10 @@ export async function POST(req: Request, context: RouteContext) {
         stripeCustomerId: true,
         stripeSubscriptionId: true,
         stripePriceId: true,
+        webSubscriptionPlan: true,
+        subscriptionStore: true,
+        storeSubscriptionPlan: true,
+        storeSubscriptionExpiresAt: true,
       },
     });
 
@@ -140,6 +144,8 @@ export async function POST(req: Request, context: RouteContext) {
         stripeSubscriptionId: subscription.id,
         stripePriceId: priceId,
         plan,
+        effectivePlan: updated.plan,
+        subscriptionStore: updated.subscriptionStore,
       },
     });
 

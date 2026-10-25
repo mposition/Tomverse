@@ -61,7 +61,6 @@ export async function POST(req: Request) {
         id: true,
         plan: true,
         stripeSubscriptionId: true,
-        subscriptionStore: true,
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
       },

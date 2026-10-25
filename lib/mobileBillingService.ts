@@ -111,7 +111,11 @@ export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userI
   if (!pack) throw new Error("Unknown credit pack.");
   const where = { store_environment_transactionId: { store, environment: event.environment, transactionId: event.transaction_id } };
   const existing = await tx.mobileStoreTransaction.findUnique({ where });
-  if (existing && existing.userId !== userId) throw new Error("Store purchase belongs to another account.");
+  if (existing && existing.userId !== userId) {
+    const error = new Error("Store purchase belongs to another account.");
+    error.name = "StorePurchaseOwnershipError";
+    throw error;
+  }
   // A cancellation tombstone also handles refund-before-purchase delivery.
   if (existing?.refunded || (existing && event.type === "NON_RENEWING_PURCHASE")) return;
   const purchase = existing || await tx.mobileStoreTransaction.create({ data: {
