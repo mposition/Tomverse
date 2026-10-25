@@ -5,7 +5,14 @@ import type { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
-import { qaReleaseTrainLastTrainFrom, qaReleaseTrainSelectionFrom, type QaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoCore";
+import {
+  qaReleaseTrainEmergencyAdmissible,
+  qaReleaseTrainEmergencyFrom,
+  qaReleaseTrainLastTrainFrom,
+  qaReleaseTrainSelectionFrom,
+  type QaReleaseTrainEmergency,
+  type QaReleaseTrainSelection,
+} from "@/lib/qaReleaseTrainCargoCore";
 import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
 
 /**
@@ -15,24 +22,31 @@ import type { QaReleaseTrainPick } from "@/lib/qaReleaseTrainCore";
  * through the shared writer. No table of its own and no raw SQL here.
  */
 export const QA_RELEASE_TRAIN_ADMITTED_ACTION = "qa_release.train_admitted";
+/** An emergency departure's admission: its own action, so it never spends the scheduled trains' pick. */
+export const QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION = "qa_release.train_emergency_admitted";
 export const QA_RELEASE_TRAIN_REPORTED_ACTION = "qa_release.train_reported";
 const TARGET_TYPE = "QaReleaseTrain";
 /** Prisma's interactive-transaction limit: one lock, one read, one audit append. */
 const TRANSACTION_MS = 15_000;
 
-export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "already_admitted";
+export type QaReleaseTrainRefusal = "revision_mismatch" | "no_control" | "already_admitted" | "no_emergency";
 
 /**
  * Whether this departure may run: the caller's revision is the newest and this
- * departure was not admitted before. Both are read after the audit chain lock,
- * so neither can change between the read and the admission. A refusal writes
- * nothing. The develop merge lane's latch is not read (owner decision
- * 2026-10-23): a dev deploy problem says nothing about the picked pull
- * requests, which run main's own CI and are merged by a person.
+ * departure was not admitted before (as either kind). An emergency departure
+ * also needs the very request the train read to be the one still pending, so
+ * a replayed or stale call, or one assembled from a request since replaced or
+ * withdrawn, cannot start one. All of it is read after the audit chain lock, so nothing
+ * can change between the read and the admission. A refusal writes nothing.
+ * The develop merge lane's latch is not read (owner decision 2026-10-23): a
+ * dev deploy problem says nothing about the picked pull requests, which run
+ * main's own CI and are merged by a person.
  */
 export async function admitQaReleaseTrain(input: {
   callerRevision: number | null;
   slot: string;
+  /** The pending emergency request the train read and assembled from (its audit row id). */
+  emergencyRequestId?: string;
 }): Promise<{ admitted: true; controlRevision: number } | { admitted: false; reason: QaReleaseTrainRefusal }> {
   return prisma.$transaction(
     async (tx) => {
@@ -43,18 +57,23 @@ export async function admitQaReleaseTrain(input: {
       // One admission per departure: an empty or failed train is not rerun
       // by the next tick inside the same hour.
       const earlier = await tx.adminAuditLog.findFirst({
-        where: { action: QA_RELEASE_TRAIN_ADMITTED_ACTION, targetType: TARGET_TYPE, targetId: input.slot },
+        where: { action: { in: [QA_RELEASE_TRAIN_ADMITTED_ACTION, QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION] }, targetType: TARGET_TYPE, targetId: input.slot },
         select: { id: true },
       });
       if (earlier) return { admitted: false as const, reason: "already_admitted" as const };
+      const emergency = input.emergencyRequestId !== undefined;
+      const pending = emergency ? (await readQaReleaseTrainEmergency(tx)).pending : null;
+      if (input.emergencyRequestId !== undefined && !qaReleaseTrainEmergencyAdmissible(pending, input.emergencyRequestId)) {
+        return { admitted: false as const, reason: "no_emergency" as const };
+      }
       await writeSystemAuditLog({
         tx,
         systemActor: "qa-release-merge-lane",
-        action: QA_RELEASE_TRAIN_ADMITTED_ACTION,
+        action: emergency ? QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION : QA_RELEASE_TRAIN_ADMITTED_ACTION,
         targetType: TARGET_TYPE,
         targetId: input.slot,
-        summary: `Release train ${input.slot} admitted.`,
-        metadata: { slot: input.slot, controlRevision: control.revision },
+        summary: emergency ? `Emergency release train ${input.slot} admitted.` : `Release train ${input.slot} admitted.`,
+        metadata: { slot: input.slot, controlRevision: control.revision, ...(pending ? { emergency: true, requestId: pending.id, numbers: pending.numbers } : {}) },
       });
       return { admitted: true as const, controlRevision: control.revision };
     },
@@ -123,14 +142,18 @@ export const QA_RELEASE_TRAIN_CARGO_ACTION = "qa_release.train_cargo_selected";
 export const QA_RELEASE_TRAIN_CARGO_TARGET_TYPE = "QaReleaseTrainCargo";
 export const QA_RELEASE_TRAIN_CARGO_TARGET_ID = "next";
 
+export type QaReleaseTrainNext = QaReleaseTrainSelection & { emergency: QaReleaseTrainEmergency };
+
 /**
- * What the next train carries: the newest saved pick, unless a train was
- * admitted after it (that train took it, and what it left out rides next).
- * Read from the audit chain the pick, the admissions and the reports are
- * written to; nothing else stores it.
+ * What the next train carries: the newest saved pick, unless a scheduled
+ * train was admitted after it (that train took it, and what it left out rides
+ * next), and any emergency request still waiting. Read from the audit chain
+ * the picks, the admissions and the reports are written to; nothing else
+ * stores it. The carry comes from that scheduled train's own report, so an
+ * emergency train reporting later never replaces it.
  */
-export async function readQaReleaseTrainSelection(db: Prisma.TransactionClient = prisma): Promise<QaReleaseTrainSelection> {
-  const [pick, admission, report] = await Promise.all([
+export async function readQaReleaseTrainSelection(db: Prisma.TransactionClient = prisma): Promise<QaReleaseTrainNext> {
+  const [pick, admission, emergency] = await Promise.all([
     db.adminAuditLog.findFirst({
       where: { action: QA_RELEASE_TRAIN_CARGO_ACTION, targetType: QA_RELEASE_TRAIN_CARGO_TARGET_TYPE, targetId: QA_RELEASE_TRAIN_CARGO_TARGET_ID },
       orderBy: { createdAt: "desc" },
@@ -141,16 +164,100 @@ export async function readQaReleaseTrainSelection(db: Prisma.TransactionClient =
       orderBy: { createdAt: "desc" },
       select: { createdAt: true, targetId: true },
     }),
+    readQaReleaseTrainEmergency(db),
+  ]);
+  const report =
+    admission && typeof admission.targetId === "string"
+      ? await db.adminAuditLog.findFirst({
+          where: { action: QA_RELEASE_TRAIN_REPORTED_ACTION, targetType: TARGET_TYPE, targetId: admission.targetId },
+          orderBy: { createdAt: "desc" },
+          select: { metadata: true },
+        })
+      : null;
+  const metadata = pick?.metadata as { numbers?: unknown } | null | undefined;
+  return {
+    ...qaReleaseTrainSelectionFrom({
+      pick: pick ? { numbers: metadata?.numbers ?? null, at: pick.createdAt, by: pick.actorEmail } : null,
+      admission: admission && typeof admission.targetId === "string" ? { slot: admission.targetId, at: admission.createdAt } : null,
+      lastTrain: report ? qaReleaseTrainLastTrainFrom(report.metadata) : null,
+    }),
+    emergency,
+  };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Emergency trains (owner request 2026-10-25)                                */
+/* ------------------------------------------------------------------------- */
+
+export const QA_RELEASE_TRAIN_EMERGENCY_ACTION = "qa_release.train_emergency_requested";
+export const QA_RELEASE_TRAIN_EMERGENCY_TARGET_TYPE = "QaReleaseTrainEmergency";
+export const QA_RELEASE_TRAIN_EMERGENCY_TARGET_ID = "next";
+
+/** The newest emergency request, pending until an emergency admission after it takes it. */
+export async function readQaReleaseTrainEmergency(db: Prisma.TransactionClient = prisma): Promise<QaReleaseTrainEmergency> {
+  const [request, admission] = await Promise.all([
     db.adminAuditLog.findFirst({
-      where: { action: QA_RELEASE_TRAIN_REPORTED_ACTION, targetType: TARGET_TYPE },
+      where: { action: QA_RELEASE_TRAIN_EMERGENCY_ACTION, targetType: QA_RELEASE_TRAIN_EMERGENCY_TARGET_TYPE, targetId: QA_RELEASE_TRAIN_EMERGENCY_TARGET_ID },
       orderBy: { createdAt: "desc" },
-      select: { metadata: true },
+      select: { id: true, createdAt: true, actorEmail: true, metadata: true },
+    }),
+    db.adminAuditLog.findFirst({
+      where: { action: QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION, targetType: TARGET_TYPE },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, targetId: true },
     }),
   ]);
-  const metadata = pick?.metadata as { numbers?: unknown } | null | undefined;
-  return qaReleaseTrainSelectionFrom({
-    pick: pick ? { numbers: metadata?.numbers ?? null, at: pick.createdAt, by: pick.actorEmail } : null,
+  const metadata = request?.metadata as { numbers?: unknown; reason?: unknown } | null | undefined;
+  return qaReleaseTrainEmergencyFrom({
+    request: request
+      ? { id: request.id, numbers: metadata?.numbers ?? null, reason: metadata?.reason ?? null, at: request.createdAt, by: request.actorEmail }
+      : null,
     admission: admission && typeof admission.targetId === "string" ? { slot: admission.targetId, at: admission.createdAt } : null,
-    lastTrain: report ? qaReleaseTrainLastTrainFrom(report.metadata) : null,
   });
+}
+
+export type QaReleaseTrainAdmission = { slot: string; at: Date; emergency: boolean };
+
+/** The newest admissions of either kind, for the departure board: a train admitted but not yet reported is still on it. */
+export async function readQaReleaseTrainAdmissions(limit = 20): Promise<QaReleaseTrainAdmission[]> {
+  const rows = await prisma.adminAuditLog.findMany({
+    where: { action: { in: [QA_RELEASE_TRAIN_ADMITTED_ACTION, QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION] }, targetType: TARGET_TYPE },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { action: true, targetId: true, createdAt: true },
+  });
+  return rows.flatMap((row) =>
+    typeof row.targetId === "string" ? [{ slot: row.targetId, at: row.createdAt, emergency: row.action === QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION }] : [],
+  );
+}
+
+/**
+ * The departure hours the train service last said it runs on, and when (it
+ * says so every round, every 10 minutes). Display only, for Admin's next
+ * train: one AppSetting row it overwrites, never an audit event, never read
+ * by the train.
+ */
+export const QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY = "qa_release.train.schedule";
+
+export type QaReleaseTrainSchedule = { hours: number[]; reportedAt: string };
+
+export async function recordQaReleaseTrainSchedule(hours: readonly number[]): Promise<void> {
+  const value = JSON.stringify({ hours: [...hours].sort((a, b) => a - b), reportedAt: new Date().toISOString() });
+  await prisma.appSetting.upsert({
+    where: { key: QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY },
+    create: { key: QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY, value },
+    update: { value },
+  });
+}
+
+export async function readQaReleaseTrainSchedule(): Promise<QaReleaseTrainSchedule | null> {
+  const row = await prisma.appSetting.findUnique({ where: { key: QA_RELEASE_TRAIN_SCHEDULE_SETTING_KEY }, select: { value: true } });
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.value) as { hours?: unknown; reportedAt?: unknown };
+    const hours = Array.isArray(parsed.hours) ? parsed.hours.filter((hour): hour is number => Number.isInteger(hour) && hour >= 0 && hour <= 23) : [];
+    return hours.length > 0 && typeof parsed.reportedAt === "string" ? { hours, reportedAt: parsed.reportedAt } : null;
+  } catch {
+    return null;
+  }
 }

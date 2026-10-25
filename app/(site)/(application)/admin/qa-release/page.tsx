@@ -6,11 +6,19 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { CiAdmissionSection } from "@/components/admin/CiAdmissionSection";
 import { QaReleaseLaneVerdictsSection } from "@/components/admin/QaReleaseLaneVerdictsSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
+import { QaReleaseTrainBoard } from "@/components/admin/QaReleaseTrainBoard";
+import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
+import { QaReleaseTrainEmergencySection } from "@/components/admin/QaReleaseTrainEmergencySection";
+import { QaReleaseTrainRefresher } from "@/components/admin/QaReleaseTrainRefresher";
+import { QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
+import { QA_RELEASE_SECTION_IDS } from "@/components/admin/qaReleaseTabParts";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
 import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
 import { type QaReleaseLaneRounds, readQaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
-import { readQaReleaseTrainReports } from "@/lib/qaReleaseTrainStore";
+import { readQaReleaseTrainBoard } from "@/lib/qaReleaseTrainBoardRead";
+import { qaReleaseTrainNextDepartureMs } from "@/lib/qaReleaseTrainCore";
+import { readQaReleaseTrainReports, readQaReleaseTrainSchedule, readQaReleaseTrainSelection } from "@/lib/qaReleaseTrainStore";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
@@ -19,7 +27,8 @@ const TABS = adminNavItemTabs("qa-release");
 
 /**
  * QA and release (docs/policy/qa-release-agent.md section 4): from a develop
- * merge to production -- the merge lane, CI admission and the release train.
+ * merge to production -- the merge lane, CI admission and the release train,
+ * each on its own tab.
  * Only the open tab's data is loaded. Reading takes ordinary admin
  * authentication, which the console layout has established; every write takes
  * owner or ops and a recent sign-in, checked by its route.
@@ -56,6 +65,8 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
       />
       {tab.id === "ci-admission" ? (
         <CiAdmissionSection key={tab.id} initial={admission} canWrite={canWrite} />
+      ) : tab.id === "train" ? (
+        <TrainTab canWrite={canWrite} nowMs={now.getTime()} />
       ) : tab.id === "lane" ? (
         <LaneTab rounds={laneRounds} canWrite={canWrite} />
       ) : (
@@ -74,6 +85,36 @@ export default async function AdminQaReleasePage({ searchParams }: PageProps<"/a
           nowMs={now.getTime()}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The release train (owner, 2026-10-25): where the next train stands, an
+ * emergency departure, the next train's cargo and the departure board.
+ */
+async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number }) {
+  const [board, next, schedule] = await Promise.all([
+    readQaReleaseTrainBoard(nowMs),
+    readQaReleaseTrainSelection(),
+    readQaReleaseTrainSchedule(),
+  ]);
+  const nextMs = schedule ? qaReleaseTrainNextDepartureMs(nowMs, schedule.hours) : null;
+  const carried = next.departedWith && next.lastTrain?.slot === next.departedWith ? next.numbers.length : 0;
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <QaReleaseTrainRefresher />
+      <QaReleaseTrainSummary
+        nextDepartureAt={nextMs === null ? null : new Date(nextMs).toISOString()}
+        riding={next.numbers.length}
+        carried={carried}
+        openTrain={board.openTrains[0] ?? null}
+        openUnknown={!board.openRead}
+        emergencyPulls={next.emergency.pending?.numbers.length ?? null}
+      />
+      <QaReleaseTrainEmergencySection canWrite={canWrite} openUnknown={!board.openRead} />
+      <QaReleaseTrainCargoSection canWrite={canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
+      <QaReleaseTrainBoard rows={board.rows} pullsRead={board.pullsRead} nowMs={nowMs} />
     </div>
   );
 }

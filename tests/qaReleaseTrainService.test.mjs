@@ -28,11 +28,14 @@ const cargo = [
 
 function ports(overrides = {}) {
   const calls = [];
+  // The schedule report is kept apart: every round sends it, and the call
+  // sequences below are about what a departure does.
+  const scheduled = [];
   const note = (name, value) => (calls.push([name, value]), value);
   const p = {
     github: {
       branchExists: async (branch) => note("branchExists", overrides.branchExists ?? false) && branch,
-      openTrains: async () => note("openTrains", overrides.openTrains ?? 0),
+      openTrains: async () => note("openTrains", { count: overrides.openTrains ?? 0, riders: overrides.riders ?? [] }),
       cargo: async (numbers) => note("cargo", (overrides.cargo ?? cargo).filter((c) => numbers.includes(c.number))),
       openPullRequest: async (pr) => {
         note("openPullRequest", pr);
@@ -52,12 +55,18 @@ function ports(overrides = {}) {
       },
     },
     app: {
-      selection: async () => note("selection", overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number)),
-      admit: async (slot) => note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot]), overrides.admit ?? { admitted: true }),
+      schedule: async (hours) => {
+        scheduled.push(hours);
+        if (overrides.scheduleFails) throw new Error("app_500");
+      },
+      selection: async () =>
+        note("selection", { numbers: overrides.selection ?? (overrides.cargo ?? cargo).map((c) => c.number), emergency: overrides.emergency ? { id: overrides.emergencyId ?? "req-1", numbers: overrides.emergency } : null }),
+      admit: async (slot, emergencyRequestId) =>
+        note("admit", overrides.admit ?? { admitted: true }) && (calls.push(["admitSlot", slot, emergencyRequestId ?? null]), overrides.admit ?? { admitted: true }),
       report: async (report) => void note("report", report),
     },
   };
-  return { p, calls, names: () => calls.map(([n]) => n) };
+  return { p, calls, scheduled, names: () => calls.map(([n]) => n) };
 }
 
 test("off, or a bad departure list, does nothing at all", async () => {
@@ -74,7 +83,8 @@ test("off, or a bad departure list, does nothing at all", async () => {
 test("outside a departure hour, after this departure's branch exists, with an open train, or with no cargo, nothing is written", async () => {
   const outside = ports();
   assert.equal((await runQaReleaseTrainRound(env(), outside.p, Date.parse("2026-10-20T00:59:00Z"))).train, "no_departure");
-  assert.deepEqual(outside.calls, []);
+  // Off the hours only the emergency read happens.
+  assert.deepEqual(outside.names(), ["selection"]);
   for (const [overrides, expected] of [
     [{ branchExists: true }, "departure_done"],
     [{ openTrains: 1 }, "train_open"],
@@ -182,4 +192,168 @@ test("an assembly failure says why: the port's git code reaches the report and t
     throw new Error("fetch failed: https://x");
   };
   assert.equal((await runQaReleaseTrainRound(env(), other.p, NOW)).failure, "assemble_failed");
+});
+
+test("every running round tells the app its departure hours; off or misconfigured tells nothing; a failed report stops nothing", async () => {
+  const outside = ports();
+  await runQaReleaseTrainRound(env({ QA_RELEASE_TRAIN_SLOTS: "9,15" }), outside.p, Date.parse("2026-10-20T00:59:00Z"));
+  assert.deepEqual(outside.scheduled, [[9, 15]]);
+  const off = ports();
+  await runQaReleaseTrainRound(env({ QA_RELEASE_TRAIN_ENABLED: "false" }), off.p, NOW);
+  await runQaReleaseTrainRound(env({ QA_RELEASE_TRAIN_SLOTS: "8,8" }), off.p, NOW);
+  assert.deepEqual(off.scheduled, []);
+  const failing = ports({ scheduleFails: true });
+  const outcome = await runQaReleaseTrainRound(env(), failing.p, NOW);
+  assert.equal(failing.scheduled.length, 1);
+  assert.notEqual(outcome.train, "failed");
+  assert.ok(failing.names().includes("admitSlot"), "the departure still runs");
+});
+
+// Emergency trains (owner request 2026-10-25).
+test("an emergency request departs off the hours, on its own minute's branch, without waiting for an open train", async () => {
+  // 2026-10-20 12:37 AEST: no departure hour.
+  const at = Date.parse("2026-10-20T02:37:00Z");
+  const { p, calls } = ports({ emergency: [12], openTrains: 1 });
+  const outcome = await runQaReleaseTrainRound(env(), p, at);
+  assert.equal(outcome.train, "opened");
+  assert.equal(outcome.slot, "20261020-1237");
+  assert.deepEqual(
+    calls.find(([n]) => n === "admitSlot"),
+    ["admitSlot", "20261020-1237", "req-1"],
+  );
+  assert.deepEqual(calls.find(([n]) => n === "assemble")[1], { branch: "release/train-20261020-1237", numbers: [12], capacity: 30 });
+  // The open train (openTrains: 1) does not hold it back.
+  const pr = calls.find(([n]) => n === "openPullRequest")[1];
+  assert.match(pr.title, /^release: emergency train 20261020-1237 \(1 PR\)$/);
+  assert.match(pr.body, /^Emergency release train 20261020-1237 \(AEST\), opened by the QA-release agent on an operator's emergency request in Admin\./);
+});
+
+test("an emergency in a departure hour goes first, and the scheduled train still waits for its own round", async () => {
+  // 11:05 AEST: the 11:00 departure's window, so the emergency takes 11:05.
+  const { p, calls } = ports({ emergency: [10] });
+  const outcome = await runQaReleaseTrainRound(env(), p, NOW);
+  assert.equal(outcome.slot, "20261020-1105");
+  assert.deepEqual(calls.find(([n]) => n === "assemble")[1].numbers, [10]);
+});
+
+test("an emergency branch already pushed this minute is done; a refused emergency admission writes nothing", async () => {
+  const at = Date.parse("2026-10-20T02:37:00Z");
+  const done = ports({ emergency: [12], branchExists: true });
+  assert.equal((await runQaReleaseTrainRound(env(), done.p, at)).train, "departure_done");
+  const refused = ports({ emergency: [12], admit: { admitted: false, reason: "no_emergency" } });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), refused.p, at), { exitCode: 0, train: "not_admitted", reason: "no_emergency" });
+  assert.ok(!refused.names().includes("assemble"));
+});
+
+test("off the hours an app that cannot answer is no departure, not a failed round", async () => {
+  const { p } = ports();
+  p.app.selection = async () => {
+    throw new Error("app_503");
+  };
+  assert.deepEqual(await runQaReleaseTrainRound(env(), p, Date.parse("2026-10-20T02:37:00Z")), { exitCode: 0, train: "no_departure" });
+});
+
+test("an emergency none of whose pull requests can ride, or whose read fails, never holds up the scheduled departure", async () => {
+  // In the 11:00 window: the scheduled train still goes, with the scheduled pick.
+  const unmerged = ports({ emergency: [999] });
+  const outcome = await runQaReleaseTrainRound(env(), unmerged.p, NOW);
+  assert.equal(outcome.slot, "20261020-1100");
+  assert.deepEqual(unmerged.calls.find(([n]) => n === "admitSlot"), ["admitSlot", "20261020-1100", null]);
+
+  const failing = ports({ emergency: [12] });
+  failing.p.github.cargo = async (numbers) => {
+    if (numbers.includes(12) && numbers.length === 1) throw new Error("github_502");
+    return cargo.filter((c) => numbers.includes(c.number));
+  };
+  assert.equal((await runQaReleaseTrainRound(env(), failing.p, NOW)).slot, "20261020-1100");
+
+  // Off the hours there is nothing to fall back to.
+  const off = Date.parse("2026-10-20T02:37:00Z");
+  assert.deepEqual(await runQaReleaseTrainRound(env(), ports({ emergency: [999] }).p, off), { exitCode: 0, train: "no_cargo" });
+  const offFailing = ports({ emergency: [12] });
+  offFailing.p.github.cargo = async () => {
+    throw new Error("github_502");
+  };
+  assert.deepEqual(await runQaReleaseTrainRound(env(), offFailing.p, off), { exitCode: 1, train: "read_failed", failure: "cargo:github_502" });
+});
+
+test("an emergency that already left this minute hands the due scheduled departure its round; one assembled empty ends it", async () => {
+  // 11:05: the emergency's own 11:05 branch exists; the 11:00 one does not.
+  const left = ports({ emergency: [12] });
+  left.p.github.branchExists = async (branch) => (left.calls.push(["branchExists", branch]), branch === "release/train-20261020-1105");
+  const outcome = await runQaReleaseTrainRound(env(), left.p, NOW);
+  assert.equal(outcome.slot, "20261020-1100");
+  assert.deepEqual(left.calls.find(([n]) => n === "admitSlot"), ["admitSlot", "20261020-1100", null]);
+
+  // The emergency is cloned and everything conflicts: the round ends there.
+  // A second clone could outrun the service's ten-minute limit after the
+  // scheduled pick was spent; the next round takes the scheduled train.
+  const empty = ports({ emergency: [12], outcomes: { 12: "conflict" } });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), empty.p, NOW), { exitCode: 0, train: "empty", slot: "20261020-1105" });
+  assert.deepEqual(
+    empty.calls.filter(([n]) => n === "admitSlot"),
+    [["admitSlot", "20261020-1105", "req-1"]],
+  );
+  assert.equal(empty.calls.filter(([n]) => n === "assemble").length, 1);
+});
+
+test("a refused emergency admission hands the due scheduled departure its round", async () => {
+  const refused = ports({ emergency: [12] });
+  refused.p.app.admit = async (slot, emergencyRequestId) => {
+    refused.calls.push(["admitSlot", slot, emergencyRequestId ?? null]);
+    return emergencyRequestId ? { admitted: false, reason: "no_emergency" } : { admitted: true };
+  };
+  const outcome = await runQaReleaseTrainRound(env(), refused.p, NOW);
+  assert.equal(outcome.slot, "20261020-1100");
+  assert.deepEqual(
+    refused.calls.filter(([n]) => n === "admitSlot"),
+    [
+      ["admitSlot", "20261020-1105", "req-1"],
+      ["admitSlot", "20261020-1100", null],
+    ],
+  );
+  // Off the hours, the refusal is the round's answer.
+  const off = ports({ emergency: [12], admit: { admitted: false, reason: "no_emergency" } });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), off.p, Date.parse("2026-10-20T02:37:00Z")), { exitCode: 0, train: "not_admitted", reason: "no_emergency" });
+});
+
+// Review r-20261025-072021: a pull request already riding an open train is
+// never cherry-picked onto a second release branch.
+test("an emergency leaves out what an open train already carries, and says so", async () => {
+  const at = Date.parse("2026-10-20T02:37:00Z");
+  const { p, calls } = ports({ emergency: [10, 12], openTrains: 1, riders: [10] });
+  const outcome = await runQaReleaseTrainRound(env(), p, at);
+  assert.equal(outcome.train, "opened");
+  assert.deepEqual(calls.find(([n]) => n === "assemble")[1].numbers, [12]);
+  assert.deepEqual(calls.find(([n]) => n === "report")[1].picks, [
+    { number: 12, outcome: "included" },
+    { number: 10, outcome: "in_open_train" },
+  ]);
+  assert.match(calls.find(([n]) => n === "openPullRequest")[1].body, /Already on an open train, skipped: #10\./);
+  // When everything it names already rides, the request is admitted and
+  // reported empty without a clone -- spent, not left pending.
+  const all = ports({ emergency: [10], openTrains: 1, riders: [10] });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), all.p, at), { exitCode: 0, train: "empty", slot: "20261020-1237" });
+  assert.deepEqual(all.calls.find(([n]) => n === "admitSlot"), ["admitSlot", "20261020-1237", "req-1"]);
+  assert.deepEqual(all.calls.find(([n]) => n === "report")[1].picks, [{ number: 10, outcome: "in_open_train" }]);
+  assert.ok(!all.names().includes("assemble"));
+  // In a departure window the round goes on to the scheduled departure, which
+  // then waits for the open train that carries #10, as any scheduled one does.
+  const inWindow = ports({ emergency: [10], openTrains: 1, riders: [10] });
+  let read = false;
+  inWindow.p.app.selection = async () => {
+    const answer = { numbers: [11, 12], emergency: read ? null : { id: "req-1", numbers: [10] } };
+    read = true;
+    return answer;
+  };
+  assert.deepEqual(await runQaReleaseTrainRound(env(), inWindow.p, NOW), { exitCode: 0, train: "train_open" });
+  assert.deepEqual(
+    inWindow.calls.filter(([n]) => n === "admitSlot"),
+    [["admitSlot", "20261020-1105", "req-1"]],
+  );
+  // Review r-20261025-082156: a requested number not yet merged into develop
+  // (cargo() does not return it) keeps the request pending, not spent.
+  const unmerged = ports({ emergency: [10, 999], openTrains: 1, riders: [10] });
+  assert.deepEqual(await runQaReleaseTrainRound(env(), unmerged.p, at), { exitCode: 0, train: "no_cargo" });
+  assert.ok(!unmerged.names().includes("admit"));
 });

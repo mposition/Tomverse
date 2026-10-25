@@ -6,6 +6,7 @@
  *
  * Pure: the read and the store pass what they read.
  */
+import { QA_RELEASE_TRAIN_REPOSITORY, qaReleaseTrainIncludedNumbers } from "./qaReleaseTrainCore.ts";
 
 export const QA_RELEASE_TRAIN_CARGO_MAX = 30;
 /** How far back merged develop pull requests are offered. */
@@ -17,11 +18,19 @@ export type QaReleaseTrainCargoStatus =
   /** Waiting in an open main pull request already; picking it would release it twice. */
   | "in_main_pull_request"
   /**
-   * Already released: a merged main pull request names it, or was cut from a
+   * Already released: a merged main pull request carries it -- its commits or
+   * title name it, or hold every one of its own commits -- or was cut from a
    * branch with the same name (`hotfix/2026-10-21-x` for `claude/to-develop/x`),
    * which is how a hotfix that names no number is recognised.
    */
   | "on_main"
+  /**
+   * Only a main pull request's body mentions it: it may already be on main,
+   * or the body only refers to it (2026-10-25: #2941 named the checklist #2940
+   * to run on staging, and #2940 read as on main). It can be picked; the train
+   * skips it at departure if main already has its change.
+   */
+  | "mentioned"
   /** Brings main into develop: it has nothing to release. */
   | "back_merge"
   /** Changes .github/workflows: the train's App cannot push it. */
@@ -44,17 +53,44 @@ const record = (value: unknown): Json | null => (typeof value === "object" && va
 const list = (value: unknown): Json[] => (Array.isArray(value) ? value.map(record).filter((item): item is Json => item !== null) : []);
 
 /**
- * Pull request numbers a release pull request carries: those its title or
- * body names (`#2873`). A train's body (lib/qaReleaseTrainCore.ts) also names
- * what it left out and what it skipped as already on main, so when the body
- * has an `## Included` section only that section counts (2026-10-23: #2906
- * marked seventeen left-out pull requests as on main).
+ * Pull request numbers a release pull request says it carries, beside its
+ * commits: those its title names (`#2873`), and the number leading each item
+ * of a train's `## Included` section -- the train service reads riders the
+ * same way (qaReleaseTrainIncludedNumbers). Free text in a body, an item's
+ * own title included ("follow up on #2988"), is not read: it names what a
+ * release refers to as well as what it carries (2026-10-23: #2906's left-out
+ * list; 2026-10-25: #2941 named the checklist #2940 to run on staging, and
+ * #2940 read as on main).
  */
 export function qaReleaseTrainReferencedNumbers(pull: Json): number[] {
-  const body = typeof pull.body === "string" ? pull.body : "";
-  const included = /^## Included\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body);
-  const text = `${typeof pull.title === "string" ? pull.title : ""}\n${included ? included[1] : body}`;
-  return [...new Set([...text.matchAll(/#(\d{1,7})\b/g)].map((match) => Number(match[1])))];
+  const title = typeof pull.title === "string" ? pull.title : "";
+  const fromTitle = [...title.matchAll(/#(\d{1,7})\b/g)].map((match) => Number(match[1]));
+  return [...new Set([...fromTitle, ...qaReleaseTrainIncludedNumbers(typeof pull.body === "string" ? pull.body : "")])];
+}
+
+/**
+ * An open main pull request that can hold a candidate back: one from a
+ * branch of this repository. Anyone can open one on the public repository
+ * from a fork, with any title or body; a fork's open pull request is not
+ * believed. A merged one was merged by a person and is.
+ */
+const fromThisRepository = (pull: Json): boolean => record(record(pull.head)?.repo)?.full_name === QA_RELEASE_TRAIN_REPOSITORY;
+
+/**
+ * What a release pull request really carries, from its commits: a develop pull
+ * request rides as its own merge commit, whether merged, cherry-picked with
+ * `-x` (`(cherry picked from commit <sha>)`) or picked by the train (the
+ * subject `Merge pull request #2978 from ...` kept).
+ */
+export function qaReleaseTrainCarried(messages: readonly string[]): { numbers: Set<number>; shas: Set<string> } {
+  const numbers = new Set<number>();
+  const shas = new Set<string>();
+  for (const message of messages) {
+    const subject = /^Merge pull request #(\d{1,7}) from /.exec(message);
+    if (subject) numbers.add(Number(subject[1]));
+    for (const picked of message.matchAll(/\(cherry picked from commit ([0-9a-f]{40})\)/g)) shas.add(picked[1]);
+  }
+  return { numbers, shas };
 }
 
 /**
@@ -74,20 +110,48 @@ export function qaReleaseTrainCargoCandidates(input: {
   mergedMainJson: unknown;
   openMainJson: unknown;
   files: ReadonlyMap<number, readonly string[]>;
+  /** Each main pull request's commits, as read; what its title names counts too, read or not. */
+  mainCommits?: ReadonlyMap<number, readonly { sha: string; message: string }[]>;
+  /** Each candidate's own commits (merge commits left out), as read. */
+  developCommits?: ReadonlyMap<number, readonly string[]>;
   nowMs: number;
 }): QaReleaseTrainCargoCandidate[] {
   const since = input.nowMs - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
+  // What each main pull request carries: develop pull request numbers its
+  // commits and title name, and commits it holds or cherry-picked. And what
+  // only its body mentions.
   const named = (pulls: Json[], merged: boolean) => {
     const byNumber = new Map<number, number>();
+    const bySha = new Map<string, number>();
+    const mentioned = new Map<number, number>();
     for (const pull of pulls) {
       if (merged && typeof pull.merged_at !== "string") continue;
       if (typeof pull.number !== "number") continue;
-      for (const number of qaReleaseTrainReferencedNumbers(pull)) if (!byNumber.has(number)) byNumber.set(number, pull.number);
+      // A release that cherry-picks a pull request's own commits keeps no
+      // merge subject, but names the pull request in its title (#2889, #2901).
+      const commits = input.mainCommits?.get(pull.number) ?? [];
+      const carried = qaReleaseTrainCarried(commits.map((commit) => commit.message));
+      for (const commit of commits) carried.shas.add(commit.sha);
+      for (const number of qaReleaseTrainReferencedNumbers(pull)) carried.numbers.add(number);
+      for (const number of carried.numbers) if (!byNumber.has(number)) byNumber.set(number, pull.number);
+      for (const sha of carried.shas) if (!bySha.has(sha)) bySha.set(sha, pull.number);
+      const body = typeof pull.body === "string" ? pull.body : "";
+      for (const match of body.matchAll(/#(\d{1,7})\b/g)) if (!mentioned.has(Number(match[1]))) mentioned.set(Number(match[1]), pull.number);
     }
-    return byNumber;
+    return { byNumber, bySha, mentioned };
   };
+  const openMain = list(input.openMainJson).filter(fromThisRepository);
   const onMain = named(list(input.mergedMainJson), true);
-  const inMainPull = named(list(input.openMainJson), false);
+  const inMainPull = named(openMain, false);
+  // Carried: named by number, its merge commit cherry-picked, or every one of
+  // its own commits there (merged or cherry-picked one by one).
+  const carriedBy = (carried: ReturnType<typeof named>, pull: Json) => {
+    const byNumber = carried.byNumber.get(pull.number as number);
+    if (byNumber !== undefined) return byNumber;
+    if (typeof pull.merge_commit_sha === "string" && carried.bySha.has(pull.merge_commit_sha)) return carried.bySha.get(pull.merge_commit_sha);
+    const own = input.developCommits?.get(pull.number as number) ?? [];
+    return own.length > 0 && own.every((sha) => carried.bySha.has(sha)) ? carried.bySha.get(own[0]) : undefined;
+  };
   const branches = (pulls: Json[], merged: boolean) => {
     const byTail = new Map<string, number>();
     for (const pull of pulls) {
@@ -100,7 +164,7 @@ export function qaReleaseTrainCargoCandidates(input: {
     return byTail;
   };
   const onMainBranches = branches(list(input.mergedMainJson), true);
-  const inMainPullBranches = branches(list(input.openMainJson), false);
+  const inMainPullBranches = branches(openMain, false);
   return list(input.mergedDevelopJson)
     .filter((pull) => record(pull.base)?.ref === "develop" && typeof pull.merged_at === "string" && typeof pull.number === "number")
     .filter((pull) => Date.parse(pull.merged_at as string) >= since)
@@ -109,8 +173,9 @@ export function qaReleaseTrainCargoCandidates(input: {
       const number = pull.number as number;
       const files = input.files.get(number);
       const headRef = String(record(pull.head)?.ref ?? "");
-      const mainNumber = onMain.get(number) ?? onMainBranches.get(branchTail(headRef));
-      const mainPullNumber = inMainPull.get(number) ?? inMainPullBranches.get(branchTail(headRef));
+      const mainNumber = carriedBy(onMain, pull) ?? onMainBranches.get(branchTail(headRef));
+      const mainPullNumber = carriedBy(inMainPull, pull) ?? inMainPullBranches.get(branchTail(headRef));
+      const mentionedBy = onMain.mentioned.get(number) ?? inMainPull.mentioned.get(number);
       const status: QaReleaseTrainCargoStatus = qaReleaseTrainIsBackMerge(headRef, String(pull.title ?? ""))
         ? "back_merge"
         : mainNumber !== undefined
@@ -121,20 +186,23 @@ export function qaReleaseTrainCargoCandidates(input: {
             ? "unchecked"
             : files.some((path) => path.startsWith(".github/workflows/"))
               ? "changes_workflows"
-              : "available";
+              : mentionedBy !== undefined
+                ? "mentioned"
+                : "available";
       return {
         number,
         title: String(pull.title ?? "").slice(0, 200),
         author: String(record(pull.user)?.login ?? "").slice(0, 60),
         mergedAt: pull.merged_at as string,
         status,
-        mainPullRequest: mainNumber ?? mainPullNumber ?? null,
+        mainPullRequest: mainNumber ?? mainPullNumber ?? (status === "mentioned" ? (mentionedBy ?? null) : null),
       };
     });
 }
 
 /** Whether a candidate may be picked: anything but released, queued in a main PR, or a workflow change. */
-export const qaReleaseTrainCargoPickable = (status: QaReleaseTrainCargoStatus) => status === "available" || status === "unchecked";
+export const qaReleaseTrainCargoPickable = (status: QaReleaseTrainCargoStatus) =>
+  status === "available" || status === "unchecked" || status === "mentioned";
 
 /** A pick as saved: distinct positive pull request numbers, at most the train's capacity. Null when not one. */
 export function parseQaReleaseTrainCargoPick(value: unknown): number[] | null {
@@ -222,5 +290,57 @@ export function qaReleaseTrainSelectionFrom(input: {
     savedBy: pick.by,
     departedWith: spent ? admission.slot : null,
     lastTrain,
+  };
+}
+
+/*
+ * Emergency trains (owner request 2026-10-25): the operator names pull
+ * requests and a reason in Admin, and the train service departs with them on
+ * its next round instead of waiting for a departure hour. The request is an
+ * audited Admin action; the train's emergency admission spends it. An empty
+ * request withdraws a pending one.
+ */
+export const QA_RELEASE_TRAIN_EMERGENCY_REASON_MIN = 5;
+export const QA_RELEASE_TRAIN_EMERGENCY_REASON_MAX = 300;
+
+/** A reason as saved: trimmed, one line, within bounds. Null when not one. */
+export function parseQaReleaseTrainEmergencyReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const reason = value.replace(/\s+/g, " ").trim();
+  return reason.length >= QA_RELEASE_TRAIN_EMERGENCY_REASON_MIN && reason.length <= QA_RELEASE_TRAIN_EMERGENCY_REASON_MAX ? reason : null;
+}
+
+export type QaReleaseTrainEmergency = {
+  /**
+   * The pending request, or null when none is waiting. `id` is its audit row:
+   * the train names it when admitted, so a request replaced meanwhile is
+   * never spent by a train assembled from the one before it.
+   */
+  pending: { id: string; numbers: number[]; reason: string; requestedAt: string; requestedBy: string | null } | null;
+  /** The emergency departure that took the newest request, when one did. */
+  departedWith: string | null;
+};
+
+/**
+ * Whether an emergency admission may proceed: the request the train read and
+ * assembled from is the very one still pending. A request withdrawn, already
+ * spent, or replaced since the train read it is refused.
+ */
+export const qaReleaseTrainEmergencyAdmissible = (pending: QaReleaseTrainEmergency["pending"], requestId: string): boolean =>
+  pending !== null && pending.id === requestId;
+
+/** The emergency state from the newest request and the newest emergency admission. */
+export function qaReleaseTrainEmergencyFrom(input: {
+  request: { id: string; numbers: unknown; reason: unknown; at: Date; by: string | null } | null;
+  admission: { slot: string; at: Date } | null;
+}): QaReleaseTrainEmergency {
+  const { request, admission } = input;
+  if (!request) return { pending: null, departedWith: null };
+  if (admission !== null && admission.at.getTime() > request.at.getTime()) return { pending: null, departedWith: admission.slot };
+  const numbers = parseQaReleaseTrainCargoPick(request.numbers) ?? [];
+  const reason = parseQaReleaseTrainEmergencyReason(request.reason);
+  return {
+    pending: numbers.length > 0 && reason !== null ? { id: request.id, numbers, reason, requestedAt: request.at.toISOString(), requestedBy: request.by } : null,
+    departedWith: null,
   };
 }

@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { QaReleaseMainCandidatesSection } from "@/components/admin/QaReleaseMainCandidatesSection";
 import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
-import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
-import { QaReleaseTrainSection, type QaReleaseTrainView } from "@/components/admin/QaReleaseTrainSection";
 import type { AgentDigestConsole, AgentDigestConsoleRow } from "@/lib/agentDigestConsoleRead";
 import { aestStamp } from "@/lib/agentOffice/time";
 import { adminFetch } from "@/lib/adminFetch";
@@ -23,7 +21,7 @@ import {
 } from "@/lib/qaReleaseAttentionCore";
 import type { QaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesCore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
-import { QA_RELEASE_SECTION_IDS, card, openSection } from "@/components/admin/qaReleaseTabParts";
+import { QA_RELEASE_SECTION_IDS, QA_RELEASE_TRAIN_TAB_HREF, card, openSection, type QaReleaseTrainView } from "@/components/admin/qaReleaseTabParts";
 
 const PAGE_PATH = "/admin/qa-release";
 const CONTROL_ROUTE = "/api/admin/agent-digests/qa-release/control";
@@ -54,8 +52,9 @@ const CI_CLASS_TONE: Record<string, string> = {
  * The QA and release tab of the common Agent digest area
  * (docs/policy/qa-release-agent.md section 4), ordered by what the operator
  * asks first: what needs me, is production current, is the merge lane
- * running, what did the latest digest find. Rarely used parts (the release
- * train and the operator control revision) sit collapsed at the bottom.
+ * running, what did the latest digest find. The operator control revision,
+ * rarely used, sits collapsed at the bottom; the release train has its own
+ * tab, and a failed train is raised here with a link to it.
  * Nothing here approves, merges or signs; the one write on the tab's main
  * body is the merge lane's release form, owner and ops only.
  */
@@ -71,10 +70,30 @@ export function AdminAgentDigestsPanel({
   /** The server's clock when the page was read, so both renders agree. */
   nowMs: number;
 }) {
+  const m = useAdminMessages(adminAgentDigestsMessages);
+  const router = useRouter();
   const items = qaReleaseAttentionItems({ console: initial, main, trains, nowMs });
   const figures = qaReleaseStatusFigures({ digests: initial.digests, main });
+  // Refresh: the page is read again on the server (main's pull requests and
+  // production straight from GitHub). The next train lives on its own tab.
+  const [refreshing, startRefresh] = useTransition();
+  const refresh = () => startRefresh(() => router.refresh());
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="qa-release-tab">
+      <div className="-mb-2 flex items-center justify-end gap-3">
+        <span className="text-xs text-zinc-500" data-testid="qa-release-read-at">
+          {m.overviewReadAt.replace("{at}", aestStamp(new Date(nowMs).toISOString()))}
+        </span>
+        <button
+          type="button"
+          className="inline-flex min-h-8 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50"
+          onClick={refresh}
+          disabled={refreshing}
+          data-testid="qa-release-refresh"
+        >
+          {refreshing ? m.overviewRefreshing : m.overviewRefresh}
+        </button>
+      </div>
       <AttentionStrip items={items} />
       <StatusCards figures={figures} />
       <div className="grid min-w-0 gap-5 lg:grid-cols-2">
@@ -82,8 +101,6 @@ export function AdminAgentDigestsPanel({
         <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.lane} />
       </div>
       <LatestDigest digests={initial.digests} limit={initial.limit} />
-      <QaReleaseTrainCargoSection canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
-      <QaReleaseTrainSection trains={trains} id={QA_RELEASE_SECTION_IDS.train} />
       <AgentSettings initial={initial} />
     </section>
   );
@@ -128,7 +145,12 @@ function AttentionStrip({ items }: { items: QaReleaseAttentionItem[] }) {
           urgent: true,
         };
       case "main_unread":
-        return { title: m.attentionMainUnread, detail: m.attentionMainUnreadDetail, action: null, urgent: false };
+        return {
+          title: m.attentionMainUnread,
+          detail: m.attentionMainUnreadDetail + (item.failure ? fill(m.githubFailure, { failure: item.failure }) : ""),
+          action: null,
+          urgent: false,
+        };
       case "ci_failed":
         return {
           title: fill(m.attentionCiFailed, { count: item.count }),
@@ -154,7 +176,7 @@ function AttentionStrip({ items }: { items: QaReleaseAttentionItem[] }) {
         return {
           title: m.attentionTrainFailed,
           detail: fill(m.attentionTrainFailedDetail, { slot: item.slot, failure: item.failure ?? m.none }),
-          action: [m.attentionSeeTrain, QA_RELEASE_SECTION_IDS.train],
+          action: [m.attentionSeeTrain, QA_RELEASE_TRAIN_TAB_HREF],
           urgent: false,
         };
     }
@@ -181,8 +203,9 @@ function AttentionStrip({ items }: { items: QaReleaseAttentionItem[] }) {
               </div>
               {action ? (
                 <a
-                  href={`#${action[1]}`}
-                  onClick={(event) => openSection(event, action[1])}
+                  // A section of this tab, or (starting with "/") another tab.
+                  href={action[1].startsWith("/") ? action[1] : `#${action[1]}`}
+                  onClick={action[1].startsWith("/") ? undefined : (event) => openSection(event, action[1])}
                   className="inline-flex min-h-9 items-center rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm font-medium text-zinc-100 hover:bg-zinc-800"
                 >
                   {action[0]}
