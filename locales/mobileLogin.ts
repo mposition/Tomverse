@@ -13,6 +13,9 @@ const en = {
   "browserIntro": "Use the same sign-in options as the Tomverse website, then return to the app.",
   "inAppEmail": "Use an email code in the app",
   "browserUnavailable": "Browser sign-in is not available on this server yet. You can use an email code in the app.",
+  "browserDeviceUnavailable": "Browser sign-in is unavailable on this device. Use an email code in the app.",
+  "browserVerificationFailed": "This app could not verify browser sign-in. Use an email code in the app.",
+  "browserBusy": "Close the previous sign-in window before starting another browser sign-in.",
   "browserFailed": "Browser sign-in could not finish. Try again or use an email code in the app.",
   "browserCancelled": "Browser sign-in was cancelled. Try again when you are ready.",
   "browserExpired": "Browser sign-in expired. Start a new sign-in request.",
@@ -41,6 +44,9 @@ export const mobileLoginCopy: Record<MobileLanguage, typeof en> = {
   "browserIntro": "Tomverse 웹사이트와 같은 로그인 방법으로 인증한 뒤 앱으로 돌아오세요.",
   "inAppEmail": "앱에서 이메일 코드로 로그인",
   "browserUnavailable": "이 서버에서 브라우저 로그인을 아직 사용할 수 없습니다. 앱에서 이메일 코드로 로그인할 수 있습니다.",
+  "browserDeviceUnavailable": "이 기기에서 브라우저 로그인을 사용할 수 없습니다. 앱에서 이메일 코드로 로그인해 주세요.",
+  "browserVerificationFailed": "앱에서 브라우저 로그인을 확인할 수 없습니다. 앱에서 이메일 코드로 로그인해 주세요.",
+  "browserBusy": "이전 로그인 창을 닫은 뒤 새 브라우저 로그인을 시작해 주세요.",
   "browserFailed": "브라우저 로그인을 완료하지 못했습니다. 다시 시도하거나 앱에서 이메일 코드로 로그인해 주세요.",
   "browserCancelled": "브라우저 로그인을 취소했습니다. 준비되면 다시 시도해 주세요.",
   "browserExpired": "브라우저 로그인 시간이 만료되었습니다. 새 로그인을 시작해 주세요.",
@@ -61,6 +67,9 @@ export function mobileLoginError(error: unknown, language: MobileLanguage, phase
  const code = (error as { code?: string })?.code ?? "";
  const copy = mobileLoginCopy[language];
  if (code === "MOBILE_LOGIN_UNAVAILABLE") return phase === "browser" ? copy.browserUnavailable : copy.unavailable;
+ if (phase === "browser" && code === "LOGIN_UNAVAILABLE") return copy.browserDeviceUnavailable;
+ if (phase === "browser" && code === "LOGIN_VERIFICATION_FAILED") return copy.browserVerificationFailed;
+ if (phase === "browser" && code === "LOGIN_IN_PROGRESS") return copy.browserBusy;
  if (phase === "browser" && ["LOGIN_CANCELLED", "DEVICE_AUTH_CANCELLED"].includes(code)) return copy.browserCancelled;
  if (phase === "browser" && code === "LOGIN_EXPIRED") return copy.browserExpired;
  if (code === "EMAIL_CODE_INVALID") return copy.invalid;

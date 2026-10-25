@@ -64,11 +64,12 @@ public class MobileBrowserSignInTest {
     }
     private static class Launcher implements ActivityResultCaller {
         Intent launched;
+        int launches;
         ActivityResultContract<?, ?> contract;
         @Override public <I, O> ActivityResultLauncher<I> registerForActivityResult(ActivityResultContract<I, O> contract, ActivityResultCallback<O> callback) {
             this.contract = contract;
             return new ActivityResultLauncher<I>() {
-                @Override public void launch(I intent, ActivityOptionsCompat options) { launched = (Intent) intent; }
+                @Override public void launch(I intent, ActivityOptionsCompat options) { launched = (Intent) intent; launches++; }
                 @Override public void unregister() {}
                 @Override public ActivityResultContract<I, ?> getContract() { return contract; }
             };
@@ -86,12 +87,23 @@ public class MobileBrowserSignInTest {
     }
     private Call pending() throws Exception {
         Call call = new Call(); field("origin", "https://tomverse.app"); field("pendingLogin", call);
+        field("browserActive", true);
         field("state", STATE); field("verifier", "v".repeat(43)); field("pendingGeneration", 0L);
         return call;
     }
     private AuthTabIntent.AuthResult result(int code, String uri) {
         Launcher launcher = new Launcher(); launcher.register(plugin);
         return (AuthTabIntent.AuthResult) launcher.contract.parseResult(code, uri == null ? null : new Intent().setData(Uri.parse(uri)));
+    }
+    private Call launch(Launcher launcher) throws Exception {
+        field("browserLauncher", launcher.register(plugin)); field("origin", "https://tomverse.app");
+        int expected = launcher.launches + 1;
+        Call call = new Call(); plugin.signIn(call);
+        for (int i = 0; i < 500 && launcher.launches < expected; i++) { Shadows.shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(10); }
+        assertEquals(expected, launcher.launches); return call;
+    }
+    private String callback(Launcher launcher) {
+        return CALLBACK + "#grant=" + GRANT + "&state=" + launcher.launched.getData().getQueryParameter("state");
     }
     @After public void closeQueue() throws Exception { ((ExecutorService) field("queue")).shutdownNow(); }
 
@@ -145,6 +157,43 @@ public class MobileBrowserSignInTest {
         Call call = pending(); ((AtomicLong) field("signInGeneration")).incrementAndGet();
         plugin.handleBrowserResult(result(AuthTabIntent.RESULT_OK, CALLBACK + "#grant=" + GRANT + "&state=" + STATE)); call.await();
         assertEquals("LOGIN_CANCELLED", call.error); assertEquals(0, plugin.exchanges);
+    }
+    @Test public void anExpiredTabKeepsItsResultSlotUntilItsLateResultIsConsumed() throws Exception {
+        Launcher launcher = new Launcher();
+        for (int code : new int[] { AuthTabIntent.RESULT_OK, AuthTabIntent.RESULT_CANCELED, AuthTabIntent.RESULT_VERIFICATION_FAILED }) {
+            Call expired = launch(launcher); String oldCallback = callback(launcher);
+            Shadows.shadowOf(Looper.getMainLooper()).idleFor(180, TimeUnit.SECONDS); expired.await();
+            assertEquals("LOGIN_EXPIRED", expired.error); assertEquals(true, field("browserActive"));
+            int launches = launcher.launches; int exchanges = plugin.exchanges;
+            Call blocked = new Call(); plugin.signIn(blocked); blocked.await();
+            assertEquals("LOGIN_IN_PROGRESS", blocked.error); assertEquals(launches, launcher.launches);
+            plugin.handleBrowserResult(result(code, code == AuthTabIntent.RESULT_OK ? oldCallback : null));
+            assertEquals(false, field("browserActive")); assertEquals(exchanges, plugin.exchanges);
+            Call fresh = launch(launcher);
+            plugin.handleBrowserResult(result(AuthTabIntent.RESULT_OK, callback(launcher))); fresh.await();
+            assertNull(fresh.error); assertEquals(exchanges + 1, plugin.exchanges);
+        }
+    }
+    @Test public void signOutKeepsTheOldTabIsolatedUntilItReturnsThenAllowsFreshSignIn() throws Exception {
+        field("store", new SecureSessionStore(plugin.getContext()));
+        Launcher launcher = new Launcher(); Call old = launch(launcher); String oldCallback = callback(launcher);
+        Call logout = new Call(); plugin.signOut(logout); logout.await();
+        Shadows.shadowOf(Looper.getMainLooper()).idle(); old.await();
+        assertEquals("LOGIN_CANCELLED", old.error); assertEquals(true, field("browserActive"));
+        Call blocked = new Call(); plugin.signIn(blocked); blocked.await();
+        assertEquals("LOGIN_IN_PROGRESS", blocked.error); assertEquals(1, launcher.launches);
+        plugin.handleBrowserResult(result(AuthTabIntent.RESULT_OK, oldCallback));
+        assertEquals(0, plugin.exchanges);
+        Call fresh = launch(launcher);
+        plugin.handleBrowserResult(result(AuthTabIntent.RESULT_OK, callback(launcher))); fresh.await();
+        assertNull(fresh.error); assertEquals(1, plugin.exchanges);
+    }
+    @Test public void aConcurrentBrowserRequestCannotInvalidateTheActiveAttempt() throws Exception {
+        Launcher launcher = new Launcher(); Call first = launch(launcher);
+        Call second = new Call(); plugin.signIn(second); second.await();
+        assertEquals("LOGIN_IN_PROGRESS", second.error); assertEquals(1, launcher.launches);
+        plugin.handleBrowserResult(result(AuthTabIntent.RESULT_OK, callback(launcher))); first.await();
+        assertNull(first.error); assertEquals(1, plugin.exchanges);
     }
     @Test public void unsolicitedAppLinkIntentsCannotCompleteAuthTabSignIn() throws Exception {
         pending(); plugin.unsolicitedIntent(new Intent().setData(Uri.parse(CALLBACK + "#grant=" + GRANT + "&state=" + STATE)));

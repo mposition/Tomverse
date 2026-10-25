@@ -43,6 +43,9 @@ public class MobileAuthPlugin extends Plugin {
     private String state;
     private PluginCall pendingLogin;
     private ActivityResultLauncher<Intent> browserLauncher;
+    // Keep the ActivityResult slot occupied until its tab returns, even after
+    // expiry or sign-out has discarded the pending call and its PKCE proof.
+    private volatile boolean browserActive;
     private final AtomicLong signInGeneration = new AtomicLong();
     private long pendingGeneration;
     private BiometricPrompt devicePrompt;
@@ -189,6 +192,7 @@ public class MobileAuthPlugin extends Plugin {
         });
     }
     @PluginMethod public void signIn(PluginCall call) {
+        if (browserActive) { call.reject("Close the previous sign-in window first", "LOGIN_IN_PROGRESS"); return; }
         long generation = nextSignIn();
         queue.execute(() -> {
             try {
@@ -200,7 +204,7 @@ public class MobileAuthPlugin extends Plugin {
     private void openBrowser(PluginCall call, long generation) {
         main.post(() -> {
             if (!currentSignIn(generation)) { call.reject("Sign-in cancelled", "LOGIN_CANCELLED"); return; }
-            if (pendingLogin != null) { call.reject("Sign-in already in progress", "LOGIN_IN_PROGRESS"); return; }
+            if (browserActive || pendingLogin != null) { call.reject("Close the previous sign-in window first", "LOGIN_IN_PROGRESS"); return; }
             try {
                 validateOrigin();
                 String browser = browserPackage();
@@ -210,9 +214,10 @@ public class MobileAuthPlugin extends Plugin {
                 Uri url = Uri.parse(origin + "/auth/mobile").buildUpon().appendQueryParameter("code_challenge", challenge).appendQueryParameter("state", state).build();
                 AuthTabIntent tab = new AuthTabIntent.Builder().build();
                 tab.intent.setPackage(browser);
+                browserActive = true;
                 tab.launch(browserLauncher, url, Uri.parse(origin).getHost(), "/auth/mobile/callback");
                 main.postDelayed(() -> { if (pendingLogin == call) { pendingLogin = null; verifier = null; state = null; call.reject("Sign-in expired", "LOGIN_EXPIRED"); } }, 180000);
-            } catch (Exception e) { pendingLogin = null; verifier = null; state = null; call.reject("Could not open sign-in", "LOGIN_UNAVAILABLE"); }
+            } catch (Exception e) { browserActive = false; pendingLogin = null; verifier = null; state = null; call.reject("Could not open sign-in", "LOGIN_UNAVAILABLE"); }
         });
     }
     String browserPackage() {
@@ -222,6 +227,8 @@ public class MobileAuthPlugin extends Plugin {
         return chrome != null && CustomTabsClient.isAuthTabSupported(getContext(), chrome) ? chrome : null;
     }
     void handleBrowserResult(AuthTabIntent.AuthResult result) {
+        if (!browserActive) return;
+        browserActive = false;
         if (pendingLogin == null) return;
         if (result.resultCode != AuthTabIntent.RESULT_OK || result.resultUri == null) {
             rejectBrowserSignIn(result.resultCode == AuthTabIntent.RESULT_CANCELED ? "LOGIN_CANCELLED" : "LOGIN_VERIFICATION_FAILED");

@@ -94,6 +94,9 @@ if neither supports Auth Tab, sign-in reports unavailable. iOS retains its
 ASWebAuthenticationSession callback and automatic dismissal. The native layer
 resolves sign-in only after exchanging and storing the session. Domain
 association verification and physical-device verification remain required.
+An expired or signed-out Android attempt retains its ActivityResult slot until
+the old authentication window returns. Close that window before retrying; its
+late cancellation or redirect cannot consume a newer attempt's PKCE proof.
 
 The email option signs existing accounts in using a six-digit code entered
 inside the app. The native plugin calls the exact
