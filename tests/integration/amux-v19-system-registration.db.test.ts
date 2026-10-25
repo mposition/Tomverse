@@ -6,7 +6,7 @@ import { after, before, test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog, writeSystemAuditLog } from
+import { takeAuditChainLock, writeSystemAuditLog } from
   "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V19_SYSTEM_REGISTRATION_ACTION,
@@ -23,8 +23,6 @@ import { commitAmuxIdeaAnalysisResult } from
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
-import { inspectV4TaskCostCatalog } from
-  "@/lib/amux/v4TaskCostCatalogCore";
 import { commitFrontierCatalogDecision } from
   "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from
@@ -67,6 +65,8 @@ import { amuxSessionPageKeyIdentities,
   commitAmuxSessionAnalysisPlanInTx, readAmuxSessionPageContextInTx } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
 import { prisma } from "@/lib/prisma";
+import { ensureModelRegistrySeeded } from "@/lib/modelRegistry";
+import { seedAmuxWorkerCatalog, truncateAmuxWorkerRegistry } from "./amuxDerivedCatalogFixture";
 
 const commitAmuxIdeaSessionSubmission = (
   tx: Parameters<typeof commitPinnedSessionSubmission>[0],
@@ -197,6 +197,7 @@ before(async () => {
 });
 
 after(async () => {
+  await truncateAmuxWorkerRegistry();
   await new Promise<void>((resolve, reject) => server.close((error) =>
     error ? reject(error) : resolve()));
   for (const value of objects.values()) value.fill(0);
@@ -204,48 +205,15 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+// Task prices come from the worker registry and Admin › Models (owner
+// decision 2026-10-25): one frontier Claude worker whose v22 profile runs
+// implement Tasks, priced by the seeded registry model.
 async function approveSyntheticTaskCatalog() {
-  const now = Date.now();
-  const catalog = {
-    schemaVersion: 1, catalogVersion: `system-catalog-${randomUUID()}`,
-    pricingVersion: "synthetic-pricing-v1", gradeRulesVersion: "synthetic-grades-v1",
-    gradeRules: [{ role: "implement", grade: "frontier",
-      caps: { uncachedInputTokens: 1_000, outputTokens: 1_000,
-        cacheReadTokens: 500, cacheWriteTokens: 500, maxAttempts: 2 } }],
-    routes: [{ routeId: "synthetic/implement", workerName: "synthetic-worker",
-      provider: "openai", modelId: "synthetic-frontier", routePolicyDigest: "d".repeat(64),
-      enabled: true, roles: ["implement"], grades: ["frontier"],
-      pricingSource: "synthetic-test", pricingVerifiedAt:
-        new Date(now - 60_000).toISOString(),
-      pricingExpiresAt: new Date(now + 24 * 60 * 60_000).toISOString(),
-      uncachedInputMicroUsdPerMillion: 1_000_000,
-      cacheReadMicroUsdPerMillion: 100_000,
-      cacheWriteMicroUsdPerMillion: 150_000,
-      outputMicroUsdPerMillion: 2_000_000,
-      toolCostCapMicroUsdPerAttempt: 0 }],
-  };
-  const inspected = inspectV4TaskCostCatalog(catalog);
-  assert.equal(inspected.ok, true);
-  if (!inspected.ok) throw new Error("synthetic Task catalog rejected");
-  await prisma.$transaction(async (tx) => {
-    const latest = await tx.amuxV4TaskCostCatalogApproval.findFirst({
-      orderBy: { version: "desc" }, select: { version: true } });
-    const id = randomUUID();
-    const auditId = await writeAdminAuditLog({ tx, session, request,
-      action: "amux.v4.task_catalog.approve",
-      targetType: "AmuxV4TaskCostCatalogApproval", targetId: id,
-      summary: "Approved one synthetic current Task catalog for system registration testing.",
-      metadata: { synthetic: true } });
-    await tx.amuxV4TaskCostCatalogApproval.create({ data: { id,
-      version: (latest?.version ?? 0) + 1, status: "approved",
-      catalogVersion: catalog.catalogVersion,
-      pricingVersion: catalog.pricingVersion,
-      catalog: catalog as Prisma.InputJsonValue,
-      catalogDigest: inspected.catalogDigest, evidenceDigest: "e".repeat(64),
-      approvedByUserId: authority.approvedByUserId,
-      approvalAuditLogId: auditId, approvedAt: new Date(),
-    } });
-  });
+  await ensureModelRegistrySeeded();
+  await seedAmuxWorkerCatalog([{ worker_name: "claude-contract",
+    routing_roles: ["contract"],
+    v22: { model: "claude-opus-4-8", routing_roles: ["design", "implement", "investigate"],
+      tool_capabilities: ["repo_read", "repo_write"] } }]);
 }
 
 async function completedSessionIdea(options: {

@@ -922,7 +922,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "decision maker",
       "kill switch",
       "analysis settings",
-      "cost catalogue",
     ],
     tabs: [
       {
@@ -934,7 +933,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "workers",
         label: "Workers",
-        description: "Register AI workers, choose what each can do, turn them on or off, and approve the Task cost catalogue",
+        description: "Register AI workers, choose what each can do, and turn them on or off",
       },
       { id: "safety", label: "Execution safety and recovery", description: "Automatic recovery, evidence to inspect and operator halt decisions", badge: "amuxOrchestratorHalts" },
       { id: "decision-maker", label: "Decision Maker", description: "The Decision Maker kill switch and the mode of each instance" },

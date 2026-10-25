@@ -616,7 +616,6 @@ test("multiline AMUX service imports remain in the audit sweep", () => {
     "amux/ideas/unit-decisions/cancel/route.ts",
     "amux/ideas/unit-decisions/no-commit/route.ts",
     "amux/portfolio/route.ts",
-    "amux/task-cost-catalog/route.ts",
     "amux/v22-lane/route.ts",
   ];
   for (const name of serviceAuditedRoutes) {

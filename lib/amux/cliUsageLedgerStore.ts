@@ -5,8 +5,8 @@ import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
-import { inspectV4TaskCostCatalog, type V4TaskCostCatalog } from
-  "@/lib/amux/v4TaskCostCatalogCore";
+import type { V4TaskCostCatalog } from "@/lib/amux/v4TaskCostCatalogCore";
+import { readAmuxV4TaskAutoCatalog } from "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { amuxCliUsageReceiptDigest, amuxCliUsageReceiptSchema,
   amuxUsageLedgerReceiptSchema,
   estimateAmuxCliApiCost, v22ReceiptModelMatchesAssignment,
@@ -83,21 +83,11 @@ async function approvedTaskPrice(tx: Prisma.TransactionClient,
   receipt: Receipt): Promise<AmuxCliApiPrice | null> {
   if (receipt.binding.kind !== "task_attempt" || !receipt.actualModelId ||
       receipt.actualModelId === "multi_model") return null;
-  const row = await tx.amuxV4TaskCostCatalogApproval.findFirst({
-    orderBy: { version: "desc" },
-  });
-  if (!row || row.status !== "approved" || row.revokedAt !== null) return null;
-  const inspection = inspectV4TaskCostCatalog(row.catalog);
-  if (!inspection.ok || inspection.catalogDigest !== row.catalogDigest) return null;
-  const audit = await tx.adminAuditLog.findUnique({
-    where: { id: row.approvalAuditLogId },
-    select: { action: true, actorUserId: true, targetId: true,
-      targetType: true, entryHash: true },
-  });
-  if (!audit?.entryHash || audit.action !== "amux.v4.task_catalog.approve" ||
-      audit.actorUserId !== row.approvedByUserId || audit.targetId !== row.id ||
-      audit.targetType !== "AmuxV4TaskCostCatalogApproval") return null;
-  const catalog = row.catalog as unknown as V4TaskCostCatalog;
+  // The price the registries give now (owner decision 2026-10-25); a worker or
+  // model the catalog no longer prices records the usage unpriced.
+  const current = await readAmuxV4TaskAutoCatalog(tx).catch(() => null);
+  if (!current?.ok) return null;
+  const catalog = current.catalog as unknown as V4TaskCostCatalog;
   const candidates = catalog.routes.filter((route) => route.enabled &&
     route.workerName === receipt.worker && route.provider === receipt.provider &&
     route.modelId === receipt.actualModelId &&
@@ -106,7 +96,7 @@ async function approvedTaskPrice(tx: Prisma.TransactionClient,
   if (candidates.length !== 1) return null;
   const route = candidates[0];
   return { provider: receipt.provider, modelId: receipt.actualModelId,
-    version: row.pricingVersion,
+    version: catalog.pricingVersion,
     uncachedInputMicroUsdPerMillion: route.uncachedInputMicroUsdPerMillion,
     cacheReadMicroUsdPerMillion: route.cacheReadMicroUsdPerMillion,
     cacheWriteMicroUsdPerMillion: route.cacheWriteMicroUsdPerMillion,

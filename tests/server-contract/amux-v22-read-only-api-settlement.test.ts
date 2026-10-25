@@ -121,6 +121,17 @@ mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), {
       return { receipt: { role: "implement", grade: "frontier",
         receiptDigest: "f".repeat(64) } };
     },
+    // Task prices come from the registries (owner decision 2026-10-25).
+    readAmuxV4TaskAutoCatalog: async () => ({ ok: true, catalogDigest,
+      catalogId: "registry:one", catalog: { pricingVersion: "price-v1",
+        routes: [{ enabled: true, workerName: worker,
+          provider: "anthropic", modelId: "claude-opus-5-5",
+          pricingVerifiedAt: "2026-10-13T00:00:00.000Z",
+          pricingExpiresAt: "2026-10-14T00:00:00.000Z",
+          uncachedInputMicroUsdPerMillion: 1_000_000,
+          cacheReadMicroUsdPerMillion: 100_000,
+          cacheWriteMicroUsdPerMillion: 200_000,
+          outputMicroUsdPerMillion: 2_000_000 }] } }),
   },
 });
 mock.module(mod("lib/amux/v52GradeReceipt.ts"), { namedExports: {
@@ -227,19 +238,6 @@ const tx = {
   amuxWorkerRuntime: {
     updateMany: async () => { world.runtimeUpdates += 1; return { count: 1 }; },
   },
-  amuxV4TaskCostCatalogApproval: { findFirst: async () => ({
-    id: "catalog-one", status: "approved", revokedAt: null,
-    catalogDigest, approvalAuditLogId: "catalog-audit",
-    approvedByUserId: "owner-one", pricingVersion: "price-v1",
-    catalog: { routes: [{ enabled: true, workerName: worker,
-      provider: "anthropic", modelId: "claude-opus-5-5",
-      pricingVerifiedAt: "2026-10-13T00:00:00.000Z",
-      pricingExpiresAt: "2026-10-14T00:00:00.000Z",
-      uncachedInputMicroUsdPerMillion: 1_000_000,
-      cacheReadMicroUsdPerMillion: 100_000,
-      cacheWriteMicroUsdPerMillion: 200_000,
-      outputMicroUsdPerMillion: 2_000_000 }] },
-  }) },
   adminAuditLog: { findUnique: async (args: { where: { id: string } }) =>
     args.where.id === "assignment-audit" ?
       !world.assignmentAuditPresent ? null : {

@@ -781,7 +781,7 @@ v4의 **Task 카드** 승인 화면은 제안된 실행 역할·등급만 보여
 
 운영자가 승인한 것은 **산출·재확인 방식**이다. 실제 catalog 항목, 가격 출처/버전, 등급별 숫자, 캐시·reasoning 계산, 예약·누적 ledger, 경로 변경 판정의 코드·테스트는 별도 구현 gate다. 이 절만으로 worker 실행, 외부 호출, migration 적용, staging/live write, 자동 승격 또는 배포를 열지 않는다.
 
-운영자 결정(2026-10-25): catalog 경로는 worker registry의 v22 worker에서 서버가 초안으로 만든다. 등급은 등록 역할 상한에서, Task 역할은 그 v22 profile이 실제로 실행하는 역할에서 가져온다. 가격은 Admin › 모델 registry를 Chat 과금과 같은 방식(`resolveModelPricing`, 등급 입력 한도가 닿는 가격 구간)으로 해석한다. 캐시 읽기는 그 배수를 쓰고, 캐시 쓰기·도구 비용은 0 상한이다. 운영자는 등급별 입력·출력 토큰과 시도 횟수만 정하고 Operations settings › Workers에서 승인한다. 승인 때 서버가 같은 시각·버전으로 다시 초안을 만들어 digest가 같아야 기록하므로, 요청이 단가를 정할 수 없다. 가격은 90일 뒤 만료되어 다시 승인해야 한다. 가격을 두 곳에서 관리하지 않는다.
+운영자 결정(2026-10-25, 같은 날 갱신): Task 비용표는 운영자가 따로 승인하지 않는다. 운영자가 개발 일을 내리는 내부 도구이므로, 가격을 두 곳에서 관리하거나 승인 단계를 두지 않는다. 서버가 쓸 때마다 worker registry의 v22 worker(등록 역할 상한에서 등급, v22 profile이 실제로 실행하는 역할)와 Admin › 모델 가격(`resolveModelPricing`, 등급 입력 한도가 닿는 가격 구간)으로 비용표를 계산한다. 등급별 토큰·시도 한도는 코드 상수(`AMUX_TASK_CATALOG_CAPS`)다. 같은 registry면 같은 digest가 나오므로, worker나 가격이 실제로 바뀔 때만 재확인한다. 남는 결정적 경계는 하나다: 유료 API 호출 전에 이 상한을 예약하고, 가격을 정할 worker가 없는 역할·등급의 Task는 0원으로 처리하지 않고 보류한다. `AmuxV4TaskCostCatalogApproval` 표는 기존 기록으로만 남고 더 쓰지 않는다.
 
 ## v11 — 아이디어 단위별 결정·파생 이력 [결정, 운영자 mposition 2026-10-01]
 

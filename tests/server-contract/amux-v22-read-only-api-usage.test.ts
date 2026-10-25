@@ -11,6 +11,8 @@ let auditInput: Record<string, unknown> | null = null;
 let auditCalls = 0;
 let authoritativeFrame: unknown = null;
 let authorityCalls = 0;
+let catalogReads = 0;
+let catalogModelId = "";
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   writeSystemAuditLog: async (input: Record<string, unknown>) => {
@@ -21,6 +23,22 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
 } });
 mock.module(mod("lib/amux/v4TaskCostCatalogCore.ts"), { namedExports: {
   inspectV4TaskCostCatalog: () => ({ ok: true, catalogDigest }),
+} });
+// Task prices come from the registries (owner decision 2026-10-25).
+mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
+  readAmuxV4TaskAutoCatalog: async () => {
+    catalogReads += 1;
+    return { ok: true, catalogDigest, catalogId: "registry:one", catalog: {
+      pricingVersion: "price-v2",
+      routes: [{ enabled: true, workerName: "worker-one",
+        provider: "anthropic", modelId: catalogModelId,
+        pricingVerifiedAt: "2026-01-01T00:00:00.000Z",
+        pricingExpiresAt: "2100-01-01T00:00:00.000Z",
+        uncachedInputMicroUsdPerMillion: 2_000_000,
+        cacheReadMicroUsdPerMillion: 200_000,
+        cacheWriteMicroUsdPerMillion: 400_000,
+        outputMicroUsdPerMillion: 4_000_000 }] } };
+  },
 } });
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   readAmuxV22RecoveryAuthority: async (_tx: unknown, readTaskId: string,
@@ -103,28 +121,11 @@ test("API receipt keeps its immutable start price after catalogue drift and repl
       digest: p.amuxV22ReadOnlyApiExecutionReceiptDigest(receiptBody) };
     const existingDigests = new Map<string, string>();
     let boundTaskId = taskId;
-    let catalogReads = 0;
+    catalogReads = 0;
+    catalogModelId = frame.modelId;
     let inserts = 0;
     const insertedValues: unknown[][] = [];
     const tx = {
-      amuxV4TaskCostCatalogApproval: { findFirst: async () => {
-        catalogReads += 1;
-        return {
-        id: "catalog-two", status: "approved", revokedAt: null,
-        catalogDigest, approvalAuditLogId: "catalog-audit",
-        approvedByUserId: "owner-one", pricingVersion: "price-v2",
-        catalog: { routes: [{ enabled: true, workerName: "worker-one",
-          provider: "anthropic", modelId: frame.modelId,
-          pricingVerifiedAt: "2026-10-14T00:00:00.000Z",
-          pricingExpiresAt: "2026-10-20T00:00:00.000Z",
-          uncachedInputMicroUsdPerMillion: 2_000_000,
-          cacheReadMicroUsdPerMillion: 200_000,
-          cacheWriteMicroUsdPerMillion: 400_000,
-          outputMicroUsdPerMillion: 4_000_000 }] },
-      }; } },
-      adminAuditLog: { findUnique: async () => ({ entryHash: "a".repeat(64),
-        action: "amux.v4.task_catalog.approve", actorUserId: "owner-one",
-        targetId: "catalog-two", targetType: "AmuxV4TaskCostCatalogApproval" }) },
       amuxCliUsageEvent: { findUnique: async (query: {
         where: { invocationId: string } }) => {
         const receiptDigest = existingDigests.get(query.where.invocationId);
