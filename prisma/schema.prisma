@@ -24,6 +24,9 @@ model User {
   subscriptionCurrentPeriodEnd  DateTime?
   subscriptionBillingInterval   String?
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  mobileBillingId               String?       @unique
+  subscriptionStore             String?
+  subscriptionStoreProductId    String?
   /// When the stored subscription state was read from Stripe. Webhooks arrive
   /// out of order, so a snapshot read before this is refused rather than
   /// reverting the account to an older plan. See lib/stripeWebhookSyncCore.ts.
@@ -68,6 +71,7 @@ model User {
   creditLots                           CreditLot[]
   creditLedgerEntries                  CreditLedgerEntry[]
   creditDebtEntries                    CreditDebtEntry[]
+  mobileStoreTransactions              MobileStoreTransaction[]
   chatCreditReservations               ChatCreditReservation[]
   imageGenerations                     ImageGeneration[]
   messageArtifacts                     MessageArtifact[]
@@ -1706,6 +1710,7 @@ model CreditLot {
   originalFundedCostMicroUsd  BigInt              @default(0)
   remainingFundedCostMicroUsd BigInt              @default(0)
   expiresAt                   DateTime
+  nonExpiring                 Boolean             @default(false)
   status                      String              @default("active")
   createdAt                   DateTime            @default(now())
   updatedAt                   DateTime            @updatedAt
@@ -1713,6 +1718,26 @@ model CreditLot {
 
   @@index([userId, status, expiresAt])
   @@index([purchaseId])
+}
+
+model MobileStoreTransaction {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store         String
+  environment   String
+  transactionId String
+  productId     String
+  packId        String
+  credits       Int
+  fundedCostMicroUsd BigInt
+  creditLotId   String?  @unique
+  refunded      Boolean @default(false)
+  purchasedAt   DateTime
+  createdAt     DateTime @default(now())
+
+  @@unique([store, environment, transactionId])
+  @@index([userId, purchasedAt])
 }
 
 model CreditLedgerEntry {

@@ -94,3 +94,12 @@ body {
 .check-detail code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.native-billing { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem; overflow-wrap: anywhere; }
+.native-billing-heading, .native-billing-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.native-billing-heading { justify-content: space-between; }
+.native-billing-heading h2 { font-size: 1.25rem; }
+.native-billing-current, .native-billing-products article { border: 1px solid #a1a1aa; border-radius: .75rem; padding: 1rem; margin: 1rem 0; }
+.native-billing h4 { margin: 0 0 .5rem; font-size: 1.125rem; }
+.native-billing p { line-height: 1.6; }
+.native-billing a { color: var(--foreground); text-decoration: underline; }
+.native-billing button[aria-pressed="true"] { outline: 2px solid var(--tomverse-accent-mid); outline-offset: 1px; }

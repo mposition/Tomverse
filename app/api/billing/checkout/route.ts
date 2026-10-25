@@ -424,6 +424,7 @@ export async function POST(req: Request) {
         stripeCustomerId: true,
         stripeSubscriptionId: true,
         subscriptionStatus: true,
+        subscriptionStore: true,
         subscriptionCurrentPeriodEnd: true,
         plan: true,
         creditDebtCredits: true,
@@ -434,6 +435,9 @@ export async function POST(req: Request) {
     });
     if (!user) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
+    }
+    if (user.subscriptionStore && effectivePlanForAccess(user) !== "Free") {
+      return NextResponse.json({ code: "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", error: "Manage this subscription in the store where it was purchased." }, { status: 409 });
     }
     // The plan the account can actually use right now, not the raw column: a
     // Founding Tester Pass that has run out still leaves `plan` at "Pro", and

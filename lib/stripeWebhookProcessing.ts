@@ -134,6 +134,7 @@ async function syncSubscription(
     select: {
       id: true,
       email: true,
+      subscriptionStore: true,
       subscriptionSyncedAt: true,
       settings: {
         select: { language: true },
@@ -141,6 +142,7 @@ async function syncSubscription(
     },
   });
   if (!user) return null;
+  if (user.subscriptionStore) return null;
 
   const decision = shouldApplySubscriptionSnapshot({
     storedObservedAt: user.subscriptionSyncedAt,
@@ -158,6 +160,7 @@ async function syncSubscription(
   const applied = await prisma.user.updateMany({
     where: {
       id: user.id,
+      subscriptionStore: null,
       OR: [
         { subscriptionSyncedAt: null },
         { subscriptionSyncedAt: { lte: observedAt } },
@@ -274,6 +277,7 @@ export async function resyncAccountBillingFromStripe({
     const cleared = await prisma.user.updateMany({
       where: {
         id: userId,
+        subscriptionStore: null,
         OR: [
           { subscriptionSyncedAt: null },
           { subscriptionSyncedAt: { lte: observedAt } },

@@ -61,6 +61,7 @@ export async function POST(req: Request) {
         id: true,
         plan: true,
         stripeSubscriptionId: true,
+        subscriptionStore: true,
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
       },
@@ -70,6 +71,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
 
+    if (user.subscriptionStore) {
+      return NextResponse.json({ code: "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", error: "Cancel this subscription in the store where it was purchased." }, { status: 409 });
+    }
     if ((user.plan !== "Pro" && user.plan !== "Max") || !user.stripeSubscriptionId) {
       return NextResponse.json(
         { error: "No active Stripe subscription is available to cancel." },

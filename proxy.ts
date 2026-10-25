@@ -42,6 +42,7 @@ import {
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
+import { mobileBillingBearerRoutes } from "@/lib/mobileBillingCore";
 import {
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
@@ -283,7 +284,7 @@ export function proxy(request: NextRequest) {
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),
-    registeredRoutes: nativeChat ? [...N1B_BEARER_ROUTES, request.nextUrl.pathname] : N1B_BEARER_ROUTES,
+    registeredRoutes: [...N1B_BEARER_ROUTES, ...(nativeChat ? [request.nextUrl.pathname] : []), ...(request.method === "POST" ? mobileBillingBearerRoutes() : [])],
     verify: (token) => {
       const verdict = verifyMobileAccessTokenString(token);
       return verdict.ok
@@ -295,7 +296,7 @@ export function proxy(request: NextRequest) {
     return withNativeCors(blockedBearerResponse(), request);
   }
   if (bearer.kind === "yes") {
-    if (nativeChat && request.headers.get("origin") && !isNativeAppOrigin(request.headers.get("origin"))) {
+    if ((nativeChat || mobileBillingBearerRoutes().includes(request.nextUrl.pathname)) && request.headers.get("origin") && !isNativeAppOrigin(request.headers.get("origin"))) {
       return withNativeCors(blockedBearerResponse(), request);
     }
     applyMobileIdentityHeaders(requestHeaders, bearer.identity);

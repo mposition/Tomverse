@@ -26,7 +26,8 @@ export const effectivePlanForAccess = (
   now = new Date()
 ): EffectivePlanTier => {
   const plan = normalizePlan(input.plan);
-  if (input.subscriptionStatus !== FOUNDING_TESTER_PASS_STATUS) return plan;
+  const expiringAccess = input.subscriptionStatus === FOUNDING_TESTER_PASS_STATUS || input.subscriptionStatus?.startsWith("mobile_store_");
+  if (!expiringAccess) return plan;
   if (!input.subscriptionCurrentPeriodEnd) return "Free";
   const periodEnd = new Date(input.subscriptionCurrentPeriodEnd);
   if (!Number.isFinite(periodEnd.getTime()) || periodEnd <= now) return "Free";
