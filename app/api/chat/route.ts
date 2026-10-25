@@ -1704,6 +1704,7 @@ async function handleChatPost(
                           routerModelId: true,
                           routerChallengerTurns: true,
                           productKey: true,
+                          continuationBridge: { select: { id: true } },
                       },
                   })
                 : null;
@@ -2086,6 +2087,10 @@ async function handleChatPost(
             !guestAutoSelection?.routed &&
             Boolean(session?.user?.id && conversationId && assistantMessageId) &&
             conversationRouting?.productKey === "chat" &&
+            // A Chat continuation stays text-only: `startChatImageTurn` refuses
+            // a bridged conversation, so an image decision here would leave
+            // the question with no answer (continuation policy §5.1).
+            !conversationRouting?.continuationBridge &&
             !admissionToken &&
             !deepResearchDepth &&
             !promptRefinerDecision &&

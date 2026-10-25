@@ -83,7 +83,7 @@ test("only a Chat continuation offers Compare in Review", () => {
     // An answer for the conversation the user just left never navigates.
     assert.match(
         client,
-        /isOwnerCurrent: \(\) => currentChatIdRef\.current === shellConversationId/
+        /isOwnerCurrent: \(\) =>\s*reviewForkTicketRef\.current === conversationSelectionTicketRef\.current &&\s*currentChatIdRef\.current === shellConversationId/
     );
     assert.match(
         client,

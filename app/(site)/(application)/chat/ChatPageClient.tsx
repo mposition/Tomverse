@@ -10079,6 +10079,14 @@ export function ChatPageClient({
     offers it, and only while its original is readable: the server forks the
     same snapshot into a new Review conversation and this one stays Chat.
   */
+  /*
+    The press's own selection ticket. Every departure -- another row, a new
+    chat -- allocates a new ticket before it navigates, and a product switch
+    is marked below, so an answer that lands mid-departure is not this
+    screen's to act on. The conversation id alone stays the same while a new
+    chat or a product switch is leaving.
+  */
+  const reviewForkTicketRef = useRef<number | null>(null);
   const {
     start: startReviewFork,
     status: reviewForkStatus,
@@ -10086,9 +10094,9 @@ export function ChatPageClient({
   } = useContinuationLauncher(
     { reviewFromConversationId: shellConversationId ?? "" },
     {
-      // The selection moves before `shellConversationId` follows it; an
-      // answer for the conversation the user just left must not navigate.
-      isOwnerCurrent: () => currentChatIdRef.current === shellConversationId,
+      isOwnerCurrent: () =>
+        reviewForkTicketRef.current === conversationSelectionTicketRef.current &&
+        currentChatIdRef.current === shellConversationId,
     }
   );
   const compareInReview = useMemo(
@@ -10096,7 +10104,10 @@ export function ChatPageClient({
       routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode &&
       shellConversationId && continuationSource.timeline?.source.status === "available"
         ? {
-            onPress: () => void startReviewFork(),
+            onPress: () => {
+              reviewForkTicketRef.current = conversationSelectionTicketRef.current;
+              void startReviewFork();
+            },
             pending: reviewForkStatus === "creating",
             error: reviewForkError,
           }
@@ -10177,8 +10188,13 @@ export function ChatPageClient({
     Boolean(productSwitchHasUnknownWrite) ||
     draftConflict ||
     draftSyncFailed;
-  const handleProductSwitch = () =>
-    !productSwitchDisabled && preserveDraftsForProductSwitch();
+  const handleProductSwitch = () => {
+    const admitted = !productSwitchDisabled && preserveDraftsForProductSwitch();
+    // Leaving for the other product: a Compare-in-Review answer still in
+    // flight is no longer this screen's to navigate.
+    if (admitted) reviewForkTicketRef.current = null;
+    return admitted;
+  };
   const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
     ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
     : selectedModels;

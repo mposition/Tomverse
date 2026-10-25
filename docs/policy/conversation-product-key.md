@@ -163,9 +163,13 @@ Tomverse Code는 아직 `Conversation` 행을 쓰지 않으므로, 지금 `code`
   답을 냅니다. `kind`는 계속 authorization·modality 경계이고 제품 정체성이
   아닙니다.
 
-### 5.3.1 기존 행 교정 migration
+### 5.3.1 기존 행 교정 migration (적용 완료, 다시 실행하지 않음)
 
-개정 전에 만들어진 continuation은 `productKey = 'chat'`으로 저장돼 있습니다.
+> 2026-10-25 개정 뒤에는 bridge + `chat`이 정상 Chat 이어가기입니다. 아래 교정은 이미
+> 적용된 2026-09-01 migration의 기록이며, 다시 실행하거나 같은 조건으로 새 migration을
+> 만들면 새 Chat 이어가기를 Review로 바꾸게 됩니다.
+
+2026-09-01 개정 전에 만들어진 continuation은 `productKey = 'chat'`으로 저장돼 있었습니다.
 교정은 **명시적 migration**이고 대상은 정확히 다음 교집합입니다.
 
 > bridge를 가진 행 **그리고** `productKey = 'chat'`인 행.

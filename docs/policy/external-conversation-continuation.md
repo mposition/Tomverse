@@ -282,7 +282,8 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
   아래 §8.2의 view model 규칙을 봅니다.
 - **Deep Research는 기존 제약을 유지합니다** — system block을 싣지 않으므로
   가져온 seed가 전달되지 않습니다. 이 개정이 그 제약을 풀지 않습니다.
-- **이미지 생성은 이 대화에서 실행되지 않습니다.** 별도 이미지 대화 draft로
+- **이미지 생성은 이 대화에서 실행되지 않습니다.** Chat 이어가기도 Smart Adaptive의
+  이미지 판정을 하지 않습니다(`/api/chat`의 `autoImageTurnEligible`이 bridge를 제외). 별도 이미지 대화 draft로
   넘기며, 그 draft에 원본 transcript를 전달하지 않습니다
   (`docs/policy/image-generation.md`).
 - **Web Search · 첨부 · Assistant profile · Memory는 기존 Review 계약을 그대로

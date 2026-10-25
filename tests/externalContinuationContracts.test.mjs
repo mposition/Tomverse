@@ -1012,6 +1012,31 @@ test("the default continuation is Chat only where Chat is offered", () => {
     assert.match(route, /productKey: await defaultContinuationProduct\(userId\)/);
 });
 
+test("a Chat continuation never becomes a Smart Adaptive image turn", () => {
+    // Independent review round 4: `startChatImageTurn` refuses a bridged
+    // conversation with 409, so an image decision on a Chat continuation left
+    // the stored question with no answer. §5.1 keeps continuations text-only.
+    const chat = readFileSync("app/api/chat/route.ts", "utf8");
+    assert.match(chat, /continuationBridge: \{ select: \{ id: true \} \},/);
+    const eligible = chat.slice(
+        chat.indexOf("const autoImageTurnEligible ="),
+        chat.indexOf("const autoImageDecisionPromise")
+    );
+    assert.match(eligible, /!conversationRouting\?\.continuationBridge &&/);
+});
+
+test("a Compare-in-Review answer is owned by the press's selection", () => {
+    const client = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
+    // Every departure invalidates it: another row or a new chat allocates a
+    // new ticket, and an admitted product switch clears the press's ticket.
+    assert.match(client, /reviewForkTicketRef\.current === conversationSelectionTicketRef\.current &&/);
+    assert.match(client, /reviewForkTicketRef\.current = conversationSelectionTicketRef\.current;\s*void startReviewFork\(\);/);
+    assert.match(client, /if \(admitted\) reviewForkTicketRef\.current = null;/);
+    const launcher = readFileSync("components/imports/useContinuationLauncher.ts", "utf8");
+    // A stale answer never touches a newer attempt's state.
+    assert.match(launcher, /if \(generationRef\.current === generation\) setStatus\("idle"\);/);
+});
+
 test("comparing in Review forks the owned bridge's snapshot, never rewriting the product", () => {
     const route = readFileSync(
         "app/api/conversations/[conversationId]/continuation/review/route.ts",
@@ -1216,9 +1241,9 @@ test("a retry reuses the attempt's idempotency key and only cancel clears it", (
     // or an owner that moved on -- changes nothing, including after a failed
     // answer's body has drained.
     assert.match(startBody, /isOwnerCurrentRef\.current\?\.\(\) \?\? true/);
-    assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*await discardResponseBody\(response\);\s*return false;/);
-    assert.match(startBody, /await discardResponseBody\(response\);\s*if \(!isCurrent\(\)\) return false;\s*setStatus\("failed"\)/);
-    assert.match(startBody, /if \(!isCurrent\(\)\) return false;\s*if \(!body\.conversationId\)/);
+    assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*await discardResponseBody\(response\);\s*settleStale\(\);\s*return false;/);
+    assert.match(startBody, /await discardResponseBody\(response\);\s*if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}\s*setStatus\("failed"\)/);
+    assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}\s*if \(!body\.conversationId\)/);
 
     // Cancel drops the key, because that is the deliberate "start a second
     // fork"; a success this screen acted on ends the attempt. Nothing else.

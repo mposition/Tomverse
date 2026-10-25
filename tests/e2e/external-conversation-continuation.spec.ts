@@ -2549,12 +2549,18 @@ test.describe("a continuation opens in its product's workspace", () => {
             }
         );
 
+        // Review loads slowly, so the answer lands while this screen is still
+        // mounted and leaving (independent review round 4).
+        await page.route(/\/review(\?.*)?$/, async (route) => {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            await route.continue().catch(() => {});
+        });
+
         await page.getByTestId("continuation-compare-in-review").click();
-        // Leave in-app, which unmounts the launcher that sent the request.
         const switcher = await productSwitcher(page);
         await switcher.getByTestId("chat-product-review").click();
-        await expect(page).toHaveURL(/\/review(\?|$)/);
         release();
+        await expect(page).toHaveURL(/\/review(\?|$)/);
         await page.waitForTimeout(500);
         await expect(page).toHaveURL(/\/review(\?|$)/);
     });

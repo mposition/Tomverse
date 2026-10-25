@@ -164,6 +164,13 @@ export function useContinuationLauncher(
         const isCurrent = () =>
             generationRef.current === generation &&
             (isOwnerCurrentRef.current?.() ?? true);
+        // An answer the screen no longer owns leaves the button usable again,
+        // but only while this mount still shows the same endpoint: a newer
+        // attempt's state is not this answer's to change. The key stays, so
+        // pressing again replays whatever this request created.
+        const settleStale = () => {
+            if (generationRef.current === generation) setStatus("idle");
+        };
 
         setStatus("creating");
         setErrorMessage(null);
@@ -178,17 +185,24 @@ export function useContinuationLauncher(
             );
             if (!isCurrent()) {
                 await discardResponseBody(response);
+                settleStale();
                 return false;
             }
             if (!response.ok) {
                 await discardResponseBody(response);
-                if (!isCurrent()) return false;
+                if (!isCurrent()) {
+                    settleStale();
+                    return false;
+                }
                 setStatus("failed");
                 setErrorMessage(refusalMessage(response.status, t));
                 return false;
             }
             const body = (await response.json()) as { conversationId?: string };
-            if (!isCurrent()) return false;
+            if (!isCurrent()) {
+                settleStale();
+                return false;
+            }
             if (!body.conversationId) {
                 setStatus("failed");
                 setErrorMessage(t("continuation.createFailed"));
@@ -198,7 +212,10 @@ export function useContinuationLauncher(
             router.push(continuationPath(body.conversationId));
             return true;
         } catch {
-            if (!isCurrent()) return false;
+            if (!isCurrent()) {
+                settleStale();
+                return false;
+            }
             // The attempt keeps its key, so pressing again resolves to
             // whatever the first request created rather than making a second
             // conversation.
