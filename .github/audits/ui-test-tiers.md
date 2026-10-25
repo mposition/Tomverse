@@ -121,6 +121,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `web-search-composer-state.spec.ts` |
 | `assistant-knowledge-upload.spec.ts` |
 | `voice-input-composer.spec.ts` |
+| `voice-conversation.spec.ts` |
 | `conversation-draft-identity.spec.ts` |
 | `prompt-refiner-focus.spec.ts` |
 | `prompt-refiner-chat-input.spec.ts` |
@@ -140,6 +141,14 @@ touch 입력도 함께 측정하며, 다른 project에서는 명시적으로 건
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
 파일 수는 2026-08-31 현재 53개입니다.
+
+`voice-conversation.spec.ts`의 기본 버튼 교대 검사 5개가 2026-10-25에
+합류했습니다. 320·360·390·430·1280px에서 빈 입력의 음성 버튼과 글·첨부가
+있는 입력의 전송 버튼이 같은 자리를 사용하고, 내용 삭제 후 복귀하며,
+전송이나 통화 시작이 자동 실행되지 않는지 확인합니다. desktop-chromium에서
+모바일 touch와 PC pointer를 측정하고 다른 project는 명시적으로 건너뜁니다.
+기존 통화 시나리오 전체를 PR tier에 추가하지 않으며, 기기·API는 모의 처리합니다.
+로컬 선택 실행은 서버 시작을 포함해 5개 검사 24.9초였습니다.
 
 `chat-starter-catalog.spec.ts`가 2026-09-15에 합류해 58개입니다
 (project당 +8). 시작 카탈로그는 신규 계정이 처음 보는 화면이고, 이 tier가
