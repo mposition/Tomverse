@@ -1,0 +1,29 @@
+[Unit]
+Description=Tomverse read-only CLI monitor (codex-impl pilot)
+ConditionUser=tomverse-admin
+
+[Service]
+# Install only under a dedicated operator UID, never the monitored worker UID.
+Type=simple
+EnvironmentFile=%h/.config/tomverse-cli-monitor/collector.env
+ExecStart=/usr/bin/bwrap --die-with-parent --new-session \
+  --unshare-pid --unshare-ipc --unshare-uts \
+  --ro-bind /usr /usr --symlink usr/bin /bin \
+  --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+  --ro-bind /etc/hosts /etc/hosts \
+  --ro-bind /etc/resolv.conf /etc/resolv.conf --ro-bind /etc/ssl /etc/ssl \
+  --ro-bind %h/.local/share/tomverse-cli-monitor /app \
+  --proc /proc --dev /dev --tmpfs /tmp --chdir /app \
+  --unsetenv SSH_AUTH_SOCK --unsetenv DBUS_SESSION_BUS_ADDRESS \
+  --unsetenv GPG_AGENT_INFO --setenv HOME /tmp --setenv PATH /usr/bin \
+  /usr/bin/node /app/collector.mjs
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=15
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+StandardInput=null
+UMask=0077
+
+[Install]
+WantedBy=default.target
