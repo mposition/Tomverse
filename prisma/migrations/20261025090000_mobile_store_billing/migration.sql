@@ -2,6 +2,13 @@ ALTER TABLE "User" ADD COLUMN "mobileBillingId" TEXT,
   ADD COLUMN "subscriptionStore" TEXT,
   ADD COLUMN "subscriptionStoreProductId" TEXT;
 CREATE UNIQUE INDEX "User_mobileBillingId_key" ON "User"("mobileBillingId");
+ALTER TABLE "User" ADD COLUMN "webSubscriptionPlan" TEXT,
+  ADD COLUMN "storeSubscriptionPlan" TEXT,
+  ADD COLUMN "storeSubscriptionExpiresAt" TIMESTAMP(3),
+  ADD COLUMN "storeSubscriptionBillingInterval" TEXT,
+  ADD COLUMN "storeSubscriptionCancelAtPeriodEnd" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "storeSubscriptionSyncedAt" TIMESTAMP(3);
+UPDATE "User" SET "webSubscriptionPlan" = "plan";
 ALTER TABLE "CreditLot" ADD COLUMN "nonExpiring" BOOLEAN NOT NULL DEFAULT false;
 CREATE TABLE "MobileStoreTransaction" (
   "id" TEXT NOT NULL PRIMARY KEY,

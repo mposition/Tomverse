@@ -4,7 +4,9 @@ Implementation uses RevenueCat's Capacitor SDK as the StoreKit / Google Play
 Billing adapter. Tomverse remains the entitlement and credit ledger owner.
 The SDK verifies/finishes store purchases; an authenticated RevenueCat webhook
 grants consumable credits exactly once. Subscription sync reads the current
-RevenueCat server snapshot under a separate billing lock, never the client's entitlements. A pending payment
+RevenueCat server snapshot, never the client's entitlements. Provider HTTP runs
+outside transactions; a short shared subscription lock serializes DB writes.
+Separate observation clocks reject older snapshots for each provider. A pending payment
 does not grant access. Failed webhook processing returns 503 for redelivery.
 
 ## Product behavior
@@ -26,6 +28,12 @@ does not grant access. Failed webhook processing returns 503 for redelivery.
   second recurring subscription. The app contains no Stripe checkout or
   external purchase link. Cross-store subscriptions also remain with the
   original store. Credits remain purchasable through the current native store.
+- Web and store subscription state are persisted separately. If a previously
+  opened checkout completes after a store purchase, its payment and subscription
+  are retained and both cancellation paths are shown. Neither source's late
+  deletion can remove the other source's paid access. The effective tier is the
+  highest currently entitled tier, with a shared monthly allowance rather than
+  an extra allowance per subscription.
 - Starter 500 is offered to Free; Project 1,500 and Power 4,000 to Pro/Max, as on
   web. Store prices come from localized StoreKit/Play product data. An annual
   price is the complete annual charge, not a monthly equivalent.
@@ -102,6 +110,9 @@ Finalize the currently provisional bundle/application ID before registering
 products. Store credentials, agreements, tax/banking details, product review,
 pricing and a RevenueCat account are required operational setup; choose and
 approve the provider's commercial terms before production activation.
+The initial catalog uses standard recurring base plans without introductory,
+trial or installment offers. Add those offers only with their complete pricing
+phase disclosures and device validation.
 
 ## Verification
 

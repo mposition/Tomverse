@@ -15,6 +15,7 @@ const serialized = <T,>(work: () => Promise<T>): Promise<T> => {
 export function canPurchaseMobileProduct(state: MobileBillingState, product: MobileBillingProduct, store: MobileStore) {
   if (product.store !== store) return false;
   if (product.kind === "credits") return state.products.some((p) => p.productId === product.productId);
+  if (state.webSubscription?.active) return false;
   if (!state.active) return true;
   return state.subscriptionStore === store && !state.cancelAtPeriodEnd && state.interval === product.interval && state.plan !== product.plan;
 }

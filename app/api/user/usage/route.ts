@@ -16,7 +16,7 @@ import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { effectivePlanModelLimit } from "@/lib/billingEntitlements";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { recommendCreditAction } from "@/lib/creditPacks";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 import { getZonedDayWindow } from "@/lib/userTimeZone";
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
@@ -48,6 +48,7 @@ export async function GET(req: Request) {
       where: { id: session.user.id },
       select: {
         plan: true,
+        ...STORE_ENTITLEMENT_SELECT,
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
         subscriptionStatus: true,
@@ -109,6 +110,7 @@ export async function GET(req: Request) {
       effectivePlanForAccess(
         {
           plan: user?.plan,
+          ...user,
           subscriptionStatus: user?.subscriptionStatus,
           subscriptionCurrentPeriodEnd: user?.subscriptionCurrentPeriodEnd,
         },

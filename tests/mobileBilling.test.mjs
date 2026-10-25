@@ -50,6 +50,9 @@ test("cancellation preserves paid access; grace uses the verified grace deadline
   assert.equal(resolve({ "pro.month": subscription(), "max.month": subscription() }).plan, "Max");
 });
 test("store access expires even if the expiration webhook is delayed", () => {
+  assert.equal(effectivePlanForAccess({ plan: "Max", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: "2026-10-24" }, now), "Free");
+  assert.equal(effectivePlanForAccess({ plan: "Max", webSubscriptionPlan: "Pro", storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: "2026-10-24" }, now), "Pro");
+  assert.equal(effectivePlanForAccess({ plan: "Free", webSubscriptionPlan: "Free", storeSubscriptionPlan: "Pro", storeSubscriptionExpiresAt: "2026-11-24" }, now), "Pro");
   for (const status of ["mobile_store_active", "mobile_store_grace", "mobile_store_expired"]) {
     assert.equal(effectivePlanForAccess({ plan: "Max", subscriptionStatus: status, subscriptionCurrentPeriodEnd: "2026-10-24" }, now), "Free");
     assert.equal(effectivePlanForAccess({ plan: "Max", subscriptionStatus: status }, now), "Free");

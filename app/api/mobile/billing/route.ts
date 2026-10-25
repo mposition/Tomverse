@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 1024, mobileBillingRequestSchema);
     const billingId = await ensureMobileBillingId(auth.identity.userId);
     if (body.action === "cancel_web") await cancelMobileWebSubscription(auth.identity.userId);
-    await syncMobileSubscription(auth.identity.userId, billingId);
+    if (body.action !== "cancel_web") await syncMobileSubscription(auth.identity.userId, billingId);
     return Response.json(await readMobileBillingState(auth.identity.userId, body.store), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const response = apiSecurityResponse(error);

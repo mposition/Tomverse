@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-async function installBilling(page: Page, web = false) {
+async function installBilling(page: Page, web = false, overlap = false) {
   const calls: { plugin: string; method: string; options: Record<string, unknown> }[] = [];
   await page.exposeFunction("billingCall", (call: typeof calls[number]) => { calls.push(call); });
   await page.addInitScript(() => {
@@ -28,6 +28,7 @@ async function installBilling(page: Page, web = false) {
     await route.fulfill({ headers, json: {
       billingId: "billing-account", plan: "Pro", subscriptionStore: web ? "web" : "play_store", productId: "pro:monthly",
       interval: "monthly", expiresAt: "2026-11-25T00:00:00Z", active: true, cancelAtPeriodEnd: cancelled, purchasedCredits,
+      webSubscription: { active: web || overlap, cancelAtPeriodEnd: cancelled, expiresAt: "2026-11-25T00:00:00Z" },
       products: [
         { store: "play_store", productId: "pro:monthly", kind: "subscription", plan: "Pro", interval: "monthly", monthlyCredits: 3000, maxModels: 3 },
         { store: "play_store", productId: "max:monthly", kind: "subscription", plan: "Max", interval: "monthly", monthlyCredits: 10000, maxModels: 5 },
@@ -58,11 +59,20 @@ test("web subscribers can cancel renewal inside the app without a second subscri
   await page.getByRole("button", { name: "Cancel subscription", exact: true }).click();
   await page.getByRole("button", { name: "Confirm cancellation", exact: true }).click();
   await expect(page.getByText("Automatic renewal has been cancelled.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Access until:", { exact: false })).toBeVisible();
+  await expect(page.getByText(/^Access until:/)).toBeVisible();
 });
 test("billing fits a narrow screen and keeps Free chat accessible", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 }); await installBilling(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("button", { name: "Back to chat", exact: true }).click();
   await expect(page.getByTestId("native-chat-input")).toBeVisible();
+});
+test("overlapping web and store subscriptions both remain manageable without another purchase", async ({ page }) => {
+  await installBilling(page, false, true);
+  await expect(page.getByRole("alert")).toContainText("subscriptions with both providers");
+  await expect(page.getByRole("button", { name: "Change plan", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel subscription", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm cancellation", exact: true }).click();
+  await expect(page.getByText("Automatic renewal has been cancelled.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage or cancel subscription", exact: true })).toBeEnabled();
 });

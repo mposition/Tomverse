@@ -43,7 +43,7 @@ import {
   shouldApplySubscriptionSnapshot,
   subscriptionIdFromEventObject,
 } from "@/lib/stripeWebhookSyncCore";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { applyWebSubscriptionSnapshot } from "@/lib/subscriptionEntitlements";
 
 const subscriptionActiveStatuses = new Set(["active", "trialing", "past_due"]);
 
@@ -146,7 +146,6 @@ async function syncSubscription(
     },
   });
   if (!user) return null;
-  if (user.subscriptionStore && effectivePlanForAccess(user, observedAt) !== "Free") return null;
 
   const decision = shouldApplySubscriptionSnapshot({
     storedObservedAt: user.subscriptionSyncedAt,
@@ -161,32 +160,15 @@ async function syncSubscription(
     return null;
   }
 
-  const applied = await prisma.user.updateMany({
-    where: {
-      id: user.id,
-      AND: [{ OR: [{ subscriptionStore: null }, { subscriptionCurrentPeriodEnd: { lte: observedAt } }] }],
-      OR: [
-        { subscriptionSyncedAt: null },
-        { subscriptionSyncedAt: { lte: observedAt } },
-      ],
-    },
-    data: {
-      plan,
-      subscriptionStore: null,
-      subscriptionStoreProductId: null,
-      stripeSubscriptionId: subscription.id,
-      stripePriceId: priceId,
-      subscriptionStatus: subscription.status,
-      subscriptionCurrentPeriodEnd: periodEnd,
-      subscriptionBillingInterval: billingInterval,
-      subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-      subscriptionSyncedAt: observedAt,
-    },
+  const applied = await applyWebSubscriptionSnapshot({
+    userId: user.id, plan, subscriptionId: subscription.id, priceId,
+    status: subscription.status, periodEnd, interval: billingInterval,
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end), observedAt,
   });
   // A concurrent handler applied a newer read between the select and the
   // update. Its state is the correct one, so this snapshot is dropped rather
   // than retried -- retrying would only race again.
-  if (applied.count === 0) return null;
+  if (!applied) return null;
 
   return { user, plan, periodEnd, billingInterval };
 }
@@ -280,27 +262,12 @@ export async function resyncAccountBillingFromStripe({
   }
 
   if (!subscription) {
-    const cleared = await prisma.user.updateMany({
-      where: {
-        id: userId,
-        subscriptionStore: null,
-        OR: [
-          { subscriptionSyncedAt: null },
-          { subscriptionSyncedAt: { lte: observedAt } },
-        ],
-      },
-      data: {
-        plan: "Free",
-        stripeSubscriptionId: null,
-        stripePriceId: null,
-        subscriptionStatus: null,
-        subscriptionBillingInterval: null,
-        subscriptionCancelAtPeriodEnd: false,
-        subscriptionSyncedAt: observedAt,
-      },
+    const cleared = await applyWebSubscriptionSnapshot({
+      userId, subscriptionId: null, priceId: null, plan: "Free",
+      status: "canceled", periodEnd: null, interval: null, cancelAtPeriodEnd: false, observedAt,
     });
     return {
-      result: cleared.count > 0 ? "cleared" : "no_subscription",
+      result: cleared ? "cleared" : "no_subscription",
       plan: "Free",
       subscriptionStatus: null,
       stripeSubscriptionId: null,
@@ -627,24 +594,12 @@ async function handleSubscriptionDeleted(
   // Guarded like every other write. A deletion is terminal for *this*
   // subscription, but the account may already have moved on to a newer one --
   // an unguarded downgrade to Free here would undo it.
-  await prisma.user.updateMany({
-    where: {
-      stripeCustomerId: customerId,
-      OR: [
-        { subscriptionSyncedAt: null },
-        { subscriptionSyncedAt: { lte: observedAt } },
-      ],
-    },
-    data: {
-      plan: "Free",
-      stripeSubscriptionId: null,
-      stripePriceId: null,
-      subscriptionStatus: subscription.status,
-      subscriptionCurrentPeriodEnd: getPeriodEnd(subscription),
-      subscriptionBillingInterval: null,
-      subscriptionCancelAtPeriodEnd: false,
-      subscriptionSyncedAt: observedAt,
-    },
+  const user = await prisma.user.findFirst({ where: { stripeCustomerId: customerId }, select: { id: true } });
+  if (!user) return;
+  await applyWebSubscriptionSnapshot({
+    userId: user.id, plan: "Free", subscriptionId: null, priceId: null,
+    status: subscription.status, periodEnd: getPeriodEnd(subscription), interval: null,
+    cancelAtPeriodEnd: false, observedAt, deletedSubscriptionId: subscription.id,
   });
 }
 

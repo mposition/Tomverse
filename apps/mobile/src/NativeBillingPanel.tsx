@@ -62,13 +62,15 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
       <div className="native-billing-current"><h3>Current plan: {state.plan}</h3><p>Purchased credits: {state.purchasedCredits.toLocaleString()}</p>
         {state.active && state.expiresAt && <p>{state.cancelAtPeriodEnd ? "Access until" : "Renews"}: {new Date(state.expiresAt).toLocaleDateString()}</p>}
         {state.active && state.subscriptionStore && state.subscriptionStore !== "web" && <button type="button" disabled={busy} onClick={() => { void manage().catch(() => setError("Unable to open subscription management.")); }}>Manage or cancel subscription</button>}
-        {state.active && state.subscriptionStore === "web" && <><p>Your current subscription is managed by Tomverse. Cancel renewal here; access continues until the end of the paid period.</p>
-          {!state.cancelAtPeriodEnd && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel subscription</button>}
+        {state.active && (state.subscriptionStore === "web" || state.webSubscription?.active) && <><p>Your web subscription is managed by Tomverse. Cancel renewal here; access continues until the end of the paid period.</p>
+          {state.webSubscription?.expiresAt && <p>Web subscription access until: {new Date(state.webSubscription.expiresAt).toLocaleDateString()}</p>}
+          {!(state.webSubscription?.cancelAtPeriodEnd ?? state.cancelAtPeriodEnd) && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel subscription</button>}
           {confirmCancel && <div role="group" aria-label="Confirm cancellation"><p>Cancel automatic renewal? Your paid access continues until the date above.</p>
             <button type="button" disabled={busy} onClick={() => { setConfirmCancel(false); void run(() => client.current!.cancelWeb(), "Automatic renewal has been cancelled."); }}>Confirm cancellation</button>
             <button type="button" disabled={busy} onClick={() => setConfirmCancel(false)}>Keep subscription</button></div>}
         </>}
       </div>
+      {state.subscriptionStore !== "web" && state.webSubscription?.active && <p role="alert">You have subscriptions with both providers. You can cancel web renewal here and manage your store subscription separately. Your credit allowance is shared and is not doubled.</p>}
       {state.active && state.subscriptionStore !== store && <p>To avoid a second subscription, change your plan through its original provider. You can still buy additional credits here.</p>}
       {state.active && state.cancelAtPeriodEnd && <p>Renewal is cancelled. Use subscription management to resume renewal before changing plans.</p>}
       <h3>Choose a plan</h3>

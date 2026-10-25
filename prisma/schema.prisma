@@ -27,6 +27,12 @@ model User {
   mobileBillingId               String?       @unique
   subscriptionStore             String?
   subscriptionStoreProductId    String?
+  webSubscriptionPlan           String?
+  storeSubscriptionPlan         String?
+  storeSubscriptionExpiresAt    DateTime?
+  storeSubscriptionBillingInterval String?
+  storeSubscriptionCancelAtPeriodEnd Boolean @default(false)
+  storeSubscriptionSyncedAt     DateTime?
   /// When the stored subscription state was read from Stripe. Webhooks arrive
   /// out of order, so a snapshot read before this is refused rather than
   /// reverting the account to an older plan. See lib/stripeWebhookSyncCore.ts.

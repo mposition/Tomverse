@@ -1,4 +1,6 @@
 export const dynamic = "force-dynamic";
+import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
@@ -59,6 +61,7 @@ export async function PATCH(req: Request, context: RouteContext) {
         id: true,
         email: true,
         plan: true,
+        ...STORE_ENTITLEMENT_SELECT,
         subscriptionStatus: true,
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
@@ -82,11 +85,15 @@ export async function PATCH(req: Request, context: RouteContext) {
         payload: body,
         reason: body.reason,
       },
-      () =>
-        prisma.user.update({
+      () => prisma.$transaction(async (tx) => {
+        await lockSubscriptionAccount(tx, userId);
+        const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+        return tx.user.update({
           where: { id: userId },
           data: {
-            plan: body.plan,
+            plan: effectivePlanForAccess({ ...entitlement, plan: body.plan, webSubscriptionPlan: body.plan,
+              subscriptionStatus: body.subscriptionStatus || "manually_adjusted" }),
+            webSubscriptionPlan: body.plan,
             subscriptionStatus: body.subscriptionStatus || "manually_adjusted",
             // Settled here, not in the browser: a clock-derived value in the
             // request body would differ between the first attempt and the
@@ -119,7 +126,8 @@ export async function PATCH(req: Request, context: RouteContext) {
             stripeSubscriptionId: true,
             stripePriceId: true,
           },
-        })
+        });
+      })
     );
 
     // Queued: the plan moved whether or not the notice reaches anybody, and

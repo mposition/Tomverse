@@ -17,20 +17,31 @@ export const addUtcDays = (date: Date, days: number) => {
 const normalizePlan = (value: unknown): EffectivePlanTier =>
   value === "Pro" || value === "Max" ? value : "Free";
 
+export const STORE_ENTITLEMENT_SELECT = {
+  webSubscriptionPlan: true, storeSubscriptionPlan: true, storeSubscriptionExpiresAt: true,
+} as const;
+
 export const effectivePlanForAccess = (
   input: {
     plan: unknown;
     subscriptionStatus?: string | null;
     subscriptionCurrentPeriodEnd?: Date | string | null;
+    webSubscriptionPlan?: string | null;
+    storeSubscriptionPlan?: string | null;
+    storeSubscriptionExpiresAt?: Date | string | null;
   },
   now = new Date()
 ): EffectivePlanTier => {
-  const plan = normalizePlan(input.plan);
+  let plan = normalizePlan(input.webSubscriptionPlan ?? input.plan);
   const expiringAccess = input.subscriptionStatus === FOUNDING_TESTER_PASS_STATUS || input.subscriptionStatus?.startsWith("mobile_store_");
-  if (!expiringAccess) return plan;
-  if (!input.subscriptionCurrentPeriodEnd) return "Free";
-  const periodEnd = new Date(input.subscriptionCurrentPeriodEnd);
-  if (!Number.isFinite(periodEnd.getTime()) || periodEnd <= now) return "Free";
+  if (expiringAccess) {
+    const periodEnd = new Date(input.subscriptionCurrentPeriodEnd || 0);
+    if (!Number.isFinite(periodEnd.getTime()) || periodEnd <= now) plan = "Free";
+  }
+  const storeExpiry = new Date(input.storeSubscriptionExpiresAt || 0);
+  const native = Number.isFinite(storeExpiry.getTime()) && storeExpiry > now ? normalizePlan(input.storeSubscriptionPlan) : "Free";
+  if (native === "Max" || plan === "Max") return "Max";
+  if (native === "Pro" || plan === "Pro") return "Pro";
   return plan;
 };
 

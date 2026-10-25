@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     if (payload.event.type !== "TEST") await processMobileStoreWebhook(payload.event);
     return Response.json({ received: true });
   } catch (error) {
+    console.warn("Store webhook rejected or deferred.", { errorName: error instanceof Error ? error.name : "UnknownError" });
     const response = apiSecurityResponse(error);
     if (response) return response;
     console.warn("Store webhook processing failed.", { errorName: error instanceof Error ? error.name : "UnknownError" });

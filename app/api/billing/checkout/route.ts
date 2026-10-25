@@ -35,6 +35,7 @@ import { checkoutPlanEligibilityBlock } from "@/lib/checkoutPlanEligibilityCore"
 import { FOUNDING_TESTER_PASS_STARTED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { prisma } from "@/lib/prisma";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 import { getStripe } from "@/lib/stripe";
@@ -69,6 +70,7 @@ import {
   FOUNDING_TESTER_PASS_STATUS,
   addUtcDays,
   effectivePlanForAccess,
+  STORE_ENTITLEMENT_SELECT,
   isInternalPassPromotion,
 } from "@/lib/foundingTesterPassCore";
 import {
@@ -205,10 +207,14 @@ async function activateInternalPass({
       },
     });
 
+    await lockSubscriptionAccount(tx, userId);
+    const entitlement = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     await tx.user.update({
       where: { id: userId },
       data: {
-        plan: tierForPlanId(planId),
+        plan: effectivePlanForAccess({ ...entitlement, webSubscriptionPlan: tierForPlanId(planId),
+          subscriptionStatus: FOUNDING_TESTER_PASS_STATUS, subscriptionCurrentPeriodEnd: periodEnd }),
+        webSubscriptionPlan: tierForPlanId(planId),
         stripeSubscriptionId: null,
         stripePriceId: null,
         subscriptionStatus: FOUNDING_TESTER_PASS_STATUS,
@@ -425,6 +431,7 @@ export async function POST(req: Request) {
         stripeSubscriptionId: true,
         subscriptionStatus: true,
         subscriptionStore: true,
+        ...STORE_ENTITLEMENT_SELECT,
         subscriptionCurrentPeriodEnd: true,
         plan: true,
         creditDebtCredits: true,
@@ -436,13 +443,14 @@ export async function POST(req: Request) {
     if (!user) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
-    if (user.subscriptionStore && effectivePlanForAccess(user) !== "Free") {
+    if (user.subscriptionStore && user.storeSubscriptionExpiresAt && user.storeSubscriptionExpiresAt > new Date()) {
       return NextResponse.json({ code: "STORE_SUBSCRIPTION_MANAGED_EXTERNALLY", error: "Manage this subscription in the store where it was purchased." }, { status: 409 });
     }
     // The plan the account can actually use right now, not the raw column: a
     // Founding Tester Pass that has run out still leaves `plan` at "Pro", and
     // blocking that account from subscribing would be wrong.
     const effectivePlan = effectivePlanForAccess({
+      ...user,
       plan: user.plan,
       subscriptionStatus: user.subscriptionStatus,
       subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd,

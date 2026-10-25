@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test, mock } from "node:test";
 import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
-import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription } from "@/lib/mobileBillingService";
+import { applyMobileCreditEvent, ensureMobileBillingId, syncMobileSubscription, readMobileBillingState, cancelMobileWebSubscription } from "@/lib/mobileBillingService";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import { getPurchasedCreditSummary, expireCreditLots, reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
 import { getStripe } from "@/lib/stripe";
-import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
+import { resyncSubscriptionFromStripe, processStripeEvent } from "@/lib/stripeWebhookProcessing";
 
 process.env.MOBILE_BILLING_PRODUCTS_JSON = JSON.stringify([
   { store: "app_store", productId: "credits500", kind: "credits", packId: "starter_500" },
@@ -81,14 +81,14 @@ test("subscription sync preserves credit usage, protects web subscriptions and r
   try {
     await syncMobileSubscription(user.id, billingId);
     let account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-    assert.equal(account.plan, "Pro"); assert.equal(account.subscriptionCancelAtPeriodEnd, true);
+    assert.equal(account.plan, "Pro"); assert.equal(account.storeSubscriptionCancelAtPeriodEnd, true);
     assert.equal(account.subscriptionStore, "app_store");
     assert.equal(account.subscriptionSyncedAt, null, "mobile sync must not advance the Stripe observation clock");
     subscriptions = {};
     await syncMobileSubscription(user.id, billingId);
     account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     assert.equal(account.plan, "Free");
-    await prisma.user.update({ where: { id: user.id }, data: { plan: "Max", subscriptionStore: null, stripeSubscriptionId: "sub-web", subscriptionStatus: "active" } });
+    await prisma.user.update({ where: { id: user.id }, data: { plan: "Max", webSubscriptionPlan: "Max", subscriptionStore: null, stripeSubscriptionId: "sub-web", subscriptionStatus: "active" } });
     await syncMobileSubscription(user.id, billingId);
     assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).plan, "Max");
   } finally { globalThis.fetch = originalFetch; }
@@ -99,8 +99,8 @@ test("a paid web subscription applies immediately after store expiry, including 
   const user = await createUser(); const billingId = await ensureMobileBillingId(user.id);
   const customer = "cus_mobile_transition";
   await prisma.user.update({ where: { id: user.id }, data: {
-    plan: "Max", subscriptionStore: "app_store", subscriptionStatus: "mobile_store_active",
-    subscriptionStoreProductId: "old.max", subscriptionCurrentPeriodEnd: new Date("2000-01-01"), stripeCustomerId: customer,
+    plan: "Max", webSubscriptionPlan: "Free", subscriptionStore: "app_store", storeSubscriptionPlan: "Max",
+    subscriptionStoreProductId: "old.max", storeSubscriptionExpiresAt: new Date("2000-01-01"), stripeCustomerId: customer,
   } });
   const subscription = { id: "sub_mobile_transition", customer, status: "active", cancel_at_period_end: false,
     metadata: { planId: "pro" }, current_period_end: Math.floor(Date.now() / 1000) + 86400,
@@ -121,9 +121,47 @@ test("a paid web subscription applies immediately after store expiry, including 
     } } } }));
     await mobile;
     const current = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-    assert.equal(current.plan, "Pro"); assert.equal(current.subscriptionStore, null);
+    assert.equal(current.plan, "Pro"); assert.equal(current.subscriptionStore, "app_store");
     assert.equal(current.stripeSubscriptionId, subscription.id);
     // The earlier mobile response must not reclaim a paid web subscription.
     assert.equal(current.subscriptionStatus, "active");
   } finally { retrieve.mock.restore(); globalThis.fetch = originalFetch; }
+});
+
+test("checkout completing after a store purchase stays recorded and cancellable, and web deletion preserves store access", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_local_mock_only";
+  const user = await createUser(); await ensureMobileBillingId(user.id);
+  const customer = "cus_mobile_overlap";
+  await prisma.user.update({ where: { id: user.id }, data: {
+    plan: "Max", webSubscriptionPlan: "Free", subscriptionStore: "app_store",
+    storeSubscriptionPlan: "Max", storeSubscriptionExpiresAt: new Date("2099-01-01"), stripeCustomerId: customer,
+  } });
+  const subscription = { id: "sub_mobile_overlap", customer, status: "active", cancel_at_period_end: false,
+    metadata: { planId: "pro" }, current_period_end: Math.floor(Date.now() / 1000) + 86400,
+    items: { data: [{ id: "item", price: { id: "price_test_mobile", product: "prod_test", recurring: { interval: "month" } } }] },
+  } as unknown as Stripe.Subscription;
+  const stripe = getStripe();
+  const retrieve = mock.method(stripe.subscriptions, "retrieve", async () => subscription);
+  const update = mock.method(stripe.subscriptions, "update", async () => { subscription.cancel_at_period_end = true; return subscription; });
+  try {
+    await processStripeEvent({ id: "evt_overlap", type: "checkout.session.completed", data: { object: {
+      id: "cs_mobile_overlap", subscription: subscription.id, amount_total: 1500, currency: "usd",
+      created: Math.floor(Date.now() / 1000), metadata: {},
+    } } } as unknown as Stripe.Event);
+    let account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    assert.equal(account.plan, "Max"); assert.equal(account.stripeSubscriptionId, subscription.id);
+    assert.equal(account.webSubscriptionPlan, "Pro");
+    assert.equal(await prisma.billingTransaction.count({ where: { userId: user.id, stripeCheckoutSessionId: "cs_mobile_overlap" } }), 1);
+    const state = await readMobileBillingState(user.id, "app_store");
+    assert.equal(state.webSubscription?.active, true); assert.equal(state.subscriptionStore, "app_store");
+    await cancelMobileWebSubscription(user.id);
+    assert.equal(update.mock.callCount(), 1);
+    account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    assert.equal(account.subscriptionCancelAtPeriodEnd, true); assert.equal(account.plan, "Max");
+    await processStripeEvent({ id: "evt_delete_overlap", type: "customer.subscription.deleted", created: Math.floor(Date.now() / 1000),
+      data: { object: { ...subscription, status: "canceled" } } } as unknown as Stripe.Event);
+    account = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    assert.equal(account.plan, "Max"); assert.equal(account.webSubscriptionPlan, "Free");
+    assert.equal(account.storeSubscriptionPlan, "Max"); assert.equal(account.stripeSubscriptionId, null);
+  } finally { retrieve.mock.restore(); update.mock.restore(); }
 });

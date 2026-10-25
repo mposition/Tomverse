@@ -9,6 +9,8 @@ import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { increaseCreditDebt, lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { getStripe } from "@/lib/stripe";
+import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 import {
   mobileBillingEnvironment, parseMobileBillingProducts, resolveMobileSubscription,
   type MobileBillingState, type MobileStore, type revenueCatWebhookSchema,
@@ -38,32 +40,23 @@ async function readRevenueCatCustomer(billingId: string) {
 
 export async function syncMobileSubscription(userId: string, billingId: string) {
   const products = mobileBillingProducts();
-  // Serialize current-state reads with a billing-only lock, so provider latency
-  // cannot block chat reservations or credit settlements.
+  // Timestamp before HTTP; stale responses cannot replace newer provider state.
+  const observedAt = new Date();
+  const current = resolveMobileSubscription(await readRevenueCatCustomer(billingId), products, mobileBillingEnvironment());
   await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`mobile-billing:${userId}`}))`;
+    await lockSubscriptionAccount(tx, userId);
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.mobileBillingId !== billingId) throw new Error("Billing identity changed.");
-    // Web subscriptions retain their own execution and cancellation authority.
-    if (!user.subscriptionStore && user.stripeSubscriptionId && ["active", "trialing", "past_due"].includes(user.subscriptionStatus || "")) return;
-    const current = resolveMobileSubscription(await readRevenueCatCustomer(billingId), products, mobileBillingEnvironment());
-    if (current) {
-      await tx.user.updateMany({ where: { id: userId, OR: [
-        { subscriptionStore: { not: null } }, { stripeSubscriptionId: null },
-        { subscriptionStatus: { notIn: ["active", "trialing", "past_due"] } }, { subscriptionStatus: null },
-      ] }, data: {
-        plan: current.plan, subscriptionStore: current.store, subscriptionStoreProductId: current.productId,
-        subscriptionStatus: current.status === "past_due" ? "mobile_store_grace" : "mobile_store_active",
-        subscriptionCurrentPeriodEnd: current.expiresAt, subscriptionBillingInterval: current.interval,
-        subscriptionCancelAtPeriodEnd: current.cancelAtPeriodEnd,
-      } });
-    } else if (user.subscriptionStore) {
-      await tx.user.updateMany({ where: { id: userId, subscriptionStore: user.subscriptionStore }, data: { plan: "Free", subscriptionStatus: "mobile_store_expired",
-        subscriptionStore: null, subscriptionStoreProductId: null,
-        subscriptionCancelAtPeriodEnd: true, subscriptionCurrentPeriodEnd: new Date(),
-      } });
-    }
-  }, { timeout: 20_000 });
+    if (user.storeSubscriptionSyncedAt && user.storeSubscriptionSyncedAt > observedAt) return;
+    const data = {
+      webSubscriptionPlan: user.webSubscriptionPlan ?? user.plan,
+      subscriptionStore: current?.store || null, subscriptionStoreProductId: current?.productId || null,
+      storeSubscriptionPlan: current?.plan || "Free", storeSubscriptionExpiresAt: current?.expiresAt || null,
+      storeSubscriptionBillingInterval: current?.interval || null,
+      storeSubscriptionCancelAtPeriodEnd: current?.cancelAtPeriodEnd || false, storeSubscriptionSyncedAt: observedAt,
+    };
+    await tx.user.update({ where: { id: userId }, data: { ...data, plan: effectivePlanForAccess({ ...user, ...data }) } });
+  });
 }
 
 export async function readMobileBillingState(userId: string, store: MobileStore): Promise<MobileBillingState> {
@@ -73,12 +66,17 @@ export async function readMobileBillingState(userId: string, store: MobileStore)
   if (!user.mobileBillingId) throw new Error("Billing identity unavailable.");
   const plan = effectivePlanForAccess(user);
   const subscriptionStore = user.subscriptionStore === "app_store" || user.subscriptionStore === "play_store" ? user.subscriptionStore : null;
-  const active = plan !== "Free" && Boolean(subscriptionStore || (user.stripeSubscriptionId && ["active", "trialing", "past_due"].includes(user.subscriptionStatus || "")));
+  const nativeActive = Boolean(subscriptionStore && user.storeSubscriptionExpiresAt && user.storeSubscriptionExpiresAt > new Date());
+  const webActive = Boolean(user.stripeSubscriptionId && ["active", "trialing", "past_due"].includes(user.subscriptionStatus || ""));
+  const active = nativeActive || webActive;
   return {
-    billingId: user.mobileBillingId, plan, subscriptionStore: subscriptionStore || (user.stripeSubscriptionId ? "web" : null),
-    productId: user.subscriptionStoreProductId, interval: user.subscriptionBillingInterval,
-    expiresAt: user.subscriptionCurrentPeriodEnd?.toISOString() || null,
-    cancelAtPeriodEnd: user.subscriptionCancelAtPeriodEnd, active, purchasedCredits: summary.remainingCredits,
+    billingId: user.mobileBillingId, plan, subscriptionStore: nativeActive ? subscriptionStore : webActive ? "web" : null,
+    productId: user.subscriptionStoreProductId,
+    interval: nativeActive ? user.storeSubscriptionBillingInterval : user.subscriptionBillingInterval,
+    expiresAt: (nativeActive ? user.storeSubscriptionExpiresAt : user.subscriptionCurrentPeriodEnd)?.toISOString() || null,
+    cancelAtPeriodEnd: nativeActive ? user.storeSubscriptionCancelAtPeriodEnd : user.subscriptionCancelAtPeriodEnd,
+    webSubscription: { active: webActive, cancelAtPeriodEnd: user.subscriptionCancelAtPeriodEnd, expiresAt: user.subscriptionCurrentPeriodEnd?.toISOString() || null },
+    active, purchasedCredits: summary.remainingCredits,
     products: mobileBillingProducts().filter((p) => p.store === store).flatMap<MobileBillingState["products"][number]>((p) => {
       if (p.kind === "credits") {
         const pack = getCreditPack(p.packId);
@@ -92,11 +90,13 @@ export async function readMobileBillingState(userId: string, store: MobileStore)
 
 export async function cancelMobileWebSubscription(userId: string) {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
-  if (user.subscriptionStore || !user.stripeSubscriptionId) throw new Error("No web subscription to cancel.");
+  if (!user.stripeSubscriptionId) throw new Error("No web subscription to cancel.");
   // Idempotent update: retries never create a charge or restore auto-renewal.
-  const subscription = await getStripe().subscriptions.update(user.stripeSubscriptionId, { cancel_at_period_end: true });
-  await prisma.user.updateMany({ where: { id: userId, subscriptionStore: null, stripeSubscriptionId: subscription.id },
-    data: { subscriptionCancelAtPeriodEnd: true } });
+  const subscription = await getStripe().subscriptions.retrieve(user.stripeSubscriptionId);
+  if (subscription.status !== "canceled" && !subscription.cancel_at_period_end) {
+    await getStripe().subscriptions.update(user.stripeSubscriptionId, { cancel_at_period_end: true });
+  }
+  await resyncSubscriptionFromStripe(user.stripeSubscriptionId);
 }
 
 type StoreEvent = z.infer<typeof revenueCatWebhookSchema>["event"];
