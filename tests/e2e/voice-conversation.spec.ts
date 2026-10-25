@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, mockChatStream, openRecentConversation, prepareGuestPage } from "./support/app-fixtures";
+import { mockAttachmentUpload, mockAuthenticatedApi, mockChatStream, openRecentConversation, prepareGuestPage } from "./support/app-fixtures";
 
 type VoiceQa = {
   calls: Array<Record<string, unknown>>;
@@ -40,7 +40,7 @@ async function installVoiceTransport(page: Page) {
   });
 }
 
-async function openVoice(page: Page, selectionMode: "manual" | "auto") {
+async function prepareVoice(page: Page, selectionMode: "manual" | "auto") {
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, {
     productKey: "chat", language: "en", selectedModels: ["gpt-5-6-luna"], selectionMode,
@@ -55,11 +55,16 @@ async function openVoice(page: Page, selectionMode: "manual" | "auto") {
   await page.context().addCookies([
     { name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" },
     { name: "__tomverse_e2e_voice_conversation", value: "1", url: "http://127.0.0.1:3100" },
+    { name: "__tomverse_e2e_voice_input", value: "1", url: "http://127.0.0.1:3100" },
   ]);
   await page.goto("/chat?lang=en");
   await openRecentConversation(page, { title: "QA conversation" });
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await expect(page.getByTestId("voice-conversation-open")).toBeEnabled();
+}
+
+async function openVoice(page: Page, selectionMode: "manual" | "auto") {
+  await prepareVoice(page, selectionMode);
   await page.getByTestId("voice-conversation-open").click();
   await expect(page.getByRole("dialog", { name: "Voice conversation" })).toBeVisible();
 }
@@ -67,6 +72,56 @@ async function openVoice(page: Page, selectionMode: "manual" | "auto") {
 test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
 test.setTimeout(90_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit mobile viewports on Chromium."); });
+
+for (const width of [320, 360, 390, 430, 1280]) test.describe(`Primary action at ${width}px`, () => {
+  test.use({ hasTouch: width < 768 });
+  test(`primary action switches between voice and Send at ${width}px`, { tag: "@ui-risk" }, async ({ page }, testInfo) => {
+    let submissions = 0;
+    page.on("request", request => {
+      if (new URL(request.url()).pathname === "/api/chat" && request.method() === "POST") submissions++;
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await prepareVoice(page, "manual");
+    const input = page.getByTestId("chat-textarea");
+    const voice = page.getByTestId("voice-conversation-open");
+    const send = page.getByTestId("chat-send-button");
+    const dictation = page.getByTestId("composer-voice-button");
+    await expect(dictation).toBeVisible();
+    await expect(voice).toBeVisible();
+    await expect(send).toHaveCount(0);
+    const emptyPosition = await voice.boundingBox();
+    await page.getByTestId("chat-input").screenshot({ path: testInfo.outputPath(`primary-voice-${width}.png`) });
+
+    await input.fill("A draft question");
+    await expect(send).toBeEnabled();
+    await expect(voice).toBeHidden();
+    await expect(voice).toHaveCount(1);
+    await expect(dictation).toBeVisible();
+    const sendPosition = await send.boundingBox();
+    expect(emptyPosition).not.toBeNull();
+    expect(sendPosition).not.toBeNull();
+    expect(Math.abs(emptyPosition!.x - sendPosition!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(emptyPosition!.y - sendPosition!.y)).toBeLessThanOrEqual(1);
+    await page.getByTestId("chat-input").screenshot({ path: testInfo.outputPath(`primary-send-${width}.png`) });
+
+    await input.fill(" \n ");
+    await expect(voice).toBeVisible();
+    await expect(send).toHaveCount(0);
+    const upload = await mockAttachmentUpload(page);
+    await page.getByTestId("chat-input").locator('input[type="file"]').setInputFiles({
+      name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("Draft attachment"),
+    });
+    await expect.poll(() => upload.finalizeCount).toBe(1);
+    await expect(send).toBeEnabled();
+    await expect(voice).toBeHidden();
+    await page.getByTestId("attachment-remove").click();
+    await expect(voice).toBeVisible();
+    await expect(send).toHaveCount(0);
+    const activeVoiceCalls = await page.evaluate(() => (window as unknown as { __voiceConversationQa: VoiceQa }).__voiceConversationQa.calls.filter(call => call.action !== "history"));
+    expect(activeVoiceCalls).toHaveLength(0);
+    expect(submissions).toBe(0);
+  });
+});
 
 for (const mode of ["auto", "manual"] as const) test(`${mode} voice reuses Chat persistence, model selection and search`, async ({ page }) => {
   const chatRequests: Array<Record<string, unknown>> = [];
@@ -89,6 +144,8 @@ for (const mode of ["auto", "manual"] as const) test(`${mode} voice reuses Chat 
   expect(receipt?.conversationId).toBe("qa-conversation");
   expect(receipt?.sourceUserMessageId).toMatch(/^[a-f0-9-]{36}$/);
   expect(receipt).not.toHaveProperty("content");
+  await expect(page.getByRole("dialog", { name: "Voice conversation" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __voiceConversationQa: VoiceQa }).__voiceConversationQa.stopped)).toBe(0);
   await page.getByRole("button", { name: "End conversation", exact: true }).click();
   await expect(page.getByText("Conversation ended", { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __voiceConversationQa: VoiceQa }).__voiceConversationQa.stopped)).toBeGreaterThan(0);
