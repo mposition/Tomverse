@@ -25,10 +25,13 @@ async function mountCompletion(page: Page, reply: { status?: number; body?: obje
     const react = source.match(/["']([^"']*\/react\.js[^"']*)["']/)?.[1];
     expect(anchor).toBeGreaterThan(0); expect(react).toBeTruthy();
     const root = resolve(__dirname, "../..").replaceAll("\\", "/");
+    // Match Vite's canonical /@fs URL on both POSIX and Windows. A second
+    // slash on POSIX loads another copy of the language context.
+    const fsRoot = `/@fs${root.startsWith("/") ? "" : "/"}${root}`;
     const imports = `import React from ${JSON.stringify(react)};
       const createElement = React.createElement;
-      import { LanguageProvider } from ${JSON.stringify(`/@fs/${root}/components/LanguageProvider.tsx`)};
-      import { MobileLoginContent } from ${JSON.stringify(`/@fs/${root}/app/(site)/(application)/auth/mobile/MobileLoginContent.tsx`)};`;
+      import { LanguageProvider } from ${JSON.stringify(`${fsRoot}/components/LanguageProvider.tsx`)};
+      import { MobileLoginContent } from ${JSON.stringify(`${fsRoot}/app/(site)/(application)/auth/mobile/MobileLoginContent.tsx`)};`;
     await route.fulfill({ response, body: imports + source.slice(0, anchor) + `
       createRoot(container).render(createElement(StrictMode, null,
         createElement(LanguageProvider, { initialLang: "ko", forceInitialLang: true },
