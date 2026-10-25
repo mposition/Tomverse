@@ -8149,7 +8149,9 @@ export function ChatPageClient({
             return "unknown";
           }
           const data = await response.json().catch(() => null);
-          if (data?.surface !== "chat") return "unknown";
+          // Still this mount's Chat row: a plain Chat at /chat, or a Chat
+          // continuation at its own route (surface "continuation").
+          if (data?.surface !== routeSurface || data?.productKey !== "chat") return "unknown";
           if (
             data?.selectionMode === mode &&
             (mode !== "auto" || data?.autoSelection?.offered === true)

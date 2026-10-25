@@ -2461,28 +2461,115 @@ test.describe("a continuation opens in its product's workspace", () => {
             )
         );
 
+        const openRow = async (title: string, id: string) => {
+            const list = await openConversationList(page);
+            await list
+                .getByTestId("sidebar-conversation-item")
+                .filter({ hasText: title })
+                .last()
+                .click();
+            await expect(page).toHaveURL(new RegExp(`/continuations/${id}$`));
+        };
+
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         await page.getByTestId("continuation-compare-in-review").click();
         await expect.poll(() => forkKeys.first.length).toBe(1);
 
-        const list = await openConversationList(page);
-        const row = list
-            .getByTestId("sidebar-conversation-item")
-            .filter({ hasText: SECOND_TITLE })
-            .last();
-        await row.click();
-        await expect(page).toHaveURL(new RegExp(`/continuations/${SECOND_ID}$`));
-
-        // A's answer lands now and must change nothing on B's screen.
+        // A -> B -> A: back on the same endpoint, A's first answer is still
+        // from an earlier visit and must not navigate.
+        await openRow(SECOND_TITLE, SECOND_ID);
+        await openRow(SOURCE_CONVERSATION_TITLE, CONVERSATION_ID);
         releaseFirst();
-        const compare = page.getByTestId("continuation-compare-in-review");
-        await expect(compare).toBeEnabled();
+        await expect(page.getByTestId("continuation-compare-in-review")).toBeEnabled();
         await page.waitForTimeout(500);
-        await expect(page).toHaveURL(new RegExp(`/continuations/${SECOND_ID}$`));
+        await expect(page).toHaveURL(new RegExp(`/continuations/${CONVERSATION_ID}$`));
 
-        await compare.click();
+        // B gets an attempt of its own.
+        await openRow(SECOND_TITLE, SECOND_ID);
+        await page.getByTestId("continuation-compare-in-review").click();
         await expect(page).toHaveURL(/\/continuations\/qa-second-review-fork$/);
         expect(forkKeys.second).toHaveLength(1);
         expect(forkKeys.second[0]).not.toBe(forkKeys.first[0]);
+    });
+
+    test("a late answer after leaving the continuation moves nobody", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openContinuationAs(page, "chat");
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await page.route(
+            `**/api/conversations/${CONVERSATION_ID}/continuation/review`,
+            async (route) => {
+                await held;
+                await route
+                    .fulfill(json({ conversationId: REVIEW_FORK_ID, idempotentReplay: false }, 201))
+                    .catch(() => {});
+            }
+        );
+
+        await page.getByTestId("continuation-compare-in-review").click();
+        // Leave in-app, which unmounts the launcher that sent the request.
+        const switcher = await productSwitcher(page);
+        await switcher.getByTestId("chat-product-review").click();
+        await expect(page).toHaveURL(/\/review(\?|$)/);
+        release();
+        await page.waitForTimeout(500);
+        await expect(page).toHaveURL(/\/review(\?|$)/);
+    });
+
+    test("a stored Smart Adaptive change is confirmed on a Chat continuation", async ({
+        page,
+    }) => {
+        /*
+          Independent review, 2026-10-25. A mode PATCH that failed after
+          committing is settled by one readback, which accepted only
+          \`surface: "chat"\` -- a Chat continuation answers "continuation", so
+          the stored change read as unknown and blocked the controls.
+        */
+        await prepareGuestPage(page, "ko");
+        await openContinuationAs(page, "chat");
+        let storedMode = "auto";
+        await page.route(
+            new RegExp(`.*/api/conversations/${CONVERSATION_ID}(\\?.*)?$`),
+            async (route) => {
+                if (route.request().method() === "PATCH") {
+                    storedMode = (route.request().postDataJSON() as { selectionMode: string })
+                        .selectionMode;
+                    // Committed, then failed: the unknown-outcome case.
+                    await route.fulfill(json({ error: "boom" }, 500));
+                    return;
+                }
+                await route.fulfill(
+                    json({
+                        id: CONVERSATION_ID,
+                        title: "Continued from an imported chat",
+                        kind: "chat",
+                        productKey: "chat",
+                        surface: "continuation",
+                        selectedModels: [PRIMARY_MODEL],
+                        disabledPanels: [],
+                        webSearchMode: "off",
+                        memoryMode: "inherit",
+                        selectionMode: storedMode,
+                        autoSelection: { offered: true },
+                        assistantProfile: null,
+                        isLocked: false,
+                        shareEnabled: false,
+                        shareExpiresAt: null,
+                        messages: [],
+                        messagePage: { hasMore: false, nextCursor: null },
+                    })
+                );
+            }
+        );
+
+        const toggle = page.getByTestId("composer-auto-routing-toggle");
+        await expect(toggle).toHaveAttribute("aria-checked", "true");
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-checked", "false");
+        await expect(page.getByText("자동 설정을 저장하지 못했습니다.")).toHaveCount(0);
+        expect(storedMode).toBe("manual");
     });
 });

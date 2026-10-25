@@ -96,11 +96,15 @@ export function useContinuationLauncher(
       to B would be answered with A's conversation -- the server resolves by
       `(userId, key)` alone -- and A's late response would navigate B's
       screen. So the key is stored with its endpoint, the state resets when the
-      endpoint changes, and a response for an endpoint that is no longer
-      current changes nothing.
+      endpoint changes, and a response that arrives after its endpoint stopped
+      being current -- or after the launcher unmounted -- changes nothing.
+
+      Current means "the same mount generation", not "the same endpoint
+      string": A -> B -> A must not revive A's first response, so every
+      endpoint change and the unmount start a new generation.
     */
     const attemptRef = useRef<{ endpoint: string; key: string } | null>(null);
-    const currentEndpointRef = useRef(endpoint);
+    const generationRef = useRef(0);
     const [stateEndpoint, setStateEndpoint] = useState(endpoint);
     if (stateEndpoint !== endpoint) {
         setStateEndpoint(endpoint);
@@ -108,7 +112,10 @@ export function useContinuationLauncher(
         setErrorMessage(null);
     }
     useLayoutEffect(() => {
-        currentEndpointRef.current = endpoint;
+        generationRef.current += 1;
+        return () => {
+            generationRef.current += 1;
+        };
     }, [endpoint]);
     const creating = status === "creating" && stateEndpoint === endpoint;
 
@@ -133,7 +140,8 @@ export function useContinuationLauncher(
             };
         }
         const idempotencyKey = attemptRef.current.key;
-        const isCurrent = () => currentEndpointRef.current === endpoint;
+        const generation = generationRef.current;
+        const isCurrent = () => generationRef.current === generation;
 
         setStatus("creating");
         setErrorMessage(null);
