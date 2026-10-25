@@ -837,7 +837,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
   mobileStoreTransaction: (userId) =>
     prisma.mobileStoreTransaction.findMany({
       where: { userId },
-      select: { store: true, environment: true, productId: true, packId: true, credits: true, refunded: true, purchasedAt: true },
+      select: { store: true, environment: true, productId: true, packId: true, credits: true, refunded: true, needsReview: true, purchasedAt: true },
       orderBy: { purchasedAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),

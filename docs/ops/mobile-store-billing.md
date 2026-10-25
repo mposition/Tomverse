@@ -55,8 +55,14 @@ does not grant access. Failed webhook processing returns 503 for redelivery.
   authorization after checking the effective plan's pack eligibility. A verified
   credit webhook atomically consumes one matching authorization. A pending
   payment remains authorized if the plan changes before delivery; direct SKU
-  purchases without authorization cannot grant credits. Duplicate and refund
-  events never need a second authorization. Pending authorizations are deleted
+  purchases without authorization cannot grant credits. There is at most one
+  open authorization per account/SKU, valid for a purchase timestamp within 24
+  hours of authorization (delivery can arrive later). Duplicate and refund
+  events never need a second authorization; refund-before-purchase also consumes
+  the matching authorization. A verified paid purchase without authorization is
+  retained with needsReview, acknowledged without retry, and surfaced in server
+  error logs and the app's support notice; further credit purchases are blocked
+  until support resolves the store payment/refund. Pending authorizations are deleted
   with the account and are included in its filtered data export.
 
 ## Configuration before activation

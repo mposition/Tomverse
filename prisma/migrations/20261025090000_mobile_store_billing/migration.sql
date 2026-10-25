@@ -19,6 +19,8 @@ CREATE TABLE "MobileStorePurchaseAuthorization" (
 );
 CREATE INDEX "mobile_store_purchase_auth_lookup_idx"
   ON "MobileStorePurchaseAuthorization"("userId", "store", "productId", "createdAt");
+CREATE UNIQUE INDEX "mobile_store_purchase_auth_open_key"
+  ON "MobileStorePurchaseAuthorization"("userId", "store", "productId");
 CREATE TABLE "MobileStoreTransaction" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -31,6 +33,7 @@ CREATE TABLE "MobileStoreTransaction" (
   "fundedCostMicroUsd" BIGINT NOT NULL CHECK ("fundedCostMicroUsd" > 0),
   "creditLotId" TEXT,
   "refunded" BOOLEAN NOT NULL DEFAULT false,
+  "needsReview" BOOLEAN NOT NULL DEFAULT false,
   "purchasedAt" TIMESTAMP(3) NOT NULL,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

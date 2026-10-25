@@ -14,7 +14,7 @@ const serialized = <T,>(work: () => Promise<T>): Promise<T> => {
 };
 export function canPurchaseMobileProduct(state: MobileBillingState, product: MobileBillingProduct, store: MobileStore) {
   if (product.store !== store) return false;
-  if (product.kind === "credits") return state.products.some((p) => p.productId === product.productId);
+  if (product.kind === "credits") return !state.creditPurchasesNeedingReview && state.products.some((p) => p.productId === product.productId);
   if (state.verificationPending) return false;
   if (state.webSubscription?.active) return false;
   if (!state.active) return ({ Free: 0, Pro: 1, Max: 2 }[product.plan] || 0) > ({ Free: 0, Pro: 1, Max: 2 }[state.plan as "Free" | "Pro" | "Max"] || 0);

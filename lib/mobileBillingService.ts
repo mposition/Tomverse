@@ -81,8 +81,9 @@ export async function syncMobileSubscription(userId: string, billingId: string) 
 }
 
 export async function readMobileBillingState(userId: string, store: MobileStore): Promise<MobileBillingState> {
-  const [user, summary, plans] = await Promise.all([
+  const [user, summary, plans, creditPurchasesNeedingReview] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: userId } }), getPurchasedCreditSummary(userId), getBillingPlans(),
+    prisma.mobileStoreTransaction.count({ where: { userId, needsReview: true, refunded: false } }),
   ]);
   if (!user.mobileBillingId) throw new Error("Billing identity unavailable.");
   const plan = effectivePlanForAccess(user);
@@ -101,7 +102,7 @@ export async function readMobileBillingState(userId: string, store: MobileStore)
     cancelAtPeriodEnd: native?.cancelAtPeriodEnd ?? (nativeActive ? user.storeSubscriptionCancelAtPeriodEnd : user.subscriptionCancelAtPeriodEnd),
     storeSubscriptions: stores,
     webSubscription: { active: webActive, cancelAtPeriodEnd: user.subscriptionCancelAtPeriodEnd, expiresAt: user.subscriptionCurrentPeriodEnd?.toISOString() || null },
-    active, purchasedCredits: summary.remainingCredits,
+    active, purchasedCredits: summary.remainingCredits, creditPurchasesNeedingReview,
     products: mobileBillingProducts().filter((p) => p.store === store).flatMap<MobileBillingState["products"][number]>((p) => {
       if (p.kind === "credits") {
         const pack = getCreditPack(p.packId);
@@ -135,7 +136,11 @@ export async function prepareMobileCreditPurchase(userId: string, store: MobileS
     await lockSubscriptionAccount(tx, userId);
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (!pack.allowedPlans.includes(effectivePlanForAccess(user))) throw new Error("Credit pack is not available for this plan.");
-    await tx.mobileStorePurchaseAuthorization.create({ data: { userId, store, productId } });
+    if (await tx.mobileStoreTransaction.count({ where: { userId, needsReview: true, refunded: false } })) throw new Error("Resolve the previous store credit payment before purchasing again.");
+    await tx.mobileStorePurchaseAuthorization.upsert({
+      where: { userId_store_productId: { userId, store, productId } },
+      create: { userId, store, productId }, update: { createdAt: new Date() },
+    });
   });
 }
 
@@ -156,21 +161,31 @@ export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userI
   }
   // A cancellation tombstone also handles refund-before-purchase delivery.
   if (existing?.refunded || (existing && event.type === "NON_RENEWING_PURCHASE")) return;
-  if (event.type === "NON_RENEWING_PURCHASE") {
+  let authorized = false;
+  if (!existing) {
     // A delayed/pending payment retains the plan authorization made before
     // its store sheet opened. Refunds and duplicate delivery need no new approval.
     const authorization = await tx.mobileStorePurchaseAuthorization.findFirst({
-      where: { userId, store, productId: event.product_id, createdAt: { lte: new Date(event.purchased_at_ms + 60_000) } },
+      where: { userId, store, productId: event.product_id, createdAt: {
+        gte: new Date(event.purchased_at_ms - 86_400_000), lte: new Date(event.purchased_at_ms + 60_000),
+      } },
       orderBy: { createdAt: "asc" },
     });
-    if (!authorization) throw new Error("Credit purchase has no server plan authorization.");
-    await tx.mobileStorePurchaseAuthorization.delete({ where: { id: authorization.id } });
+    if (authorization) {
+      authorized = true;
+      await tx.mobileStorePurchaseAuthorization.delete({ where: { id: authorization.id } });
+    }
   }
   const purchase = existing || await tx.mobileStoreTransaction.create({ data: {
     userId, store, environment: event.environment, transactionId: event.transaction_id, productId: event.product_id,
     packId: pack.id, credits: pack.credits, fundedCostMicroUsd: BigInt(pack.fundedCostMicroUsd),
     purchasedAt: new Date(event.purchased_at_ms), refunded: event.type === "CANCELLATION",
+    needsReview: event.type === "NON_RENEWING_PURCHASE" && !authorized,
   } });
+  if (event.type === "NON_RENEWING_PURCHASE" && purchase.needsReview) {
+    console.error("Paid store credit purchase needs operator review; credits withheld.", { purchaseId: purchase.id, store, productId: event.product_id });
+    return;
+  }
   if (event.type === "CANCELLATION") {
     if (purchase.creditLotId) {
       const lot = await tx.creditLot.findUniqueOrThrow({ where: { id: purchase.creditLotId } });
@@ -184,7 +199,7 @@ export async function applyMobileCreditEvent(tx: Prisma.TransactionClient, userI
         fundedCostMicroUsd: purchase.fundedCostMicroUsd - lot.remainingFundedCostMicroUsd, type: "refund_unrecovered",
         metadata: { mobileStoreTransactionId: purchase.id } });
     }
-    await tx.mobileStoreTransaction.update({ where: { id: purchase.id }, data: { refunded: true } });
+    await tx.mobileStoreTransaction.update({ where: { id: purchase.id }, data: { refunded: true, needsReview: false } });
     return;
   }
   const offset = await offsetCreditDebt(tx, { userId, availableCredits: pack.credits,

@@ -40,18 +40,40 @@ const bindSubscription = (billingId: string, transactionId: string, store: "APP_
 test("credit pack plan eligibility is server-authorized before payment and survives a delayed plan change", async () => {
   const user = await createUser();
   await assert.rejects(prepareMobileCreditPurchase(user.id, "app_store", "credits1500"), /not available/);
-  await assert.rejects(deliver(user.id, { product_id: "credits1500" }), /no server plan authorization/);
+  const unauthorizedId = randomUUID();
+  await deliver(user.id, { product_id: "credits1500", transaction_id: unauthorizedId });
+  await deliver(user.id, { product_id: "credits1500", transaction_id: unauthorizedId });
+  const withheld = await prisma.mobileStoreTransaction.findFirstOrThrow({ where: { userId: user.id, transactionId: unauthorizedId } });
+  assert.equal(withheld.needsReview, true);
+  await ensureMobileBillingId(user.id);
+  assert.equal((await readMobileBillingState(user.id, "app_store")).creditPurchasesNeedingReview, 1);
   assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 0);
   await prisma.user.update({ where: { id: user.id }, data: { plan: "Pro" } });
+  await assert.rejects(prepareMobileCreditPurchase(user.id, "app_store", "credits1500"), /previous store credit payment/);
+  await deliver(user.id, { product_id: "credits1500", transaction_id: unauthorizedId, type: "CANCELLATION" });
   await prepareMobileCreditPurchase(user.id, "app_store", "credits1500");
   await prisma.user.update({ where: { id: user.id }, data: { plan: "Free" } });
   const purchase = { product_id: "credits1500", purchased_at_ms: Date.now() };
   await Promise.all([deliver(user.id, purchase), deliver(user.id, purchase)]);
   assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 1500);
-  await assert.rejects(deliver(user.id, { ...purchase, transaction_id: randomUUID() }), /no server plan authorization/);
+  await deliver(user.id, { ...purchase, transaction_id: randomUUID() });
+  assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 1500);
   await deliver(user.id, { ...purchase, type: "CANCELLATION" });
   assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 0);
   await assert.rejects(deliver(user.id, { product_id: "unmapped" }), /Unmapped/);
+});
+
+test("only one open authorization is kept per SKU and expired authorizations retain paid purchases for support", async () => {
+  const user = await createUser();
+  await Promise.all([prepareMobileCreditPurchase(user.id, "app_store", "credits500"), prepareMobileCreditPurchase(user.id, "app_store", "credits500")]);
+  assert.equal(await prisma.mobileStorePurchaseAuthorization.count({ where: { userId: user.id } }), 1);
+  await prisma.mobileStorePurchaseAuthorization.updateMany({ where: { userId: user.id }, data: { createdAt: new Date(Date.now() - 172800000) } });
+  await deliver(user.id, { purchased_at_ms: Date.now() });
+  const paid = await prisma.mobileStoreTransaction.findFirstOrThrow({ where: { userId: user.id } });
+  assert.equal(paid.needsReview, true);
+  assert.equal((await getPurchasedCreditSummary(user.id)).remainingCredits, 0);
+  await deliver(user.id, { type: "CANCELLATION", purchased_at_ms: Date.now() });
+  assert.equal((await prisma.mobileStoreTransaction.findUniqueOrThrow({ where: { id: paid.id } })).needsReview, false);
 });
 
 test("concurrent purchase delivery grants once and a second account cannot replay the store transaction", async () => {

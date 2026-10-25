@@ -1737,6 +1737,7 @@ model MobileStorePurchaseAuthorization {
   createdAt DateTime @default(now())
 
   @@index([userId, store, productId, createdAt], map: "mobile_store_purchase_auth_lookup_idx")
+  @@unique([userId, store, productId], map: "mobile_store_purchase_auth_open_key")
 }
 
 model MobileStoreTransaction {
@@ -1752,6 +1753,7 @@ model MobileStoreTransaction {
   fundedCostMicroUsd BigInt
   creditLotId   String?  @unique
   refunded      Boolean @default(false)
+  needsReview   Boolean @default(false)
   purchasedAt   DateTime
   createdAt     DateTime @default(now())
 

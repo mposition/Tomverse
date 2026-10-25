@@ -60,6 +60,7 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
     {busy && <p role="status">Connecting to {storeName}…</p>}
     {state && <>
       {state.verificationPending && <p role="status">Store verification is pending. Refresh your balance before starting another subscription purchase.</p>}
+      {!!state.creditPurchasesNeedingReview && <p role="alert">A store credit payment needs support review. Contact support@tomverse.app before making another credit purchase. Your payment record has been retained.</p>}
       <div className="native-billing-current"><h3>Current plan: {state.plan}</h3><p>Purchased credits: {state.purchasedCredits.toLocaleString()}</p>
         {state.active && state.expiresAt && <p>{state.cancelAtPeriodEnd ? "Access until" : "Renews"}: {new Date(state.expiresAt).toLocaleDateString()}</p>}
         {state.active && state.subscriptionStore && state.subscriptionStore !== "web" && <button type="button" disabled={busy} onClick={() => { void manage().catch(() => setError("Unable to open subscription management.")); }}>Manage or cancel subscription</button>}
@@ -97,7 +98,7 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
       <div className="native-billing-products">{state.products.filter((p) => p.kind === "credits").map((item) => {
         const product = products.find((p) => p.identifier === item.productId);
         return <article key={item.productId}><h4>{item.credits?.toLocaleString()} credits</h4><p>{product?.priceString || "Unavailable"}</p>
-          <button type="button" disabled={busy || !product} onClick={() => { void run(() => client.current!.purchase(product!), "Purchase submitted. Credits appear after store verification; refresh if the payment is still processing."); }}>Buy credits</button></article>;
+          <button type="button" disabled={busy || !product || !canPurchaseMobileProduct(state, item, store)} onClick={() => { void run(() => client.current!.purchase(product!), "Purchase submitted. Credits appear after store verification; refresh if the payment is still processing."); }}>Buy credits</button></article>;
       })}</div>
       {!products.length && <p>No store products are available. Please try again later.</p>}
     </>}

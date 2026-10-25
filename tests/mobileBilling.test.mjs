@@ -78,6 +78,7 @@ test("subscription changes cannot create duplicate or cross-provider subscriptio
   }
   assert.equal(canPurchaseMobileProduct(base, products[1], "play_store"), false);
   assert.equal(canPurchaseMobileProduct({ ...base, subscriptionStore: "web" }, products[4], "play_store"), true);
+  assert.equal(canPurchaseMobileProduct({ ...base, creditPurchasesNeedingReview: 1 }, products[4], "play_store"), false);
 });
 test("Android changes pass replacement modes; account changes fence any later authenticated synchronization", async () => {
   let state = { ...base }; let active = true; const requests = []; const purchases = [];
