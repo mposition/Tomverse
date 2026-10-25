@@ -74,3 +74,22 @@ stdin and does not read worker homes. Only the existing loopback AMUX
 self-signed certificate is accepted; ingestion to Tomverse verifies TLS and
 rejects redirects. Stop the collector or turn the app switch off to disable
 the view. Disabling and credential rotation make the old buffer unreadable.
+
+### Execution host without sudo
+
+The existing Ubuntu operator account can instead install the user unit from
+`scripts/systemd/user/`. It requires lingering and unprivileged user namespaces.
+Bundle the exact release's `scripts/amux-cli-monitor.mjs` with esbuild for Node
+ESM, and install it as `~/.local/share/tomverse-cli-monitor/collector.mjs`.
+Keep that directory and `~/.config/tomverse-cli-monitor/` mode 700, the bundle
+and `collector.env` mode 600, and copy the unit to `~/.config/systemd/user/`.
+The environment file contains only the three collector settings above.
+
+This variant mounts only the bundle directory into an otherwise hidden home,
+makes the filesystem read-only, hides `/proc` (including other processes'
+credentials), and prohibits mount changes. It does not inherit a worker's
+environment or read worker homes. Before enabling it, run `--check-source` with
+the same sandbox and verify a `--once` ingest under the actual unit settings.
+Use `systemctl --user enable --now tomverse-amux-cli-monitor.service` only after
+the app release and dedicated credential are ready. This starts the one fixed
+collector; it does not activate any other worker.

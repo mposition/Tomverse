@@ -1,0 +1,26 @@
+[Unit]
+Description=Tomverse read-only CLI monitor (codex-impl pilot)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/tomverse-cli-monitor/collector.env
+WorkingDirectory=%h/.local/share/tomverse-cli-monitor
+ExecStart=/usr/bin/node %h/.local/share/tomverse-cli-monitor/collector.mjs
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=15
+PrivateUsers=yes
+ProtectHome=tmpfs
+BindReadOnlyPaths=%h/.local/share/tomverse-cli-monitor
+ProtectSystem=strict
+PrivateTmp=yes
+NoNewPrivileges=yes
+InaccessiblePaths=/proc
+SystemCallFilter=~@mount
+RestrictAddressFamilies=AF_INET AF_INET6
+StandardInput=null
+UMask=0077
+
+[Install]
+WantedBy=default.target
