@@ -184,12 +184,15 @@ public class MobileAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc public func hasSession(_ call: CAPPluginCall) {
         queue.async {
             do {
-                guard self.enabled && self.installationReady else {
+                guard self.enabled else {
                     call.resolve(["signedIn": false]); return
                 }
+                guard self.installationReady else { throw SessionFailure.unavailable }
                 let signedIn = try self.stored() != nil
                 call.resolve(["signedIn": signedIn])
-            } catch { call.resolve(["signedIn": false]) }
+            } catch {
+                call.reject("Could not read the device session. Try again.", "MOBILE_AUTH_UNAVAILABLE")
+            }
         }
     }
 

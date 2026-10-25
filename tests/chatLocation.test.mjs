@@ -142,7 +142,9 @@ test("location caching stops before the whole current turn, including on a first
   assert.equal(second[2].providerOptions, undefined);
   assert.ok(!JSON.stringify(second[2]).includes("cacheControl"));
   assert.ok(!JSON.stringify(history).includes("cacheControl"));
-  assert.deepEqual(second.slice(0, 1), history.slice(0, 1));
+  assert.deepEqual(second[0], history[0]);
+  assert.deepEqual(second[1].content, history[1].content);
+  assert.equal(history[1].providerOptions, undefined);
 });
 
 test("stopping a turn cancels its location wait immediately without cancelling another panel's acquisition", async () => {

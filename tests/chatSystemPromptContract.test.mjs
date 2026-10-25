@@ -82,7 +82,7 @@ test("the chat route hands the injected context block to the SDK as instructions
   for (const call of streamTextCalls) {
     assert.match(
       call,
-      /messages: sdkMessages,/,
+      /messages: (?:sdkMessages|fallbackSdkMessages),/,
       "every streamText call sends the filtered array"
     );
     assert.match(
@@ -96,6 +96,11 @@ test("the chat route hands the injected context block to the SDK as instructions
       "formattedMessages still carries the system turn and must not reach the SDK"
     );
   }
+  assert.match(
+    source,
+    /splitProviderInstructions\(uncachedLocationMessages\)\.messages/,
+    "the location fallback also filters system messages through the shared splitter"
+  );
 });
 
 test("formattedMessages keeps the system turn for the paths that accept one", () => {

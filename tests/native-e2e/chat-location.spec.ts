@@ -2,11 +2,11 @@ import { test, expect, type Page } from "@playwright/test";
 import { buildSearchMetadataTrailerChunk } from "../../packages/chat-core/src/streamTrailer";
 import { buildStreamKeepaliveChunk } from "../../lib/chatStreamKeepalive";
 
-const installDevice = async (page: Page, signedIn = true, scenario: { holdSession?: boolean; failIdentityOnce?: boolean; incomplete?: boolean } = {}) => {
+const installDevice = async (page: Page, signedIn = true, scenario: { holdSession?: boolean; lockedStore?: boolean; failIdentityOnce?: boolean; incomplete?: boolean } = {}) => {
   const requests: Array<{ body: Record<string, unknown>; authorization: string | undefined }> = [];
-  await page.addInitScript(({ signedIn, holdSession }) => {
+  await page.addInitScript(({ signedIn, holdSession, lockedStore }) => {
     const sessionWaiters: Array<() => void> = [];
-    const state = { signedIn, holdSession, releaseSession: null as (() => void) | null, calls: [] as string[], latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, holdAuth: false, releaseAuth: null as (() => void) | null, hold: false, release: null as (() => void) | null };
+    const state = { signedIn, holdSession, lockedStore, releaseSession: null as (() => void) | null, calls: [] as string[], latitude: -27.4697701, denied: false, reads: 0, browserUrls: [] as string[], proof: false, holdAuth: false, releaseAuth: null as (() => void) | null, hold: false, release: null as (() => void) | null };
     const device = window as unknown as { androidBridge: object; __nativeFixture: typeof state; Capacitor: object };
     device.__nativeFixture = state; device.androidBridge = {};
     const methods = { MobileAuth: ["hasSession", "getAccessToken", "beginSignIn", "completeSignIn", "signOut"],
@@ -17,6 +17,7 @@ const installDevice = async (page: Page, signedIn = true, scenario: { holdSessio
         state.calls.push(`${plugin}.${method}`);
         if (plugin === "MobileAuth") {
           if (method === "hasSession") {
+            if (state.lockedStore) throw new Error("secure store locked");
             if (state.holdSession) await new Promise<void>((resolve) => {
               sessionWaiters.push(resolve); state.releaseSession = () => sessionWaiters.splice(0).forEach((done) => done());
             });
@@ -40,7 +41,7 @@ const installDevice = async (page: Page, signedIn = true, scenario: { holdSessio
         throw new Error("unexpected native call");
       },
     };
-  }, { signedIn, holdSession: scenario.holdSession ?? false });
+  }, { signedIn, holdSession: scenario.holdSession ?? false, lockedStore: scenario.lockedStore ?? false });
   let failedIdentity = false;
   await page.route("https://api.native-chat.test/**", async (route) => {
     const request = route.request();
@@ -165,6 +166,17 @@ test("a transient identity failure retries the existing session without replacin
   await installDevice(page, true, { failIdentityOnce: true });
   await expect(page.getByRole("button", { name: "Retry connection", exact: true })).toBeVisible();
   await expect(page.getByTestId("native-sign-in")).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry connection", exact: true }).click();
+  await expect(page.getByTestId("native-chat-input")).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);
+  expect(calls).not.toContain("MobileAuth.beginSignIn"); expect(calls).not.toContain("MobileAuth.signOut");
+});
+
+test("a locked secure store offers retry instead of pairing and preserves its native session", async ({ page }) => {
+  await installDevice(page, true, { lockedStore: true });
+  await expect(page.getByRole("button", { name: "Retry connection", exact: true })).toBeVisible();
+  await expect(page.getByTestId("native-sign-in")).toHaveCount(0);
+  await device(page, { lockedStore: false });
   await page.getByRole("button", { name: "Retry connection", exact: true }).click();
   await expect(page.getByTestId("native-chat-input")).toBeVisible();
   const calls = await page.evaluate(() => (window as unknown as { __nativeFixture: { calls: string[] } }).__nativeFixture.calls);

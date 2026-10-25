@@ -77,7 +77,7 @@ public class MobileAuthPluginTest {
     @Test public void aLockedStoreCanBeRetriedWithoutLosingItsSession() throws Exception {
         plugin.readFails = true;
         Call session = new Call(); plugin.hasSession(session); session.await();
-        assertFalse(session.response.getBoolean("signedIn"));
+        assertTrue(session.rejected); assertNull(session.response);
         Call token = new Call(); plugin.getAccessToken(token); token.await(); assertTrue(token.rejected);
         assertEquals("existing-native-session", plugin.credential); assertEquals(0, plugin.clears);
         plugin.readFails = false;

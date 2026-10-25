@@ -196,9 +196,11 @@ public class MobileAuthPlugin extends Plugin {
 
     @PluginMethod public void hasSession(PluginCall call) {
         queue.execute(() -> {
-            boolean signedIn = false;
-            try { signedIn = enabled() && stored() != null; } catch (Exception ignored) { /* A locked store is not a sign-out request. */ }
-            call.resolve(new JSObject().put("signedIn", signedIn));
+            try { call.resolve(new JSObject().put("signedIn", enabled() && stored() != null)); }
+            catch (Exception ignored) {
+                // Let the UI retry without offering to replace a locked session.
+                call.reject("Could not read the device session. Try again.", "MOBILE_AUTH_UNAVAILABLE");
+            }
         });
     }
 
