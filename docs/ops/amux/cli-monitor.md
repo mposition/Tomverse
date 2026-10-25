@@ -77,15 +77,20 @@ the view. Disabling and credential rotation make the old buffer unreadable.
 
 ### Execution host without sudo
 
-The existing Ubuntu operator account can instead install the user unit from
-`scripts/systemd/user/`. It requires lingering and unprivileged user namespaces.
+The separate Ubuntu operator account `tomverse-admin` can instead install the
+user unit from `scripts/systemd/user/`. **Never install it as the AMUX worker
+account `tommy`, or any account running monitored workers.** The distinct UID
+keeps workers from reading the ingest credential, modifying the collector or
+signalling it. File modes and a sandbox alone do not protect against the same
+UID. It requires lingering and unprivileged user namespaces.
 Bundle the exact release's `scripts/amux-cli-monitor.mjs` with esbuild for Node
 ESM, and install it as `~/.local/share/tomverse-cli-monitor/collector.mjs`.
 Keep that directory and `~/.config/tomverse-cli-monitor/` mode 700, the bundle
 and `collector.env` mode 600, and copy the unit to `~/.config/systemd/user/`.
 The environment file contains only the three collector settings above.
 
-This variant mounts only the bundle directory into an otherwise hidden home,
+Within the separate operator account, this variant mounts only the bundle
+directory into an otherwise hidden home,
 makes the filesystem read-only, hides `/proc` (including other processes'
 credentials), and prohibits mount changes. It does not inherit a worker's
 environment or read worker homes. Before enabling it, run `--check-source` with
