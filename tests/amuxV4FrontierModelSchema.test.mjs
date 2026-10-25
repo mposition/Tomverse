@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { readMigrationSqlFiles } from "./support/repositoryFiles.mjs";
 
 const migrationName = "20261001111800_amux_v4_frontier_model_catalog";
 const migrationRoot = new URL("../prisma/migrations/", import.meta.url);
@@ -34,9 +35,9 @@ test("approval and revocation require distinct actor-bound audit records", () =>
 });
 
 test("later migrations cannot remove the one-active Frontier invariant", () => {
-  for (const entry of readdirSync(migrationRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name <= migrationName) continue;
-    const later = readFileSync(new URL(`${entry.name}/migration.sql`, migrationRoot), "utf8");
+  for (const entry of readMigrationSqlFiles()) {
+    if (entry.name <= migrationName) continue;
+    const later = entry.sql;
     assert.doesNotMatch(later,
       /DROP\s+INDEX(?:\s+IF\s+EXISTS)?\s+"AmuxIdeaFrontierModelApproval_one_active_model"/i,
       entry.name);

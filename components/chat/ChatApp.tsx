@@ -1,6 +1,7 @@
 "use client";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
+import { chatLocationSession } from "@/lib/chatLocationClient";
 import {
   memo,
   useCallback,
@@ -1859,7 +1860,9 @@ function ChatAppComponent({
     }
 
     try {
+      const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal);
       const sendChatRequest = async (turnstileToken?: string) => {
+        controller.signal.throwIfAborted();
         onDispatchStarted?.();
         if (isGuestMode && guestAutoCapability) {
           guestAutoRequestStarted = true;
@@ -1892,6 +1895,8 @@ function ChatAppComponent({
                   : message)
                 .map(toChatRequestMessage)
             ),
+            ...(turnLocation && chatLocationSession.canShare(turnLocation, panelIdentityKey)
+              ? { currentLocation: turnLocation } : {}),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isGuestMode
@@ -2645,6 +2650,7 @@ function ChatAppComponent({
     }
   }, [
     assistantMessageWriter,
+    panelIdentityKey,
     isGuestMode,
     onContextBundleStale,
     messages,

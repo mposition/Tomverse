@@ -146,6 +146,16 @@ test('Code managed inference with migrated local schema and real shared credit l
       await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_MODEL_PLAN_FORBIDDEN');
       assert.equal(dispatches,before);assert.equal(await db.codeManagedCall.count({where:{reservationId:held.reservationId}}),0);await release(user,held.reservationId);
     });
+    await t.test('store access expiry is checked at admission and dispatch while the cached plan remains paid',async()=>{
+      const user=await newUser('Pro'),before=dispatches;
+      await db.user.update({where:{id:user},data:{webSubscriptionPlan:'Free',storeSubscriptionPlan:'Pro',storeSubscriptionExpiresAt:new Date(Date.now()-86400000)}});
+      await rejectCode(()=>reserve(user),'CODE_MODEL_PLAN_FORBIDDEN');
+      await db.user.update({where:{id:user},data:{storeSubscriptionExpiresAt:new Date(Date.now()+86400000)}});
+      const held=await reserve(user);
+      await db.user.update({where:{id:user},data:{storeSubscriptionExpiresAt:new Date(Date.now()-86400000)}});
+      await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId)),'CODE_MODEL_PLAN_FORBIDDEN');
+      assert.equal(dispatches,before);await release(user,held.reservationId);
+    });
     await t.test('a small prompt on a large-context catalog model fits one credit and then respects the true cap',async()=>{
       const cheap={...structuredClone(originalRows[0]),modelId:'code-cheap-large-context',apiModelId:'cheap-large-fixture',capabilities:{...originalRows[0].capabilities,maxContextTokens:1000000},pricing:{...originalRows[0].pricing,inputUsdPerMTok:0.1,outputUsdPerMTok:0.5}};
       const {modelId,...profile}=cheap;await db.modelCatalogEntry.create({data:{category:'coding',modelId,enabled:true,profile}});

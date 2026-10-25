@@ -67,6 +67,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `account-flow.spec.ts` |
 | `answer-header-layout.spec.ts` |
 | `chat-analytics-settings-placement.spec.ts` |
+| `chat-location.spec.ts` |
 | `chat-welcome-flicker.spec.ts` |
 | `chat-memory-context.spec.ts` |
 | `chat-unified-workspace.spec.ts` |

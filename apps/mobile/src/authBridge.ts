@@ -1,6 +1,6 @@
 import { registerPlugin } from "@capacitor/core";
 
-import { authenticatedFetch } from "./authenticatedFetch";
+import { authenticatedFetch, type MobileRequestInit } from "./authenticatedFetch";
 import type { MobileAuthBridge } from "./authBridgeContract";
 
 /**
@@ -37,7 +37,7 @@ export const MobileAuth = registerPlugin<MobileAuthBridge>("MobileAuth", {
 export const TOMVERSE_API_ORIGIN =
   import.meta.env?.VITE_TOMVERSE_API_ORIGIN ?? "https://tomverse.app";
 
-export const mobileApiFetch = (path: string, init?: RequestInit) =>
+export const mobileApiFetch = (path: string, init?: MobileRequestInit) =>
   authenticatedFetch(path, init, {
     bridge: MobileAuth,
     apiOrigin: TOMVERSE_API_ORIGIN,

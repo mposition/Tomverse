@@ -4,3 +4,12 @@ project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/
 
 include ':tomverse-mobile-auth'
 project(':tomverse-mobile-auth').projectDir = new File('../native-auth/android')
+
+include ':revenuecat-purchases-capacitor'
+project(':revenuecat-purchases-capacitor').projectDir = new File('../../../node_modules/@revenuecat/purchases-capacitor/android')
+
+include ':capacitor-browser'
+project(':capacitor-browser').projectDir = new File('../../../node_modules/@capacitor/browser/android')
+
+include ':capacitor-geolocation'
+project(':capacitor-geolocation').projectDir = new File('../../../node_modules/@capacitor/geolocation/android')

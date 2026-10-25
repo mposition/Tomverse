@@ -11,7 +11,7 @@ import {
 } from "@/lib/billingPriceCatalog";
 import type { BillingCurrency } from "@/lib/billingMarkets";
 import { parsePromotionRiskFlags } from "@/lib/billingPromotionSecurity";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 import { prisma } from "@/lib/prisma";
 import {
   buildCheckoutRequestPreview,
@@ -155,6 +155,7 @@ const loadAccount = async (
       id: true,
       plan: true,
       stripeSubscriptionId: true,
+      ...STORE_ENTITLEMENT_SELECT,
       subscriptionStatus: true,
       subscriptionCurrentPeriodEnd: true,
     },
@@ -181,6 +182,7 @@ const loadAccount = async (
     // Pass leaves `plan` at "Pro", and judging against the raw column would
     // report a checkout as blocked that the server would accept.
     effectivePlan: effectivePlanForAccess({
+      ...user,
       plan: user.plan,
       subscriptionStatus: user.subscriptionStatus,
       subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd,

@@ -48,7 +48,7 @@ test("native upload destination and credential headers are fail-closed", () => {
 });
 for (const bundle of [null, "priced-context"]) test(`Review saves once and isolates follow-up context with bundle ${bundle}`, async () => {
   const calls=[];const conversation={id:"review-a",selectedModels:["a","b"],messages:[{id:"old-user",role:"user",content:"Previous"},{id:"a-old",role:"assistant",modelId:"a",content:"A previous"},{id:"b-old",role:"assistant",modelId:"b",content:"B previous"}],webSearchMode:"always"};
-  const transport=createApiTransport(async(path,init={})=>{
+  const transport=createApiTransport(async(path,init={})=>{if(typeof init==="function")init=init();
     calls.push({path,init});
     if(path==="/api/products/mobile/capabilities")return Response.json(capability);
     if(path==="/api/chat/preflight")return Response.json({ok:true,admissionToken:"aggregate-admission",contextBundle:bundle});
@@ -63,7 +63,7 @@ for (const bundle of [null, "priced-context"]) test(`Review saves once and isola
 
 for (const infrastructure of [500,503,"offline"]) test(`comparison preflight retries ${infrastructure} once then uses ordinary model admission`, async () => {
   let preflights=0;let requests=0;const conversation={id:"review",selectedModels:["a","b"],messages:[]};
-  const transport=createApiTransport(async(path,init={})=>{
+  const transport=createApiTransport(async(path,init={})=>{if(typeof init==="function")init=init();
     if(path.includes("capabilities"))return Response.json(capability);
     if(path.endsWith("preflight")){preflights++;if(infrastructure==="offline")throw new TypeError("Offline");return Response.json({code:"UNAVAILABLE"},{status:infrastructure});}
     if(path.endsWith("/messages")){assert.equal(preflights,2);const input=JSON.parse(init.body).messages[0];conversation.messages.push({id:"saved",role:"user",content:input.content});return Response.json({messageMappings:[{requestId:input.clientRequestId,messageId:"saved"}]});}
@@ -79,7 +79,7 @@ test("restore reads every message page and restores the canonical assistant prof
 });
 test("Deep Research uses its durable job status without submitting a second question or model request", async () => {
   const calls=[];const conversation={id:"research",selectedModels:["research-model"],messages:[]};
-  const transport=createApiTransport(async(path,init={})=>{
+  const transport=createApiTransport(async(path,init={})=>{if(typeof init==="function")init=init();
     calls.push(path);
     if(path==="/api/products/mobile/capabilities")return Response.json(capability);
     if(path.endsWith("/messages")){const message=JSON.parse(init.body).messages[0];conversation.messages.push({id:"source",role:"user",content:message.content});return Response.json({messageMappings:[{requestId:message.clientRequestId,messageId:"source"}]});}
@@ -103,7 +103,7 @@ for (const refusal of [429,403]) test(`comparison admission ${refusal} saves no 
   await assert.rejects(transport.sendReview(conversation,"Compare",[],new AbortController().signal,()=>{}),error=>{assert.match(mobileErrorText(error,"ko","Fallback"),/Trace ID: synthetic-trace/);return error.status===refusal&&error.questionPersisted===false&&error.retryAfterSeconds===12&&error.traceId==="synthetic-trace";});assert.equal(dispatches,0);assert.equal(persisted,0);
 });
 test("item feedback uses the route's PUT contract and withdrawal remains DELETE", async () => {
-  const calls=[];const transport=createApiTransport(async(path,init={})=>{calls.push({path,method:init.method});return Response.json(path.includes("capabilities")?capability:{});},bridge);
+  const calls=[];const transport=createApiTransport(async(path,init={})=>{if(typeof init==="function")init=init();calls.push({path,method:init.method});return Response.json(path.includes("capabilities")?capability:{});},bridge);
   await transport.setReviewFeedback("c","review","server-item","helpful");await transport.setReviewFeedback("c","review","server-item",null);
   assert.deepEqual(calls.filter(call=>call.path.includes("item-feedback")).map(call=>call.method),["PUT","DELETE"]);
 });

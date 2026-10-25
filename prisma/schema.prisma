@@ -24,6 +24,18 @@ model User {
   subscriptionCurrentPeriodEnd  DateTime?
   subscriptionBillingInterval   String?
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  mobileBillingId               String?       @unique
+  storeSubscriptionPurchaseAttempt Json?
+  storeSubscriptionVerificationPending Boolean @default(false)
+  subscriptionStore             String?
+  subscriptionStoreProductId    String?
+  webSubscriptionPlan           String?
+  storeSubscriptionPlan         String?
+  storeSubscriptionExpiresAt    DateTime?
+  storeSubscriptionBillingInterval String?
+  storeSubscriptionCancelAtPeriodEnd Boolean @default(false)
+  storeSubscriptionSyncedAt     DateTime?
+  storeSubscriptionSnapshot     Json?
   /// When the stored subscription state was read from Stripe. Webhooks arrive
   /// out of order, so a snapshot read before this is refused rather than
   /// reverting the account to an older plan. See lib/stripeWebhookSyncCore.ts.
@@ -68,6 +80,8 @@ model User {
   creditLots                           CreditLot[]
   creditLedgerEntries                  CreditLedgerEntry[]
   creditDebtEntries                    CreditDebtEntry[]
+  mobileStoreTransactions              MobileStoreTransaction[]
+  mobileStorePurchaseAuthorizations    MobileStorePurchaseAuthorization[]
   chatCreditReservations               ChatCreditReservation[]
   imageGenerations                     ImageGeneration[]
   messageArtifacts                     MessageArtifact[]
@@ -1574,6 +1588,7 @@ model CreditLot {
   originalFundedCostMicroUsd  BigInt              @default(0)
   remainingFundedCostMicroUsd BigInt              @default(0)
   expiresAt                   DateTime
+  nonExpiring                 Boolean             @default(false)
   status                      String              @default("active")
   createdAt                   DateTime            @default(now())
   updatedAt                   DateTime            @updatedAt
@@ -1581,6 +1596,49 @@ model CreditLot {
 
   @@index([userId, status, expiresAt])
   @@index([purchaseId])
+}
+
+model MobileStorePurchaseAuthorization {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store     String
+  productId String
+  createdAt DateTime @default(now())
+
+  @@index([userId, store, productId, createdAt], map: "mobile_store_purchase_auth_lookup_idx")
+}
+
+model MobileStoreTransaction {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store         String
+  environment   String
+  transactionId String
+  productId     String
+  packId        String
+  credits       Int
+  fundedCostMicroUsd BigInt
+  creditLotId   String?  @unique
+  refunded      Boolean @default(false)
+  needsReview   Boolean @default(false)
+  purchasedAt   DateTime
+  createdAt     DateTime @default(now())
+
+  @@unique([store, environment, transactionId])
+  @@index([userId, purchasedAt])
+}
+
+/// Financial replay tombstones deliberately have no account foreign key.
+model MobileStoreOwnership {
+  store           String
+  environment     String
+  transactionHash String
+  ownerHash       String
+  kind            String
+  createdAt       DateTime @default(now())
+  @@id([store, environment, transactionHash])
 }
 
 model CreditLedgerEntry {

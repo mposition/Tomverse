@@ -58,6 +58,7 @@ export interface HistoryTransport {
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
+  location?: ReturnType<typeof import("@tomverse/chat-core").createChatLocationSession>;
   history?: HistoryTransport;
   voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number | null }>;
   voiceRequest?(body: unknown, signal?: AbortSignal): Promise<Response>;

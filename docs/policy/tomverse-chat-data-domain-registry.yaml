@@ -333,6 +333,26 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: mobileStoreTransaction
+    prismaModel: MobileStoreTransaction
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: mobileStorePurchaseAuthorization
+    prismaModel: MobileStorePurchaseAuthorization
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: creditLot
     prismaModel: CreditLot
     userLinkageRole: subject
