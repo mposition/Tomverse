@@ -69,6 +69,7 @@ test("a location question automatically acquires permission and answers without 
   expect((await send(page, "What is nearby now?")).currentLocation.latitude).toBe(-33.869);
   expect(analyses).toBe(1);
   await page.reload();
+  await expect(page.getByText("What is nearby now?", { exact: true })).toBeVisible();
   expect((await send(page, "지금 제가 있는 위치가 어디인가요?")).currentLocation.latitude).toBe(-33.869);
   expect(analyses).toBe(2);
   await page.getByTestId("chat-location-disable").click();
