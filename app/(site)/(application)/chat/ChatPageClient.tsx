@@ -905,6 +905,13 @@ export function ChatPageClient({
     routeSurface === "continuation"
       ? continuationProduct === "chat" ? "chat" : "workspace"
       : routeSurface;
+  /*
+    A continuation stays text-only (continuation policy §5.1): the server
+    refuses an image turn on a bridged conversation after the question is
+    saved, so no in-conversation image path may start here. The separate image
+    draft, which carries no imported transcript, is unaffected.
+  */
+  const inConversationImagesAllowed = routeSurface !== "continuation";
   const {
     models: AVAILABLE_MODELS,
     getModel,
@@ -2427,6 +2434,7 @@ export function ChatPageClient({
   // an image request to the image workspace (lib/chatImageIntent.ts). The
   // send gate in `handleGlobalSubmit` reads this answer.
   const imageIntentRoutedOnSend =
+    inConversationImagesAllowed &&
     chatImageIntentEnabled &&
     !isGuestMode &&
     imageGenerationEnabled &&
@@ -5758,7 +5766,8 @@ export function ChatPageClient({
       // marker would not survive every restore/remount path safely.
       return;
     }
-    if (mountedSurface === "workspace" && reviewWorkspace.mode === "professional" &&
+    if (mountedSurface === "workspace" && inConversationImagesAllowed &&
+      reviewWorkspace.mode === "professional" &&
       options === undefined && reviewWorkspace.imagePromptMode && reviewImageModelId) {
       const model = imageCatalog.getModel(reviewImageModelId);
       if (!model || model.disabledReason || isGuestMode || !imageGenerationEnabled ||
@@ -5778,10 +5787,12 @@ export function ChatPageClient({
         imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds });
     }
     const professionalImageRouting = mountedSurface === "workspace" &&
+      inConversationImagesAllowed &&
       options === undefined &&
       reviewWorkspace.mode === "professional" && chatImageIntentEnabled && imageGenerationEnabled &&
       !isGuestMode && attachments.length === 0 && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
-    if (mountedSurface === "workspace" && (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
+    if (mountedSurface === "workspace" && inConversationImagesAllowed &&
+      (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
       !options?.reviewRouteChecked && !isImageDraftActiveRef.current) {
       if (!isModelSelectionReady || !isInitialConversationResolved) return;
       if ((!reviewEasyAvailable && !professionalImageRouting) || isGuestMode) {

@@ -1025,6 +1025,21 @@ test("a Chat continuation never becomes a Smart Adaptive image turn", () => {
     assert.match(eligible, /!conversationRouting\?\.continuationBridge &&/);
 });
 
+test("no in-conversation image path starts on a continuation route", () => {
+    // Independent review round 5: the client image paths (manual Chat intent,
+    // Review Professional image choice, Review routing) reached the same 409
+    // after the question was saved. A continuation is text-only (§5.1).
+    const client = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
+    assert.match(client, /const inConversationImagesAllowed = routeSurface !== "continuation";/);
+    assert.match(client, /const imageIntentRoutedOnSend =\s*inConversationImagesAllowed &&/);
+    assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*reviewWorkspace\.mode === "professional" &&\s*options === undefined && reviewWorkspace\.imagePromptMode/);
+    assert.match(client, /const professionalImageRouting = mountedSurface === "workspace" &&\s*inConversationImagesAllowed &&/);
+    assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*\(reviewWorkspace\.mode === "easy" \|\| professionalImageRouting\)/);
+    // A failed product read is an error, never a guessed Review composer.
+    const page = readFileSync("app/(site)/(application)/continuations/[conversationId]/page.tsx", "utf8");
+    assert.doesNotMatch(page, /catch \{\s*return "review";/);
+});
+
 test("a Compare-in-Review answer is owned by the press's selection", () => {
     const client = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
     // Every departure invalidates it: another row or a new chat allocates a

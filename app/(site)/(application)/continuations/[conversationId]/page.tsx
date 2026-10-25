@@ -61,7 +61,11 @@ export default async function ContinuedConversationPage({
     );
 }
 
-/** Review for anything unreadable: it is what every continuation was before. */
+/**
+ * The owned row's product. No session is Review (nothing to own); a failed
+ * read throws rather than guessing, because rendering the Review composer for
+ * a Chat row would let it store several models on a single-model product.
+ */
 async function storedContinuationProduct(
     conversationId: string
 ): Promise<"chat" | "review"> {
@@ -74,16 +78,12 @@ async function storedContinuationProduct(
         const chatIds = jar.get("__tomverse_e2e_chat_continuations")?.value ?? "";
         return chatIds.split(",").includes(conversationId) ? "chat" : "review";
     }
-    try {
-        const session = await getServerSession(authOptions);
-        const userId = session?.user?.id;
-        if (!userId) return "review";
-        const row = await prisma.conversation.findFirst({
-            where: { id: conversationId, userId },
-            select: { productKey: true },
-        });
-        return row?.productKey === "chat" ? "chat" : "review";
-    } catch {
-        return "review";
-    }
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) return "review";
+    const row = await prisma.conversation.findFirst({
+        where: { id: conversationId, userId },
+        select: { productKey: true },
+    });
+    return row?.productKey === "chat" ? "chat" : "review";
 }
