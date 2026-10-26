@@ -131,9 +131,10 @@ test("source TLS verification stays enabled and its private CA never reaches ing
     assert.deepEqual(await readAgentOfficeCliSource(kind, worker, {
       TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64: Buffer.from(certificate).toString("base64"),
     }), { ok: true });
+  assert.equal(options.length, AGENT_OFFICE_CLI_WORKERS.length * 2);
   for (const value of options) {
     assert.ok(AGENT_OFFICE_CLI_WORKERS.some(worker => value.path === `/api/sessions/${worker}/transcript?max=40000` ||
-      value.path === `/api/sessions/${worker}/peek?lines=80&live=1`));
+      value.path === `/api/sessions/${worker}/peek?lines=80${worker.startsWith("claude-") ? "" : "&live=1"}`));
     assert.equal(value.hostname, "127.0.0.1");
     assert.equal(value.port, 8824);
     assert.equal(value.ca.toString(), certificate);
