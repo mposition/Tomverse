@@ -4179,12 +4179,14 @@ async function handleChatPost(
         // *that* limit was already refused by `createChatBudget` with
         // CHAT_INPUT_TOKEN_LIMIT before reaching here.
         const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;
-        const outputBudget = fitChatOutputToContextWindow({
+        // A multi-pass (MCP) reservation sums every pass; the window only has
+        // to hold one, so the guard reads the single-pass view of the budget.
+        const outputBudget = ((budget) => fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            reservedInputTokens: contextInputTokens,
+            reservedInputTokens: budget.inputTokens,
             requestOutputCapTokens: budget.maxOutputTokens,
             providerMaxOutputTokens: budget.providerMaxOutputTokens,
-        });
+        }))({ ...budget, inputTokens: contextInputTokens });
         if (outputBudget.kind === "exceeded") {
             throw new ChatAccessError(
                 400,
@@ -4951,7 +4953,7 @@ async function handleChatPost(
                     ]),
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     maxOutputTokens: requestMaxOutputTokens,
-                    maxRetries: mcpConnector || modelConfig.provider === "zhipu" ? 0 : undefined,
+                    maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
                     headers:
                         modelConfig.provider === "perplexity"
                             ? perplexityUsageHeaders(traceId)
@@ -4959,6 +4961,7 @@ async function handleChatPost(
                     ...generationSettings,
                     ...(combinedToolConfig ?? {}),
                     ...(mcpConnector ? {
+                        maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
                         prepareStep: mcpConnector.prepareStep,
                     } : {}),
