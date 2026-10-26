@@ -41,7 +41,7 @@ const ATTEMPT = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
 const RECEIPT = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 let v22DeliveryProfile: { modelId: string; role: string;
   budgetMicrousd: number; readOnlyRetry?: Record<string, unknown>;
-  gradeGuard?: true; executionGrade?: string; reviewAuthor?: "claude";
+  gradeGuard?: true; executionGrade?: string; reviewAuthor?: string;
   reviewAuthorVendor?: string; reviewScope?: string } | null = null;
 let recoveryApprovalId: string | null = null;
 const calls: { writer: string; input: unknown }[] = [];
@@ -237,6 +237,26 @@ test("v52 delivery carries the route-bound review author explicitly", async () =
     assert.equal(body.delivery.v22_execution.review_author_vendor, "anthropic");
     assert.equal(body.delivery.v22_execution.review_scope,
       "Title: Task\nCompletion criteria:\n- Works");
+  } finally { v22DeliveryProfile = null; }
+});
+
+test("a Codex v52 delivery carries its own model and CLI as the review author", async () => {
+  // Owner decision 2026-10-26: Codex, Copilot and Cursor workers run v22. The
+  // Rust bridge reads review_author as a plain string and passes it to the
+  // review server, so any CLI name crosses the wire unchanged.
+  v22DeliveryProfile = { modelId: "gpt-6-luna", role: "implement",
+    budgetMicrousd: 1_250_000, gradeGuard: true,
+    executionGrade: "advanced", reviewAuthor: "codex",
+    reviewAuthorVendor: "openai", reviewScope: "Title: Task\nCompletion criteria:\n- Works" };
+  try {
+    const exchange = wire.exchanges.find((entry) => entry.name === "delivery_pull");
+    assert.ok(exchange);
+    const response = await post(exchange.path, exchange.request);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.delivery.v22_execution.model_id, "gpt-6-luna");
+    assert.equal(body.delivery.v22_execution.review_author, "codex");
+    assert.equal(body.delivery.v22_execution.review_author_vendor, "openai");
   } finally { v22DeliveryProfile = null; }
 });
 

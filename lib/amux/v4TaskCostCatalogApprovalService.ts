@@ -42,8 +42,10 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
   }
   const ceilings = new Map(registrations.map((registration) =>
     [registration.workerName, registration.roleCeiling]));
+  // Any provider's row: a Codex, Copilot or Cursor route prices from the
+  // Admin › Models entry its model ID names, as a Claude route does.
   const rows = await tx.modelRegistryEntry.findMany({
-    where: { provider: "anthropic", catalogDeleted: false } });
+    where: { catalogDeleted: false } });
   const unreadable = new Set<string>();
   const models = rows.flatMap((row) => {
     try { return [registryRowToModel(row)]; } catch { unreadable.add(row.id); return []; }
@@ -72,7 +74,7 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
   };
   return deriveAmuxV4TaskAutoCatalog({ priceFor,
     workers: derived.v22.map((entry) => ({ workerName: entry.worker_name,
-      modelId: entry.model, roles: entry.routing_roles,
+      provider: entry.provider, modelId: entry.model, roles: entry.routing_roles,
       roleCeiling: ceilings.get(entry.worker_name) ?? null })) });
 }
 

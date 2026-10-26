@@ -1280,6 +1280,38 @@ export const RAW_SQL_ALLOWLIST = [
       "The capability migration (orchestration policy version 35, section 2). Its two AdminAuditLog mentions are the restrictive foreign key from auditLogId and the one SELECT EXISTS read in the guard that refuses an event whose audit row of the same transaction, person and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLE adding the key with ON DELETE / ON UPDATE RESTRICT, the trigger events, the guard's TG_OP comparison and words of comments.",
   },
   {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AmuxWorkerCapabilityEvent",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "Its three mentions are the ALTER TABLE that replaces the v22 shape CHECK, and the guard's read of the worker's newest capability revision and its error naming. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The replaced capability guard reads the worker's newest registry event (class, ceiling, desired state), as before. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The replaced capability guard keeps its one SELECT EXISTS read of the person's audit row of the same transaction. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "The ALTER TABLE that replaces the usage ledger's source and shape CHECKs to admit the Copilot and Cursor CLIs. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  },
+  {
     path: "lib/amux/workerCapabilityStore.ts",
     table: "AmuxWorkerCapabilityEvent",
     tableMentions: 4,
@@ -3228,6 +3260,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "Three reads in the capability event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the worker's newest registry event, its newest capability revision, and one SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql",
+    count: 3,
+    reason:
+      "The same three EXECUTE reads in the replaced capability event guard (owner decision 2026-10-26 widens only its class check): the worker's newest registry event, its newest capability revision and one SELECT EXISTS on AdminAuditLog, each over a TG_TABLE_SCHEMA-qualified constant name quoted with %I and bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",

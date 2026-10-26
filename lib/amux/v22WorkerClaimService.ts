@@ -36,7 +36,7 @@ import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22RequiredTool,
-  amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
+  amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported, amuxV22Provider,
   amuxV22WorkerClaimEnabled, chooseAmuxV22WorkerRoute,
   AMUX_V22_WORKER_CLAIM_ENV, type AmuxV22ClaimLane } from
   "./v22WorkerClaimCore.ts";
@@ -287,6 +287,10 @@ async function claimCandidate(taskId: string, assignmentId: string,
             route.workerName === recovery.workerName)
           return apiModelAccessCurrent;
         const quota = telemetry.get(route.workerName);
+        // Only the Claude sidecar can read its subscription quota. Another
+        // provider's limit shows up as a failed attempt, not a blocked claim.
+        if (amuxV22Provider(route.provider) !== "anthropic")
+          return !quota?.scoring.provider_exhausted;
         return quota?.evidence.quota.state === "fresh" &&
           !quota.scoring.provider_exhausted &&
           (quota.scoring.quota_remaining.value ?? 0) > 0;

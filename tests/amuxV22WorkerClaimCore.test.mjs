@@ -82,9 +82,19 @@ test("claim only selects routes the environment-gated one-shot sidecar can execu
   }
   assert.equal(amuxV22OneShotRouteSupported("anthropic", "claude-opus-5-5"),
     true);
-  assert.equal(amuxV22OneShotRouteSupported("openai", "gpt-6-astra"), false);
+  // Owner decision 2026-10-26: every registered provider class runs v22.
+  assert.equal(amuxV22OneShotRouteSupported("openai", "gpt-6-astra"), true);
+  assert.equal(amuxV22OneShotRouteSupported("github-copilot", "claude-sonnet-5-5"), true);
+  assert.equal(amuxV22OneShotRouteSupported("cursor", "composer-2.5"), true);
   assert.equal(amuxV22OneShotRouteSupported("anthropic", "gpt-6-astra"),
     false);
+  assert.equal(amuxV22OneShotRouteSupported("gemini", "gemini-3"), false);
+  assert.equal(amuxV22OneShotRouteSupported("openai", "-leading-dash"), false);
+  // The sidecar checks the model against its own provider.
+  assert.doesNotThrow(() => parseAmuxV22OneShotRequest(
+    { ...base, role: "implement", modelId: "gpt-6-luna" }, "worker-a", "openai"));
+  assert.throws(() => parseAmuxV22OneShotRequest(
+    { ...base, role: "implement", modelId: "gpt-6-luna" }, "worker-a"));
   const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
   assert.match(claim, /amuxV22OneShotRoleSupported\(card\.taskRole\)/);
   assert.match(claim, /amuxV22OneShotRouteSupported\(route\.provider, route\.modelId\)/);
