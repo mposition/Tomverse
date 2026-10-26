@@ -1128,3 +1128,9 @@ e2dfa01a6963bee109ad65f022cb831ca2e663da:tests/integration/marketing-competitor-
 # removed browser-login fixture, not an API key or a signing credential.
 # Scope: exactly this one historical finding; current scans remain enabled.
 9e1632617ca035bf0b59ac37ff2a11751dfc3121:tests/mobileBrowserLogin.test.mjs:generic-api-key:44
+
+# The same synthetic AMUX v19 result-route secret, carried to main by the
+# selective port commit ef19baf (release/2026-10-26-amux-v19-intake). Same
+# two files and lines as the 4149b2d entries above; not a credential.
+ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19LocalMaxSessionResultOnce.test.mjs:generic-api-key:17
+ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19SessionAnalysisResultRoute.test.mjs:generic-api-key:25
