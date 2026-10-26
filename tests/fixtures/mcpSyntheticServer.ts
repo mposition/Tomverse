@@ -10,7 +10,7 @@ export const SYNTHETIC_DOCUMENTS = [
 ];
 export const SYNTHETIC_GOLD = { dueDate: "30 October", owner: "Mina", blocker: "billing QA" };
 
-export async function startMcpSyntheticServer(options: { basicClientAuth?: boolean; noScope?: boolean } = {}) {
+export async function startMcpSyntheticServer(options: { basicClientAuth?: boolean; noScope?: boolean; grantedScope?: string } = {}) {
   let writes = 0;
   let requests = 0;
   let paused: Promise<void> | null = null, resume: (() => void) | null = null;
@@ -48,7 +48,7 @@ export async function startMcpSyntheticServer(options: { basicClientAuth?: boole
         ? req.headers.authorization === `Basic ${Buffer.from("synthetic-client:synthetic-oauth-client-secret").toString("base64")}`
         : params.get("client_id") === "synthetic-client";
       if (!saved || saved.challenge !== challenge || saved.redirect !== params.get("redirect_uri") || !validClient) { json(400, { error: "invalid_grant" }); return; }
-      tokenExchanges++; json(200, { access_token: "synthetic-oauth-access", token_type: "Bearer", expires_in: 3600, ...(options.noScope ? {} : { scope: "read write" }) }); return;
+      tokenExchanges++; json(200, { access_token: "synthetic-oauth-access", token_type: "Bearer", expires_in: 3600, ...(options.grantedScope !== undefined ? { scope: options.grantedScope } : options.noScope ? {} : { scope: "read write" }) }); return;
     }
     if (req.url === "/redirect") { res.writeHead(307, { location: "http://169.254.169.254/" }); res.end(); return; }
     if (req.url !== "/mcp") { res.writeHead(404); res.end(); return; }

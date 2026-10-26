@@ -112,7 +112,7 @@ export function PluginWorkspace() {
         </select><select className={styles.filter} aria-label={p.source} value={source} onChange={e => { setSource(e.target.value); setLimit(24); }}>
           <option value="all">{p.anySource}</option><option value="openai">Codex</option><option value="claude">Claude Code</option>
         </select></>}
-        <nav className={styles.mobileTabs} aria-label={c.title}>{(["all", "connected", "approvals"] as const).map(key => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{c[key]}</button>)}</nav></div>
+        <nav className={styles.mobileTabs} aria-label={c.title}>{(["all", "connected", "approvals"] as const).map(key => <button type="button" key={key} aria-pressed={tab === key} onClick={() => { setTab(key); setLimit(24); }}>{c[key]}</button>)}</nav></div>
       <p className={styles.disclosure}><ShieldCheck size={20} aria-hidden="true" />{c.disclosure}</p>
       {loading && <p role="status">{c.sending}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}

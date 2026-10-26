@@ -65,7 +65,7 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
     tokens: () => state.tokens,
     saveTokens: async tokens => {
       if (tokens.issuer !== oauth.issuer || tokens.token_type.toLowerCase() !== "bearer" || tokens.access_token.length > 4096 || /\s/.test(tokens.access_token)) throw new McpConnectorError("oauth_token_refused");
-      const allowed = new Set(oauth.scope.split(/\s+/));
+      const allowed = new Set((oauth.tokenScope ?? oauth.scope).split(/\s+/).filter(Boolean));
       if (tokens.scope && tokens.scope.split(/\s+/).some(scope => !allowed.has(scope))) throw new McpConnectorError("oauth_scope_expanded");
       state.tokens = tokens; await save();
     },

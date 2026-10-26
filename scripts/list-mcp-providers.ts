@@ -12,6 +12,7 @@ const rows = providers.map(provider => ({ id: provider.id, name: provider.name, 
     return { id: profile.id, url: profile.url, auth: profile.auth, configured: enabled.has(profile.id),
       ...("oauth" in profile && profile.oauth ? { scope: profile.oauth.scope,
         scopeEnvironment: `${prefix}_SCOPE`, availableScopes: profile.oauth.allowedScopes,
+        tokenScopeEnvironment: `${prefix}_TOKEN_SCOPE`,
         clientIdEnvironment: `${prefix}_CLIENT_ID`, clientSecretEnvironment: `${prefix}_CLIENT_SECRET`,
         registration: "registrationUrl" in profile.oauth ? "dynamic-or-registered" : "registered-app-required" } : {}) };
   }) }));

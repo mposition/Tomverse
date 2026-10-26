@@ -11,7 +11,7 @@ test("catalog entries never grant connections and disabled preview ignores prese
   assert.deepEqual(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "false", MCP_CONNECTOR_PROVIDERS: "notion,unknown" }), []);
   assert.deepEqual(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true" }), []);
   assert.throws(() => mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "notion,notion" }));
-  assert.throws(() => mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "unregistered" }));
+  assert.deepEqual(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "unregistered,linear" }).map(s => s.id), ["linear"]);
 });
 
 test("catalog assets stay local, provenance stays public, and unavailable brands use a fallback", () => {
@@ -42,10 +42,10 @@ test("static app setup and unspecified scope requirements remain closed", () => 
   const env = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "asana,slack,zoom" };
   assert.deepEqual(mcpServers(env), []);
   const configured = mcpServers({ ...env, MCP_CONNECTOR_PROVIDERS: "zoom", MCP_PROVIDER_ZOOM_CLIENT_ID: "synthetic-client",
-    MCP_PROVIDER_ZOOM_CLIENT_SECRET: "synthetic-client-secret" });
+    MCP_PROVIDER_ZOOM_CLIENT_SECRET: "synthetic-client-secret", MCP_PROVIDER_ZOOM_TOKEN_SCOPE: "user:read" });
   assert.equal(configured.length, 1); assert.equal(configured[0].oauth?.tokenAuthMethod, "client_secret_basic");
   assert.equal(JSON.stringify(configured).includes("synthetic-client-secret"), false);
-  assert.throws(() => mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "notion", MCP_PROVIDER_NOTION_SCOPE: "admin" }));
+  assert.deepEqual(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "notion,linear", MCP_PROVIDER_NOTION_SCOPE: "admin" }).map(s => s.id), ["linear"]);
   assert.deepEqual(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "github" }), []);
 });
 
@@ -55,10 +55,21 @@ test("every prepared profile validates as fixed HTTPS destinations using synthet
     const env: Record<string, string> = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: profile.id,
       [`${prefix}_CLIENT_ID`]: "synthetic-client", [`${prefix}_CLIENT_SECRET`]: "synthetic-client-secret" };
     if ("oauth" in profile && profile.oauth?.scopeRequired) env[`${prefix}_SCOPE`] = profile.oauth.allowedScopes[0];
+    if ("oauth" in profile && !profile.oauth?.scope && !env[`${prefix}_SCOPE`]) env[`${prefix}_TOKEN_SCOPE`] = profile.oauth?.allowedScopes[0] ?? "synthetic-provider-scope";
     const [server] = mcpServers(env);
     assert.ok(server, profile.id);
     assert.doesNotThrow(() => validateMcpEndpoint(server), profile.id);
     if (server.oauth) for (const url of [server.oauth.issuer, server.oauth.authorizationUrl, server.oauth.tokenUrl, ...(server.oauth.registrationUrl ? [server.oauth.registrationUrl] : [])])
       assert.doesNotThrow(() => validateMcpEndpoint({ ...server, url }, true), profile.id);
   }
+});
+
+test("provider defaults require an explicit token scope bound without guessing broad consent", () => {
+  const base = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "atlassian,dropbox" };
+  assert.deepEqual(mcpServers(base), []);
+  const [server] = mcpServers({ ...base, MCP_PROVIDER_ATLASSIAN_TOKEN_SCOPE: "documents:read" });
+  assert.equal(server.id, "atlassian"); assert.equal(server.oauth?.scope, "");
+  assert.equal(server.oauth?.tokenScope, "documents:read");
+  assert.deepEqual(mcpServers({ ...base, MCP_PROVIDER_DROPBOX_TOKEN_SCOPE: "unadvertised:admin" }), []);
+  assert.equal(mcpServers({ ...base, MCP_PROVIDER_ATLASSIAN_TOKEN_SCOPE: "" }).length, 1);
 });

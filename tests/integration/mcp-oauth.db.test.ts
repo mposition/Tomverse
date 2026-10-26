@@ -90,12 +90,13 @@ test("OAuth token redirects cannot forward credentials to a metadata endpoint", 
 });
 
 test("SDK confidential DCR uses bound Basic client authentication with an empty provider scope", async () => {
-  const basic = await startMcpSyntheticServer({ basicClientAuth: true, noScope: true });
+  const basic = await startMcpSyntheticServer({ basicClientAuth: true, noScope: true, grantedScope: "documents:read" });
   const owner = `mcp-basic-${randomUUID()}`;
   const oldPort = process.env.MCP_CONNECTOR_SYNTHETIC_PORT;
   process.env.MCP_CONNECTOR_SYNTHETIC_PORT = String(basic.port);
   process.env.MCP_CONNECTOR_SYNTHETIC_TOKEN_AUTH_METHOD = "client_secret_basic";
   process.env.MCP_CONNECTOR_SYNTHETIC_NO_SCOPE = "true";
+  process.env.MCP_CONNECTOR_SYNTHETIC_TOKEN_SCOPE = "documents:read";
   await prisma.user.create({ data: { id: owner } });
   try {
     const started = await startMcpOAuth(owner, "synthetic", callback);
@@ -110,10 +111,19 @@ test("SDK confidential DCR uses bound Basic client authentication with an empty 
     assert.ok(row.oauthCiphertext?.startsWith("enc:v1:"));
     assert.equal(row.oauthCiphertext?.includes("synthetic-oauth-client-secret"), false);
     assert.equal(JSON.stringify(await listMcpConnections(owner)).includes("synthetic-oauth-client-secret"), false);
+    process.env.MCP_CONNECTOR_SYNTHETIC_TOKEN_SCOPE = "documents:other";
+    const rejected = await startMcpOAuth(owner, "synthetic", callback);
+    const rejectedResponse = await fetch(rejected.authorizationUrl!, { redirect: "manual" });
+    const rejectedCallback = new URL(rejectedResponse.headers.get("location")!);
+    const mcpRequests = basic.oauthMcpRequests;
+    await assert.rejects(() => completeMcpOAuth(owner, rejectedCallback.searchParams.get("state")!, rejectedCallback.searchParams.get("code")!, rejectedCallback.searchParams.get("iss")!),
+      { code: "oauth_authorization_failed" });
+    assert.equal(basic.oauthMcpRequests, mcpRequests);
   } finally {
     process.env.MCP_CONNECTOR_SYNTHETIC_PORT = oldPort;
     delete process.env.MCP_CONNECTOR_SYNTHETIC_TOKEN_AUTH_METHOD;
     delete process.env.MCP_CONNECTOR_SYNTHETIC_NO_SCOPE;
+    delete process.env.MCP_CONNECTOR_SYNTHETIC_TOKEN_SCOPE;
     await prisma.user.deleteMany({ where: { id: owner } }); await basic.close();
   }
 });

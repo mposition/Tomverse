@@ -20,8 +20,11 @@ export const mcpServerSchema = z.object({
     registrationUrl: z.string().url().optional(), clientId: z.string().min(1).max(512).optional(),
     clientSecretEnv: z.string().regex(/^[A-Z][A-Z0-9_]{1,100}$/).optional(),
     tokenAuthMethod: z.enum(["none", "client_secret_post", "client_secret_basic"]).optional(),
+    tokenScope: z.string().max(500).optional(),
     scope: z.string().max(500), }).strict().optional(),
 }).strict().superRefine((server, context) => {
+  if (server.oauth?.tokenScope !== undefined && server.oauth.scope !== "")
+    context.addIssue({ code: "custom", message: "Default token scope bounds require an omitted request scope" });
   if (server.githubRepository) {
     const url = new URL(server.url);
     if (url.origin !== "https://api.githubcopilot.com" || !url.pathname.startsWith("/mcp/") || [".", ".."].includes(server.githubRepository.split("/")[1]))
@@ -31,7 +34,7 @@ export const mcpServerSchema = z.object({
     if (server.auth === "oauth" && (!server.githubRepositoryId || server.oauth?.issuer !== "https://github.com/login/oauth" ||
       server.oauth.authorizationUrl !== "https://github.com/login/oauth/authorize" || server.oauth.tokenUrl !== "https://github.com/login/oauth/access_token" ||
       server.oauth.scope !== "offline_access" || !server.oauth.clientId || !server.oauth.clientSecretEnv || server.oauth.registrationUrl ||
-      (server.oauth.tokenAuthMethod !== undefined && server.oauth.tokenAuthMethod !== "client_secret_post")))
+      (server.oauth.tokenAuthMethod !== undefined && server.oauth.tokenAuthMethod !== "client_secret_post") || server.oauth.tokenScope !== undefined))
       context.addIssue({ code: "custom", message: "GitHub OAuth requires a registered confidential GitHub App and repository ID" });
   }
   if (server.githubRepositoryId && !server.githubRepository) context.addIssue({ code: "custom", message: "Repository ID requires a repository scope" });
@@ -66,6 +69,7 @@ export function mcpServers(env: Record<string, string | undefined> = process.env
       auth: env.MCP_CONNECTOR_SYNTHETIC_OAUTH === "true" ? "oauth" : "none",
       ...(env.MCP_CONNECTOR_SYNTHETIC_OAUTH === "true" ? { oauth: { issuer: origin, authorizationUrl: `${origin}/authorize`, tokenUrl: `${origin}/token`, registrationUrl: `${origin}/register`,
         scope: env.MCP_CONNECTOR_SYNTHETIC_NO_SCOPE === "true" ? "" : "read write",
+        ...(env.MCP_CONNECTOR_SYNTHETIC_TOKEN_SCOPE !== undefined ? { tokenScope: env.MCP_CONNECTOR_SYNTHETIC_TOKEN_SCOPE } : {}),
         ...(env.MCP_CONNECTOR_SYNTHETIC_TOKEN_AUTH_METHOD === "client_secret_basic" ? { tokenAuthMethod: "client_secret_basic" as const } : {}) } } : {}),
     });
   }

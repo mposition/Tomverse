@@ -52,6 +52,14 @@ Profiles without dynamic registration require their own registered app and
 Use uppercase IDs with hyphens replaced by underscores. Scope selection uses
 `MCP_PROVIDER_<PROFILE_ID>_SCOPE`. The 74 profiles requiring an explicit scope
 choice remain absent until the operator chooses among the recorded scopes.
+When a provider requires an omitted request scope, declare its expected default
+grant bound with `MCP_PROVIDER_<PROFILE_ID>_TOKEN_SCOPE` instead. An explicit empty
+value declares no token scopes; otherwise every returned scope must be in that
+bound. Unspecified defaults remain unavailable. Advertised scopes are validated;
+when a provider advertises none, the operator must establish the bound from that
+provider's documentation and app permissions. The server never guesses that
+bound from an eventual token response. Invalid/unknown individual presets are
+omitted without disabling valid configured providers.
 Configure app callback URLs for `/api/mcp/oauth/callback`; loopback and Dev
 credentials are separate. Asana, Slack, HubSpot, Zoom and Amazon Selling Partner
 require static app registration.

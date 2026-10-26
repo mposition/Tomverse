@@ -11,7 +11,7 @@ export function selectedMcpProviderPolicies(env: ProviderEnvironment = process.e
   if (ids.length > 256 || new Set(ids).size !== ids.length) throw new Error("invalid_mcp_provider_selection");
   return ids.flatMap(id => {
     const preset = MCP_PROVIDER_PRESETS.find(profile => profile.id === id);
-    if (!preset) throw new Error("unknown_mcp_provider");
+    if (!preset) return [];
     // GitHub retains the existing reviewed repository-specific App profile.
     if (preset.auth === "github" || preset.auth === "configure") return [];
     const base = { id: preset.id, name: preset.name, url: preset.url, readTools: [], auth: preset.auth };
@@ -21,16 +21,21 @@ export function selectedMcpProviderPolicies(env: ProviderEnvironment = process.e
     const clientId = env[`${prefix}_CLIENT_ID`];
     const clientSecretEnv = `${prefix}_CLIENT_SECRET`;
     const scope = env[`${prefix}_SCOPE`] ?? oauth.scope;
-    if (!env[`${prefix}_SCOPE`] && oauth.scopeRequired) return [];
-    const requestedScopes = scope.split(/\s+/).filter(Boolean);
-    if (scope.length > 500 || (oauth.allowedScopes.length && requestedScopes.some(value => !oauth.allowedScopes.includes(value))))
-      throw new Error("invalid_mcp_provider_scope");
+    // Default grants must have an operator-declared bound even when the provider
+    // requires the authorization request to omit scope entirely.
+    const tokenScope = env[`${prefix}_TOKEN_SCOPE`];
+    if (!scope && tokenScope === undefined) return [];
+    if (oauth.scopeRequired && !env[`${prefix}_SCOPE`] && tokenScope === undefined) return [];
+    if (tokenScope !== undefined && scope !== "") return [];
+    const requestedScopes = [scope, tokenScope || ""].flatMap(value => value.split(/\s+/).filter(Boolean));
+    if (scope.length > 500 || (tokenScope?.length || 0) > 500 || (oauth.allowedScopes.length && requestedScopes.some(value => !oauth.allowedScopes.includes(value)))) return [];
     const registrationUrl = "registrationUrl" in oauth ? oauth.registrationUrl : undefined;
     if (!clientId && !registrationUrl) return [];
     if (clientId && oauth.tokenAuthMethod !== "none" && !env[clientSecretEnv]) return [];
     if (!clientId && env[clientSecretEnv]) return [];
     return [{ ...base, oauth: { issuer: oauth.issuer, authorizationUrl: oauth.authorizationUrl,
       tokenUrl: oauth.tokenUrl, tokenAuthMethod: oauth.tokenAuthMethod, scope,
+      ...(tokenScope === undefined ? {} : { tokenScope }),
       ...(clientId ? { clientId, ...(oauth.tokenAuthMethod === "none" ? {} : { clientSecretEnv }) } : { registrationUrl }) } }];
   });
 }
