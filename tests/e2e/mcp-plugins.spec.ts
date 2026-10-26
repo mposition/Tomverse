@@ -43,7 +43,7 @@ test("@ui-risk plugin inventory shows logos, explicit permissions and one-action
   await page.goto("/plugins?lang=ko");
   await expect(page.getByRole("heading", { name: "플러그인", level: 1, exact: true })).toBeVisible();
   const nav = page.getByTestId("navigation-plugins"); await expect(nav).toHaveAttribute("aria-current", "page");
-  await expect(page.locator('[data-testid="plugin-card"] img[src="/plugins/github.svg"]')).toBeVisible();
+  await expect(page.locator('[data-testid="plugin-card"] img[src="/plugins/providers/github.png"]')).toBeVisible();
   await page.getByTestId("plugin-card").filter({ hasText: "GitHub" }).getByRole("button", { name: "권한 관리" }).click();
   await expect(page.getByRole("checkbox").first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -95,4 +95,33 @@ test("@ui-risk disabled preview and add dialog remain accessible without exposin
   await expect(page.getByText("현재 환경에서는 Connector Preview가 꺼져 있습니다.")).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: test.info().outputPath("plugins-disabled.png"), fullPage: true });
+});
+
+test("@ui-risk provider catalog searches both directories without presenting listings as live connections", async ({ page }) => {
+  let requests = 0;
+  await page.route("**/api/mcp/**", route => {
+    if (route.request().method() !== "GET") requests++;
+    return route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } });
+  });
+  await page.goto("/plugins?lang=ko");
+  const search = page.getByRole("textbox", { name: "플러그인 검색" });
+  await search.fill("Figma");
+  const card = page.getByTestId("plugin-card").filter({ has: page.getByRole("heading", { name: "Figma", exact: true }) });
+  await expect(card).toBeVisible();
+  await expect(card.locator("img")).toHaveAttribute("src", "/plugins/providers/figma.png");
+  await expect(card.getByRole("button", { name: "연결", exact: true })).toHaveCount(0);
+  await card.getByRole("button", { name: "상세 정보" }).click();
+  await expect(page.getByRole("link", { name: "공급자 문서" })).toHaveAttribute("href", /^https:\/\//);
+  await expect(page.getByText("원격 MCP 주소가 공개된 공급자입니다.", { exact: false })).toBeVisible();
+  await search.fill("Gmail");
+  await page.getByRole("combobox", { name: "디렉터리", exact: true }).selectOption("openai");
+  await expect(page.getByTestId("plugin-card").filter({ hasText: "Gmail" })).toBeVisible();
+  await page.getByRole("combobox", { name: "분류", exact: true }).selectOption("security");
+  await expect(page.getByText("일치하는 플러그인이 없습니다.")).toBeVisible();
+  expect(requests).toBe(0);
+  await expectNoHorizontalOverflow(page);
+  await page.getByRole("combobox", { name: "분류", exact: true }).selectOption("all");
+  await page.getByRole("combobox", { name: "디렉터리", exact: true }).selectOption("all");
+  await search.fill("");
+  await page.screenshot({ path: test.info().outputPath("plugins-color.png"), fullPage: false });
 });
