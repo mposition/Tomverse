@@ -1,4 +1,5 @@
 "use client";
+import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
 import { chatLocationSession } from "@/lib/chatLocationClient";
@@ -1556,6 +1557,7 @@ function ChatAppComponent({
     */
     const effectiveWebSearchMode: WebSearchMode | undefined =
       webSearchModeOverride ?? webSearchMode;
+    const mcpConnectionId = currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
     setChatRuntimeLastPrompt(runKey, {
       text,
       targetChatId,
@@ -1923,6 +1925,7 @@ function ChatAppComponent({
                 }
               : {}),
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
+            ...(mcpConnectionId ? { mcpConnectionId } : {}),
             ...(admissionToken ? { admissionToken } : {}),
             ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
             ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
@@ -2274,6 +2277,7 @@ function ChatAppComponent({
                   autoRewrite: routedModelId && !progress.retryingWithModelId
                     ? autoRewrite : undefined,
                   isGeneratingArtifact: progress.isGeneratingArtifact,
+                  mcpProgress: progress.mcpProgress,
                   ...(progress.generatingArtifactFormat
                     ? {
                         generatingArtifactFormat:
@@ -2679,6 +2683,8 @@ function ChatAppComponent({
     webSearchMode,
     transcriptScope,
     reviewProvider,
+    currentProduct,
+    initialConversationId,
   ]);
 
   const handleRestoreQuestion = useCallback((assistantMessageId: string) => {

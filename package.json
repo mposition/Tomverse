@@ -10,6 +10,8 @@
     "node": "22.x"
   },
   "scripts": {
+    "setup:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts",
+    "dev:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts --dev",
     "test:code-managed": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/codeManagedCore.test.mjs tests/server-contract/code-managed-provider.test.mjs tests/server-contract/code-managed-route.test.mjs tests/server-contract/code-managed-reconciliation-route.test.mjs",
     "test:code-managed-db": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/integration/code-managed-execution.db.test.mjs",
     "test:chat-unified-optimizer": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/chatUnifiedOptimizerCandidate.test.mjs tests/chatUnifiedOptimizerLedgerCore.test.mjs tests/chatUnifiedOptimizerAmuxSourcePin.test.mjs tests/chatUnifiedOptimizerCandidateGeneration.test.mjs tests/chatUnifiedOptimizerPublicCollector.test.mjs tests/chatUnifiedOptimizerAmuxCandidateStore.test.mjs tests/amuxIntakeRegistrationCore.test.mjs tests/server-contract/chat-unified-optimizer-candidate-generation-store.test.mjs tests/server-contract/chat-unified-optimizer-amux-candidate-route.test.mjs tests/server-contract/chat-unified-optimizer-amux-test-card-page.test.mjs",
@@ -389,12 +391,14 @@
     "@auth/prisma-adapter": "^2.11.3",
     "@aws-sdk/client-s3": "^3.1134.0",
     "@aws-sdk/s3-request-presigner": "^3.1134.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@prisma/config": "^7.10.0",
     "@sentry/nextjs": "^10.75.2",
     "ai": "^7.0.131",
     "ajv": "^6.15.0",
+    "ajv-mcp": "npm:ajv@8.20.0",
     "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
     "js-tiktoken": "1.0.21",

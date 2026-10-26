@@ -9,7 +9,7 @@ export function chatStreamDisplayText(raw: string): string {
     text += raw.slice(offset, start);
     const rest = raw.slice(start + 1);
     if (rest.startsWith("TOMVERSE_SEARCH_METADATA")) return text;
-    const marker = ["TOMVERSE_ROUTING_RETRY", "TOMVERSE_STREAM_KEEPALIVE", "TOMVERSE_ARTIFACT_PROGRESS"]
+    const marker = ["TOMVERSE_ROUTING_RETRY", "TOMVERSE_STREAM_KEEPALIVE", "TOMVERSE_ARTIFACT_PROGRESS", "TOMVERSE_MCP_PROGRESS"]
       .find((name) => rest.startsWith(name));
     // Hold incomplete and unknown controls back, including their partial names.
     if (!marker) return text;
