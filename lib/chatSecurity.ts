@@ -196,6 +196,8 @@ export type ChatBudget = {
     modelUsageClass: ModelUsageClass;
     usageCredits: number;
     inputTokens: number;
+    /** Per-request context ceiling when inputTokens reserves multiple tool steps. */
+    contextInputTokens?: number;
     /**
      * The output cap this application asks for, before it is fitted to the
      * room the context window has left (`lib/chatContextWindow.ts`). Not what
@@ -940,6 +942,11 @@ export const createChatBudget = (
          * full, and only the question of whether it is too long changed.
          */
         reservationOnlyInputTokens?: number;
+        /** Application tool schemas/results widen the internal reservation,
+         * without changing the user's authored-input credit weight. */
+        additionalToolInputTokens?: number;
+        /** Server-selected model passes; used only for internal cost holds. */
+        toolInputPasses?: number;
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -994,7 +1001,7 @@ export const createChatBudget = (
         0,
         Math.trunc(options?.reservationOnlyInputTokens ?? 0)
     );
-    const reservedInputTokens =
+    const contextInputTokens =
         Math.min(
             maxInputTokens,
             toReservedInputTokens(estimatedInput, {
@@ -1002,12 +1009,19 @@ export const createChatBudget = (
                     nativeSearchEnabled: options?.nativeSearchEnabled === true,
                     appManagedSearchEnabled:
                         options?.appManagedSearchEnabled === true,
-                }),
+                }) + Math.max(0, Math.trunc(options?.additionalToolInputTokens ?? 0)),
             })
         ) + reservationOnlyInputTokens;
-    const pricing = resolveModelRequestPricing(model, {
-        estimatedPromptTokens: reservedInputTokens,
+    const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
+    let pricing = resolveModelRequestPricing(model, {
+        estimatedPromptTokens: contextInputTokens,
     });
+    if (passes > 1) pricing = resolveModelRequestPricing(model, {
+        estimatedPromptTokens: contextInputTokens + pricing.maxOutputTokens,
+    });
+    // Every paid step re-sends its context. Earlier assistant output can also
+    // be re-sent; reserve it without changing authored-input credit weight.
+    const reservedInputTokens = contextInputTokens * passes + pricing.maxOutputTokens * (passes - 1);
 
     return {
         modelId: model.id,
@@ -1020,6 +1034,7 @@ export const createChatBudget = (
             ) +
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
+        ...(passes > 1 ? { contextInputTokens } : {}),
         maxOutputTokens: pricing.maxOutputTokens,
         providerMaxOutputTokens: pricing.providerMaxOutputTokens,
         reservedOutputTokens: pricing.reservationOutputTokens,
@@ -5722,6 +5737,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
         webSearchMode?: unknown;
+        mcpConnectionId?: unknown;
         admissionToken?: unknown;
         contextBundle?: unknown;
         acknowledgedUnavailableAttachmentIds?: unknown;
@@ -5729,6 +5745,9 @@ export const validateChatPayload = (body: unknown) => {
         guestAutoCapability?: unknown;
         guestClientTurnId?: unknown;
     };
+    if (payload.mcpConnectionId !== undefined && (typeof payload.mcpConnectionId !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(payload.mcpConnectionId))) {
+        throw new ChatAccessError(400, "INVALID_CONNECTOR_SELECTION", "Invalid connector selection.");
+    }
     if (
         payload.guestAutoCapability !== undefined &&
         (typeof payload.guestAutoCapability !== "string" ||
@@ -6015,6 +6034,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
         webSearchMode?: WebSearchMode;
+        mcpConnectionId?: string;
         admissionToken?: string;
         contextBundle?: string;
         acknowledgedUnavailableAttachmentIds?: string[];

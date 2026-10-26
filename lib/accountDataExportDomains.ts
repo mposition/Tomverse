@@ -45,6 +45,12 @@ export type ExportDomainDeclaration = {
 };
 
 export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
+  { domain: "mcpOAuthFlow", publicName: "plugin_authorizations", prismaModel: "McpOAuthFlow", state: "included_filtered",
+    withheldReason: "OAuth state hashes, PKCE verifiers, tokens, client credentials and callback URLs are withheld." },
+  { domain: "mcpConnection", publicName: "plugin_connections", prismaModel: "McpConnection", state: "included_filtered",
+    withheldReason: "Authentication credentials, remote schemas, policy digests and execution leases are withheld." },
+  { domain: "mcpInvocation", publicName: "plugin_actions", prismaModel: "McpInvocation", state: "included_filtered",
+    withheldReason: "Encryption envelopes and internal version fences are withheld. Unexpired pending arguments are decrypted for their owner; terminal arguments are erased." },
   {domain:"codeTaskReservation",publicName:"code_credit_usage",prismaModel:"CodeTaskReservation",state:"included_filtered",
     withheldReason:"Provider cost basis, pricing snapshots, idempotency digests and internal lease data are withheld."},
   // --- wholly the user's own data ------------------------------------------

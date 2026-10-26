@@ -1128,3 +1128,9 @@ e2dfa01a6963bee109ad65f022cb831ca2e663da:tests/integration/marketing-competitor-
 # removed browser-login fixture, not an API key or a signing credential.
 # Scope: exactly this one historical finding; current scans remain enabled.
 9e1632617ca035bf0b59ac37ff2a11751dfc3121:tests/mobileBrowserLogin.test.mjs:generic-api-key:44
+
+# Synthetic MCP credential-echo test value, never issued to or used by a service.
+# Commit 3c5426a added the invented literal to exercise fragmented credential
+# detection. The test now generates its value at runtime. Keep only this exact
+# historical finding exempt; current files and every other finding stay scanned.
+3c5426a6e7ae1c222fef7d9f4507b65099e6b319:tests/mcpConnectorBoundary.test.ts:generic-api-key:36

@@ -4,6 +4,8 @@ import type { Prisma } from "@prisma/client";
 import type { ModelMessage } from "ai";
 
 const MAX_PROVIDER_CONTEXT_BYTES = 2 * 1024 * 1024;
+const hasEphemeralConnectorCalls = (messages: ModelMessage[]) => messages.some(message => Array.isArray(message.content) &&
+  message.content.some(part => part && typeof part === "object" && "toolName" in part && typeof part.toolName === "string" && part.toolName.startsWith("mcp_")));
 
 const isResponseMessage = (value: unknown): value is ModelMessage => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -27,6 +29,7 @@ export const serializeProviderResponseMessages = (
   value: unknown
 ): SerializedProviderContext | null => {
   if (!Array.isArray(value) || !value.every(isResponseMessage)) return null;
+  if (hasEphemeralConnectorCalls(value)) return null;
   const serialized = JSON.stringify(value);
   const byteLength = Buffer.byteLength(serialized, "utf8");
   if (byteLength === 0 || byteLength > MAX_PROVIDER_CONTEXT_BYTES) return null;
@@ -40,6 +43,7 @@ export const parseProviderResponseMessages = (
   value: unknown
 ): ModelMessage[] | null => {
   if (!Array.isArray(value) || !value.every(isResponseMessage)) return null;
+  if (hasEphemeralConnectorCalls(value)) return null;
   const serialized = JSON.stringify(value);
   if (Buffer.byteLength(serialized, "utf8") > MAX_PROVIDER_CONTEXT_BYTES) {
     return null;
