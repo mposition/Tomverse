@@ -1,0 +1,855 @@
+{
+  "retrievedAt": "2026-10-26",
+  "assets": [
+    {
+      "provider": "adobe",
+      "path": "/plugins/providers/adobe.png",
+      "source": "https://avatars.githubusercontent.com/u/476009?s=96&v=4"
+    },
+    {
+      "provider": "alloydb",
+      "path": "/plugins/providers/alloydb.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "alloydb-omni",
+      "path": "/plugins/providers/alloydb-omni.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "airtable",
+      "path": "/plugins/providers/airtable.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/airtable/assets/logo.png"
+    },
+    {
+      "provider": "aikido",
+      "path": "/plugins/providers/aikido.jpg",
+      "source": "https://avatars.githubusercontent.com/u/110776285?s=96&v=4"
+    },
+    {
+      "provider": "activecampaign",
+      "path": "/plugins/providers/activecampaign.png",
+      "source": "https://avatars.githubusercontent.com/u/563440?s=96&v=4"
+    },
+    {
+      "provider": "airwallex",
+      "path": "/plugins/providers/airwallex.png",
+      "source": "https://avatars.githubusercontent.com/u/15722888?s=96&v=4"
+    },
+    {
+      "provider": "aiven",
+      "path": "/plugins/providers/aiven.png",
+      "source": "https://avatars.githubusercontent.com/u/14290521?s=96&v=4"
+    },
+    {
+      "provider": "amazon-location-service",
+      "path": "/plugins/providers/amazon-location-service.png",
+      "source": "https://avatars.githubusercontent.com/u/3299148?s=96&v=4"
+    },
+    {
+      "provider": "apollo-graphql",
+      "path": "/plugins/providers/apollo-graphql.png",
+      "source": "https://avatars.githubusercontent.com/u/17189275?s=96&v=4"
+    },
+    {
+      "provider": "amazon-selling-partner",
+      "path": "/plugins/providers/amazon-selling-partner.png",
+      "source": "https://avatars.githubusercontent.com/u/8594673?s=96&v=4"
+    },
+    {
+      "provider": "amplitude",
+      "path": "/plugins/providers/amplitude.png",
+      "source": "https://avatars.githubusercontent.com/u/2291562?s=96&v=4"
+    },
+    {
+      "provider": "apollo",
+      "path": "/plugins/providers/apollo.png",
+      "source": "https://avatars.githubusercontent.com/u/19340971?s=96&v=4"
+    },
+    {
+      "provider": "asana",
+      "path": "/plugins/providers/asana.png",
+      "source": "https://avatars.githubusercontent.com/u/1472111?s=96&v=4"
+    },
+    {
+      "provider": "atlan",
+      "path": "/plugins/providers/atlan.png",
+      "source": "https://avatars.githubusercontent.com/u/47002402?s=96&v=4"
+    },
+    {
+      "provider": "appwrite",
+      "path": "/plugins/providers/appwrite.png",
+      "source": "https://avatars.githubusercontent.com/u/25003669?s=96&v=4"
+    },
+    {
+      "provider": "aws",
+      "path": "/plugins/providers/aws.png",
+      "source": "https://avatars.githubusercontent.com/u/3299148?s=96&v=4"
+    },
+    {
+      "provider": "aws-amplify",
+      "path": "/plugins/providers/aws-amplify.png",
+      "source": "https://avatars.githubusercontent.com/u/3299148?s=96&v=4"
+    },
+    {
+      "provider": "aws-serverless",
+      "path": "/plugins/providers/aws-serverless.png",
+      "source": "https://avatars.githubusercontent.com/u/3299148?s=96&v=4"
+    },
+    {
+      "provider": "aws-transform",
+      "path": "/plugins/providers/aws-transform.png",
+      "source": "https://avatars.githubusercontent.com/u/3299148?s=96&v=4"
+    },
+    {
+      "provider": "aws-startup-advisor",
+      "path": "/plugins/providers/aws-startup-advisor.png",
+      "source": "https://avatars.githubusercontent.com/u/2232217?s=96&v=4"
+    },
+    {
+      "provider": "aws-data-analytics",
+      "path": "/plugins/providers/aws-data-analytics.png",
+      "source": "https://avatars.githubusercontent.com/u/2232217?s=96&v=4"
+    },
+    {
+      "provider": "aws-core",
+      "path": "/plugins/providers/aws-core.png",
+      "source": "https://avatars.githubusercontent.com/u/2232217?s=96&v=4"
+    },
+    {
+      "provider": "atlassian",
+      "path": "/plugins/providers/atlassian.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/atlassian-rovo/assets/logo.png"
+    },
+    {
+      "provider": "bigquery",
+      "path": "/plugins/providers/bigquery.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "buildkite",
+      "path": "/plugins/providers/buildkite.png",
+      "source": "https://avatars.githubusercontent.com/u/5055988?s=96&v=4"
+    },
+    {
+      "provider": "azure",
+      "path": "/plugins/providers/azure.png",
+      "source": "https://avatars.githubusercontent.com/u/6154722?s=96&v=4"
+    },
+    {
+      "provider": "browser-use",
+      "path": "/plugins/providers/browser-use.png",
+      "source": "https://avatars.githubusercontent.com/u/192012301?s=96&v=4"
+    },
+    {
+      "provider": "build-ios-apps",
+      "path": "/plugins/providers/build-ios-apps.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/build-ios-apps/assets/app-icon.png"
+    },
+    {
+      "provider": "bigdata",
+      "path": "/plugins/providers/bigdata.png",
+      "source": "https://avatars.githubusercontent.com/u/220340990?s=96&v=4"
+    },
+    {
+      "provider": "box",
+      "path": "/plugins/providers/box.png",
+      "source": "https://avatars.githubusercontent.com/u/23900?s=96&v=4"
+    },
+    {
+      "provider": "blackrock",
+      "path": "/plugins/providers/blackrock.png",
+      "source": "https://avatars.githubusercontent.com/u/10467948?s=96&v=4"
+    },
+    {
+      "provider": "clickhouse",
+      "path": "/plugins/providers/clickhouse.png",
+      "source": "https://avatars.githubusercontent.com/u/54801242?s=96&v=4"
+    },
+    {
+      "provider": "cloud-sql-mysql",
+      "path": "/plugins/providers/cloud-sql-mysql.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "chrome-devtools-mcp",
+      "path": "/plugins/providers/chrome-devtools-mcp.png",
+      "source": "https://avatars.githubusercontent.com/u/11260967?s=96&v=4"
+    },
+    {
+      "provider": "circle-skills",
+      "path": "/plugins/providers/circle-skills.png",
+      "source": "https://avatars.githubusercontent.com/u/5419909?s=96&v=4"
+    },
+    {
+      "provider": "canva",
+      "path": "/plugins/providers/canva.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/canva/assets/logo.png"
+    },
+    {
+      "provider": "circleback",
+      "path": "/plugins/providers/circleback.png",
+      "source": "https://avatars.githubusercontent.com/u/122568444?s=96&v=4"
+    },
+    {
+      "provider": "clickup",
+      "path": "/plugins/providers/clickup.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/clickup/assets/logo.png"
+    },
+    {
+      "provider": "cloud-sql-postgresql",
+      "path": "/plugins/providers/cloud-sql-postgresql.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "cloud-sql-sqlserver",
+      "path": "/plugins/providers/cloud-sql-sqlserver.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "cloudflare",
+      "path": "/plugins/providers/cloudflare.svg",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/cloudflare/assets/cloudflare-small.svg"
+    },
+    {
+      "provider": "cockroachdb",
+      "path": "/plugins/providers/cockroachdb.png",
+      "source": "https://avatars.githubusercontent.com/u/6748139?s=96&v=4"
+    },
+    {
+      "provider": "confidence",
+      "path": "/plugins/providers/confidence.png",
+      "source": "https://avatars.githubusercontent.com/u/251374?s=96&v=4"
+    },
+    {
+      "provider": "codex-security",
+      "path": "/plugins/providers/codex-security.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/codex-security/assets/logo.png"
+    },
+    {
+      "provider": "cloudinary",
+      "path": "/plugins/providers/cloudinary.jpg",
+      "source": "https://avatars.githubusercontent.com/u/45069436?s=96&v=4"
+    },
+    {
+      "provider": "codspeed",
+      "path": "/plugins/providers/codspeed.png",
+      "source": "https://avatars.githubusercontent.com/u/116658140?s=96&v=4"
+    },
+    {
+      "provider": "context7",
+      "path": "/plugins/providers/context7.png",
+      "source": "https://avatars.githubusercontent.com/u/74989412?s=96&v=4"
+    },
+    {
+      "provider": "data-agent-kit",
+      "path": "/plugins/providers/data-agent-kit.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "dataproc",
+      "path": "/plugins/providers/dataproc.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "data-analytics",
+      "path": "/plugins/providers/data-analytics.svg",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/data-analytics/assets/datascience-small.svg"
+    },
+    {
+      "provider": "creative-production",
+      "path": "/plugins/providers/creative-production.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/creative-production/assets/logo.png"
+    },
+    {
+      "provider": "datadog",
+      "path": "/plugins/providers/datadog.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/datadog/assets/logo.png"
+    },
+    {
+      "provider": "discord",
+      "path": "/plugins/providers/discord.png",
+      "source": "https://avatars.githubusercontent.com/u/1965106?s=96&v=4"
+    },
+    {
+      "provider": "dropbox",
+      "path": "/plugins/providers/dropbox.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/dropbox/assets/logo.png"
+    },
+    {
+      "provider": "expo",
+      "path": "/plugins/providers/expo.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/expo/assets/expo.png"
+    },
+    {
+      "provider": "dominodatalab",
+      "path": "/plugins/providers/dominodatalab.png",
+      "source": "https://avatars.githubusercontent.com/u/8785569?s=96&v=4"
+    },
+    {
+      "provider": "exa",
+      "path": "/plugins/providers/exa.png",
+      "source": "https://avatars.githubusercontent.com/u/77906174?s=96&v=4"
+    },
+    {
+      "provider": "fiftyone",
+      "path": "/plugins/providers/fiftyone.png",
+      "source": "https://avatars.githubusercontent.com/u/25984855?s=96&v=4"
+    },
+    {
+      "provider": "firestore-native",
+      "path": "/plugins/providers/firestore-native.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "firebase",
+      "path": "/plugins/providers/firebase.png",
+      "source": "https://avatars.githubusercontent.com/u/1335026?s=96&v=4"
+    },
+    {
+      "provider": "firecrawl",
+      "path": "/plugins/providers/firecrawl.png",
+      "source": "https://avatars.githubusercontent.com/u/135057108?s=96&v=4"
+    },
+    {
+      "provider": "gc-ai",
+      "path": "/plugins/providers/gc-ai.png",
+      "source": "https://avatars.githubusercontent.com/u/162403434?s=96&v=4"
+    },
+    {
+      "provider": "figma",
+      "path": "/plugins/providers/figma.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/figma/assets/figma.png"
+    },
+    {
+      "provider": "github",
+      "path": "/plugins/providers/github.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/github/assets/github.png"
+    },
+    {
+      "provider": "fullstory",
+      "path": "/plugins/providers/fullstory.jpg",
+      "source": "https://avatars.githubusercontent.com/u/33756472?s=96&v=4"
+    },
+    {
+      "provider": "forge-skills",
+      "path": "/plugins/providers/forge-skills.png",
+      "source": "https://avatars.githubusercontent.com/u/168166?s=96&v=4"
+    },
+    {
+      "provider": "google-cloud-storage",
+      "path": "/plugins/providers/google-cloud-storage.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "gitlab",
+      "path": "/plugins/providers/gitlab.png",
+      "source": "https://avatars.githubusercontent.com/u/1086321?s=96&v=4"
+    },
+    {
+      "provider": "gmail",
+      "path": "/plugins/providers/gmail.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/gmail/assets/gmail.png"
+    },
+    {
+      "provider": "grafana",
+      "path": "/plugins/providers/grafana.jpg",
+      "source": "https://avatars.githubusercontent.com/u/7195757?s=96&v=4"
+    },
+    {
+      "provider": "google-drive",
+      "path": "/plugins/providers/google-drive.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-drive/assets/logo.png"
+    },
+    {
+      "provider": "google-calendar",
+      "path": "/plugins/providers/google-calendar.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-calendar/assets/logo.png"
+    },
+    {
+      "provider": "gitkraken",
+      "path": "/plugins/providers/gitkraken.png",
+      "source": "https://avatars.githubusercontent.com/u/92606490?s=96&v=4"
+    },
+    {
+      "provider": "govtribe",
+      "path": "/plugins/providers/govtribe.jpg",
+      "source": "https://avatars.githubusercontent.com/u/5221908?s=96&v=4"
+    },
+    {
+      "provider": "hugging-face",
+      "path": "/plugins/providers/hugging-face.png",
+      "source": "https://avatars.githubusercontent.com/u/25720743?s=96&v=4"
+    },
+    {
+      "provider": "honeycomb",
+      "path": "/plugins/providers/honeycomb.png",
+      "source": "https://avatars.githubusercontent.com/u/15988027?s=96&v=4"
+    },
+    {
+      "provider": "hubspot",
+      "path": "/plugins/providers/hubspot.png",
+      "source": "https://avatars.githubusercontent.com/u/326419?s=96&v=4"
+    },
+    {
+      "provider": "hostinger",
+      "path": "/plugins/providers/hostinger.png",
+      "source": "https://avatars.githubusercontent.com/u/2630767?s=96&v=4"
+    },
+    {
+      "provider": "greptile",
+      "path": "/plugins/providers/greptile.png",
+      "source": "https://avatars.githubusercontent.com/u/140149887?s=96&v=4"
+    },
+    {
+      "provider": "hunter",
+      "path": "/plugins/providers/hunter.png",
+      "source": "https://avatars.githubusercontent.com/u/12171627?s=96&v=4"
+    },
+    {
+      "provider": "granola",
+      "path": "/plugins/providers/granola.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/granola/assets/logo.png"
+    },
+    {
+      "provider": "incident-io",
+      "path": "/plugins/providers/incident-io.png",
+      "source": "https://avatars.githubusercontent.com/u/76436871?s=96&v=4"
+    },
+    {
+      "provider": "knowledge-catalog",
+      "path": "/plugins/providers/knowledge-catalog.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "intercom",
+      "path": "/plugins/providers/intercom.png",
+      "source": "https://avatars.githubusercontent.com/u/6585?s=96&v=4"
+    },
+    {
+      "provider": "legalzoom",
+      "path": "/plugins/providers/legalzoom.jpg",
+      "source": "https://avatars.githubusercontent.com/u/92651296?s=96&v=4"
+    },
+    {
+      "provider": "linear",
+      "path": "/plugins/providers/linear.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/linear/assets/logo.png"
+    },
+    {
+      "provider": "leadfeeder",
+      "path": "/plugins/providers/leadfeeder.png",
+      "source": "https://avatars.githubusercontent.com/u/1669667?s=96&v=4"
+    },
+    {
+      "provider": "looker",
+      "path": "/plugins/providers/looker.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "logfire",
+      "path": "/plugins/providers/logfire.png",
+      "source": "https://avatars.githubusercontent.com/u/110818415?s=96&v=4"
+    },
+    {
+      "provider": "lumen",
+      "path": "/plugins/providers/lumen.png",
+      "source": "https://avatars.githubusercontent.com/u/25334553?s=96&v=4"
+    },
+    {
+      "provider": "linq-alpha",
+      "path": "/plugins/providers/linq-alpha.png",
+      "source": "https://avatars.githubusercontent.com/u/323068470?s=96&v=4"
+    },
+    {
+      "provider": "lovable",
+      "path": "/plugins/providers/lovable.png",
+      "source": "https://avatars.githubusercontent.com/u/148472368?s=96&v=4"
+    },
+    {
+      "provider": "lusha",
+      "path": "/plugins/providers/lusha.png",
+      "source": "https://avatars.githubusercontent.com/u/215645364?s=96&v=4"
+    },
+    {
+      "provider": "mapbox",
+      "path": "/plugins/providers/mapbox.png",
+      "source": "https://avatars.githubusercontent.com/u/600935?s=96&v=4"
+    },
+    {
+      "provider": "logrocket",
+      "path": "/plugins/providers/logrocket.png",
+      "source": "https://avatars.githubusercontent.com/u/19847951?s=96&v=4"
+    },
+    {
+      "provider": "microsoft-learn",
+      "path": "/plugins/providers/microsoft-learn.png",
+      "source": "https://avatars.githubusercontent.com/u/6154722?s=96&v=4"
+    },
+    {
+      "provider": "mercadopago",
+      "path": "/plugins/providers/mercadopago.png",
+      "source": "https://avatars.githubusercontent.com/u/900583?s=96&v=4"
+    },
+    {
+      "provider": "mongodb-atlas",
+      "path": "/plugins/providers/mongodb-atlas.jpg",
+      "source": "https://avatars.githubusercontent.com/u/45120?s=96&v=4"
+    },
+    {
+      "provider": "mongodb",
+      "path": "/plugins/providers/mongodb.jpg",
+      "source": "https://avatars.githubusercontent.com/u/45120?s=96&v=4"
+    },
+    {
+      "provider": "mintlify",
+      "path": "/plugins/providers/mintlify.png",
+      "source": "https://avatars.githubusercontent.com/u/93011474?s=96&v=4"
+    },
+    {
+      "provider": "miro",
+      "path": "/plugins/providers/miro.png",
+      "source": "https://avatars.githubusercontent.com/u/48276018?s=96&v=4"
+    },
+    {
+      "provider": "teams",
+      "path": "/plugins/providers/teams.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/teams/assets/logo.png"
+    },
+    {
+      "provider": "monday",
+      "path": "/plugins/providers/monday.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/monday-com/assets/logo.png"
+    },
+    {
+      "provider": "netlify",
+      "path": "/plugins/providers/netlify.png",
+      "source": "https://avatars.githubusercontent.com/u/7892489?s=96&v=4"
+    },
+    {
+      "provider": "neon",
+      "path": "/plugins/providers/neon.png",
+      "source": "https://avatars.githubusercontent.com/u/77690634?s=96&v=4"
+    },
+    {
+      "provider": "newrelic",
+      "path": "/plugins/providers/newrelic.jpg",
+      "source": "https://avatars.githubusercontent.com/u/31739?s=96&v=4"
+    },
+    {
+      "provider": "openai-developers",
+      "path": "/plugins/providers/openai-developers.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/openai-developers/assets/logo.png"
+    },
+    {
+      "provider": "notion",
+      "path": "/plugins/providers/notion.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/notion/assets/notion.png"
+    },
+    {
+      "provider": "nimble",
+      "path": "/plugins/providers/nimble.jpg",
+      "source": "https://avatars.githubusercontent.com/u/94446617?s=96&v=4"
+    },
+    {
+      "provider": "outlook-calendar",
+      "path": "/plugins/providers/outlook-calendar.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/outlook-calendar/assets/logo.png"
+    },
+    {
+      "provider": "pinecone",
+      "path": "/plugins/providers/pinecone.png",
+      "source": "https://avatars.githubusercontent.com/u/54333248?s=96&v=4"
+    },
+    {
+      "provider": "playwright",
+      "path": "/plugins/providers/playwright.png",
+      "source": "https://avatars.githubusercontent.com/u/6154722?s=96&v=4"
+    },
+    {
+      "provider": "outlook-email",
+      "path": "/plugins/providers/outlook-email.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/outlook-email/assets/logo.png"
+    },
+    {
+      "provider": "paypal",
+      "path": "/plugins/providers/paypal.png",
+      "source": "https://avatars.githubusercontent.com/u/476675?s=96&v=4"
+    },
+    {
+      "provider": "pagerduty",
+      "path": "/plugins/providers/pagerduty.png",
+      "source": "https://avatars.githubusercontent.com/u/766800?s=96&v=4"
+    },
+    {
+      "provider": "pendo",
+      "path": "/plugins/providers/pendo.png",
+      "source": "https://avatars.githubusercontent.com/u/5685215?s=96&v=4"
+    },
+    {
+      "provider": "pigment",
+      "path": "/plugins/providers/pigment.png",
+      "source": "https://avatars.githubusercontent.com/u/52931234?s=96&v=4"
+    },
+    {
+      "provider": "planetscale",
+      "path": "/plugins/providers/planetscale.png",
+      "source": "https://avatars.githubusercontent.com/u/35612527?s=96&v=4"
+    },
+    {
+      "provider": "postiz",
+      "path": "/plugins/providers/postiz.png",
+      "source": "https://avatars.githubusercontent.com/u/128401275?s=96&v=4"
+    },
+    {
+      "provider": "prisma",
+      "path": "/plugins/providers/prisma.png",
+      "source": "https://avatars.githubusercontent.com/u/17219288?s=96&v=4"
+    },
+    {
+      "provider": "postman",
+      "path": "/plugins/providers/postman.png",
+      "source": "https://avatars.githubusercontent.com/u/10251060?s=96&v=4"
+    },
+    {
+      "provider": "quarkus-agent",
+      "path": "/plugins/providers/quarkus-agent.png",
+      "source": "https://avatars.githubusercontent.com/u/47638783?s=96&v=4"
+    },
+    {
+      "provider": "posthog",
+      "path": "/plugins/providers/posthog.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/posthog/assets/logo.png"
+    },
+    {
+      "provider": "public-equity-investing",
+      "path": "/plugins/providers/public-equity-investing.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/public-equity-investing/assets/logo.png"
+    },
+    {
+      "provider": "qt-development-skills",
+      "path": "/plugins/providers/qt-development-skills.png",
+      "source": "https://avatars.githubusercontent.com/u/144343050?s=96&v=4"
+    },
+    {
+      "provider": "railway",
+      "path": "/plugins/providers/railway.png",
+      "source": "https://avatars.githubusercontent.com/u/66716858?s=96&v=4"
+    },
+    {
+      "provider": "sagemaker-ai",
+      "path": "/plugins/providers/sagemaker-ai.png",
+      "source": "https://avatars.githubusercontent.com/u/3299148?s=96&v=4"
+    },
+    {
+      "provider": "salesforce-development",
+      "path": "/plugins/providers/salesforce-development.png",
+      "source": "https://avatars.githubusercontent.com/u/464563?s=96&v=4"
+    },
+    {
+      "provider": "resend",
+      "path": "/plugins/providers/resend.jpg",
+      "source": "https://avatars.githubusercontent.com/u/109384852?s=96&v=4"
+    },
+    {
+      "provider": "sanity",
+      "path": "/plugins/providers/sanity.png",
+      "source": "https://avatars.githubusercontent.com/u/17177659?s=96&v=4"
+    },
+    {
+      "provider": "revenuecat",
+      "path": "/plugins/providers/revenuecat.png",
+      "source": "https://avatars.githubusercontent.com/u/33013347?s=96&v=4"
+    },
+    {
+      "provider": "render",
+      "path": "/plugins/providers/render.png",
+      "source": "https://avatars.githubusercontent.com/u/114033652?s=96&v=4"
+    },
+    {
+      "provider": "rootly",
+      "path": "/plugins/providers/rootly.png",
+      "source": "https://avatars.githubusercontent.com/u/199156715?s=96&v=4"
+    },
+    {
+      "provider": "sap-cds-mcp",
+      "path": "/plugins/providers/sap-cds-mcp.png",
+      "source": "https://avatars.githubusercontent.com/u/117299792?s=96&v=4"
+    },
+    {
+      "provider": "sap-fiori-mcp-server",
+      "path": "/plugins/providers/sap-fiori-mcp-server.png",
+      "source": "https://avatars.githubusercontent.com/u/2531208?s=96&v=4"
+    },
+    {
+      "provider": "sap-mdk-server",
+      "path": "/plugins/providers/sap-mdk-server.png",
+      "source": "https://avatars.githubusercontent.com/u/2531208?s=96&v=4"
+    },
+    {
+      "provider": "sentry",
+      "path": "/plugins/providers/sentry.svg",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/sentry/assets/sentry-small.svg"
+    },
+    {
+      "provider": "sharepoint",
+      "path": "/plugins/providers/sharepoint.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/sharepoint/assets/logo.png"
+    },
+    {
+      "provider": "sap-hana-cli",
+      "path": "/plugins/providers/sap-hana-cli.png",
+      "source": "https://avatars.githubusercontent.com/u/50221243?s=96&v=4"
+    },
+    {
+      "provider": "semgrep",
+      "path": "/plugins/providers/semgrep.png",
+      "source": "https://avatars.githubusercontent.com/u/29760937?s=96&v=4"
+    },
+    {
+      "provider": "spanner",
+      "path": "/plugins/providers/spanner.png",
+      "source": "https://avatars.githubusercontent.com/u/2810941?s=96&v=4"
+    },
+    {
+      "provider": "slack",
+      "path": "/plugins/providers/slack.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/slack/assets/slack.png"
+    },
+    {
+      "provider": "stripe",
+      "path": "/plugins/providers/stripe.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/stripe/assets/logo.png"
+    },
+    {
+      "provider": "shippo",
+      "path": "/plugins/providers/shippo.png",
+      "source": "https://avatars.githubusercontent.com/u/7683313?s=96&v=4"
+    },
+    {
+      "provider": "sumup",
+      "path": "/plugins/providers/sumup.png",
+      "source": "https://avatars.githubusercontent.com/u/1194464?s=96&v=4"
+    },
+    {
+      "provider": "sonarqube",
+      "path": "/plugins/providers/sonarqube.png",
+      "source": "https://avatars.githubusercontent.com/u/545988?s=96&v=4"
+    },
+    {
+      "provider": "shopify",
+      "path": "/plugins/providers/shopify.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/shopify/assets/logo.png"
+    },
+    {
+      "provider": "sonatype-guide",
+      "path": "/plugins/providers/sonatype-guide.png",
+      "source": "https://avatars.githubusercontent.com/u/44938?s=96&v=4"
+    },
+    {
+      "provider": "twilio-developer-kit",
+      "path": "/plugins/providers/twilio-developer-kit.svg",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/twilio-developer-kit/assets/logo.svg"
+    },
+    {
+      "provider": "ui5",
+      "path": "/plugins/providers/ui5.png",
+      "source": "https://avatars.githubusercontent.com/u/6333374?s=96&v=4"
+    },
+    {
+      "provider": "ui5-modernization",
+      "path": "/plugins/providers/ui5-modernization.png",
+      "source": "https://avatars.githubusercontent.com/u/6333374?s=96&v=4"
+    },
+    {
+      "provider": "supabase",
+      "path": "/plugins/providers/supabase.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/supabase/assets/logo.png"
+    },
+    {
+      "provider": "terraform",
+      "path": "/plugins/providers/terraform.png",
+      "source": "https://avatars.githubusercontent.com/u/761456?s=96&v=4"
+    },
+    {
+      "provider": "valtown",
+      "path": "/plugins/providers/valtown.png",
+      "source": "https://avatars.githubusercontent.com/u/114268765?s=96&v=4"
+    },
+    {
+      "provider": "synthflow",
+      "path": "/plugins/providers/synthflow.png",
+      "source": "https://avatars.githubusercontent.com/u/146477258?s=96&v=4"
+    },
+    {
+      "provider": "you-com",
+      "path": "/plugins/providers/you-com.jpg",
+      "source": "https://avatars.githubusercontent.com/u/229386092?s=96&v=4"
+    },
+    {
+      "provider": "vercel",
+      "path": "/plugins/providers/vercel.png",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/vercel/assets/logo.png"
+    },
+    {
+      "provider": "vanguard-advisor-tools",
+      "path": "/plugins/providers/vanguard-advisor-tools.png",
+      "source": "https://avatars.githubusercontent.com/u/34166451?s=96&v=4"
+    },
+    {
+      "provider": "workos",
+      "path": "/plugins/providers/workos.png",
+      "source": "https://avatars.githubusercontent.com/u/47638084?s=96&v=4"
+    },
+    {
+      "provider": "wix",
+      "path": "/plugins/providers/wix.jpg",
+      "source": "https://avatars.githubusercontent.com/u/686511?s=96&v=4"
+    },
+    {
+      "provider": "wingspan",
+      "path": "/plugins/providers/wingspan.jpg",
+      "source": "https://avatars.githubusercontent.com/u/52424212?s=96&v=4"
+    },
+    {
+      "provider": "vanta",
+      "path": "/plugins/providers/vanta.png",
+      "source": "https://avatars.githubusercontent.com/u/22898424?s=96&v=4"
+    },
+    {
+      "provider": "windsor-ai",
+      "path": "/plugins/providers/windsor-ai.png",
+      "source": "https://avatars.githubusercontent.com/u/82590693?s=96&v=4"
+    },
+    {
+      "provider": "zoho-catalyst",
+      "path": "/plugins/providers/zoho-catalyst.png",
+      "source": "https://avatars.githubusercontent.com/u/61141689?s=96&v=4"
+    },
+    {
+      "provider": "zocks-advisor",
+      "path": "/plugins/providers/zocks-advisor.png",
+      "source": "https://avatars.githubusercontent.com/u/102025502?s=96&v=4"
+    },
+    {
+      "provider": "zoom",
+      "path": "/plugins/providers/zoom.svg",
+      "source": "https://raw.githubusercontent.com/openai/plugins/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/zoom/assets/app-icon.svg"
+    },
+    {
+      "provider": "zapier",
+      "path": "/plugins/providers/zapier.png",
+      "source": "https://avatars.githubusercontent.com/u/1261889?s=96&v=4"
+    },
+    {
+      "provider": "zscaler",
+      "path": "/plugins/providers/zscaler.png",
+      "source": "https://avatars.githubusercontent.com/u/1709408?s=96&v=4"
+    },
+    {
+      "provider": "zoominfo",
+      "path": "/plugins/providers/zoominfo.png",
+      "source": "https://avatars.githubusercontent.com/u/16402566?s=96&v=4"
+    }
+  ]
+}

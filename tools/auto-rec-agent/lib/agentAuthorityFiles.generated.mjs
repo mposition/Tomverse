@@ -134,7 +134,11 @@ const CONTROL_PLANE_PATTERNS = [
   "tests/**/amux*",
   "tests/**/*-amux-*",
   "tests/verifyAmuxWslGitTransfer.test.mjs",
-  "tests/orchestrator*"
+  "tests/orchestrator*",
+  // Brand assets whose names carry the agent safety-net token. Classify only
+  // these exact images; the rest of the public asset directory stays unclassified.
+  "public/plugins/providers/data-agent-kit.png",
+  "public/plugins/providers/quarkus-agent.png"
 ];
 const PRODUCT_PATTERNS = [
   "app/**",

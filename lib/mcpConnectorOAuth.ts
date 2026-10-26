@@ -19,6 +19,7 @@ const ownOAuth = (server: McpServerPolicy) => {
   }
   if (!oauth.clientId && !oauth.registrationUrl) throw new McpConnectorError("oauth_client_required");
   if (oauth.clientSecretEnv && (!oauth.clientId || !process.env[oauth.clientSecretEnv])) throw new McpConnectorError("oauth_client_required");
+  if (oauth.clientId && oauth.tokenAuthMethod && oauth.tokenAuthMethod !== "none" && !oauth.clientSecretEnv) throw new McpConnectorError("oauth_client_required");
   return oauth;
 };
 
@@ -31,8 +32,8 @@ function discovery(server: McpServerPolicy): OAuthDiscoveryState {
       issuer: oauth.issuer, authorization_endpoint: oauth.authorizationUrl, token_endpoint: oauth.tokenUrl,
       ...(oauth.registrationUrl ? { registration_endpoint: oauth.registrationUrl } : {}),
       response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"],
-      code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["client_secret_post", "none"],
-    }, resourceMetadata: { resource: server.url, authorization_servers: [oauth.issuer], scopes_supported: oauth.scope.split(/\s+/) } };
+      code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: oauth.tokenAuthMethod ? [oauth.tokenAuthMethod] : ["client_secret_post", "none"],
+    }, resourceMetadata: { resource: server.url, authorization_servers: [oauth.issuer], scopes_supported: oauth.scope.split(/\s+/).filter(Boolean) } };
 }
 
 async function runOAuth(input: { flowId: string; userId: string; server: McpServerPolicy; redirectUri: string; state: string;
@@ -51,15 +52,20 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
   const provider: OAuthClientProvider = {
     redirectUrl: input.redirectUri,
     clientMetadata: { client_name: "Tomverse", redirect_uris: [input.redirectUri], grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"], token_endpoint_auth_method: oauth.clientSecretEnv ? "client_secret_post" : "none", scope: oauth.scope },
+      response_types: ["code"], token_endpoint_auth_method: oauth.tokenAuthMethod || (oauth.clientSecretEnv ? "client_secret_post" : "none"), scope: oauth.scope || undefined },
     state: () => input.state,
     clientInformation: () => oauth.clientId ? { client_id: oauth.clientId, issuer: oauth.issuer,
+      token_endpoint_auth_method: oauth.tokenAuthMethod || (oauth.clientSecretEnv ? "client_secret_post" : "none"),
       ...(oauth.clientSecretEnv ? { client_secret: process.env[oauth.clientSecretEnv] } : {}) } : state.clientInformation,
-    saveClientInformation: async info => { if (info.issuer !== oauth.issuer) throw new McpConnectorError("oauth_issuer_mismatch"); state.clientInformation = info; await save(); },
+    saveClientInformation: async info => {
+      if (info.issuer !== oauth.issuer) throw new McpConnectorError("oauth_issuer_mismatch");
+      if (oauth.tokenAuthMethod && oauth.tokenAuthMethod !== "none" && !info.client_secret) throw new McpConnectorError("oauth_client_required");
+      state.clientInformation = info; await save();
+    },
     tokens: () => state.tokens,
     saveTokens: async tokens => {
       if (tokens.issuer !== oauth.issuer || tokens.token_type.toLowerCase() !== "bearer" || tokens.access_token.length > 4096 || /\s/.test(tokens.access_token)) throw new McpConnectorError("oauth_token_refused");
-      const allowed = new Set(oauth.scope.split(/\s+/));
+      const allowed = new Set((oauth.tokenScope ?? oauth.scope).split(/\s+/).filter(Boolean));
       if (tokens.scope && tokens.scope.split(/\s+/).some(scope => !allowed.has(scope))) throw new McpConnectorError("oauth_scope_expanded");
       state.tokens = tokens; await save();
     },
@@ -81,12 +87,18 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
     },
   };
   const endpoints = [oauth.tokenUrl, ...(oauth.registrationUrl ? [oauth.registrationUrl] : [])];
-  const fetchers = new Map(endpoints.map(url => [new URL(url).href, guardedMcpFetch({ ...input.server, url }, null, signal, true)]));
+  const registeredEndpoints = new Set(endpoints.map(url => new URL(url).href));
+  let oauthRequests = 0;
   const outcome = await auth(provider, { serverUrl: input.server.url, scope: oauth.scope, authorizationCode: input.code,
-    fetchFn: (url, init) => {
-      const fetcher = fetchers.get(String(url instanceof Request ? url.url : url));
-      if (!fetcher) throw new McpConnectorError("oauth_discovery_refused");
-      return fetcher(url, githubOAuthTokenRequest(input.server, String(url instanceof Request ? url.url : url), init));
+    fetchFn: async (url, init) => {
+      const target = String(url instanceof Request ? url.url : url);
+      if (!registeredEndpoints.has(target)) throw new McpConnectorError("oauth_discovery_refused");
+      if (++oauthRequests > 8) throw new McpConnectorError("request_limit");
+      const info = await provider.clientInformation();
+      const basic = target === new URL(oauth.tokenUrl).href && oauth.tokenAuthMethod === "client_secret_basic" && info && "client_secret" in info && info.client_secret
+        ? `Basic ${Buffer.from(`${info.client_id}:${info.client_secret}`, "latin1").toString("base64")}` : undefined;
+      const fetcher = guardedMcpFetch({ ...input.server, url: target }, null, signal, true, basic);
+      return fetcher(url, githubOAuthTokenRequest(input.server, target, init));
     } });
   return { outcome, redirect, secrets: state };
 }
