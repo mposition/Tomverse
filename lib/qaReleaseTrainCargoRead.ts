@@ -24,7 +24,16 @@ const FILE_READS_AT_ONCE = 6;
 const COMMIT_PAGE_CAP = 3;
 
 export type QaReleaseTrainCargoCandidatesRead =
-  | { status: "ok"; readAt: string; candidates: QaReleaseTrainCargoCandidate[] }
+  | {
+      status: "ok";
+      readAt: string;
+      candidates: QaReleaseTrainCargoCandidate[];
+      /**
+       * Set when the newest read failed and these are the last good one's
+       * candidates: the page keeps its list and says why it is not newer.
+       */
+      stale?: { failure: string; failedAt: string };
+    }
   | { status: "unread"; failure: string };
 
 /**
@@ -80,7 +89,10 @@ async function inBatches<T>(items: readonly T[], work: (item: T) => Promise<void
   }
 }
 
-let cached: { atMs: number; value: QaReleaseTrainCargoCandidatesRead } | null = null;
+/** `failed`: this read failed (its value is the last good one marked stale, or unread), so it is retried after a minute. */
+let cached: { atMs: number; value: QaReleaseTrainCargoCandidatesRead; failed: boolean } | null = null;
+/** The last read that succeeded: what a failed read falls back to. */
+let lastGood: Extract<QaReleaseTrainCargoCandidatesRead, { status: "ok" }> | null = null;
 
 /**
  * The last candidates read, whatever their age, without reading GitHub: for
@@ -104,7 +116,7 @@ export async function readQaReleaseTrainCargoCandidates(
   nowMs = Date.now(),
   options: { fresh?: boolean } = {},
 ): Promise<QaReleaseTrainCargoCandidatesRead> {
-  const keepMs = options.fresh ? FRESH_MIN_MS : cached?.value.status === "ok" ? CACHE_MS : FAILURE_CACHE_MS;
+  const keepMs = options.fresh ? FRESH_MIN_MS : cached?.failed ? FAILURE_CACHE_MS : CACHE_MS;
   if (cached && nowMs - cached.atMs < keepMs) return cached.value;
   if (inFlight) return inFlight;
   inFlight = readFromGithub(nowMs).finally(() => {
@@ -136,11 +148,16 @@ async function readFromGithub(nowMs: number): Promise<QaReleaseTrainCargoCandida
   const readJson = createGithubRepoReader();
   try {
     const sinceMs = nowMs - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
+    // Each list says where it failed: `develop:github_403`, `open:timeout`.
+    const at = <T,>(where: string, read: Promise<T>) =>
+      read.catch((error: unknown) => {
+        throw new ReadFailure(`${where}:${githubReadFailure(error)}`);
+      });
     const [mergedDevelopJson, mergedMainJson, openMainJson] = await Promise.all([
-      readClosedSince(readJson, "develop", sinceMs),
+      at("develop", readClosedSince(readJson, "develop", sinceMs)),
       // A release that carried a candidate was merged after it, so inside the window too.
-      readClosedSince(readJson, "main", sinceMs),
-      readOpenMain(readJson),
+      at("main", readClosedSince(readJson, "main", sinceMs)),
+      at("open", readOpenMain(readJson)),
     ]);
     // What each main pull request in the window really carries: its commits,
     // beside the numbers its title names.
@@ -182,11 +199,23 @@ async function readFromGithub(nowMs: number): Promise<QaReleaseTrainCargoCandida
       readAt: new Date(nowMs).toISOString(),
       candidates: qaReleaseTrainCargoCandidates({ mergedDevelopJson, mergedMainJson, openMainJson, files, mainCommits, developCommits, nowMs }),
     };
-    cached = { atMs: nowMs, value };
+    cached = { atMs: nowMs, value, failed: false };
+    lastGood = value;
     return value;
   } catch (error) {
-    const value: QaReleaseTrainCargoCandidatesRead = { status: "unread", failure: githubReadFailure(error) };
-    cached = { atMs: nowMs, value };
+    // A failed read no longer blanks the page (owner, 2026-10-26: "GitHub
+    // could not be read" came up too often): the last good list stays, marked
+    // with why it is not newer, and the read is retried after a minute. Why
+    // it failed goes to the log too, a code only, never a URL or a body.
+    const failure = error instanceof ReadFailure ? error.message : githubReadFailure(error);
+    console.warn(JSON.stringify({ event: "qa_release_train_cargo_read_failed", failure, lastGoodAt: lastGood?.readAt ?? null }));
+    const value: QaReleaseTrainCargoCandidatesRead = lastGood
+      ? { ...lastGood, stale: { failure, failedAt: new Date(nowMs).toISOString() } }
+      : { status: "unread", failure };
+    cached = { atMs: nowMs, value, failed: true };
     return value;
   }
 }
+
+/** A list read that failed, named by where: its message is the failure code shown and logged. */
+class ReadFailure extends Error {}
