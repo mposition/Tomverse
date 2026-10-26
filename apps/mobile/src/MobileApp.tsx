@@ -24,6 +24,7 @@ import { AnswerContent } from "./AnswerContent";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import { AccountScreen } from "./AccountScreen";
 import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
+import { ImportedTranscript } from "./ImportedTranscript";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 function AnswerAttribution({ message, language }: { message: ChatMessage; language: MobileLanguage }) {
@@ -280,7 +281,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }} />
     </ConversationListScreen> : <>
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
-        {!conversation?.messages.length && !streaming && <WorkspaceWelcome product="chat" language={language} transport={transport} onSeed={(text, starter) => {
+        {/* A continuation is never a blank new chat: its original is its start. */}
+        {conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}
+        {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <WorkspaceWelcome product="chat" language={language} transport={transport} onSeed={(text, starter) => {
           if (starter === "compareAnswers" || starter === "compareImageModels") { preserveNativeDraft(owner, "review:new", text); setProduct("review"); setView("chat"); }
           else { setDraft(text); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); if (starter === "sourcedAnswer" && conversation && conversation.webSearchMode !== "always") void configureTools({ webSearchMode: "always" }).catch(() => {}); }
         }} />}
