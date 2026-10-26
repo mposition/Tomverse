@@ -144,3 +144,42 @@ export function qaReleaseTrainBoardRows(input: {
     };
   });
 }
+
+/*
+ * The board by day (owner request 2026-10-26): a page per AEST day, the last
+ * seven days only. Older trains stay in the audit chain and on GitHub.
+ */
+export const QA_RELEASE_TRAIN_BOARD_DAYS = 7;
+const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The AEST calendar day of a moment, `YYYY-MM-DD`. */
+export const qaReleaseTrainAestDay = (ms: number): string => new Date(ms + AEST_OFFSET_MS).toISOString().slice(0, 10);
+
+/** The start of the board's oldest day: midnight AEST six days before today's. */
+export function qaReleaseTrainBoardSinceMs(nowMs: number): number {
+  const today = Date.parse(`${qaReleaseTrainAestDay(nowMs)}T00:00:00Z`) - AEST_OFFSET_MS;
+  return today - (QA_RELEASE_TRAIN_BOARD_DAYS - 1) * DAY_MS;
+}
+
+export type QaReleaseTrainBoardDay = {
+  /** `YYYY-MM-DD` in AEST. */
+  day: string;
+  /** 0 Sunday ... 6 Saturday. */
+  weekday: number;
+  rows: QaReleaseTrainBoardRow[];
+};
+
+/** The seven AEST days, today first, each with the trains admitted on it (newest first); a day without one is empty. */
+export function qaReleaseTrainBoardDays(rows: readonly QaReleaseTrainBoardRow[], nowMs: number): QaReleaseTrainBoardDay[] {
+  const todayStartMs = qaReleaseTrainBoardSinceMs(nowMs) + (QA_RELEASE_TRAIN_BOARD_DAYS - 1) * DAY_MS;
+  return Array.from({ length: QA_RELEASE_TRAIN_BOARD_DAYS }, (_, back) => {
+    const startMs = todayStartMs - back * DAY_MS;
+    const day = qaReleaseTrainAestDay(startMs);
+    return {
+      day,
+      weekday: new Date(startMs + AEST_OFFSET_MS).getUTCDay(),
+      rows: rows.filter((row) => qaReleaseTrainAestDay(Date.parse(row.admittedAt)) === day),
+    };
+  });
+}
