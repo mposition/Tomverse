@@ -234,6 +234,12 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
         <p className="mt-3 text-sm text-zinc-400">{m.trainCargoLoading}</p>
       ) : (
         <>
+          {view.candidates.status === "ok" && view.candidates.stale ? (
+            // The newest read failed: the last good list stays, and says how old it is and why.
+            <p className="mt-3 text-[13px] text-amber-300" data-testid="qa-release-train-cargo-stale">
+              {m.trainCargoStale.replace("{at}", aestStamp(view.candidates.readAt)).replace("{failure}", view.candidates.stale.failure)}
+            </p>
+          ) : null}
           <div className="mt-3 grid grid-cols-3 gap-2">
             {[
               [m.trainCargoCanRide, pickable.length],
