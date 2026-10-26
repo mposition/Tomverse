@@ -25,6 +25,8 @@ import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import { AccountScreen } from "./AccountScreen";
 import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
 import { ImportedTranscript } from "./ImportedTranscript";
+import { reviewSeedFromChat } from "../../../lib/chatReviewHandoff";
+import { mobileCompareInReviewCopy } from "../../../locales/mobileCompareInReview";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 function AnswerAttribution({ message, language }: { message: ChatMessage; language: MobileLanguage }) {
@@ -70,6 +72,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   // a reopened claimed or streaming attempt does not yet.
   const reportable = (message: { content: string; status?: string }) =>
     Boolean(transport.reportAnswer) && Boolean(message.content.trim()) && [undefined, "normal", "incomplete"].includes(message.status);
+  // "Compare in Review" (lib/chatReviewHandoff.ts): a finished answer's
+  // question opens as a new Review draft, through the same review:new draft
+  // the welcome starters use. Nothing is sent; this conversation is unchanged.
+  const comparable = (message: ChatMessage) =>
+    message.role === "assistant" && Boolean(message.content.trim()) && [undefined, "normal", "incomplete"].includes(message.status);
   const [offline, setOffline] = useState(!navigator.onLine);
   const abort = useRef<AbortController | null>(null);
   const epoch = useRef(0);
@@ -238,6 +245,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     else { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
     setView("chat");
   }
+  function compareInReview(messageId: string) {
+    if (!conversation || streaming || reviewBusy || uncertain) return;
+    const seed = reviewSeedFromChat(conversation.messages, messageId, mobileCompareInReviewCopy(language).context);
+    if (!seed) return;
+    preserveNativeDraft(owner, "review:new", seed);
+    switchProduct("review");
+  }
   function switchProduct(next: "chat" | "review") {
     if (next === product) return;
     requestEpoch.current++;
@@ -287,7 +301,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
           if (starter === "compareAnswers" || starter === "compareImageModels") { preserveNativeDraft(owner, "review:new", text); setProduct("review"); setView("chat"); }
           else { setDraft(text); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); if (starter === "sourcedAnswer" && conversation && conversation.webSearchMode !== "always") void configureTools({ webSearchMode: "always" }).catch(() => {}); }
         }} />}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />
