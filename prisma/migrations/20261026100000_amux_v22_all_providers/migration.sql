@@ -21,7 +21,7 @@ ALTER TABLE "AmuxWorkerCapabilityEvent"
           -- whole branch NULL, and a NULL CHECK passes.
           "v22Model" IS NOT NULL AND "v22Roles" IS NOT NULL AND "v22Tools" IS NOT NULL
           AND ("v22Model" ~ '^claude-[A-Za-z0-9._-]{1,120}$'
-            OR "v22Model" ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$')
+            OR "v22Model" ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$')
           AND pg_catalog.cardinality("v22Roles") BETWEEN 1 AND 4
           AND "v22Roles" <@ ARRAY['design', 'implement', 'investigate', 'review']::TEXT[]
           AND pg_catalog.cardinality("v22Tools") BETWEEN 1 AND 2

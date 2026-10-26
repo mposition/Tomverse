@@ -713,14 +713,21 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
       output_tokens: 120, reasoning_output_tokens: 20 } },
   ].map((event) => JSON.stringify(event)).join("\n") + "\n";
   const fake = fakeSpawn(output);
+  let cleaned = 0;
   const result = await runAmuxV22OneShot(investigate, codex,
-    { syntheticPlatform: true, spawnChild: fake.spawnChild });
+    { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+      createRunHome: async (_provider, value) => ({
+        config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
+        cleanup: async () => { cleaned += 1; } }) });
+  assert.equal(cleaned, 1);
   assert.equal(fake.calls.length, 1);
   const [call] = fake.calls;
   assert.equal(call.binary, "/opt/tomverse-amux-v22/codex");
   assert.deepEqual(call.args.slice(0, 4), ["-a", "never", "--no-daemon", "exec"]);
   assert.ok(call.args.includes("read-only") && call.args.includes("gpt-6-luna"));
-  assert.equal(call.spawnOptions.env.CODEX_HOME, codex.claudeConfigDir);
+  // The CLI sees the fresh run home, never the sidecar's own config dir.
+  assert.equal(call.spawnOptions.env.CODEX_HOME, "/run-home/codex");
+  assert.equal(call.spawnOptions.env.HOME, "/run-home");
   assert.equal(call.spawnOptions.env.CLAUDE_CONFIG_DIR, undefined);
   assert.equal(result.kind, "succeeded");
   assert.equal(result.resultText, "Findings.");
@@ -738,14 +745,15 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
   const guarded = fakeSpawn(output);
   const blocked = await runAmuxV22OneShot({ ...request, role: "investigate" },
     { ...config, provider: "cursor" }, { syntheticPlatform: true,
-      spawnChild: guarded.spawnChild, channelPreflight: () => "mcp_config_present" });
+      spawnChild: guarded.spawnChild, channelPreflight: () => "project_cli_config_present" });
   assert.equal(guarded.calls.length, 0);
   assert.deepEqual([blocked.kind, blocked.cliStarted, blocked.failure],
-    ["failed", false, "mcp_config_present"]);
+    ["failed", false, "project_cli_config_present"]);
   const claudeOnly = fakeSpawn(output);
   await assert.rejects(() => runAmuxV22OneShot({ ...request, role: "investigate" },
     { ...config, provider: "cursor" },
-    { syntheticPlatform: true, spawnChild: claudeOnly.spawnChild }).then((value) => {
+    { syntheticPlatform: true, spawnChild: claudeOnly.spawnChild, channelPreflight: () => null,
+      createRunHome: async (_provider, value) => ({ config: value, cleanup: async () => {} }) }).then((value) => {
     // The request is valid for Cursor (any model name); a Claude JSON result
     // has no Cursor terminal event, so the run is unknown, not failed.
     assert.equal(value.kind, "outcome_unknown");

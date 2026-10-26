@@ -250,16 +250,20 @@ where
 }
 
 /// A v22 delivery's model name, of any provider (owner decision 2026-10-26:
-/// Codex, Copilot and Cursor workers run v22 too). The bounds are the app's
-/// `amuxV22OneShotRouteSupported`: a `claude-` name up to 127 bytes, any
-/// other up to 120. Whether the model belongs to the worker's own CLI is the
-/// sidecar's check, which knows its provider.
+/// Codex, Copilot and Cursor workers run v22 too). It is the app's
+/// `amuxV22OneShotRouteSupported` grammar: `claude-` and 1 to 120 of
+/// [A-Za-z0-9._-], or any other name of 1 to 120 such characters starting
+/// with a letter or digit. Whether the model belongs to the worker's own CLI
+/// is the sidecar's check, which knows its provider.
 pub fn v22_model_id_valid(model_id: &str) -> bool {
+    let plain = |part: &[u8]| part.iter().all(|byte| byte.is_ascii_alphanumeric() ||
+        matches!(byte, b'.' | b'_' | b'-'));
     let bytes = model_id.as_bytes();
-    let limit = if model_id.starts_with("claude-") { 127 } else { 120 };
-    !bytes.is_empty() && bytes.len() <= limit && bytes[0].is_ascii_alphanumeric() &&
-        bytes.iter().all(|byte| byte.is_ascii_alphanumeric() ||
-            matches!(byte, b'.' | b'_' | b':' | b'-'))
+    match model_id.strip_prefix("claude-") {
+        Some(rest) => (1..=120).contains(&rest.len()) && plain(rest.as_bytes()),
+        None => (1..=120).contains(&bytes.len()) && bytes[0].is_ascii_alphanumeric() &&
+            plain(bytes),
+    }
 }
 
 /// The sidecar socket of a v22 worker's `--worker` bridge (orchestration
@@ -1922,14 +1926,15 @@ mod quota_tests {
     #[test]
     fn v22_delivery_model_names_any_provider_but_only_a_plain_id() {
         for model in ["claude-opus-5-5", "gpt-6-luna", "composer-2.5", "auto",
-            "claude-sonnet-5-5", "grok-4.7-high", "a:b_c"] {
+            "claude-sonnet-5-5", "grok-4.7-high", "a.b_c"] {
             assert!(v22_model_id_valid(model), "{model}");
         }
         let long_claude = format!("claude-{}", "a".repeat(120));
         assert!(v22_model_id_valid(&long_claude));
         assert!(!v22_model_id_valid(&format!("{long_claude}a")));
         let other = "a".repeat(121);
-        for model in ["", "-leading", ".x", "gpt 6", "gpt/6", "x;rm", other.as_str()] {
+        for model in ["", "-leading", ".x", "gpt 6", "gpt/6", "x;rm", "a:b", "claude-",
+            "claude-a:b", other.as_str()] {
             assert!(!v22_model_id_valid(model), "{model}");
         }
         assert!(v22_model_id_valid(&"a".repeat(120)));

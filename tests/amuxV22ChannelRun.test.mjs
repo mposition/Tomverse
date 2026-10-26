@@ -8,6 +8,7 @@ import test from "node:test";
 import { amuxCliPricedModelId, estimateAmuxCliApiCost, makeAmuxCliUsageReceipt } from
   "../lib/amux/cliUsageLedgerCore.ts";
 import { amuxV22ChannelArgs, amuxV22ChannelEnv, amuxV22ChannelPreflight,
+  createAmuxV22ChannelRunHome,
   parseAmuxV22ChannelOutput } from
   "../lib/amux/v22ChannelRun.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
@@ -195,7 +196,7 @@ test("a tool outside the role's list makes the run unknown, never trusted", () =
   assert.equal(cursor("readToolCall").valid, true);
 });
 
-test("Codex writes the checkout only; no CLI starts beside an MCP configuration", () => {
+test("Codex writes the checkout only; no CLI starts beside its project configuration", () => {
   // Measured on the runner without these, /tmp and a CODEX_HOME writable root
   // were writable from the workspace-write shell.
   const codex = amuxV22ChannelArgs("openai", request("implement"), "/w");
@@ -206,16 +207,61 @@ test("Codex writes the checkout only; no CLI starts beside an MCP configuration"
   const config = { worktreePath: "/w", homePath: "/h", claudeConfigDir: "/c" };
   for (const [provider, expected] of [
     ["openai", ["/w/.codex/config.toml"]],
-    ["github-copilot", ["/h/.copilot/mcp-config.json", "/w/.mcp.json", "/w/.github/mcp.json"]],
-    ["cursor", ["/w/.cursor/mcp.json", "/h/.cursor/mcp.json", "/c/cursor/mcp.json"]]]) {
+    ["github-copilot", ["/w/.mcp.json", "/w/.github/mcp.json", "/w/.github/hooks"]],
+    ["cursor", ["/w/.cursor"]]]) {
     const seen = [];
     assert.equal(amuxV22ChannelPreflight(provider, config,
       { exists: (file) => { seen.push(file.replaceAll("\\", "/")); return false; } }), null);
     assert.deepEqual(seen, expected, provider);
     for (const present of seen)
       assert.equal(amuxV22ChannelPreflight(provider, config,
-        { exists: (file) => file.replaceAll("\\", "/") === present }), "mcp_config_present");
+        { exists: (file) => file.replaceAll("\\", "/") === present }), "project_cli_config_present");
   }
   assert.equal(amuxV22ChannelPreflight("gemini", config, { exists: () => false }),
     "unsupported_provider");
+});
+
+test("each run gets a fresh home holding only its sign-in, removed afterwards", async () => {
+  const { mkdtemp, mkdir, writeFile, readdir, readFile, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "amux-v22-home-"));
+  const home = join(root, "home");
+  const cli = join(root, "cli");
+  await mkdir(join(cli, "cursor"), { recursive: true });
+  await mkdir(home);
+  // A user configuration left in the sidecar's own home and config dir.
+  await mkdir(join(home, ".copilot"));
+  await writeFile(join(home, ".copilot", "mcp-config.json"), "{}");
+  await writeFile(join(cli, "config.toml"), "[mcp_servers.x]");
+  await writeFile(join(cli, "auth.json"), "codex-sign-in");
+  await writeFile(join(cli, "cursor", "auth.json"), "cursor-sign-in");
+  const config = { worktreePath: join(root, "w"), homePath: home, claudeConfigDir: cli };
+  for (const [provider, expected] of [["openai", ["codex/auth.json"]],
+    ["cursor", [".config/cursor/auth.json"]], ["github-copilot", []]]) {
+    const run = await createAmuxV22ChannelRunHome(provider, config);
+    const files = [];
+    const walk = async (dir, prefix = "") => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) await walk(join(dir, entry.name), `${prefix}${entry.name}/`);
+        else files.push(`${prefix}${entry.name}`);
+      }
+    };
+    await walk(run.config.homePath);
+    assert.deepEqual(files, expected, provider);
+    const env = amuxV22ChannelEnv(provider, run.config, { authDir: cli,
+      readToken: () => Buffer.from("x") });
+    assert.equal(env.HOME, run.config.homePath);
+    if (provider === "openai") {
+      assert.equal(env.CODEX_HOME, join(run.config.homePath, "codex"));
+      assert.equal(await readFile(join(env.CODEX_HOME, "auth.json"), "utf8"), "codex-sign-in");
+    }
+    await run.cleanup();
+    await assert.rejects(stat(run.config.homePath));
+  }
+  await assert.rejects(createAmuxV22ChannelRunHome("gemini", config), /unsupported/);
+  // A missing sign-in leaves no half-made home behind.
+  const empty = { ...config, claudeConfigDir: join(root, "missing") };
+  await assert.rejects(createAmuxV22ChannelRunHome("openai", empty));
+  assert.deepEqual((await readdir(home)).filter((name) => name.startsWith("run-")), []);
 });

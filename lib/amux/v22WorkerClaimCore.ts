@@ -29,7 +29,8 @@ export const amuxV22OneShotRoleSupported = (role: string) =>
  * Cursor's print mode cannot be kept from its shell once it may write, so a
  * Cursor worker takes the read roles only (`implement: false`).
  */
-const ANY_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
+// The CLI usage receipt's model grammar has no colon, so neither does a route.
+const ANY_MODEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 export const AMUX_V22_PROVIDERS = Object.freeze({
   anthropic: Object.freeze({ providerClass: "claude", cli: "claude",
     model: /^claude-[A-Za-z0-9._-]{1,120}$/, implement: true }),
