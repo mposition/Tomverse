@@ -131,6 +131,7 @@ import {
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
+import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
 import {
   clearContinuationFocus,
   continuationFocusSnapshot,
@@ -10222,6 +10223,21 @@ export function ChatPageClient({
     if (admitted) reviewForkTicketRef.current = null;
     return admitted;
   };
+  /*
+    "Compare in Review" on a Chat answer (lib/chatReviewHandoff.ts): leave
+    through the product switch's own admission -- drafts preserved, blocked
+    while a send, mode write or draft conflict is open -- to a new Review
+    draft. Nothing here writes to this conversation or sends anything.
+  */
+  const handleCompareChatInReview = (seed: string) => {
+    if (!handleProductSwitch()) {
+      showToast(t("chat.compareInReviewBlocked"), "info");
+      return;
+    }
+    router.push(reviewPrefillHref(seed));
+  };
+  const compareChatInReview =
+    mountedSurface === "chat" && !isGuestMode ? handleCompareChatInReview : undefined;
   useLayoutEffect(() => {
     reviewForkAdmissionRef.current = () =>
       !productSwitchDisabled && preserveDraftsForProductSwitch();
@@ -10296,6 +10312,7 @@ export function ChatPageClient({
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
+          onCompareInReview={compareChatInReview}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
@@ -10470,6 +10487,7 @@ export function ChatPageClient({
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
+          onCompareInReview={compareChatInReview}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}

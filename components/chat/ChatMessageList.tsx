@@ -19,6 +19,7 @@ import {
   ArrowDown,
   Bot,
   Braces,
+  Columns3,
   Check,
   CircleAlert,
   Copy,
@@ -70,6 +71,11 @@ type ChatMessageListProps = {
   onRetryLast?: () => void;
   /** Chat restores this message's question to the composer; never dispatches. */
   onRestoreQuestion?: (messageId: string) => void;
+  /**
+   * Chat: open this answer's question as a new Review draft
+   * (lib/chatReviewHandoff.ts). Never sends, never changes this conversation.
+   */
+  onCompareInReview?: (messageId: string) => void;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -413,6 +419,7 @@ export function ChatMessageList({
   messages,
   onRetryLast,
   onRestoreQuestion,
+  onCompareInReview,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -1772,6 +1779,26 @@ export function ChatMessageList({
                           {t("chat.regenerate")}
                         </button>
                       )}
+                    </div>
+                  )}
+                  {onCompareInReview && !isUser && !imported && !isActivelyGenerating &&
+                    msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") && (
+                    /*
+                      A second opinion on this answer: its question opens as a
+                      new Review draft. Light, in the answer's own flow, and
+                      only on a finished answer with text.
+                    */
+                    <div className="mt-2 flex">
+                      <button
+                        type="button"
+                        data-testid="chat-compare-in-review"
+                        onClick={() => onCompareInReview(msg.id)}
+                        aria-label={t("chat.compareInReviewLabel")}
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-2 text-[12px] font-semibold text-zinc-500 transition-colors hover:bg-zinc-200/70 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-100"
+                      >
+                        <Columns3 className="h-3.5 w-3.5" aria-hidden="true" />
+                        {t("chat.compareInReview")}
+                      </button>
                     </div>
                   )}
                   {canRestoreQuestion && (

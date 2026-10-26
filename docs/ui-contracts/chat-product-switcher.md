@@ -34,6 +34,15 @@ conversation from the same imported original and opens it, and the Chat
 conversation keeps its product (`docs/policy/external-conversation-continuation.md`
 §3.1).
 
+Every finished Tomverse answer in Chat also offers "Compare in Review" (owner
+decision 2026-10-26). It is not the switcher either: it opens a new Review draft
+through the existing `/review?prompt=` prefill with that answer's question and up
+to two earlier questions (`lib/chatReviewHandoff.ts`, deterministic, no model
+call), leaves through the switcher's own admission (drafts preserved, blocked
+while a send or draft conflict is open), and sends nothing. The Chat
+conversation, its `productKey` and its models are unchanged; Review never
+converts back into Chat.
+
 The navigation callback may stage one idle in-memory draft snapshot immediately
 before following a product link. It does not persist, publish or copy that draft
 into the other product. While a send, stream, mode write, recovered unknown
