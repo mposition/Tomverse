@@ -83,6 +83,20 @@ outputs remain ignored. Android builds require JDK 21, Android SDK 36 and Gradle
 run `npm --workspace @tomverse/mobile run build:android` after installing them.
 The iOS MVP targets iOS 17.4+ and requires macOS and Xcode. Signing and real device verification are separate.
 
+## Prepare an iOS build on Windows
+
+Run `npm run prepare:ios` from the repository root to type-check and build the
+production bundle, sync only iOS and validate its resources, local SPM paths,
+permissions, privacy declarations and plugin registrations. Run
+`npm run build:ios -- --dry-run` to inspect the unsigned Xcode command without
+executing it. `npm --workspace @tomverse/mobile run test:ui:ios` runs the existing
+synthetic UI scenarios in desktop WebKit; native permissions still need a device.
+
+On a Mac, `npm run build:ios` builds an unsigned Simulator application with
+Xcode 26+. It does not sign, upload, enroll a service or submit to a store.
+See [remote iOS build handoff](../../docs/ops/ios-remote-build.md) for clean-machine
+setup, output paths, validation evidence and the remaining Mac/device checks.
+
 ## Authentication and operational boundary
 
 The primary sign-in action opens the existing web sign-in flow in the system

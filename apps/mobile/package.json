@@ -10,8 +10,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --project tsconfig.json",
     "cap:sync": "cap sync",
+    "cap:sync:ios": "cap sync ios",
     "brand:assets": "node brand-assets.mjs",
     "test:ui": "playwright test --config playwright.config.ts",
+    "test:ui:ios": "playwright test --config playwright.ios.config.ts",
     "build:android": "node build-android.mjs",
     "capacitor:sync:after": "node scripts/configure-store-billing.mjs && node scripts/configure-location-permissions.mjs"
   },
