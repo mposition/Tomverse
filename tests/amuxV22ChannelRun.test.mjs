@@ -35,8 +35,11 @@ test("a read role gets no write tool; Copilot never gets a shell; Cursor never w
     "computer_use", "in_app_browser", "apps"])
     assert.equal(codex[codex.indexOf(feature) - 1], "--disable", feature);
   for (const setting of ["sandbox_workspace_write.network_access=false",
-    'web_search="disabled"', "mcp_servers={}"])
+    'web_search="disabled"'])
     assert.equal(codex[codex.indexOf(setting) - 1], "-c", setting);
+  // A -c table merges into CODEX_HOME's config; the user config is not read.
+  assert.ok(codex.includes("--ignore-user-config") && !codex.some((part) =>
+    part.startsWith("mcp_servers")));
   assert.ok(!codex.some((part) => /bypass|dangerously|yolo/.test(part)));
   const copilot = amuxV22ChannelArgs("github-copilot", request("implement"), "/w");
   assert.ok(copilot.includes("edit") && copilot.includes("create") &&
@@ -188,7 +191,7 @@ test("a tool outside the role's list makes the run unknown, never trusted", () =
   assert.equal(cursor("readToolCall").valid, true);
 });
 
-test("Codex writes the checkout only; Cursor never starts beside an MCP configuration", () => {
+test("Codex writes the checkout only; no CLI starts beside an MCP configuration", () => {
   // Measured on the runner without these, /tmp and a CODEX_HOME writable root
   // were writable from the workspace-write shell.
   const codex = amuxV22ChannelArgs("openai", request("implement"), "/w");
@@ -197,13 +200,18 @@ test("Codex writes the checkout only; Cursor never starts beside an MCP configur
     "sandbox_workspace_write.exclude_tmpdir_env_var=true"])
     assert.equal(codex[codex.indexOf(setting) - 1], "-c", setting);
   const config = { worktreePath: "/w", homePath: "/h", claudeConfigDir: "/c" };
-  const seen = [];
-  assert.equal(amuxV22ChannelPreflight("cursor", config,
-    { exists: (file) => { seen.push(file.replaceAll("\\", "/")); return false; } }), null);
-  assert.deepEqual(seen, ["/w/.cursor/mcp.json", "/h/.cursor/mcp.json", "/c/cursor/mcp.json"]);
-  for (const present of seen)
-    assert.equal(amuxV22ChannelPreflight("cursor", config,
-      { exists: (file) => file.replaceAll("\\", "/") === present }), "mcp_config_present");
-  for (const provider of ["openai", "github-copilot"])
-    assert.equal(amuxV22ChannelPreflight(provider, config, { exists: () => true }), null);
+  for (const [provider, expected] of [
+    ["openai", ["/w/.codex/config.toml"]],
+    ["github-copilot", ["/h/.copilot/mcp-config.json", "/w/.mcp.json", "/w/.github/mcp.json"]],
+    ["cursor", ["/w/.cursor/mcp.json", "/h/.cursor/mcp.json", "/c/cursor/mcp.json"]]]) {
+    const seen = [];
+    assert.equal(amuxV22ChannelPreflight(provider, config,
+      { exists: (file) => { seen.push(file.replaceAll("\\", "/")); return false; } }), null);
+    assert.deepEqual(seen, expected, provider);
+    for (const present of seen)
+      assert.equal(amuxV22ChannelPreflight(provider, config,
+        { exists: (file) => file.replaceAll("\\", "/") === present }), "mcp_config_present");
+  }
+  assert.equal(amuxV22ChannelPreflight("gemini", config, { exists: () => false }),
+    "unsupported_provider");
 });

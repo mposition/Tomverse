@@ -140,6 +140,9 @@ test("the guard binds every tag and v22 role to the worker's current ceiling and
   // Investigate is read-only and allowed at chore; review needs a verified class only.
   await insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore", "review"], v22Model: "claude-opus-5-5", v22Roles: ["investigate", "review"], v22Tools: ["repo_read"] });
   await insertRaw(userId, { workerName: "codex-impl", routingTags: ["implementation"], v22Model: "gpt-6-luna", v22Roles: ["implement"], v22Tools: ["repo_write"] });
+  // Cursor takes read roles only, in the guard as in the app.
+  await rejectsWith(insertRaw(userId, { workerName: "cursor-impl", routingTags: ["implementation"], v22Model: "auto", v22Roles: ["implement"], v22Tools: ["repo_write"] }), /AMUX_WORKER_CAPABILITY_V22_ROLE/);
+  await insertRaw(userId, { workerName: "cursor-impl", routingTags: ["implementation"], v22Model: "auto", v22Roles: ["investigate"], v22Tools: ["repo_read"] });
 });
 
 test("only a registered, non-retired worker has capabilities; revisions follow on; events never change", async () => {

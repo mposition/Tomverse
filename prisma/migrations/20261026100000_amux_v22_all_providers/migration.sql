@@ -3,7 +3,8 @@
 -- TOMVERSE_AMUX_V22_MULTI_PROVIDER is enabled). Each change is the latest
 -- definition with only the new providers added:
 -- * a v22 profile may name any provider class's model; a Claude worker stays
---   on a claude-* model (the guard, which reads the registry class);
+--   on a claude-* model and a Cursor worker takes no implement role (the
+--   guard, which reads the registry class);
 -- * the CLI usage ledger accepts the Copilot and Cursor CLIs, with the token
 --   semantics measured for the v19 channels (Copilot input includes cache
 --   reads, Cursor's does not; neither reports reasoning apart from output).
@@ -102,6 +103,10 @@ BEGIN
         -- claude-* model (owner decision 2026-10-26).
         IF registry_class = 'claude' AND NEW."v22Model" !~ '^claude-[A-Za-z0-9._-]{1,120}$' THEN
             RAISE EXCEPTION 'AMUX_WORKER_CAPABILITY_V22_CLASS';
+        END IF;
+        -- Cursor's print mode reaches its shell once it may write: read roles only.
+        IF registry_class = 'cursor' AND 'implement' = ANY (NEW."v22Roles") THEN
+            RAISE EXCEPTION 'AMUX_WORKER_CAPABILITY_V22_ROLE';
         END IF;
         FOREACH role IN ARRAY NEW."v22Roles" LOOP
             IF role = 'implement' AND (ceiling_rank < 2 OR NOT ('repo_write' = ANY (NEW."v22Tools"))) THEN
