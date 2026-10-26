@@ -38,6 +38,19 @@ export function v22SettlementPatchMatches(input: {
     storedPatch.bodyPurgedAt === null;
 }
 
+/** apps/tomverse-orchestrator send_v22 refuses a larger budget field. */
+export const AMUX_V22_BRIDGE_BUDGET_MAX_MICROUSD = 5_000_000;
+
+/** The budget field a v22 delivery carries. An ordinary run is not budget
+ * bound (owner decision 2026-10-25), so its field only has to stay within the
+ * box bridge's wire range; the read-only retry carries its exact signed
+ * amount. */
+export function amuxV22DeliveryBudgetMicrousd(reservedMicrousd: number,
+  readOnlyRetry: boolean) {
+  return readOnlyRetry ? reservedMicrousd :
+    Math.min(reservedMicrousd, AMUX_V22_BRIDGE_BUDGET_MAX_MICROUSD);
+}
+
 /** One supervised CLI process is the whole v22 attempt. Its invocation ID is
  * the durable attempt ID, allocated before dispatch. A caller-supplied subset
  * of receipts cannot turn an unobserved second call into a successful run. */

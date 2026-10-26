@@ -92,10 +92,11 @@ test("a cache write is priced at the verified five-minute rate the CLI is charge
   assert.equal(routeOf(catalog, "claude-opus-4-8").cacheWriteMicroUsdPerMillion, 6_250_000);
 });
 
-test("a model with no verified cache-write rate is not priced", () => {
-  assert.deepEqual(derive({ workers: [workers[1]], priceFor: () => ({
-    ...flat["claude-sonnet-5"], cacheWriteUsdPerMillionTokens: null }) }),
-  { ok: false, code: "no_priced_worker" });
+test("a model with no verified cache-write rate is still priced, at Anthropic's 1.25x rule", () => {
+  const result = derive({ workers: [workers[1]], priceFor: () => ({
+    ...flat["claude-sonnet-5"], cacheWriteUsdPerMillionTokens: null }) });
+  assert.equal(result.ok, true, "a model without a write rate never blocks registration");
+  assert.equal(result.catalog.routes[0].cacheWriteMicroUsdPerMillion, 3_750_000);
 });
 
 test("the reservation covers a Claude-shaped run that uses every cap", () => {

@@ -17,7 +17,8 @@ import { inspectV4TaskCostCatalog } from "./v4TaskCostCatalogCore.ts";
  *   bills it, at the tier the grade's input cap reaches. Cache reads use the
  *   resolved multiplier; cache writes use the verified five-minute write rate,
  *   the lifetime the app and the one-shot CLI cache with (no one-hour TTL is
- *   set). A model with no verified write rate is not priced at all. Tool costs are capped at
+ *   set), or Anthropic's published five-minute rule (1.25x input) for a model
+ *   with none -- the catalog is a recorded estimate, not a stop. Tool costs are capped at
  *   zero;
  * - grade caps: AMUX_TASK_CATALOG_CAPS below, changed in code. They bound
  *   cache reads and writes as well, because the Claude CLI reports them
@@ -121,9 +122,10 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const price = input.priceFor(worker.modelId, caps[grade].inputTokens);
     const uncached = microUsd(price?.inputUsdPerMillionTokens);
     const output = microUsd(price?.outputUsdPerMillionTokens);
-    const verifiedWrite = microUsd(price?.cacheWriteUsdPerMillionTokens);
     // A zero or missing price never becomes a free route.
-    if (!price || uncached === null || output === null || verifiedWrite === null) continue;
+    if (!price || uncached === null || output === null) continue;
+    const verifiedWrite = microUsd(price.cacheWriteUsdPerMillionTokens) ??
+      Math.ceil(uncached * 1.25);
     const multiplier = price.cachedInputPriceMultiplier;
     const cacheRead = Number.isFinite(multiplier) && multiplier > 0
       ? Math.ceil(uncached * multiplier) : uncached;

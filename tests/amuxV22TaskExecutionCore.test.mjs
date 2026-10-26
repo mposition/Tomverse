@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV22EngineeringPublicationEnabled,
+import { amuxV22DeliveryBudgetMicrousd, amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
   v22ReadOnlyApiReceiptMatchesUsage,
@@ -118,4 +118,12 @@ test("read-only API receipt must exactly match its content-free usage event", ()
     { event: { ...event, pricingVersion: "other" } },
     { event: { ...event, projectedApiCostMicrousd: 364n } },
   ]) assert.equal(v22ReadOnlyApiReceiptMatchesUsage({ ...base, ...changed }), false);
+});
+
+test("an ordinary delivery's budget field stays within the bridge's 5 USD wire range", () => {
+  assert.equal(amuxV22DeliveryBudgetMicrousd(1_250_000, false), 1_250_000);
+  assert.equal(amuxV22DeliveryBudgetMicrousd(23_200_000, false), 5_000_000,
+    "a dear ordinary run is still delivered, not refused by the bridge");
+  assert.equal(amuxV22DeliveryBudgetMicrousd(3_400_000, true), 3_400_000,
+    "the read-only retry carries its exact signed amount");
 });
