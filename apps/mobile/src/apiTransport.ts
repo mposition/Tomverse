@@ -11,7 +11,7 @@ import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArt
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
 import { uploadMobileFile } from "./nativeUpload";
-import type { ChatTransport, Conversation, MobileAttachment, MobileCapabilities } from "./chatTransport";
+import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
 
 import { nativeChatLocation } from "./chatLocation";
 import type { MobileRequestInit } from "./authenticatedFetch";
@@ -108,7 +108,21 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const modelId = attempt?.actualModelId ?? message.modelId;
       return { ...message, ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
     });
-    return { ...item, messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
+    // A continuation carries its imported original; an unreadable source is
+    // drawn as the divider alone rather than as an ordinary empty chat.
+    const imported = item.surface === "continuation" ? await continuationSource(id).catch(() => undefined) : undefined;
+    return { ...item, ...(imported ? { imported } : {}), messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
+  }
+  // The imported original of a continuation, one page at a time; `offset`
+  // omitted asks for the page that ends at the divider (policy §8.2 of
+  // docs/policy/external-conversation-continuation.md).
+  async function continuationSource(id: string, offset?: number): Promise<ImportedTranscript> {
+    const value = await request<{ provider: string; importedAt: string; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; sourceModelLabel?: string | null }> } }>(
+      `${pathFor(id)}/continuation?offset=${offset === undefined ? "end" : Math.max(0, Math.trunc(offset))}`, { cache: "no-store" });
+    const status = value.source.status === "deleted" || value.source.status === "locked" ? value.source.status : "available";
+    const messages = status === "available" ? (value.source.messages ?? []).filter(message => message.role === "user" || message.role === "assistant")
+      .map(message => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content, sourceModelLabel: message.sourceModelLabel ?? null })) : [];
+    return { provider: value.provider, importedAt: value.importedAt, status, messages, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100 };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
     await request(pathFor(id), json("PATCH", { selectionMode: auto ? "auto" : "manual", ...(!auto ? { selectedModels: [modelId] } : {}) }));
@@ -282,7 +296,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     deviceSecurity: () => bridge.getDeviceSecurity?.() ?? Promise.resolve({ available: false, enabled: false, locked: false }),
     setDeviceLock: async (enabled, reason) => { await bridge.setDeviceLock({ enabled, reason }); window.dispatchEvent(new Event("tomverse-device-security-changed")); },
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
-    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => row.surface === "workspace" && ["chat", "image"].includes(row.kind)),
+    // A Review continuation is listed with Review (owner request 2026-10-26).
+    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
     createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
@@ -329,10 +344,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     verifyEmailCode: (email, code) => { clearSessionState(); return bridge.verifyEmailCode({ email, code }); },
     signOut: () => { clearSessionState(); return bridge.signOut(); },
     list: async () => {
-      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean }>>("/api/conversations");
-      return rows.filter((row) => row.surface === "chat" && row.kind === "chat");
+      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean; productKey?: string | null }>>("/api/conversations");
+      // A Chat continuation is a Chat conversation with its imported original
+      // above it, so it is listed with Chat (owner request 2026-10-26).
+      return rows.filter((row) => row.kind === "chat" && (row.surface === "chat" || (row.surface === "continuation" && row.productKey === "chat")));
     },
     load,
+    continuationSource,
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
