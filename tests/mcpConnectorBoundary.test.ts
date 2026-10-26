@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import test from "node:test";
 import { connectorInputSchema, mcpModelSchema, normalizeMcpResult, mcpToolName, validateMcpArguments } from "@/lib/mcpConnectorSchema";
 import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
@@ -33,7 +34,7 @@ test("undeclared arguments and untrusted constraint prose cannot reach automatic
   assert.throws(() => validateMcpArguments({ name: "read", mode: "read", inputSchema: schema }, { method: "not-a-valid-enum" }));
 });
 test("credential checks cover split parts, separators and an inserted character", () => {
-  const token = "mcp_9fnL4yJ8c0Q2zR6wK3vD5hP7";
+  const token = "mcp_" + randomBytes(18).toString("hex");
   for (const parts of [[token.slice(0, 12), token.slice(12)], [token.split("").join("-")], [token.slice(0, 12) + "X" + token.slice(12)]]) {
     assert.equal(containsMcpCredential({ content: parts.map(text => ({ type: "text", text })) }, token), true);
   }
