@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { McpProgressNotice } from "@/components/plugins/McpProgressNotice";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef, MouseEventHandler, ReactNode } from "react";
@@ -1479,6 +1480,7 @@ export function ChatMessageList({
                         currentProduct={currentProduct}
                       />
                     )}
+                    {!isUser && msg.mcpProgress && (isActivelyGenerating || msg.mcpProgress === "approval_required") && <McpProgressNotice state={msg.mcpProgress} />}
                     {!isUser &&
                       isActivelyGenerating &&
                       msg.isGeneratingArtifact &&

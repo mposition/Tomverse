@@ -1134,3 +1134,9 @@ e2dfa01a6963bee109ad65f022cb831ca2e663da:tests/integration/marketing-competitor-
 # two files and lines as the 4149b2d entries above; not a credential.
 ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19LocalMaxSessionResultOnce.test.mjs:generic-api-key:17
 ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19SessionAnalysisResultRoute.test.mjs:generic-api-key:25
+
+# Synthetic MCP credential-echo test value, never issued to or used by a service.
+# Commit 3c5426a added the invented literal to exercise fragmented credential
+# detection. The test now generates its value at runtime. Keep only this exact
+# historical finding exempt; current files and every other finding stay scanned.
+3c5426a6e7ae1c222fef7d9f4507b65099e6b319:tests/mcpConnectorBoundary.test.ts:generic-api-key:36
