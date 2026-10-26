@@ -1,6 +1,12 @@
 export const dynamic = "force-dynamic";
 
+import { cookies } from "next/headers";
+import { getServerSession } from "next-auth/next";
+
 import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
+import { authOptions } from "@/lib/auth";
+import { isE2EFixtureMode } from "@/lib/e2eTestMode";
+import { prisma } from "@/lib/prisma";
 
 /**
  * `/continuations/[conversationId]` — a conversation continued from an
@@ -23,8 +29,15 @@ import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
  *
  * The path stays because the imported half has to be part of the URL's
  * meaning: `conversationSurface()` sends a bridged conversation here from the
- * sidebar and from search, and it reads the bridge — never the product key,
- * which is `review` and shared with every other Review conversation.
+ * sidebar and from search, and it reads the bridge — never the product key.
+ *
+ * ## Which workspace
+ *
+ * The stored product of the owned row: a Chat continuation renders the Chat
+ * workspace (Smart Adaptive), anything else the Review workspace. Before
+ * 2026-10-25 this mount was neither, and showed the legacy comparison screen.
+ * The key remounts the client when the product changes under the same route,
+ * which is what following "Compare in Review" from a Chat continuation does.
  *
  * Nothing is gated here. The rollout flag governs *creating* a continuation
  * and *seeding* a turn from one; opening a conversation that already exists,
@@ -37,10 +50,40 @@ export default async function ContinuedConversationPage({
     params: Promise<{ conversationId: string }>;
 }) {
     const { conversationId } = await params;
+    const continuationProduct = await storedContinuationProduct(conversationId);
     return (
         <ReviewWorkspaceShell
+            key={continuationProduct}
             initialConversationId={conversationId}
             mountedSurface="continuation"
+            continuationProduct={continuationProduct}
         />
     );
+}
+
+/**
+ * The owned row's product. No session is Review (nothing to own); a failed
+ * read throws rather than guessing, because rendering the Review composer for
+ * a Chat row would let it store several models on a single-model product.
+ */
+async function storedContinuationProduct(
+    conversationId: string
+): Promise<"chat" | "review"> {
+    // Browser-only mocked journeys have no database, so a spec names its Chat
+    // continuations (comma-separated ids) in a cookie, behind the same loopback
+    // + two-flag fixture boundary as the other shells. Never read on a
+    // deployment.
+    if (isE2EFixtureMode()) {
+        const jar = await cookies();
+        const chatIds = jar.get("__tomverse_e2e_chat_continuations")?.value ?? "";
+        return chatIds.split(",").includes(conversationId) ? "chat" : "review";
+    }
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!userId) return "review";
+    const row = await prisma.conversation.findFirst({
+        where: { id: conversationId, userId },
+        select: { productKey: true },
+    });
+    return row?.productKey === "chat" ? "chat" : "review";
 }

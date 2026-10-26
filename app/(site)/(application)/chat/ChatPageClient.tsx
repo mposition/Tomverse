@@ -130,6 +130,8 @@ import {
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
+import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
+import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
 import {
   clearContinuationFocus,
   continuationFocusSnapshot,
@@ -770,7 +772,8 @@ export function ChatPageClient({
   chatStarterEnabledFlagKeys = [],
   chatStarterCapabilities = [],
   initialConversationId = null,
-  mountedSurface = "workspace",
+  mountedSurface: routeSurface = "workspace",
+  continuationProduct,
 }: {
   guestDefaultModelId: string;
   /**
@@ -883,7 +886,33 @@ export function ChatPageClient({
    * conversation than the one on screen.
    */
   mountedSurface?: ConversationSurface;
+  /**
+   * The stored product of a continuation mount (its route reads the owned
+   * row). Ignored on every other surface.
+   */
+  continuationProduct?: "chat" | "review";
 }) {
+  /*
+    Two surfaces, kept apart on purpose.
+
+    `routeSurface` is the URL this mount is at, and it is what navigation
+    compares a row's server-owned surface against. `mountedSurface` is the
+    workspace it renders: a continuation is the Chat or the Review product with
+    an imported transcript above it, never a third workspace of its own. Before
+    2026-10-25 the two were one value, and a continuation rendered neither
+    product's workspace -- the legacy comparison screen.
+  */
+  const mountedSurface: ConversationSurface =
+    routeSurface === "continuation"
+      ? continuationProduct === "chat" ? "chat" : "workspace"
+      : routeSurface;
+  /*
+    A continuation stays text-only (docs/policy/external-conversation-continuation.md §5.1): the server
+    refuses an image turn on a bridged conversation after the question is
+    saved, so no in-conversation image path may start here. The separate image
+    draft, which carries no imported transcript, is unaffected.
+  */
+  const inConversationImagesAllowed = routeSurface !== "continuation";
   const {
     models: AVAILABLE_MODELS,
     getModel,
@@ -2406,6 +2435,7 @@ export function ChatPageClient({
   // an image request to the image workspace (lib/chatImageIntent.ts). The
   // send gate in `handleGlobalSubmit` reads this answer.
   const imageIntentRoutedOnSend =
+    inConversationImagesAllowed &&
     chatImageIntentEnabled &&
     !isGuestMode &&
     imageGenerationEnabled &&
@@ -3393,7 +3423,8 @@ export function ChatPageClient({
   }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setFocusToken, setInputValue, showToast, t]);
 
   useEffect(() => {
-    if (mountedSurface !== "chat" || isGuestMode ||
+    // The /chat URL names its conversation; a continuation route already does.
+    if (routeSurface !== "chat" || isGuestMode ||
         !isInitialConversationResolved || !currentChatId) return;
     const url = new URL(window.location.href);
     // A not-yet-resolved owned read must not erase the id needed for reload.
@@ -3404,7 +3435,7 @@ export function ChatPageClient({
     // probe and the server would correctly answer 404.
     url.searchParams.set(CONVERSATION_HANDOFF_PARAM, currentChatId);
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  }, [currentChatId, isGuestMode, isInitialConversationResolved, mountedSurface]);
+  }, [currentChatId, isGuestMode, isInitialConversationResolved, routeSurface]);
 
   const runComparisonPreflight = useCallback(
     async ({
@@ -4393,7 +4424,7 @@ export function ChatPageClient({
         const defaults = reviewDefaultProvidersRef.current;
         if (defaults?.userId === sessionUserId) reviewWorkspace.setProviders(defaults.providers.slice(0, Math.min(3, maxSelectableModels)));
         else reviewWorkspace.clearProviders();
-        if (mountedSurface === "continuation" && identityKey) {
+        if (routeSurface === "continuation" && identityKey) {
             // This route transition unmounts the continuation tree. Promote
             // accepted turns before changing the selection ticket so their
             // prompt-free receipt survives into the next mount.
@@ -4425,10 +4456,10 @@ export function ChatPageClient({
           arriving there with no conversation open is exactly its own new-chat
           state.
         */
-        if (mountedSurface === "continuation") {
+        if (routeSurface === "continuation") {
             // A fresh Chat entry re-runs the server's current offered gate.
             // Existing owned Chat remains readable independently of that gate.
-            router.push(REVIEW_WORKSPACE_PATH);
+            router.push(mountedSurface === "chat" ? CHAT_WORKSPACE_PATH : REVIEW_WORKSPACE_PATH);
             return;
         }
         if (mountedSurface === "chat") {
@@ -4520,6 +4551,9 @@ export function ChatPageClient({
         }
     ) => {
         if (mountedSurface === "workspace") {
+            // A Review continuation has no in-conversation image mode
+            // (docs/policy/external-conversation-continuation.md §5.1).
+            if (!inConversationImagesAllowed) return;
             setReviewImageModelId(modelId ?? options?.modelIds?.[0] ?? DEFAULT_IMAGE_MODEL_ID);
             reviewWorkspace.setImagePromptMode(true);
             setInputValue(draftText);
@@ -4832,7 +4866,7 @@ export function ChatPageClient({
                     router.push(ownPath);
                     return;
                 }
-            } else if (targetSurface !== mountedSurface) {
+            } else if (targetSurface !== routeSurface) {
                 // The workspace has no per-conversation URL, so the id travels
                 // as a parameter the workspace spends on arrival.
                 // Review has its own canonical workspace after the product
@@ -5000,7 +5034,7 @@ export function ChatPageClient({
         if (navigationAttempt === conversationNavigationAttemptRef.current &&
             currentChatIdRef.current === id &&
             ["chat", "workspace", "continuation"].includes(data.surface) &&
-            data.surface !== mountedSurface) {
+            data.surface !== routeSurface) {
           // The in-place selection above already made `id` current, but this
           // late server-owned surface answer still leaves the mounted tree.
           // Re-run the departure barrier so durable-but-undispatched turns are
@@ -5159,7 +5193,7 @@ export function ChatPageClient({
               screen the user came from, not replay this selection. The
               continuation's own path carries no parameter and is left alone.
             */
-            if (mountedSurface !== "chat" && window.location.search.includes(CONVERSATION_HANDOFF_PARAM)) {
+            if (routeSurface !== "chat" && window.location.search.includes(CONVERSATION_HANDOFF_PARAM)) {
                 const url = new URL(window.location.href);
                 url.searchParams.delete(CONVERSATION_HANDOFF_PARAM);
                 window.history.replaceState(
@@ -5242,7 +5276,7 @@ export function ChatPageClient({
             ? conversations.find((conversation) => conversation.id === savedChatId)
             : undefined;
         const restorableChatId =
-            savedRow && (savedRow.surface ?? "workspace") === mountedSurface
+            savedRow && (savedRow.surface ?? "workspace") === routeSurface
                 ? savedRow.id
                 : null;
 
@@ -5736,7 +5770,8 @@ export function ChatPageClient({
       // marker would not survive every restore/remount path safely.
       return;
     }
-    if (mountedSurface === "workspace" && reviewWorkspace.mode === "professional" &&
+    if (mountedSurface === "workspace" && inConversationImagesAllowed &&
+      reviewWorkspace.mode === "professional" &&
       options === undefined && reviewWorkspace.imagePromptMode && reviewImageModelId) {
       const model = imageCatalog.getModel(reviewImageModelId);
       if (!model || model.disabledReason || isGuestMode || !imageGenerationEnabled ||
@@ -5756,6 +5791,7 @@ export function ChatPageClient({
         imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds });
     }
     const professionalImageRouting = mountedSurface === "workspace" &&
+      inConversationImagesAllowed &&
       options === undefined &&
       reviewWorkspace.mode === "professional" && chatImageIntentEnabled && imageGenerationEnabled &&
       !isGuestMode && attachments.length === 0 && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
@@ -5820,6 +5856,12 @@ export function ChatPageClient({
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
+        if (!inConversationImagesAllowed) {
+          // Easy still picks text models per question on a continuation; an
+          // image answer is refused before anything is saved
+          // (docs/policy/external-conversation-continuation.md §5.1).
+          reviewWorkspace.setError(t("continuation.imagesUnavailable")); return;
+        }
         if (chosen.length > imageGroupMaxModelsProp) {
           reviewWorkspace.setError(t("chat.imageGenerationModelLimitNotice").replace("{max}", String(imageGroupMaxModelsProp))); return;
         }
@@ -8127,7 +8169,9 @@ export function ChatPageClient({
             return "unknown";
           }
           const data = await response.json().catch(() => null);
-          if (data?.surface !== "chat") return "unknown";
+          // Still this mount's Chat row: a plain Chat at /chat, or a Chat
+          // continuation at its own route (surface "continuation").
+          if (data?.surface !== routeSurface || data?.productKey !== "chat") return "unknown";
           if (
             data?.selectionMode === mode &&
             (mode !== "auto" || data?.autoSelection?.offered === true)
@@ -10050,10 +10094,70 @@ export function ChatPageClient({
         : [],
     [continuationSource.timeline]
   );
+  /*
+    "Compare in Review" (owner decision 2026-10-25). Only a Chat continuation
+    offers it, and only while its original is readable: the server forks the
+    same snapshot into a new Review conversation and this one stays Chat.
+  */
+  /*
+    The press's own selection ticket. Every departure -- another row, a new
+    chat -- allocates a new ticket before it navigates, and a product switch
+    is marked below, so an answer that lands mid-departure is not this
+    screen's to act on. The conversation id alone stays the same while a new
+    chat or a product switch is leaving.
+  */
+  const reviewForkTicketRef = useRef<number | null>(null);
+  // The product switch's own admission, read when the fork's answer lands:
+  // leaving for Review preserves the drafts the same way the switcher does.
+  const reviewForkAdmissionRef = useRef<() => boolean>(() => false);
+  const {
+    start: startReviewFork,
+    status: reviewForkStatus,
+    errorMessage: reviewForkError,
+  } = useContinuationLauncher(
+    { reviewFromConversationId: shellConversationId ?? "" },
+    {
+      isOwnerCurrent: () =>
+        reviewForkTicketRef.current === conversationSelectionTicketRef.current &&
+        currentChatIdRef.current === shellConversationId,
+      beforeNavigate: () => reviewForkAdmissionRef.current(),
+    }
+  );
+  // Same blocking states as the product switcher (unknown writes, sends,
+  // draft conflicts or failed draft sync); computed here because the switch's
+  // own value is defined further down.
+  const compareBlocked =
+    Boolean(pendingSubmission) || selectionModePending || draftConflict || draftSyncFailed;
+  const compareInReview = useMemo(
+    () =>
+      routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode &&
+      shellConversationId && continuationSource.timeline?.source.status === "available"
+        ? {
+            onPress: () => {
+              reviewForkTicketRef.current = conversationSelectionTicketRef.current;
+              void startReviewFork();
+            },
+            pending: reviewForkStatus === "creating" || compareBlocked,
+            error: reviewForkError,
+          }
+        : undefined,
+    [
+      continuationSource.timeline,
+      isGuestMode,
+      mountedSurface,
+      compareBlocked,
+      reviewForkError,
+      reviewForkStatus,
+      startReviewFork,
+      routeSurface,
+      shellConversationId,
+    ]
+  );
   const importedTranscript = useMemo(
     () =>
       continuationSource.timeline
         ? {
+            compareInReview,
             status: continuationSource.timeline.source.status,
             provider: continuationSource.timeline.provider,
             importedAt: continuationSource.timeline.importedAt,
@@ -10088,6 +10192,7 @@ export function ChatPageClient({
       continuationSource.focusOutcome,
       continuationFocusRequest,
       consumeAppliedSearchHitFocus,
+      compareInReview,
     ]
   );
 
@@ -10113,8 +10218,32 @@ export function ChatPageClient({
     Boolean(productSwitchHasUnknownWrite) ||
     draftConflict ||
     draftSyncFailed;
-  const handleProductSwitch = () =>
-    !productSwitchDisabled && preserveDraftsForProductSwitch();
+  const handleProductSwitch = () => {
+    const admitted = !productSwitchDisabled && preserveDraftsForProductSwitch();
+    // Leaving for the other product: a Compare-in-Review answer still in
+    // flight is no longer this screen's to navigate.
+    if (admitted) reviewForkTicketRef.current = null;
+    return admitted;
+  };
+  /*
+    "Compare in Review" on a Chat answer (lib/chatReviewHandoff.ts): leave
+    through the product switch's own admission -- drafts preserved, blocked
+    while a send, mode write or draft conflict is open -- to a new Review
+    draft. Nothing here writes to this conversation or sends anything.
+  */
+  const handleCompareChatInReview = (seed: string) => {
+    if (!handleProductSwitch()) {
+      showToast(t("chat.compareInReviewBlocked"), "info");
+      return;
+    }
+    router.push(reviewPrefillHref(seed));
+  };
+  const compareChatInReview =
+    mountedSurface === "chat" && !isGuestMode ? handleCompareChatInReview : undefined;
+  useLayoutEffect(() => {
+    reviewForkAdmissionRef.current = () =>
+      !productSwitchDisabled && preserveDraftsForProductSwitch();
+  });
   const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
     ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
     : selectedModels;
@@ -10185,6 +10314,7 @@ export function ChatPageClient({
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
+          onCompareInReview={compareChatInReview}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
@@ -10215,7 +10345,7 @@ export function ChatPageClient({
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
+          onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);
@@ -10359,6 +10489,7 @@ export function ChatPageClient({
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
+          onCompareInReview={compareChatInReview}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
@@ -10389,7 +10520,7 @@ export function ChatPageClient({
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage ? (text, modelId, options) => {
+          onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);

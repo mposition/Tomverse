@@ -42,7 +42,22 @@ The file saver was also exercised in a fresh Android emulator with networking
 disabled: path refusal, user cancellation, concurrent-save refusal and saving
 the exact 29-byte synthetic fixture through the system picker all passed.
 
+## Store billing
+
+Native store subscriptions, plan changes, cancellation, restoration and credit
+packs are available behind default-off billing switches. See
+[store billing setup](../../docs/ops/mobile-store-billing.md) for configuration,
+verification and activation requirements. Store credit purchases do not expire.
+
 ## Local development
+
+Automatic current-location intent analysis additionally requires the server-side
+`TOMVERSE_CHAT_LOCATION_INTENT_ENABLED=true` switch (default off) and a configured
+Auto routing model. Enabling it permits one bounded routing-model call per
+eligible question, including manual models and verified guests, within the
+existing provider operational budget. Manual location and reuse of an already
+enabled location session do not need this extra call. Activation is a separate
+operator action; this change does not enable the switch.
 
 From the repository root, using local PowerShell, without production credentials:
 
@@ -70,8 +85,29 @@ The iOS MVP targets iOS 17.4+ and requires macOS and Xcode. Signing and real dev
 
 ## Authentication and operational boundary
 
-The default app UI signs existing accounts in using an email address and a
-six-digit code entered inside the app. The native plugin calls the exact
+The primary sign-in action opens the existing web sign-in flow in the system
+browser and returns to the installed app through the native PKCE session.
+It uses the same sign-in options as the website. The welcome screen also offers
+an explicit email-code option inside the app. The email form's alternate sign-in
+action uses the same native browser flow; it does not open a standalone website
+login that cannot return a session to the app. Cancelled, expired and unavailable
+browser sign-ins retain the email-code option and show an appropriate message.
+
+After web authentication, the completion page automatically requests one
+short-lived PKCE grant and navigates to the HTTPS callback. There is no extra
+confirmation or Open app button. Android uses AndroidX Auth Tab, which closes the
+authentication window and delivers the verified HTTPS result to the native
+plugin. It selects an Auth Tab-capable default browser, then installed Chrome;
+if neither supports Auth Tab, sign-in reports unavailable. iOS retains its
+ASWebAuthenticationSession callback and automatic dismissal. The native layer
+resolves sign-in only after exchanging and storing the session. Domain
+association verification and physical-device verification remain required.
+An expired or signed-out Android attempt retains its ActivityResult slot until
+the old authentication window returns. Close that window before retrying; its
+late cancellation or redirect cannot consume a newer attempt's PKCE proof.
+
+The email option signs existing accounts in using a six-digit code entered
+inside the app. The native plugin calls the exact
 `/api/auth/mobile/email` path; the server reuses the existing email delivery,
 OTP verification, rate limits and mobile session issuer. Cookies cannot grant
 identity on this path. Signup and additional Turnstile verification are directed
@@ -265,3 +301,9 @@ the corrected authentication boundary; no live endpoint was enabled by this work
 Do not hand a local validation APK over as a production-login fix. Real-account
 testing requires separately approved publication/deployment and server enrollment,
 followed by a supported capability response from the actual target server.
+
+## Foreground location
+
+The current Chat and Review composers offer a Current location switch in Tools. When location is off, a bounded analysis by the configured routing model can identify a location-dependent question and request foreground device permission before the same question is answered. Existing device permission is reused, including after reload; the app does not show another permission dialog of its own. Once enabled, each message reads a fresh approximate fix. Manual off, denial and acquisition failures suppress automatic requests for the current identity session. Location is excluded from stored messages and device drafts. Switching accounts, signing out, or reloading clears in-memory state without changing the browser/device permission setting. Ordinary chat remains available on any analysis or acquisition failure. Analysis uses the existing routing provider operational budget; no new provider, price or budget ceiling is enabled.
+
+The existing native chat enrollment, browser login, secure store and product navigation are unchanged. Run the workspace cap:sync script after dependency changes; its post-sync hook configures foreground coarse Android location and reduced-accuracy iOS usage descriptions. Physical-device permission and GPS observations remain separate from browser fixtures.

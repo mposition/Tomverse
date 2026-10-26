@@ -12,6 +12,16 @@ export type ChatMessage = {
   attachments?: import("../../../components/chat/types").ChatAttachment[];
   imageTurn?: { groupId: string; modelIds: string[] };
 };
+/** The imported original above a continuation's own turns. Read-only. */
+export type ImportedTranscript = {
+  provider: string;
+  importedAt: string;
+  status: "available" | "deleted" | "locked";
+  messages: Array<{ id: string; role: "user" | "assistant"; content: string; sourceModelLabel: string | null }>;
+  /** Index of the first loaded message; earlier ones load a page at a time. */
+  offset: number;
+  pageSize: number;
+};
 export type Conversation = {
   id: string;
   title: string;
@@ -24,6 +34,8 @@ export type Conversation = {
   webSearchMode?: "off" | "always";
   memoryMode?: "inherit" | "on" | "off";
   assistantProfileId?: string | null;
+  productKey?: string | null;
+  imported?: ImportedTranscript;
 };
 export type MobileImageGroup = {
   status: string;
@@ -36,7 +48,7 @@ export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limi
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
 export type AssistantSummary = { id: string; name: string; description?: string | null };
-export type ChatSummary = Pick<Conversation, "id" | "title"> & { kind?: string; surface?: string; updatedAt?: string; pinned?: boolean; pinSeq?: number; projectId?: string | null; selectedModels?: string[]; isLocked?: boolean; shareEnabled?: boolean; sourceState?: string | null };
+export type ChatSummary = Pick<Conversation, "id" | "title"> & { kind?: string; surface?: string; productKey?: string | null; updatedAt?: string; pinned?: boolean; pinSeq?: number; projectId?: string | null; selectedModels?: string[]; isLocked?: boolean; shareEnabled?: boolean; sourceState?: string | null };
 export type HistoryProject = { id: string; name: string; conversationCount?: number };
 export type HistorySearch = { results: Array<{ id: string; kind?: string; conversationId: string; conversationTitle: string; snippet: string; surface?: string }>; truncated?: boolean; sourceSearch?: string; validUntil?: string | null };
 export interface HistoryTransport {
@@ -58,6 +70,7 @@ export interface HistoryTransport {
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
+  location?: ReturnType<typeof import("@tomverse/chat-core").createChatLocationSession>;
   history?: HistoryTransport;
   voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number | null }>;
   voiceRequest?(body: unknown, signal?: AbortSignal): Promise<Response>;
@@ -103,6 +116,7 @@ export interface ChatTransport {
   signOut(): Promise<void>;
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;
+  continuationSource?(id: string, offset?: number): Promise<ImportedTranscript>;
   create(title?: string): Promise<Conversation>;
   models(): Promise<MobileModel[]>;
   capabilities(): Promise<{ offered: boolean }>;

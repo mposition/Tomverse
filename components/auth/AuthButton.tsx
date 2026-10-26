@@ -1,5 +1,6 @@
 ﻿// components/auth/AuthButton.tsx
 "use client";
+import { storeBillingDeletionNotice } from "@/locales/storeBilling";
 
 import { UsagePercentGauge } from "@/components/chat/UsagePercentGauge";
 import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
@@ -2337,6 +2338,9 @@ export function AuthButton({
                         </div>
                         <p className="mt-2 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
                             {t("auth.deleteAccountImmediateDescription")}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-red-700 dark:text-red-100" data-testid="delete-account-store-billing-notice">
+                            {storeBillingDeletionNotice(globalLang)}
                         </p>
                         <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
                             <input

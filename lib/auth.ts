@@ -7,7 +7,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 import { parseEmailLoginIntent, verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
 import { appUrl } from "@/lib/accountEmails";
 import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
@@ -120,6 +120,7 @@ export const authOptions: NextAuthOptions = {
                         plan: true,
                         createdAt: true,
                         subscriptionStatus: true,
+                        ...STORE_ENTITLEMENT_SELECT,
                         subscriptionCurrentPeriodEnd: true,
                     },
                 });
@@ -250,8 +251,13 @@ export const authOptions: NextAuthOptions = {
                     createdAt?: unknown;
                     subscriptionStatus?: string | null;
                     subscriptionCurrentPeriodEnd?: Date | null;
+                    webSubscriptionPlan?: string | null;
+                    storeSubscriptionPlan?: string | null;
+                    storeSubscriptionExpiresAt?: Date | null;
+                    storeSubscriptionSnapshot?: unknown;
                 };
                 token.plan = effectivePlanForAccess({
+                    ...analyticsUser,
                     plan: analyticsUser.plan,
                     subscriptionStatus: analyticsUser.subscriptionStatus,
                     subscriptionCurrentPeriodEnd:

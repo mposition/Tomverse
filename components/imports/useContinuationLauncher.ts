@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useLanguage } from "@/components/LanguageProvider";
@@ -34,9 +34,12 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
  *     retry: a double click, a dropped response and a "try again" all send the
  *     same key, and the server resolves them to the one conversation the first
  *     request created.
- *   - Cleared only by `cancel()`. Arming again after an explicit cancel is a
- *     second, deliberate fork, which §3 allows.
- *   - Never cleared by a failure. That is the case the whole thing exists for.
+ *   - Cleared by `cancel()` -- arming again after an explicit cancel is a
+ *     second, deliberate fork, which §3 allows -- and by a success this screen
+ *     acted on, which ends the attempt.
+ *   - Never cleared by a failure, nor by leaving the screen while the answer
+ *     is unknown. That is the case the whole thing exists for, so the key is
+ *     held per endpoint outside the component and outlives a remount.
  *
  * The server decides everything else: `createExternalContinuation` reads by
  * `(userId, idempotencyKey)`, creates, and re-reads on a unique violation, so
@@ -62,60 +65,170 @@ export type ContinuationLauncher = {
     cancel: () => void;
 };
 
-export function useContinuationLauncher({
-    externalConversationId,
-}: {
-    externalConversationId: string;
-}): ContinuationLauncher {
+/**
+ * What the attempt continues.
+ *
+ * An imported snapshot (the server picks Chat or Review), or a continuation
+ * being compared in Review -- a second fork of the same snapshot that the
+ * server finds from that conversation's own bridge, so no external id is ever
+ * sent on an account conversation URL.
+ */
+export type ContinuationLaunchSource =
+    | { externalConversationId: string }
+    | { reviewFromConversationId: string };
+
+/**
+ * The open attempt's key per endpoint, for this tab. Outside the component so
+ * an attempt whose answer never reached the screen keeps its key across an
+ * unmount: pressing again replays it rather than making a second conversation.
+ */
+const openAttemptKeys = new Map<string, string>();
+
+const launchEndpoint = (source: ContinuationLaunchSource): string =>
+    "externalConversationId" in source
+        ? `/api/external-conversations/${encodeURIComponent(source.externalConversationId)}/continuations`
+        : `/api/conversations/${encodeURIComponent(source.reviewFromConversationId)}/continuation/review`;
+
+export function useContinuationLauncher(
+    source: ContinuationLaunchSource,
+    options: {
+        /**
+         * Whether the screen that pressed is still the one on show, read when
+         * the answer lands. The Compare-in-Review caller moves its selection
+         * before `source` follows it, and an answer in that window must not
+         * navigate the conversation the user has just opened.
+         */
+        isOwnerCurrent?: () => boolean;
+        /**
+         * Asked just before navigating to the created conversation. `false`
+         * keeps this screen (and the attempt's key, so the next press replays
+         * the same conversation): the Compare-in-Review caller refuses while
+         * a draft cannot be preserved, as the product switch does.
+         */
+        beforeNavigate?: () => boolean;
+    } = {}
+): ContinuationLauncher {
+    const endpoint = launchEndpoint(source);
+    const isOwnerCurrentRef = useRef(options.isOwnerCurrent);
+    const beforeNavigateRef = useRef(options.beforeNavigate);
+    useLayoutEffect(() => {
+        isOwnerCurrentRef.current = options.isOwnerCurrent;
+        beforeNavigateRef.current = options.beforeNavigate;
+    });
     const { t } = useLanguage();
     const router = useRouter();
     const [status, setStatus] = useState<ContinuationLauncherStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const idempotencyKeyRef = useRef<string | null>(null);
+    /*
+      The attempt belongs to one endpoint.
+
+      The Compare-in-Review caller keeps this hook mounted while the open
+      continuation changes (`/continuations/[a]` to `[b]` is the same page),
+      so the source can change under a live attempt. A key minted for A sent
+      to B would be answered with A's conversation -- the server resolves by
+      `(userId, key)` alone -- and A's late response would navigate B's
+      screen. So the key is stored with its endpoint, the state resets when the
+      endpoint changes, and a response that arrives after its endpoint stopped
+      being current -- or after the launcher unmounted -- changes nothing.
+
+      Current means "the same mount generation", not "the same endpoint
+      string": A -> B -> A must not revive A's first response, so every
+      endpoint change and the unmount start a new generation.
+    */
+    const generationRef = useRef(0);
+    const [stateEndpoint, setStateEndpoint] = useState(endpoint);
+    if (stateEndpoint !== endpoint) {
+        setStateEndpoint(endpoint);
+        setStatus("idle");
+        setErrorMessage(null);
+    }
+    useLayoutEffect(() => {
+        generationRef.current += 1;
+        return () => {
+            generationRef.current += 1;
+        };
+    }, [endpoint]);
+    const creating = status === "creating" && stateEndpoint === endpoint;
 
     const start = useCallback(async (): Promise<boolean> => {
         // Guards the double click at the source: the second press finds the
         // launcher already creating and returns before it can send anything.
         // The button is disabled too, but a disabled attribute is a rendering
         // detail and this is the invariant.
-        if (status === "creating") return false;
+        if (creating) return false;
 
         // `crypto.randomUUID` exists in every browser this application
         // supports; the fallback keeps a non-secure context (an http://
         // preview) failing by creating one conversation rather than by
         // throwing before the click does anything.
-        idempotencyKeyRef.current ??=
-            typeof crypto !== "undefined" && "randomUUID" in crypto
-                ? crypto.randomUUID()
-                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const idempotencyKey = idempotencyKeyRef.current;
+        let idempotencyKey = openAttemptKeys.get(endpoint);
+        if (!idempotencyKey) {
+            idempotencyKey =
+                typeof crypto !== "undefined" && "randomUUID" in crypto
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            openAttemptKeys.set(endpoint, idempotencyKey);
+        }
+        const generation = generationRef.current;
+        const isCurrent = () =>
+            generationRef.current === generation &&
+            (isOwnerCurrentRef.current?.() ?? true);
+        // An answer the screen no longer owns leaves the button usable again,
+        // but only while this mount still shows the same endpoint: a newer
+        // attempt's state is not this answer's to change. The key stays, so
+        // pressing again replays whatever this request created.
+        const settleStale = () => {
+            if (generationRef.current === generation) setStatus("idle");
+        };
 
         setStatus("creating");
         setErrorMessage(null);
         try {
             const response = await fetch(
-                `/api/external-conversations/${encodeURIComponent(externalConversationId)}/continuations`,
+                endpoint,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ idempotencyKey }),
                 }
             );
+            if (!isCurrent()) {
+                await discardResponseBody(response);
+                settleStale();
+                return false;
+            }
             if (!response.ok) {
                 await discardResponseBody(response);
+                if (!isCurrent()) {
+                    settleStale();
+                    return false;
+                }
                 setStatus("failed");
                 setErrorMessage(refusalMessage(response.status, t));
                 return false;
             }
             const body = (await response.json()) as { conversationId?: string };
+            if (!isCurrent()) {
+                settleStale();
+                return false;
+            }
             if (!body.conversationId) {
                 setStatus("failed");
                 setErrorMessage(t("continuation.createFailed"));
                 return false;
             }
+            if (beforeNavigateRef.current && !beforeNavigateRef.current()) {
+                setStatus("idle");
+                return false;
+            }
+            openAttemptKeys.delete(endpoint);
             router.push(continuationPath(body.conversationId));
             return true;
         } catch {
+            if (!isCurrent()) {
+                settleStale();
+                return false;
+            }
             // The attempt keeps its key, so pressing again resolves to
             // whatever the first request created rather than making a second
             // conversation.
@@ -123,13 +236,13 @@ export function useContinuationLauncher({
             setErrorMessage(t("continuation.createFailed"));
             return false;
         }
-    }, [externalConversationId, router, status, t]);
+    }, [creating, endpoint, router, t]);
 
     const cancel = useCallback(() => {
-        idempotencyKeyRef.current = null;
+        openAttemptKeys.delete(endpoint);
         setStatus("idle");
         setErrorMessage(null);
-    }, []);
+    }, [endpoint]);
 
     return { status, errorMessage, start, cancel };
 }

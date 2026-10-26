@@ -7,7 +7,8 @@ import { useSession } from "next-auth/react";
 import { useUserUsage } from "./useUserUsage";
 import { usagePercent } from "./UsagePercentGauge";
 import { chatProductUiCopy, localizedProductHref, type ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
-import { ArrowRight, BarChart3, Check, ChevronDown, Moon, X } from "lucide-react";
+import { ArrowRight, BarChart3, Check, ChevronDown, Moon, Puzzle, X } from "lucide-react";
+import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -80,7 +81,7 @@ export function ChatCommandBar({ workspace, locked = false }: { workspace: Works
   </header>;
 }
 
-export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct; locked?: boolean }) {
+export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct | "plugins"; locked?: boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const [open, setOpen] = useState(false);
   const keyboardInset = useKeyboardInset();
@@ -112,6 +113,7 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
       {product === "chat" ? <button type="button" aria-current="page" onClick={() => setOpen(false)}><Icon file="63e9a" /><span>Chat</span></button>
         : <Link className="review-navigation-chat" aria-disabled={locked} href={localizedProductHref("chat", lang)} onClick={event => { if (locked || (onChat && !onChat())) event.preventDefault(); }}><Icon file="63e9a" /><span>Chat</span></Link>}
       <button className="review-navigation-history" ref={trigger} type="button" onClick={() => setOpen(true)} aria-expanded={open}><Icon file="c8527" /><span>{c.history}</span></button>
+      <Link href={`/plugins?lang=${lang}`} className="review-navigation-plugins" data-testid="navigation-plugins" aria-current={product === "plugins" ? "page" : undefined} aria-disabled={locked || undefined} onClick={event => { if (locked) event.preventDefault(); }}><Puzzle size={22} aria-hidden="true" /><span>{mcpConnectorCopy[lang].title}</span></Link>
       <div className="review-nav-spacer" />
       <Link href="/help"><Icon file="2b087" /><span>{c.help}</span></Link>
       <button type="button" onClick={() => settings("preferences")}><Icon file="f3fe6" /><span>{c.settings}</span></button>

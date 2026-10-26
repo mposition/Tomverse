@@ -10,6 +10,9 @@ datasource db {
 // ==========================================
 
 model User {
+  mcpConnections McpConnection[]
+  mcpInvocations McpInvocation[]
+  mcpOAuthFlows McpOAuthFlow[]
   codeTaskReservations CodeTaskReservation[]
   id                            String        @id @default(cuid())
   name                          String?
@@ -24,6 +27,18 @@ model User {
   subscriptionCurrentPeriodEnd  DateTime?
   subscriptionBillingInterval   String?
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  mobileBillingId               String?       @unique
+  storeSubscriptionPurchaseAttempt Json?
+  storeSubscriptionVerificationPending Boolean @default(false)
+  subscriptionStore             String?
+  subscriptionStoreProductId    String?
+  webSubscriptionPlan           String?
+  storeSubscriptionPlan         String?
+  storeSubscriptionExpiresAt    DateTime?
+  storeSubscriptionBillingInterval String?
+  storeSubscriptionCancelAtPeriodEnd Boolean @default(false)
+  storeSubscriptionSyncedAt     DateTime?
+  storeSubscriptionSnapshot     Json?
   /// When the stored subscription state was read from Stripe. Webhooks arrive
   /// out of order, so a snapshot read before this is refused rather than
   /// reverting the account to an older plan. See lib/stripeWebhookSyncCore.ts.
@@ -68,6 +83,8 @@ model User {
   creditLots                           CreditLot[]
   creditLedgerEntries                  CreditLedgerEntry[]
   creditDebtEntries                    CreditDebtEntry[]
+  mobileStoreTransactions              MobileStoreTransaction[]
+  mobileStorePurchaseAuthorizations    MobileStorePurchaseAuthorization[]
   chatCreditReservations               ChatCreditReservation[]
   imageGenerations                     ImageGeneration[]
   messageArtifacts                     MessageArtifact[]
@@ -131,6 +148,60 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
+}
+
+// Human-selected remote MCP connections. Credentials and pending arguments are
+// encrypted; external documents are never stored here or promoted to Memory.
+model McpConnection {
+  id String @id @default(cuid())
+  userId String
+  serverId String
+  policyDigest String
+  status String @default("connected")
+  credentialCiphertext String?
+  oauthCiphertext String?
+  catalog Json
+  grants Json @default("[]")
+  version Int @default(1)
+  leaseId String?
+  leaseUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invocations McpInvocation[]
+  @@unique([userId, serverId])
+}
+
+model McpOAuthFlow {
+  id String @id @default(cuid())
+  userId String
+  serverId String
+  policyDigest String
+  connectionVersion Int?
+  stateHash String @unique
+  secretCiphertext String?
+  state String @default("pending")
+  redirectUri String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, expiresAt])
+}
+
+model McpInvocation {
+  id String @id @default(cuid())
+  userId String
+  connectionId String
+  connectionVersion Int
+  toolName String
+  argumentsCiphertext String?
+  state String @default("pending")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connection McpConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  @@index([userId, state, createdAt])
 }
 
 model UserSettings {
@@ -1706,6 +1777,7 @@ model CreditLot {
   originalFundedCostMicroUsd  BigInt              @default(0)
   remainingFundedCostMicroUsd BigInt              @default(0)
   expiresAt                   DateTime
+  nonExpiring                 Boolean             @default(false)
   status                      String              @default("active")
   createdAt                   DateTime            @default(now())
   updatedAt                   DateTime            @updatedAt
@@ -1713,6 +1785,49 @@ model CreditLot {
 
   @@index([userId, status, expiresAt])
   @@index([purchaseId])
+}
+
+model MobileStorePurchaseAuthorization {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store     String
+  productId String
+  createdAt DateTime @default(now())
+
+  @@index([userId, store, productId, createdAt], map: "mobile_store_purchase_auth_lookup_idx")
+}
+
+model MobileStoreTransaction {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store         String
+  environment   String
+  transactionId String
+  productId     String
+  packId        String
+  credits       Int
+  fundedCostMicroUsd BigInt
+  creditLotId   String?  @unique
+  refunded      Boolean @default(false)
+  needsReview   Boolean @default(false)
+  purchasedAt   DateTime
+  createdAt     DateTime @default(now())
+
+  @@unique([store, environment, transactionId])
+  @@index([userId, purchasedAt])
+}
+
+/// Financial replay tombstones deliberately have no account foreign key.
+model MobileStoreOwnership {
+  store           String
+  environment     String
+  transactionHash String
+  ownerHash       String
+  kind            String
+  createdAt       DateTime @default(now())
+  @@id([store, environment, transactionHash])
 }
 
 model CreditLedgerEntry {

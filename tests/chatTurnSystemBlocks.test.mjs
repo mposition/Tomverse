@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildChatTurnSystemBlocks } from "../lib/chatTurnSystemBlocks.ts";
 import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
+import { buildChatLocationPrompt, buildChatLocationContext } from "../lib/chatLocationPrompt.ts";
 import {
   ARTIFACT_TOOL_DEFINITION_TOKENS,
 } from "../lib/generatedArtifactToolPolicy.ts";
@@ -28,20 +29,21 @@ const base = {
 const build = (overrides = {}) =>
   buildChatTurnSystemBlocks({ ...base, ...overrides });
 
-test("a chat turn that cannot search carries all three capability blocks", () => {
+test("a chat turn that cannot search carries file, image, location, and search blocks", () => {
   const blocks = build();
-  assert.equal(blocks.systemMessages.length, 3);
+  assert.equal(blocks.systemMessages.length, 4);
   assert.equal(blocks.systemMessages[0].role, "system");
   assert.ok(blocks.systemMessages[0].content.includes("# File generation"));
   assert.ok(blocks.systemMessages[1].content.includes("# Images"));
-  assert.ok(blocks.systemMessages[2].content.includes("# Current information"));
+  assert.ok(blocks.systemMessages[2].content.includes("# Current device location"));
+  assert.ok(blocks.systemMessages[3].content.includes("# Current information"));
 });
 
-test("a searching turn carries two: there is no limitation to state", () => {
+test("a searching turn keeps location context without a search limitation", () => {
   const blocks = build({ nativeSearchEnabled: true });
   assert.equal(blocks.webSearchTurnState, "searching");
   assert.equal(blocks.webSearchCapabilityPrompt, "");
-  assert.equal(blocks.systemMessages.length, 2);
+  assert.equal(blocks.systemMessages.length, 3);
   // An empty system message is a message saying nothing, priced and sent.
   assert.ok(blocks.systemMessages.every((message) => message.content.trim()));
 });
@@ -58,6 +60,7 @@ test("a model that searches inside its own completion is not told it cannot", ()
 test("the priced tokens are exactly the blocks present plus the tool schema", () => {
   const blocks = build();
   const expected =
+    estimateTextTokens(buildChatLocationPrompt()) +
     estimateTextTokens(blocks.artifactPlan.systemPrompt) +
     estimateTextTokens(blocks.imageCapabilityPrompt) +
     estimateTextTokens(blocks.webSearchCapabilityPrompt) +
@@ -106,10 +109,14 @@ test("the forced-search flag only matters while native search is enabled", () =>
   assert.notEqual(onForced.promptTokens, onUnforced.promptTokens);
 });
 
-test("a deep research turn carries no blocks and costs nothing", () => {
+test("deep research has no system blocks, and prices only a supplied ephemeral fix", () => {
   const blocks = build({ isDeepResearchTurn: true });
-  assert.equal(blocks.systemMessages.length, 0);
+  assert.deepEqual(blocks.systemMessages, []);
   assert.equal(blocks.promptTokens, 0);
+  const currentLocation = { latitude: 1, longitude: 2, accuracy: 150, timestamp: Date.now() };
+  const located = build({ isDeepResearchTurn: true, currentLocation });
+  assert.deepEqual(located.systemMessages, []);
+  assert.equal(located.promptTokens, estimateTextTokens(buildChatLocationContext(currentLocation)));
   assert.equal(blocks.artifactPlan, null);
   assert.equal(blocks.imageCapabilityPrompt, "");
 });

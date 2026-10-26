@@ -94,6 +94,9 @@ test("no control revision, and GitHub unread, are each raised", () => {
     qaReleaseAttentionItems(input).map((item) => item.kind),
     ["control_missing", "main_unread"],
   );
+  // Why it could not be read reaches the operator.
+  input.main = { ...input.main, readFailure: "github_403" };
+  assert.deepEqual(qaReleaseAttentionItems(input).find((item) => item.kind === "main_unread"), { kind: "main_unread", failure: "github_403" });
 });
 
 test("a digest is late only while the digest is switched on", () => {

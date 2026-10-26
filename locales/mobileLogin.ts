@@ -10,6 +10,15 @@ const en = {
   "change": "Use another email",
   "resend": "Send a new code",
   "otherSignIn": "Use another sign-in method",
+  "browserIntro": "Use the same sign-in options as the Tomverse website, then return to the app.",
+  "inAppEmail": "Use an email code in the app",
+  "browserUnavailable": "Browser sign-in is not available on this server yet. You can use an email code in the app.",
+  "browserDeviceUnavailable": "Browser sign-in is unavailable on this device. Use an email code in the app.",
+  "browserVerificationFailed": "This app could not verify browser sign-in. Use an email code in the app.",
+  "browserBusy": "Close the previous sign-in window before starting another browser sign-in.",
+  "browserFailed": "Browser sign-in could not finish. Try again or use an email code in the app.",
+  "browserCancelled": "Browser sign-in was cancelled. Try again when you are ready.",
+  "browserExpired": "Browser sign-in expired. Start a new sign-in request.",
   "unavailable": "App sign-in is not available on this server yet. Please try again after the service update.",
   "invalid": "This code is invalid or expired. Check it or request a new code.",
   "limited": "Too many attempts. Wait a moment before trying again.",
@@ -32,6 +41,15 @@ export const mobileLoginCopy: Record<MobileLanguage, typeof en> = {
   "change": "다른 이메일 사용",
   "resend": "새 코드 받기",
   "otherSignIn": "다른 로그인 방법 사용",
+  "browserIntro": "Tomverse 웹사이트와 같은 로그인 방법으로 인증한 뒤 앱으로 돌아오세요.",
+  "inAppEmail": "앱에서 이메일 코드로 로그인",
+  "browserUnavailable": "이 서버에서 브라우저 로그인을 아직 사용할 수 없습니다. 앱에서 이메일 코드로 로그인할 수 있습니다.",
+  "browserDeviceUnavailable": "이 기기에서 브라우저 로그인을 사용할 수 없습니다. 앱에서 이메일 코드로 로그인해 주세요.",
+  "browserVerificationFailed": "앱에서 브라우저 로그인을 확인할 수 없습니다. 앱에서 이메일 코드로 로그인해 주세요.",
+  "browserBusy": "이전 로그인 창을 닫은 뒤 새 브라우저 로그인을 시작해 주세요.",
+  "browserFailed": "브라우저 로그인을 완료하지 못했습니다. 다시 시도하거나 앱에서 이메일 코드로 로그인해 주세요.",
+  "browserCancelled": "브라우저 로그인을 취소했습니다. 준비되면 다시 시도해 주세요.",
+  "browserExpired": "브라우저 로그인 시간이 만료되었습니다. 새 로그인을 시작해 주세요.",
   "unavailable": "이 서버는 아직 앱 로그인을 지원하지 않습니다. 서비스 업데이트 후 다시 시도해 주세요.",
   "invalid": "코드가 올바르지 않거나 만료되었습니다. 확인하거나 새 코드를 받아 주세요.",
   "limited": "시도 횟수가 많습니다. 잠시 후 다시 시도해 주세요.",
@@ -45,15 +63,20 @@ export const mobileLoginCopy: Record<MobileLanguage, typeof en> = {
  // English fallback until the initial email flow's other translations are ready.
  zh: en, de: en, fr: en, es: en, pt: en,
 };
-export function mobileLoginError(error: unknown, language: MobileLanguage, phase: "request" | "verify" = "verify") {
+export function mobileLoginError(error: unknown, language: MobileLanguage, phase: "request" | "verify" | "browser" = "verify") {
  const code = (error as { code?: string })?.code ?? "";
  const copy = mobileLoginCopy[language];
- if (code === "MOBILE_LOGIN_UNAVAILABLE") return copy.unavailable;
+ if (code === "MOBILE_LOGIN_UNAVAILABLE") return phase === "browser" ? copy.browserUnavailable : copy.unavailable;
+ if (phase === "browser" && code === "LOGIN_UNAVAILABLE") return copy.browserDeviceUnavailable;
+ if (phase === "browser" && code === "LOGIN_VERIFICATION_FAILED") return copy.browserVerificationFailed;
+ if (phase === "browser" && code === "LOGIN_IN_PROGRESS") return copy.browserBusy;
+ if (phase === "browser" && ["LOGIN_CANCELLED", "DEVICE_AUTH_CANCELLED"].includes(code)) return copy.browserCancelled;
+ if (phase === "browser" && code === "LOGIN_EXPIRED") return copy.browserExpired;
  if (code === "EMAIL_CODE_INVALID") return copy.invalid;
  if (code === "EMAIL_ACCOUNT_NOT_FOUND") return copy.account;
  if (code === "MOBILE_LOGIN_REFUSED") return copy.refused;
  if (code === "EMAIL_CODE_LOCKED" || code.includes("RATE_LIMITED")) return copy.limited;
  if (code.startsWith("TURNSTILE_")) return copy.challenge;
  if (code === "SEND_FAILED") return copy.deliveryFailed;
- return phase === "request" ? copy.requestFailed : copy.failed;
+ return phase === "browser" ? copy.browserFailed : phase === "request" ? copy.requestFailed : copy.failed;
 }

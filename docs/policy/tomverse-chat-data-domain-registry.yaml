@@ -178,6 +178,36 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: mcpOAuthFlow
+    prismaModel: McpOAuthFlow
+    userLinkageRole: subject
+    owner: chat
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: mcpConnection
+    prismaModel: McpConnection
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: mcpInvocation
+    prismaModel: McpInvocation
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: session
     prismaModel: Session
     userLinkageRole: subject
@@ -332,6 +362,26 @@ domains:
     retentionPolicy: immediate
     implementationStatus: implemented
     inUnifiedExport: included
+
+  - domain: mobileStoreTransaction
+    prismaModel: MobileStoreTransaction
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: mobileStorePurchaseAuthorization
+    prismaModel: MobileStorePurchaseAuthorization
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
 
   - domain: creditLot
     prismaModel: CreditLot

@@ -29,8 +29,15 @@ updates:
     # a new release SHA recorded, verified beyond PR CI, a rollback SHA, and a
     # confirmed back-merge.
     target-branch: develop
+    # Pinned to 02:00 Brisbane time so the weekly batch never lands, and starts
+    # CI, during operating hours. Unset, GitHub picked ~08:00 AEST on Sundays.
+    # Security updates are not scheduled and still arrive whenever an advisory
+    # is published.
     schedule:
       interval: weekly
+      day: sunday
+      time: "02:00"
+      timezone: Australia/Brisbane
     open-pull-requests-limit: 10
     ignore:
       # TypeScript 7 is the native port and no longer ships the JavaScript
@@ -133,5 +140,9 @@ updates:
     # into main (scripts/main-pr-source-policy.mjs); dependabot/** still
     # passes there for the security updates that ignore this setting.
     target-branch: develop
+    # Same 02:00 Brisbane slot as npm above.
     schedule:
       interval: weekly
+      day: sunday
+      time: "02:00"
+      timezone: Australia/Brisbane

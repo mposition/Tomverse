@@ -45,6 +45,12 @@ export type ExportDomainDeclaration = {
 };
 
 export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
+  { domain: "mcpOAuthFlow", publicName: "plugin_authorizations", prismaModel: "McpOAuthFlow", state: "included_filtered",
+    withheldReason: "OAuth state hashes, PKCE verifiers, tokens, client credentials and callback URLs are withheld." },
+  { domain: "mcpConnection", publicName: "plugin_connections", prismaModel: "McpConnection", state: "included_filtered",
+    withheldReason: "Authentication credentials, remote schemas, policy digests and execution leases are withheld." },
+  { domain: "mcpInvocation", publicName: "plugin_actions", prismaModel: "McpInvocation", state: "included_filtered",
+    withheldReason: "Encryption envelopes and internal version fences are withheld. Unexpired pending arguments are decrypted for their owner; terminal arguments are erased." },
   {domain:"codeTaskReservation",publicName:"code_credit_usage",prismaModel:"CodeTaskReservation",state:"included_filtered",
     withheldReason:"Provider cost basis, pricing snapshots, idempotency digests and internal lease data are withheld."},
   // --- wholly the user's own data ------------------------------------------
@@ -1102,6 +1108,21 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included_filtered",
     withheldReason:
       "Which promotion was redeemed, for what plan, and the access period it bought. The client IP and payment-method fingerprint hashes and the risk flags are abuse signals: handing a user their own fraud assessment teaches whoever is abusing the promotion how the control works.",
+  },
+  {
+    domain: "mobileStoreTransaction",
+    publicName: "store_credit_purchases",
+    prismaModel: "MobileStoreTransaction",
+    state: "included_filtered",
+    withheldReason:
+      "The store, product, credits, purchase time and refund state belong to the user. Store transaction identifiers and Tomverse's funded cost basis are withheld.",
+  },
+  {
+    domain: "mobileStorePurchaseAuthorization",
+    publicName: "pending_store_credit_purchases",
+    prismaModel: "MobileStorePurchaseAuthorization",
+    state: "included_filtered",
+    withheldReason: "The store, product and authorization time belong to the user; internal authorization identifiers are withheld.",
   },
   {
     domain: "creditLot",

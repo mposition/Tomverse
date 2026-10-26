@@ -37,7 +37,7 @@ export function createDemoTransport(): ChatTransport {
     saveMemoryPreferences: async input => { localStorage.setItem(key + ":memory", JSON.stringify(input)); },
     assistants: async () => [{ id: "demo-assistant", name: "Synthetic writing assistant" }],
     configureTools: async (id, input) => { const items = read(); const item = items.find(value => value.id === id)!; Object.assign(item, input); write(items); return item; },
-    listReview: async () => read().filter(item => item.surface === "workspace"),
+    listReview: async () => read().filter(item => item.surface === "workspace" || (item.surface === "continuation" && item.productKey === "review")),
     createReview: async models => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
     configureReview: async (id, models) => { const items = read(); const item = items.find(value => value.id === id)!; item.selectedModels = models; write(items); return item; },
     routeReview: async input => ({ kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
@@ -60,7 +60,10 @@ export function createDemoTransport(): ChatTransport {
     session: async () => signedIn,
     signIn: async () => { signedIn = true; localStorage.setItem(key + ":session", "signed-in"); },
     signOut: async () => { signedIn = false; localStorage.removeItem(key + ":session"); localStorage.removeItem(key); },
-    list: async () => read().filter(item => item.surface !== "workspace"),
+    list: async () => read().filter(item => item.surface !== "workspace" && !(item.surface === "continuation" && item.productKey === "review")),
+    // A fixture continuation stores its end page as `imported` and earlier pages
+    // by offset, so the older-messages button can be exercised without a server.
+    continuationSource: async (id, offset) => { const item = read().find(value => value.id === id) as (Conversation & { importedPages?: Record<string, NonNullable<Conversation["imported"]>> }) | undefined; const page = offset === undefined ? item?.imported : item?.importedPages?.[String(offset)]; if (!page) throw Error("Conversation unavailable"); return page; },
     load: async (id) => { const item = read().find((c) => c.id === id); if (!item) throw Error("Conversation unavailable"); return item; },
     create: async () => {
       const item: Conversation = { id: crypto.randomUUID(), title: "New chat", selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, webSearchMode: "always", surface: "chat", messages: [] };

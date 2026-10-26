@@ -76,6 +76,7 @@ import { voiceConversationConfig } from "@tomverse/chat-core";
 export async function ReviewWorkspaceShell({
   initialConversationId = null,
   mountedSurface = "workspace",
+  continuationProduct,
 }: {
   /**
    * The conversation this mount opens with, when the route named one.
@@ -89,7 +90,18 @@ export async function ReviewWorkspaceShell({
   initialConversationId?: string | null;
   /** Which surface this mount is, so selecting across surfaces navigates. */
   mountedSurface?: ConversationSurface;
+  /**
+   * The stored product of a continuation mount, read by its route from the
+   * owned row: which workspace renders under `/continuations/[id]`.
+   */
+  continuationProduct?: "chat" | "review";
 } = {}) {
+  // The workspace this mount renders. A continuation keeps its own route
+  // surface for navigation but is the Chat or Review product underneath.
+  const productSurface: ConversationSurface =
+    mountedSurface === "continuation"
+      ? continuationProduct === "chat" ? "chat" : "workspace"
+      : mountedSurface;
   let guestDefaultModelId: string = APP_DEFAULTS.guestDefaultModelId;
   // The lineup that lead orders (lib/appSettings). A read failure keeps the
   // compiled trio, which is what the client defaults to as well.
@@ -286,7 +298,7 @@ export async function ReviewWorkspaceShell({
     });
   }
 
-  if (mountedSurface === "chat" && !fixtureMode) {
+  if (productSurface === "chat" && !fixtureMode) {
     try {
       const session = await getServerSession(authOptions);
       if (session?.user?.id) {
@@ -372,6 +384,7 @@ export async function ReviewWorkspaceShell({
         chatStarterCapabilities={starterCapabilities}
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
+        continuationProduct={continuationProduct}
       />
       </ImageModelCatalogProvider>
       </HelpGuideAccessProvider>

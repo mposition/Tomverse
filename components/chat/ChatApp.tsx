@@ -1,6 +1,9 @@
 "use client";
+import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
+import { chatLocationSession } from "@/lib/chatLocationClient";
+import { requestChatLocationIntent } from "@tomverse/api-client";
 import {
   memo,
   useCallback,
@@ -14,6 +17,7 @@ import {
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { VoiceConversationHistory } from "@/components/chat/VoiceConversationHistory";
 import { Message, type ChatAttachment } from "@/components/chat/types";
+import { reviewSeedFromChat } from "@/lib/chatReviewHandoff";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
@@ -225,6 +229,8 @@ type ChatAppProps = {
    */
   otherPanelModelIds?: readonly string[];
   onRestorePrompt?: (prompt: ChatRecoveryPrompt) => void;
+  /** Chat: open a Review draft prefilled from one answer's question. */
+  onCompareInReview?: (seed: string) => void;
   initialConversationId?: string | null;
   promptPayload?: {
     id: string;
@@ -345,6 +351,7 @@ type ChatAppProps = {
     focusRequest?: { messageId: string; nonce: number } | null;
     /** Called once the requested message has been scrolled to and focused. */
     onFocusApplied?: (nonce: number) => void;
+    compareInReview?: { onPress: () => void; pending: boolean; error: string | null };
   };
   useCenteredWelcome?: boolean;
   /**
@@ -458,6 +465,7 @@ function ChatAppComponent({
   reviewProvider,
   otherPanelModelIds,
   onRestorePrompt,
+  onCompareInReview,
   initialConversationId = null,
   promptPayload,
   onContextBundleStale,
@@ -1549,6 +1557,7 @@ function ChatAppComponent({
     */
     const effectiveWebSearchMode: WebSearchMode | undefined =
       webSearchModeOverride ?? webSearchMode;
+    const mcpConnectionId = currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
     setChatRuntimeLastPrompt(runKey, {
       text,
       targetChatId,
@@ -1639,7 +1648,7 @@ function ChatAppComponent({
       // settling owns the key now, and this watchdog must not end it.
       abortChatRuntimeRun(runKey, controller, expiry.cause);
     };
-    const liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
+    let liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
     // The signed error report token from the response headers, when the
     // server issued one. Lives only in this closure and in the error
     // message's runtime `errorReport` context -- never persisted.
@@ -1860,6 +1869,15 @@ function ChatAppComponent({
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
+        // Human permission and guest verification happen before provider wait
+        // time starts. The same source turn is continued after either prompt.
+        liveness.stop();
+        const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, {
+          turnId: sourceUserMessageId,
+          requiresLocation: () => requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }),
+        });
+        controller.signal.throwIfAborted();
+        liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
         onDispatchStarted?.();
         if (isGuestMode && guestAutoCapability) {
           guestAutoRequestStarted = true;
@@ -1892,6 +1910,8 @@ function ChatAppComponent({
                   : message)
                 .map(toChatRequestMessage)
             ),
+            ...(turnLocation && chatLocationSession.canShare(turnLocation, panelIdentityKey)
+              ? { currentLocation: turnLocation } : {}),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isGuestMode
@@ -1905,6 +1925,7 @@ function ChatAppComponent({
                 }
               : {}),
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
+            ...(mcpConnectionId ? { mcpConnectionId } : {}),
             ...(admissionToken ? { admissionToken } : {}),
             ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
             ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
@@ -2256,6 +2277,7 @@ function ChatAppComponent({
                   autoRewrite: routedModelId && !progress.retryingWithModelId
                     ? autoRewrite : undefined,
                   isGeneratingArtifact: progress.isGeneratingArtifact,
+                  mcpProgress: progress.mcpProgress,
                   ...(progress.generatingArtifactFormat
                     ? {
                         generatingArtifactFormat:
@@ -2645,6 +2667,7 @@ function ChatAppComponent({
     }
   }, [
     assistantMessageWriter,
+    panelIdentityKey,
     isGuestMode,
     onContextBundleStale,
     messages,
@@ -2660,6 +2683,8 @@ function ChatAppComponent({
     webSearchMode,
     transcriptScope,
     reviewProvider,
+    currentProduct,
+    initialConversationId,
   ]);
 
   const handleRestoreQuestion = useCallback((assistantMessageId: string) => {
@@ -3193,6 +3218,13 @@ function ChatAppComponent({
         }
         onRestoreQuestion={transcriptScope === "conversation" && onRestorePrompt
           ? handleRestoreQuestion : undefined}
+        // Built from this transcript, which is the one on screen.
+        onCompareInReview={transcriptScope === "conversation" && onCompareInReview
+          ? (messageId) => {
+              const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
+              if (seed) onCompareInReview(seed);
+            }
+          : undefined}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

@@ -614,17 +614,19 @@ const checks = [
     // search adds 6,400 input tokens the raw estimate does not carry, so
     // comparing the estimate let a searching turn sit that far over the limit
     // and fail at the provider -- after a reservation and a dispatched call --
-    // instead of here, for free
-    // (docs/ops/tomverse-chat-context-window-rollout.md).
-    name: "The context-window guard measures the reserved input, not the raw estimate",
+    // instead of here, for free. MCP reserves repeated paid steps separately;
+    // the window bounds one request, including its tool overhead, rather than
+    // that aggregate cost reservation (docs/ops/mcp-connector-preview.md).
+    name: "The context-window guard measures reserved per-request input including tools",
     file: "app/api/chat/route.ts",
     test: (source) => {
       const guard = source.slice(
-        source.indexOf("fitChatOutputToContextWindow({"),
+        source.indexOf("const contextInputTokens = "),
         source.indexOf("MODEL_CONTEXT_WINDOW_EXCEEDED")
       );
       return (
-        guard.includes("reservedInputTokens: budget.inputTokens") &&
+        guard.includes("const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;") &&
+        guard.includes("reservedInputTokens: contextInputTokens") &&
         !guard.includes("estimatedInputTokens")
       );
     },

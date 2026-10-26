@@ -3,10 +3,11 @@
  * 12), run by the merge lane service after its develop round. The order
  * keeps every write behind every check:
  *
- *   start decision -> departure -> this departure's branch not yet pushed ->
- *   no open train -> the operator picked cargo in Admin -> the app admits (revision,
- *   once per departure, audit) -> assemble on a fresh clone of main -> push the branch ->
- *   open the main pull request -> report.
+ *   start decision -> the operator's cargo in Admin (an emergency request, or
+ *   the next scheduled train's pick) -> departure -> this departure's branch
+ *   not yet pushed -> no open train (scheduled only) -> the app admits
+ *   (revision, once per departure, audit) -> assemble on a fresh clone of
+ *   main -> push the branch -> open the main pull request -> report.
  *
  * GitHub writes are the branch push and the pull request, nothing else: no
  * label, comment or status. Every failure after admission is reported with a
@@ -20,6 +21,7 @@ import {
   parseQaReleaseTrainSlots,
   qaReleaseTrainBranch,
   qaReleaseTrainDeparture,
+  qaReleaseTrainEmergencySlot,
   qaReleaseTrainPullRequest,
   qaReleaseTrainShouldDepart,
   type QaReleaseTrainCandidate,
@@ -31,8 +33,8 @@ export type QaReleaseTrainPorts = {
   github: {
     /** Whether the departure's branch already exists on GitHub. */
     branchExists(branch: string): Promise<boolean>;
-    /** Open pull requests into main whose head is a train branch. */
-    openTrains(): Promise<number>;
+    /** Open pull requests into main whose head is a train branch, and the pull requests they carry. */
+    openTrains(): Promise<{ count: number; riders: number[] }>;
     /** These pull requests, each one that is merged into develop; the rest are left out. */
     cargo(numbers: readonly number[]): Promise<QaReleaseTrainCandidate[]>;
     openPullRequest(input: { head: string; title: string; body: string }): Promise<number>;
@@ -52,9 +54,16 @@ export type QaReleaseTrainPorts = {
     push(branch: string): Promise<void>;
   };
   app: {
-    /** The pull request numbers the operator picked for the next train in Admin. */
-    selection(): Promise<number[]>;
-    admit(slot: string): Promise<{ admitted: boolean; reason?: string }>;
+    /** Tells the app the departure hours this service runs on, for Admin's next-train line. */
+    schedule(hours: number[]): Promise<void>;
+    /**
+     * The pull request numbers the operator picked for the next scheduled
+     * train in Admin, and the emergency request waiting, if one is (its id is
+     * its audit row).
+     */
+    selection(): Promise<{ numbers: number[]; emergency: { id: string; numbers: number[] } | null }>;
+    /** An emergency admission names the request it was assembled from; the app refuses one since replaced. */
+    admit(slot: string, emergencyRequestId?: string): Promise<{ admitted: boolean; reason?: string }>;
     report(report: {
       slot: string;
       outcome: "opened" | "empty" | "failed";
@@ -89,44 +98,108 @@ export async function runQaReleaseTrainRound(
   env: Readonly<Record<string, string | undefined>>,
   ports: QaReleaseTrainPorts,
   nowMs: number,
+  /** Set when this round already ran its emergency: the scheduled departure only. */
+  scheduledOnly = false,
 ): Promise<QaReleaseTrainOutcome> {
   const start = decideQaReleaseTrainStart(env);
   if (start === "disabled") return { exitCode: 0, train: "disabled" };
   if (start === "refuse") return { exitCode: 1, train: "refused_to_start" };
   const hours = parseQaReleaseTrainSlots(env.QA_RELEASE_TRAIN_SLOTS);
   if (hours === null) return { exitCode: 1, train: "refused_to_start" };
-  const departure = qaReleaseTrainDeparture(nowMs, hours);
-  if (departure === null) return { exitCode: 0, train: "no_departure" };
-  const branch = qaReleaseTrainBranch(departure.slot);
+  // Every round, departure or not, so Admin shows the hours really in use
+  // (owner, 2026-10-25). Display only: a failure never stops the train.
+  await ports.app.schedule(hours).catch(() => undefined);
 
-  let cargo: QaReleaseTrainCandidate[];
-  let openTrains: number;
-  let step = "branch";
+  // An emergency request (owner, 2026-10-25) departs on the first round after
+  // it, departure hour or not, and does not wait for an open train: it is
+  // the operator's call that this cannot wait. Otherwise the scheduled
+  // departure, one open train at a time. An emergency never holds up a
+  // scheduled departure that is due before anything is cloned: when none of
+  // its pull requests is merged into develop, its reads fail, it already left
+  // this minute or its admission is refused, the round falls through to the
+  // scheduled one (the request stays pending until it departs or is
+  // withdrawn). One whose every pull request already rides an open train is
+  // admitted and reported empty without a clone, spending the request, and
+  // the round goes on to a due scheduled departure. One that is assembled
+  // and carries nothing ends the round: a second clone could outrun the
+  // service's ten-minute limit after the scheduled pick was spent.
+  let departure: { slot: string; emergency: boolean; emergencyRequestId?: string };
+  let branch: string;
+  let cargo: QaReleaseTrainCandidate[] = [];
+  let openTrains = 0;
+  // An emergency's pull requests already riding an open train: never picked
+  // onto a second release branch, reported as such.
+  let onOpenTrain: number[] = [];
+  let step = "selection";
   try {
-    if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
-    step = "open_trains";
-    openTrains = await ports.github.openTrains();
-    if (openTrains > 0) {
-      cargo = [];
+    const scheduledNow = qaReleaseTrainDeparture(nowMs, hours);
+    // Off the departure hours the read is only for an emergency request: an
+    // app that cannot answer then means no emergency, not a failed round.
+    const selection = scheduledNow === null ? await ports.app.selection().catch(() => null) : await ports.app.selection();
+    if (selection === null) return { exitCode: 0, train: "no_departure" };
+    let emergency: { slot: string; branch: string; cargo: QaReleaseTrainCandidate[]; id: string; onOpenTrain: number[] } | null = null;
+    let emergencyLeft = false;
+    if (!scheduledOnly && selection.emergency !== null && selection.emergency.numbers.length > 0) {
+      const slot = qaReleaseTrainEmergencySlot(nowMs, hours);
+      const emergencyBranch = qaReleaseTrainBranch(slot);
+      try {
+        step = "branch";
+        emergencyLeft = await ports.github.branchExists(emergencyBranch);
+        if (!emergencyLeft) {
+          step = "open_trains";
+          const riding = new Set((await ports.github.openTrains()).riders);
+          step = "cargo";
+          const merged = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency.numbers));
+          const riders = merged.filter((c) => !riding.has(c.number));
+          const skipped = merged.filter((c) => riding.has(c.number)).map((c) => c.number);
+          // With nothing to ride, the request is spent only when every number
+          // it names already rides an open train; one not yet merged into
+          // develop keeps it pending.
+          const allRiding = selection.emergency.numbers.every((number) => riding.has(number));
+          if (riders.length > 0 || (skipped.length > 0 && allRiding)) {
+            emergency = { slot, branch: emergencyBranch, cargo: riders, id: selection.emergency.id, onOpenTrain: skipped };
+          }
+        }
+      } catch (error) {
+        if (scheduledNow === null) throw error;
+      }
+    }
+    if (emergency !== null) {
+      departure = { slot: emergency.slot, emergency: true, emergencyRequestId: emergency.id };
+      branch = emergency.branch;
+      cargo = emergency.cargo;
+      onOpenTrain = emergency.onOpenTrain;
     } else {
-      step = "selection";
-      const numbers = await ports.app.selection();
+      if (scheduledNow === null) {
+        return { exitCode: 0, train: emergencyLeft ? "departure_done" : selection.emergency && !scheduledOnly ? "no_cargo" : "no_departure" };
+      }
+      departure = { slot: scheduledNow.slot, emergency: false };
+      branch = qaReleaseTrainBranch(departure.slot);
+      step = "branch";
+      if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
+      step = "open_trains";
+      openTrains = (await ports.github.openTrains()).count;
       step = "cargo";
-      cargo = numbers.length === 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.cargo(numbers));
+      cargo = openTrains > 0 || selection.numbers.length === 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.cargo(selection.numbers));
     }
   } catch (error) {
     return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure(step, error) };
   }
-  const go = qaReleaseTrainShouldDepart({ departure, openTrainPullRequests: openTrains, candidates: cargo.length });
+  const go = qaReleaseTrainShouldDepart({ departure, openTrainPullRequests: openTrains, candidates: cargo.length + onOpenTrain.length });
   if (!go.depart) return { exitCode: 0, train: go.reason === "no_departure" ? "no_departure" : go.reason };
 
   let admission;
   try {
-    admission = await ports.app.admit(departure.slot);
+    admission = await ports.app.admit(departure.slot, departure.emergencyRequestId);
   } catch (error) {
     return { exitCode: 1, train: "read_failed", failure: qaReleaseTrainReadFailure("admit", error) };
   }
-  if (!admission.admitted) return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
+  if (!admission.admitted) {
+    // A refused emergency (replaced, withdrawn, or this minute taken) takes
+    // no seat from a scheduled departure that is due.
+    if (departure.emergency && qaReleaseTrainDeparture(nowMs, hours) !== null) return runQaReleaseTrainRound(env, ports, nowMs, true);
+    return { exitCode: 0, train: "not_admitted", reason: admission.reason ?? "unknown" };
+  }
 
   const fail = async (failure: string, picks: QaReleaseTrainPick[] = [], rcSha: string | null = null, pushed = false): Promise<QaReleaseTrainOutcome> => {
     try {
@@ -137,6 +210,19 @@ export async function runQaReleaseTrainRound(
     return { exitCode: 1, train: "failed", failure };
   };
 
+  // Everything the emergency names already rides an open train: nothing to
+  // clone. Reported empty, the request is spent.
+  if (cargo.length === 0) {
+    const picks = onOpenTrain.map((number) => ({ number, outcome: "in_open_train" as const }));
+    try {
+      await ports.app.report({ slot: departure.slot, outcome: "empty", pullRequestNumber: null, branch: null, rcSha: null, failure: null, picks });
+    } catch {
+      return { exitCode: 1, train: "failed", failure: "report_failed" };
+    }
+    if (departure.emergency && qaReleaseTrainDeparture(nowMs, hours) !== null) return runQaReleaseTrainRound(env, ports, nowMs, true);
+    return { exitCode: 0, train: "empty", slot: departure.slot };
+  }
+
   let assembled;
   try {
     assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO);
@@ -145,7 +231,7 @@ export async function runQaReleaseTrainRound(
     const message = error instanceof Error ? error.message : "";
     return fail(/^git_[a-z]{1,20}$/.test(message) ? `assemble_${message}` : "assemble_failed");
   }
-  const picks = assembled.picks;
+  const picks: QaReleaseTrainPick[] = [...assembled.picks, ...onOpenTrain.map((number) => ({ number, outcome: "in_open_train" as const }))];
   if (!picks.some((p) => p.outcome === "included")) {
     try {
       await ports.app.report({ slot: departure.slot, outcome: "empty", pullRequestNumber: null, branch: null, rcSha: null, failure: null, picks });
@@ -160,7 +246,14 @@ export async function runQaReleaseTrainRound(
   } catch {
     return fail("push_failed", picks, assembled.headSha);
   }
-  const pr = qaReleaseTrainPullRequest({ slot: departure.slot, candidates: cargo, picks, rcSha: assembled.headSha, rollbackSha: assembled.mainSha });
+  const pr = qaReleaseTrainPullRequest({
+    slot: departure.slot,
+    candidates: cargo,
+    picks,
+    rcSha: assembled.headSha,
+    rollbackSha: assembled.mainSha,
+    emergency: departure.emergency,
+  });
   let number: number;
   try {
     number = await ports.github.openPullRequest({ head: branch, title: pr.title, body: pr.body });
