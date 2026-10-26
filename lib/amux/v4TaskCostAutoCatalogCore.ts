@@ -65,6 +65,8 @@ export const AMUX_TASK_CATALOG_CAPS: Readonly<Record<AmuxExecutionGrade,
 
 export type AmuxTaskCatalogWorker = {
   workerName: string;
+  /** The v22 provider (a v19 CLI channel name). */
+  provider: string;
   modelId: string;
   /** The v22 profile's roles. */
   roles: readonly string[];
@@ -130,12 +132,12 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const cacheRead = Number.isFinite(multiplier) && multiplier > 0
       ? Math.ceil(uncached * multiplier) : uncached;
     const cacheWrite = verifiedWrite;
-    const identity = { workerName: worker.workerName, provider: "anthropic",
+    const identity = { workerName: worker.workerName, provider: worker.provider,
       modelId: worker.modelId, roles, grade };
     routes.push({
       routeId: `v22:${worker.workerName}`,
       workerName: worker.workerName,
-      provider: "anthropic",
+      provider: worker.provider,
       modelId: worker.modelId,
       // Only the route's identity, so a price change never asks an approved
       // Task to reconfirm its route.

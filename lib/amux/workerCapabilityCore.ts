@@ -21,6 +21,7 @@
 import {
   amuxV22OneShotRoleSupported,
   amuxV22OneShotRouteSupported,
+  amuxV22ProviderForClass,
   amuxV22RequiredTool,
 } from "./v22WorkerClaimCore.ts";
 import {
@@ -173,8 +174,9 @@ export function amuxWorkerCapabilityRefusal(
     return "tools_invalid";
   }
   if (v22 !== null) {
-    if (registration.providerClass !== "claude") return "v22_not_claude";
-    if (!amuxV22OneShotRouteSupported("anthropic", v22.model)) return "v22_model_unsupported";
+    const provider = amuxV22ProviderForClass(registration.providerClass);
+    if (provider === null) return "v22_not_claude";
+    if (!amuxV22OneShotRouteSupported(provider, v22.model)) return "v22_model_unsupported";
     if (v22.roles.length < 1 || v22.roles.length > AMUX_WORKER_CAPABILITY_LIMITS.v22RolesMax ||
         new Set(v22.roles).size !== v22.roles.length) {
       return "v22_roles_invalid";
@@ -218,7 +220,8 @@ export function amuxWorkerCapabilityWithinCeiling(
   if (v22 !== null) {
     const roles = v22.roles.filter((role) =>
       Object.hasOwn(AMUX_WORKER_V22_ROLE_REQUIREMENTS, role) && allowed(AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]));
-    v22 = roles.length > 0 && registration.providerClass === "claude" ? { ...v22, roles } : null;
+    v22 = roles.length > 0 && amuxV22ProviderForClass(registration.providerClass) !== null ?
+      { ...v22, roles } : null;
   }
   return { ...capability, routingTags, v22 };
 }

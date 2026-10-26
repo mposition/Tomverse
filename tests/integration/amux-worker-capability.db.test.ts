@@ -127,14 +127,19 @@ test("the guard binds every tag and v22 role to the worker's current ceiling and
   await rejectsWith(insertRaw(userId, { workerName: "codex-impl", routingTags: ["architecture"] }), /AMUX_WORKER_CAPABILITY_TAG_CEILING/);
   await rejectsWith(insertRaw(userId, { workerName: "cursor-impl", routingTags: ["review"] }), /AMUX_WORKER_CAPABILITY_TAG_VERIFIED/);
   await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "claude-opus-5-5", v22Roles: ["implement"], v22Tools: ["repo_write"] }), /AMUX_WORKER_CAPABILITY_V22_ROLE/);
-  await rejectsWith(insertRaw(userId, { workerName: "codex-impl", routingTags: ["implementation"], v22Model: "claude-opus-5-5", v22Roles: ["implement"], v22Tools: ["repo_write"] }), /AMUX_WORKER_CAPABILITY_V22_CLASS/);
+  // Owner decision 2026-10-26: every provider class may run v22; only a
+  // Claude worker is held to a claude-* model.
+  await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "gpt-6-luna", v22Roles: ["investigate"], v22Tools: ["repo_read"] }), /AMUX_WORKER_CAPABILITY_V22_CLASS/);
   await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "claude-opus-5-5", v22Roles: ["investigate"], v22Tools: ["repo_write"] }), /AMUX_WORKER_CAPABILITY_V22_ROLE/);
   await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore", "chore"] }), /AMUX_WORKER_CAPABILITY_DUPLICATE/);
   await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["engineering"] }), /routing_tags_check/);
-  await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "gpt-5", v22Roles: ["investigate"], v22Tools: ["repo_read"] }), /v22_shape_check/);
+  // The guard runs before the CHECK, so a malformed name is shown on a class
+  // the guard lets through.
+  await rejectsWith(insertRaw(userId, { workerName: "codex-impl", routingTags: ["implementation"], v22Model: "-not a model", v22Roles: ["implement"], v22Tools: ["repo_write"] }), /v22_shape_check/);
   await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "claude-opus-5-5", v22Roles: null, v22Tools: ["repo_read"] }), /v22_shape_check/);
   // Investigate is read-only and allowed at chore; review needs a verified class only.
   await insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore", "review"], v22Model: "claude-opus-5-5", v22Roles: ["investigate", "review"], v22Tools: ["repo_read"] });
+  await insertRaw(userId, { workerName: "codex-impl", routingTags: ["implementation"], v22Model: "gpt-6-luna", v22Roles: ["implement"], v22Tools: ["repo_write"] });
 });
 
 test("only a registered, non-retired worker has capabilities; revisions follow on; events never change", async () => {
