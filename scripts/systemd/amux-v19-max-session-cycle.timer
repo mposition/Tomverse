@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll the AMUX v19 session analysis queue
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=10s
+Persistent=false
+Unit=amux-v19-max-session-cycle.service
+
+[Install]
+WantedBy=timers.target

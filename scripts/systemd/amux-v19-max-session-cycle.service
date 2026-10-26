@@ -1,0 +1,27 @@
+[Unit]
+Description=Tomverse AMUX v19 session analysis (one cycle)
+After=network-online.target
+Wants=network-online.target
+ConditionFileNotEmpty=%h/.local/lib/tomverse-amux-v19/max-session-cycle.mjs
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/tomverse-amux-v19/max-session.env
+# Bring every tracked mirror up to its remote before any claim. A failed
+# fetch stops the unit here, so no budget is claimed for a pin the local
+# mirror cannot check out.
+ExecStartPre=/bin/bash %h/.local/lib/tomverse-amux-v19/refresh-tracked-mirrors.sh
+ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-v19/max-session-cycle.mjs
+WorkingDirectory=%h
+# v19 has no analysis deadline; the operator's stop button and the seven-day
+# retention end a long call. This only bounds a wedged unit.
+TimeoutStartSec=infinity
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-v19-max-session-cycle
+
+# The timer may start again, but an unknown outcome keeps the durable halt
+# marker, which refuses every later claim until the operator reconciles it.

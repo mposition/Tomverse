@@ -761,6 +761,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaOperatingScopeSetting",
+    publicName: "amux_idea_operating_scope_settings",
+    prismaModel: "AmuxIdeaOperatingScopeSetting",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaAnalysisPriceVersion",
     publicName: "amux_idea_analysis_price_versions",
     prismaModel: "AmuxIdeaAnalysisPriceVersion",
@@ -776,6 +782,48 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxIdeaSubmission",
     publicName: "amux_idea_submissions",
     prismaModel: "AmuxIdeaSubmission",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaSessionAnalysisReservation",
+    publicName: "amux_idea_session_analysis_reservations",
+    prismaModel: "AmuxIdeaSessionAnalysisReservation",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaSessionAnalysisBudgetClaim",
+    publicName: "amux_idea_session_analysis_budget_claims",
+    prismaModel: "AmuxIdeaSessionAnalysisBudgetClaim",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaSessionAnalysisResult",
+    publicName: "amux_idea_session_analysis_results",
+    prismaModel: "AmuxIdeaSessionAnalysisResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaSessionResultOrphanKeyRetirement",
+    publicName: "amux_idea_session_result_orphan_key_retirements",
+    prismaModel: "AmuxIdeaSessionResultOrphanKeyRetirement",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaTrackedCheckoutEvidence",
+    publicName: "amux_idea_tracked_checkout_evidence",
+    prismaModel: "AmuxIdeaTrackedCheckoutEvidence",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaTrackedCheckoutReadManifest",
+    publicName: "amux_idea_tracked_checkout_read_manifests",
+    prismaModel: "AmuxIdeaTrackedCheckoutReadManifest",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaReadManifestKeyIntent",
+    publicName: "amux_idea_read_manifest_key_intents",
+    prismaModel: "AmuxIdeaReadManifestKeyIntent",
     state: "unverified",
   },
   {
@@ -806,6 +854,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxIdeaUnitDecision",
     publicName: "amux_idea_unit_decisions",
     prismaModel: "AmuxIdeaUnitDecision",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaRegistrationRefusal",
+    publicName: "amux_idea_registration_refusals",
+    prismaModel: "AmuxIdeaRegistrationRefusal",
     state: "unverified",
   },
   {

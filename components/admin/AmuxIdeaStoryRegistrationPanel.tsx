@@ -4,6 +4,8 @@ import { useState } from "react";
 import { z } from "zod";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { amuxTaskRegistrationRefusalPresentation } from
+  "@/components/admin/amuxIdeaRegistrationRefusalUi";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -69,6 +71,8 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
     const value: unknown = await response.json().catch(() => null);
     const code = value && typeof value === "object" && "error" in value &&
       typeof value.error === "string" ? value.error : "unavailable";
+    const taskRefusal = isTask ?
+      amuxTaskRegistrationRefusalPresentation(code) : null;
     if (response.status === 428) setReauth(true);
     if (code === "duplicate_reason_required" && value &&
         typeof value === "object" && "candidateIds" in value &&
@@ -78,8 +82,13 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
       setDuplicateIds(value.candidateIds); setRequestId(null);
       setError(null);
     } else if (code === "outcome_unknown") { setUnknown(true); setError(null); }
-    else { if (code === "reconfirm") { setDuplicateIds([]); setReason(""); }
-      setError(isTask ? m.taskRegistrationFailed(code) : m.storyRegistrationFailed(code)); }
+    else {
+      if (code === "reconfirm" || taskRefusal?.clearDuplicateState) {
+        setDuplicateIds([]); setReason("");
+      }
+      setError(taskRefusal ? m[taskRefusal.messageKey] :
+        isTask ? m.taskRegistrationFailed(code) : m.storyRegistrationFailed(code));
+    }
   };
   const load = async () => {
     if (busy || unknown) return;

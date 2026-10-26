@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import {
   inspectAmuxAnalysisChunk,
+  type AmuxAnalysisChunk,
   type AmuxAnalysisChunkInspection,
   type AmuxPermittedTargetRef,
 } from "./ideaAnalysisChunkCore.ts";
@@ -16,6 +17,8 @@ type InspectionInput = {
   previousContinuationKind: "input" | "output" | null;
   permittedSourceRefIds: readonly string[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
+  /** The schema the producing prompt asked for (amux-intake v20). */
+  requiredSchemaVersion: AmuxAnalysisChunk["schemaVersion"] | null;
 };
 
 export type SealedAmuxDraftUnit = {

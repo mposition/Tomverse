@@ -12,6 +12,7 @@ import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
 import { AMUX_V22_TASK_EXECUTION_ENV,
   AMUX_V22_SEALED_DELIVERY_MARKER,
+  amuxV22DeliveryBudgetMicrousd,
   amuxV22TaskExecutionEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
@@ -386,7 +387,7 @@ export async function pullAmuxWorkDelivery(input: {
         assignment?.workerInstanceId !== delivery.workerInstanceId ||
         assignment?.workerGeneration !== delivery.workerGeneration ||
         !Number.isSafeInteger(budgetMicrousd) ||
-        budgetMicrousd < 1 || budgetMicrousd > 5_000_000)
+        budgetMicrousd < 1)
       throw new Error("v22 delivery assignment profile is invalid");
     const assignmentAudit = await tx.adminAuditLog.findUnique({
       where: { id: assignment.authorizationAuditLogId },
@@ -538,7 +539,8 @@ export async function pullAmuxWorkDelivery(input: {
           `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
           AMUX_V22_WORKER_AUTHORITY_NOTICE,
         v22Execution: { modelId: assignment.modelId, role: assignment.role,
-          budgetMicrousd, ...(gradeGuard ? { gradeGuard: true as const,
+          budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
+          ...(gradeGuard ? { gradeGuard: true as const,
             executionGrade: assignment.grade,
             ...(reviewScope ? {
               // The approved v22 one-shot catalog uses the fixed Claude CLI.

@@ -55,6 +55,10 @@ import {
   AMUX_V4_ANALYSIS_RESULT_READ_ENV,
   amuxV4AnalysisResultReadEnabled,
 } from "@/lib/amux/ideaAnalysisResultReadCore";
+import { AMUX_SESSION_INTAKE_READBACK_ENV, amuxSessionIntakeReadbackEnabled } from
+  "@/lib/amux/ideaSessionIntakeReadbackCore";
+import { AMUX_SESSION_INTAKE_ENV, amuxSessionIntakeWritePermitted } from
+  "@/lib/amux/ideaSessionSubmissionCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { amuxBacklogPage, amuxBacklogSearch } from "@/lib/amux/adminBacklogListCore";
@@ -194,6 +198,13 @@ export default async function AdminAmuxBacklogPage({
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
+          sessionIntake={amuxSessionIntakeWritePermitted(process.env[AMUX_SESSION_INTAKE_ENV],
+            process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
+            amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
+              process.env[AMUX_V4_IDEA_READBACK_ENV])}
+          analysisStopAvailable={
+            process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_READ === "enabled" &&
+            process.env.TOMVERSE_AMUX_V19_ANALYSIS_STOP_WRITE === "enabled"}
           operatorId={session.user.id} />
         {openedIdea && ideaProgress !== undefined ? <AmuxIdeaProgressPanel rows={ideaProgress}
           activeRequestId={openRequestId} /> : null}

@@ -36,10 +36,6 @@ mock.module(mod("lib/amux/adminBacklogRead.ts"), { namedExports: {
 mock.module(mod("lib/adminLocaleServer.ts"), { namedExports: {
   getAdminMessages: async (messages) => { messageReads++; return messages.en; },
 } });
-mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports: {
-  AMUX_V4_TASK_CATALOG_WRITE_ENV: "TOMVERSE_AMUX_V4_TASK_CATALOG_WRITE",
-  amuxV4TaskCatalogWriteEnabled: () => false,
-} });
 mock.module(mod("lib/amux/portfolioAssessmentService.ts"), { namedExports: {
   AMUX_V4_PORTFOLIO_WRITE_ENV: "TOMVERSE_AMUX_V4_PORTFOLIO_WRITE",
   amuxV4PortfolioWriteEnabled: () => false,
@@ -50,7 +46,7 @@ mock.module(mod("lib/amux/ideaProgressRead.ts"), { namedExports: {
 const panels = {};
 for (const name of ["AdminPageTabs", "AmuxBacklogListPanel", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
   "AmuxIdeaInputPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxAnalysisClaimResolutionPanel",
-  "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary"]) {
+  "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary"]) {
   const panel = () => null;
   panels[name] = panel;
   mock.module(mod(`components/admin/${name}.tsx`), { namedExports: { [name]: panel } });
@@ -89,10 +85,10 @@ test("default and unknown tabs render Ideas without offering legacy intake", asy
   assert.doesNotMatch(page, /AmuxIntakePanel|AmuxLocalIntakePanel/);
 });
 
-test("Ideas holds only the idea flow; portfolio, cleanup and the cost catalogue have their own sections", async () => {
+test("Ideas holds only the idea flow; portfolio and cleanup have their own sections", async () => {
   const ideas = elements(await open(query({ tab: "ideas" })));
   assert.ok(ideas.some((element) => element.type === panels.AmuxIdeaInputPanel));
-  for (const moved of ["AmuxPortfolioPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxTaskCostCatalogApprovalPanel",
+  for (const moved of ["AmuxPortfolioPanel", "AmuxUnusedAnalysisReservationPanel",
     "AmuxBacklogListPanel"]) {
     assert.equal(ideas.some((element) => element.type === panels[moved]), false, moved);
   }
@@ -103,13 +99,14 @@ test("Ideas holds only the idea flow; portfolio, cleanup and the cost catalogue 
   const recovery = elements(await open(query({ tab: "recovery" })));
   assert.ok(recovery.some((element) => element.type === panels.AmuxUnusedAnalysisReservationPanel));
   const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
-  assert.doesNotMatch(page, /AmuxTaskCostCatalogApprovalPanel/, "the catalogue lives in Operations settings");
   const settings = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-settings/page.tsx"), "utf8");
   const analysis = settings.slice(settings.indexOf('if (tab.id === "analysis")'));
-  for (const panel of ["<AmuxAnalysisMonthlyBudgetPanel", "<AmuxFrontierModelRegistrationPanel",
-    "<AmuxTaskCostCatalogApprovalPanel"]) {
+  for (const panel of ["<AmuxAnalysisMonthlyBudgetPanel", "<AmuxFrontierModelRegistrationPanel"]) {
     assert.ok(analysis.slice(0, 1200).includes(panel), `${panel} is in Analysis settings`);
   }
+  // Owner decision 2026-10-25: Task costs need no approval, so no page
+  // offers a cost catalogue panel.
+  assert.doesNotMatch(page + settings, /TaskCostCatalog/);
 });
 
 test("List reads the normalized filter and page only after recent authentication", async () => {

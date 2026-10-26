@@ -32,3 +32,23 @@ test("the card plan route keeps the single routes' checks, and the single prepar
   assert.equal((plan.match(/prisma\.\$transaction\(/g) ?? []).length, 1);
   assert.ok(plan.indexOf("commitAmuxV4CardRegistration(tx,") < plan.indexOf("scanner.admitCreated(tx,"));
 });
+
+test("single and whole-plan Task costs use the deterministic final grade at prepare and consume", () => {
+  const single = readFileSync("lib/amux/ideaStoryRegistrationService.ts", "utf8");
+  assert.match(single,
+    /finalTaskGrade = verified\.proposal\.cardType === "task" \?[\s\S]*requireAmuxV20TaskGrade\(verified\.proposal,[\s\S]*analysisPreviewId: verified\.previewId/);
+  assert.match(single,
+    /calculateCurrentApprovedAmuxV4TaskCost\(tx,[\s\S]*verified\.proposal\.taskRole, finalTaskGrade!\)/);
+  const recalculate = single.slice(single.indexOf("const recalculate = async"));
+  assert.ok(recalculate.indexOf("requireAmuxV20TaskGrade(verified.proposal,") <
+    recalculate.indexOf("calculateCurrentApprovedAmuxV4TaskCost(transaction"));
+  assert.doesNotMatch(recalculate,
+    /calculateCurrentApprovedAmuxV4TaskCost\([\s\S]{0,160}proposal\.executionGrade/);
+
+  const plan = readFileSync("lib/amux/ideaCardPlanApprovalService.ts", "utf8");
+  const planRecalculate = plan.slice(plan.indexOf("recalculate: async (transaction)"));
+  assert.ok(planRecalculate.indexOf("inspectAmuxV20TaskRegistration(proposal)") <
+    planRecalculate.indexOf("calculateCurrentApprovedAmuxV4TaskCost(transaction"));
+  assert.match(planRecalculate,
+    /calculateCurrentApprovedAmuxV4TaskCost\(transaction,[\s\S]*proposal\.taskRole, inspected\.executionGrade\)/);
+});

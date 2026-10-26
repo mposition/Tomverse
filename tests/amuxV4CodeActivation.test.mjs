@@ -22,7 +22,6 @@ import { transferConfirmReadPermitted, transferConfirmWritePermitted } from
 import { transferPreviewReadPermitted, transferPreviewWritePermitted } from
   "../lib/amux/ideaTransferPreviewInputCore.ts";
 import { amuxV4PortfolioWriteEnabled } from "../lib/amux/portfolioAssessmentService.ts";
-import { amuxV4TaskCatalogWriteEnabled } from "../lib/amux/v4TaskCostCatalogApprovalService.ts";
 
 test("v4 code activation keeps every exposed stage closed without its environment switch", () => {
   const gates = [
@@ -33,7 +32,7 @@ test("v4 code activation keeps every exposed stage closed without its environmen
     transferPreviewWritePermitted, transferPreviewReadPermitted,
     transferConfirmWritePermitted, transferConfirmReadPermitted,
     amuxV4ResolutionPreviewEnabled, amuxV4UnitWriteEnabled,
-    amuxV4PortfolioWriteEnabled, amuxV4TaskCatalogWriteEnabled,
+    amuxV4PortfolioWriteEnabled,
     amuxV4ContentRetentionEnabled, amuxV4LiveAnalysisCliEnabled,
     amuxV4AnalysisQueueReadEnabled, amuxV4AnalysisResultReadEnabled,
   ];
@@ -70,6 +69,17 @@ test("unit no-commit recovery has a separate default-off switch", () => {
     import.meta.url), "utf8");
   assert.match(source, /UNIT_RECOVERY_WRITE_ENV = "TOMVERSE_AMUX_V4_UNIT_RECOVERY_WRITE"/);
   assert.match(source, /!AMUX_V4_UNIT_WRITE_CODE_ENABLED \|\|\s*process\.env\[UNIT_RECOVERY_WRITE_ENV\] !== "enabled"/);
+});
+
+test("v4 live CLI retains its v13 child and tunnel limits", () => {
+  const source = readFileSync(new URL(
+    "../lib/amux/ideaLocalIsolatedCliRunner.mjs", import.meta.url), "utf8");
+  const runOnce = source.slice(source.indexOf("async function runIsolatedCliOnce("),
+    source.indexOf("export async function runAmuxV4IsolatedSyntheticCliS0("));
+  assert.ok(runOnce.startsWith("async function runIsolatedCliOnce("));
+  assert.match(runOnce, /createAmuxV4EgressProxy\(selection\.egressHosts/);
+  assert.match(runOnce, /await awaitAmuxV4BoundedChild\(child,\s*AMUX_V4_CLI_HARD_DEADLINE_MS\)/);
+  assert.doesNotMatch(runOnce, /createAmuxV19EgressProxy|awaitAmuxV19StoppableChild/);
 });
 
 test("v29 opens four v22 code latches and v49 adds publication, not outcome writes", () => {

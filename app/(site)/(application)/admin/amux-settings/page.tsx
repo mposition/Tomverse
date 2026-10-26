@@ -8,9 +8,11 @@ import { AmuxDecisionMakerRequestsPanel } from "@/components/admin/AmuxDecisionM
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxDecisionMakerWorkPointer } from "@/components/admin/AmuxDecisionMakerWorkPointer";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
-import { AmuxTaskCostCatalogApprovalPanel } from "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
 import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
 import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
+import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePanel";
+import { AmuxMaxSubscriptionPricePanel } from "@/components/admin/AmuxMaxSubscriptionPricePanel";
+import { AmuxSessionBudgetResolutionPanel } from "@/components/admin/AmuxSessionBudgetResolutionPanel";
 import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import { AmuxWorkersOverviewPanel } from "@/components/admin/AmuxWorkersOverview";
 import {
@@ -42,8 +44,6 @@ import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityA
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
 import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
-import { AMUX_V4_TASK_CATALOG_WRITE_ENV, amuxV4TaskCatalogWriteEnabled } from
-  "@/lib/amux/v4TaskCostCatalogApprovalService";
 import {
   AMUX_V4_FRONTIER_CATALOG_READ_ENV,
   AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
@@ -105,19 +105,23 @@ export default async function AdminAmuxSettingsPage({
   }
   // Owner only (the tab's viewRoles); resolveAdminTabFor has already refused other roles.
   // Approved backlog redesign, screen C: the monthly analysis budget, the
-  // approved analysis models and the Task cost catalogue, each behind the same
-  // server switches as before; the execution and plan approvals only read them.
+  // approved analysis models, each behind the same server switches as before.
+  // Task costs need no approval: they come from the worker registry and
+  // Admin › Models (owner decision 2026-10-25).
   if (tab.id === "analysis") {
     const budgetAvailable = process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
       process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled";
     const modelWriteAvailable =
       frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]) &&
       frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV]);
+    // amux-intake v19 item 2: the operating scope is the one approval for
+    // unattended intake, so it comes first on this owner-only tab.
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
+      <AmuxOperatingScopePanel operatorId={session.user.id} />
+      <AmuxMaxSubscriptionPricePanel />
       <AmuxAnalysisMonthlyBudgetPanel available={budgetAvailable} operatorId={session.user.id} />
-      <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} />
-      <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
-        amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} /></div>;
+      <AmuxSessionBudgetResolutionPanel />
+      <AmuxFrontierModelRegistrationPanel writeAvailable={modelWriteAvailable} operatorId={session.user.id} /></div>;
   }
   if (tab.id === "decision-maker") {
     // The switch, the declaration-accuracy report and the request list are

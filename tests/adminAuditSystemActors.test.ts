@@ -5,6 +5,13 @@ import test from "node:test";
 
 import {
   AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
+  AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+  AMUX_SESSION_IDEA_SUBMITTED_SCOPE,
+  AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+  AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+  AMUX_SESSION_ANALYSIS_RESERVED_SCOPE,
+  AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+  AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
@@ -129,6 +136,7 @@ test("the system actor list is closed and changes only by review", () => {
     "auto-router-optimizer",
     "auto-router-rec-agent",
     "amux-v4-intake",
+    "amux-session-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
     "engineering-agent-retention",
@@ -194,6 +202,31 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
   assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
   assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
+  assert.equal(isSystemAuditActor(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    AMUX_SESSION_IDEA_SUBMITTED_ACTION, AMUX_SESSION_IDEA_SUBMITTED_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+    AMUX_SESSION_ANALYSIS_RESERVED_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+    "amux.idea.operating_scope.updated", "AmuxIdeaOperatingScopeSetting"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_ANALYSIS_RESERVED_ACTION,
+    targetType: AMUX_SESSION_ANALYSIS_RESERVED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+      actorScope: AMUX_SESSION_ANALYSIS_RESERVED_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+    targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+      actorScope: AMUX_SESSION_IDEA_SUBMITTED_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_SESSION_IDEA_SUBMITTED_ACTION,
+    targetType: AMUX_SESSION_IDEA_SUBMITTED_TARGET,
+    metadata: { systemActor: AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR },
+  })), "unknown");
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
     AMUX_V4_UNIT_UNKNOWN_ACTION, AMUX_V4_UNIT_DECISION_TARGET), true);
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
@@ -395,7 +428,14 @@ test("no administrator audit call site names the reserved key", () => {
   // free of it, so a future caller that needs both has to come through review.
   // It reads source text only: metadata built at runtime (a parsed body, a
   // result object) is covered by the writer's own refusal, not by this scan.
-  const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts"]);
+  const allowed = new Set([
+    "lib/adminAudit.ts",
+    "lib/adminAuditSystemActors.ts",
+    // Reviewed authority multiplexer: it sends system registrations to the
+    // system writer and leaves owner registrations on the administrator writer.
+    // Both writers independently reject a reserved-key mismatch.
+    "lib/amux/ideaRegistrationAuditAuthority.ts",
+  ]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))
     .map((path) => relative(ROOT, path).split("\\").join("/"))
@@ -409,6 +449,17 @@ test("no administrator audit call site names the reserved key", () => {
       .map(({ path }) => path),
     []
   );
+});
+
+test("the AMUX registration authority keeps owner and system audit writers separate", () => {
+  const source = readFileSync(resolve(ROOT,
+    "lib/amux/ideaRegistrationAuditAuthority.ts"), "utf8");
+  const writer = source.slice(source.indexOf(
+    "export async function writeAmuxRegistrationAudit"));
+  assert.equal((writer.match(/writeSystemAuditLog\(/g) ?? []).length, 1);
+  assert.equal((writer.match(/writeAdminAuditLog\(/g) ?? []).length, 1);
+  assert.match(writer,
+    /if \(isAmuxSystemRegistrationAuthority\(input\.authority\)\) \{[\s\S]*?return writeSystemAuditLog\([\s\S]*?\}\);[\s\S]*?\}\s+return writeAdminAuditLog\(/);
 });
 
 test("the marketing generator writes only the LLM cost ledger's five actions", () => {

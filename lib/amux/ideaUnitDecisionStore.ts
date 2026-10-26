@@ -21,7 +21,10 @@ import { amuxContentDigest, sealAmuxContent,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxAnalysisNode } from "./ideaAnalysisChunkCore.ts";
-import { inspectAmuxV4CardRegistration } from "./ideaUnitRegistrationCore.ts";
+import { amuxV4CardRegistrationDecisionErrorCode,
+  inspectAmuxV4CardRegistration, isAmuxV20TaskRegistrationRefusal,
+  type AmuxV20TaskRegistrationRefusal } from
+  "./ideaUnitRegistrationCore.ts";
 import { inspectAmuxV4NodeCreation } from "./ideaNodeRegistrationCore.ts";
 import { checkAmuxIdeaUnitConsume,
   type AmuxIdeaUnitConsumeContext } from "./ideaUnitConsumeGuard.ts";
@@ -29,6 +32,12 @@ import type { V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { allocateAmuxCardDisplayKey,
   chooseAmuxFeatureDisplayPrefix } from "./cardDisplayKeyAllocator.ts";
+import { AmuxV20RegistrationRefusalDetected } from
+  "./ideaRegistrationRefusalDetectionCore.ts";
+import { amuxRegistrationAuthorityActor, amuxRegistrationAuthorityKind,
+  amuxRegistrationDataOwner,
+  type AmuxRegistrationAuditAuthority, writeAmuxRegistrationAudit } from
+  "./ideaRegistrationAuditAuthority.ts";
 
 /** A09's protected writer still requires the dedicated environment gate and
  * the route's owner approval before its transaction body is reachable. */
@@ -40,7 +49,8 @@ export const amuxV4UnitWriteEnabled = (value: string | undefined) =>
 export class AmuxV4UnitDecisionError extends Error {
   constructor(readonly code: "forbidden" | "not_found" | "not_ready" |
     "reconfirm" | "integrity_unavailable" | "write_disabled" |
-    "outcome_unknown" | "duplicate_reason_required") {
+    "outcome_unknown" | "duplicate_reason_required" |
+    AmuxV20TaskRegistrationRefusal) {
     super(code);
     this.name = "AmuxV4UnitDecisionError";
   }
@@ -61,6 +71,27 @@ const ownerId = (session: Session): string => {
   }
   return id;
 };
+
+/** Preserve the owner route's existence-hiding split while a system actor
+ * remains unable to claim a human owner identity. */
+function unitDecisionDataOwner(
+  input: AmuxRegistrationAuditAuthority,
+  snapshot: AmuxIdeaUnitConfirmationSnapshot,
+): string {
+  try {
+    return amuxRegistrationDataOwner(input, snapshot);
+  } catch {
+    if (amuxRegistrationAuthorityKind(input) === "system") {
+      throw new AmuxV4UnitDecisionError("not_found");
+    }
+    try {
+      amuxRegistrationAuthorityActor(input);
+    } catch {
+      throw new AmuxV4UnitDecisionError("forbidden");
+    }
+    throw new AmuxV4UnitDecisionError("not_found");
+  }
+}
 
 async function assertCurrentProposalSource(tx: Prisma.TransactionClient,
   snapshot: AmuxIdeaUnitConfirmationSnapshot, chunkIndex: number) {
@@ -102,20 +133,16 @@ async function assertCurrentProposalSource(tx: Prisma.TransactionClient,
  * authorized rows and an independently recomputed duplicate scan and price.
  * This function verifies the source and target metadata again in its DB tx.
  * It never creates a card, marks a proposal final, or authorizes execution. */
-export async function commitAmuxV4UnitPrepare(tx: Prisma.TransactionClient, input: {
-  session: Session;
-  request: Request;
+export async function commitAmuxV4UnitPrepare(tx: Prisma.TransactionClient,
+  input: AmuxRegistrationAuditAuthority & {
   snapshot: AmuxIdeaUnitConfirmationSnapshot;
   duplicateScan: AmuxIdeaDuplicateScan | null;
   taskCost: V4TaskCostCeilingResult | null;
   digestKey: AmuxDigestKey;
 }): Promise<{ decisionId: string; confirmationDigest: string; expiresAt: Date;
   auditId: string }> {
-  const actorUserId = ownerId(input.session);
   const { snapshot } = input;
-  if (snapshot.actorUserId !== actorUserId) {
-    throw new AmuxV4UnitDecisionError("not_found");
-  }
+  const actorUserId = unitDecisionDataOwner(input, snapshot);
   const derived = deriveAmuxIdeaUnitConfirmation(snapshot, input.digestKey,
     input.duplicateScan, input.taskCost);
   if (!derived.ok) throw new AmuxV4UnitDecisionError("reconfirm");
@@ -236,14 +263,16 @@ export async function commitAmuxV4UnitPrepare(tx: Prisma.TransactionClient, inpu
       throw new AmuxV4UnitDecisionError("reconfirm");
     }
   }
-  const auditId = await writeAdminAuditLog({ tx, session: input.session,
-    request: input.request, action: "amux.v4.unit.prepare",
+  const authorityKind = amuxRegistrationAuthorityKind(input);
+  const auditId = await writeAmuxRegistrationAudit({ tx, authority: input,
+    action: "amux.v4.unit.prepare",
     targetType: "AmuxIdeaUnitDecision", targetId: snapshot.decisionId,
-    summary: "Prepared one AMUX v4 unit decision without registering a card.",
+    summary: "Prepared one AMUX v4 unit decision without registering backlog.",
     metadata: { ideaId: snapshot.ideaId, draftUnitId: snapshot.draftUnitId,
       action: snapshot.action, unitDigest: snapshot.unitBody.digest,
       confirmationDigest: derived.confirmationDigest,
-      sourcePreviewId: snapshot.source.previewId },
+      sourcePreviewId: snapshot.source.previewId,
+      registrationAuthority: authorityKind },
   });
   const row = await tx.amuxIdeaUnitDecision.create({ data: {
     id: snapshot.decisionId, ideaId: snapshot.ideaId,
@@ -279,9 +308,8 @@ export async function commitAmuxV4UnitPrepare(tx: Prisma.TransactionClient, inpu
  * from the current draft unit, and `recalculate` must read the current board
  * and approved Task price inside this transaction after the audit lock. A
  * caller-provided preview or model suggestion never bypasses these checks. */
-export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient, input: {
-  session: Session;
-  request: Request;
+export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
+  input: AmuxRegistrationAuditAuthority & {
   snapshot: AmuxIdeaUnitConfirmationSnapshot;
   proposal: AmuxAnalysisCard;
   context: Omit<AmuxIdeaUnitConsumeContext, "databaseNow" | "currentConfirmation">;
@@ -293,8 +321,8 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     taskCost: V4TaskCostCeilingResult | null;
   }>;
 }): Promise<{ decisionId: string; cardId: string; auditId: string }> {
-  const actorUserId = ownerId(input.session);
-  if (input.snapshot.actorUserId !== actorUserId ||
+  const actorUserId = unitDecisionDataOwner(input, input.snapshot);
+  if (
       !/^[A-Za-z0-9_-]{8,80}$/.test(input.cardId) ||
       !/^[0-9a-f-]{36}$/.test(input.consumeRequestId)) {
     throw new AmuxV4UnitDecisionError("not_found");
@@ -407,17 +435,27 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
   const evidence = await input.recalculate(tx);
   const confirmation = deriveAmuxIdeaUnitConfirmation(input.snapshot,
     input.keys, evidence.duplicateScan, evidence.taskCost);
+  const authorityKind = amuxRegistrationAuthorityKind(input);
   const inspected = inspectAmuxV4CardRegistration({
     prepared: { ...prepared, state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-    context: { ...input.context, databaseNow: now,
+    context: { ...input.context, registrationAuthority: authorityKind,
+      databaseNow: now,
       currentConfirmation: confirmation }, confirmation,
     snapshot: input.snapshot, proposal: input.proposal,
     digestKey: input.keys,
     resolvedFeatureRef: hierarchy[2].id,
   });
   if (!inspected.ok) {
-    throw new AmuxV4UnitDecisionError(inspected.code === "halt"
-      ? "integrity_unavailable" : "reconfirm");
+    if (isAmuxV20TaskRegistrationRefusal(inspected.code)) {
+      throw new AmuxV20RegistrationRefusalDetected(inspected.code, {
+        ideaId: prepared.ideaId,
+        draftUnitId: prepared.draftUnitId,
+        analysisPreviewId: prepared.sourcePreviewId,
+      }, input.proposal);
+    }
+    throw new AmuxV4UnitDecisionError(
+      amuxV4CardRegistrationDecisionErrorCode(inspected.code),
+    );
   }
   const plan = inspected.plan;
   const title = sealAmuxContent(Buffer.from(plan.title, "utf8"),
@@ -438,7 +476,11 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     sourceSystem: plan.sourceSystem, sourceKey: plan.sourceKey,
     sourceVersion: "1", sourceDigest: plan.sourceDigest,
     sourceSnapshot: { schemaVersion: "amux-v4", ideaId: plan.ideaId,
-      approvalId: plan.decisionId },
+      approvalId: plan.decisionId,
+      ...(plan.cardType === "task" ? {
+        proposedExecutionGrade: plan.proposedExecutionGrade,
+        finalExecutionGrade: plan.executionGrade,
+      } : {}) },
     cardType: plan.cardType, storyKind: plan.storyKind,
     parentFeatureNodeId: plan.featureNodeId,
     parentStoryCardId: plan.parentStoryCardId,
@@ -463,13 +505,18 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     await tx.amuxWorkDependency.createMany({ data: plan.dependencyIds.map(
       (dependencyId) => ({ taskId: input.cardId, dependencyId })) });
   }
-  const auditId = await writeAdminAuditLog({ tx, session: input.session,
-    request: input.request, action: "amux.v4.unit.consume",
+  const auditId = await writeAmuxRegistrationAudit({ tx, authority: input,
+    action: "amux.v4.unit.consume",
     targetType: "AmuxIdeaUnitDecision", targetId: plan.decisionId,
-    summary: "Consumed one owner-confirmed AMUX v4 card into inert backlog.",
+    summary: "Consumed one confirmed AMUX v4 card into inert backlog.",
     metadata: { ideaId: plan.ideaId, draftUnitId: plan.draftUnitId,
       cardId: input.cardId, action: "register_card", status: "backlog",
       confirmationDigest: prepared.confirmationDigest,
+      registrationAuthority: authorityKind,
+      ...(plan.cardType === "task" ? {
+        proposedExecutionGrade: plan.proposedExecutionGrade,
+        finalExecutionGrade: plan.executionGrade,
+      } : {}),
       publicPrDisclosureApproved:
         input.snapshot.card?.task?.publicPrDisclosureApproved === true,
       ownerAssigned: false, executionAttempted: false },
@@ -493,16 +540,16 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
 
 /** One node, one approval, one revision and one finalized draft in a single
  * transaction. No card or worker is created by this hierarchy operation. */
-export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient, input: {
-  session: Session; request: Request;
+export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient,
+  input: AmuxRegistrationAuditAuthority & {
   snapshot: AmuxIdeaUnitConfirmationSnapshot;
   proposal: AmuxAnalysisNode;
   context: Omit<AmuxIdeaUnitConsumeContext, "databaseNow" | "currentConfirmation">;
   consumeRequestId: string; keys: AmuxContentKeys;
   recalculate: (tx: Prisma.TransactionClient) => Promise<AmuxIdeaDuplicateScan>;
 }): Promise<{ decisionId: string; nodeId: string; auditId: string }> {
-  const actorUserId = ownerId(input.session);
-  if (input.snapshot.actorUserId !== actorUserId ||
+  const actorUserId = unitDecisionDataOwner(input, input.snapshot);
+  if (
       input.snapshot.action !== "create_node" ||
       !/^[0-9a-f-]{36}$/.test(input.consumeRequestId)) {
     throw new AmuxV4UnitDecisionError("not_found");
@@ -569,10 +616,12 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient, inp
   const duplicates = await input.recalculate(tx);
   const confirmation = deriveAmuxIdeaUnitConfirmation(input.snapshot,
     input.keys, duplicates, null);
+  const authorityKind = amuxRegistrationAuthorityKind(input);
   const inspected = inspectAmuxV4NodeCreation({
     prepared: { ...prepared, state: prepared.state as
       "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-    context: { ...input.context, databaseNow: now,
+    context: { ...input.context, registrationAuthority: authorityKind,
+      databaseNow: now,
       currentConfirmation: confirmation }, confirmation,
     snapshot: input.snapshot, proposal: input.proposal,
     digestKey: input.keys,
@@ -592,13 +641,14 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient, inp
   // refuses a concurrent creation that took the same one.
   const displayPrefix = plan.level === "feature" ?
     await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix) : null;
-  const auditId = await writeAdminAuditLog({ tx, session: input.session,
-    request: input.request, action: "amux.v4.unit.consume",
+  const auditId = await writeAmuxRegistrationAudit({ tx, authority: input,
+    action: "amux.v4.unit.consume",
     targetType: "AmuxIdeaUnitDecision", targetId: plan.decisionId,
-    summary: "Consumed one owner-confirmed AMUX v4 portfolio node.",
+    summary: "Consumed one confirmed AMUX v4 portfolio node.",
     metadata: { ideaId: plan.ideaId, draftUnitId: plan.draftUnitId,
       nodeId: plan.id, action: "create_node",
       confirmationDigest: prepared.confirmationDigest,
+      registrationAuthority: authorityKind,
       ...(plan.displayPrefix ? { proposedDisplayPrefix: plan.displayPrefix,
         displayPrefix } : {}),
       executionAttempted: false },
@@ -701,7 +751,8 @@ export async function commitAmuxV4UnitRejection(tx: Prisma.TransactionClient, in
     input.keys, null, null);
   const guard = checkAmuxIdeaUnitConsume({ ...prepared,
     state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  { ...input.context, registrationAuthority: "owner", databaseNow: now,
+    currentConfirmation: confirmation });
   if (guard.decision !== "allow") {
     throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
       "integrity_unavailable" : "reconfirm");
@@ -838,7 +889,8 @@ export async function commitAmuxV4NodeSelection(tx: Prisma.TransactionClient, in
   }
   const guard = checkAmuxIdeaUnitConsume({ ...prepared,
     state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  { ...input.context, registrationAuthority: "owner", databaseNow: now,
+    currentConfirmation: confirmation });
   if (guard.decision !== "allow") {
     throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
       "integrity_unavailable" : "reconfirm");
@@ -1011,7 +1063,8 @@ export async function commitAmuxV4CardLink(tx: Prisma.TransactionClient, input: 
   }
   const guard = checkAmuxIdeaUnitConsume({ ...prepared,
     state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
-  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  { ...input.context, registrationAuthority: "owner", databaseNow: now,
+    currentConfirmation: confirmation });
   if (guard.decision !== "allow") {
     throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
       "integrity_unavailable" : "reconfirm");

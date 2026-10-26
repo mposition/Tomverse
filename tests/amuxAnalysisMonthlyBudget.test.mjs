@@ -31,12 +31,16 @@ test("lost-write recovery binds the exact ID, version, amount and canonical audi
 
 const snapshot = { state: "snapshot", version: 1, monthStart: "2026-10-01T00:00:00.000Z",
   limitMicroUsd: "1000000000", spentMicroUsd: "42240000", reservedMicroUsd: "0",
-  remainingMicroUsd: "957760000", writeEnabled: true };
+  remainingMicroUsd: "957760000", shadowOverrunMicroUsd: "0", writeEnabled: true };
 test("display accepts only coherent server accounting, never unknown usage as zero", () => {
   assert.equal(readAnalysisBudgetSnapshotReply(snapshot)?.remainingMicroUsd, "957760000");
   for (const change of [{ spentMicroUsd: null }, { limitMicroUsd: "0" }, { reservedMicroUsd: "-1" },
-    { remainingMicroUsd: "1000000000" }, { writeEnabled: undefined }, { monthStart: "yesterday" }])
+    { remainingMicroUsd: "1000000000" }, { shadowOverrunMicroUsd: "42240001" },
+    { writeEnabled: undefined }, { monthStart: "yesterday" }])
     assert.equal(readAnalysisBudgetSnapshotReply({ ...snapshot, ...change }), null);
+  assert.equal(readAnalysisBudgetSnapshotReply({ ...snapshot, limitMicroUsd: "40000000",
+    spentMicroUsd: "50000000", shadowOverrunMicroUsd: "10000000",
+    remainingMicroUsd: "0" })?.spentMicroUsd, "50000000");
 });
 
 test("the monthly setting reuses the existing budget switches and never adds a call or user-credit capability", () => {

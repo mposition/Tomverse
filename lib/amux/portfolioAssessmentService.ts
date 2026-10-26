@@ -10,6 +10,11 @@ import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
 import { readAmuxPortfolioClock } from "./portfolioClock.ts";
+import { amuxRegistrationAuthorityActor,
+  amuxRegistrationAuthorityKind,
+  isAmuxSystemRegistrationAuthority,
+  type AmuxRegistrationAuditAuthority, writeAmuxRegistrationAudit } from
+  "./ideaRegistrationAuditAuthority.ts";
 import { amuxPortfolioAssessmentPayloadSchema,
   parseAmuxPortfolioMetrics, type AmuxPortfolioAssessmentPayload } from
   "./portfolioScoreSchemas.ts";
@@ -155,11 +160,15 @@ export async function previewAmuxPortfolioAssessment(session: Session,
 /** One assessment inside the caller's transaction. The single route passes
  * the digest its preview showed; the plan approval passes null, because the
  * values it writes are the ones in the same request. */
-export async function writeAmuxPortfolioAssessmentInTx(tx: Prisma.TransactionClient, input: {
-  session: Session; request: Request; payload: AmuxPortfolioAssessmentPayload;
+export async function writeAmuxPortfolioAssessmentInTx(tx: Prisma.TransactionClient,
+  input: AmuxRegistrationAuditAuthority & {
+  payload: AmuxPortfolioAssessmentPayload;
   confirmationDigest: string | null; digestKey: AmuxDigestKey;
 }) {
-  const actorUserId = amuxPortfolioOwnerId(input.session);
+  let actorUserId: string;
+  try { actorUserId = amuxRegistrationAuthorityActor(input); } catch {
+    throw new AmuxPortfolioError("forbidden");
+  }
   {
     await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
     await takeAuditChainLock(tx);
@@ -180,8 +189,8 @@ export async function writeAmuxPortfolioAssessmentInTx(tx: Prisma.TransactionCli
     if (input.confirmationDigest !== null && plan.confirmationDigest !== input.confirmationDigest) {
       throw new AmuxPortfolioError("reconfirm");
     }
-    const auditId = await writeAdminAuditLog({ tx, session: input.session,
-      request: input.request, action: "amux.v4.portfolio.assessment.approve",
+    const auditInput = { tx,
+      action: "amux.v4.portfolio.assessment.approve" as const,
       targetType: "AmuxPortfolioAssessment", targetId: input.payload.id,
       summary: "Confirmed one versioned portfolio evidence assessment.",
       metadata: { subjectKind: target.kind, subjectId: target.id,
@@ -190,8 +199,13 @@ export async function writeAmuxPortfolioAssessmentInTx(tx: Prisma.TransactionCli
         reasonCode: input.payload.reasonCode,
         priorMetrics: plan.priorMetrics, nextMetrics: plan.metrics,
         evidenceRefCount: input.payload.evidenceRefs.length,
-        evidenceAsOf: plan.evidenceAsOf.toISOString() },
-    });
+        evidenceAsOf: plan.evidenceAsOf.toISOString(),
+        registrationAuthority: amuxRegistrationAuthorityKind(input) },
+    };
+    const auditId = isAmuxSystemRegistrationAuthority(input) ?
+      await writeAmuxRegistrationAudit({ ...auditInput, authority: input }) :
+      await writeAdminAuditLog({ ...auditInput, session: input.session,
+        request: input.request });
     const now = await readAmuxPortfolioClock(tx);
     await tx.amuxPortfolioAssessment.create({ data: {
       id: input.payload.id, requestId: input.payload.requestId,

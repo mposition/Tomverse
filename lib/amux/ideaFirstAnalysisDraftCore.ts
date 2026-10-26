@@ -13,6 +13,7 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
   raw: string;
   keys: AmuxContentKeys;
   unitIds?: readonly string[];
+  templateVersion: string;
 }):
   | { decision: "ready"; draft: SealedAmuxAnalysisDraft;
       coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: 0 }
@@ -31,6 +32,7 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
     coveredStartOrdinal: 0,
     coveredEndOrdinal: 0,
     history: [],
+    templateVersion: input.templateVersion,
   });
   if (prepared.decision === "needs_owner_input") {
     return { decision: "hold", reason: "owner_input" };
