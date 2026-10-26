@@ -17,7 +17,8 @@ authorised by this work.
 | T06 UI | Complete | Desktop/mobile browser flow and dark theme | Not deployed | Not deployed |
 | T07 Boundary/regression checks | Complete locally | Protocol/DB/security 26, existing unit regressions 131, UI 10, zoom rechecks 2 | Not deployed | Not deployed |
 | T08 Independent review | Accepted | Claude: r-20261025-230233-b98a8f, head 3c5426a6e | Not deployed | Not deployed |
-| T09 Real service verification | GitHub OAuth/search/read/source path verified locally | Real GitHub MCP, zero-hit issue search, existing PR #35 read, mock-model Chat answer; live writes not exercised | Not deployed | Not deployed |
+| T09 Real service verification | GitHub OAuth/search/read/source path verified locally | Real GitHub MCP, PR #35 and test issue #36 read, mock-model Chat answer | Not deployed | Not deployed |
+| T09-W Live write verification | Complete for the approved one-issue scope | Issue #36 created once, title/body/source and search verified, duplicate approval refused, prior read grants restored | Not deployed | Not deployed |
 | T10 Operational rollout | Not authorised | Separate push/merge/deploy/activation approval | Not performed | Not performed |
 
 Synthetic success is not evidence of compatibility with GitHub, Railway,
@@ -178,9 +179,10 @@ MCP `issue_read/get`: 2,347 UTF-8 body bytes, with the actual source
 A mock model used the existing Chat tool adapter for three steps: real MCP
 search, real MCP read, and an answer containing the verified source. This is
 actual provider/transport evidence, not a paid-LLM quality evaluation or a claim
-that every provider is compatible. External writes and product paid-model calls
-remain zero. Actual GitHub write execution, provider-side token revocation,
-other services, deployed Dev/Production and operational activation remain untested.
+that every provider is compatible. That read-only run made zero external writes
+and zero product paid-model calls. The subsequent owner-approved one-issue write
+verification is recorded below. Provider-side token revocation, other services,
+deployed Dev/Production and operational activation remain untested.
 
 Claude accepted the canonical-issuer correction at `9c3c37e8c` in
 `r-20261026-013010-07ae1a`. Follow-up changes cover safe UI wording, dependency
@@ -200,6 +202,37 @@ test pins that support. Existing local callback/sign-in trace queries were
 redacted, and an HTTP callback probe after restart produced no performance trace
 file or recorded authentication query. Runtime authorization/audit checks remain
 enabled; this helper setting does not alter deployed logging or permissions.
+
+### T09-W: owner-approved live issue creation
+
+On 26 October 2026 the owner explicitly approved creating one synthetic issue in
+`mposition/TomverseCode`, excluding push, merge and deployment. The existing
+accepted write/approval boundary was reused without changing runtime code.
+
+- Tool: GitHub MCP `issue_write`, method `create`, bound owner/repository above.
+- Title: `[MCP-01 test] Connector verification`.
+- Body: `Synthetic connector verification. No customer or production data.`
+- Created resource: https://github.com/mposition/TomverseCode/issues/36.
+
+The execution used the existing server-side grant and one-use approval path.
+Preflight MCP search found no exact-title match; the pending action retained the
+exact approved arguments encrypted. The owner's chat approval was applied once
+through `decideMcpInvocation`. The invocation completed, erased its stored
+arguments and rejected a second use of the same approval before external dispatch.
+A local exclusive execution receipt additionally prevented replaying the test
+command after an attempt, including uncertain outcomes.
+
+MCP `issue_read/get` returned issue #36 with the exact title and body and its
+actual read source. A subsequent MCP search found the new issue and did not
+create a read citation from the search hit. Temporary `issue_write` selection
+was removed, restoring the original `issue_read` and `search_issues` grants with
+the existing version fence. The test issue remains available at the link above;
+no comment, update, close or deletion was performed. Actual external writes in
+this approved test: **1 issue creation**. Product paid-model calls: **0**.
+
+This completes the local live-write test for the named GitHub repository, not
+all-provider write compatibility or deployed readiness. Dev and Production are
+unchanged and not deployed; push, merge and deployment were not performed.
 
 Local OAuth increment verification: 23 protocol/security/provider-profile tests,
 19 disposable-DB tests and 9 transport/telemetry/monitoring regressions pass.
