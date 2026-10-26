@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useQaReleaseTrainReads } from "@/components/admin/QaReleaseTrainRefresher";
-import { announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
-import { adminFetch } from "@/lib/adminFetch";
+import { QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS, announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
+import { adminFetch, isAdminFetchTimeout } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { aestStamp } from "@/lib/agentOffice/time";
@@ -54,7 +54,8 @@ const hoursText = (hours: readonly number[]) => hours.map((hour) => String(hour)
 export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { canWrite: boolean; id?: string; reloadKey?: number }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
   const [view, setView] = useState<View | null>(null);
-  const [failed, setFailed] = useState(false);
+  // "slow": the read outlasted the wait; the server goes on and keeps it for the next try.
+  const [failed, setFailed] = useState<false | "error" | "slow">(false);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -67,7 +68,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
 
   useEffect(() => {
     let cancelled = false;
-    adminFetch(reloadKey > 0 || reads.fresh ? `${API}?fresh=1` : API, { cache: "no-store" })
+    adminFetch(reloadKey > 0 || reads.fresh ? `${API}?fresh=1` : API, { cache: "no-store", timeoutMs: QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS })
       .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
         return response.json() as Promise<View>;
@@ -78,8 +79,8 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
         setPicked(new Set(next.selection.numbers));
         setFailed(false);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((error: unknown) => {
+        if (!cancelled) setFailed(isAdminFetchTimeout(error) ? "slow" : "error");
       });
     return () => {
       cancelled = true;
@@ -227,7 +228,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
 
       {failed || view?.candidates.status === "unread" ? (
         <p className="mt-3 text-sm text-amber-300">
-          {m.trainCargoUnread}
+          {failed === "slow" ? m.trainCargoSlow : m.trainCargoUnread}
           {view?.candidates.status === "unread" ? m.githubFailure.replace("{failure}", view.candidates.failure) : ""}
         </p>
       ) : view === null ? (
