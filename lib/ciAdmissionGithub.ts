@@ -11,13 +11,17 @@ import {
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
- * repository with Pull requests, Actions and Commit statuses write, Metadata
- * read.
+ * repository with Pull requests, Actions, Commit statuses and Contents write,
+ * Metadata read. Contents write is asked for only by the calls that need it:
+ * draft/ready (GitHub's rule for changing a pull request's stage) and
+ * update-branch; every other token is issued without it.
  *
  * Writes, and nothing else: convert a pull request to draft, mark one ready
  * for review, cancel a pull_request workflow run of a held pull request, a
- * draft or one the operator stops in Admin, and one commit status (context `CI admission`) on a pull request's
- * head telling sessions it waits in line. No merge, push, label or comment. Every failure is a short
+ * draft or one the operator stops in Admin, one commit status (context `CI admission`) on a pull request's
+ * head telling sessions it waits in line, and GitHub's update-branch for a
+ * draft behind its base (develop merged into its branch: Contents write, owner
+ * 2026-10-25). No merge into a base, no other push, label or comment. Every failure is a short
  * code; no token, key or body is ever returned or logged. The webhook
  * signature check is in lib/ciAdmissionWebhookCore.ts.
  */
@@ -147,6 +151,8 @@ export type CiAdmissionGithub = {
   check(pull: CiAdmissionPull): Promise<CiAdmissionCheck>;
   convertToDraft(pull: CiAdmissionPull): Promise<void>;
   markReady(pull: CiAdmissionPull): Promise<void>;
+  /** Merges the base into the pull request's branch (GitHub's update-branch), only while its head is still the one judged. */
+  updateBranch(pull: CiAdmissionPull): Promise<void>;
   /**
    * Cancels the pull request's own queued and running pull_request runs (never
    * another pull request's on the same commit); returns how many. `force` is
@@ -158,12 +164,36 @@ export type CiAdmissionGithub = {
   runnerUsage(): Promise<CiRunnerOwner[]>;
   /** The `CI admission` commit status on the pull request's head. */
   setStatus(sha: string, state: "pending" | "success", description: string): Promise<void>;
+  /**
+   * GET one path under the repository's API (`/pulls?...`, `/commits/main`)
+   * with a read-only token, for Admin pages that show the repository; throws
+   * `github_<status>`.
+   */
+  readRepo(path: string): Promise<unknown>;
 };
 
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
 
+/**
+ * Why GitHub refused an installation token, as a short code: its message is
+ * matched, never kept (2026-10-26: "github_token_422" for days while the App's
+ * new Contents permission was not yet accepted on the installation).
+ */
+export function tokenRefusal(status: number, body: () => unknown): string {
+  let message = "";
+  try {
+    const parsed = body();
+    if (typeof parsed === "object" && parsed !== null && typeof (parsed as Json).message === "string") message = (parsed as Json).message as string;
+  } catch {
+    // An unreadable body says nothing more than its status.
+  }
+  if (/permissions requested are not granted/i.test(message)) return "github_token_permission_not_granted";
+  if (/repositor(y|ies)/i.test(message)) return "github_token_repository_not_installed";
+  return `github_token_${status}`;
+}
+
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
-  const call = async (method: "GET" | "POST", url: string, auth: string, body?: Json) => {
+  const call = async (method: "GET" | "POST" | "PUT", url: string, auth: string, body?: Json) => {
     const response = await fetch(url, {
       method,
       headers: {
@@ -198,7 +228,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         repositories: [CI_ADMISSION_REPOSITORY.split("/")[1]],
         permissions,
       });
-      if (answer.status !== 201) throw new Error(`github_token_${answer.status}`);
+      if (answer.status !== 201) throw new Error(tokenRefusal(answer.status, () => answer.json()));
       const value = record(answer.json()).token;
       if (typeof value !== "string" || value === "") throw new Error("github_shape");
       return value;
@@ -215,9 +245,14 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     if (answer.status !== 200) throw new Error(`github_${answer.status}`);
     return answer.json();
   };
+  // Draft and ready are a pull request's stage, which GitHub lets only those
+  // with write access to the repository change: Pull requests write alone is
+  // refused (FORBIDDEN, 2026-10-25: no conversion either way ever succeeded).
+  // So these two mutations, and only they, ask for Contents write too.
+  const STAGE_PERMISSIONS = { pull_requests: "write", contents: "write", metadata: "read" };
   const graphql = async (mutation: string, id: string) => {
     if (!/^[A-Za-z0-9_=-]{1,100}$/.test(id)) throw new Error("node_id_invalid");
-    const answer = await call("POST", `${API}/graphql`, await installationToken(), { query: mutation, variables: { id } });
+    const answer = await call("POST", `${API}/graphql`, await installationToken(STAGE_PERMISSIONS), { query: mutation, variables: { id } });
     if (answer.status !== 200) throw new Error(`github_graphql_${answer.status}`);
     const body = record(answer.json());
     if (body.errors !== undefined) {
@@ -331,6 +366,29 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         pull.nodeId,
       );
       if (record(record(data.markPullRequestReadyForReview).pullRequest).isDraft !== false) throw new Error("github_still_draft");
+    },
+    async readRepo(path) {
+      if (!path.startsWith("/") || path.includes("..")) throw new Error("github_path");
+      // Only the permission the path needs: an installation without Contents
+      // still reads pull requests.
+      const permissions: Record<string, string> = path.startsWith("/pulls")
+        ? { pull_requests: "read", metadata: "read" }
+        : { contents: "read", metadata: "read" };
+      const answer = await call("GET", `${REPO}${path}`, await installationToken(permissions));
+      if (answer.status !== 200) throw new Error(`github_${answer.status}`);
+      return answer.json();
+    },
+    async updateBranch(pull) {
+      // Only this write needs Contents write; every other token stays without it.
+      const answer = await call(
+        "PUT",
+        `${REPO}/pulls/${pull.number}/update-branch`,
+        await installationToken({ contents: "write", pull_requests: "write", metadata: "read" }),
+        { expected_head_sha: pull.headSha },
+      );
+      // 422: the head moved meanwhile, a conflict, or GitHub refused (a
+      // workflow file change needs the Workflows permission too).
+      if (answer.status !== 202) throw new Error(`github_update_branch_${answer.status}`);
     },
     async runnerUsage() {
       const runs = new Map<number, Json>();

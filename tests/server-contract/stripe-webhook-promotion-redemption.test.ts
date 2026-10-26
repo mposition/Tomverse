@@ -96,6 +96,14 @@ async function loadProcessor() {
       require(resolve(ROOT, path)) as Record<string, unknown>;
 
     const tx = {
+      $executeRaw: async () => 0,
+      user: {
+        findUniqueOrThrow: async () => ({ id: "user_1", plan: "Free", subscriptionSyncedAt: null }),
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          world.userUpdates.push(data);
+          return { id: "user_1", ...data };
+        },
+      },
       billingPromotion: {
         findUnique: async () => ({
           id: "promo_db",

@@ -66,5 +66,11 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>When you ask a location-dependent question or turn on Current location, share your approximate position with AI providers to answer it. Existing device permission is reused. Location is refreshed when sending a message and is not tracked in the background.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>When you ask a location-dependent question or turn on Current location, share your approximate position with AI providers to answer it. Existing device permission is reused. Location is refreshed when sending a message and is not tracked in the background.</string>
+	<key>NSLocationDefaultAccuracyReduced</key>
+	<true/>
 </dict>
 </plist>

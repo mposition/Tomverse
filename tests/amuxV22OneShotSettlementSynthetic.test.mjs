@@ -55,7 +55,7 @@ test("one verified invocation can settle review or a known Task failure", async 
       source: receipt.source,
       actualModelId: receipt.actualModelId,
       selectedModelId: receipt.selectedModelId }],
-    reservedCostMicrousd: 250n, resultStored: true };
+    reservedCostMicrousd: 250n, resultStored: true, budgetBound: false };
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "succeeded" }), true);
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
@@ -75,7 +75,7 @@ test("lost receipt reply reads back once; missing proof and timeout never settle
   assert.equal(timeout.count, 1);
 });
 
-test("a failed or expensive receipt cannot claim a successful Task", async () => {
+test("a failed receipt cannot claim a successful Task; its cost does not stop settlement", async () => {
   const failed = await run({ resultKind: "invocation_failed" });
   assert.equal(failed.receipt.status, "failed");
   const evidence = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
@@ -90,9 +90,10 @@ test("a failed or expensive receipt cannot claim a successful Task", async () =>
     outcome: "succeeded" }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "failed" }), true);
+  // Owner decision 2026-10-25: an ordinary run has no cost stop.
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "failed", events: [{ ...evidence.events[0],
-      projectedApiCostMicrousd: 251n }] }), false);
+      projectedApiCostMicrousd: 251n }] }), true);
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "failed", events: [...evidence.events, evidence.events[0]] }), false);
 });

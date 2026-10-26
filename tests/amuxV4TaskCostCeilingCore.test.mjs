@@ -276,3 +276,16 @@ test("unverified current basis and invalid approval stay on hold", () => {
     ceilingMicroUsd: "9".repeat(100_000),
   }, old), { decision: "hold", reason: "approval_invalid" });
 });
+
+test("an ordinary Task is never stopped by a higher cost, only by a changed route", async () => {
+  const { v4TaskCeilingDecision } = await import("../lib/amux/v4TaskCostCeilingCore.ts");
+  for (const reason of ["ceiling_increased", "task_bounds_increased"]) {
+    assert.equal(v4TaskCeilingDecision({ decision: "reconfirm", reason }, false), "allow", reason);
+    assert.equal(v4TaskCeilingDecision({ decision: "reconfirm", reason }, true), "reconfirm",
+      `an owner-approved recovery keeps ${reason}`);
+  }
+  assert.equal(v4TaskCeilingDecision({ decision: "reconfirm", reason: "task_route_changed" }, false),
+    "reconfirm", "a route outside the confirmed receipt still needs the owner");
+  assert.equal(v4TaskCeilingDecision({ decision: "hold", reason: "approval_invalid" }, false), "hold");
+  assert.equal(v4TaskCeilingDecision({ decision: "allow", reason: "within_approved_ceiling" }, true), "allow");
+});

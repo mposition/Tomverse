@@ -222,6 +222,7 @@ run(
     "--test",
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
+    "tests/integration/mobile-store-billing.db.test.ts",
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
@@ -839,6 +840,7 @@ run(
     "tests/integration/memory-schema.db.test.ts",
     "tests/integration/memory-extraction.db.test.ts",
     "tests/integration/memory-extraction-persistence.db.test.ts",
+    "tests/integration/memory-extraction-auto.db.test.ts",
     "tests/integration/memory-extraction-worker.db.test.ts",
     "tests/integration/memory-extraction-credits.db.test.ts",
     "tests/integration/memory-extraction-provider-cost.db.test.ts",
@@ -904,6 +906,11 @@ run(
     // strict single use true under a real race, and D8's contract that a
     // replay's revocation commits even though the caller is refused.
     "tests/integration/mobile-auth-service.db.test.ts",
+    // MCP ownership, one-use write approvals, OAuth and additive migration
+    // behavior against the dedicated test DB and synthetic loopback server.
+    "tests/integration/mcp-connector.db.test.ts",
+    "tests/integration/mcp-oauth.db.test.ts",
+    "tests/integration/mcp-migration.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",

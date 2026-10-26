@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, MapPin, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
     MarketingFooter,
@@ -196,6 +196,7 @@ function ProviderDestinationTable({
 const sections = [
     ["collectedTitle", "collected", UserRound],
     ["purposeTitle", "purpose", Database],
+    ["locationTitle", "location", MapPin],
     ["providersTitle", "providers", Send],
     // Its own section rather than a sentence inside "External AI providers":
     // the promise that matters here is what happens to the *recording*, and

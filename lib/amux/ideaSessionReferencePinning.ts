@@ -13,8 +13,18 @@ export class AmuxSessionReferencePinningError extends Error {
   }
 }
 
+/** Development lands on this branch and reaches the default branch only by
+ * release, so a repository that has it is read at its head (owner decision
+ * 2026-10-24); a repository without it keeps its default branch. */
+export const AMUX_SESSION_PINNED_DEVELOPMENT_BRANCH = "develop";
+
 async function githubJson(path: string, token: string,
-  fetchImpl: typeof fetch): Promise<Record<string, unknown>> {
+  fetchImpl: typeof fetch): Promise<Record<string, unknown>>;
+async function githubJson(path: string, token: string,
+  fetchImpl: typeof fetch, missingIsNull: true): Promise<Record<string, unknown> | null>;
+async function githubJson(path: string, token: string,
+  fetchImpl: typeof fetch, missingIsNull = false,
+): Promise<Record<string, unknown> | null> {
   const endpoint = `https://api.github.com${path}`;
   const response = await fetchImpl(endpoint, {
     method: "GET", redirect: "manual", cache: "no-store",
@@ -23,6 +33,11 @@ async function githubJson(path: string, token: string,
       authorization: `Bearer ${token}`, "user-agent": "tomverse-amux-intake",
       "x-github-api-version": "2022-11-28" },
   });
+  // Only GitHub's own JSON 404 means "no such branch"; anything else refuses.
+  if (missingIsNull && response.status === 404 &&
+      (!response.url || response.url === endpoint) &&
+      response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ===
+        "application/json") return null;
   if (response.status !== 200 || response.url && response.url !== endpoint ||
       response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
         "application/json") throw new AmuxSessionReferencePinningError();
@@ -54,6 +69,20 @@ export async function pinAmuxSessionReferences(input: IdeaInput, token: string |
       if (typeof metadata.full_name !== "string" ||
           metadata.full_name.toLowerCase() !== repository.toLowerCase()) {
         throw new AmuxSessionReferencePinningError();
+      }
+      const development = await githubJson(
+        `/repos/${name}/branches/${AMUX_SESSION_PINNED_DEVELOPMENT_BRANCH}`,
+        token, fetchImpl, true);
+      if (development) {
+        const head = development.commit;
+        const sha = head && typeof head === "object" && !Array.isArray(head)
+          ? (head as Record<string, unknown>).sha : null;
+        if (development.name !== AMUX_SESSION_PINNED_DEVELOPMENT_BRANCH ||
+            typeof sha !== "string" || !SHA.test(sha)) {
+          throw new AmuxSessionReferencePinningError();
+        }
+        result.push(sha);
+        continue;
       }
       const branch = metadata.default_branch;
       if (typeof branch !== "string" || branch.length < 1 || branch.length > 255 ||

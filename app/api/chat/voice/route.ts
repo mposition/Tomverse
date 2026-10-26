@@ -106,11 +106,22 @@ export async function POST(request: Request) {
     const initialFunding = readVoiceCreditPayload(reservation.reservationPayload);
     let reservedSeconds = initialFunding.maxSeconds;
     let fundedCloseAt = Date.parse(initialFunding.closeAt!);
+    // Reserve at least 15 seconds after HTTP setup for the existing 10-second
+    // sideband handshake and a usable initial window. Never dispatch after a
+    // slow commit has consumed that headroom; no provider call means full refund.
+    const startupTimeout = () => Math.min(15_000, Math.floor(fundedCloseAt - Date.now() - 15_000));
+    const refuseExpiredStart = async () => {
+      await settleVoiceConversationCredits(reservation.id, 0);
+      return json("VOICE_START_WINDOW_EXPIRED", 409, { reservationId: reservation.id });
+    };
+    if (!Number.isFinite(fundedCloseAt) || startupTimeout() < 5_000 || request.signal.aborted) return await refuseExpiredStart();
     let providerResult;
     await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { reservationPayload: {
       ...readVoiceCreditPayload(reservation.reservationPayload), dispatchStartedAt: new Date().toISOString(), webLeaseUntil: new Date(Date.now() + 30_000).toISOString(),
     } } });
-    try { providerResult = await createVoiceProviderSession(body.sdp, history); }
+    const providerTimeoutMs = startupTimeout();
+    if (providerTimeoutMs < 5_000 || request.signal.aborted) return await refuseExpiredStart();
+    try { providerResult = await createVoiceProviderSession(body.sdp, history, providerTimeoutMs); }
     catch {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
       return json("VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });

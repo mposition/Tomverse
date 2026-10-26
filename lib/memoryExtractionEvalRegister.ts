@@ -163,9 +163,9 @@ export type MemoryExtractionEvalEntry = {
      *
      *   * expiry is short and enforced at runtime, not only in CI;
      *   * the deterministic validator probes must all hold;
-     *   * candidates it produces are never bulk-approved, so a secret or a
-     *     directive the model mislabels reaches a prompt only through the
-     *     user's own one-by-one approval (§12.3's zero bulk-safe adoptions).
+     *   * the critical probes are what stand between a mislabelled secret or
+     *     directive and a prompt: since 2026-10-24 a validator-clean standard
+     *     candidate activates without review, and nothing sensitive is stored.
      */
     ownerLaunch?: {
         approver: string;
@@ -182,6 +182,27 @@ export const MEMORY_OWNER_LAUNCH_MAX_DAYS = 30;
 
 export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry[] =
     [
+        {
+            // The pair automatic extraction uses: the approved entry for the
+            // prompt this build sends (lib/memoryExtractionAuto.ts). v10 is
+            // new in the change that approves it, so its text and this
+            // approval land together.
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v10",
+            status: "approved",
+            owner: "@mposition",
+            registeredAt: "2026-10-24",
+            notes: "v9 with the health rules rewritten: the behaviour a health fact creates is kept without its reason, and anything still health-revealing is not extracted. Needed because extraction no longer has a review queue.",
+            evalBudget: null,
+            evaluation: null,
+            ownerLaunch: {
+                approver: "@mposition",
+                approvedAt: "2026-10-24",
+                expiresAt: "2026-11-22",
+                decisionRef: "Owner decision in chat, 2026-10-24: free automatic extraction on import, no review queue, health reasons rewritten out and still-sensitive candidates not stored.",
+                knownLimitations: "Unmeasured, like v9. Candidates activate without review, so the deterministic validator and its critical probes are the only gate before a memory reaches a prompt.",
+            },
+        },
         {
             extractionModelId: "gpt-5-6-luna",
             promptVersion: "mem-extract-v9",
@@ -969,29 +990,6 @@ export function findApprovedEvalPair(
     );
     if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) return null;
     return entry;
-}
-
-/**
- * Whether candidates from this pair may be approved in bulk. Only a pair whose
- * evaluation measured zero critical bulk-safe adoptions qualifies; an owner
- * launch, a revoked, candidate or unknown pair is reviewed one by one.
- *
- * Positive on purpose: it requires `evaluation` rather than checking for the
- * absence of `ownerLaunch`, because revoking or renewing a launch drops that
- * field and would make the unmeasured candidates it already stored
- * bulk-eligible again. `null` is a user-authored memory.
- */
-export function allowsBulkApproval(
-    pair: MemoryExtractionPairRef | null,
-    register: readonly MemoryExtractionEvalEntry[] = MEMORY_EXTRACTION_EVAL_REGISTER
-): boolean {
-    if (!pair) return true;
-    const entry = register.find(
-        (candidate) =>
-            candidate.extractionModelId === pair.extractionModelId &&
-            candidate.promptVersion === pair.promptVersion
-    );
-    return entry?.status === "approved" && Boolean(entry.evaluation);
 }
 
 /**

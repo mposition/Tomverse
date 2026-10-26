@@ -61,7 +61,7 @@ owner-only (rule 14).
 | Operations | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | SRE agent | `/admin/sre-ops` | — |
-| Operations | QA and release | `/admin/qa-release` | `overview`, `lane`, `ci-admission` |
+| Operations | QA and release | `/admin/qa-release` | `overview`, `train`, `lane`, `ci-admission` |
 | Operations | Agent digests | `/admin/agent-digests` | `billing-finance-ops` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
@@ -102,7 +102,10 @@ works in it, not only reads it; `/admin/agent-digests?tab=qa-release` and
 Its `lane` tab is the merge lane's own record of its latest rounds: every
 open develop pull request with what the lane will do with it, the ones that
 are the operator's first with the files that made them so; that count is
-the tab's chip.
+the tab's chip. Its `train` tab (2026-10-25) is the release train: the next
+train's cargo, an emergency departure request, and a departure board of
+past trains that stays dark in both console themes (the one Admin file
+`tests/adminTheme.test.mjs` lets use literal colours).
 
 **Agent digests** is the common area where agent teams' daily digests are
 read (`docs/policy/qa-release-agent.md` section 4), one section per agent
@@ -621,7 +624,7 @@ The safety section distinguishes automatic recovery checks, operator confirmatio
 
 ### AMUX Ideas holds only the idea flow (2026-10-15)
 
-The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to **Cleanup and recovery** (`?tab=recovery`), and the monthly analysis budget, the approval of analysis models and the Task worker and model cost catalogue to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Ideas flow links there and only reads what is approved. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas on the six-step bar; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. No route was retired, so no redirect was added.
+The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to **Cleanup and recovery** (`?tab=recovery`), and the monthly analysis budget and the approval of analysis models to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Task cost catalogue has no panel and no approval: the server derives it from the worker registry and Admin › Models (owner decision 2026-10-25). The Ideas flow links to Analysis settings and only reads the budget and models approved there. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas on the six-step bar; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. No route was retired, so no redirect was added.
 
 ### AMUX Ideas is a one-stop flow with two decisions (2026-10-16)
 

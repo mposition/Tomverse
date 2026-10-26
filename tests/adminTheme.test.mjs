@@ -71,7 +71,12 @@ test("every Admin component and page is written in dark classes only, with no da
   assert.ok(files.length > 100);
   const offenders = files.filter((path) => /(^|[\s"'`])dark:[a-z]/m.test(read(path)));
   assert.deepEqual(offenders, []);
-  // A literal colour is outside the palette, so Light cannot remap it.
-  const literal = files.filter((path) => /\b(?:bg|text|border|from|to|via|ring|fill|stroke)-\[(?:#|rgb|hsl|oklch)/.test(read(path)));
+  // A literal colour is outside the palette, so Light cannot remap it. The
+  // one exception wants exactly that: the release train's departure board is
+  // a dark board with its own light text in both themes (owner, 2026-10-25).
+  const FIXED_DARK = ["components/admin/QaReleaseTrainBoard.tsx"];
+  const literal = files.filter(
+    (path) => !FIXED_DARK.includes(path) && /\b(?:bg|text|border|from|to|via|ring|fill|stroke)-\[(?:#|rgb|hsl|oklch)/.test(read(path)),
+  );
   assert.deepEqual(literal, []);
 });

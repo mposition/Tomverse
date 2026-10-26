@@ -8,9 +8,11 @@ import { mobileErrorText } from "../../../locales/mobileErrors";
 import type { MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
 import { mobileVoiceError, mobileVoiceCopy, mobileVoicePrivacy } from "../../../locales/mobileVoice";
+import { NativeLocationControl } from "./NativeLocationControl";
 import { ComposerTools, type ToolChange, type ComposerAction } from "./ComposerTools";
 
 type Props = {
+  locationIdentity?: string | null;
   voiceConversation?: (disabled: boolean) => ReactNode;
   copy: typeof mobileCopy.en; transport: ChatTransport; draft: string; setDraft: (text: string) => void;
   language: MobileLanguage;
@@ -18,7 +20,7 @@ type Props = {
   extraTools?: ComposerAction[];
   offline?: boolean; disabled: boolean; streaming: boolean; onSend: (text: string, files: MobileAttachment[]) => Promise<void | boolean>; onStop: () => void;
 };
-export function Composer({ copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, voiceConversation }: Props) {
+export function Composer({ locationIdentity = null, copy, language, transport, draft, setDraft, disabled, offline = false, streaming, onSend, onStop, conversation, onConfigureTools, extraTools, voiceConversation }: Props) {
   const [files, setFiles] = useState<MobileAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -65,6 +67,7 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
     void onSend(draft, files).then(result => { if (result !== false) setFiles([]); });
   }
   return <div className="composer-area">
+    {transport.location && <NativeLocationControl session={transport.location} identity={locationIdentity} language={language} compact />}
     {error && <p role="alert" className="notice error">{error}</p>}
     {voice.state.status === "error" && <p role="alert" className="notice error">{mobileVoiceError(language, voice.state.code, voice.serverCode)}<button onClick={voice.dismissError}>×</button></p>}
     {files.length > 0 && <ul className="attachments">{files.map((file) => <li key={file.uploadId}>{file.name}<button aria-label={`${copy.remove}: ${file.name}`} onClick={() => setFiles((items) => items.filter((item) => item.uploadId !== file.uploadId))}>×</button></li>)}</ul>}
@@ -85,6 +88,6 @@ export function Composer({ copy, language, transport, draft, setDraft, disabled,
     {voiceBusy && <p className="voice-privacy">{mobileVoicePrivacy(language)}</p>}
     {!voiceBusy && voice.elapsedSeconds > 0 && draft && <p className="composer-progress">{copy.voiceReview}</p>}
     {uploading && <p role="status" className="composer-progress">{copy.loading}</p>}
-    {tools && <ComposerTools extraTools={extraTools} transport={transport} language={language} conversation={conversation} onChange={onConfigureTools} onClose={() => setTools(false)} onFiles={() => { setTools(false); picker.current?.click(); }} onPhotos={() => { setTools(false); photos.current?.click(); }} />}
+    {tools && <ComposerTools locationIdentity={locationIdentity} extraTools={extraTools} transport={transport} language={language} conversation={conversation} onChange={onConfigureTools} onClose={() => setTools(false)} onFiles={() => { setTools(false); picker.current?.click(); }} onPhotos={() => { setTools(false); photos.current?.click(); }} />}
   </div>;
 }

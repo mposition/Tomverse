@@ -79,6 +79,13 @@ The mobile composer must preserve this vertical structure:
 
 Optional rows may be compacted or conditionally hidden. The textarea row may not be merged with another row.
 
+When Chat offers voice conversation, its waveform and Send share one primary
+action position. An empty trimmed draft without attachments shows the waveform;
+text or an attachment shows Send instead. Dictation remains a separate microphone.
+Recording and streaming keep their existing controls, and surfaces without voice
+conversation keep Send. Switching the visible action must not unmount an active
+voice session or submit a draft. Web and the bundled app follow the same behavior.
+
 The normal mobile state keeps its compact context row at supported portrait
 heights, including a 680px viewport. Keyboard-open and landscape compaction may
 fold that row as described above; a merely shorter portrait viewport does not.
@@ -122,6 +129,9 @@ the optional analytics notice stays inside the dock's safe area.
 - ChatMessageList optimization is subordinate to composer usability.
 - An attachment chip, its filename, and any attachment error occupy their own
   rows; none of them may narrow, cover or shorten the textarea's row.
+- Optional current-location status occupies its own row above the textarea.
+  Its off action remains reachable at 320px and 200% text scaling. Coverage:
+  `tests/e2e/chat-location.spec.ts`.
 
 ## Scroll ownership and the visible viewport
 

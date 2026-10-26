@@ -1,4 +1,5 @@
 import "server-only";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 
 import {
   reclaimStaleUploadClaims,
@@ -59,6 +60,7 @@ import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   FOUNDING_TESTER_PASS_EXPIRED_STATUS,
   FOUNDING_TESTER_PASS_STATUS,
+  effectivePlanForAccess,
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
@@ -229,6 +231,8 @@ const expireFoundingTesterPasses = async (now: Date) => {
         data: { expiredAt: now },
       });
       if (marked.count !== 1) return { expired: false, downgraded: false };
+      await lockSubscriptionAccount(tx, row.userId);
+      const entitlement = await tx.user.findUniqueOrThrow({ where: { id: row.userId } });
       const user = await tx.user.updateMany({
         where: {
           id: row.userId,
@@ -237,7 +241,8 @@ const expireFoundingTesterPasses = async (now: Date) => {
           subscriptionCurrentPeriodEnd: { lte: now },
         },
         data: {
-          plan: "Free",
+          plan: effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" }),
+          webSubscriptionPlan: "Free",
           subscriptionStatus: FOUNDING_TESTER_PASS_EXPIRED_STATUS,
           subscriptionBillingInterval: null,
           subscriptionCancelAtPeriodEnd: true,
@@ -440,6 +445,18 @@ export async function cleanupExpiredData() {
   // pass steps read what the one before them wrote, and running them in
   // sequence keeps a notice in the same run as the expiry it announces.
   const { step, failures } = createMaintenanceStepRunner();
+
+  // Expire pending MCP payloads even with the connector switch off. Running
+  // calls have an unknown outcome after a crash and must never be replayed.
+  await step("mcp_connector_payloads", async () => {
+    await prisma.mcpOAuthFlow.updateMany({ where: { expiresAt: { lte: now }, secretCiphertext: { not: null } },
+      data: { state: "expired", secretCiphertext: null } });
+    await prisma.mcpOAuthFlow.deleteMany({ where: { expiresAt: { lt: new Date(now.getTime() - 86_400_000) } } });
+    await prisma.mcpInvocation.updateMany({ where: { expiresAt: { lte: now }, state: "pending" },
+      data: { state: "expired", argumentsCiphertext: null } });
+    await prisma.mcpInvocation.updateMany({ where: { expiresAt: { lte: now }, state: "running" },
+      data: { state: "unknown", argumentsCiphertext: null } });
+  });
 
   const creditReservations = await step("chat_credit_reservations", () =>
     reconcileExpiredChatCreditReservations()

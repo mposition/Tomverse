@@ -118,6 +118,7 @@ export type DesktopChatShellProps = {
   onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
+  onCompareInReview?: (seed: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -236,6 +237,7 @@ export type DesktopChatShellProps = {
     focusRequest?: { messageId: string; nonce: number } | null;
     /** Called once the requested message has been scrolled to and focused. */
     onFocusApplied?: (nonce: number) => void;
+    compareInReview?: { onPress: () => void; pending: boolean; error: string | null };
   };
   /**
    * Whether this conversation has content the panels cannot see.
@@ -427,6 +429,7 @@ export function DesktopChatShell({
   onProductSwitch,
   transcriptScope = "model",
   onRestorePrompt,
+  onCompareInReview,
   conversations,
   currentChatId,
   selectedModels,
@@ -1372,6 +1375,7 @@ export function DesktopChatShell({
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
+                  onCompareInReview={onCompareInReview}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}

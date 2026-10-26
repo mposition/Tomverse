@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV22EngineeringPublicationEnabled,
+import { amuxV22DeliveryBudgetMicrousd, amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
-  v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from
@@ -37,22 +36,10 @@ test("settlement refuses a patch inserted, removed, or changed after decrypt", (
   assert.equal(matches({ ...readPatch, taskId: "task-2" }, storedPatch), false);
 });
 
-test("each attempt fits the assigned route and cumulative owner ceiling", () => {
-  const base = { assignedMicroUsd: 1_000n,
-    currentMicroUsd: 800n, approvedCeilingMicroUsd: 5_000n,
-    priorReservedMicroUsd: 4_000n };
-  assert.equal(v22ExecutionCostWithinAssignment(base), true);
-  assert.equal(v22ExecutionCostWithinAssignment({ ...base,
-    currentMicroUsd: 1_001n }), false);
-  assert.equal(v22ExecutionCostWithinAssignment({ ...base,
-    priorReservedMicroUsd: 4_001n }), false);
-  assert.equal(v22ExecutionCostWithinAssignment({ ...base,
-    assignedMicroUsd: 0n }), false);
-});
-
 test("v22 settlement accepts only its one preallocated invocation receipt", () => {
   const base = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
     outcome: "succeeded", resultStored: true, reservedCostMicrousd: 1_000n,
+    budgetBound: false,
     events: [{ invocationId: "attempt-1", status: "succeeded",
       completeness: "reported_complete", projectedApiCostMicrousd: 700n,
       cli: "claude", source: "claude_result",
@@ -81,8 +68,24 @@ test("v22 settlement accepts only its one preallocated invocation receipt", () =
     events: [{ ...base.events[0], actualModelId: null }] }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...base,
     events: [{ ...base.events[0], actualModelId: "claude-sonnet-5" }] }), false);
-  assert.equal(v22ExecutionReceiptVerified({ ...base,
+  // Owner decision 2026-10-25: an ordinary CLI run settles on its observed
+  // usage, whatever it cost and even when it could not be priced.
+  for (const projectedApiCostMicrousd of [1_001n, null]) {
+    assert.equal(v22ExecutionReceiptVerified({ ...base,
+      events: [{ ...base.events[0], projectedApiCostMicrousd }] }), true);
+  }
+  // The one-off read-only retry ran under its signed dollar budget, on the
+  // CLI as on the read-only API, so its projection must fit.
+  assert.equal(v22ExecutionReceiptVerified({ ...base, budgetBound: true,
     events: [{ ...base.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base, budgetBound: true,
+    events: [{ ...base.events[0], projectedApiCostMicrousd: null }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base, budgetBound: true }), true);
+  const api = { ...base, budgetBound: true, expectedExecutionSource: "anthropic_messages_api",
+    events: [{ ...base.events[0], cli: "anthropic_api", source: "anthropic_messages_api" }] };
+  assert.equal(v22ExecutionReceiptVerified(api), true);
+  assert.equal(v22ExecutionReceiptVerified({ ...api,
+    events: [{ ...api.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
 });
 
 test("read-only API receipt must exactly match its content-free usage event", () => {
@@ -115,4 +118,12 @@ test("read-only API receipt must exactly match its content-free usage event", ()
     { event: { ...event, pricingVersion: "other" } },
     { event: { ...event, projectedApiCostMicrousd: 364n } },
   ]) assert.equal(v22ReadOnlyApiReceiptMatchesUsage({ ...base, ...changed }), false);
+});
+
+test("an ordinary delivery's budget field stays within the bridge's 5 USD wire range", () => {
+  assert.equal(amuxV22DeliveryBudgetMicrousd(1_250_000, false), 1_250_000);
+  assert.equal(amuxV22DeliveryBudgetMicrousd(23_200_000, false), 5_000_000,
+    "a dear ordinary run is still delivered, not refused by the bridge");
+  assert.equal(amuxV22DeliveryBudgetMicrousd(3_400_000, true), 3_400_000,
+    "the read-only retry carries its exact signed amount");
 });

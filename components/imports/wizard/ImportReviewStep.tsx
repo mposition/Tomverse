@@ -7,6 +7,7 @@ import {
     primaryButtonClass,
     secondaryButtonClass,
 } from "@/components/imports/importFormatting";
+import { ImportMemoryNotice } from "@/components/imports/wizard/ImportMemoryNotice";
 import type { ServerReview } from "@/lib/externalImportWizard";
 
 /**
@@ -150,6 +151,8 @@ export function ImportReviewStep({
                     </span>
                 </p>
             )}
+
+            <ImportMemoryNotice />
 
             <div className="mt-4 flex flex-wrap gap-2">
                 <button

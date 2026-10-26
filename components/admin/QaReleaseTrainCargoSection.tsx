@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { card } from "@/components/admin/qaReleaseTabParts";
-import { adminFetch } from "@/lib/adminFetch";
+import { useQaReleaseTrainReads } from "@/components/admin/QaReleaseTrainRefresher";
+import { QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS, announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
+import { adminFetch, isAdminFetchTimeout } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { aestStamp } from "@/lib/agentOffice/time";
@@ -17,9 +18,11 @@ import {
   type QaReleaseTrainSelection,
 } from "@/lib/qaReleaseTrainCargoCore";
 import type { QaReleaseTrainCargoCandidatesRead } from "@/lib/qaReleaseTrainCargoRead";
+import { QA_RELEASE_TRAIN_DEFAULT_SLOTS } from "@/lib/qaReleaseTrainCore";
+import type { QaReleaseTrainSchedule } from "@/lib/qaReleaseTrainStore";
 
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
-const PAGE_PATH = "/admin/qa-release";
+const PAGE_PATH = "/admin/qa-release?tab=train";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 
 const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
@@ -27,11 +30,14 @@ const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   unchecked: "bg-zinc-800 text-zinc-300",
   in_main_pull_request: "bg-zinc-800 text-zinc-400",
   on_main: "bg-zinc-800 text-zinc-400",
+  mentioned: "bg-amber-300/15 text-amber-300",
   changes_workflows: "bg-amber-300/15 text-amber-300",
   back_merge: "bg-zinc-800 text-zinc-400",
 };
 
-type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleaseTrainSelection };
+type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleaseTrainSelection; schedule: (QaReleaseTrainSchedule & { nextDepartureAt: string | null }) | null };
+
+const hoursText = (hours: readonly number[]) => hours.map((hour) => String(hour).padStart(2, "0")).join("·");
 
 /**
  * The next release train's cargo (lib/qaReleaseTrainCargoCore.ts): merged
@@ -41,10 +47,15 @@ type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleas
  * train left out rides the next one, marked here with the develop pull
  * requests a conflict needs first.
  */
-export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean; id?: string }) {
+/**
+ * `reloadKey`: the overview's Refresh count. Each new value reads the
+ * candidates again from GitHub, past the shared ten-minute read.
+ */
+export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { canWrite: boolean; id?: string; reloadKey?: number }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
   const [view, setView] = useState<View | null>(null);
-  const [failed, setFailed] = useState(false);
+  // "slow": the read outlasted the wait; the server goes on and keeps it for the next try.
+  const [failed, setFailed] = useState<false | "error" | "slow">(false);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -52,10 +63,12 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
   const [query, setQuery] = useState("");
   // What cannot ride is counted, not listed, unless asked for (owner, 2026-10-23: the list ran to hundreds).
   const [showAll, setShowAll] = useState(false);
+  // On the train tab its own "Read again" (and the emergency panel's save) read it again.
+  const reads = useQaReleaseTrainReads();
 
   useEffect(() => {
     let cancelled = false;
-    adminFetch(API, { cache: "no-store" })
+    adminFetch(reloadKey > 0 || reads.fresh ? `${API}?fresh=1` : API, { cache: "no-store", timeoutMs: QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS })
       .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
         return response.json() as Promise<View>;
@@ -66,13 +79,13 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
         setPicked(new Set(next.selection.numbers));
         setFailed(false);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((error: unknown) => {
+        if (!cancelled) setFailed(isAdminFetchTimeout(error) ? "slow" : "error");
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey, reads.key, reads.fresh]);
 
   const saved = useMemo(() => new Set(view?.selection.numbers ?? []), [view]);
   const changed = picked.size !== saved.size || [...picked].some((number) => !saved.has(number));
@@ -131,6 +144,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       setView((current) => (current ? { ...current, selection: payload.result! } : current));
       setPicked(new Set(payload.result.numbers));
       setNotice({ tone: "ok", text: m.trainCargoSaved.replace("{count}", String(payload.result.numbers.length)) });
+      announceQaReleaseTrainChanged();
     } catch {
       setNotice({ tone: "error", text: m.trainCargoSaveFailed });
     } finally {
@@ -147,7 +161,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
   const unreleased = (predecessors: readonly number[]) =>
     predecessors.filter((number) => {
       const status = candidateByNumber.get(number)?.status;
-      return status === undefined || status === "available" || status === "unchecked" || status === "changes_workflows";
+      return status === undefined || qaReleaseTrainCargoPickable(status) || status === "changes_workflows";
     });
   const trainLabel = lastTrain ? (lastTrain.pullRequestNumber !== null ? `#${lastTrain.pullRequestNumber}` : lastTrain.slot) : "";
   const leftOutText = (reason: QaReleaseTrainCarryReason) =>
@@ -172,6 +186,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       unchecked: m.trainCargoUnchecked,
       in_main_pull_request: m.trainCargoInMainPull.replace("{number}", String(candidate.mainPullRequest ?? "")),
       on_main: m.trainCargoOnMain.replace("{number}", String(candidate.mainPullRequest ?? "")),
+      mentioned: m.trainCargoMentioned.replace("{number}", String(candidate.mainPullRequest ?? "")),
       changes_workflows: m.trainCargoWorkflows,
       back_merge: m.trainCargoBackMerge,
     })[candidate.status];
@@ -179,11 +194,23 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
   const button =
     "inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-700 px-3 text-[13px] font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50";
 
+  // The hours the train service said it runs on (QA_RELEASE_TRAIN_SLOTS), not
+  // the default: the service reports them every round.
+  const schedule = view?.schedule ?? null;
+  const departures = schedule
+    ? m.trainCargoSchedule
+        .replace("{hours}", hoursText(schedule.hours))
+        .replace("{next}", schedule.nextDepartureAt ? aestStamp(schedule.nextDepartureAt) : "-")
+        .replace("{at}", aestStamp(schedule.reportedAt))
+    : m.trainCargoScheduleUnknown.replace("{hours}", hoursText(QA_RELEASE_TRAIN_DEFAULT_SLOTS.split(",").map(Number)));
+
   return (
     <section className={card} id={id} data-testid="qa-release-train-cargo">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h3 className="text-base font-semibold text-zinc-100">{m.trainCargoTitle}</h3>
-        <span className="text-xs text-zinc-400">{m.trainCargoDepartures}</span>
+        <span className="text-xs text-zinc-400" data-testid="qa-release-train-schedule">
+          {departures}
+        </span>
         {view?.selection.savedAt ? (
           <span className="ml-auto text-xs text-zinc-500">
             {m.trainCargoLastSaved.replace("{at}", aestStamp(view.selection.savedAt)).replace("{by}", view.selection.savedBy ?? "-")}
@@ -200,11 +227,20 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
       ) : null}
 
       {failed || view?.candidates.status === "unread" ? (
-        <p className="mt-3 text-sm text-amber-300">{m.trainCargoUnread}</p>
+        <p className="mt-3 text-sm text-amber-300">
+          {failed === "slow" ? m.trainCargoSlow : m.trainCargoUnread}
+          {view?.candidates.status === "unread" ? m.githubFailure.replace("{failure}", view.candidates.failure) : ""}
+        </p>
       ) : view === null ? (
         <p className="mt-3 text-sm text-zinc-400">{m.trainCargoLoading}</p>
       ) : (
         <>
+          {view.candidates.status === "ok" && view.candidates.stale ? (
+            // The newest read failed: the last good list stays, and says how old it is and why.
+            <p className="mt-3 text-[13px] text-amber-300" data-testid="qa-release-train-cargo-stale">
+              {m.trainCargoStale.replace("{at}", aestStamp(view.candidates.readAt)).replace("{failure}", view.candidates.stale.failure)}
+            </p>
+          ) : null}
           <div className="mt-3 grid grid-cols-3 gap-2">
             {[
               [m.trainCargoCanRide, pickable.length],
@@ -274,7 +310,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
               {shown.map((candidate) => {
                 const can = qaReleaseTrainCargoPickable(candidate.status);
                 const carried = can ? carriedByNumber.get(candidate.number) : undefined;
-                const needs = carried?.reason === "conflict" ? unreleased(carried.predecessors) : [];
+                const needs = carried?.reason === "conflict" && carried.predecessors ? unreleased(carried.predecessors) : [];
                 return (
                   <li
                     key={candidate.number}
@@ -305,7 +341,11 @@ export function QaReleaseTrainCargoSection({ canWrite, id }: { canWrite: boolean
                       {carried ? (
                         <div className="mt-1 text-xs text-amber-300" data-testid={`qa-release-train-cargo-carried-${candidate.number}`}>
                           <span>{leftOutText(carried.reason)}</span>
-                          {carried.reason === "conflict" && needs.length === 0 ? <span className="block text-zinc-400">{m.trainCargoNoPredecessor}</span> : null}
+                          {carried.reason === "conflict" && carried.predecessors === null ? (
+                            <span className="block text-zinc-400">{m.trainCargoPredecessorsUnknown}</span>
+                          ) : carried.reason === "conflict" && needs.length === 0 ? (
+                            <span className="block text-zinc-400">{m.trainCargoNoPredecessor}</span>
+                          ) : null}
                           {needs.length > 0 ? (
                             <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-zinc-300">
                               {m.trainCargoNeedsFirst}

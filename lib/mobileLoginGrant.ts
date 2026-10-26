@@ -19,8 +19,8 @@ import "server-only";
  *
  * ## The binding, and what it is for
  *
- * The browser generates a PKCE verifier, keeps it, and sends only its S256
- * challenge when asking for a grant. The app presents the verifier when it
+ * The native app generates and keeps a PKCE verifier; the browser receives
+ * only its S256 challenge when asking for a grant. The app presents the verifier when it
  * exchanges. So a grant intercepted on its way back to the device is useless
  * without the verifier that never left the instance that started the flow.
  *

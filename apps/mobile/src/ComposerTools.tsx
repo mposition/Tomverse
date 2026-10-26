@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { NativeLocationControl } from "./NativeLocationControl";
 import { Sheet } from "./Sheet";
 import type { AssistantSummary, ChatTransport, Conversation } from "./chatTransport";
 import type { MobileLanguage } from "../../../locales/mobile";
@@ -7,7 +8,8 @@ import { mobileParityCopy } from "../../../locales/mobileParity";
 
 export type ComposerAction = { label: string; disabled?: boolean; onSelect: () => void };
 export type ToolChange = { webSearchMode?: "off" | "always"; memoryMode?: "inherit" | "on" | "off"; assistantProfileId?: string | null };
-export function ComposerTools({ transport, language, conversation, onChange, onFiles, onPhotos, onClose, extraTools }: {
+export function ComposerTools({ locationIdentity = null, transport, language, conversation, onChange, onFiles, onPhotos, onClose, extraTools }: {
+  locationIdentity?: string | null;
   transport: ChatTransport; language: MobileLanguage; conversation?: Conversation | null;
   extraTools?: ComposerAction[];
   onChange?: (input: ToolChange) => Promise<void>; onFiles: () => void; onPhotos: () => void; onClose: () => void;
@@ -30,6 +32,7 @@ export function ComposerTools({ transport, language, conversation, onChange, onF
   }
   return <Sheet title={c.tools} closeLabel={mobileCopy[language].close} onClose={() => { if (!busy) onClose(); }}>
     <div className="composer-tools">
+      {transport.location && <NativeLocationControl session={transport.location} identity={locationIdentity} language={language} />}
       <div className="file-sources"><button onClick={onPhotos}>{c.photos}</button><button onClick={onFiles}>{c.files}</button></div><p className="field-hint">{c.filePrivacy}</p>
       <label className="switch-field"><span>{c.search}<small>{c.searchHint}</small></span><input type="checkbox" role="switch" checked={conversation ? conversation.webSearchMode === "always" : true} disabled={busy || !onChange} onChange={event => void change({ webSearchMode: event.target.checked ? "always" : "off" })} /></label>
       <label>{c.memory}<select aria-label={c.memory} value={conversation?.memoryMode ?? "inherit"} disabled={busy || !onChange} onChange={event => void change({ memoryMode: event.target.value as "inherit" | "on" | "off" })}><option value="inherit">{c.inherit}</option><option value="on">{c.on}</option><option value="off">{c.off}</option></select></label>

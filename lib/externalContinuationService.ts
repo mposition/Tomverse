@@ -17,15 +17,15 @@
  * cannot tell apart from any other. A bridge with no conversation is
  * provenance about nothing. Both are created inside the caller's transaction
  * through `createConversation`, which is what the writer-coverage check
- * requires and what makes `productKey = "review"` unmissable.
+ * requires and what makes the endpoint's `productKey` unmissable.
  *
- * ## Why the product is Review
+ * ## Which product
  *
- * Continuing an imported transcript is asking several models the same next
- * question with the same imported context, in one place. That is Review
- * (docs/policy/external-conversation-continuation.md §3.1). The bridge decides
- * provenance and which surface the row opens at; it does not decide the
- * product, and the product does not decide the surface -- deriving one from
+ * Chat (Smart Adaptive) by default, Review when the owner asks to compare
+ * models on the same original (owner decision 2026-10-25,
+ * docs/policy/external-conversation-continuation.md §3.1). The endpoint picks
+ * it; the bridge decides provenance and which route the row opens at, never
+ * the product, and the product does not decide the route -- deriving one from
  * the other would send every Review conversation to `/continuations`.
  */
 
@@ -38,7 +38,10 @@ import {
     effectivePlanModelLimit,
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
-import { REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
+import {
+    CHAT_PRODUCT_KEY,
+    type ConversationProductKey,
+} from "@/lib/conversationProduct";
 import { createConversation } from "@/lib/conversationCreation";
 import {
     capToPlanModelLimit,
@@ -176,6 +179,9 @@ async function readSeedPlan(
     return planContinuationSeed({ messages: rows, sourceMessageCount });
 }
 
+/** The products a continuation can be (§3.1). Studio is another modality. */
+export type ContinuationProductKey = Extract<ConversationProductKey, "chat" | "review">;
+
 export type CreatedContinuation = {
     conversationId: string;
     /** True when an earlier attempt with the same key had already created it. */
@@ -199,12 +205,17 @@ export type CreatedContinuation = {
  * than to the source, which is why a replay is answered even when it names a
  * different source — answering it with a second conversation would be exactly
  * the duplicate the key exists to prevent.
+ *
+ * `productKey` is required and comes from the endpoint, never from a request
+ * body (docs/policy/conversation-product-key.md §5.2). Chat is a single-model
+ * Smart Adaptive conversation; Review keeps the account's comparison set.
  */
 export async function createExternalContinuation(input: {
     userId: string;
     externalConversationId: string;
     idempotencyKey: string;
     request: Request;
+    productKey: ContinuationProductKey;
 }): Promise<CreatedContinuation> {
     const existing = await readContinuationByKey(
         input.userId,
@@ -223,7 +234,13 @@ export async function createExternalContinuation(input: {
       idempotent replay above returns before any of it runs, so a retried click
       does not pay for it either.
     */
-    const selectedModels = await resolveInitialContinuationModels(input.userId);
+    const accountModels = await resolveInitialContinuationModels(input.userId);
+    // Chat answers on one model, the lead of the same saved combination a
+    // blank Chat draft starts from (`newWorkspaceDraftModels`).
+    const selectedModels =
+        input.productKey === CHAT_PRODUCT_KEY
+            ? [accountModels[0] ?? APP_DEFAULTS.defaultModelId]
+            : accountModels;
 
     try {
         return await createContinuationRows({ ...input, selectedModels });
@@ -313,6 +330,7 @@ async function createContinuationRows(input: {
     externalConversationId: string;
     idempotencyKey: string;
     request: Request;
+    productKey: ContinuationProductKey;
     selectedModels: string[];
 }): Promise<CreatedContinuation> {
     return prisma.$transaction(async (tx) => {
@@ -337,21 +355,27 @@ async function createContinuationRows(input: {
             {
                 userId: input.userId,
                 title: LEGACY_CONTINUATION_TITLE,
-                // A server constant, never a body field. Review is what the
-                // user is doing here: putting the same imported context and
-                // the same next question to the models they chose
-                // (docs/policy/external-conversation-continuation.md §3.1).
-                productKey: REVIEW_PRODUCT_KEY,
-                // Not derived, and not inherited from anything. Auto is a
-                // Chat-only feature (`AUTO_SELECTION_PRODUCT`), so on a Review
-                // row it is absent rather than refused, and the database's
-                // `Conversation_auto_only_chat_check` would refuse the pair
-                // anyway.
-                selectionMode: "manual",
-                // The account's own new-conversation combination, resolved by
-                // the same function `POST /api/conversations` uses. §8.3: no
-                // continuation-specific default combination.
+                // The endpoint's server constant, never a body field
+                // (docs/policy/external-conversation-continuation.md §3.1):
+                // Chat by default, Review when the owner asks to compare.
+                productKey: input.productKey,
+                // A Chat continuation opens in Smart Adaptive, the mode the
+                // continuations route only chooses for an account Auto is
+                // offered to. Auto is Chat-only (`AUTO_SELECTION_PRODUCT`), so
+                // a Review row is manual and the database's
+                // `Conversation_auto_only_chat_check` refuses anything else.
+                selectionMode:
+                    input.productKey === CHAT_PRODUCT_KEY ? "auto" : "manual",
+                // The account's own new-conversation combination (Chat: its
+                // lead model), resolved by the same function
+                // `POST /api/conversations` uses. §8.3: no continuation-specific
+                // default combination.
                 selectedModels: JSON.stringify(input.selectedModels),
+                // The new-conversation default every other create uses
+                // (`conversationCreateHandler`). Omitted, the row fell to the
+                // column default "off" and a continuation opened with web
+                // search off where a fresh Chat or Review has it on.
+                webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
             },
             { id: true }
         );

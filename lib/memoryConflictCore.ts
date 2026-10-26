@@ -1,6 +1,10 @@
 import { memoryStatementKey } from "./memoryValidatorCore";
 
-/** A model-proposed topic is a review hint, never permission to change a memory. */
+/**
+ * A model-proposed topic groups statements about one thing. Extraction lets
+ * the newer statement on a topic supersede the older one
+ * (lib/memoryExtractionPersistence.ts), never one the user wrote or edited.
+ */
 export const MEMORY_CANONICAL_KEY_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,5}$/;
 
 export function isMemoryCanonicalKey(value: unknown): value is string {

@@ -1103,3 +1103,34 @@ f942c9e83457a075b9a7b921868a75103fd98eeb:tests/engineeringAgentPublisher.test.mj
 #
 # Scope: exactly this one finding in that one commit.
 1fbaeff327c4f3e5208cedac18dbd20ee43e9f02:tests/integration/auto-router-optimizer-recommendations.db.test.ts:generic-api-key:16
+
+# Synthetic AMUX v19 result-route secret, not a credential.
+#
+# Commit 4149b2d introduced tests/amuxV19LocalMaxSessionResultOnce.test.mjs
+# and tests/amuxV19SessionAnalysisResultRoute.test.mjs with the same made-up
+# bearer secret ("syntheticMaxResultSecret_..."), handed to an in-process
+# route under test and never to any running system.
+#
+# Scope: exactly these two findings in that one commit.
+4149b2d7f621402fe63b2c166f8749070b884ad1:tests/amuxV19LocalMaxSessionResultOnce.test.mjs:generic-api-key:17
+4149b2d7f621402fe63b2c166f8749070b884ad1:tests/amuxV19SessionAnalysisResultRoute.test.mjs:generic-api-key:25
+
+# Synthetic audit-chain test key, not a credential.
+#
+# Commit e2dfa01 (closed PR #2642, still on its remote branches) introduced
+# tests/integration/marketing-competitor-registry.db.test.ts with a made-up
+# AUDIT_SECRET for its throwaway test database.
+#
+# Scope: exactly this one finding in that one commit.
+e2dfa01a6963bee109ad65f022cb831ca2e663da:tests/integration/marketing-competitor-registry.db.test.ts:generic-api-key:24
+
+# Synthetic iOS application identifier A1B2C3D4E5.app.tomverse.shell in the
+# removed browser-login fixture, not an API key or a signing credential.
+# Scope: exactly this one historical finding; current scans remain enabled.
+9e1632617ca035bf0b59ac37ff2a11751dfc3121:tests/mobileBrowserLogin.test.mjs:generic-api-key:44
+
+# Synthetic MCP credential-echo test value, never issued to or used by a service.
+# Commit 3c5426a added the invented literal to exercise fragmented credential
+# detection. The test now generates its value at runtime. Keep only this exact
+# historical finding exempt; current files and every other finding stay scanned.
+3c5426a6e7ae1c222fef7d9f4507b65099e6b319:tests/mcpConnectorBoundary.test.ts:generic-api-key:36

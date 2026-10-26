@@ -36,6 +36,18 @@ const migrationsDirectory = join(root, "prisma", "migrations");
  * how it becomes a decision somebody can revisit rather than an omission.
  */
 const REGISTRY = {
+  McpConnection_status_check: {
+    owner: "database",
+    reason: "Connected, reauthentication-required and disconnected states are written by server-owned connector transitions. Clients submit actions rather than stored status values.",
+  },
+  McpInvocation_state_check: {
+    owner: "database",
+    reason: "The server owns pending, running and terminal one-use approval states. An uncertain dispatched write remains unknown until its owner records the verified outcome; API clients cannot assign arbitrary states.",
+  },
+  McpOAuthFlow_state_check: {
+    owner: "database",
+    reason: "The OAuth handler and maintenance own the authorization lifecycle. The callback's untrusted state parameter is an opaque lookup token, never the stored lifecycle state.",
+  },
   Feedback_answerSignal_check: {
     owner: "list",
     module: "lib/feedbackPolicy.ts",

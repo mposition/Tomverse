@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { offsetCreditDebt } from "@/lib/creditDebt";
 
 export type AddOnCreditReservationEntry = {
   lotId: string;
@@ -39,7 +40,7 @@ export const getPurchasedCreditSummary = async (userId: string, now = new Date()
     where: {
       userId,
       status: "active",
-      expiresAt: { gt: now },
+      AND: [{ OR: [{ nonExpiring: true }, { expiresAt: { gt: now } }] }],
       OR: [
         { remainingCredits: { gt: 0 } },
         { remainingFundedCostMicroUsd: { gt: 0 } },
@@ -51,6 +52,7 @@ export const getPurchasedCreditSummary = async (userId: string, now = new Date()
       remainingCredits: true,
       remainingFundedCostMicroUsd: true,
       expiresAt: true,
+      nonExpiring: true,
     },
   });
   return {
@@ -59,7 +61,7 @@ export const getPurchasedCreditSummary = async (userId: string, now = new Date()
       (sum, lot) => sum + asSafeNumber(lot.remainingFundedCostMicroUsd),
       0
     ),
-    earliestExpiry: lots[0]?.expiresAt || null,
+    earliestExpiry: lots.find((lot) => !lot.nonExpiring)?.expiresAt || null,
     lotCount: lots.length,
   };
 };
@@ -85,7 +87,7 @@ export const reserveAddOnCredits = async (
     where: {
       userId,
       status: "active",
-      expiresAt: { gt: now },
+      AND: [{ OR: [{ nonExpiring: true }, { expiresAt: { gt: now } }] }],
       OR: [
         { remainingCredits: { gt: 0 } },
         { remainingFundedCostMicroUsd: { gt: 0 } },
@@ -198,8 +200,42 @@ export const settleAddOnCredits = async (
       select: {
         remainingCredits: true,
         remainingFundedCostMicroUsd: true,
+        status: true,
+        source: true,
       },
     });
+    // A store refund can arrive while a chat reservation is in flight. Its
+    // unused portion clears the refund debt instead of reviving a refunded lot.
+    if (lot.status === "refunded" && lot.source === "mobile_store_purchase") {
+      const offset = await offsetCreditDebt(tx, {
+        userId, availableCredits: refundCredits, availableFundedCostMicroUsd: BigInt(refundCost),
+        type: "admin_adjustment", metadata: { reservationId, reason: "store_refund_reservation_release" },
+      });
+      const returnedCredits = refundCredits - offset.offsetCredits;
+      const returnedCost = BigInt(refundCost) - offset.offsetFundedCostMicroUsd;
+      if (returnedCredits > 0 || returnedCost > BigInt(0)) {
+        const release = await tx.creditLot.create({ data: {
+          userId, source: "mobile_store_reservation_release", nonExpiring: true,
+          expiresAt: new Date("9999-12-31T00:00:00Z"),
+          originalCredits: returnedCredits, remainingCredits: returnedCredits,
+          originalFundedCostMicroUsd: returnedCost, remainingFundedCostMicroUsd: returnedCost,
+        } });
+        await tx.creditLedgerEntry.create({ data: {
+          userId, creditLotId: release.id, type: "refund", reservationId,
+          creditsDelta: returnedCredits, fundedCostMicroUsdDelta: returnedCost,
+          balanceAfterCredits: returnedCredits, balanceAfterFundedCostMicroUsd: returnedCost,
+          metadata: { outcome, refundedLotId: entry.lotId },
+        } });
+      }
+      await tx.creditLedgerEntry.create({ data: {
+        userId, creditLotId: entry.lotId, type: "settle", reservationId,
+        creditsDelta: 0, fundedCostMicroUsdDelta: BigInt(0),
+        balanceAfterCredits: lot.remainingCredits, balanceAfterFundedCostMicroUsd: lot.remainingFundedCostMicroUsd,
+        metadata: { outcome, settledCredits: usedCredits, storeRefund: true },
+      } });
+      creditsLeft -= usedCredits; costLeft -= usedCost;
+      continue;
+    }
     if (refundCredits > 0 || refundCost > 0) {
       lot = await tx.creditLot.update({
         where: { id: entry.lotId },
@@ -210,6 +246,8 @@ export const settleAddOnCredits = async (
         select: {
           remainingCredits: true,
           remainingFundedCostMicroUsd: true,
+          status: true,
+          source: true,
         },
       });
       await tx.creditLedgerEntry.create({
@@ -253,7 +291,7 @@ export const settleAddOnCredits = async (
 export const expireCreditLots = async (now = new Date()) =>
   prisma.$transaction(async (tx) => {
     const lots = await tx.creditLot.findMany({
-      where: { status: "active", expiresAt: { lte: now } },
+      where: { status: "active", nonExpiring: false, expiresAt: { lte: now } },
       select: {
         id: true,
         userId: true,

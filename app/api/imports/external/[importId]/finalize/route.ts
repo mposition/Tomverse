@@ -1,4 +1,12 @@
-import { NextResponse } from "next/server";
+/**
+ * The post-response extraction kick below runs inside this budget: Next runs
+ * `after` for the route's max duration. 120s covers one chunk, the most a
+ * kick attempts; a kick cut short is picked up by the fifteen-minute
+ * dispatcher.
+ */
+export const maxDuration = 120;
+
+import { NextResponse, after } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
@@ -15,6 +23,37 @@ import { authOptions } from "@/lib/auth";
 import { EXTERNAL_IMPORT_MAX_CONTROL_REQUEST_BYTES } from "@/lib/externalImportLimits";
 import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
 import { finalizeExternalImport } from "@/lib/externalImportService";
+import { startAutomaticMemoryExtraction } from "@/lib/memoryExtractionAuto";
+import { kickMemoryExtractionRun } from "@/lib/memoryExtractionWorker";
+
+/**
+ * A finished import is the request to remember it (owner decision
+ * 2026-10-24): extraction starts by itself, free, after the response is sent.
+ * Best-effort on purpose -- whatever does not start here, the dispatcher
+ * starts within fifteen minutes -- so it never throws into the request.
+ */
+async function startExtractionAfterImport(userId: string) {
+    try {
+        const start = await startAutomaticMemoryExtraction(userId);
+        console.info(
+            JSON.stringify({
+                event: "memory_extraction_auto_start",
+                outcome: start.outcome,
+                ...(start.outcome === "skipped" ? { reason: start.reason } : {}),
+            })
+        );
+        if (start.outcome === "started") {
+            await kickMemoryExtractionRun(start.runId);
+        }
+    } catch (error) {
+        console.error(
+            JSON.stringify({
+                event: "memory_extraction_auto_start_failed",
+                errorName: error instanceof Error ? error.name : "UnknownError",
+            })
+        );
+    }
+}
 
 const finalizeSchema = z
     .object({
@@ -55,6 +94,11 @@ export async function POST(
             selectedConversationIds: body.selectedConversationIds,
             expectedImportDigest: body.expectedImportDigest ?? null,
         });
+        // A replayed finalize started its extraction the first time.
+        if (!result.idempotentReplay) {
+            const userId = session.user.id;
+            after(() => startExtractionAfterImport(userId));
+        }
         return NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },
         });

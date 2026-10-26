@@ -43,11 +43,23 @@ test("a bounded Read still records the file it touched", () => {
   assert.deepEqual(complete(observer), { kind: "complete", files: ["src/a.ts"] });
 });
 
-test("failed Read and tool summaries leave the file manifest unverified", () => {
+test("a failed Read is counted, not read, and tool summaries stay unverified", () => {
+  // A failed call (an oversized Read, a bad pattern) is not a read: the
+  // analysis goes on and the manifest holds only the successful Reads.
   const failed = make();
   observe(failed, use("read_1", "Read", { file_path: file }));
   observe(failed, reply("read_1", true));
-  assert.deepEqual(complete(failed), { kind: "unverified" });
+  assert.deepEqual(complete(failed), { kind: "complete", files: [] });
+  assert.equal(failed.rejectReason(), null);
+  assert.deepEqual(failed.toolErrors(), { Read: 1, Grep: 0, Glob: 0 });
+  // A failed Grep reads nothing, so it needs no open trace to certify.
+  const failedSearch = make();
+  observe(failedSearch, use("grep_1", "Grep", { pattern: "(" }));
+  observe(failedSearch, reply("grep_1", true));
+  observe(failedSearch, use("read_2", "Read", { file_path: file }));
+  observe(failedSearch, reply("read_2"));
+  assert.deepEqual(complete(failedSearch), { kind: "complete", files: ["src/a.ts"] });
+  assert.deepEqual(failedSearch.toolErrors(), { Read: 0, Grep: 1, Glob: 0 });
   const summary = make();
   observe(summary, { type: "tool_use_summary" });
   assert.deepEqual(complete(summary), { kind: "unverified" });
@@ -123,11 +135,13 @@ test("a successful tool result without is_error counts, as the pinned CLI writes
     { type: "tool_result", tool_use_id: "read_1", content: "untrusted bytes" }] } });
   assert.deepEqual(complete(observer), { kind: "complete", files: ["src/a.ts"] });
   assert.equal(observer.rejectReason(), null);
-  const failed = make();
-  observe(failed, use("read_1", "Read", { file_path: file }));
-  observe(failed, reply("read_1", true));
-  assert.deepEqual(complete(failed), { kind: "unverified" });
-  assert.equal(failed.rejectReason(), "tool_result_error");
+  // Anything but an omitted, false or true is_error is not a CLI shape.
+  const odd = make();
+  observe(odd, use("read_1", "Read", { file_path: file }));
+  observe(odd, { type: "user", message: { role: "user", content: [
+    { type: "tool_result", tool_use_id: "read_1", is_error: 1, content: "x" }] } });
+  assert.deepEqual(complete(odd), { kind: "unverified" });
+  assert.equal(odd.rejectReason(), "tool_result_shape");
 });
 
 test("malformed and trailing events invalidate a previously complete manifest", () => {

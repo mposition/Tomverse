@@ -147,8 +147,6 @@ const LOCK = /\b(?:lockAccountMemoryItems|acquireUserMemoryLock)\(/;
  * what, after the lock, re-establishes the facts.
  */
 const UNLOCKED_ENUMERATIONS = new Map([
-  // Ids only; the candidate and its evidence are re-read and re-validated.
-  ["lib/memoryService.ts#bulkApproveMemories", /tx\.memoryItem\.findFirst\(/],
   // The update re-states status and expiry in its where clause.
   ["lib/memoryExpiryService.ts#reconcileExpiredMemories", /tx\.memoryItem\.updateMany\(\{\s*where: \{[\s\S]*?status:[\s\S]*?expiresAt:/],
   // Ids and owners only; the lock facts are re-read for those ids.
@@ -252,10 +250,6 @@ test("in a function that takes the memory lock, every memory read it decides on 
     }
   }
   assert.deepEqual([...allowedSeen].sort(), [...UNLOCKED_ENUMERATIONS.keys()].sort(), "every allowance is still needed");
-  // The bulk enumeration reads ids and nothing a decision could use.
-  const service = readFileSync("lib/memoryService.ts", "utf8");
-  const bulk = service.slice(service.indexOf("export async function bulkApproveMemories("));
-  assert.match(bulk.slice(0, bulk.search(LOCK)), /select: \{ id: true \}/);
 });
 
 test("no other module writes MemoryItem or MemoryEvidence rows", () => {

@@ -1,14 +1,42 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 
 import {
   QA_RELEASE_IMAGE_VARIABLES,
   QA_RELEASE_SERVICE_VARIABLES,
   checkQaReleaseServiceEnv,
   decideQaReleaseServiceStart,
+  isUnconfiguredAgentService,
 } from "../lib/qaReleaseServiceEnvCore.ts";
 
 const runtime = { PATH: "/usr/bin", HOME: "/root", NODE_ENV: "production", RAILWAY_ENVIRONMENT_NAME: "staging", RAILWAY_DEPLOYMENT_ID: "d" };
+
+test("only a runtime-only environment with no operator configuration is dormant", () => {
+  const own = ["SUPPORT_TRIAGE_RETENTION_SECRET"];
+  assert.equal(isUnconfiguredAgentService(runtime, own), true);
+  for (const environment of ["production", "dev", "pr-1", undefined])
+    assert.equal(isUnconfiguredAgentService({ ...runtime, RAILWAY_ENVIRONMENT_NAME: environment }, own), false);
+  for (const value of ["", " ", "synthetic"])
+    assert.equal(isUnconfiguredAgentService({ ...runtime, SUPPORT_TRIAGE_RETENTION_SECRET: value }, own), false);
+  for (const name of ["DATABASE_URL", "RAILWAY_TOKEN", "GITHUB_TOKEN", "QA_RELEASE_MONITOR_SECRET"])
+    assert.equal(isUnconfiguredAgentService({ ...runtime, [name]: "synthetic" }, own), false);
+});
+
+test("the retention entry is dormant before importing an unreleased supervisor", { skip: process.platform === "win32" }, () => {
+  const run = (extra = {}) => spawnSync(process.execPath,
+    ["--experimental-strip-types", "scripts/support-triage-retention-service.mjs"], {
+      env: { PATH: process.env.PATH, RAILWAY_ENVIRONMENT_NAME: "staging", ...extra }, encoding: "utf8",
+    });
+  const dormant = run();
+  assert.equal(dormant.status, 0, dormant.stderr);
+  assert.equal(JSON.parse(dormant.stdout.trim()).outcome, "unconfigured");
+  for (const extra of [{ SUPPORT_TRIAGE_RETENTION_SECRET: "" }, { DATABASE_URL: "postgres://synthetic" }]) {
+    const refused = run(extra);
+    assert.notEqual(refused.status, 0);
+    assert.equal(refused.stdout.includes('"unconfigured"'), false);
+  }
+});
 
 const digestEnv = (overrides = {}) => ({
   ...runtime,

@@ -31,7 +31,9 @@ test("open main pull requests carry the source rule's verdict, sorted by number"
 });
 
 test("an unread GitHub answer is unread, not empty; an unknown commit makes the state unknown", () => {
-  const unread = qaReleaseMainCandidates({ openPullsJson: null, mainHeadJson: null, environment: "staging", servingSha: B });
+  const unread = qaReleaseMainCandidates({ openPullsJson: null, mainHeadJson: null, environment: "staging", servingSha: B, readFailure: "timeout" });
+  assert.equal(unread.readFailure, "timeout");
+  assert.equal(qaReleaseMainCandidates({ openPullsJson: [], mainHeadJson: null, environment: "staging", servingSha: B }).readFailure, null);
   assert.equal(unread.pullRequests, null);
   assert.equal(unread.production.servesMainHead, null);
   const behind = qaReleaseMainCandidates({ openPullsJson: [], mainHeadJson: { sha: A }, environment: "production", servingSha: B });

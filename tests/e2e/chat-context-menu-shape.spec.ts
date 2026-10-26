@@ -23,6 +23,7 @@ import { mockAuthenticatedApi } from "./support/app-fixtures";
  * the message, then who answers it, then the two longer-running tasks.
  */
 const CANONICAL_ORDER = [
+  "tools-location-row",
   "tools-attach-row",
   "tools-web-search-row",
   "tools-assistant-row",
@@ -51,14 +52,14 @@ const rootActionTestIds = async (page: Page) =>
   );
 
 test.describe("chat context menu shape", () => {
-  test("the root offers at most six actions @ui-risk", async ({ page }) => {
+  test("the root offers at most seven actions including optional location @ui-risk", async ({ page }) => {
     await mockAuthenticatedApi(page, { assistantProfiles: [] });
     await page.goto("/review?lang=en");
     await openMenu(page);
 
     const ids = await rootActionTestIds(page);
     expect(ids.length).toBeGreaterThan(0);
-    expect(ids.length).toBeLessThanOrEqual(6);
+    expect(ids.length).toBeLessThanOrEqual(7);
 
     // Which rows appear depends on flags, plan and guest state, and always
     // has -- so the assertion is that nothing outside the allowed set gets in

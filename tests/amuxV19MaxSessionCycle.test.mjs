@@ -246,6 +246,16 @@ test("the status line carries fixed words only", () => {
     registrationState: "committed" }), { line:
     "AMUX_V19_MAX_SESSION_CYCLE_recorded planState=plan_ready registrationState=committed\n",
   exitCode: 0 });
+  // Failed tool calls the analysis recovered from print as counts by tool.
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "recorded",
+    haltReleased: true, planState: "plan_ready", registrationState: "committed",
+    toolErrors: { Read: 2, Grep: 0, Glob: 1 } }).line,
+  "AMUX_V19_MAX_SESSION_CYCLE_recorded planState=plan_ready registrationState=committed readErrors=2 globErrors=1\n");
+  assert.equal(amuxV19MaxSessionCycleStatus({ kind: "recorded",
+    haltReleased: true, planState: "plan_ready", registrationState: "committed",
+    toolErrors: { Read: "two", Grep: -1, Glob: 1.5 } }).line,
+  "AMUX_V19_MAX_SESSION_CYCLE_recorded planState=plan_ready registrationState=committed\n",
+  "only small whole counts are printed");
   // A refused plan names the app's closed refusal word.
   assert.equal(amuxV19MaxSessionCycleStatus({ kind: "recorded",
     haltReleased: true, planState: "plan_refused", planReason: "invalid_result",
