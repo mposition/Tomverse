@@ -28,6 +28,7 @@ import {
     type AiReviewApprovalArmMetrics,
     type AiReviewApprovalMetrics,
 } from "@/lib/aiReviewQualityThresholds";
+import { findJudgedThresholdSet, judgedThresholdProblems } from "./aiReviewJudgedThresholds";
 
 export const AI_REVIEW_EVAL_REGISTER_MIN_INDEPENDENT_RUNS = 2;
 
@@ -50,6 +51,8 @@ export const AI_REVIEW_EVAL_REGISTER_MIN_INDEPENDENT_RUNS = 2;
  * attributed to a pair that did not produce it.
  */
 export type AiReviewEvalRunEvidence = {
+    /** Required for judged-v3; all bundles are reverified by the file gate. */
+    judgementsRef?: string;
     /** Repository-relative path to the artifact this run wrote. */
     artifactRef: string;
     /** Which of the independent runs this is. Two runs, two ordinals. */
@@ -104,6 +107,7 @@ export type AiReviewEvalEntry = {
      * "some pooled figure did".
      */
     evaluation: {
+        metricSource?: "keyword-v1" | "judged-v3";
         runs: readonly AiReviewEvalRunEvidence[];
         datasetVersion: string;
         datasetSchemaVersion: number;
@@ -273,6 +277,15 @@ export const approvedEntryProblems = (
     // The numbers themselves. Until this existed, an approval that named an
     // artifact, a commit and two ordinals was accepted whatever it measured --
     // "the metrics are present" is not "the metrics are sufficient".
+    const judgedThresholds = findJudgedThresholdSet(evaluation.thresholdVersion);
+    if (evaluation.metricSource === "judged-v3" || judgedThresholds) {
+        if (evaluation.metricSource !== "judged-v3") problems.push("judged thresholds require metricSource judged-v3");
+        if (!judgedThresholds) problems.push(`judged threshold set "${evaluation.thresholdVersion}" does not exist`);
+        else problems.push(...judgedThresholdProblems(judgedThresholds));
+        for (const run of evaluation.runs) if (!run.judgementsRef) problems.push(`run ${run.runOrdinal}: no judged evidence directory; keyword substitution is forbidden`);
+        // Numeric admission reads and verifies both evidence paths in the file gate.
+        return problems;
+    }
     const thresholds = findThresholdSet(evaluation.thresholdVersion);
     if (!thresholds) {
         problems.push(

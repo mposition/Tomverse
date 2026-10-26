@@ -11,6 +11,8 @@ import { chromium, expect } from "@playwright/test";
 import assert from "node:assert/strict";
 import { buildCase, layOutRun } from "../tests/fixtures/aiReviewJudgedRun.mjs";
 import { readAiReviewJudgedRunCatalog } from "../lib/aiReviewJudgedRunReport.ts";
+import { readAiReviewPreparationCatalog } from "../lib/aiReviewPreparationServer.ts";
+import { aiReviewM5Progress } from "../lib/aiReviewM5Progress.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dir = await mkdtemp(join(tmpdir(), "tomverse-ai-review-admin-"));
@@ -31,6 +33,8 @@ try {
   layOutRun(join(runs, "02-complete"), fixtures);
   layOutRun(join(runs, "01-incomplete"), fixtures, { bundles: [] });
   const catalog = readAiReviewJudgedRunCatalog(runs);
+  const preparation = readAiReviewPreparationCatalog();
+  const progress = aiReviewM5Progress(preparation, { state: "unconfigured", reports: [], problems: [] });
   assert.equal(catalog.reports[0].result.aggregable, true);
   await build({
     entryPoints: [resolve(root, "tests/fixtures/aiReviewAdminWorkspace.tsx")],
@@ -58,6 +62,9 @@ try {
     if (req.url === "/catalog.json") {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(catalog));
+    } else if (req.url === "/preparation.json") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ catalog: preparation, progress }));
     } else if (req.url === "/ui.js" || req.url === "/ui.css") {
       res.setHeader(
         "Content-Type",
@@ -162,9 +169,51 @@ try {
     .selectOption("01-incomplete");
   await expect(page.getByTestId("judged-run-refused")).toBeVisible();
   await expect(page.getByTestId("judged-metric")).toHaveCount(0);
+  await page.goto(`${base}/prepare`);
+  await page.getByTestId("ai-review-preparation").locator(":scope > summary").click();
+  await page.getByRole("textbox", { name: "검토 메모·미결 사항" }).fill("Browser draft, not a judgement");
+  const editDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "편집 초안 내려받기" }).click();
+  const editPath = join(dir, "proposal.json");
+  await (await editDownload).saveAs(editPath);
+  const proposal = JSON.parse(await readFile(editPath, "utf8"));
+  assert.equal(proposal.proposedCase.status, "candidate");
+  assert.equal(proposal.proposedCase.adoptedBy, null);
+  assert.equal(proposal.proposedCase.notes, "Browser draft, not a judgement");
+  const sampleDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "표본 구성 초안 내려받기" }).click();
+  const samplePath = join(dir, "sample.json");
+  await (await sampleDownload).saveAs(samplePath);
+  assert.equal(JSON.parse(await readFile(samplePath, "utf8")).dataset.frozenDigest, null);
+  const thresholds = page.getByTestId("ai-review-threshold-draft");
+  await thresholds.locator("summary").click();
+  const thresholdDownload = page.getByRole("button", { name: "미승인 기준 초안 내려받기" });
+  await expect(thresholdDownload).toBeDisabled();
+  await page.getByRole("textbox", { name: "임계값 버전" }).fill("browser-fixture-only");
+  for (const input of await thresholds.getByRole("spinbutton").all()) await input.fill("0.5");
+  await page.getByRole("spinbutton", { name: "블라인드 검토 최소 사례 수" }).fill("20");
+  await page.getByRole("combobox", { name: "음성 사례 부분집합" }).selectOption("diagnostic");
+  await expect(thresholdDownload).toBeEnabled();
+  const thresholdEvent = page.waitForEvent("download");
+  await thresholdDownload.click();
+  const thresholdPath = join(dir, "threshold.json");
+  await (await thresholdEvent).saveAs(thresholdPath);
+  const threshold = JSON.parse(await readFile(thresholdPath, "utf8"));
+  assert.equal(threshold.approvedBy, null);
+  assert.equal(threshold.maxWilsonUpper.inventedFindingRate, 0.5);
+  assert.equal("falseConsensusRate" in threshold.maxWilsonUpper, false);
+  await expect(page.getByTestId("judged-metric")).toHaveCount(0);
+  await expect(page.getByTestId("ai-review-m5-progress")).toContainText("승급 판정이 아닙니다");
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
+  await page.screenshot({ path: resolve(root, ".tmp-ai-review-preparation-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1500, height: 1100 });
+  await page.screenshot({ path: resolve(root, ".tmp-ai-review-preparation-desktop.png"), fullPage: true });
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Admin run selection, shared metrics, arms, evidence dialog, keyboard focus, search/filter, exact JSON export, refusal, mobile and dark mode.",
+    "PASS: Admin results, source evidence, candidate/sample/threshold draft exports, unsigned defaults, operational inventory, refusal, mobile and dark mode.",
   );
 } finally {
   await browser?.close();

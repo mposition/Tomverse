@@ -1,42 +1,121 @@
-# AI Review M5 UI implementation
+# AI Review M5 전체 목표와 구현 현황
 
-Scope: the two user-approved completion mockups, implemented sequentially. Local implementation and verification are separate from merge, deployment and measured M5 eligibility. Existing paid actions keep their current explicit execution paths.
+원래 목표는 **사용자가 여러 AI 답변의 모순·누락·차이를 근거와 함께 확인하고, 실제 측정된 품질과 운영 성과를 바탕으로 AI Review를 M5 수준의 대표 기능으로 완성하는 것**입니다. 사용자·관리자 시안 구현은 이 목표의 일부입니다.
 
-| Task | Deliverable | Implementation | Verification |
+## 상태 확인 기준 — 2026-10-26
+
+- 로컬: `codex/to-develop/ai-review-m5-ui`. 사용자·보고 UI의 기준 커밋은 `fa42d1456`이며, 이번 회차에 M12~M18의 준비·연결·현황 도구를 추가했습니다.
+- Dev: Railway에서 조회 당시 가장 최근 성공한 배포 `92453aded`. 더 새 배포는 진행 또는 대기 상태였으므로 성공으로 세지 않았습니다.
+- Production: Railway의 성공 배포 `59ef177e0`.
+- 원격 `develop`은 `c4cb5a024`이며, 이번 UI 커밋은 원격 `develop`·`main`과 위 두 성공 배포에 포함되지 않았습니다.
+- **배포됨**은 성공 배포의 소스에 구현과 호출 경로가 있다는 뜻입니다. 이번 확인에서 실제 유료 호출이나 모든 운영 사용자 흐름을 재실행하지는 않았습니다.
+- **코드 포함**은 오프라인 도구가 해당 배포 커밋에 있다는 뜻이며, 그 환경에서 평가를 수행했다는 뜻이 아닙니다. **미확인**은 증거를 확보하지 못한 상태이며 실패와 다릅니다.
+
+## 원래 목표 대비 작업 목록
+
+| ID | 작업과 완료 기준 | 로컬 구현·준비 상태 | Dev | Production |
+|---|---|---|---|---|
+| M01 | 모순·누락·차이 교차검토와 두 검토자 결과 | 기존 구현 완료 | 배포됨 | 배포됨 |
+| M02 | 인용의 원문 존재 여부·출처 일치도·미검증 상태 표시 | 기존 구현 완료 | 배포됨 | 배포됨 |
+| M03 | 항목별 피드백과 사용자가 요청하는 별도 웹 검증 | 기존 구현 완료, 새 화면에도 연결 | 기존 화면 배포됨 | 기존 화면 배포됨 |
+| M04 | 새 근거 탐색 화면: 발견 선택 → 해당 답변 → 정확한 인용 위치 | 구현·로컬 검증 완료 | 새 화면 미반영 | 새 화면 미반영 |
+| M05 | 새 관리자 화면: 실행·지표·언어/작업군·사례 검색·근거·JSON 내보내기 | 구현·로컬 검증 완료 | 미반영 | 미반영 |
+| M06 | 새 화면의 모바일·다크 모드·키보드 접근성 | 범위 내 로컬 검증 완료 | 새 화면 미반영 | 새 화면 미반영 |
+| M07 | 공급자 시도별 성공·실패, 크레딧 대조, 사용·재방문 계측과 운영 점수표 | 기존 구현 완료 | 배포됨, 실제 성과 미확인 | 배포됨, 실제 성과 미확인 |
+| M08 | judged-v3 판정 기록·채점·원문 결속·변경 후 증거 검증 | 기존 구현·회귀 완료 | 코드 포함 | 코드 포함 |
+| M09 | 실행·언어·작업 유형별 집계, 보고 CLI, 점수 비노출 분모 도구 | 기존 구현·회귀 완료 | 코드 포함 | 코드 포함 |
+| M10 | CLI와 Admin의 저장 실행 검증·읽기 함수 공유 | 구현·로컬 검증 완료 | 공유 읽기 변경 미반영 | 공유 읽기 변경 미반영 |
+| M11 | 증거 없음·거절·원문/인용 누락을 정상 점수와 구분해 표시 | 새 화면 구현·로컬 검증 완료 | 새 화면 미반영 | 새 화면 미반영 |
+| M12 | 후보별 필수성·정답 목록·완전성 검토와 채택 | 후보 원문·gold 확인 및 편집 초안 다운로드 UI 구현. 관련 4건 통과. 실제 9건 채택은 대기 | 새 도구 미반영·채택 미완료 | 새 도구 미반영·채택 미완료 |
+| M13 | 판정용 표본 구성 확정·동결·현재 표본 하한 충족 | 표본 부족분·후보 선택·새 버전 구성 초안 UI 구현. 서명 자동 승계 없음. 실제 구성 승인·동결 대기 | 새 도구 미반영 | 새 도구 미반영 |
+| M14 | 새 지표 상한·언어 격차·작업군 허용치·음성 부분집합 적용 확정 | 점수 비노출 기준 입력·미승인 초안 다운로드 구현. 범위·필수값·서명 검사 3건 통과. 실제 값 선택·승인 대기 | 새 도구·승인값 미반영 | 새 도구·승인값 미반영 |
+| M15 | 승인 게이트의 두 오류율을 judged 지표로 전환 | 선택적 연결 구현·파일 회귀 8건 통과. 6개 기존 하한·2개 judged 상한·arm 검사. 승인된 기준이 없어 운영 활성화 대기 | 새 연결 미반영 | 새 연결 미반영 |
+| M16 | 독립 평가 2회·사람의 블라인드 판정·검토자 조합 승인 | 기존 실행·판정 경로 + 일괄 초안 생성·읽기 전용 점검 구현·검증. 실제 독립 실행·사람 판정·조합 승인 대기 | 새 도구 미반영·완료 증거 없음 | 새 도구 미반영·완료 증거 없음 |
+| M17 | 새 관리자 화면에 검증된 실제 평가 보고서 연결 | 서버 설정 기반 연결·Admin과 동일한 연결 점검 CLI 구현·검증. 실제 보고서 제공 대기 | 새 화면·연결 미반영 | 새 화면·연결 미반영 |
+| M18 | 운영 품질·사용 성과 확인, 복구 훈련, 최종 M5 승급 | 기존 운영 점수표 + 증거 현황·미기록 상태·내보내기 구현·검증. 실제 관측·훈련·승급 서명 대기 | 새 현황 화면 미반영·M5 미달성 | 새 현황 화면 미반영·M5 미달성 |
+
+M14에는 유지하는 여섯 품질 하한의 미서명 상태도 남아 있습니다. M15의 승인 범위는 두 오류율 교체이며, 모순·누락의 precision/recall 네 값은 전환 후에도 키워드 진단으로 남는 설계입니다.
+
+읽기 전용 `npm run report:ai-review-m5-readiness`를 이번 확인에서 실행했습니다. 결과는 **도구 구현 완료 / 평가 준비 미완료 / M5 승급 불가**입니다. 운영 보고서를 입력하지 않았으므로 실제 운영 성과 수치를 판단하지 않았습니다.
+
+## 시안 구현 작업 6건
+
+사용자가 선택한 두 시안을 순서대로 구현했습니다. 로컬 구현·검증은 병합·배포와 실제 M5 품질 달성에서 분리합니다. 기존 유료 동작은 명시적으로 요청하는 현재 경로를 유지합니다.
+
+| 작업 | 결과물 | 구현 | 해당 작업에서 수행한 검증 |
 |---|---|---|---|
-| 1 | User evidence workspace, source identity and exact quote navigation | Implemented | 2 projection tests + 3 rendered component tests; focused ESLint passed |
-| 2 | Per-item feedback, optional web verification and reviewer switching | Implemented | 26 existing contract tests; real-component Chromium flow passed, including state preservation, explicit web action and 320px |
-| 3 | Shared stored-run reader for CLI and Admin | Implemented | 15 file-flow regressions and focused ESLint passed; shared result and read-only inputs verified |
-| 4 | Admin metrics, arms, evidence drill-down and export | Implemented | 3 rendered component tests; real-component Chromium run selection, arms, search/filter, evidence dialog and exact JSON export passed |
-| 5 | Missing evidence, refusals and separate operational readiness | Implemented | 16 file-flow regressions including forged scores; 6 rendered UI cases including empty, refusal, missing original and missing quote |
-| 6 | Responsive, keyboard, dark-mode and integration checks | Implemented | 30 scoped app-browser tests; both real-component browser harnesses; 450 related server tests and 453 client tests passed |
+| 1 | 사용자 근거 탐색 화면, 원문 식별과 정확한 인용 위치 이동 | 완료 | 데이터 변환 2건·렌더링 3건, 관련 ESLint 통과 |
+| 2 | 항목별 피드백·선택적 웹 검증·검토자 전환 연결 | 완료 | 기존 계약 26건, 상태 유지·명시적 웹 요청·320px 실제 컴포넌트 브라우저 검증 |
+| 3 | CLI와 Admin의 저장 실행 공통 읽기 함수 | 완료 | 파일 흐름 회귀 15건, 동일 결과·입력 무변경, 관련 ESLint 통과 |
+| 4 | 관리자 지표·그룹·근거 상세·내보내기 | 완료 | 렌더링 3건, 실행 선택·그룹·검색/필터·상세·JSON 내보내기 브라우저 검증 |
+| 5 | 증거 부족·거절 표시와 운영 준비 상태 분리 | 완료 | 조작된 점수를 포함한 파일 흐름 16건, 빈 상태·거절·원문/인용 누락 등 UI 6건 |
+| 6 | 반응형·키보드·다크 모드·통합 검증 | 완료 | 앱 브라우저 30건, 실제 컴포넌트 검증 2종, 관련 서버 450건·클라이언트 453건 |
 
-Completion is six implemented and locally verified tasks. It does not approve thresholds, adopt evaluation candidates, freeze datasets, enable paid runs, merge, deploy or certify M5.
+**6/6 완료는 위 범위의 로컬 구현·검증 완료이며, AI Review M5 전체 완료율이 아닙니다.** 임계값 승인, 평가 후보 채택, dataset 동결, 유료 실행, 병합·배포 또는 M5 승급을 수행한 것이 아닙니다.
 
-## Delivered surfaces
+## 제공되는 화면
 
-- User: `/review` → AI Review. The existing dialog now contains a finding/source workspace, exact quote navigation, persistent per-item feedback and opt-in web verification. The complete report remains available in a disclosure.
-- Admin: `/admin/analytics?tab=ai-review`. Select an evaluation run, inspect metrics and groups, search/filter cases, inspect recorded judgements and original answers, and export the report as JSON. Operational scorecards remain separate below it.
-- The CLI and Admin use `readAiReviewJudgedRunReport()`. Neither writes or changes the approval gate.
+- 사용자: `/review` → AI Review. 기존 대화창에 발견/원문 탐색, 정확한 인용 위치 이동, 저장되는 항목별 피드백, 사용자가 선택하는 웹 검증을 연결했습니다. 전체 보고서도 펼쳐 읽을 수 있습니다.
+- 관리자 준비: `/admin/analytics?tab=ai-review`. 후보 원문·메모 편집안, 표본 구성, 임계값 초안을 내려받습니다. 서버 원본을 변경하지 않고 서명을 채우지 않습니다. 실행 점수는 읽거나 미리 불러오지 않습니다.
+- 관리자 결과: `/admin/analytics?tab=ai-review&reviewView=reports`. 평가 실행 선택, 지표와 그룹, 사례 검색·필터, 기록된 판정과 원문, JSON 내보내기, M5 증거 현황을 제공합니다. 기존 운영 점수표도 별도로 남아 있습니다.
+- CLI와 Admin은 `readAiReviewJudgedRunReport()`를 공유합니다. 이 경로는 입력을 쓰거나 승인 게이트를 바꾸지 않습니다.
 
-## Report input
+## 실제 보고서 연결
 
-Set `AI_REVIEW_JUDGED_RUNS_DIR` on the server to an existing report directory. Each child run directory contains `run.json`, `run.journal.jsonl`, `dataset.json` and `judgements/<caseId>/{case,observation,record,artifact}.json`. The directory is configured by the server, never accepted from a request. The latest 20 directory names are inspected in descending name order.
+서버의 `AI_REVIEW_JUDGED_RUNS_DIR`에 보고서 디렉터리를 지정합니다. 각 실행 하위 디렉터리는 `run.json`, `run.journal.jsonl`, `dataset.json`, `judgements/<caseId>/{case,observation,record,artifact}.json`을 포함합니다. 경로는 서버 설정에서만 받으며 요청에서 받지 않습니다. 디렉터리 이름 내림차순으로 상위 20개를 읽습니다.
 
-The page shows an honest empty state until reports are connected. It does not generate evaluations, fill in missing signatures, replace failed evidence with sample scores or enable paid calls. Exported JSON includes evaluation source text and judgement records.
+보고서를 연결하기 전에는 빈 상태를 표시합니다. 평가를 자동 생성하거나, 빠진 서명을 채우거나, 실패한 증거를 예시 점수로 바꾸거나, 유료 호출을 켜지 않습니다. 내보낸 JSON에는 평가 원문과 판정 기록이 포함됩니다.
 
-## Verification scope
+## 검증 범위
 
-Local Windows verification used isolated worktree dependencies, synthetic evidence and mocked provider endpoints. No production credentials or paid model calls were used.
+구현 검증은 로컬 Windows의 격리된 작업 트리에서 합성 증거와 모의 공급자 응답을 사용했습니다. Production 자격증명이나 유료 모델 호출은 사용하지 않았습니다. 아래는 구현 커밋의 로컬 관측이며 CI나 운영 성능 결과가 아닙니다.
 
-- Related server tests: 450/450.
-- Client test lane: 453/453.
-- App browser flows: comparison review 6/6, item feedback 9/9, source grounding 9/9, guest attachment/review journey 6/6.
-- Real-component harnesses: `npm run verify:ai-review-workspace` and `npm run verify:ai-review-admin`. Both cover 320px/390px, dark mode and keyboard focus. User coverage includes long-source quote scrolling; Admin coverage includes exact JSON export and refusal without metrics.
-- Full project TypeScript checking, ESLint, document references, policy section references (23/23), and the existing evaluation check passed.
+- 관련 서버 테스트: 450/450.
+- 클라이언트 테스트: 453/453.
+- 앱 브라우저 흐름: 비교 검토 6/6, 항목 피드백 9/9, 출처 연결 9/9, 게스트 첨부/검토 6/6.
+- 실제 컴포넌트 검증: `npm run verify:ai-review-workspace`, `npm run verify:ai-review-admin`. 모두 320px/390px, 다크 모드와 키보드 포커스를 확인했습니다. 사용자 화면은 긴 원문의 인용 위치 이동, 관리자 화면은 정확한 JSON 내보내기와 지표 없는 거절 상태도 확인했습니다.
+- 프로젝트 전체 TypeScript 검사, ESLint, 문서 참조, 정책 절 참조 23/23, 기존 평가 검사가 통과했습니다.
 
-The broader, unchanged `comparison-action-rail` suite was also attempted. Some cases failed during fixture entry or low-credit overlays before reaching the changed review UI. Temporary changes to that suite were discarded; its remaining failures are not reported as passed. Canonical screenshot baselines were not regenerated on Windows. CI and deployment remain unverified.
+추가로 실행한 기존 `comparison-action-rail` 검사 일부는 변경된 검토 화면에 도달하기 전의 초기 진입이나 크레딧 부족 오버레이에서 실패했습니다. 해당 검사에 시도한 임시 변경은 폐기했으며, 남은 실패를 통과로 보고하지 않습니다. Windows에서 기준 스크린샷은 재생성하지 않았습니다. 이번 UI 커밋의 CI와 실제 배포 검증은 미완료입니다.
 
-## Delivery status
+## 전달 상태와 다음 순서
 
-All six local implementation tasks are complete. This branch has not been merged or deployed to Dev or Production. Remaining operational work is report-data configuration and the separately authorized review/merge/release process; measured M5 qualification still depends on the outstanding evaluation and policy decisions.
+시안 범위의 로컬 구현 6건과 이번 회차의 준비·연결·현황 도구를 구현했습니다.
+**도구의 구현 완료와 M12~M18의 실제 심사·운영 작업 완료는 다릅니다. 전체 M5를
+100% 완료로 기록하지 않습니다.** 이번 브랜치는 Dev·Production에 병합되거나 배포되지 않았습니다.
+
+이번 추가 구현 검증은 Windows Node 22에서 수행했습니다. 관련 서버 테스트 397건,
+최종 게이트·정책 절 테스트 31건(서버 테스트와 일부 중복), 관리자 렌더링 6건,
+실제 컴포넌트 브라우저 검증이 통과했습니다. 프로젝트 TypeScript·관련 ESLint·문서
+참조·기존 평가 검사도 통과했습니다. CI·Dev·Production의 검증 결과가 아닙니다.
+
+일괄 초안과 연결 점검 명령은 **로컬 PC, PowerShell, 이 저장소 루트**에서 사용합니다.
+production 자격증명이나 모델 호출은 필요 없습니다. 판정 bundle의 `case.json`·
+`observation.json`은 먼저 준비돼 있어야 합니다.
+
+```powershell
+# 미존재 record.json만 생성; 기존 기록을 덮어쓰지 않음
+npm run draft:ai-review-judgement-batch -- --dir <판정-bundle-디렉터리>
+# 읽기 전용; 미완료 판정이 있으면 종료 코드 1
+npm run draft:ai-review-judgement-batch -- --dir <판정-bundle-디렉터리> --check
+# 읽기 전용; Admin과 같은 경로로 저장된 실행 연결 확인
+npm run report:ai-review-judged-catalog -- --dir <실행-보고서-상위-디렉터리>
+```
+
+게이트 연결 검증도 같은 위치에서 읽기 전용으로 실행합니다. 먼저 사람이 선택·서명한
+새 버전 기준 파일과 완전한 판정 bundle, 기존 블라인드 검토 증거가 필요합니다.
+
+```powershell
+npm run check:ai-review-eval -- --artifact=<실행.json> --judged-thresholds=<서명된-기준.json> --judgements=<판정-bundle-디렉터리>
+```
+
+이 명령은 등록부를 승인 상태로 바꾸지 않습니다. 서명 없는 초안, 옛 임계값 버전 재사용,
+판정 누락·읽기 실패·분모 0은 통과하지 않습니다. 실제 기준값을 저장소의 활성 집합에
+추가하거나 운영 실행을 승인한 것은 아닙니다.
+
+1. 새 화면의 미병합 변경을 Dev 검증 단계로 넘깁니다. 로컬 검사 결과와 남은 비교 버튼 영역 회귀 실패를 함께 전달합니다. 병합·배포는 별도 단계입니다.
+2. 후보 채택과 표본 구성, 임계값 결정을 진행해 구현된 judged 게이트의 실제 사용에 필요한 입력을 준비합니다.
+3. 승인 범위 안에서 실제 평가·사람의 판정을 완료하고 검증된 보고서를 관리자 화면에 연결합니다.
+4. 운영 관측·복구 훈련·최종 승급 판단을 완료합니다.
+
+이번 목록 갱신은 후보 채택, 동결, 임계값 승인, 유료 실행, 병합·배포 또는 M5 승급을 수행하거나 승인하지 않습니다.

@@ -204,8 +204,11 @@ mposition). judged-v3 위의 대체 지표는 `missedEveryPlantedIssueRate`와
 `thresholdShortfalls()` → `approvedEntryProblems()`로 흘러 **승인 판정에
 도달합니다.** `check:ai-review-eval`이 실행될 때마다 그 연결을 출력합니다.
 이것을 대신할 판정 계약(`docs/ops/ai-review-eval-scoring-contract.md`)과 그
-집계기는 **이 게이트에 연결돼 있지 않으며, 연결하는 것도 §6 임계값을 그에 맞춰
-바꾸는 것도 아무도 결정하지 않았습니다.**
+집계기의 **선택적 연결은 2026-10-26 구현됐습니다.** `metricSource: "judged-v3"`인
+기록은 여섯 기존 하한과 두 새 judged 상한을 사용하며, 새 상한에 키워드 값을 대신
+넣지 않습니다. 현재 승인된 judged 임계값 집합은 비어 있어 운영 전환은 미활성입니다.
+기존 증거의 검증 경로는 유지합니다. §6의 실제 임계값 선택·서명과 평가 증거 승인은
+구현 완료와 별개이며 이 변경으로 수행하지 않았습니다.
 
 **`false_consensus_safety`가 재는 범위.** 그 규칙은 **안전 관련** 허위 합의
 주장이고, 안전과 무관한 맥락에서 잘못 "모두 일치한다"고 말하는 것은 그 규칙에도
