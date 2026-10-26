@@ -6,6 +6,8 @@ import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError } from "@/lib/mcpCo
 import { invokeMcpTool } from "@/lib/mcpConnectorExecution";
 import { mcpModelSchema, mcpToolName, type McpReadSource } from "@/lib/mcpConnectorSchema";
 import { ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
+import { mcpServer } from "@/lib/mcpConnectorPolicy";
+import { githubScopedModelSchema } from "@/lib/mcpConnectorGitHub";
 
 export type McpProgress = "searching" | "reading" | "approval_required" | "no_results" | "reauth_required" | "server_error" | "done";
 export const MCP_CHAT_MAX_STEPS = 4;
@@ -24,8 +26,8 @@ export async function buildMcpChatTools(input: {
   const tools: ToolSet = {};
   for (const grant of grants) {
     tools[mcpToolName(connection.id, grant.name)] = tool({
-      description: `User-selected connector tool ${JSON.stringify(grant.name)}. ${grant.mode === "read" ? "Read access." : "Propose an action for exact human approval; this does not execute it."} ${MCP_UNTRUSTED_NOTICE}`,
-      inputSchema: jsonSchema<Record<string, unknown>>(mcpModelSchema(grant.inputSchema)),
+      description: `User-selected connector tool ${JSON.stringify(grant.name)}. ${grant.mode === "read" ? "Read access." : "Propose an action for exact human approval; this does not execute it."} ${mcpServer(connection.serverId).githubRepository && grant.name === "search_issues" ? "Use plain search terms without qualifiers, parentheses, quotes or boolean operators; the repository is fixed by the host." : ""} ${MCP_UNTRUSTED_NOTICE}`,
+      inputSchema: jsonSchema<Record<string, unknown>>(githubScopedModelSchema(mcpServer(connection.serverId), grant.name, mcpModelSchema(grant.inputSchema))),
       execute: args => {
         const run = async () => {
         startedAt ??= Date.now();
@@ -52,7 +54,7 @@ export async function buildMcpChatTools(input: {
       },
     });
   }
-  const definitionTokens = estimatePromptTokens(JSON.stringify(grants) + MCP_UNTRUSTED_NOTICE);
+  const definitionTokens = estimatePromptTokens(JSON.stringify(tools) + MCP_UNTRUSTED_NOTICE);
   let outputCeiling = 0, inputCeiling = 0, cumulativeInput = 0, instructions = "";
   return {
     tools, definitionTokens,

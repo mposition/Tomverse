@@ -63,6 +63,8 @@ const securityHeaders = [
 const CANONICAL_SITE_ORIGIN = "https://tomverse.app";
 
 const nextConfig: NextConfig = {
+  // Authorization codes and state must not enter the development request log.
+  logging: { incomingRequests: { ignore: [/\/api\/mcp\/oauth\/callback(?:\?|$)/] } },
   poweredByHeader: false,
   serverExternalPackages: ["officeparser"],
   // Workspace packages ship TypeScript source and no build output, so the app

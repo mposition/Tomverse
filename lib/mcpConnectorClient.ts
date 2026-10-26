@@ -68,6 +68,7 @@ export function guardedMcpFetch(server: McpServerPolicy, token: string | null, s
     headers.delete("cookie"); headers.delete("authorization");
     if (token) headers.set("authorization", `Bearer ${token}`);
     headers.set("host", url.host);
+    headers.set("user-agent", "Tomverse-MCP-Preview/1.0");
     const body = typeof init?.body === "string" ? init.body : init?.body instanceof URLSearchParams ? init.body.toString() : undefined;
     if (body && Buffer.byteLength(body) > MCP_LIMITS.inputBytes * 2) throw new McpConnectorError("input_limit");
     return new Promise<Response>((resolve, reject) => {

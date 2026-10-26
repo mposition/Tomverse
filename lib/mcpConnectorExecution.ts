@@ -8,6 +8,7 @@ import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError, mcpServer } from "
 import { connectorInputSchema, normalizeMcpResult, validateMcpArguments } from "@/lib/mcpConnectorSchema";
 import { auditMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest, ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
 import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
+import { githubIssueReadSources, validateGithubRepositoryScope } from "@/lib/mcpConnectorGitHub";
 
 export type McpToolOutcome = Awaited<ReturnType<typeof normalizeMcpResult>> & { notice: string; approvalId?: string };
 const safeError = (e: unknown) => e instanceof McpConnectorError ? e.code :
@@ -40,6 +41,7 @@ async function performMcp(input: { userId: string; connectionId: string; version
   const grant = parseMcpGrants(connection.grants).find(t => t.name === name);
   if (connection.version !== version || !grant) throw new McpConnectorError("connection_changed", 409);
   validateMcpArguments(grant, args);
+  validateGithubRepositoryScope(server, name, args);
   const leaseId = randomUUID();
   const claimed = await prisma.mcpConnection.updateMany({ where: { id: connectionId, userId, version, status: "connected",
     OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }] },
@@ -73,6 +75,7 @@ async function performMcp(input: { userId: string; connectionId: string; version
     if (grant.mode === "confirm" && normalized.status === "server_error") throw new McpConnectorError("outcome_unknown");
     const token = decryptMcpSecret(connection.credentialCiphertext);
     if (containsMcpCredential(result, token)) throw new McpConnectorError("credential_echo_refused");
+    if (normalized.status === "ok") normalized.sources.push(...githubIssueReadSources(server, name, args, result));
     await prisma.$transaction(async tx => {
       await takeAuditChainLock(tx);
       if (!await tx.mcpConnection.findFirst({ where: { id: connectionId, userId, version, status: "connected" }, select: { id: true } })) throw new McpConnectorError("connection_changed", 409);
@@ -104,6 +107,7 @@ export async function invokeMcpTool(input: { userId: string; connectionId: strin
   const grant = parseMcpGrants(row.grants).find(t => t.name === input.name);
   if (!grant) throw new McpConnectorError("tool_not_allowed", 403);
   validateMcpArguments(grant, input.args);
+  validateGithubRepositoryScope(mcpServer(row.serverId), input.name, input.args);
   const mode = mcpServer(row.serverId).readTools.includes(grant.name) ? grant.mode : "confirm";
   const invocation = await createInvocation(input.userId, row.id, row.version, grant.name, input.args, mode === "confirm");
   if (mode === "confirm") return { status: "approval_required", approvalId: invocation.id, content: "Review the exact action in Plugins. Nothing has been executed.", sources: [], notice: MCP_UNTRUSTED_NOTICE };

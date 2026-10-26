@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/nextjs";
 
 import { resolveSentryEnvironmentTag } from "@/lib/deploymentEnvironment";
+import { isMcpOAuthCallbackTelemetry } from "@/lib/mcpConnectorTelemetry";
 import {
   isNextNoFallbackError,
   isNextNoFallbackSentryEvent,
@@ -28,8 +29,10 @@ Sentry.init({
       ? Math.min(1, tracesSampleRate)
       : 0,
   ignoreErrors: ["Internal: NoFallbackError"],
+  beforeSendTransaction: event => isMcpOAuthCallbackTelemetry(event) ? null : event,
   beforeSend(event, hint) {
     if (
+      isMcpOAuthCallbackTelemetry(event) ||
       isNextNoFallbackError(hint?.originalException) ||
       isNextNoFallbackSentryEvent(event)
     ) {

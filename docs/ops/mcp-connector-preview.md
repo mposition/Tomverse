@@ -16,8 +16,8 @@ authorised by this work.
 | T05 Chat integration | Complete | Mock model → real MCP → read sources → answer | Not deployed | Not deployed |
 | T06 UI | Complete | Desktop/mobile browser flow and dark theme | Not deployed | Not deployed |
 | T07 Boundary/regression checks | Complete locally | Protocol/DB/security 26, existing unit regressions 131, UI 10, zoom rechecks 2 | Not deployed | Not deployed |
-| T08 Independent review | In progress | Claude through existing review orchestrator | Not deployed | Not deployed |
-| T09 Real service verification | Not performed | Requires chosen service/account and explicit access approval | Not performed | Not performed |
+| T08 Independent review | Accepted | Claude: r-20261025-230233-b98a8f, head 3c5426a6e | Not deployed | Not deployed |
+| T09 Real service verification | OAuth adapter implemented locally | GitHub mposition/TomverseCode selected; app registration, user consent and actual MCP access pending | Not performed | Not performed |
 | T10 Operational rollout | Not authorised | Separate push/merge/deploy/activation approval | Not performed | Not performed |
 
 Synthetic success is not evidence of compatibility with GitHub, Railway,
@@ -104,6 +104,56 @@ The local-only `MCP_CONNECTOR_SYNTHETIC_PORT` adds the fixture at the exact
 `MCP_CONNECTOR_NATIVE_ENABLED` separately gates native bearer enrollment.
 Neither switch is activated on Dev or Production by this changeset.
 
+### GitHub OAuth
+
+The first scoped profile uses a private GitHub App with Issues read/write and
+Metadata read. The host permits only `search_issues`, `issue_read/get` and
+`issue_write/create` in `mposition/TomverseCode` (repository ID `1309523852`).
+Writes still require a separate one-use approval for the exact arguments.
+Searches require plain terms; qualifiers and boolean scope overrides are refused.
+Only issue bodies actually read by the bound `issue_read/get` call create source
+cards. Provider content and search hits do not grant source status themselves.
+
+Use `MCP_GITHUB_OAUTH_CLIENT_ID`, `MCP_GITHUB_OAUTH_CLIENT_SECRET`,
+`MCP_GITHUB_REPOSITORY` and `MCP_GITHUB_REPOSITORY_ID` for the built-in profile.
+Do not also register another server with ID `github` in `MCP_CONNECTOR_SERVERS`.
+The alternative explicit JSON profile is in
+`config/mcp/github-tomverse-code.example.json`; its secret is an environment
+reference. The issuer and code/token destinations are fixed to GitHub. PKCE and
+`offline_access` request expiring user tokens; an empty returned scope is valid
+for a GitHub App. Code and refresh requests include the configured repository ID;
+the host's repository check remains authoritative even if the provider ignores
+that narrowing parameter. Development callback request logging is suppressed;
+Sentry server/edge callback errors and transactions (including child spans) are
+discarded so code/state parameters are not exported as telemetry.
+
+For the local PC only (PowerShell, repository root), run `npm run setup:mcp-github`
+after the focused credential-boundary review is accepted. This opens an owner-bound
+loopback registration page. The owner clicks GitHub's Create button, then installs
+the private app on **TomverseCode only**. The helper stores the client credentials
+using Windows CurrentUser DPAPI outside the repository and discards the generated
+PEM/webhook secret. It never prints credentials or reads/issues writes. Registration
+has a 15-minute state/cookie deadline and never retries an uncertain exchange.
+The UI only binds to `127.0.0.1:3132`; canonical product OAuth callback registration
+is `http://127.0.0.1:3131/api/mcp/oauth/callback` for this local app. Dev/Production
+must use separately registered canonical callbacks and their own secret settings.
+
+`npm run dev:mcp-github` loads that encrypted registration into a loopback-only
+development child. It requires a disposable DB on `127.0.0.1:56439` with
+`schema=mcp_oauth_preview` (prepare it with the existing Prisma local schema setup).
+It does not bypass normal Tomverse sign-in; normal local sign-in must be configured.
+It does not migrate a deployed database or enable Dev/Production. From Plugins,
+GitHub → Connect starts the ordinary owner-bound OAuth flow without token entry.
+Actual GitHub OAuth/MCP compatibility remains unverified until that consent flow
+and scoped calls run successfully. Product paid-model calls remain zero.
+
+Local OAuth increment verification: 22 protocol/security/provider-profile tests,
+19 disposable-DB tests and 9 transport/telemetry/monitoring regressions pass.
+Windows DPAPI round-trip self-test passes with synthetic data. Lint and the full
+TypeScript check pass (the latter needs a larger heap for this repository).
+This evidence contains no actual GitHub App creation, OAuth consent, issue read
+or issue write.
+
 ## Local verification
 
 The final focused protocol/DB/security batch passed 26 tests, including real
@@ -148,6 +198,14 @@ skips unsupported catalog tools and counts only active connection capacity.
 The installed Next generator explicitly writes the retained `##` heading.
 Read-invocation audit events retain the existing transactional chain; batching
 or replacing that chain is outside this preview.
+Claude accepted the fixes in `r-20261025-230233-b98a8f` at `3c5426a6e`.
+Follow-up verification: 35 core/DB/privacy tests, 2 transport tests and 72
+existing regressions pass, along with lint, typecheck and the optimized build.
+Known accepted preview limitations: composed/root-map argument schemas may not
+be callable; enum/const constraints are hidden from the model and can require
+explicit user-provided values; fragment echo checks can false-positive and
+then require verified-outcome handling for a dispatched write. Encoded covert
+channels from a malicious credential recipient are outside text-filter guarantees.
 
 - SDK client and Streamable HTTP examples: https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x
 - GitHub remote MCP/authentication: https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md

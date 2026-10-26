@@ -7,6 +7,7 @@ import { takeAuditChainLock } from "@/lib/adminAudit";
 import { guardedMcpFetch, resolvePublicMcpEndpoint, validateMcpEndpoint } from "@/lib/mcpConnectorClient";
 import { MCP_LIMITS, McpConnectorError, mcpServer, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 import { auditMcp, connectMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest } from "@/lib/mcpConnectorStore";
+import { githubOAuthTokenRequest } from "@/lib/mcpConnectorGitHub";
 
 type OAuthSecrets = { verifier?: string; clientInformation?: OAuthClientInformationMixed; tokens?: OAuthTokens };
 const stateDigest = (state: string) => createHash("sha256").update(state).digest("hex");
@@ -85,7 +86,7 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
     fetchFn: (url, init) => {
       const fetcher = fetchers.get(String(url instanceof Request ? url.url : url));
       if (!fetcher) throw new McpConnectorError("oauth_discovery_refused");
-      return fetcher(url, init);
+      return fetcher(url, githubOAuthTokenRequest(input.server, String(url instanceof Request ? url.url : url), init));
     } });
   return { outcome, redirect, secrets: state };
 }

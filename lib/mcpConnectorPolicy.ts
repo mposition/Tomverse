@@ -12,11 +12,27 @@ export const mcpServerSchema = z.object({
   // These names are reviewed server policy, never inferred from annotations.
   readTools: z.array(z.string().max(128)).max(32).default([]),
   auth: z.enum(["none", "bearer", "oauth"]).default("bearer"),
+  sourceAdapter: z.enum(["github-issues"]).optional(),
+  githubRepository: z.string().regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/).optional(),
+  githubRepositoryId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   oauth: z.object({ issuer: z.string().url(), authorizationUrl: z.string().url(), tokenUrl: z.string().url(),
     registrationUrl: z.string().url().optional(), clientId: z.string().min(1).max(512).optional(),
     clientSecretEnv: z.string().regex(/^[A-Z][A-Z0-9_]{1,100}$/).optional(),
     scope: z.string().min(1).max(500), }).strict().optional(),
-}).strict();
+}).strict().superRefine((server, context) => {
+  if (server.githubRepository) {
+    const url = new URL(server.url);
+    if (url.origin !== "https://api.githubcopilot.com" || !url.pathname.startsWith("/mcp/") || [".", ".."].includes(server.githubRepository.split("/")[1]))
+      context.addIssue({ code: "custom", message: "GitHub repository scopes require the registered GitHub endpoint" });
+    if (server.readTools.some(name => !["search_issues", "issue_read"].includes(name)))
+      context.addIssue({ code: "custom", message: "GitHub writes require confirmation" });
+    if (server.auth === "oauth" && (!server.githubRepositoryId || server.oauth?.issuer !== "https://github.com" ||
+      server.oauth.authorizationUrl !== "https://github.com/login/oauth/authorize" || server.oauth.tokenUrl !== "https://github.com/login/oauth/access_token" ||
+      server.oauth.scope !== "offline_access" || !server.oauth.clientId || !server.oauth.clientSecretEnv || server.oauth.registrationUrl))
+      context.addIssue({ code: "custom", message: "GitHub OAuth requires a registered confidential GitHub App and repository ID" });
+  }
+  if (server.githubRepositoryId && !server.githubRepository) context.addIssue({ code: "custom", message: "Repository ID requires a repository scope" });
+});
 export type McpServerPolicy = z.infer<typeof mcpServerSchema>;
 export type McpGrant = { name: string; mode: "read" | "confirm"; inputSchema: Record<string, unknown> };
 export class McpConnectorError extends Error {
@@ -30,6 +46,14 @@ export function mcpPreviewEnabled(env = process.env) {
 export function mcpServers(env = process.env): McpServerPolicy[] {
   if (!mcpPreviewEnabled(env)) return [];
   const configured = z.array(mcpServerSchema).max(20).parse(JSON.parse(env.MCP_CONNECTOR_SERVERS || "[]"));
+  if (env.MCP_GITHUB_OAUTH_CLIENT_ID && env.MCP_GITHUB_OAUTH_CLIENT_SECRET) {
+    configured.push(mcpServerSchema.parse({ id: "github", name: `GitHub · ${env.MCP_GITHUB_REPOSITORY}`,
+      url: "https://api.githubcopilot.com/mcp/x/issues", auth: "oauth", readTools: ["search_issues", "issue_read"],
+      sourceAdapter: "github-issues", githubRepository: env.MCP_GITHUB_REPOSITORY, githubRepositoryId: Number(env.MCP_GITHUB_REPOSITORY_ID),
+      oauth: { issuer: "https://github.com", authorizationUrl: "https://github.com/login/oauth/authorize",
+        tokenUrl: "https://github.com/login/oauth/access_token", scope: "offline_access", clientId: env.MCP_GITHUB_OAUTH_CLIENT_ID,
+        clientSecretEnv: "MCP_GITHUB_OAUTH_CLIENT_SECRET" } }));
+  }
   if (env.NODE_ENV !== "production" && env.MCP_CONNECTOR_SYNTHETIC_PORT) {
     const port = z.coerce.number().int().min(1024).max(65535).parse(env.MCP_CONNECTOR_SYNTHETIC_PORT);
     const origin = `http://127.0.0.1:${port}`;

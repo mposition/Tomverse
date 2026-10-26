@@ -9,6 +9,7 @@ import { decryptOAuthToken, encryptOAuthAccountTokens } from "@/lib/oauthTokenCr
 import { withMcpClient } from "@/lib/mcpConnectorClient";
 import { connectorInputSchema } from "@/lib/mcpConnectorSchema";
 import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
+import { GITHUB_ISSUE_TOOLS } from "@/lib/mcpConnectorGitHub";
 import { MCP_LIMITS, McpConnectorError, mcpServer, mcpServers, type McpGrant, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 
 export const mcpPolicyDigest = (server: McpServerPolicy) => createHash("sha256").update(JSON.stringify(server)).digest("hex");
@@ -65,6 +66,7 @@ export async function connectMcp(userId: string, serverId: string, credential?: 
     if (result.tools.length > MCP_LIMITS.catalogTools || result.nextCursor) throw new McpConnectorError("tool_catalog_limit");
     return result.tools.flatMap(t => {
       try {
+        if (server.githubRepository && !GITHUB_ISSUE_TOOLS.has(t.name)) return [];
         if (t.outputSchema) connectorInputSchema(t.outputSchema, "output");
         return [{ name: z.string().regex(/^[A-Za-z0-9_.:-]{1,128}$/).parse(t.name),
           mode: server.readTools.includes(t.name) ? "read" as const : "confirm" as const,
