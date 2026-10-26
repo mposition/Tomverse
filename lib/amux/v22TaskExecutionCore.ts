@@ -52,6 +52,9 @@ export function v22ExecutionReceiptVerified(input: {
   reservedCostMicrousd: bigint;
   resultStored: boolean;
   expectedExecutionSource?: "claude_result" | "anthropic_messages_api";
+  /** The attempt ran under a dollar budget: only the one-off read-only
+   * retry does, bound to its signed risk acceptance. */
+  budgetBound: boolean;
 }) {
   if (input.invocationIds.length !== 1 ||
       input.invocationIds[0] !== input.attemptId ||
@@ -70,8 +73,13 @@ export function v22ExecutionReceiptVerified(input: {
     event.cli === expectedExecutor && event.source === expectedSource &&
     event.actualModelId !== null &&
     event.actualModelId === event.selectedModelId &&
-    // Owner decision 2026-10-25: a run settles on its observed usage, with no
-    // cost check, whether ordinary or an owner-approved recovery.
+    // Owner decision 2026-10-25: a run without a dollar budget settles on its
+    // observed usage; comparing it with the reservation would only strand a
+    // run already paid for. The one-off read-only retry ran under its signed
+    // budget, so its projection must still fit.
+    (!input.budgetBound ||
+      (event.projectedApiCostMicrousd !== null &&
+       event.projectedApiCostMicrousd <= input.reservedCostMicrousd)) &&
     (input.outcome === "succeeded" ? event.status === "succeeded" :
       event.status === "succeeded" || event.status === "failed");
 }

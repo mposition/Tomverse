@@ -491,9 +491,6 @@ export function amuxV22ReadOnlyRetryRouteCost(input: {
     candidate.provider === input.provider && candidate.modelId === input.modelId);
   if (!route || input.priorReservedMicroUsd !== AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD)
     throw new Error("cost_unverified");
-  // The one-off risk acceptance for this incident Task was signed for these
-  // amounts; they bind its launch, delivery and frame, so they stay as signed
-  // (owner decision 2026-10-26 keeps no dollar stop while the run executes).
   const cap = BigInt(route.perAttemptMicroUsd);
   const worst = input.priorReservedMicroUsd + cap;
   if (cap <= BigInt(0) || cap > AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD ||
@@ -554,7 +551,6 @@ export function amuxV22RecoveryStartAllowed(input: {
     a.historicalAttempts === input.historicalAttempts &&
     a.nextAttemptNumber === input.nextAttemptNumber &&
     a.oldHeldMicroUsd === input.priorReservedMicroUsd &&
-    // Owner decision 2026-10-25: a recovery is not held to the cost it was
-    // approved at; a later price or cap does not stop it.
-    input.assignedMicroUsd > BigInt(0);
+    input.assignedMicroUsd > BigInt(0) && input.assignedMicroUsd <= a.additionalCapMicroUsd &&
+    a.catalogApprovalId === input.catalogApprovalId && a.costDigest === input.costDigest;
 }
