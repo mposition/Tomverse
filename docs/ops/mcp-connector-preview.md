@@ -2,8 +2,9 @@
 
 Baseline: `origin/develop` at `7b18707463ba6a04ed399843c23935dcb287133b`.
 Branch: `codex/to-develop/mcp-01-preview`. Existing checkout changes were
-preserved in their original checkout. No remote push, merge or deployment is
-authorised by this work.
+preserved in their original checkout. On 26 October 2026 the owner authorised
+the feature-branch push and a PR targeting `develop`. Merge and deployment are
+not part of that request; T10 activation will be performed in Dev, not Production.
 
 ## Task ledger
 
@@ -19,13 +20,22 @@ authorised by this work.
 | T08 Independent review | Accepted | Claude: r-20261025-230233-b98a8f, head 3c5426a6e | Not deployed | Not deployed |
 | T09 Real service verification | GitHub OAuth/search/read/source path verified locally | Real GitHub MCP, PR #35 and test issue #36 read, mock-model Chat answer | Not deployed | Not deployed |
 | T09-W Live write verification | Complete for the approved one-issue scope | Issue #36 created once, title/body/source and search verified, duplicate approval refused, prior read grants restored | Not deployed | Not deployed |
-| T10 Operational rollout | Not authorised | Separate push/merge/deploy/activation approval | Not performed | Not performed |
+| T10 Operational rollout | Develop PR handoff; owner selected Dev for activation | Deployed verification pending | Not deployed; activation pending | Not deployed; activation excluded |
 
 Synthetic success is not evidence of compatibility with GitHub, Railway,
 Notion, Linear or Slack. The UI identifies unconfigured providers explicitly.
 The host is provider-independent; a service must actually expose compatible
 remote MCP and a separately scoped credential. Existing Drive file import and
 Tomverse login permissions are not connector permissions.
+
+T10 handoff: this PR does not activate the connector. Dev must apply the additive
+DB migration and configure its own GitHub App credentials and canonical
+`https://dev.tomverse.app/api/mcp/oauth/callback` before enabling the default-off
+switch. The loopback app credentials and disposable local database are not Dev
+configuration. Verify Dev OAuth, explicitly selected search/read/source, exact
+write approval and disconnect/access blocking after deployment. Local test-issue
+creation approval was consumed by issue #36; it does not authorise another write.
+Production activation and paid-model evaluation remain outside this handoff.
 
 ## Implemented surface
 
