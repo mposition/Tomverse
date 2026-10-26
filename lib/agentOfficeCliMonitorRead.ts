@@ -5,7 +5,7 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { agentOfficeCliMonitorCredential } from "@/lib/agentOfficeCliMonitor";
 import { agentOfficeCliBuffer } from "@/lib/agentOfficeCliMonitorBuffer";
-import { AGENT_OFFICE_CLI_WORKER } from "@/lib/agentOfficeCliMonitorCore";
+import { isAgentOfficeCliWorker } from "@/lib/agentOfficeCliMonitorCore";
 
 export const agentOfficeCliJson = (body: object, status = 200) => Response.json(body, {
   status, headers: { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" },
@@ -20,10 +20,11 @@ export async function readAgentOfficeCliMonitor(request: Request, session: Sessi
     await assertRecentAdminAuthentication(session);
     await rateLimit(request, session.user.id, "admin-office-cli-monitor", { minute: 120, day: 20_000 });
     const query = new URL(request.url).searchParams;
+    const worker = query.get("worker");
     if ([...query.keys()].some((key) => key !== "worker") || query.getAll("worker").length !== 1 ||
-        query.get("worker") !== AGENT_OFFICE_CLI_WORKER) return agentOfficeCliJson({ error: "invalid_request" }, 400);
+        !isAgentOfficeCliWorker(worker)) return agentOfficeCliJson({ error: "invalid_request" }, 400);
     const credential = agentOfficeCliMonitorCredential();
-    return agentOfficeCliJson(credential ? agentOfficeCliBuffer.read(credential) :
+    return agentOfficeCliJson(credential ? agentOfficeCliBuffer.read(worker, credential) :
       { state: "unavailable", receivedAt: null, snapshot: null });
   } catch (error) {
     if (isAdminReauthenticationError(error)) return agentOfficeCliJson({ error: "ADMIN_REAUTHENTICATION_REQUIRED" }, 428);

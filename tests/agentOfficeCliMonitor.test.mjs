@@ -7,13 +7,15 @@ import { EventEmitter } from "node:events";
 import { checkServerIdentity, rootCertificates } from "node:tls";
 import {
   AGENT_OFFICE_CLI_MAX_BYTES, AGENT_OFFICE_CLI_STALE_MS, AGENT_OFFICE_CLI_TTL_MS,
-  AGENT_OFFICE_CLI_WORKER, agentOfficeCliSnapshotSchema, maskAgentOfficeCliText,
+  AGENT_OFFICE_CLI_WORKER, AGENT_OFFICE_CLI_WORKERS, agentOfficeCliProvider,
+  agentOfficeCliSnapshotSchema, maskAgentOfficeCliText,
 } from "../lib/agentOfficeCliMonitorCore.ts";
 import { createAgentOfficeCliBuffer, agentOfficeCliBuffer } from "../lib/agentOfficeCliMonitorBuffer.ts";
 import { agentOfficeCliMonitorCredential, recordAgentOfficeCliMonitor } from "../lib/agentOfficeCliMonitor.ts";
 import { readAgentOfficeCliMonitor } from "../lib/agentOfficeCliMonitorRead.ts";
 import { collectAgentOfficeCliSnapshot, projectAgentOfficeCliSource,
-  readAgentOfficeCliSource, sendAgentOfficeCliSnapshot } from "../lib/agentOfficeCliMonitorCollector.mjs";
+  configuredAgentOfficeCliWorkers, readAgentOfficeCliSource,
+  sendAgentOfficeCliSnapshot } from "../lib/agentOfficeCliMonitorCollector.mjs";
 
 const source = (events = []) => ({ name: AGENT_OFFICE_CLI_WORKER, provider: "codex", events });
 const pane = (output = "$ npm test\n24 passed") => ({ name: AGENT_OFFICE_CLI_WORKER, output });
@@ -22,14 +24,90 @@ const snapshot = () => projectAgentOfficeCliSource(source([
   { kind: "assistant", text: "I will inspect its existing tests." },
   { kind: "tool", tool: "exec_command", detail: "npm test", output: "24 passed" },
 ]), pane());
+const workerSnapshot = (worker, capturedAt = new Date()) => projectAgentOfficeCliSource({
+  name: worker, provider: agentOfficeCliProvider(worker),
+  events: [{ kind: "user", text: `Prompt for ${worker}` }, { kind: "assistant", text: `Reply from ${worker}` }],
+  output: worker.startsWith("claude-") ? `Transcript for ${worker}` : "",
+}, { name: worker, output: `Terminal for ${worker}` }, worker, capturedAt);
+
+test("monitor configuration is restricted to the 13 approved resident names", () => {
+  assert.equal(AGENT_OFFICE_CLI_WORKERS.length, 13);
+  assert.deepEqual(configuredAgentOfficeCliWorkers({}), ["codex-impl"]);
+  assert.deepEqual(configuredAgentOfficeCliWorkers({
+    TOMVERSE_AMUX_CLI_MONITOR_WORKERS: AGENT_OFFICE_CLI_WORKERS.join(","),
+  }), AGENT_OFFICE_CLI_WORKERS);
+  for (const value of ["", "all", "codex-impl,codex-impl", "codex-impl,engineering-runner", "../send", "https://other.example"])
+    assert.throws(() => configuredAgentOfficeCliWorkers({ TOMVERSE_AMUX_CLI_MONITOR_WORKERS: value }), /invalid workers/);
+  for (const worker of ["../codex-impl", "codex-impl/send", "constructor", "decision-maker-openai"])
+    assert.throws(() => readAgentOfficeCliSource("transcript", worker), /invalid worker/);
+});
+
+test("all provider projections preserve real supplied text without inventing roles", () => {
+  for (const worker of AGENT_OFFICE_CLI_WORKERS) {
+    const value = workerSnapshot(worker);
+    assert.equal(value.worker, worker);
+    assert.equal(value.rawOutput, `Terminal for ${worker}`);
+    if (worker.startsWith("codex-")) {
+      assert.equal(value.source, "amux-codex-rollout");
+      assert.deepEqual(value.events.map(event => event.kind), ["prompt", "assistant"]);
+    } else {
+      assert.equal(value.source, worker.startsWith("claude-") ? "amux-transcript" : "amux-terminal");
+      assert.deepEqual(value.events, [{ kind: "output", text: worker.startsWith("claude-")
+        ? `Transcript for ${worker}` : `Terminal for ${worker}` }]);
+    }
+    assert.equal(agentOfficeCliSnapshotSchema.safeParse(value).success, true);
+    assert.throws(() => projectAgentOfficeCliSource({ name: worker, provider: "wrong", output: "", events: [] },
+      { name: worker, output: "" }, worker), /source_mismatch/);
+    assert.throws(() => projectAgentOfficeCliSource({ name: worker, provider: agentOfficeCliProvider(worker), output: "", events: [] },
+      { name: "different-worker", output: "" }, worker), /source_mismatch/);
+  }
+  assert.equal(agentOfficeCliSnapshotSchema.safeParse({ ...workerSnapshot("claude-impl"), source: "amux-codex-rollout" }).success, false);
+});
+
+test("plaintext and terminal fallbacks mask before keeping the most recent bounded output", () => {
+  const token = "ghp_" + "r".repeat(36);
+  for (const worker of ["claude-impl", "cursor-impl", "copilot-impl"]) {
+    const make = text => projectAgentOfficeCliSource({ name: worker, provider: agentOfficeCliProvider(worker),
+      output: worker.startsWith("claude-") ? text : "" }, { name: worker, output: text }, worker);
+    const safe = make(token + "\n" + "x".repeat(10_000));
+    assert.equal(safe.events[0].text, "[REDACTED: sensitive output]");
+    assert.equal(safe.rawOutput, "[REDACTED: sensitive output]");
+    const large = make("한".repeat(12_000) + "latest result");
+    assert.equal(large.truncated, true);
+    assert.ok(large.events[0].text.endsWith("latest result"));
+    assert.ok(Buffer.byteLength(JSON.stringify(large)) <= AGENT_OFFICE_CLI_MAX_BYTES);
+  }
+});
+
+test("worker buffers isolate all 13 snapshots, ordering, expiration and credential rotation", () => {
+  let clock = Date.now();
+  const buffer = createAgentOfficeCliBuffer(() => clock);
+  for (const worker of AGENT_OFFICE_CLI_WORKERS) buffer.record(workerSnapshot(worker), "a");
+  for (const worker of AGENT_OFFICE_CLI_WORKERS) {
+    const value = buffer.read(worker, "a").snapshot;
+    assert.equal(value.worker, worker);
+    assert.ok(value.events.every(event => event.text.includes(worker)));
+    assert.equal(buffer.read(worker, "b").snapshot, null);
+  }
+  assert.throws(() => buffer.record({ ...snapshot(), worker: "unknown" }, "a"), /invalid worker/);
+  assert.equal(buffer.record(workerSnapshot("codex-chore", new Date(clock - 60_000)), "a"), "older");
+  clock += AGENT_OFFICE_CLI_TTL_MS - 1;
+  buffer.record(workerSnapshot("claude-impl", new Date(clock)), "a");
+  clock += 2;
+  assert.equal(buffer.read("codex-impl", "a").snapshot, null);
+  assert.equal(buffer.read("claude-impl", "a").state, "live");
+  buffer.record(workerSnapshot("cursor-impl", new Date(clock)), "b");
+  assert.equal(buffer.read("cursor-impl", "b").state, "live");
+  assert.equal(buffer.read("claude-impl", "b").snapshot, null);
+});
 
 test("source reads fail closed without an explicit AMUX trust certificate", () => {
   for (const kind of ["transcript", "pane"])
     for (const value of [undefined, "", "x".repeat(65_537)])
-      assert.throws(() => readAgentOfficeCliSource(kind, { TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64: value }),
+      assert.throws(() => readAgentOfficeCliSource(kind, AGENT_OFFICE_CLI_WORKER, { TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64: value }),
         /source_ca_unconfigured/);
   for (const kind of ["send", "constructor", "toString", "__proto__"])
-    assert.throws(() => readAgentOfficeCliSource(kind, {}), /invalid source/);
+    assert.throws(() => readAgentOfficeCliSource(kind), /invalid source/);
 });
 
 test("source TLS verification stays enabled and its private CA never reaches ingestion", async (t) => {
@@ -49,11 +127,14 @@ test("source TLS verification stays enabled and its private CA never reaches ing
   });
   syncBuiltinESMExports();
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
-  for (const kind of ["transcript", "pane"])
-    assert.deepEqual(await readAgentOfficeCliSource(kind, {
+  for (const worker of AGENT_OFFICE_CLI_WORKERS) for (const kind of ["transcript", "pane"])
+    assert.deepEqual(await readAgentOfficeCliSource(kind, worker, {
       TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64: Buffer.from(certificate).toString("base64"),
     }), { ok: true });
+  assert.equal(options.length, AGENT_OFFICE_CLI_WORKERS.length * 2);
   for (const value of options) {
+    assert.ok(AGENT_OFFICE_CLI_WORKERS.some(worker => value.path === `/api/sessions/${worker}/transcript?max=40000` ||
+      value.path === `/api/sessions/${worker}/peek?lines=80${worker.startsWith("claude-") ? "" : "&live=1"}`));
     assert.equal(value.hostname, "127.0.0.1");
     assert.equal(value.port, 8824);
     assert.equal(value.ca.toString(), certificate);
@@ -82,7 +163,7 @@ test("source TLS verification stays enabled and its private CA never reaches ing
 
 test("the collector reuses two GET projections and omits reasoning and unknown fields", async () => {
   const reads = [];
-  const value = await collectAgentOfficeCliSnapshot(async kind => {
+  const value = await collectAgentOfficeCliSnapshot(AGENT_OFFICE_CLI_WORKER, async kind => {
     reads.push(kind);
     return kind === "pane" ? pane() : source([
       { kind: "user", text: "prompt" }, { kind: "reasoning", text: "private reasoning" },
@@ -102,7 +183,7 @@ test("the collector reuses two GET projections and omits reasoning and unknown f
 test("an unavailable or mismatched source never fabricates a live capture", async () => {
   assert.throws(() => projectAgentOfficeCliSource({ ...source(), name: "claude-impl" }, pane()));
   assert.throws(() => projectAgentOfficeCliSource({ ...source(), provider: "claude" }, pane()));
-  await assert.rejects(collectAgentOfficeCliSnapshot(async () => { throw new Error("offline"); }));
+  await assert.rejects(collectAgentOfficeCliSnapshot(AGENT_OFFICE_CLI_WORKER, async () => { throw new Error("offline"); }));
 });
 
 test("sensitive events are hidden before truncation, including ANSI and private-key blocks", () => {
@@ -133,14 +214,14 @@ test("multibyte output and oversized histories fit the full wire byte limit", ()
 test("the volatile buffer separates fresh, stale, expired and rotated-credential readings", () => {
   let clock = Date.now();
   const buffer = createAgentOfficeCliBuffer(() => clock);
-  assert.equal(buffer.read("a").state, "unavailable");
+  assert.equal(buffer.read(AGENT_OFFICE_CLI_WORKER,"a").state, "unavailable");
   buffer.record(snapshot(), "a");
-  assert.equal(buffer.read("a").state, "live");
-  assert.equal(buffer.read("b").snapshot, null);
+  assert.equal(buffer.read(AGENT_OFFICE_CLI_WORKER,"a").state, "live");
+  assert.equal(buffer.read(AGENT_OFFICE_CLI_WORKER,"b").snapshot, null);
   clock += AGENT_OFFICE_CLI_STALE_MS + 1;
-  assert.equal(buffer.read("a").state, "stale");
+  assert.equal(buffer.read(AGENT_OFFICE_CLI_WORKER,"a").state, "stale");
   clock += AGENT_OFFICE_CLI_TTL_MS;
-  assert.equal(buffer.read("a").snapshot, null);
+  assert.equal(buffer.read(AGENT_OFFICE_CLI_WORKER,"a").snapshot, null);
 });
 
 test("a delayed older capture cannot replace the latest captured conversation", () => {
@@ -148,7 +229,7 @@ test("a delayed older capture cannot replace the latest captured conversation", 
   const current = snapshot();
   buffer.record(current, "a");
   assert.equal(buffer.record({ ...current, capturedAt: new Date(Date.parse(current.capturedAt) - 1_000).toISOString() }, "a"), "older");
-  assert.equal(buffer.read("a").snapshot.capturedAt, current.capturedAt);
+  assert.equal(buffer.read(AGENT_OFFICE_CLI_WORKER,"a").snapshot.capturedAt, current.capturedAt);
 });
 
 const fixtureSecret = "cli-monitor-fixture-credential-20261025";
@@ -174,10 +255,10 @@ test("ingest fails closed when disabled or unauthenticated", async (t) => {
   assert.equal((await recordAgentOfficeCliMonitor(request(snapshot()))).status, 401);
 });
 
-test("ingest refuses command fields, other workers, oversized bodies and expired captures", async (t) => {
+test("ingest refuses command fields, unknown workers, oversized bodies and expired captures", async (t) => {
   enable(t);
   for (const value of [
-    { ...snapshot(), command: "run something" }, { ...snapshot(), worker: "codex-contract" },
+    { ...snapshot(), command: "run something" }, { ...snapshot(), worker: "engineering-runner" },
     { ...snapshot(), rawOutput: "x".repeat(70_000) },
   ]) await assert.rejects(recordAgentOfficeCliMonitor(request(value)));
   assert.equal((await recordAgentOfficeCliMonitor(request({ ...snapshot(), capturedAt: "2020-01-01T00:00:00.000Z" }))).status, 400);
@@ -188,7 +269,7 @@ test("ingest masks again on the app boundary before making a snapshot readable",
   const token = "sk-proj-" + "q".repeat(40);
   const value = { ...snapshot(), events: [{ kind: "output", text: token }], rawOutput: token };
   assert.equal((await recordAgentOfficeCliMonitor(request(value))).status, 200);
-  const reading = agentOfficeCliBuffer.read(agentOfficeCliMonitorCredential());
+  const reading = agentOfficeCliBuffer.read(AGENT_OFFICE_CLI_WORKER,agentOfficeCliMonitorCredential());
   assert.equal(reading.state, "live");
   assert.equal(JSON.stringify(reading).includes(token), false);
 });
@@ -229,7 +310,7 @@ test("real owner authorization and step-up guard transcript reads before the buf
   assert.equal(stale.status, 428);
   assert.equal((await stale.json()).error,"ADMIN_REAUTHENTICATION_REQUIRED");
   assert.equal(limits,0);
-  for(const suffix of ["?worker=codex-contract", "?worker=codex-impl&worker=codex-impl", "?worker=codex-impl&command=run"])
+  for(const suffix of ["?worker=engineering-runner", "?worker=codex-impl&worker=codex-impl", "?worker=codex-impl&command=run"])
     assert.equal((await readAgentOfficeCliMonitor(readRequest(suffix),session(),rateLimit)).status,400);
   const current = snapshot();
   await recordAgentOfficeCliMonitor(request(current));
@@ -237,4 +318,13 @@ test("real owner authorization and step-up guard transcript reads before the buf
   assert.equal(allowed.status,200);
   assert.equal(allowed.headers.get("Cache-Control"),"private, no-store, max-age=0");
   assert.equal((await allowed.json()).snapshot.worker,"codex-impl");
+  for (const worker of AGENT_OFFICE_CLI_WORKERS) {
+    const value = workerSnapshot(worker);
+    assert.equal((await recordAgentOfficeCliMonitor(request(value))).status,200);
+    const reading = await readAgentOfficeCliMonitor(readRequest(`?worker=${worker}`),session(),rateLimit);
+    assert.equal(reading.status,200);
+    const body = await reading.json();
+    assert.equal(body.snapshot.worker,worker);
+    assert.deepEqual(body.snapshot.events,value.events);
+  }
 });

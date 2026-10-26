@@ -1,20 +1,31 @@
-# Agent office CLI monitor pilot
+# Agent office CLI monitor
 
 Owner request, 2026-10-25: implement the approved Figma monitor and connect one
-AMUX worker for read-only observation. The pilot is fixed to `codex-impl`.
+AMUX worker for read-only observation. Owner follow-up, 2026-10-26: extend the
+same owner-only, read-only view to the remaining 12 resident AMUX workers.
+The scope is the existing 13-name office roster (Codex, Claude, Cursor and
+Copilot), without changing worker registration, dispatch, stdin or execution.
 
-The collector reuses the existing loopback AMUX `GET /api/sessions/codex-impl/transcript`
-and `GET /api/sessions/codex-impl/peek?lines=80&live=1`. It does not start a CLI,
+The collector reuses the existing loopback AMUX `GET /api/sessions/<worker>/transcript`
+and `GET /api/sessions/<worker>/peek?lines=80` (with `live=1` for non-Claude
+workers), accepting only the approved
+resident names. It does not start a CLI,
 send a prompt, register a worker, alter dispatch or make a model call. The
-structured conversation and tool output come from the existing Codex rollout;
-the Raw output tab shows the current terminal viewport. Source events have no
+structured Codex conversation and tool output come from the existing rollout.
+Claude supplies its existing AMUX text transcript. Cursor and Copilot currently
+supply no transcript, so their view shows the actual terminal viewport. The
+panel identifies the supplied format; text without role metadata is displayed
+as output, without inferring prompts or responses. The Raw output tab always
+shows the current terminal viewport. Claude's raw read omits live-frame
+deduplication so text already in its transcript can still appear in Raw output.
+Source events have no
 timestamps: the UI labels the snapshot capture time, not invented event times.
 Reasoning and unknown event kinds are omitted.
 
 ## Data and access
 
 - Only an authenticated owner with recent admin authentication can read
-  `GET /api/admin/office/cli-monitor?worker=codex-impl`. Reads are rate limited
+  `GET /api/admin/office/cli-monitor?worker=<worker>`. Reads are rate limited
   and private/no-store. No browser mutation or stdin endpoint exists.
 - A dedicated ingest-only secret protects `POST /api/internal/amux/cli-monitor`.
   It is separate from the bridge and worker credentials and never reaches a CLI
@@ -23,16 +34,18 @@ Reasoning and unknown event kinds are omitted.
   The app repeats masking before buffering. Masking is best effort: arbitrary
   confidential prose is not guaranteed detectable. Treat this as owner-only
   operational content, never a public/shareable transcript.
-- At most 80 events, 4,000 characters per event, an 8,000-character terminal
+- Per worker: at most 80 events, 4,000 characters per event, an 8,000-character terminal
   excerpt and 65,536 UTF-8 bytes total. The collector caps source responses at
   1 MiB. Request deadlines bound reads and ingestion. No output enters logs.
-- Only the latest snapshot is held in volatile application memory, expiring
-  after 15 minutes. No transcript DB table, file, audit payload or permanent
+- Only the latest snapshot for each of the 13 names is held in volatile application memory, expiring
+  independently after 15 minutes (at most 832 KiB of serialized snapshots total).
+  The read route selects exactly the requested worker; switching workers unmounts
+  the old browser poll and clears its content. No transcript DB table, file, audit payload or permanent
   history is created. A 20-second reporting gap displays Reconnecting.
-- This first pilot requires **one long-running app replica**. Restarts clear
+- This monitor requires **one long-running app replica**. Restarts clear
   the buffer; the next collector report restores it. Multi-replica operation
-  and historical execution retention require a separate shared buffer before
-  expanding scope. The selector currently names only the current session.
+  and historical execution retention require a separate shared buffer.
+  The selector currently names only the current session.
 - Pause updates freezes browser polling, not the agent. Scrolling up suspends
   auto-follow; Jump to latest resumes it. Closing unmounts and aborts polling.
 
@@ -84,7 +97,7 @@ The provided systemd unit expects an operator-installed checkout at
 stdin and does not read worker homes. The explicitly trusted loopback AMUX
 certificate is verified; ingestion to Tomverse verifies TLS and
 rejects redirects. Stop the collector or turn the app switch off to disable
-the view. Disabling and credential rotation make the old buffer unreadable.
+the view. Disabling and credential rotation make every old worker buffer unreadable.
 
 ### Execution host without sudo
 
@@ -100,8 +113,8 @@ Bundling avoids installing a checkout and npm dependencies on this account;
 the system unit above uses an operator-managed checkout with `tsx` instead.
 Keep that directory and `~/.config/tomverse-cli-monitor/` mode 700, the bundle
 and `collector.env` mode 600, and copy the unit to `~/.config/systemd/user/`.
-The environment file contains only the three collector settings above and the
-public AMUX trust certificate setting.
+The environment file contains only the collector settings above, the public
+AMUX trust certificate setting and the optional worker selection below.
 
 The user unit runs Bubblewrap directly: only `/usr`, DNS/hosts/TLS files and
 the collector directory are mounted read-only. Home directories and the host's
@@ -116,8 +129,32 @@ It does not inherit a worker's environment or read worker homes. Before
 enabling it, run `--check-source` with the same sandbox and verify a `--once`
 ingest under the actual unit settings.
 Use `systemctl --user enable --now tomverse-amux-cli-monitor.service` only after
-the app release and dedicated credential are ready. This starts the one fixed
-collector; it does not activate any other worker.
+the app release and dedicated credential are ready. This starts the collector;
+it does not launch or change any monitored worker.
+
+### Expanding the existing collector
+
+The collector defaults to `codex-impl` when
+`TOMVERSE_AMUX_CLI_MONITOR_WORKERS` is absent. The app accepts only the current
+13-name resident roster. Unknown names, duplicates, generic URLs and arbitrary
+API paths are refused. Each selected worker polls independently, so an
+unavailable source does not stall the other workers.
+
+After the finished boundary review and app release, update only the existing
+operator collector bundle and add this non-secret selection to its mode-600
+environment file, keeping the existing ingest credential and public CA:
+
+```text
+TOMVERSE_AMUX_CLI_MONITOR_WORKERS=claude-chore,claude-contract,claude-impl,claude-review,codex-chore,codex-contract,codex-impl,cursor-chore,cursor-impl,cursor-worker,copilot-chore,copilot-impl,copilot-worker
+```
+
+Run the same sandboxed `--check-source` with this selection and the public CA,
+without loading the ingest credential. It reports counts and kinds for each
+worker, never conversation content. Then restart only
+`tomverse-amux-cli-monitor.service` and verify each worker in the production
+owner office. To roll back the collection scope, set the selection to
+`codex-impl` and restart that same unit. No worker restart, registration or paid
+call is involved.
 
 From the Ubuntu operator account's bash, verify the installed bundle without
 credentials or external writes (this reads only the existing worker output).
@@ -137,6 +174,8 @@ systemd-run --user --wait --pipe -p NoNewPrivileges=yes \
   --ro-bind "$HOME/.local/share/tomverse-cli-monitor" /app \
   --proc /proc --dev /dev --tmpfs /tmp --chdir /app \
   --clearenv --setenv HOME /tmp --setenv PATH /usr/bin \
+  --setenv TOMVERSE_AMUX_CLI_MONITOR_WORKERS \
+    'claude-chore,claude-contract,claude-impl,claude-review,codex-chore,codex-contract,codex-impl,cursor-chore,cursor-impl,cursor-worker,copilot-chore,copilot-impl,copilot-worker' \
   --setenv TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64 \
     "$(base64 -w0 "$HOME/.config/tomverse-cli-monitor/amux-source.pem")" \
   /usr/bin/node /app/collector.mjs --check-source

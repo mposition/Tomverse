@@ -1,34 +1,42 @@
 import {
   AGENT_OFFICE_CLI_STALE_MS, AGENT_OFFICE_CLI_TTL_MS,
   sanitizeAgentOfficeCliSnapshot,
-  type AgentOfficeCliReading, type AgentOfficeCliSnapshot,
+  isAgentOfficeCliWorker,
+  type AgentOfficeCliReading, type AgentOfficeCliSnapshot, type AgentOfficeCliWorker,
 } from "./agentOfficeCliMonitorCore";
 
-/** Volatile, bounded pilot buffer: no transcripts in the product DB, files,
- * logs or audit chain. Use one long-running app replica for this pilot. */
+/** One bounded, volatile snapshot per resident worker, on one app replica. */
 export function createAgentOfficeCliBuffer(now: () => number = Date.now) {
-  let latest: { snapshot: AgentOfficeCliSnapshot; receivedAt: number; credential: string } | null = null;
-  let expiry: ReturnType<typeof setTimeout> | undefined;
+  const latest = new Map<AgentOfficeCliWorker, { snapshot: AgentOfficeCliSnapshot; receivedAt: number;
+    credential: string; expiry?: ReturnType<typeof setTimeout> }>();
   return {
     record(snapshot: AgentOfficeCliSnapshot, credential: string): "recorded" | "older" {
-      if (latest?.credential === credential &&
-          Date.parse(snapshot.capturedAt) < Date.parse(latest.snapshot.capturedAt)) return "older";
-      latest = { snapshot: sanitizeAgentOfficeCliSnapshot(snapshot), receivedAt: now(), credential };
-      clearTimeout(expiry);
-      expiry = setTimeout(() => { latest = null; }, AGENT_OFFICE_CLI_TTL_MS);
-      expiry.unref?.();
+      if (!isAgentOfficeCliWorker(snapshot.worker)) throw new TypeError("invalid worker");
+      const previous = latest.get(snapshot.worker);
+      if (previous?.credential === credential &&
+          Date.parse(snapshot.capturedAt) < Date.parse(previous.snapshot.capturedAt)) return "older";
+      clearTimeout(previous?.expiry);
+      const entry: NonNullable<typeof previous> = {
+        snapshot: sanitizeAgentOfficeCliSnapshot(snapshot), receivedAt: now(), credential,
+      };
+      entry.expiry = setTimeout(() => {
+        if (latest.get(snapshot.worker) === entry) latest.delete(snapshot.worker);
+      }, AGENT_OFFICE_CLI_TTL_MS);
+      entry.expiry.unref?.();
+      latest.set(snapshot.worker, entry);
       return "recorded";
     },
-    read(credential: string): AgentOfficeCliReading {
-      if (!latest || latest.credential !== credential || now() - latest.receivedAt >= AGENT_OFFICE_CLI_TTL_MS)
+    read(worker: AgentOfficeCliWorker, credential: string): AgentOfficeCliReading {
+      const entry = latest.get(worker);
+      if (!entry || entry.credential !== credential || now() - entry.receivedAt >= AGENT_OFFICE_CLI_TTL_MS)
         return { state: "unavailable", receivedAt: null, snapshot: null };
-      return { state: now() - latest.receivedAt > AGENT_OFFICE_CLI_STALE_MS ? "stale" : "live",
-        receivedAt: new Date(latest.receivedAt).toISOString(), snapshot: latest.snapshot };
+      return { state: now() - entry.receivedAt > AGENT_OFFICE_CLI_STALE_MS ? "stale" : "live",
+        receivedAt: new Date(entry.receivedAt).toISOString(), snapshot: entry.snapshot };
     },
   };
 }
 
 const shared = globalThis as typeof globalThis & {
-  agentOfficeCliBuffer?: ReturnType<typeof createAgentOfficeCliBuffer>;
+  agentOfficeCliWorkerBuffer?: ReturnType<typeof createAgentOfficeCliBuffer>;
 };
-export const agentOfficeCliBuffer = shared.agentOfficeCliBuffer ??= createAgentOfficeCliBuffer();
+export const agentOfficeCliBuffer = shared.agentOfficeCliWorkerBuffer ??= createAgentOfficeCliBuffer();
