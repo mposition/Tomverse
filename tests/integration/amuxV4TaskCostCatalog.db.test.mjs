@@ -36,7 +36,10 @@ test("approved Task price catalog is audited, immutable and fail-closed", {
       ("id", "version", "status", "catalogVersion", "pricingVersion",
        "catalog", "catalogDigest", "evidenceDigest", "approvedByUserId",
        "approvalAuditLogId", "approvedAt", "updatedAt")
-      VALUES ($1, 1, 'approved', 'synthetic-v1', 'prices-v1',
+      -- Next free version: other suites approve real catalogs that persist.
+      VALUES ($1, (SELECT COALESCE(MAX("version"), 0) + 1
+                   FROM public."AmuxV4TaskCostCatalogApproval"),
+              'approved', 'synthetic-' || $1, 'prices-v1',
               '{"schemaVersion":1}'::jsonb, $2, $3, $4, $5,
               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
     await client.query(insert, [id, digest, evidenceDigest, actorUserId, auditId]);

@@ -133,6 +133,7 @@ const CONTROL_PLANE_PATTERNS = [
   "tests/amux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",
+  "tests/verifyAmuxWslGitTransfer.test.mjs",
   "tests/orchestrator*"
 ];
 const PRODUCT_PATTERNS = [

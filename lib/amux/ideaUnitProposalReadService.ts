@@ -2,9 +2,12 @@ import "server-only";
 
 import type { Session } from "next-auth";
 
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
-import { readAmuxFirstIdeaAnalysisResult } from "./ideaAnalysisResultReadService.ts";
+import { AmuxIdeaAnalysisResultReadError,
+  readAmuxFirstIdeaAnalysisResultForDataOwner } from
+  "./ideaAnalysisResultReadService.ts";
 import { loadAmuxContentKeyRing, type AmuxContentKeyIdentity } from
   "./ideaKeyStore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
@@ -13,7 +16,8 @@ import type { AmuxAnalysisCard, AmuxAnalysisNode } from
   "./ideaAnalysisChunkCore.ts";
 
 export class AmuxIdeaUnitProposalReadError extends Error {
-  constructor(readonly code: "not_found" | "not_ready" | "integrity_unavailable") {
+  constructor(readonly code: "not_found" | "not_ready" | "schema_invalid" |
+    "integrity_unavailable") {
     super(code);
     this.name = "AmuxIdeaUnitProposalReadError";
   }
@@ -29,7 +33,34 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
     previewId: string;
   }> {
   const actorUserId = session.user?.id;
-  if (!actorUserId || !/^[A-Za-z0-9:_-]{8,80}$/.test(ideaId) ||
+  if (!actorUserId || !isAdminSession(session) ||
+      getAdminRole(session) !== "owner") {
+    throw new AmuxIdeaUnitProposalReadError("not_found");
+  }
+  return readVerifiedAmuxUnitProposalForDataOwnerInternal(actorUserId, ideaId,
+    draftUnitId, false);
+}
+
+/** System-registration read with an explicit data owner. It preserves every
+ * commitment and key check of the owner reader without inventing a Session. */
+export async function readVerifiedAmuxUnitProposalForDataOwner(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+): ReturnType<typeof readVerifiedAmuxUnitProposalForDataOwnerInternal> {
+  return readVerifiedAmuxUnitProposalForDataOwnerInternal(actorUserId, ideaId,
+    draftUnitId, true);
+}
+
+async function readVerifiedAmuxUnitProposalForDataOwnerInternal(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+  surfaceStoredSchemaInvalid: boolean,
+): Promise<{
+  proposal: AmuxAnalysisCard | AmuxAnalysisNode;
+  unit: { id: string; localRef: string; bodyDigest: string;
+    bodyDigestKeyId: string; chunkIndex: number; expiresAt: Date };
+  previewId: string;
+}> {
+  if (!/^[A-Za-z0-9:_-]{8,128}$/.test(actorUserId) ||
+      !/^[A-Za-z0-9:_-]{8,80}$/.test(ideaId) ||
       !/^[A-Za-z0-9_-]{8,80}$/.test(draftUnitId)) {
     throw new AmuxIdeaUnitProposalReadError("not_found");
   }
@@ -90,6 +121,9 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
           raw: plain.toString("utf8"), chunkIndex: unit.chunkIndex,
           permittedSourceRefIds: ["operator_idea"],
         });
+        if (!inspected.ok && surfaceStoredSchemaInvalid) {
+          throw new AmuxIdeaUnitProposalReadError("schema_invalid");
+        }
         if (!inspected.ok || inspected.unit.kind !== "card" ||
             inspected.unit.localId !== unit.localRef) {
           throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
@@ -117,8 +151,9 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
     subjectId: amuxAnalysisFreeformSubjectId(ideaId, chunk.currentPreviewId) });
   try {
     const keys = await loadAmuxContentKeyRing(identities);
-    const result = await readAmuxFirstIdeaAnalysisResult(session, ideaId,
-      keys, unit.chunkIndex);
+    const result = await readAmuxFirstIdeaAnalysisResultForDataOwner(
+      actorUserId, ideaId, keys, unit.chunkIndex,
+      { surfaceStoredSchemaInvalid });
     if (result.state !== "ready" && result.state !== "partial" &&
         result.state !== "needs_owner_input") {
       throw new AmuxIdeaUnitProposalReadError("not_ready");
@@ -138,6 +173,11 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
       expiresAt: unit.expiresAt }, previewId: result.previewId };
   } catch (error) {
     if (error instanceof AmuxIdeaUnitProposalReadError) throw error;
+    if (surfaceStoredSchemaInvalid &&
+        error instanceof AmuxIdeaAnalysisResultReadError &&
+        error.code === "schema_invalid") {
+      throw new AmuxIdeaUnitProposalReadError("schema_invalid");
+    }
     throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
   }
 }
@@ -151,9 +191,31 @@ export async function readVerifiedAmuxCardProposal(session: Session,
   return { ...result, proposal: result.proposal };
 }
 
+export async function readVerifiedAmuxCardProposalForDataOwner(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+) {
+  const result = await readVerifiedAmuxUnitProposalForDataOwner(actorUserId,
+    ideaId, draftUnitId);
+  if (result.proposal.kind !== "card") {
+    throw new AmuxIdeaUnitProposalReadError("not_ready");
+  }
+  return { ...result, proposal: result.proposal };
+}
+
 export async function readVerifiedAmuxNodeProposal(session: Session,
   ideaId: string, draftUnitId: string) {
   const result = await readVerifiedAmuxUnitProposal(session, ideaId, draftUnitId);
+  if (result.proposal.kind !== "node") {
+    throw new AmuxIdeaUnitProposalReadError("not_ready");
+  }
+  return { ...result, proposal: result.proposal };
+}
+
+export async function readVerifiedAmuxNodeProposalForDataOwner(
+  actorUserId: string, ideaId: string, draftUnitId: string,
+) {
+  const result = await readVerifiedAmuxUnitProposalForDataOwner(actorUserId,
+    ideaId, draftUnitId);
   if (result.proposal.kind !== "node") {
     throw new AmuxIdeaUnitProposalReadError("not_ready");
   }

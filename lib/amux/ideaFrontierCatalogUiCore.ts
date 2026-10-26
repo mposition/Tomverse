@@ -1,7 +1,10 @@
+import { isAmuxIdeaAnalysisProvider, type AmuxIdeaAnalysisProvider } from
+  "./ideaAnalysisChannelCore.ts";
+
 export type AvailableFrontierModel = {
   approvalId: string;
   approvalVersion: number;
-  provider: "openai" | "anthropic";
+  provider: AmuxIdeaAnalysisProvider;
   modelId: string;
   allowedEfforts: string[];
 };
@@ -32,7 +35,7 @@ export function defaultFrontierSelection(models: readonly AvailableFrontierModel
 
 export type PendingFrontierCatalogApproval = {
   approvalId: string;
-  provider: "openai" | "anthropic";
+  provider: AmuxIdeaAnalysisProvider;
   modelId: string;
   allowedEfforts: string[];
   expectedPreviousVersion: number;
@@ -90,7 +93,7 @@ const exactEfforts = (actual: unknown, expected: readonly string[]): boolean =>
 
 const validPendingApproval = (expected: PendingFrontierCatalogApproval): boolean =>
   APPROVAL_ID.test(expected.approvalId) &&
-  (expected.provider === "openai" || expected.provider === "anthropic") &&
+  isAmuxIdeaAnalysisProvider(expected.provider) &&
   MODEL_ID.test(expected.modelId) &&
   expected.allowedEfforts.length > 0 && expected.allowedEfforts.length <= EFFORTS.size &&
   expected.allowedEfforts.every((value) => EFFORTS.has(value)) &&
@@ -119,7 +122,7 @@ export function readFrontierRegistrationReceipt(
     const value = parsed as Record<string, unknown>;
     if (Object.keys(value).length !== 6 || value.operatorId !== operatorId ||
         typeof value.approvalId !== "string" ||
-        (value.provider !== "openai" && value.provider !== "anthropic") ||
+        !isAmuxIdeaAnalysisProvider(value.provider) ||
         typeof value.modelId !== "string" || !Array.isArray(value.allowedEfforts) ||
         !Number.isSafeInteger(value.expectedPreviousVersion)) {
       return { kind: "unavailable" };
@@ -185,7 +188,7 @@ export function readAvailableFrontierModels(status: number, body: unknown): Avai
     const row = value as Record<string, unknown>;
     if (typeof row.approvalId !== "string" || !APPROVAL_ID.test(row.approvalId) ||
         seen.has(row.approvalId) || !Number.isSafeInteger(row.approvalVersion) ||
-        Number(row.approvalVersion) < 1 || (row.provider !== "openai" && row.provider !== "anthropic") ||
+        Number(row.approvalVersion) < 1 || !isAmuxIdeaAnalysisProvider(row.provider) ||
         typeof row.modelId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(row.modelId) ||
         !Array.isArray(row.allowedEfforts) || row.allowedEfforts.length === 0 ||
         row.allowedEfforts.length > EFFORTS.size ||

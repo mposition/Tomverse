@@ -18,6 +18,21 @@ import {
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import {
+  AMUX_SESSION_INTAKE_READBACK_ENV,
+  amuxSessionIntakeReadbackEnabled,
+} from "@/lib/amux/ideaSessionIntakeReadbackCore";
+import {
+  AMUX_SESSION_INTAKE_ENV,
+  amuxSessionIntakeWritePermitted,
+  inspectAmuxIdeaSessionSubmission,
+  inspectAmuxSessionModelChoice,
+} from "@/lib/amux/ideaSessionSubmissionCore";
+import {
+  AmuxIdeaSessionSubmissionError,
+  readAmuxIdeaSessionSubmissionRequest,
+  submitAmuxIdeaFromSession,
+} from "@/lib/amux/ideaSessionSubmissionService";
 import { authOptions } from "@/lib/auth";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -41,7 +56,47 @@ const owner = async (): Promise<Session | NextResponse> => {
   return session;
 };
 
+/** amux-intake v19 item 1: the Admin idea input and coding sessions enter the
+ * same intake writer. While session intake is on, an Admin idea is stored as
+ * a session idea under the owner's operating scope and queued for automatic
+ * analysis; otherwise the v4 path below is unchanged. */
+const sessionIntakeOn = () =>
+  amuxSessionIntakeWritePermitted(process.env[AMUX_SESSION_INTAKE_ENV],
+    process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
+  amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
+    process.env[AMUX_V4_IDEA_READBACK_ENV]);
+
+/** Reading back a stored session idea needs only the read-back switches: an
+ * owner who turns session writes off after a lost answer must still recover
+ * it, or the v4 read would report a committed session idea as partial. */
+const sessionReadbackOn = () =>
+  amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
+    process.env[AMUX_V4_IDEA_READBACK_ENV]);
+
+const ADMIN_SOURCE = Object.freeze({ toolName: "tomverse-admin",
+  modelProvider: "operator", sessionDisplay: "Admin idea input" });
+
+/** Refused before the intake transaction starts, so nothing was written. */
+const SESSION_PREWRITE_STATUS: Partial<Record<AmuxIdeaSessionSubmissionError["code"], number>> = {
+  submission_disabled: 503,
+  audit_unavailable: 503,
+  scope_unavailable: 409,
+  outside_scope: 409,
+  model_not_approved: 409,
+  model_not_launchable: 409,
+  reference_snapshot_unavailable: 503,
+  // key_store_unavailable stays a read-back: the shared UI table treats it so
+  // on the v4 path, where a key outcome can be uncertain.
+};
+
 const failure = (error: unknown): Response => {
+  if (error instanceof AmuxIdeaSessionSubmissionError) {
+    const status = SESSION_PREWRITE_STATUS[error.code];
+    // An uncertain or already-seen write is read back by its request id.
+    return NextResponse.json(status ? { error: error.code }
+      : { error: "outcome_unknown", ...(error.readBack ? { readBack: error.readBack } : {}) },
+    { status: status ?? 503, headers: noStore });
+  }
   if (error instanceof IdeaSubmissionError) {
     return NextResponse.json(
       { error: error.code, ...(error.readBack ? { readBack: error.readBack } : {}),
@@ -81,7 +136,37 @@ export async function POST(request: Request) {
       minute: 3,
       day: 20,
     });
-    const inspected = inspectAmuxIdeaSubmission(await readLimitedText(request, AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES));
+    const raw = await readLimitedText(request, AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES);
+    if (sessionIntakeOn()) {
+      let envelope: unknown;
+      try { envelope = JSON.parse(raw); } catch { envelope = null; }
+      const body = envelope && typeof envelope === "object" && !Array.isArray(envelope)
+        ? envelope as Record<string, unknown> : {};
+      const inspected = inspectAmuxIdeaSessionSubmission({ version: body.version,
+        requestId: body.requestId, input: body.input, source: ADMIN_SOURCE });
+      if (!inspected.ok) {
+        return NextResponse.json({ error: inspected.code }, { status: 400, headers: noStore });
+      }
+      // The owner may pick this idea's model; without one the scope's model runs.
+      const choice = inspectAmuxSessionModelChoice(body.model);
+      if (!choice.ok) {
+        return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
+      }
+      // The session analysis reads its references from pinned checkouts; an
+      // idea with none would be claimed and then have nothing to read.
+      if (inspected.counts.repositoryCount + inspected.counts.pullRequestCount === 0) {
+        return NextResponse.json({ error: "references_required" }, { status: 400, headers: noStore });
+      }
+      const committed = await submitAmuxIdeaFromSession({ inspected, model: choice.model });
+      return NextResponse.json(
+        { ideaId: committed.ideaId, requestId: committed.requestId, state: "submitted",
+          origin: "session",
+          hasExternalSources: inspected.counts.repositoryCount + inspected.counts.pullRequestCount > 0,
+          transferReady: false },
+        { status: 201, headers: noStore },
+      );
+    }
+    const inspected = inspectAmuxIdeaSubmission(raw);
     if (!inspected.ok) {
       return NextResponse.json(
         { error: inspected.code },
@@ -116,10 +201,21 @@ export async function GET(request: Request) {
     if (!requestId || !isAmuxIdeaRequestId(requestId)) {
       return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
     }
-    return NextResponse.json(
-      await readIdeaSubmissionRequest(session, requestId),
-      { headers: noStore },
-    );
+    // A session idea saved from Admin has the operator as its actor, so the v4 owner
+    // read finds the row and, with no v4-shaped audit, calls it partial. The session
+    // read answers first (it is absent for any row that is not a session idea).
+    if (sessionReadbackOn()) {
+      const seen = await readAmuxIdeaSessionSubmissionRequest(requestId);
+      if (seen.status !== "absent") {
+        return NextResponse.json(seen.status === "committed"
+          ? { requestId, status: "committed", ideaId: seen.ideaId, origin: "session",
+            hasExternalSources: seen.hasExternalSources }
+          : { requestId, status: "partial", ideaId: seen.ideaId, origin: "session" },
+        { headers: noStore });
+      }
+    }
+    const owned = await readIdeaSubmissionRequest(session, requestId);
+    return NextResponse.json(owned, { headers: noStore });
   } catch (error) {
     return failure(error);
   }

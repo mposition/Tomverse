@@ -99,9 +99,25 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/ideaSubmissionCore.ts",
   "lib/amux/localIntakeCore.ts",
 ].sort();
-// A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "4c1868bde54b7c4683857acdc0542a8f8d9263f8a95d94502c03eab7ca5d304e";
-const SOURCE_SCOPE_DISABLED_DIGEST = "3cbeb173f3d105d2e5ba6524e961da8110d6975731c19aa9c92ced15be209c5c";
+// The v19 idea_raw size change touches ideaCrypto in this unchanged read-only
+// closure. The v19 tracked checkout adds localIntakeCore to the existing
+// closure without a route, import, writer or reviewed-file-list change.
+// The encrypted v19 read manifest adds a content purpose to ideaCrypto and
+// ideaKeyStore. This preview's reviewed closure still has the same 13 files,
+// no new write or outbound capability, and both latch states stay pinned.
+// v19 orphan-key retirement adds a readback-only S3 verifier to the existing
+// key-store module; the preview closure still has 13 files and no new call.
+// The orphan sweeper's version-specific delete is exported from the same key
+// store but is not called by this read-only preview; its 13-file closure and
+// route's read-only transaction remain fixed in both latch states.
+// The v19 read-manifest retirement fence adds a conditional-write recovery
+// export in the same key-store file. This preview imports only its key loader;
+// the 13-file closure, read-only transaction and outbound-call scan are fixed.
+// Re-pinned for intake v19 session results: lib/amux/ideaKeyStore.ts now also
+// fences an orphan analysis-result key. The preview services only load keys
+// (loadAmuxContentUnitKeys); the closure file list is unchanged.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "a905558c830f5209832ff49b22c35f1c5d484b3f735da18001003a40ba4ebc77";
+const SOURCE_SCOPE_DISABLED_DIGEST = "26199694df292f77f04179ecd6ffa2af408c3c7018f3513f4d80959af7629554";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -116,6 +132,8 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaHierarchyDecisionCore.ts",
   "lib/amux/ideaKeyConfig.ts",
   "lib/amux/ideaKeyStore.ts",
+  "lib/amux/ideaRegistrationRefusalCore.ts",
+  "lib/amux/ideaRegistrationRefusalReadService.ts",
   "lib/amux/ideaResolutionChoiceCore.ts",
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
@@ -129,8 +147,37 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // docs/policy/amux-intake.md v17 adds lib/amux/cardDisplayKeyCore.ts to the
 // closure through ideaAnalysisChunkCore's Feature prefix check: a pure module
 // with no import, I/O or writer. Repinned for that 15-file closure only.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "d67dc3e773f95508cdbffab9c84ba3fe8892065a312a58d81b0f14b8796e5996";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "37537b37803c99e7d390e4c58966c6da40760697172ca162e17a74d673be68b2";
+// Intake v20 changes only schema validation and stored-chunk readback in the
+// same closure; it adds no import, I/O or writer. Repin both latch states.
+// The same v19 idea_raw size change touches ideaCrypto here. No route,
+// import, writer or reviewed file changes in this preview closure.
+// Intake v20.5 adds an audited refusal metadata read to the existing analysis
+// read. Its two-module boundary is read-only and does not import the refusal
+// writer; keep both latch digests pinned to this 17-file closure.
+// Review r-20261016-095415-ada10c scoped that metadata read to the exact
+// displayed preview and source plan, while keeping the same read-only closure.
+// Intake v19.5 adds a data-owner form of the same stored-result read and the
+// closed whole-plan refusal vocabulary. On 2026-10-16 the 17-file closure was
+// recomputed unchanged, with no writer, outbound I/O or dynamic import added.
+// The v19.5 review repair separates task and whole-plan refusal predicates and
+// verifies the stored system actor/scope. The import closure remains identical.
+// The v19.5 follow-up surfaces stored schema failures only to the unattended
+// registrar. The same 17-file owner preview closure remains read-only.
+// The v19.5 replay repair adds an optional attempt-kind query predicate to the
+// same refusal reader. On 2026-10-16 the file list and writer scan stayed fixed.
+// Recomputed for the merged v19.5 and develop sources; the 17-file closure,
+// read-only scan and both latch states remain explicitly pinned.
+// The same v19 content-purpose extension changes these reviewed sources, but
+// does not add a writer, import, or outbound call to the resolution preview.
+// The same verifier changes the existing 17-file closure without changing
+// the preview's route, imports, writer scan, or outbound-call guard.
+// The exact-version retirement export is not invoked by the resolution
+// reader. Its 17-file closure and read-only route/service guards remain fixed.
+// The fixed-fence retirement functions remain unreachable from this reader.
+// Its 17-file closure and both latch-state writer checks are unchanged.
+// Re-pinned with the source-scope digests above for the same ideaKeyStore change.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "cfbb8438b362045ced485e5f8302c502ece90c895da6ca28b5dd7fdbcdd84b45";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "08c17ba9d23e4078efc80bdce73f7bfdc96674ac4a1ae4adb4859a795be7ae1a";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
@@ -556,7 +603,6 @@ test("multiline AMUX service imports remain in the audit sweep", () => {
     "amux/ideas/unit-decisions/cancel/route.ts",
     "amux/ideas/unit-decisions/no-commit/route.ts",
     "amux/portfolio/route.ts",
-    "amux/task-cost-catalog/route.ts",
     "amux/v22-lane/route.ts",
   ];
   for (const name of serviceAuditedRoutes) {

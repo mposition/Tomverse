@@ -3,6 +3,10 @@
 import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxSessionAnalysisStopPanel } from "@/components/admin/AmuxSessionAnalysisStopPanel";
+import { AmuxSessionIdeaCancelPanel } from "@/components/admin/AmuxSessionIdeaCancelPanel";
+import { AmuxReadManifestPathsPanel } from "@/components/admin/AmuxReadManifestPathsPanel";
+import { AmuxSessionReviewPanel } from "@/components/admin/AmuxSessionReviewPanel";
 import { adminAmuxIdeaProgressMessages } from "@/lib/adminMessages/amuxIdeaProgress";
 import { amuxIdeaHasUnsavedDraft } from "@/lib/amux/ideaDraftGuard";
 import { AMUX_IDEA_PROGRESS_STAGES, amuxIdeaProgressStep } from "@/lib/amux/ideaProgressCore";
@@ -11,13 +15,16 @@ import type { AmuxIdeaProgressRow } from "@/lib/amux/ideaProgressRead";
 const REPOSITORY_URL = "https://github.com/mposition/Tomverse";
 /** The steps a person takes; every other step runs on its own. */
 const HUMAN_STEPS = new Set(["execution_approval", "plan_approval", "review"]);
+const EXCLUSION_REASONS = ["secretPath", "secretContent", "nonRegular",
+  "unscannableContent"] as const;
 
 /**
  * The top of one idea's detail (approved backlog redesign, B3): where the idea
  * is on the six steps, which of them are a person's, and its Tasks with their
  * PRs. Everything here is read from the progress snapshot; there is no action
- * besides opening GitHub, because the human steps have their own panels below
- * and a merge is observed by the app rather than approved again here.
+ * besides opening GitHub, reading its own CLI manifest, cancelling a queued v19 session idea and
+ * stopping its in-flight analysis, because
+ * other human steps have their own panels below and merge is observed here.
  */
 export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
   const m = useAdminMessages(adminAmuxIdeaProgressMessages);
@@ -56,6 +63,83 @@ export function AmuxIdeaDetailSummary({ row }: { row: AmuxIdeaProgressRow }) {
         })}
       </ol>
       {row.stage === "cancelled" ? <p>{m.stages.cancelled}</p> : null}
+      {row.waitingFor === "session_review" ? (
+        <p className="text-amber-200" data-testid="amux-session-review">{m.sessionReviewDetail}</p>
+      ) : null}
+      {row.waitingFor === "session_review" && row.submissionOrigin === "session" ?
+        // Keyed by idea: another idea's question never shows while the next one loads.
+        <AmuxSessionReviewPanel key={row.ideaId} ideaId={row.ideaId} /> : null}
+      {row.submissionOrigin === "session" ?
+        <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
+      {row.submissionOrigin === "session" ?
+        <AmuxSessionAnalysisStopPanel ideaId={row.ideaId} /> : null}
+      {row.submissionOrigin === "session" && row.referencePins === null &&
+          row.referencePinsLegacy ? (
+        <p className="text-zinc-400">{m.intakePinsLegacy}</p>
+      ) : null}
+      {row.submissionOrigin === "session" && row.referencePins === null &&
+          !row.referencePinsLegacy ? (
+        <p role="alert" className="text-red-200">{m.intakePinsUnavailable}</p>
+      ) : null}
+      {row.submissionOrigin === "session" && row.referencePins && row.referencePins.length > 0 ? (
+        <section aria-labelledby="amux-intake-pins-heading" data-testid="amux-intake-pins"
+          className="space-y-2 border-t border-zinc-800 pt-3">
+          <h3 id="amux-intake-pins-heading" className="font-medium text-zinc-100">
+            {m.intakePinsTitle}
+          </h3>
+          <ol className="space-y-1 text-xs text-zinc-300">
+            {row.referencePins.map((pin) => <li key={pin.referenceOrdinal}>
+              {m.checkoutReference(pin.referenceOrdinal)}: <code className="break-all text-zinc-100">
+                {pin.pinnedCommitSha}</code>
+            </li>)}
+          </ol>
+        </section>
+      ) : null}
+      {row.checkoutEvidence.length > 0 ? (
+        <section aria-labelledby="amux-checkout-evidence-heading" data-testid="amux-checkout-evidence"
+          className="space-y-2 border-t border-zinc-800 pt-3">
+          <h3 id="amux-checkout-evidence-heading" className="font-medium text-zinc-100">
+            {m.checkoutEvidenceTitle}
+          </h3>
+          <ol className="space-y-2">
+            {row.checkoutEvidence.map((evidence) => (
+              <li key={evidence.referenceOrdinal} className="rounded-lg border border-zinc-800 p-3">
+                <p className="font-medium text-zinc-100">{m.checkoutReference(evidence.referenceOrdinal)}</p>
+                <p className="text-xs text-zinc-300">{m.checkoutCommit}: <code className="break-all text-zinc-100">
+                  {evidence.pinnedCommitSha}</code></p>
+                <p className="text-xs text-zinc-300">{m.checkoutExcluded(evidence.excludedCount)}</p>
+                {evidence.excludedCount > 0 ? (
+                  <ul className="flex flex-wrap gap-x-4 text-xs text-zinc-400">
+                    {EXCLUSION_REASONS.filter((reason) => evidence.excludedReasons[reason] > 0)
+                      .map((reason) => <li key={reason}>
+                        {m.checkoutReasons[reason]}: {evidence.excludedReasons[reason]}
+                      </li>)}
+                  </ul>
+                ) : null}
+                {evidence.readManifests.map((manifest, page) => (
+                  <div key={manifest.manifestId}
+                    className="mt-2 space-y-1 border-t border-zinc-800 pt-2 text-xs text-zinc-300"
+                    data-testid="amux-checkout-read-manifest">
+                    {/* A continued analysis keeps the files each page read. */}
+                    {evidence.readManifests.length > 1 ? (
+                      <p className="font-medium text-zinc-200">{m.checkoutReadPage(page + 1)}</p>
+                    ) : null}
+                    <p>{m.checkoutReadFiles(manifest.fileCount)}</p>
+                    <p>{manifest.bodyPurged ? m.checkoutReadPurged : m.checkoutReadEncrypted}</p>
+                    <p>{m.checkoutReadDigest}: <code className="break-all text-zinc-100">
+                      {manifest.digest}</code></p>
+                    {!manifest.bodyPurged ? (
+                      <AmuxReadManifestPathsPanel ideaId={row.ideaId}
+                        manifestId={manifest.manifestId}
+                        fileCount={manifest.fileCount} />
+                    ) : null}
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       {row.taskRows.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[28rem] text-left text-sm">

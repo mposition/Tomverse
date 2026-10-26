@@ -38,19 +38,17 @@ export function v22SettlementPatchMatches(input: {
     storedPatch.bodyPurgedAt === null;
 }
 
-export function v22ExecutionCostWithinAssignment(input: {
-  assignedMicroUsd: bigint;
-  currentMicroUsd: bigint;
-  approvedCeilingMicroUsd: bigint;
-  priorReservedMicroUsd: bigint;
-}) {
-  return input.assignedMicroUsd > BigInt(0) &&
-    input.currentMicroUsd >= BigInt(0) &&
-    input.priorReservedMicroUsd >= BigInt(0) &&
-    input.approvedCeilingMicroUsd > BigInt(0) &&
-    input.currentMicroUsd <= input.assignedMicroUsd &&
-    input.priorReservedMicroUsd + input.assignedMicroUsd <=
-      input.approvedCeilingMicroUsd;
+/** apps/tomverse-orchestrator send_v22 refuses a larger budget field. */
+export const AMUX_V22_BRIDGE_BUDGET_MAX_MICROUSD = 5_000_000;
+
+/** The budget field a v22 delivery carries. An ordinary run is not budget
+ * bound (owner decision 2026-10-25), so its field only has to stay within the
+ * box bridge's wire range; the read-only retry carries its exact signed
+ * amount. */
+export function amuxV22DeliveryBudgetMicrousd(reservedMicrousd: number,
+  readOnlyRetry: boolean) {
+  return readOnlyRetry ? reservedMicrousd :
+    Math.min(reservedMicrousd, AMUX_V22_BRIDGE_BUDGET_MAX_MICROUSD);
 }
 
 /** One supervised CLI process is the whole v22 attempt. Its invocation ID is
@@ -67,6 +65,9 @@ export function v22ExecutionReceiptVerified(input: {
   reservedCostMicrousd: bigint;
   resultStored: boolean;
   expectedExecutionSource?: "claude_result" | "anthropic_messages_api";
+  /** The attempt ran under a dollar budget: only the one-off read-only
+   * retry does, bound to its signed risk acceptance. */
+  budgetBound: boolean;
 }) {
   if (input.invocationIds.length !== 1 ||
       input.invocationIds[0] !== input.attemptId ||
@@ -85,8 +86,13 @@ export function v22ExecutionReceiptVerified(input: {
     event.cli === expectedExecutor && event.source === expectedSource &&
     event.actualModelId !== null &&
     event.actualModelId === event.selectedModelId &&
-    event.projectedApiCostMicrousd !== null &&
-    event.projectedApiCostMicrousd <= input.reservedCostMicrousd &&
+    // Owner decision 2026-10-25: a run without a dollar budget settles on its
+    // observed usage; comparing it with the reservation would only strand a
+    // run already paid for. The one-off read-only retry ran under its signed
+    // budget, so its projection must still fit.
+    (!input.budgetBound ||
+      (event.projectedApiCostMicrousd !== null &&
+       event.projectedApiCostMicrousd <= input.reservedCostMicrousd)) &&
     (input.outcome === "succeeded" ? event.status === "succeeded" :
       event.status === "succeeded" || event.status === "failed");
 }

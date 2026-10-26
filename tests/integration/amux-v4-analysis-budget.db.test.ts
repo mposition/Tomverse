@@ -5,11 +5,13 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
-import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
   AMUX_V4_ANALYSIS_CLAIM_ACTION,
+  AMUX_V4_ANALYSIS_CLAIM_TARGET,
+  AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
@@ -30,7 +32,7 @@ import { commitAmuxIdeaAnalysisBudgetReservation as commitReservationWithOwnerAu
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
 import { commitAmuxIdeaOnlyAnalysisClaim,
-  enforceAmuxV4DailyClaimLimit,
+  readAmuxV4ClaimDayUtc,
   AmuxIdeaAnalysisClaimError } from "@/lib/amux/ideaAnalysisClaimService";
 import { commitAmuxIdeaAnalysisResult,
   readAmuxIdeaAnalysisResultReceipt,
@@ -45,6 +47,14 @@ import { commitAmuxKnownIdeaAnalysisSettlement,
   AmuxIdeaAnalysisSettlementError } from "@/lib/amux/ideaAnalysisBudgetSettlementService";
 import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
+import { commitAmuxIdeaAnalysisStop,
+  readAmuxIdeaAnalysisStopReceipt,
+  AmuxIdeaAnalysisStopError } from "@/lib/amux/ideaAnalysisStopService";
+import { AmuxIdeaAutoCancellationError,
+  commitAmuxOverdueIdeaAnalysisCancellation } from
+  "@/lib/amux/ideaAnalysisAutoCancellationService";
+import { readAmuxIdeaAnalysisWorkerStopState } from
+  "@/lib/amux/ideaAnalysisWorkerStopRead";
 import { commitAmuxIdeaAnalysisClaimResolution,
   readAmuxIdeaAnalysisClaimResolution,
   readAmuxIdeaAnalysisClaimResolutionReceipt,
@@ -59,6 +69,8 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
   AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "@/lib/amux/ideaAnalysisPriceVersionRead";
+import { AMUX_ANALYSIS_BUDGET_SETTING_ACTION,
+  AMUX_ANALYSIS_BUDGET_SETTING_TARGET } from "@/lib/amux/ideaAnalysisBudgetSettingCore";
 import { commitAnalysisBudgetSetting } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { prisma } from "@/lib/prisma";
 
@@ -73,6 +85,12 @@ if (!url || !["postgres:", "postgresql:"].includes(url.protocol) ||
   throw new Error("REFUSE: AMUX v4 budget DB test requires one dedicated loopback test database");
 }
 
+// The current analysis prompt asks for chunk schema 5; nodes and cards carry portfolio signals.
+const withSignals = (units: Array<Record<string, unknown>>) => units.map((unit) => unit.kind === "node"
+  ? { ...unit, portfolioSignal: { metrics: { value: 3 }, uncertainty: "low",
+    rationale: "A bounded proposal.", evidenceRefIds: unit.sourceRefIds } }
+  : unit.kind === "card" ? { ...unit, portfolioSignal: { metrics: { impact: 3 }, uncertainty: "low",
+    rationale: "A bounded proposal.", evidenceRefIds: unit.sourceRefIds } } : unit);
 const actorUserId = `synthetic-amux-budget-owner-${randomUUID()}`;
 const actorEmail = "amux-v4-budget-owner@example.test";
 process.env.ADMIN_USER_IDS = actorUserId;
@@ -113,7 +131,7 @@ test("daily claim key is the database UTC date regardless of process or session 
         SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD')
           AS "dayUtc"
       `;
-      assert.equal(await enforceAmuxV4DailyClaimLimit(tx), expected[0]?.dayUtc);
+      assert.equal(await readAmuxV4ClaimDayUtc(tx), expected[0]?.dayUtc);
     });
   } finally {
     if (priorTz === undefined) delete process.env.TZ;
@@ -171,6 +189,18 @@ const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(),
   new Date().getUTCMonth(), 1));
 const runner = { tokenCapsEnforceable: true, billableToolsDisabled: true };
 const modelId = () => `gpt-frontier-synthetic-${randomUUID()}`;
+
+async function writeSyntheticBudgetSettingAudit(tx: Prisma.TransactionClient,
+  settingId: string, limitMicroUsd = "1000000000") {
+  return writeAdminAuditLog({ session, request,
+    action: AMUX_ANALYSIS_BUDGET_SETTING_ACTION,
+    targetType: AMUX_ANALYSIS_BUDGET_SETTING_TARGET,
+    targetId: settingId,
+    summary: "Owner changed the AMUX analysis monthly ceiling; usage preserved.",
+    metadata: { namespace, version: 1, previousVersion: 0,
+      previousLimitMicroUsd: "50000000", limitMicroUsd,
+      effectiveMonth: monthStart.toISOString(), policyVersion: 16 }, tx });
+}
 
 async function approvedPriceVersionId(provider: "openai" | "anthropic",
   selectedModelId: string, expiresInMs = 24 * 60 * 60_000): Promise<string> {
@@ -679,14 +709,14 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
   // Fake local result: no provider CLI or external request occurs in this test.
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "One synthetic operator idea was analyzed.",
     remainingScope: null,
-    units: [{ kind: "node", localId: "c0:node-0", level: "initiative",
+    units: withSignals([{ kind: "node", localId: "c0:node-0", level: "initiative",
       parentRef: null, title: "Synthetic initiative",
-      description: "One bounded scope.", sourceRefIds: ["operator_idea"] }],
+      description: "One bounded scope.", sourceRefIds: ["operator_idea"] }]),
   });
   const resultInput = { requestId: randomUUID(), ideaId: claim.ideaId,
     previewId, holdId, leaseGeneration: 1 as const,
@@ -718,6 +748,34 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
   assert.equal(await prisma.amuxWorkItem.count({ where: {
     sourceSystem: "admin-idea-v4", sourceKey: claim.ideaId,
   } }), 0);
+});
+
+test("a response in an older schema than its prompt asked for is a failed call, not a draft", async () => {
+  // Review finding on amux-intake v20: the current prompt asks for chunk schema
+  // 5, so a response declaring schema 4 cannot skip the expected-path and
+  // no-review rules by being admitted under the older contract. Run inside a
+  // rolled-back transaction so the fixture leaves no claim, failure or hold for
+  // the daily claim limit and the failure streak the later cases depend on.
+  const rollback = new Error("rollback older-schema fixture");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    const rawModelOutput = JSON.stringify({ schemaVersion: 4, previewId,
+      chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
+      continuationKind: null, ownerQuestion: null,
+      coveredScope: "One synthetic operator idea was analyzed.",
+      remainingScope: null,
+      units: withSignals([{ kind: "node", localId: "c0:node-0", level: "initiative",
+        parentRef: null, title: "Synthetic initiative",
+        description: "One bounded scope.", sourceRefIds: ["operator_idea"] }]),
+    });
+    const saved = await commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+      leaseGeneration: 1 as const, outcome: "verified_success" as const, rawModelOutput,
+      inputTokens: 100, outputTokens: 50, keys });
+    assert.equal(saved.state, "provider_failed");
+    assert.equal(await tx.amuxIdeaDraftUnit.count({ where: { ideaId: claim.ideaId } }), 0);
+    throw rollback;
+  }, { timeout: 30_000 }), (error: unknown) => error === rollback);
 });
 
 async function syntheticFirstClaim() {
@@ -800,6 +858,208 @@ async function syntheticFirstClaimInTransaction(tx: Prisma.TransactionClient) {
     { requestId: randomUUID(), previewId: choice.previewId, keys });
   return { claim, previewId: choice.previewId, holdId };
 }
+
+test("seven-day expiry fences an in-flight child before cancelling its idea", async () => {
+  const rollback = new Error("rollback synthetic seven-day expiry");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const source = await syntheticFirstClaimInTransaction(tx);
+    const sourceHold = await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: source.holdId },
+    });
+    const ideaId = randomUUID();
+    const previewId = randomUUID();
+    const holdId = randomUUID();
+    const submittedAt = new Date(Date.now() - 7 * 86_400_000 - 60_000);
+    const deadline = new Date(submittedAt.getTime() + 7 * 86_400_000);
+    await tx.amuxIdeaSubmission.create({ data: {
+      id: ideaId, requestId: randomUUID(), actorUserId,
+      state: "analyzing", submittedAt, analysisDeadlineAt: deadline,
+      rawPurgeAfter: deadline,
+    } });
+    await tx.amuxIdeaAnalysisChunk.create({ data: {
+      ideaId, actorUserId, chunkIndex: 0, state: "pending",
+      attempt: 0, leaseGeneration: 0,
+    } });
+    const confirmedAt = new Date(submittedAt.getTime() + 60_000);
+    const consumedAt = new Date(confirmedAt.getTime() + 30_000);
+    const confirmExpiresAt = new Date(confirmedAt.getTime() + 86_400_000);
+    await tx.amuxIdeaTransferPreview.create({ data: {
+      id: previewId, ideaId, chunkIndex: 0, attempt: 1,
+      state: "in_flight", modelId: sourceHold.modelId,
+      templateVersion: "synthetic-template", payloadDigest: "b".repeat(64),
+      payloadDigestKeyId: "synthetic-digest", expiresAt: confirmExpiresAt,
+      confirmedAt, confirmExpiresAt, confirmationAuditLogId: randomUUID(),
+      confirmedByUserId: actorUserId, consumedAt,
+    } });
+    await tx.amuxIdeaAnalysisChunk.update({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+      data: { state: "in_flight", attempt: 1, leaseGeneration: 1,
+        currentPreviewId: previewId },
+    });
+    await tx.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: { namespace, monthStart } },
+      data: { reservedMicroUsd: { increment: sourceHold.reservedMicroUsd } },
+    });
+    await tx.amuxIdeaAnalysisBudgetHold.create({ data: {
+      id: holdId, previewId, namespace, monthStart,
+      mode: sourceHold.mode, provider: sourceHold.provider,
+      modelId: sourceHold.modelId, pricingVersion: sourceHold.pricingVersion,
+      priceVersionId: sourceHold.priceVersionId,
+      inputTokensCap: sourceHold.inputTokensCap,
+      outputTokensCap: sourceHold.outputTokensCap,
+      inputMicroUsdPerMillion: sourceHold.inputMicroUsdPerMillion,
+      outputMicroUsdPerMillion: sourceHold.outputMicroUsdPerMillion,
+      reservedMicroUsd: sourceHold.reservedMicroUsd,
+      status: "in_flight", createdAt: confirmedAt, dispatchedAt: consumedAt,
+    } });
+    await writeSystemAuditLog({ tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
+      targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET, targetId: previewId,
+      summary: "Recorded one synthetic in-flight analysis claim.",
+      metadata: { requestId: randomUUID(), previewId, ideaId, chunkIndex: 0,
+        holdId, payloadDigest: "b".repeat(64), leaseGeneration: 1,
+        modelCallStarted: false },
+    });
+    await tx.amuxIdeaAnalysisChunk.update({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+      data: { leaseGeneration: 2 },
+    });
+    await assert.rejects(commitAmuxOverdueIdeaAnalysisCancellation(tx, ideaId),
+      (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+        error.code === "integrity_unavailable");
+    assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    })).status, "in_flight");
+    await tx.amuxIdeaAnalysisChunk.update({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+      data: { leaseGeneration: 1 },
+    });
+    const before = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    const cancelled = await commitAmuxOverdueIdeaAnalysisCancellation(tx, ideaId);
+    assert.equal((await tx.amuxIdeaSubmission.findUniqueOrThrow({
+      where: { id: ideaId },
+    })).state, "cancelled");
+    assert.equal((await tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    })).state, "outcome_unknown");
+    assert.equal((await tx.amuxIdeaTransferPreview.findUniqueOrThrow({
+      where: { id: previewId },
+    })).state, "outcome_unknown");
+    assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    })).status, "outcome_unknown");
+    const afterWindow = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    assert.deepEqual([afterWindow.reservedMicroUsd, afterWindow.spentMicroUsd],
+      [before.reservedMicroUsd, before.spentMicroUsd]);
+    const cancellationAudit = await tx.adminAuditLog.findUniqueOrThrow({
+      where: { id: cancelled.auditId },
+    });
+    assert.equal(cancellationAudit.action, AMUX_V4_IDEA_AUTO_CANCEL_ACTION);
+    assert.equal((cancellationAudit.metadata as Record<string, unknown>)
+      .inFlightHoldId, holdId);
+    assert.equal(await tx.adminAuditLog.count({ where: {
+      action: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION, targetId: holdId,
+    } }), 1);
+    await assert.rejects(commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId, previewId, holdId,
+      leaseGeneration: 1, outcome: "outcome_unknown",
+      rawModelOutput: null, inputTokens: null, outputTokens: null, keys,
+    }), (error: unknown) => error instanceof AmuxIdeaAnalysisResultError &&
+      error.code === "not_ready");
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx,
+      { session, holdId });
+    assert.equal(readback.holdStatus, "outcome_unknown");
+    assert.equal(readback.zeroReleaseEligible, false);
+    const resolved = await commitAmuxIdeaAnalysisClaimResolution(tx, {
+      session, request, resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest: "c".repeat(64),
+      disposition: "evidence_insufficient",
+    });
+    assert.equal(resolved.settledMicroUsd,
+      sourceHold.reservedMicroUsd.toString());
+    assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    })).status, "owner_consumed");
+    throw rollback;
+  }, { timeout: 30_000 }), (error: unknown) => error === rollback);
+});
+
+test("owner stop fences an in-flight result and preserves the full budget hold", async () => {
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    const stopRequestId = randomUUID();
+    const before = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    assert.deepEqual(await readAmuxIdeaAnalysisWorkerStopState(tx, holdId),
+      { holdId, stop: false });
+    const stopped = await commitAmuxIdeaAnalysisStop(tx, { session, request,
+      stopRequestId, holdId, ownerConfirmed: true });
+    assert.deepEqual(await readAmuxIdeaAnalysisWorkerStopState(tx, holdId),
+      { holdId, stop: true });
+    assert.equal(stopped.previewId, previewId);
+    assert.equal(stopped.ideaId, claim.ideaId);
+    assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    })).status, "outcome_unknown");
+    assert.equal((await tx.amuxIdeaTransferPreview.findUniqueOrThrow({
+      where: { id: previewId },
+    })).state, "outcome_unknown");
+    assert.equal((await tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } },
+    })).state, "outcome_unknown");
+    const after = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    assert.equal(after.reservedMicroUsd, before.reservedMicroUsd);
+    assert.equal(after.spentMicroUsd, before.spentMicroUsd);
+    const audit = await tx.adminAuditLog.findUniqueOrThrow({
+      where: { id: stopped.auditId },
+    });
+    assert.equal(auditRowActorKind(audit), "human");
+    assert.equal((await readAmuxIdeaAnalysisStopReceipt(tx, { session,
+      stopRequestId })).status, "committed");
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx,
+      { session, holdId });
+    assert.equal(readback.zeroReleaseEligible, false);
+    await assert.rejects(commitAmuxIdeaAnalysisStop(tx, { session, request,
+      stopRequestId: randomUUID(), holdId, ownerConfirmed: true }),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisStopError &&
+      error.code === "conflict");
+    await assert.rejects(commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+      leaseGeneration: 1, outcome: "outcome_unknown",
+      rawModelOutput: null, inputTokens: null, outputTokens: null, keys,
+    }), (error: unknown) => error instanceof AmuxIdeaAnalysisResultError &&
+      error.code === "not_ready");
+    await assert.rejects(commitAmuxIdeaAnalysisClaimResolution(tx, { session,
+      request, resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      disposition: "not_started_proven" }),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+      error.code === "not_resolvable");
+    const resolved = await commitAmuxIdeaAnalysisClaimResolution(tx, { session,
+      request, resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      disposition: "evidence_insufficient" });
+    assert.equal(resolved.settledMicroUsd, "5000");
+    await tx.amuxIdeaAnalysisChunk.update({
+      where: { ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } },
+      data: { currentPreviewId: null },
+    });
+    assert.deepEqual(await readAmuxIdeaAnalysisWorkerStopState(tx, holdId),
+      { holdId, stop: true });
+    assert.equal((await readAmuxIdeaAnalysisStopReceipt(tx, { session,
+      stopRequestId })).status, "committed");
+    throw new Error("rollback synthetic owner stop");
+  }), /rollback synthetic owner stop/);
+});
 
 async function simulateClaimedIdeaDeadlineCancellation(
   tx: Prisma.TransactionClient, ideaId: string,
@@ -945,7 +1205,7 @@ test("insufficient evidence consumes the full reported-unknown reservation", asy
 
 test("a usage-unverified receipt forbids zero release and consumes the full reservation", async () => {
   const { claim, previewId, holdId } = await syntheticFirstClaim();
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "reject", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "The synthetic idea was reviewed.", remainingScope: null,
@@ -1126,12 +1386,12 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
     duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
     executionBrief: null, sourceRefIds: ["operator_idea"],
   }));
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "more",
     continuationKind: "output", ownerQuestion: null,
     coveredScope: "Eight independently reviewable stories were proposed.",
     remainingScope: "At least one further story remains from the same idea.",
-    units: [...nodes, ...cards] });
+    units: withSignals([...nodes, ...cards]) });
   const saved = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
       ideaId: claim.ideaId, previewId, holdId, leaseGeneration: 1,
@@ -1206,12 +1466,12 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
     duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
     executionBrief: null, sourceRefIds: ["operator_idea"],
   }));
-  const secondOutput = JSON.stringify({ schemaVersion: 2, previewId: secondPreviewId,
+  const secondOutput = JSON.stringify({ schemaVersion: 5, previewId: secondPreviewId,
     chunkIndex: 1, outcome: "propose", coverageStatus: "more",
     continuationKind: "output", ownerQuestion: null,
     coveredScope: "Eight more independent stories were proposed.",
     remainingScope: "A seventeenth story remains from the same idea.",
-    units: nextEight });
+    units: withSignals(nextEight) });
   const secondResult = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
       ideaId: claim.ideaId, previewId: secondPreviewId,
@@ -1243,12 +1503,12 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
   const thirdClaim = await prisma.$transaction((tx) =>
     commitAmuxIdeaOnlyAnalysisClaim(tx,
       { requestId: randomUUID(), previewId: thirdPreviewId, keys }));
-  const finalOutput = JSON.stringify({ schemaVersion: 2, previewId: thirdPreviewId,
+  const finalOutput = JSON.stringify({ schemaVersion: 5, previewId: thirdPreviewId,
     chunkIndex: 2, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "The seventeenth story was proposed.",
-    remainingScope: null, units: [{ ...nextEight[0], localId: "c2:card-0",
-      title: "Story 17" }] });
+    remainingScope: null, units: withSignals([{ ...nextEight[0], localId: "c2:card-0",
+      title: "Story 17" }]) });
   const finished = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
       ideaId: claim.ideaId, previewId: thirdPreviewId,
@@ -1290,7 +1550,7 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
 test("a bounded owner question is saved as a pause, not a provider failure", async () => {
   const { claim, previewId, holdId } = await syntheticFirstClaim();
   const question = "Which existing Feature should this story belong to?";
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "needs_information",
     coverageStatus: "needs_owner_input", continuationKind: "input",
     ownerQuestion: question, coveredScope: "The idea was read; hierarchy is unresolved.",
@@ -1393,13 +1653,13 @@ test("an unresolved in-flight result blocks a second Agent claim", async () => {
     commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
-  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+  const rawModelOutput = JSON.stringify({ schemaVersion: 5, previewId,
     chunkIndex: 0, outcome: "propose", coverageStatus: "complete",
     continuationKind: null, ownerQuestion: null,
     coveredScope: "One synthetic idea was analyzed.", remainingScope: null,
-    units: [{ kind: "node", localId: "c0:node-0", level: "initiative",
+    units: withSignals([{ kind: "node", localId: "c0:node-0", level: "initiative",
       parentRef: null, title: "Synthetic initiative",
-      description: "A bounded result.", sourceRefIds: ["operator_idea"] }],
+      description: "A bounded result.", sourceRefIds: ["operator_idea"] }]),
   });
   const settled = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
@@ -1609,10 +1869,10 @@ test("a complete first result saves independent encrypted units and closes only 
     executionGrade: null, executionBrief: null, sourceRefIds: ["operator_idea"],
   };
   const result = {
-    schemaVersion: 2, previewId, chunkIndex: 0,
+    schemaVersion: 5, previewId, chunkIndex: 0,
     outcome: "propose", coverageStatus: "complete", continuationKind: null,
     ownerQuestion: null, coveredScope: "The operator idea was analyzed.",
-    remainingScope: null, units: [...nodes, card],
+    remainingScope: null, units: withSignals([...nodes, card]),
   };
   const input = { ideaId, previewId, holdId, leaseGeneration: 1,
     rawModelOutput: JSON.stringify(result), keys };
@@ -1623,7 +1883,7 @@ test("a complete first result saves independent encrypted units and closes only 
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxFirstIdeaAnalysisDraft(tx, { ...input,
       rawModelOutput: JSON.stringify({ ...result,
-        units: [...nodes, { ...card, sourceRefIds: ["unapproved_source"] }] }) })),
+        units: withSignals([...nodes, { ...card, sourceRefIds: ["unapproved_source"] }]) }) })),
   (error: unknown) => error instanceof AmuxFirstAnalysisDraftError &&
     error.code === "invalid_result");
   await assert.rejects(prisma.$transaction(async (tx) => {
@@ -1753,7 +2013,7 @@ test("a complete rejection closes analysis without creating proposal cards", asy
   const result = await prisma.$transaction((tx) => commitAmuxFirstIdeaAnalysisDraft(tx, {
     ideaId, previewId, holdId, leaseGeneration: 1, keys,
     rawModelOutput: JSON.stringify({
-      schemaVersion: 2, previewId, chunkIndex: 0,
+      schemaVersion: 5, previewId, chunkIndex: 0,
       outcome: "reject", coverageStatus: "complete", continuationKind: null,
       ownerQuestion: null, coveredScope: "The idea cannot yield an actionable card.",
       remainingScope: null, units: [],
@@ -1857,6 +2117,97 @@ test("two confirmed previews cannot reserve the last monthly allowance twice", a
   }), 1);
 });
 
+test("budget guards compare same-transaction evidence in the PostgreSQL xid domain", async () => {
+  const guards = await prisma.$queryRaw<Array<{ name: string; body: string }>>`
+    SELECT p.proname AS "name", p.prosrc AS "body"
+    FROM pg_catalog.pg_proc p
+    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname IN (
+      'amux_idea_analysis_budget_setting_guard',
+      'amux_idea_analysis_budget_window_limit_guard'
+    )
+    ORDER BY p.proname
+  `;
+  assert.equal(guards.length, 2);
+  const settingGuard = guards.find((guard) =>
+    guard.name === "amux_idea_analysis_budget_setting_guard")?.body;
+  const windowGuard = guards.find((guard) =>
+    guard.name === "amux_idea_analysis_budget_window_limit_guard")?.body;
+  assert.ok(settingGuard);
+  assert.match(settingGuard,
+    /SELECT a\.\*, a\.xmin AS audit_xid[\s\S]+audit_row\.audit_xid <> pg_current_xact_id\(\)::xid/);
+  assert.doesNotMatch(settingGuard, /xmin::text|pg_current_xact_id\(\)::text/);
+  assert.ok(windowGuard);
+  assert.match(windowGuard,
+    /SELECT s\.\*, s\.xmin AS setting_xid[\s\S]+latest_setting\.setting_xid <> pg_current_xact_id\(\)::xid/);
+  assert.doesNotMatch(windowGuard, /xmin::text|pg_current_xact_id\(\)::text/);
+});
+
+test("same-transaction human audit with the wrong owner cannot approve a budget setting", async () => {
+  const settingId = randomUUID();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const auditId = await writeSyntheticBudgetSettingAudit(tx, settingId);
+    const evidence = await tx.$queryRaw<Array<{ sameTransaction: boolean }>>`
+      SELECT a.xmin = pg_current_xact_id()::xid AS "sameTransaction"
+      FROM "AdminAuditLog" a WHERE a."id" = ${auditId}
+    `;
+    assert.equal(evidence[0]?.sameTransaction, true);
+    await tx.amuxIdeaAnalysisBudgetSetting.create({ data: {
+      id: settingId, version: 1, limitMicroUsd: BigInt(1_000_000_000),
+      effectiveMonth: monthStart, approvedByUserId: `not-the-owner-${randomUUID()}`,
+      approvalAuditLogId: auditId,
+    } });
+  }), /analysis budget approval evidence mismatch/);
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetSetting.count({ where: { id: settingId } }), 0);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: AMUX_ANALYSIS_BUDGET_SETTING_ACTION, targetId: settingId,
+  } }), 0);
+});
+
+test("same-transaction owner approval cannot reset usage while changing the budget limit", async () => {
+  const settingId = randomUUID();
+  const spentMicroUsd = BigInt(49_995_000);
+  const reservedMicroUsd = BigInt(5_000);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000),
+      spentMicroUsd, reservedMicroUsd },
+    update: { limitMicroUsd: BigInt(50_000_000), spentMicroUsd, reservedMicroUsd },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const auditId = await writeSyntheticBudgetSettingAudit(tx, settingId);
+    await tx.amuxIdeaAnalysisBudgetSetting.create({ data: {
+      id: settingId, version: 1, limitMicroUsd: BigInt(1_000_000_000),
+      effectiveMonth: monthStart, approvedByUserId: actorUserId,
+      approvalAuditLogId: auditId,
+    } });
+    const evidence = await tx.$queryRaw<Array<{
+      auditSameTransaction: boolean; settingSameTransaction: boolean;
+    }>>`
+      SELECT a.xmin = pg_current_xact_id()::xid AS "auditSameTransaction",
+        s.xmin = pg_current_xact_id()::xid AS "settingSameTransaction"
+      FROM "AdminAuditLog" a
+      JOIN "AmuxIdeaAnalysisBudgetSetting" s ON s."approvalAuditLogId" = a."id"
+      WHERE s."id" = ${settingId}
+    `;
+    assert.deepEqual(evidence[0], {
+      auditSameTransaction: true, settingSameTransaction: true,
+    });
+    await tx.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: { namespace, monthStart } },
+      data: { limitMicroUsd: BigInt(1_000_000_000),
+        spentMicroUsd: BigInt(0), reservedMicroUsd: BigInt(0) },
+    });
+  }), /analysis budget limit requires current owner approval; usage cannot reset/);
+  const window = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  assert.equal(window.limitMicroUsd, BigInt(50_000_000));
+  assert.equal(window.spentMicroUsd, spentMicroUsd);
+  assert.equal(window.reservedMicroUsd, reservedMicroUsd);
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetSetting.count({ where: { id: settingId } }), 0);
+});
+
 test("budget window rejects another namespace or a cap without owner approval", async () => {
   const invalidMonth = new Date("2026-11-01T00:00:00.000Z");
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.create({
@@ -1885,6 +2236,18 @@ test("a saved USD 1000 setting immediately admits a real reservation that the ol
       error instanceof AmuxIdeaAnalysisReservationError && error.reason === "monthly_cap_exceeded");
     await commitAnalysisBudgetSetting(tx, { session, request, id: randomUUID(),
       expectedPreviousVersion: 0, monthlyUsd: "1000", ownerConfirmed: true });
+    const sameTransactionEvidence = await tx.$queryRaw<Array<{
+      auditSameTransaction: boolean; settingSameTransaction: boolean;
+    }>>`
+      SELECT a.xmin = pg_current_xact_id()::xid AS "auditSameTransaction",
+        s.xmin = pg_current_xact_id()::xid AS "settingSameTransaction"
+      FROM "AmuxIdeaAnalysisBudgetSetting" s
+      JOIN "AdminAuditLog" a ON a."id" = s."approvalAuditLogId"
+      WHERE s."version" = 1
+    `;
+    assert.deepEqual(sameTransactionEvidence[0], {
+      auditSameTransaction: true, settingSameTransaction: true,
+    });
     const reserved = await commitAmuxIdeaAnalysisBudgetReservation(tx,
       { holdId, previewId, priceVersionId, runner, keys });
     assert.equal(reserved.reservedMicroUsd, "5000");
@@ -1899,3 +2262,4 @@ test("a saved USD 1000 setting immediately admits a real reservation that the ol
   assert.equal(await prisma.amuxIdeaAnalysisBudgetSetting.count(), 0);
   assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({ where: { id: holdId } }), 0);
 });
+

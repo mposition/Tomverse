@@ -677,9 +677,11 @@ const REGISTRY = {
   },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxIdeaFrontierModelApproval_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/amux/ideaAnalysisChannelCore.ts",
+    list: "AMUX_IDEA_ANALYSIS_PROVIDERS",
     reason:
-      "AMUX v4 analysis currently admits only OpenAI and Anthropic for operator-approved Frontier models. A future provider needs a policy and migration change; no live model writer is enabled here.",
+      "The provider is the CLI channel that runs the analysis: openai (Codex), anthropic (Claude), github-copilot and cursor, each on a subscription account (owner decision 2026-10-20). Copilot and Cursor model IDs are the names their CLI accepts. The manual v4 path still admits only OpenAI and Anthropic at its own hold ledger.",
   },
   AmuxIdeaFrontierModelApproval_status_check: {
     owner: "database",
@@ -690,6 +692,56 @@ const REGISTRY = {
     owner: "database",
     reason:
       "AMUX v4 idea analysis storage is a closed lifecycle. This schema-only migration does not enable a writer; the future intake service must validate exactly these states before activation.",
+  },
+  AmuxIdeaSubmission_origin_check: {
+    owner: "database",
+    reason:
+      "An AMUX idea is stored either by the existing owner Admin path or by the v19 session path under the current owner-approved operating scope. The origin selects distinct human-versus-system audit evidence and cannot be relabelled after insert.",
+  },
+  AmuxIdeaSessionAnalysisReservation_status_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_STATUSES",
+    reason:
+      "A v19 session reservation is an append-only queue identity. Later dispatch, stop and cost evidence use separate rows rather than relabelling this receipt.",
+  },
+  AmuxIdeaSessionAnalysisReservation_provider_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_PROVIDERS",
+    reason:
+      "The queue receipt copies the CLI channel from the immutable owner-approved operating scope; the four channels are lib/amux/ideaAnalysisChannelCore.ts (owner decision 2026-10-20). Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
+  AmuxIdeaSessionAnalysisReservation_reasoning_effort_check: {
+    owner: "list",
+    module: "lib/amux/ideaSessionAnalysisReservationCore.ts",
+    list: "AMUX_SESSION_ANALYSIS_RESERVATION_REASONING_EFFORTS",
+    reason:
+      "The queue receipt copies the reasoning effort from the immutable owner-approved operating scope. Its trigger requires an exact match, and this list keeps malformed standalone rows out of the queue.",
+  },
+  AmuxIdeaRegistrationRefusal_attempt_kind_check: {
+    owner: "list",
+    module: "lib/amux/ideaRegistrationRefusalCore.ts",
+    list: "AMUX_V20_REGISTRATION_REFUSAL_ATTEMPT_KINDS",
+    reason:
+      "The durable v20 refusal identifies the prepare, consume or whole-plan boundary that rolled back before the separate refusal transaction recorded it.",
+  },
+  AmuxIdeaRegistrationRefusal_code_check: {
+    owner: "list",
+    module: "lib/amux/ideaRegistrationRefusalCore.ts",
+    list: "AMUX_REGISTRATION_REFUSAL_CODES",
+    reason:
+      "The deterministic v20 Task Guard and v19 whole-plan refusal codes are shared with the system registration core and Admin API; arbitrary text and expected paths never enter the record.",
+  },
+  AmuxIdeaRegistrationRefusal_proposed_grade_check: {
+    owner: "type_only",
+    reason:
+      "AmuxExecutionGrade in lib/amux/executionGradeCore.ts is the routine, advanced or frontier union. NULL preserves an invalid or absent model proposal without inventing a grade.",
+  },
+  AmuxIdeaRegistrationRefusal_final_grade_check: {
+    owner: "type_only",
+    reason:
+      "The final deterministic grade uses the same AmuxExecutionGrade union. NULL means the Guard could not derive a valid final grade before refusing the proposal.",
   },
   AmuxIdeaSourcePlanRevision_state_check: {
     owner: "database",
@@ -712,9 +764,11 @@ const REGISTRY = {
       "The dark v4 analysis hold distinguishes subscription CLI API-conversion estimates from actual API-mode costs. No reservation writer is enabled by the schema migration.",
   },
   AmuxIdeaAnalysisBudgetHold_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/amux/ideaAnalysisChannelCore.ts",
+    list: "AMUX_V4_ANALYSIS_PROVIDERS",
     reason:
-      "Only the currently approved OpenAI and Anthropic analysis providers may appear in the dark hold ledger. A later provider needs a policy and migration change.",
+      "The manual v4 hold ledger keeps the OpenAI and Anthropic vendors. The GitHub Copilot and Cursor channels added on 2026-10-20 serve only the v19 session runner, whose claims use their own table.",
   },
   AmuxIdeaAnalysisBudgetHold_status_check: {
     owner: "database",
@@ -722,9 +776,11 @@ const REGISTRY = {
       "The dark hold lifecycle preserves outcome_unknown as occupied and distinguishes an owner-consumed worst-case reserve from a verified non-start release. The future single writer must validate the same states.",
   },
   AmuxIdeaAnalysisPriceVersion_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/amux/ideaAnalysisChannelCore.ts",
+    list: "AMUX_IDEA_ANALYSIS_PROVIDERS",
     reason:
-      "Only OpenAI and Anthropic may have owner-approved AMUX v4 analysis prices; adding a provider requires an explicit policy and migration change.",
+      "A subscription_cli price may name any of the four CLI channels (owner decision 2026-10-20); the price writer still refuses an api price for github-copilot or cursor, which have no API mode here.",
   },
   AmuxIdeaAnalysisPriceVersion_mode_check: {
     owner: "database",
@@ -749,7 +805,7 @@ const REGISTRY = {
   AmuxIdeaContentKeyRetirement_purpose_check: {
     owner: "database",
     reason:
-      "Only the four per-unit AMUX analysis bodies with approved retention clocks can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
+      "Only AMUX content purposes with an approved retention clock, including the seven-day CLI read manifest, can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
   },
   AmuxIdeaRetentionHold_reason_check: {
     owner: "database",

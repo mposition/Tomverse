@@ -412,6 +412,28 @@ run(
     // Owner-managed monthly ceilings preserve usage and bind one canonical
     // audit/version without permitting unaudited or duplicate changes.
     "tests/integration/amux-v4-analysis-monthly-setting.db.test.ts",
+    // The v19 operating scope is append-only and bound to one owner audit per
+    // version; the database refuses a row without that evidence or any change.
+    "tests/integration/amux-intake-operating-scope.db.test.ts",
+    // v19 session intake stores encrypted source provenance under the latest
+    // owner scope while its canonical audit remains a dedicated system actor.
+    "tests/integration/amux-v19-session-submission.db.test.ts",
+    // Subscription claims run on all four CLI channels, each bound to its own
+    // sign-in profile and to the reservation's channel and model.
+    "tests/integration/amux-v19-subscription-channels.db.test.ts",
+    // An unproven subscription closure returns its headroom instead of filling
+    // the month, and the runner reads a pre-write 409 as that refusal.
+    "tests/integration/amux-v19-shadow-unknown-headroom.db.test.ts",
+    // Each prepared v19 direct-read reference records only its pinned SHA and
+    // aggregate exclusion proof under same-transaction system evidence.
+    "tests/integration/amux-v19-tracked-checkout-evidence.db.test.ts",
+    // v20 final Guard refusals are append-only, audit-bound, request-id
+    // idempotent and readable without retaining expected path values.
+    "tests/integration/amux-v20-registration-refusal.db.test.ts",
+    // v19 unattended registration turns one completed session analysis into
+    // nodes, cards, assessments and scores under exact system evidence, or
+    // leaves the backlog untouched and records one durable refusal.
+    "tests/integration/amux-v19-system-registration.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",

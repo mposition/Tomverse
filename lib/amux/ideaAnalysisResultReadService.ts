@@ -14,11 +14,14 @@ import { matchesAmuxIdeaAnalysisUnitCommitments } from
   "./ideaAnalysisResultReadCore.ts";
 import type { AmuxIdeaAnalysisResultView, AmuxVisibleAnalysisUnit } from
   "./ideaAnalysisResultReadCore.ts";
+import { readLatestAmuxV20RegistrationRefusalInTx } from
+  "./ideaRegistrationRefusalReadService.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 
 export class AmuxIdeaAnalysisResultReadError extends Error {
-  constructor(readonly code: "not_found" | "integrity_unavailable") {
+  constructor(readonly code: "not_found" | "schema_invalid" |
+    "integrity_unavailable") {
     super(code);
     this.name = "AmuxIdeaAnalysisResultReadError";
   }
@@ -32,7 +35,21 @@ export async function readAmuxFirstIdeaAnalysisResult(
   chunkIndex = 0,
 ): Promise<AmuxIdeaAnalysisResultView> {
   const actorUserId = session.user?.id;
-  if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner" ||
+  if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner") {
+    throw new AmuxIdeaAnalysisResultReadError("not_found");
+  }
+  return readAmuxFirstIdeaAnalysisResultForDataOwner(actorUserId, ideaId,
+    keys, chunkIndex);
+}
+
+/** Server-only read for the v19 system registrar. The caller supplies the
+ * data owner from a locked idea row; no human session or step-up is implied. */
+export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
+  actorUserId: string, ideaId: string, keys: AmuxContentKeys,
+  chunkIndex = 0,
+  options: { surfaceStoredSchemaInvalid?: boolean } = {},
+): Promise<AmuxIdeaAnalysisResultView> {
+  if (!/^[A-Za-z0-9:_-]{8,128}$/.test(actorUserId) ||
       !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId) ||
       !Number.isSafeInteger(chunkIndex) || chunkIndex < 0 ||
       chunkIndex >= 2_147_483_647) {
@@ -92,6 +109,14 @@ export async function readAmuxFirstIdeaAnalysisResult(
       }
     }
     if (chunk.state !== "draft_ready") return { state: "pending" };
+    let registrationRefusal;
+    try {
+      registrationRefusal = chunk.currentPreviewId && chunk.sourcePlanRevisionId ?
+        await readLatestAmuxV20RegistrationRefusalInTx(tx, ideaId, actorUserId,
+          chunk.currentPreviewId, chunk.sourcePlanRevisionId) : null;
+    } catch {
+      throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+    }
     const partial = chunk.coverageStatus === "more" &&
       chunk.continuationKind === "output";
     const needsOwnerInput = chunk.coverageStatus === "needs_owner_input" &&
@@ -226,7 +251,13 @@ export async function readAmuxFirstIdeaAnalysisResult(
           raw: plain.toString("utf8"), chunkIndex,
           permittedSourceRefIds: ["operator_idea"],
         });
-        if (!inspectedUnit.ok || inspectedUnit.unit.localId !== unit.localRef ||
+        if (!inspectedUnit.ok) {
+          if (options.surfaceStoredSchemaInvalid) {
+            throw new AmuxIdeaAnalysisResultReadError("schema_invalid");
+          }
+          throw new Error("proposal structure mismatch");
+        }
+        if (inspectedUnit.unit.localId !== unit.localRef ||
             inspectedUnit.unit.kind !== unit.unitKind) {
           throw new Error("proposal structure mismatch");
         }
@@ -243,8 +274,16 @@ export async function readAmuxFirstIdeaAnalysisResult(
           expectedPreviewId: previewId, expectedChunkIndex: 0,
           expectedRevisionChunkIndex: 0, previousContinuationKind: null,
           permittedSourceRefIds: ["operator_idea"], permittedTargetRefs: [],
+          // A stored chunk: its schema was fixed when it was admitted.
+          requiredSchemaVersion: null,
         });
-        if (!inspected.ok || inspected.chunk.coverageStatus !==
+        if (!inspected.ok) {
+          if (options.surfaceStoredSchemaInvalid) {
+            throw new AmuxIdeaAnalysisResultReadError("schema_invalid");
+          }
+          throw new Error("proposal mismatch");
+        }
+        if (inspected.chunk.coverageStatus !==
               (needsOwnerInput ? "needs_owner_input" : partial ? "more" : "complete") ||
             (needsOwnerInput ?
               inspected.chunk.continuationKind !== "input" &&
@@ -258,20 +297,26 @@ export async function readAmuxFirstIdeaAnalysisResult(
         completedAt: chunk.analysisCompletedAt.toISOString(), outcome: "propose",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
         remainingScope: freeformValue?.remainingScope as string | undefined ?? null,
-        nextChunkIndex: chunkIndex + 1, units: visibleUnits };
+        nextChunkIndex: chunkIndex + 1, units: visibleUnits,
+        registrationRefusal };
       if (needsOwnerInput) return { state: "needs_owner_input", ideaId, previewId,
         completedAt: chunk.analysisCompletedAt.toISOString(),
         outcome: "needs_information",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
         remainingScope: freeformValue?.remainingScope as string | undefined ?? null,
         ownerQuestion: freeformValue?.ownerQuestion as string | undefined ?? null,
-        units: visibleUnits };
+        units: visibleUnits, registrationRefusal };
       return { state: "ready", ideaId, previewId,
         completedAt: chunk.analysisCompletedAt.toISOString(),
         outcome: meta!.outcome as "propose" | "reject",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
-        units: visibleUnits };
-    } catch {
+        units: visibleUnits, registrationRefusal };
+    } catch (error) {
+      if (options.surfaceStoredSchemaInvalid &&
+          error instanceof AmuxIdeaAnalysisResultReadError &&
+          error.code === "schema_invalid") {
+        throw error;
+      }
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     } finally {
       freeform?.fill(0);

@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 
+export const AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_ACTION =
+  "amux.v4.analysis_claim.owner_resolved";
+export const AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_TARGET =
+  "AmuxIdeaAnalysisBudgetHold";
+
 export const AMUX_V4_CLAIM_RESOLUTION_DISPOSITIONS = [
   "not_started_proven",
   "evidence_insufficient",

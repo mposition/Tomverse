@@ -339,6 +339,19 @@ const approvedReceiptValid = (value: unknown): value is V4TaskApprovedCeiling =>
   return receiptDigest(core) === value.receiptDigest;
 };
 
+/**
+ * Owner decision 2026-10-25: a higher cost or larger token bounds never stop
+ * an ordinary Task. A route outside the confirmed receipt still asks for
+ * reconfirmation, and an owner-approved recovery keeps every condition.
+ */
+export function v4TaskCeilingDecision(
+  check: { decision: "allow" | "reconfirm" | "hold"; reason: string },
+  ownerApprovedRecovery: boolean,
+): "allow" | "reconfirm" | "hold" {
+  return check.decision === "reconfirm" && !ownerApprovedRecovery &&
+    check.reason !== "task_route_changed" ? "allow" : check.decision;
+}
+
 export function checkV4TaskApprovedCeiling(
   approved: unknown,
   current: V4TaskCostCeilingResult,

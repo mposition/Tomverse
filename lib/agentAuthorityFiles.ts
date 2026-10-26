@@ -180,6 +180,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/amux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",
+  "tests/verifyAmuxWslGitTransfer.test.mjs",
   "tests/orchestrator*",
 ];
 

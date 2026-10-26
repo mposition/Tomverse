@@ -14,6 +14,7 @@ import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
+import type { AmuxAnalysisOutputPage } from "./ideaOutputCursorCore.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DAY_MS = 24 * 60 * 60_000;
@@ -195,11 +196,34 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: previous?.permittedTargetRefs ?? [],
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
-    history,
+    history, templateVersion: preview.templateVersion,
   });
   if (prepared.decision === "hold") {
     throw new AmuxFirstAnalysisDraftError("invalid_result");
   }
+  return persistAmuxAnalysisPageDraftInTx(tx, { idea, planId: plan.id,
+    chunkIndex, previewId: preview.id, leaseGeneration: chunk.leaseGeneration,
+    prepared, history, now, previewPayloadPurgeAfter: preview.payloadPurgeAfter });
+}
+
+type PreparedAmuxAnalysisPage = Exclude<
+  ReturnType<typeof prepareAmuxAnalysisPageDraft>, { decision: "hold" }>;
+
+/** Persist one already-prepared page for an idea whose plan, chunk and
+ * in-flight preview the caller has locked and verified. Shared by the v4
+ * owner-confirmed path and the v19 session path so both leave the same rows
+ * for the result reader and the registration writers. */
+export async function persistAmuxAnalysisPageDraftInTx(
+  tx: Prisma.TransactionClient,
+  input: { idea: { id: string; actorUserId: string; analysisDeadlineAt: Date };
+    planId: string; chunkIndex: number; previewId: string;
+    leaseGeneration: number; prepared: PreparedAmuxAnalysisPage;
+    history: readonly AmuxAnalysisOutputPage[]; now: Date;
+    previewPayloadPurgeAfter: Date | null },
+): Promise<{ ideaId: string; previewId: string; unitCount: number;
+  analysisCompletedAt: string; auditId: string;
+  nextCursor: { sourceOrdinal: number; outputPartIndex: number } | null }> {
+  const { idea, chunkIndex, prepared, history, now } = input;
   const needsOwnerInput = prepared.decision === "needs_owner_input";
   const page = prepared.decision === "ready" ? prepared.page : {
     chunkIndex, coveredStartOrdinal: prepared.coveredStartOrdinal,
@@ -216,9 +240,9 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   const activeAnalysisPurgeAfter = new Date(idea.analysisDeadlineAt.getTime() + DAY_MS);
   // The next page needs both the preceding freeform and transfer text.
   // Completion advances all page bodies to the next purge tick.
-  const payloadPurgeAfter = new Date(Math.min(
+  const payloadPurgeAfter = input.previewPayloadPurgeAfter ? new Date(Math.min(
     (finishesAnalysis ? now : activeAnalysisPurgeAfter).getTime(),
-    preview.payloadPurgeAfter.getTime()));
+    input.previewPayloadPurgeAfter.getTime())) : null;
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
@@ -226,8 +250,8 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     targetId: `${idea.id}:${chunkIndex}`,
     summary: "Stored one bounded AMUX v4 idea analysis page as independently purgeable proposal units.",
     metadata: { ideaId: idea.id, chunkIndex,
-      previewId: preview.id, sourcePlanRevisionId: plan.id,
-      leaseGeneration: chunk.leaseGeneration, unitCount: prepared.draft.units.length,
+      previewId: input.previewId, sourcePlanRevisionId: input.planId,
+      leaseGeneration: input.leaseGeneration, unitCount: prepared.draft.units.length,
       outcome: prepared.draft.outcome,
       coverageStatus: prepared.draft.coverageStatus,
       continuationKind: prepared.draft.continuationKind,
@@ -248,7 +272,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   });
   const completedChunk = await tx.amuxIdeaAnalysisChunk.updateMany({
     where: { ideaId: idea.id, chunkIndex, state: "in_flight",
-      currentPreviewId: preview.id, leaseGeneration: input.leaseGeneration,
+      currentPreviewId: input.previewId, leaseGeneration: input.leaseGeneration,
       analysisCompletedAt: null },
     data: { state: "draft_ready", analysisCompletedAt: now,
       coverageStatus: prepared.draft.coverageStatus,
@@ -284,9 +308,10 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     }
   }
   const closedPreview = await tx.amuxIdeaTransferPreview.updateMany({
-    where: { id: preview.id, state: "in_flight", consumedAt: { not: null },
+    where: { id: input.previewId, state: "in_flight", consumedAt: { not: null },
       outcomeUnknownAt: null },
-    data: { state: "completed", payloadPurgeAfter },
+    data: { state: "completed",
+      ...(payloadPurgeAfter ? { payloadPurgeAfter } : {}) },
   });
   if (closedPreview.count !== 1) {
     throw new AmuxFirstAnalysisDraftError("integrity_unavailable");
@@ -303,7 +328,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     await tx.amuxIdeaAnalysisChunk.create({ data: {
       ideaId: idea.id, actorUserId: idea.actorUserId,
       chunkIndex: chunkIndex + 1, state: "pending", attempt: 0, leaseGeneration: 0,
-      sourcePlanRevisionId: plan.id, planStartChunkIndex: 0,
+      sourcePlanRevisionId: input.planId, planStartChunkIndex: 0,
       revisionChunkIndex: chunkIndex + 1,
     } });
   } else if (!needsOwnerInput) {
@@ -327,7 +352,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       payloadPurgeAfter: { gt: now } },
     data: { payloadPurgeAfter: now } });
   }
-  return { ideaId: idea.id, previewId: preview.id,
+  return { ideaId: idea.id, previewId: input.previewId,
     unitCount: prepared.draft.units.length,
     analysisCompletedAt: now.toISOString(), auditId,
     nextCursor };

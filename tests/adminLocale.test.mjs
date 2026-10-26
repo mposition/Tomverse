@@ -113,6 +113,11 @@ test("page meta is translated without moving the route", () => {
   assert.equal(ko.parentHref, en.parentHref);
   assert.equal(localizeAdminPageMeta("/admin/refunds", "ko").label, "환불");
   assert.equal(localizeAdminPageMeta("/admin/search", "ko").label, "전체 검색");
+  assert.equal(localizeAdminPageMeta(
+    "/admin/amux-u21-test-card", "ko", "owner").label,
+  "AMUX U21 테스트 카드");
+  assert.equal(localizeAdminPageMeta(
+    "/admin/amux-u21-test-card", "ko", "support").isKnown, false);
   assert.equal(localizeAdminPageMeta("/admin/nowhere", "ko").isKnown, false);
 });
 

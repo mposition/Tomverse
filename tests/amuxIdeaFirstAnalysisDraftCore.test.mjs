@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { prepareFirstIdeaOnlyAnalysisDraft } from "../lib/amux/ideaFirstAnalysisDraftCore.ts";
 import { openAmuxContent } from "../lib/amux/ideaCrypto.ts";
+import { AMUX_V4_ANALYSIS_PROMPT_VERSION } from "../lib/amux/ideaAnalysisPromptCore.ts";
 
 const keys = {
   masterKeyId: "test-master", masterKeyVersion: 1,
@@ -14,7 +15,9 @@ const nodes = [
   { level: "epic", parentRef: "c0:node-0", title: "Analyze ideas" },
   { level: "feature", parentRef: "c0:node-1", title: "Review analysis" },
 ].map((node, index) => ({ kind: "node", localId: `c0:node-${index}`,
-  description: "A bounded operator proposal.", sourceRefIds: ["operator_idea"], ...node }));
+  description: "A bounded operator proposal.", sourceRefIds: ["operator_idea"],
+  portfolioSignal: { metrics: { value: 3 }, uncertainty: "low",
+    rationale: "A bounded container.", evidenceRefIds: ["operator_idea"] }, ...node }));
 const card = {
   kind: "card", localId: "c0:card-0", cardType: "story", storyKind: "general",
   title: "Review a suggested card", problem: "The operator needs a verified proposal.",
@@ -23,15 +26,17 @@ const card = {
   featureRef: "c0:node-2", parentStoryRef: null,
   dependencyRefs: [], duplicateCandidateRefs: [], taskRole: null,
   executionGrade: null, executionBrief: null, sourceRefIds: ["operator_idea"],
+  portfolioSignal: { metrics: { impact: 3 }, uncertainty: "low",
+    rationale: "A bounded card.", evidenceRefIds: ["operator_idea"] },
 };
 const chunk = (overrides = {}) => ({
-  schemaVersion: 2, previewId: "preview-01", chunkIndex: 0,
+  schemaVersion: 5, previewId: "preview-01", chunkIndex: 0,
   outcome: "propose", coverageStatus: "complete", continuationKind: null,
   ownerQuestion: null, coveredScope: "The operator idea was analyzed.",
   remainingScope: null, units: [...nodes, card], ...overrides,
 });
-const prepare = (value) => prepareFirstIdeaOnlyAnalysisDraft({
-  ideaId: "idea-01", previewId: "preview-01", raw: JSON.stringify(value), keys,
+const prepare = (value, templateVersion = AMUX_V4_ANALYSIS_PROMPT_VERSION) => prepareFirstIdeaOnlyAnalysisDraft({
+  ideaId: "idea-01", previewId: "preview-01", raw: JSON.stringify(value), keys, templateVersion,
 });
 
 test("a complete first idea response becomes separately sealed units, not a card write", () => {

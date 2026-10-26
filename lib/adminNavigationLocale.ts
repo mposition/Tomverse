@@ -346,7 +346,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       workers: { label: "Worker", description: "AI worker를 등록하고, 할 수 있는 일을 정하고, 켜고 끕니다" },
       safety: { label: "실행 안전·복구", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
       "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
-      analysis: { label: "분석 설정", description: "분석 월 예산, 승인된 분석 모델, Task 비용 카탈로그" },
+      analysis: { label: "분석 설정", description: "분석 월 예산과 승인된 분석 모델" },
     },
   },
   "email-policy": {
@@ -383,6 +383,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
+  "amux-u21-test-card": {
+    label: "AMUX U21 테스트 카드",
+    description: "소유자 전용 합성 후보 수신 진단",
+  },
   "prompt-refiner-shadow": {
     label: "Prompt Refiner shadow 실행",
     description: "동결된 합성 shadow run의 owner 전용 승인과 실행",

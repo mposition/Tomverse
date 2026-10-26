@@ -163,6 +163,14 @@ test("detail routes keep their parent breadcrumb and their parent nav entry", ()
   const refiner = resolveAdminPageMeta("/admin/prompt-refiner-shadow");
   assert.equal(refiner.label, "Prompt Refiner shadow run");
   assert.equal(refiner.parentHref, "/admin/models");
+
+  const amuxTestCard = resolveAdminPageMeta("/admin/amux-u21-test-card");
+  assert.equal(amuxTestCard.label, "AMUX U21 test card");
+  assert.equal(amuxTestCard.parentHref, "/admin/amux-execution");
+  assert.equal(resolveAdminPageMeta(
+    "/admin/amux-u21-test-card", "support").isKnown, false);
+  assert.equal(ADMIN_SEARCHABLE_PAGES.some(
+    (page) => page.href === "/admin/amux-u21-test-card"), false);
 });
 
 test("the palette can reach every page, including the unlisted ones", () => {

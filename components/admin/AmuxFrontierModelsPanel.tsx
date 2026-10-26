@@ -11,6 +11,7 @@ import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
+import { isAmuxV4AnalysisProvider } from "@/lib/amux/ideaAnalysisChannelCore";
 import {
   defaultFrontierSelection,
   readAvailableFrontierModels,
@@ -64,12 +65,12 @@ export type AmuxBuildPreviewHooks = {
 };
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
-  analysisBudgetAvailable, ideaId, planReady,
+  analysisBudgetAvailable, analysisStopAvailable, ideaId, planReady,
   declaredExternalSources, operatorId, chunkIndex = 0, build = null, buildRequestId = null,
   ideaText = "", onExecutionApproved }: {
   available: boolean;
   previewAvailable: boolean; confirmAvailable: boolean;
-  analysisBudgetAvailable: boolean;
+  analysisBudgetAvailable: boolean; analysisStopAvailable: boolean;
   ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
   chunkIndex?: number;
@@ -203,7 +204,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         if (!signal?.aborted) { setModels(null); setFailure(reason); }
         return;
       }
-      const parsed = readAvailableFrontierModels(response.status, await response.json());
+      // This manual v4 flow runs only Codex and Claude; the GitHub Copilot and
+      // Cursor channels serve the v19 session runner alone.
+      const parsed = readAvailableFrontierModels(response.status, await response.json())
+        ?.filter((model) => isAmuxV4AnalysisProvider(model.provider)) ?? null;
       if (!signal?.aborted) {
         if (parsed === null) {
           setModels(null);
@@ -776,7 +780,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {confirmation.kind === "confirmed" ? <p role="status">{m.transferConfirmRecorded}</p> : null}
       {confirmation.kind === "confirmed" ? <AmuxAnalysisBudgetPanel
         key={confirmation.value.previewId} confirmed={confirmation.value}
-        available={analysisBudgetAvailable} /> : null}
+        available={analysisBudgetAvailable} stopAvailable={analysisStopAvailable} /> : null}
       {confirmation.kind === "expired" ? <p role="status">{m.transferConfirmExpired}</p> : null}
       {confirmation.kind === "refused" && !failure ?
         <p role="alert">{m.transferConfirmRefused}</p> : null}

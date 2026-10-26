@@ -119,9 +119,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // event and a delivery event are not among the kinds the ledger's deferred
   // check covers.
   "20261008130000_amux_decision_maker_stale_close_hours",
+  "20261008130100_amux_decision_maker_judgment_delivery",
   // AMUX intake v13: owner-only terminal accounting for a claimed analysis.
   "20261008130000_amux_v4_claim_owner_resolution",
-  "20261008130100_amux_decision_maker_judgment_delivery",
   // AMUX intake v16: owner-managed analysis ceiling; no deadline guard changes.
   "20261011070000_amux_v4_owner_monthly_budget",
   // Orchestration policy v31, R1: the worker registry and the three system
@@ -171,6 +171,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261013320000_amux_v22_api_model_access_audit_xid_repair",
   "20261013330000_amux_v22_api_launch_proof_deadline",
   "20261013340000_amux_v22_api_assignment_cli_passthrough_repair",
+  // docs/policy/amux-card-display-key.md S2: readable card numbers. Two
+  // columns, a counter table and immutability guards; it changes no
+  // commit-deadline mechanism.
+  "20261014100000_amux_card_display_key",
   // Orchestration policy v44: the FIRST Task prior attempt ID correction of
   // the 290 attempt guard and four recovery CHECKs; it changes no
   // commit-deadline mechanism.
@@ -179,19 +183,63 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy v46: a legacy safe stop binds the profile's live
   // runtime; it changes no commit-deadline mechanism.
   "20261014140000_amux_v22_legacy_safe_stop_live_runtime",
-  // docs/policy/amux-card-display-key.md S2: readable card numbers. Two
-  // columns, a counter table and immutability guards; it changes no
-  // commit-deadline mechanism.
-  "20261014100000_amux_card_display_key",
   // Orchestration policy v33: the audit-bound no_commit halt clear. It adds
   // no commit deadline and continues to use the existing mutation fence.
   "20261012170000_amux_verified_no_commit_halt_auto_clear",
+  // amux-intake v19: the owner operating scope setting. It is an append-only
+  // owner setting guarded by its own audit trigger and adds no commit deadline.
+  "20261016030000_amux_intake_operating_scope",
+  // amux-intake v19: encrypted session submission provenance and its audit
+  // guards; it adds no commit-deadline marker, trigger or classifier.
+  "20261016040000_amux_v19_session_submission",
+  // amux-intake v19: replace only the budget setting and window audit guards'
+  // xid comparison. Neither repair adds a commit-deadline mechanism.
+  "20261016050000_amux_budget_setting_xid_epoch",
+  "20261016050100_amux_budget_window_xid_epoch",
+  // amux-intake v20: durable final-Guard refusal evidence and operator wait
+  // metadata; it adds no commit-deadline marker, trigger or classifier.
+  "20261016060000_amux_v20_registration_refusal",
+  // amux-intake v19.5: completion receipt, scoped system audit evidence,
+  // closed whole-plan refusals and inert backlog registration. These add no
+  // commit-deadline marker, trigger or classifier.
+  "20261016070000_amux_v19_system_registration_receipt",
+  "20261016070100_amux_v19_unit_system_audit",
+  "20261016070200_amux_v19_portfolio_assessment_system_audit",
+  "20261016070300_amux_v19_portfolio_score_system_audit",
+  "20261016070400_amux_v19_plan_refusal_codes",
+  "20261016070500_amux_v19_system_registration_refusal",
+  // v20 Task snapshots bind proposed/final grades; the following repair lets
+  // the deferred v4 consistency check accept the same scoped system audit.
+  // Neither changes the commit-deadline mechanism.
+  "20261016070600_amux_v20_work_item_grade_snapshot",
+  "20261016070700_amux_v19_registration_consistency_system_audit",
   // Orchestration v52: audited execution-grade revision only, with no
   // commit-deadline marker, trigger, guard or classifier change.
   "20261016090000_amux_v52_grade_escalation_guard",
   // Orchestration v52: the immutable review receipt table and constraints use
   // the existing mutation boundary without changing commit-deadline behavior.
   "20261016130000_amux_v52_review_record",
+  // Intake v19 direct-read checkout evidence is append-only and audit-bound;
+  // it adds no commit-deadline marker, trigger or classifier change.
+  "20261017000000_amux_v19_tracked_checkout_evidence",
+  // The v19 encrypted read manifest is another independent, audit-bound
+  // content table; it does not touch the commit-deadline mechanism.
+  "20261017010000_amux_v19_tracked_checkout_read_manifest",
+  // The v19 retention transition changes only the read-manifest body and
+  // external key retirement purpose, without touching commit deadlines.
+  "20261017020000_amux_v19_read_manifest_retention",
+  // The next migration closes an insert-only purged-shape loophole on that
+  // same manifest table; it does not alter commit-deadline evidence.
+  "20261017020100_amux_v19_read_manifest_active_insert_guard",
+  // A durable key intent and its audited orphan-key retirement are independent
+  // of the AMUX commit-deadline marker and trigger.
+  "20261017021000_amux_v19_read_manifest_key_intent",
+  // Intake v19 session analysis queue reservation is append-only and bound to
+  // the submission transaction; it adds no commit-deadline mechanism.
+  "20261017010000_amux_v19_session_analysis_reservation",
+  // v19 session CLI claims share the monthly ledger but add no deadline
+  // classifier, marker, function or trigger to the commit-deadline protocol.
+  "20261017070000_amux_v19_session_budget_claim",
   // AMUX Decision Maker S2-2a3: section 5's cleanup_unknown report. It adds
   // no commit deadline: the report holds no deadline, and the ledger's
   // deferred check is unchanged and does not cover the new kind.
@@ -201,16 +249,41 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // deadline: the event guard's deadline lines and the ledger's deferred
   // check are unchanged.
   "20261017200000_amux_decision_maker_validation_count_boundary",
+  // Intake v19 pins checkout evidence to the submission audit without
+  // changing the commit-deadline marker, classifier or deferred trigger.
+  "20261018000000_amux_v19_reference_pin_guard",
+  // Intake v21 Max shadow budget mode and v19 session analysis results add
+  // columns, tables and guards; neither touches the commit-deadline marker,
+  // classifier or deferred trigger.
+  "20261018080000_amux_v19_max_shadow_budget",
+  "20261018110000_amux_v19_session_analysis_result",
   // AMUX Decision Maker S2-2b4: a direct answer's close and a delivery that
   // sent nothing. It adds no commit deadline: neither kind holds one, the
   // event guard's deadline lines are unchanged, and the ledger's deferred
   // check does not cover either.
   "20261018120000_amux_decision_maker_delivery_gaps",
+  // Intake v19 subscription channels widen provider CHECKs and replace the
+  // v21 claim mode guard body; no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261020090000_amux_v19_subscription_channels",
+  // Intake v19 subscription unknown closures return their headroom: a claim
+  // CHECK widening and the v21 claim mode guard body; no commit-deadline
+  // marker, classifier or deferred trigger changes.
+  "20261020120000_amux_v19_shadow_unknown_headroom",
   // Orchestration policy v31, operator decision 2026-10-20: the worker
   // registry guard's body without the trial-period activation rule. A
   // registry change keeps its ordinary mutation boundary; no deadline guard
   // changes.
   "20261020200000_amux_worker_registry_direct_activation",
+  // Intake v19 per-idea model choice, owner decision 2026-10-23: a read-only
+  // model predicate and the submission and reservation guard bodies; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261023090000_amux_v19_session_model_choice",
+  // Intake v19 per-page read manifests, owner decision 2026-10-24: the manifest
+  // and key-intent unique indexes become plain indexes and the key-intent guard
+  // body pairs an intent with its own manifest; no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261024010000_amux_v19_read_manifest_per_page",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -452,19 +525,112 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
 });
 
 test("only the named AMUX receipt and admission routes open direct transactions", () => {
+  const assertBefore = (source, guard, transaction = "prisma.$transaction") => {
+    assert.ok(source.includes(guard), `missing guard: ${guard}`);
+    assert.ok(source.includes(transaction), `missing transaction: ${transaction}`);
+    assert.ok(source.indexOf(guard) < source.indexOf(transaction));
+  };
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // The analysis admission routes predate A09 and own their explicit
-  // reconciliation contracts; the commit-deadline boundary still governs
-  // orchestration task execution.
+  // Analysis admission, v19 stop and budget receipts, and checkout evidence
+  // own bounded transactions; the commit-deadline boundary still governs task execution.
   assert.deepEqual(direct, [
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/unknown/route.ts",
+    "app/api/internal/amux/v19/analysis-price/route.ts",
+    "app/api/internal/amux/v19/analysis-stop/route.ts",
+    "app/api/internal/amux/v19/checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/max-checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/max-read-manifest/route.ts",
+    "app/api/internal/amux/v19/read-manifest/route.ts",
+    "app/api/internal/amux/v19/session-analysis-result/route.ts",
+    "app/api/internal/amux/v19/session-analysis-stop/route.ts",
     "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
   ]);
+  // The v19 Max launcher routes own bounded receipt transactions too; each
+  // authenticates the dedicated launcher before any transaction opens.
+  for (const path of [
+    "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
+    "app/api/internal/amux/v19/analysis-price/route.ts",
+    "app/api/internal/amux/v19/max-checkout-evidence/route.ts",
+    "app/api/internal/amux/v19/max-read-manifest/route.ts",
+    "app/api/internal/amux/v19/session-analysis-result/route.ts",
+  ]) {
+    const source = withoutComments(read(path));
+    assertBefore(source, "isAmuxV19MaxLauncherAuthorized(request");
+    assert.match(source, /\{ maxWait: [35]_000, timeout: 1[025]_000 \}/, path);
+  }
+  const stopPoll = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-stop/route.ts"));
+  assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  const sessionStopPoll = withoutComments(read(
+    "app/api/internal/amux/v19/session-analysis-stop/route.ts"));
+  assertBefore(sessionStopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(sessionStopPoll, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(sessionStopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  const sessionUnknown = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-budget/unknown/route.ts"));
+  assertBefore(sessionUnknown, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(sessionUnknown, 'process.env[WRITE_ENV] !== "enabled"');
+  assertBefore(sessionUnknown, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(sessionUnknown, /\{ maxWait: 5_000, timeout: 15_000 \}/);
+  const evidenceRoute = withoutComments(read(
+    "app/api/internal/amux/v19/checkout-evidence/route.ts"));
+  const evidencePost = between(evidenceRoute, "export async function POST",
+    "export async function GET");
+  const evidenceGet = evidenceRoute.slice(evidenceRoute.indexOf(
+    "export async function GET"));
+  assert.ok(evidencePost.indexOf("authorized(request)") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidencePost.indexOf("process.env[WRITE_ENV]") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidencePost.indexOf("process.env[READ_ENV]") <
+    evidencePost.indexOf("prisma.$transaction"));
+  assert.ok(evidenceGet.indexOf("process.env[READ_ENV]") <
+    evidenceGet.indexOf("prisma.$transaction"));
+  assertBefore(evidenceGet, "authorized(request)");
+  assert.ok(!evidenceGet.includes("process.env[WRITE_ENV]"));
+  assert.match(evidencePost, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(evidenceGet, /maxWait: 3_000, timeout: 10_000/);
+  const manifestRoute = withoutComments(read(
+    "app/api/internal/amux/v19/read-manifest/route.ts"));
+  const manifestPost = between(manifestRoute, "export async function POST",
+    "export async function GET");
+  const manifestGet = manifestRoute.slice(manifestRoute.indexOf(
+    "export async function GET"));
+  assert.ok(manifestPost.indexOf("authorized(request)") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestPost.indexOf("process.env[WRITE_ENV]") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestPost.indexOf("process.env[READ_ENV]") <
+    manifestPost.indexOf("prisma.$transaction"));
+  assert.ok(manifestGet.indexOf("process.env[READ_ENV]") <
+    manifestGet.indexOf("prisma.$transaction"));
+  assert.match(manifestPost, /maxWait: 3_000, timeout: 12_000/);
+  assert.match(manifestGet, /maxWait: 3_000, timeout: 10_000/);
+  const budgetReceipt = withoutComments(read(
+    "app/api/internal/amux/v19/analysis-budget/claim/route.ts"));
+  // POST is the Max launcher's claim write; GET is the receipt read-back.
+  const budgetClaimPost = between(budgetReceipt, "export async function POST",
+    "export async function GET");
+  const budgetClaimGet = budgetReceipt.slice(budgetReceipt.indexOf(
+    "export async function GET"));
+  assertBefore(budgetClaimPost, "isAmuxV19MaxLauncherAuthorized(request");
+  assertBefore(budgetClaimPost, 'process.env[WRITE_ENV] !== "enabled"');
+  assertBefore(budgetClaimPost, 'process.env[READ_ENV] !== "enabled"');
+  assert.match(budgetClaimPost, /\{ maxWait: 5_000, timeout: 15_000 \}/);
+  assertBefore(budgetClaimGet, "isAmuxV4AnalysisAgentAuthorized(request");
+  assertBefore(budgetClaimGet, 'process.env[READ_ENV] !== "enabled"');
+  assert.ok(!budgetClaimGet.includes("process.env[WRITE_ENV]"));
+  assert.match(budgetClaimGet, /\{ maxWait: 5_000, timeout: 10_000 \}/);
   // Intake v15 opens only the code latches. The independent runtime write
   // and receipt-read switches still fail closed before a transaction opens.
   // Both transaction bounds remain independent of execution commit deadlines.

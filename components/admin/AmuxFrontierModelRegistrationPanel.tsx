@@ -7,6 +7,8 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
+import { AMUX_IDEA_ANALYSIS_PROVIDERS, AMUX_IDEA_ANALYSIS_PROVIDER_LABELS,
+  type AmuxIdeaAnalysisProvider } from "@/lib/amux/ideaAnalysisChannelCore";
 import {
   classifyFrontierRegistrationReadFailure,
   classifyFrontierRegistrationPost,
@@ -44,7 +46,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [registrationProvider, setRegistrationProvider] =
-    useState<"openai" | "anthropic">("openai");
+    useState<AmuxIdeaAnalysisProvider>("openai");
   const [registrationModelId, setRegistrationModelId] = useState("");
   const [registrationEfforts, setRegistrationEfforts] = useState<string[]>([]);
   const [registrationVersion, setRegistrationVersion] = useState("0");
@@ -242,12 +244,12 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
               value={registrationProvider}
               disabled={registrationLocked}
               onChange={(event) => {
-                setRegistrationProvider(event.target.value as "openai" | "anthropic");
+                setRegistrationProvider(event.target.value as AmuxIdeaAnalysisProvider);
                 setRegistrationConfirmed(false);
               }}
               className="min-h-11 rounded-lg border px-3 border-zinc-600 bg-zinc-900">
-              <option value="openai">openai</option>
-              <option value="anthropic">anthropic</option>
+              {AMUX_IDEA_ANALYSIS_PROVIDERS.map((provider) => <option key={provider} value={provider}>
+                {AMUX_IDEA_ANALYSIS_PROVIDER_LABELS[provider]}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1" htmlFor="amux-v4-frontier-registration-model">

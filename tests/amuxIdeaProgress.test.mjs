@@ -18,6 +18,21 @@ const task = (overrides = {}) => ({ cardType: "task", status: "todo", reviewPrNu
 test("each idea is at exactly one of the six stages, and a human step still open always comes first", () => {
   const stage = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.waitingFor]; };
   assert.deepEqual(stage({}), ["execution_approval", "execution_approval"], "saved, nothing approved yet");
+  assert.deepEqual(stage({ submissionOrigin: "session" }), ["analysis", null],
+    "v19 queued session intake does not require an execution approval");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "awaiting_owner" }),
+    ["analysis", "session_review"], "a session answer that made no plan waits for the operator");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "awaiting_owner", proposedUnits: 2,
+    chunks: [chunk()] }), ["plan_approval", "plan_approval"],
+    "a session plan that registration did not take waits for plan approval");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "analyzing", chunks: [
+    chunk({ coverageStatus: "more" }),
+    chunk({ chunkIndex: 1, state: "pending", coverageStatus: null, previewState: null, holdStatus: null })] }),
+  ["analysis", null], "a session continuation page is claimed by the queue, not approved");
+  assert.deepEqual(stage({ submissionOrigin: "session", state: "awaiting_owner", proposedUnits: 2, chunks: [
+    chunk({ coverageStatus: "more" }),
+    chunk({ chunkIndex: 1, state: "pending", coverageStatus: null, previewState: null, holdStatus: null })] }),
+  ["analysis", "session_review"], "a refused later page waits for the operator, not for plan approval");
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "prepared", holdStatus: null })] }),
     ["execution_approval", "execution_approval"]);
   assert.deepEqual(stage({ chunks: [chunk({ state: "awaiting_preview", coverageStatus: null, previewState: "expired", holdStatus: "released" })] }),
@@ -81,14 +96,27 @@ test("the list is one statement in one bounded snapshot that never reads idea te
     cards: [
       { id: "c1", cardType: "story", status: "backlog", reviewPrNumber: null, terminal: false, displayKey: "AMUX-ADM-001" },
       { id: "c2", cardType: "task", status: "review", reviewPrNumber: 2540, terminal: false, displayKey: "AMUX-ADM-002" }],
+    checkoutEvidence: [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40), excludedCount: 2,
+      secretPath: 1, secretContent: 1, nonRegular: 0, unscannableContent: 0,
+      readManifests: [{ manifestId: "m1", fileCount: 2, digest: "b".repeat(64),
+        bodyPurged: false }] }],
+    referencePins: ["a".repeat(40)], referencePinAuditStatus: "declared",
   }, {
     // An idea with no chunk and no card comes back with SQL NULL aggregates.
     id: "idea-2", requestId: "22222222-2222-4222-8222-222222222222", state: "submitted",
     submittedAtMs: Date.parse("2026-10-14T00:00:00Z"), cancelled: false, proposedUnits: 0, chunks: null, cards: null,
+    checkoutEvidence: null, referencePins: null,
+    referencePinAuditStatus: "legacy",
+  }, {
+    id: "idea-3", requestId: "33333333-3333-4333-8333-333333333333", state: "submitted",
+    submittedAtMs: Date.parse("2026-10-13T00:00:00Z"), cancelled: false,
+    proposedUnits: 0, chunks: null, cards: null,
+    checkoutEvidence: null, referencePins: null,
+    referencePinAuditStatus: "declared",
   }];
   const tx = { $queryRaw: async (strings, ...values) => { calls.push({ sql: strings.join("?"), values }); return rows; } };
   const now = new Date("2026-10-15T03:00:00Z");
-  const [row, empty] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
+  const [row, empty, damaged] = await readAmuxIdeaProgressInTx(tx, "owner-1", now);
   assert.equal(calls.length, 1, "one statement, however many ideas");
   const { sql, values } = calls[0];
   assert.equal(/Ciphertext|"title"|"body"|bodyDigest|rawDigest/i.test(sql), false, "no idea text or digest is read");
@@ -98,11 +126,30 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.ok(sql.includes(`d."action" = 'register_card' AND d."state" = 'consumed'`));
   assert.ok(sql.includes(`ORDER BY c."chunkIndex"`));
   assert.ok(sql.includes(`ORDER BY w."createdAt" ASC, w."id" ASC`));
+  assert.ok(sql.includes(`FROM "AmuxIdeaTrackedCheckoutEvidence" e`));
+  assert.ok(sql.includes(`a."metadata"->'pinnedCommitShas'`));
+  assert.ok(sql.includes(`jsonb_typeof(a."metadata") = 'object'`));
+  assert.ok(sql.includes(`NOT (a."metadata" ? 'pinnedCommitShas')`));
+  assert.ok(sql.includes(`FROM "AmuxIdeaTrackedCheckoutReadManifest" m`));
+  assert.ok(sql.includes(`ORDER BY m."createdAt", m."id"`), "pages keep their order");
+  assert.ok(sql.includes(`ORDER BY e."referenceOrdinal"`));
   assert.deepEqual([row.stage, row.displayKey, row.reviewPullRequests, row.submittedAt],
     ["review", "AMUX-ADM-001", [{ number: 2540, displayKey: "AMUX-ADM-002" }], "2026-10-15T00:00:00.123Z"]);
   assert.deepEqual(row.taskRows, [{ displayKey: "AMUX-ADM-002", status: "review", reviewPrNumber: 2540, merged: false }],
     "the detail lists Tasks only, never stories");
+  assert.deepEqual(row.checkoutEvidence, [{ referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
+    excludedCount: 2, excludedReasons: { secretPath: 1, secretContent: 1,
+      nonRegular: 0, unscannableContent: 0 },
+    readManifests: [{ manifestId: "m1", fileCount: 2, digest: "b".repeat(64),
+      bodyPurged: false }] }]);
+  assert.deepEqual(row.referencePins, [{ referenceOrdinal: 0,
+    pinnedCommitSha: "a".repeat(40) }]);
+  assert.equal(row.referencePinsLegacy, false);
+  assert.equal(empty.referencePinsLegacy, true);
+  assert.equal(damaged.referencePinsLegacy, false);
+  assert.equal(empty.referencePins, null);
   assert.deepEqual([empty.stage, empty.displayKey, empty.taskRows], ["execution_approval", null, []]);
+  assert.deepEqual(empty.checkoutEvidence, []);
 });
 
 test("a failed read is tried once more, outside a route too, except for the boundary's own deterministic refusals", () => {

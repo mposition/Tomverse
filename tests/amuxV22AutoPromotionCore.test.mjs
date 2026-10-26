@@ -54,7 +54,7 @@ test("exception uses the owner audit writer and keeps the existing safety gates"
   }
 });
 
-test("owner control reuses canonical failure handling, stops on unknown writes, and stays separate from the read-only board", () => {
+test("owner control uses canonical failure handling and stays separate from guarded board admission", () => {
   const ui = readFileSync("components/admin/AmuxV22PromotionControl.tsx", "utf8");
   const board = readFileSync("components/admin/AmuxExecutionWorkspace.tsx", "utf8");
   assert.match(ui, /runAmuxAutoAdmissionChange/);

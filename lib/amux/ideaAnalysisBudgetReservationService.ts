@@ -13,6 +13,7 @@ import { assessAmuxIdeaAnalysisBudget,
 import { readAnalysisMonthlyBudgetSetting } from "./ideaAnalysisBudgetSettingStore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "./ideaAnalysisPriceVersionRead.ts";
 import { writeAmuxAnalysisBudgetSystemAudit } from "./ideaAnalysisBudgetSystemAudit.ts";
+import { isAmuxV4AnalysisProvider } from "./ideaAnalysisChannelCore.ts";
 
 /** This reservation service is not a claim or a dispatch permission. The
  * owner-only reservation route calls it after its independent environment
@@ -229,8 +230,9 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   });
   const lockedWindow = await tx.$queryRaw<Array<{
     spentMicroUsd: bigint; reservedMicroUsd: bigint; limitMicroUsd: bigint;
+    shadowOverrunMicroUsd: bigint;
   }>>`
-    SELECT "spentMicroUsd", "reservedMicroUsd", "limitMicroUsd"
+    SELECT "spentMicroUsd", "reservedMicroUsd", "limitMicroUsd", "shadowOverrunMicroUsd"
     FROM "AmuxIdeaAnalysisBudgetWindow"
     WHERE "namespace" = ${AMUX_V4_ANALYSIS_NAMESPACE}
       AND "monthStart" = ${monthStart}
@@ -240,10 +242,16 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   if (!window || window.limitMicroUsd !== BigInt(monthlySetting.limitMicroUsd)) {
     refuse("budget_unavailable");
   }
-  const unknown = await tx.amuxIdeaAnalysisBudgetHold.findFirst({
-    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
-    select: { id: true },
-  });
+  const [v4Unknown, sessionUnknown] = await Promise.all([
+    tx.amuxIdeaAnalysisBudgetHold.findFirst({
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
+      select: { id: true },
+    }),
+    tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({
+      where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown" },
+      select: { id: true },
+    }),
+  ]);
   const decision = assessAmuxIdeaAnalysisBudget({
     ...pricing,
     ...input.runner,
@@ -251,11 +259,14 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     asOfIso: now.toISOString(),
     windowStartsAtIso: monthStart.toISOString(),
     monthlyLimitMicroUsd: window.limitMicroUsd.toString(),
-    consumedMicroUsd: window.spentMicroUsd.toString(),
+    consumedMicroUsd: (window.spentMicroUsd + window.shadowOverrunMicroUsd).toString(),
     reservedMicroUsd: window.reservedMicroUsd.toString(),
-    usageState: unknown ? "unknown" : "known",
+    usageState: v4Unknown || sessionUnknown ? "unknown" : "known",
   });
   if (decision.decision !== "reservation_candidate") refuse("budget_hold", decision.reason);
+  // The v4 hold ledger admits only the Codex and Claude vendors; the GitHub
+  // Copilot and Cursor channels serve the v19 session runner alone.
+  if (!isAmuxV4AnalysisProvider(decision.provider)) refuse("integrity_unavailable");
   const reserve = BigInt(decision.worstCaseMicroUsd);
   const auditId = await writeAmuxAnalysisBudgetSystemAudit({
     tx, holdId: input.holdId, previewId: preview.id,
