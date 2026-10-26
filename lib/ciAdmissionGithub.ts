@@ -174,6 +174,24 @@ export type CiAdmissionGithub = {
 
 export const CI_ADMISSION_STATUS_CONTEXT = "CI admission";
 
+/**
+ * Why GitHub refused an installation token, as a short code: its message is
+ * matched, never kept (2026-10-26: "github_token_422" for days while the App's
+ * new Contents permission was not yet accepted on the installation).
+ */
+export function tokenRefusal(status: number, body: () => unknown): string {
+  let message = "";
+  try {
+    const parsed = body();
+    if (typeof parsed === "object" && parsed !== null && typeof (parsed as Json).message === "string") message = (parsed as Json).message as string;
+  } catch {
+    // An unreadable body says nothing more than its status.
+  }
+  if (/permissions requested are not granted/i.test(message)) return "github_token_permission_not_granted";
+  if (/repositor(y|ies)/i.test(message)) return "github_token_repository_not_installed";
+  return `github_token_${status}`;
+}
+
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
   const call = async (method: "GET" | "POST" | "PUT", url: string, auth: string, body?: Json) => {
     const response = await fetch(url, {
@@ -210,7 +228,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
         repositories: [CI_ADMISSION_REPOSITORY.split("/")[1]],
         permissions,
       });
-      if (answer.status !== 201) throw new Error(`github_token_${answer.status}`);
+      if (answer.status !== 201) throw new Error(tokenRefusal(answer.status, () => answer.json()));
       const value = record(answer.json()).token;
       if (typeof value !== "string" || value === "") throw new Error("github_shape");
       return value;
