@@ -7,7 +7,8 @@ The scope is the existing 13-name office roster (Codex, Claude, Cursor and
 Copilot), without changing worker registration, dispatch, stdin or execution.
 
 The collector reuses the existing loopback AMUX `GET /api/sessions/<worker>/transcript`
-and `GET /api/sessions/<worker>/peek?lines=80&live=1`, accepting only the approved
+and `GET /api/sessions/<worker>/peek?lines=80` (with `live=1` for non-Claude
+workers), accepting only the approved
 resident names. It does not start a CLI,
 send a prompt, register a worker, alter dispatch or make a model call. The
 structured Codex conversation and tool output come from the existing rollout.
@@ -15,7 +16,9 @@ Claude supplies its existing AMUX text transcript. Cursor and Copilot currently
 supply no transcript, so their view shows the actual terminal viewport. The
 panel identifies the supplied format; text without role metadata is displayed
 as output, without inferring prompts or responses. The Raw output tab always
-shows the current terminal viewport. Source events have no
+shows the current terminal viewport. Claude's raw read omits live-frame
+deduplication so text already in its transcript can still appear in Raw output.
+Source events have no
 timestamps: the UI labels the snapshot capture time, not invented event times.
 Reasoning and unknown event kinds are omitted.
 
@@ -171,6 +174,8 @@ systemd-run --user --wait --pipe -p NoNewPrivileges=yes \
   --ro-bind "$HOME/.local/share/tomverse-cli-monitor" /app \
   --proc /proc --dev /dev --tmpfs /tmp --chdir /app \
   --clearenv --setenv HOME /tmp --setenv PATH /usr/bin \
+  --setenv TOMVERSE_AMUX_CLI_MONITOR_WORKERS \
+    'claude-chore,claude-contract,claude-impl,claude-review,codex-chore,codex-contract,codex-impl,cursor-chore,cursor-impl,cursor-worker,copilot-chore,copilot-impl,copilot-worker' \
   --setenv TOMVERSE_AMUX_CLI_MONITOR_SOURCE_CA_B64 \
     "$(base64 -w0 "$HOME/.config/tomverse-cli-monitor/amux-source.pem")" \
   /usr/bin/node /app/collector.mjs --check-source
