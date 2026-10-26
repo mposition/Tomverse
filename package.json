@@ -315,6 +315,8 @@
     "build:ios": "node apps/mobile/scripts/build-ios.mjs",
     "test:ios-prebuild": "node --test tests/iosPrebuild.test.mjs",
     "test:codemagic": "node --test tests/codemagicIos.test.mjs",
+    "test:mobile-billing": "node --conditions=react-server --import tsx --test tests/mobileBilling.test.mjs && node --conditions=react-server --experimental-test-module-mocks --import tsx --test tests/server-contract/mobile-billing-route.test.ts",
+    "test:ios-billing-ui": "playwright test --config playwright.ios-billing.config.ts",
     "check:prompt-injection": "node --conditions=react-server --import tsx scripts/report-prompt-injection.mjs",
     "report:prompt-refiner-receipts": "node --import tsx scripts/report-prompt-refiner-receipts.mjs",
     "owner:prompt-refiner-vnext-one-shot-create-manifest": "node --import tsx scripts/prompt-refiner-vnext-one-shot-create-manifest.mjs",

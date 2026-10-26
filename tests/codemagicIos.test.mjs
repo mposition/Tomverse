@@ -35,8 +35,9 @@ test("preparation and validation complete before the native build and artifact p
   const compile = scripts.findIndex(script => script.includes("npm run build:ios"));
   const archive = scripts.findIndex(script => script.includes("ditto "));
   assert.ok(install >= 0 && install < prepare && prepare < compile && compile < archive);
-  for (const name of ["prepare:ios", "test:ios-prebuild", "check:ios-prebuild", "build:ios"]) assert.ok(packageJson.scripts[name]);
+  for (const name of ["prepare:ios", "test:ios-prebuild", "test:mobile-billing", "check:ios-prebuild", "build:ios"]) assert.ok(packageJson.scripts[name]);
   assert.ok(scripts[prepare].includes("npm run test:ios-prebuild"));
+  assert.ok(scripts[prepare].includes("npm run test:mobile-billing"));
   assert.ok(scripts[compile].includes("set -euo pipefail"), "tee must not hide a failed Xcode build");
   assert.ok(scripts[archive].includes("test -d"), "do not archive a missing application");
 });

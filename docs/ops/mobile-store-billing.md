@@ -158,7 +158,8 @@ writers set the separate web snapshot explicitly; readers fall back to plan
 until then.
 Run cap sync after installing dependencies; the sync hook changes Android
 MainActivity to singleTop so banking-app confirmation does not cancel the
-purchase. Enable the In-App Purchase capability in the iOS Xcode target.
+purchase. The versioned iOS App target includes the In-App Purchase capability;
+`check:ios-prebuild` verifies that capability and Swift 5+ after sync.
 Finalize the currently provisional bundle/application ID before registering
 products. Store credentials, agreements, tax/banking details, product review,
 pricing and a RevenueCat account are required operational setup; choose and
@@ -178,6 +179,7 @@ npm --workspace @tomverse/mobile run build
 node --conditions=react-server --import tsx --test tests/mobileBilling.test.mjs
 node --conditions=react-server --experimental-test-module-mocks --import tsx --test tests/server-contract/mobile-billing-route.test.ts
 npx playwright test --config playwright.native.config.ts
+npm run test:ios-billing-ui
 ```
 
 The normal DB integration runner includes mobile-store-billing.db.test.ts.
@@ -194,6 +196,55 @@ expiry and refund. Verify web access and the same monthly usage after each
 transition. Mock UI tests and an Android compilation are not store/device
 evidence. iOS compilation requires macOS/Xcode.
 
+### iOS preparation and remaining store setup
+
+The existing Apple purchase client uses the server's opaque billing identity and
+Apple public SDK key, loads subscription and consumable products separately,
+delegates tier changes to StoreKit, restores explicitly, and opens Apple's
+subscription-management page. Payment success alone does not update Tomverse
+entitlements or credits; the authenticated server/webhook remains authoritative.
+
+The iOS-specific synthetic suite covers localized annual totals, credit purchase
+before/after server verification, subscription upgrade, pending approval,
+cancellation, restoration, Apple management links and an existing web
+subscription. It runs in desktop WebKit and Chromium using fake native bridges,
+products and API responses. It does not contact RevenueCat or make a payment.
+The independent Android fixture suite remains in `tests/native-e2e`.
+
+After Apple membership activation, complete the account setup in the web
+dashboards before enabling purchases in an iOS build:
+
+1. Register the final Bundle ID and App Store Connect app. The source currently
+   retains `app.tomverse.shell`; no App Store registration is claimed by this
+   preparation. The Account Holder must complete the Paid Apps Agreement and
+   banking/tax information. Apple requires an active agreement for sandbox IAP.
+2. Register the four subscriptions and three consumable packs from the mapping
+   above, using the approved prices. Put Max at the higher level and Pro at the
+   lower level in one subscription group. Store product registration and pricing
+   have not been performed by these source changes.
+3. Add the Apple app to the same RevenueCat project used for Android. Configure
+   Apple's purchase-verification credentials and server notifications following
+   RevenueCat's current Apple setup. Preserve the Google app, products and webhook
+   settings while adding the Apple app and product mapping.
+4. In the iOS build environment, set `VITE_NATIVE_BILLING_ENABLED=true` and the
+   actual `VITE_REVENUECAT_APPLE_API_KEY=appl_...`. Google `goog_...` and RevenueCat
+   Test Store `test_...` keys cannot replace the Apple key. Server secrets remain
+   server-side. The manual unsigned Codemagic workflow does not set these values
+   or activate purchases by itself.
+5. Verify server configuration from the table above, including the Apple app ID,
+   exact product mapping and ownership-preserving webhook. TestFlight receipts
+   use sandbox. Follow the existing separate sandbox DB/deployment requirement;
+   do not switch a shared Android production server to SANDBOX for this test.
+6. Produce a signed TestFlight build, install it on the test iPad, and execute the
+   device acceptance scenarios above. Record verified purchase, refund and
+   redelivery results before calling the iOS payment integration operational.
+
+Local iOS billing verification on 2026-10-26: 16 synthetic UI cases passed (eight
+scenarios in each browser), 13 existing core/route/webhook cases passed, and
+14 iOS preparation/build-wrapper cases passed. The bundle build and iOS sync
+passed with the capability retained. Xcode compilation and real StoreKit
+sandbox/device purchase acceptance remain outstanding.
+
 Official references checked 2026-10-25:
 
 - [Apple review guidelines 3.1.1–3.1.3](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase)
@@ -201,3 +252,5 @@ Official references checked 2026-10-25:
 - [Play subscription disclosures and cancellation](https://support.google.com/googleplay/android-developer/answer/9900533)
 - [RevenueCat Capacitor SDK](https://www.revenuecat.com/docs/getting-started/installation/capacitor)
 - [Subscription changes](https://www.revenuecat.com/docs/subscription-guidance/managing-subscriptions)
+- [Apple IAP account and agreement setup](https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases/)
+- [RevenueCat Apple sandbox and TestFlight](https://www.revenuecat.com/docs/test-and-launch/sandbox/apple-app-store)

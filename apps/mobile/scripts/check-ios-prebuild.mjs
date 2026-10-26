@@ -57,11 +57,15 @@ export async function checkIosPrebuild(root = repositoryRoot) {
   const objects = project.hash.project.objects;
   const [targetId, target] = entries(objects.PBXNativeTarget).find(([, item]) => unquote(item.name) === "App") ?? [];
   assert.ok(target, "Xcode App target is missing.");
+  const projectObject = objects.PBXProject[project.hash.project.rootObject];
+  assert.equal(Number(projectObject?.attributes?.TargetAttributes?.[targetId]?.SystemCapabilities?.["com.apple.InAppPurchase"]?.enabled), 1,
+    "Enable the In-App Purchase capability on the Xcode App target.");
   const configurations = objects.XCConfigurationList[target.buildConfigurationList].buildConfigurations;
   for (const item of configurations) {
     const settings = objects.XCBuildConfiguration[item.value].buildSettings;
     assert.equal(unquote(settings.IPHONEOS_DEPLOYMENT_TARGET), "17.4", "Retain the current iOS 17.4 minimum.");
     assert.equal(unquote(settings.PRODUCT_BUNDLE_IDENTIFIER), config.appId, "Bundle ID and Capacitor appId differ.");
+    assert.ok(Number(unquote(settings.SWIFT_VERSION)) >= 5, "RevenueCat requires Swift 5 or newer.");
   }
   const resources = target.buildPhases.flatMap(phase => objects.PBXResourcesBuildPhase?.[phase.value]?.files ?? [])
     .map(file => objects.PBXFileReference[objects.PBXBuildFile[file.value]?.fileRef])

@@ -9,7 +9,7 @@ been checked locally; a Codemagic/Xcode build has not run yet.
 The repository-root `codemagic.yaml` defines `ios-simulator` (display name
 `Tomverse iOS Simulator`). It uses a Mac mini M2, Node 22.22.2 and Xcode 26.6,
 with a 45-minute timeout. It installs locked dependencies, generates and checks
-the iOS bundle, runs the preparation tests, compiles without signing and packages
+the iOS bundle, runs the preparation and billing-boundary tests, compiles without signing and packages
 the Simulator application. There are no automatic triggers or publishing steps.
 
 Repository: `https://github.com/mposition/Tomverse`.
@@ -74,6 +74,8 @@ credentials are required; these checks do not run a cloud build.
 ```powershell
 npm run test:codemagic
 npm run test:ios-prebuild
+npm run test:mobile-billing
+npm run test:ios-billing-ui
 npm run build:ios -- --dry-run
 ```
 
@@ -81,6 +83,13 @@ The workflow tests check YAML parsing, preparation order, signing/trigger
 exclusion, failed-build propagation through `tee`, and explicit artifact paths.
 The embedded Bash steps have also passed a local syntax check. These checks do
 not substitute for the first Xcode build.
+
+The App target includes the In-App Purchase capability and the Purchases SDK.
+Its Apple-specific purchase/restore flows have synthetic browser coverage, while
+the build's billing UI stays behind the existing build flag and actual Apple SDK
+key. See [native store billing](mobile-store-billing.md#ios-preparation-and-remaining-store-setup)
+for account/product registration, server configuration and signed-device payment
+acceptance. A successful unsigned compile does not complete those steps.
 
 ## Official references
 

@@ -23,6 +23,8 @@ the unsigned build below on a hosted Mac after the prepared branch is connected.
 - Preparation verifies the locally copied production bundle, SPM dependency paths,
   required purpose strings, reduced-accuracy location, disabled bridge logging
   and registration of MobileAuth, MobileFiles, Purchases, Browser and Geolocation.
+- The App target declares In-App Purchase capability. Preparation verifies it and
+  Swift 5+ alongside the existing Purchases SDK registration.
 - A cross-platform build wrapper generates an unsigned Simulator command by
   default. It rejects execution outside macOS and checks Xcode 26+ before building.
 
@@ -153,7 +155,9 @@ Windows verification on 2026-10-26:
 | Check | Result |
 |---|---|
 | Mobile TypeScript, production Vite build, local-bundle/token checks and iOS sync | Passed |
-| iOS preparation/build-wrapper fixture tests | 12 passed |
+| iOS preparation/build-wrapper fixture tests | 14 passed |
+| Apple-specific synthetic billing UI in desktop WebKit/Chromium | 16 passed |
+| Existing billing core/route/webhook checks | 13 passed |
 | Existing mobile transport, history, session, location and billing unit tests | 104 passed |
 | Existing Chromium mobile UI suite | 99 passed |
 | Desktop WebKit compatibility selection | 89 passed; 10 media/GPS-dependent cases excluded as described above |

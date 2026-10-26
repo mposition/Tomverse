@@ -43,6 +43,18 @@ test("a privacy file must be included in the actual target resources", async t =
   await assert.rejects(checkIosPrebuild(f.root), /Resources does not include PrivacyInfo/);
 });
 
+test("iOS purchases require the capability on the actual App target", async t => {
+  const f = fixture(t);
+  f.edit(`${project}/project.pbxproj`, text => text.replace(/com\.apple\.InAppPurchase = \{\s*enabled = 1;/, "com.apple.InAppPurchase = { enabled = 0;"));
+  await assert.rejects(checkIosPrebuild(f.root), /In-App Purchase capability/);
+});
+
+test("the Purchases Swift SDK requires a compatible target language version", async t => {
+  const f = fixture(t);
+  f.edit(`${project}/project.pbxproj`, text => text.replaceAll("SWIFT_VERSION = 5.0", "SWIFT_VERSION = 4.0"));
+  await assert.rejects(checkIosPrebuild(f.root), /RevenueCat requires Swift 5/);
+});
+
 test("UserDefaults requires a valid privacy reason in the native plugin resource", async t => {
   const f = fixture(t);
   f.edit("apps/mobile/native-auth/ios/Sources/MobileAuth/PrivacyInfo.xcprivacy", text => text.replace("CA92.1", ""));
