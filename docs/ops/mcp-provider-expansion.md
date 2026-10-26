@@ -12,7 +12,7 @@ pushed, merged or deployed. The original feature evidence remains in
 | P01 Supplier analysis | Official Codex 65 and Claude Code 315 entries inspected; 181 distinct integration entries | No change | No change |
 | P02 Remote profiles | 140 fixed profiles: 112 OAuth, 1 anonymous, 1 existing GitHub, 26 need additional configuration | Off by default | Off by default |
 | P03 Directory and assets | Search/category/source filters, details, 7 locales, 170 original brand/repository assets | Not deployed by this task | Not deployed by this task |
-| P04 Verification and review | In progress; local protocol/security and disposable DB verification | No new live service verified | No new live service verified |
+| P04 Verification and review | Complete locally; 39 protocol/boundary checks, 20 DB tests, 12 browser cases; Claude accepted | No new live service verified | No new live service verified |
 
 ## Coverage and limits
 
@@ -60,6 +60,12 @@ when a provider advertises none, the operator must establish the bound from that
 provider's documentation and app permissions. The server never guesses that
 bound from an eventual token response. Invalid/unknown individual presets are
 omitted without disabling valid configured providers.
+If the provider omits `scope` in its token response, there is no returned scope
+claim to compare. The operator's declared bound is not an independent token
+introspection result; verify the registered app's actual default permissions
+before activation. The synthetic check covers a returned default scope and an
+out-of-bound grant. Preset omissions have no secret-bearing logs; use the listing
+command and the environment names it prints to diagnose missing configuration.
 Configure app callback URLs for `/api/mcp/oauth/callback`; loopback and Dev
 credentials are separate. Asana, Slack, HubSpot, Zoom and Amazon Selling Partner
 require static app registration.
@@ -85,6 +91,24 @@ brands. The 11 entries without a verified asset use the puzzle fallback.
 Original URLs are in `public/plugins/providers/sources.json`. Images are served
 locally, without supplier image requests when browsing the directory. The browser
 contains public catalog data, never authentication presets or operator secrets.
+
+## Verification evidence
+
+- Protocol/security/provider regressions: 39 passed. Disposable local DB: 20 passed.
+- Desktop/mobile Chat and plugin browser flows: 12 passed; updated catalog preview
+  captures and filter rechecks: 2 passed. Browser API and model responses were synthetic.
+- Focused lint and final full TypeScript check passed. The optimized build passed
+  at `6e3581034`; the scope follow-up `0229db203` passed full TypeScript, the
+  provider/security regressions and real synthetic OAuth/DB round trips.
+- Claude accepted `6e3581034` in `r-20261026-121430-1b30d4` and the focused
+  scope/configuration follow-up `0229db203` in `r-20261026-122311-007976`.
+  Known metadata/scope uncertainty is documented above and requires actual
+  supplier/app verification before activation. The metadata sources are evidence
+  of published declarations, not guarantees about granted account permissions.
+- Product paid-model calls: 0. No new user data access, writes, Dev/Production
+  activation, remote push, merge or deployment was performed. Review is not
+  activation or deployment approval. The 26 additional-configuration profiles and
+  managed/local/SSE entries remain unavailable until their adapters/settings exist.
 
 ## Sources
 
