@@ -16,6 +16,7 @@ import {
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { VoiceConversationHistory } from "@/components/chat/VoiceConversationHistory";
 import { Message, type ChatAttachment } from "@/components/chat/types";
+import { reviewSeedFromChat } from "@/lib/chatReviewHandoff";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
@@ -227,6 +228,8 @@ type ChatAppProps = {
    */
   otherPanelModelIds?: readonly string[];
   onRestorePrompt?: (prompt: ChatRecoveryPrompt) => void;
+  /** Chat: open a Review draft prefilled from one answer's question. */
+  onCompareInReview?: (seed: string) => void;
   initialConversationId?: string | null;
   promptPayload?: {
     id: string;
@@ -461,6 +464,7 @@ function ChatAppComponent({
   reviewProvider,
   otherPanelModelIds,
   onRestorePrompt,
+  onCompareInReview,
   initialConversationId = null,
   promptPayload,
   onContextBundleStale,
@@ -3208,6 +3212,13 @@ function ChatAppComponent({
         }
         onRestoreQuestion={transcriptScope === "conversation" && onRestorePrompt
           ? handleRestoreQuestion : undefined}
+        // Built from this transcript, which is the one on screen.
+        onCompareInReview={transcriptScope === "conversation" && onCompareInReview
+          ? (messageId) => {
+              const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
+              if (seed) onCompareInReview(seed);
+            }
+          : undefined}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to
