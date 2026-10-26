@@ -119,7 +119,8 @@ Use `MCP_GITHUB_OAUTH_CLIENT_ID`, `MCP_GITHUB_OAUTH_CLIENT_SECRET`,
 Do not also register another server with ID `github` in `MCP_CONNECTOR_SERVERS`.
 The alternative explicit JSON profile is in
 `config/mcp/github-tomverse-code.example.json`; its secret is an environment
-reference. The issuer and code/token destinations are fixed to GitHub. PKCE and
+reference. The issuer is exactly `https://github.com/login/oauth`; the code/token
+destinations are fixed to GitHub. PKCE and
 `offline_access` request expiring user tokens; an empty returned scope is valid
 for a GitHub App. Code and refresh requests include the configured repository ID;
 the host's repository check remains authoritative even if the provider ignores
@@ -153,8 +154,17 @@ development child. It requires a disposable DB on `127.0.0.1:56439` with
 It does not bypass normal Tomverse sign-in; normal local sign-in must be configured.
 It does not migrate a deployed database or enable Dev/Production. From Plugins,
 GitHub → Connect starts the ordinary owner-bound OAuth flow without token entry.
-Actual GitHub OAuth/MCP compatibility remains unverified until that consent flow
-and scoped calls run successfully. Product paid-model calls remain zero.
+The owner installed the app on `mposition/TomverseCode` only and completed the
+first OAuth consent. That callback was rejected before token exchange because
+the initial registered issuer was the GitHub root rather than its OAuth issuer.
+GitHub's public metadata at
+`https://github.com/.well-known/oauth-authorization-server/login/oauth` confirms
+the corrected issuer above. Exact issuer matching and policy-digest binding are
+retained; old pending authorizations are not silently migrated or replayed.
+Callback redirects expose only a fixed failure category, never code/state or
+remote error text; the UI distinguishes expired authorization and sign-in needs.
+Actual token exchange/MCP compatibility remains unverified until a fresh bound
+flow and scoped calls succeed. Product paid-model calls remain zero.
 
 Local OAuth increment verification: 23 protocol/security/provider-profile tests,
 19 disposable-DB tests and 9 transport/telemetry/monitoring regressions pass.

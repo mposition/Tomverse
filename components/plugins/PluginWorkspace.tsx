@@ -32,17 +32,18 @@ export function PluginWorkspace() {
     setSignInRequired(!data); setInventory(data || EMPTY_PLUGIN_INVENTORY);
   }, []);
   useEffect(() => {
-    const oauth = new URLSearchParams(window.location.search).get("oauth");
+    const oauthParams = new URLSearchParams(window.location.search);
+    const oauth = oauthParams.get("oauth"), oauthReason = oauthParams.get("reason");
     const controller = new AbortController();
     void readPluginInventory(controller.signal).then(data => {
       if (!controller.signal.aborted) {
         setSignInRequired(!data); setInventory(data || EMPTY_PLUGIN_INVENTORY);
         if (oauth === "connected") setNotice(c.connected);
-        if (oauth === "failed") setError(c.error);
+        if (oauth === "failed") setError(oauthReason === "sign_in_required" ? c.signIn : oauthReason === "oauth_flow_expired" ? c.expired : c.serverError);
       }
     }).catch(() => { if (!controller.signal.aborted) setError(c.error); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [c.error, c.connected]);
+  }, [c.error, c.connected, c.signIn, c.expired, c.serverError]);
   const mutate = async (url: string, method: string, body?: unknown) => {
     if (busy) return;
     setBusy(true); setError(null); setNotice(null);

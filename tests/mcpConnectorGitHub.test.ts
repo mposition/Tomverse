@@ -41,9 +41,11 @@ test("the GitHub OAuth profile is default-off, fixed-destination and cannot clas
   assert.deepEqual(mcpServers(env), []);
   const [profile] = mcpServers({ ...env, MCP_CONNECTOR_PREVIEW_ENABLED: "true" });
   assert.equal(profile.auth, "oauth"); assert.equal(profile.oauth?.scope, "offline_access");
+  assert.equal(profile.oauth?.issuer, "https://github.com/login/oauth");
   assert.equal(JSON.stringify(profile).includes("synthetic-secret"), false);
   for (const invalid of [{ ...profile, readTools: ["issue_write"] }, { ...profile, githubRepositoryId: undefined },
-    { ...profile, oauth: { ...profile.oauth, tokenUrl: "https://evil.example/token" } }])
+    { ...profile, oauth: { ...profile.oauth, tokenUrl: "https://evil.example/token" } },
+    { ...profile, oauth: { ...profile.oauth, issuer: "https://github.com" } }])
     assert.equal(mcpServerSchema.safeParse(invalid).success, false);
 });
 

@@ -3,6 +3,7 @@ import { mcpApi } from "@/lib/mcpConnectorApi";
 import { completeMcpOAuth } from "@/lib/mcpConnectorOAuth";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 export const dynamic = "force-dynamic";
+const safeFailureCodes = new Set(["sign_in_required", "oauth_flow_expired", "oauth_issuer_mismatch", "oauth_authorization_failed", "connector_disabled", "invalid_request", "API_RATE_LIMITED"]);
 export async function GET(request: Request) {
   const response = await mcpApi(request, async userId => {
     const params = new URL(request.url).searchParams;
@@ -12,9 +13,11 @@ export async function GET(request: Request) {
     await completeMcpOAuth(userId, state, code, issuer, request.signal);
     return { connected: true };
   });
+  const failure = response.ok ? null : await response.json().catch(() => null) as { code?: unknown } | null;
+  const reason = typeof failure?.code === "string" && safeFailureCodes.has(failure.code) ? failure.code : "connector_request_failed";
   // Strip the authorization code/state from the address bar and referrer.
   return new Response(null, { status: 303, headers: {
-    Location: `${getPublicAppOrigin(request)}/plugins?oauth=${response.ok ? "connected" : "failed"}`,
+    Location: `${getPublicAppOrigin(request)}/plugins?oauth=${response.ok ? "connected" : `failed&reason=${reason}`}`,
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
   } });
 }

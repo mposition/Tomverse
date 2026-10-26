@@ -21,14 +21,14 @@ test("the pinned SDK exchanges a confidential GitHub App code and refreshes an e
   const provider: OAuthClientProvider = {
     redirectUrl: "http://127.0.0.1:3131/api/mcp/oauth/callback",
     clientMetadata: { redirect_uris: ["http://127.0.0.1:3131/api/mcp/oauth/callback"], token_endpoint_auth_method: "client_secret_post", scope: "offline_access" },
-    clientInformation: () => ({ client_id: "synthetic-client", client_secret: "synthetic-client-secret", issuer: "https://github.com" }),
+    clientInformation: () => ({ client_id: "synthetic-client", client_secret: "synthetic-client-secret", issuer: server.oauth!.issuer }),
     tokens: () => tokens, saveTokens: value => { tokens = value; }, codeVerifier: () => "synthetic-verifier", saveCodeVerifier: () => {},
     redirectToAuthorization: () => { assert.fail("Code and refresh exchanges must not redirect"); },
-    discoveryState: () => ({ authorizationServerUrl: "https://github.com", authorizationServerMetadata: {
-      issuer: "https://github.com", authorization_endpoint: server.oauth!.authorizationUrl, token_endpoint: server.oauth!.tokenUrl,
+    discoveryState: () => ({ authorizationServerUrl: server.oauth!.issuer, authorizationServerMetadata: {
+      issuer: server.oauth!.issuer, authorization_endpoint: server.oauth!.authorizationUrl, token_endpoint: server.oauth!.tokenUrl,
       response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"],
       token_endpoint_auth_methods_supported: ["client_secret_post", "none"], code_challenge_methods_supported: ["S256"],
-    }, resourceMetadata: { resource: server.url, authorization_servers: ["https://github.com"], scopes_supported: ["offline_access"] } }),
+    }, resourceMetadata: { resource: server.url, authorization_servers: [server.oauth!.issuer], scopes_supported: ["offline_access"] } }),
   };
   const fetchFn: typeof fetch = async (url, init) => {
     const request = githubOAuthTokenRequest(server, String(url), init)!;
@@ -41,7 +41,7 @@ test("the pinned SDK exchanges a confidential GitHub App code and refreshes an e
     return Response.json({ access_token: "synthetic-access", refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 28800, scope: "" });
   };
   assert.equal(await auth(provider, { serverUrl: server.url, scope: "offline_access", authorizationCode: "synthetic-code", fetchFn }), "AUTHORIZED");
-  assert.equal(tokens?.issuer, "https://github.com"); assert.equal(tokens?.scope, "");
+  assert.equal(tokens?.issuer, "https://github.com/login/oauth"); assert.equal(tokens?.scope, "");
   assert.equal(await auth(provider, { serverUrl: server.url, scope: "offline_access", fetchFn }), "AUTHORIZED");
   assert.deepEqual(grants, ["authorization_code", "refresh_token"]);
 });
