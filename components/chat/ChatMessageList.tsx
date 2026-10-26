@@ -137,6 +137,11 @@ type ChatMessageListProps = {
     focusRequest?: { messageId: string; nonce: number } | null;
     /** Called once the requested message has been scrolled to and focused. */
     onFocusApplied?: (nonce: number) => void;
+    /**
+     * "Compare in Review" on a Chat continuation: starts a Review fork of the
+     * same original. Absent on every other screen.
+     */
+    compareInReview?: { onPress: () => void; pending: boolean; error: string | null };
   };
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
@@ -717,6 +722,37 @@ export function ChatMessageList({
                 <span aria-hidden="true">·</span>
                 <span>{t("continuation.readOnlyLabel")}</span>
               </span>
+            </div>
+          )}
+          {importedTranscript?.compareInReview && (
+            /*
+              The way from a Chat continuation to Review (owner decision
+              2026-10-25). A light control beside the provenance it is about,
+              and a new conversation rather than a product rewrite: the Chat
+              conversation stays as it is (§8.1).
+            */
+            <div className="flex flex-col items-center gap-1 pb-1">
+              <button
+                type="button"
+                data-testid="continuation-compare-in-review"
+                onClick={importedTranscript.compareInReview.onPress}
+                disabled={importedTranscript.compareInReview.pending}
+                aria-busy={importedTranscript.compareInReview.pending}
+                className="inline-flex min-h-11 items-center justify-center rounded-full border border-zinc-200 px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 md:min-h-9"
+              >
+                {importedTranscript.compareInReview.pending
+                  ? t("continuation.compareInReviewPending")
+                  : t("continuation.compareInReview")}
+              </button>
+              {importedTranscript.compareInReview.error && (
+                <p
+                  role="alert"
+                  data-testid="continuation-compare-in-review-error"
+                  className="text-center text-[11px] leading-4 text-red-600 dark:text-red-400"
+                >
+                  {importedTranscript.compareInReview.error}
+                </p>
+              )}
             </div>
           )}
           {importedTranscript?.status === "deleted" && (
