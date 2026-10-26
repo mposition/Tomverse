@@ -4181,12 +4181,12 @@ async function handleChatPost(
         const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;
         // A multi-pass (MCP) reservation sums every pass; the window only has
         // to hold one, so the guard reads the single-pass view of the budget.
-        const outputBudget = ((budget) => fitChatOutputToContextWindow({
+        const outputBudget = fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            reservedInputTokens: budget.inputTokens,
+            reservedInputTokens: contextInputTokens,
             requestOutputCapTokens: budget.maxOutputTokens,
             providerMaxOutputTokens: budget.providerMaxOutputTokens,
-        }))({ ...budget, inputTokens: contextInputTokens });
+        });
         if (outputBudget.kind === "exceeded") {
             throw new ChatAccessError(
                 400,

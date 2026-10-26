@@ -279,7 +279,11 @@ the MCP-only dependency alias; Code continues to resolve Ajv 6.15.0.
 Local PC / PowerShell / repository root. The following commands write only
 local test state and use synthetic data; no production credentials are needed.
 The DB tests require a disposable local PostgreSQL instance on port 56439,
-with `mcp_preview_test` in the connection URL. They refuse any other target.
+with the exact `mcp_preview_test` schema. The shared CI runner also executes
+all three MCP DB suites in the accounts lane against its dedicated loopback
+`127.0.0.1:5432/tomverse_test` database, with `CI=true` and matching
+`TEST_DATABASE_URL`/`DATABASE_URL`. Other targets, including the real local
+OAuth preview schema, are refused.
 
 ```powershell
 node --conditions=react-server --import tsx --test tests/mcpConnectorProtocol.test.ts tests/mcpConnectorBoundary.test.ts

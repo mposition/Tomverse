@@ -85,6 +85,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `marketing-language-focus.spec.ts` |
 | `marketing-toast-host.spec.ts` |
 | `menu-and-tab-semantics.spec.ts` |
+| `mcp-plugins.spec.ts` |
 | `mobile-composer-banner-reflow.spec.ts` |
 | `mobile-short-viewport-drawer.spec.ts` |
 | `modal-focus-contract.spec.ts` |

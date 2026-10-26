@@ -41,12 +41,16 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
     select: { id: true, serverId: true, state: true, expiresAt: true, createdAt: true }, take: EXPORT_ROW_CAP }),
   mcpConnection: async userId => (await prisma.mcpConnection.findMany({ where: { userId },
     select: { id: true, serverId: true, status: true, grants: true, createdAt: true, updatedAt: true }, take: EXPORT_ROW_CAP }))
-    .map(row => ({ ...row, grants: Array.isArray(row.grants) ? row.grants.map(g => ({
+    .map(row => ({ id: row.id, serverId: row.serverId, status: row.status,
+      createdAt: row.createdAt, updatedAt: row.updatedAt,
+      grants: Array.isArray(row.grants) ? row.grants.map(g => ({
       name: (g as Record<string, unknown>)?.name, mode: (g as Record<string, unknown>)?.mode })) : [] })),
   mcpInvocation: async userId => (await prisma.mcpInvocation.findMany({ where: { userId },
     select: { id: true, connectionId: true, toolName: true, state: true, argumentsCiphertext: true, expiresAt: true, createdAt: true }, take: EXPORT_ROW_CAP }))
-    .map(({ argumentsCiphertext, ...row }) => ({ ...row, arguments: row.state === "pending" && row.expiresAt > new Date() && argumentsCiphertext
-      ? JSON.parse(decryptOAuthToken(argumentsCiphertext) || "null") : null })),
+    .map(row => ({ id: row.id, connectionId: row.connectionId, toolName: row.toolName,
+      state: row.state, expiresAt: row.expiresAt, createdAt: row.createdAt,
+      arguments: row.state === "pending" && row.expiresAt > new Date() && row.argumentsCiphertext
+        ? JSON.parse(decryptOAuthToken(row.argumentsCiphertext) || "null") : null })),
   codeTaskReservation: (userId) => prisma.$queryRaw<unknown[]>`SELECT "id","clientTaskId","status","reservedCredits","settledCredits","releasedCredits","createdAt","updatedAt" FROM "CodeTaskReservation" WHERE "userId"=${userId} ORDER BY "createdAt" LIMIT 5000`,
   userSettings: (userId) =>
     prisma.userSettings.findMany({

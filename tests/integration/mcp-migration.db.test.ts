@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Client } from "pg";
+import { assertMcpTestDatabase } from "../fixtures/mcpTestDatabase";
 test("MCP migration applies additively and its foreign keys cascade in a disposable transaction", async () => {
   const url = process.env.DATABASE_URL || "";
-  assert.ok(url.includes("127.0.0.1:56439") && url.includes("mcp_preview_test"), "disposable DB only");
+  assertMcpTestDatabase();
   const client = new Client({ connectionString: url }); await client.connect();
   try {
     await client.query("BEGIN");

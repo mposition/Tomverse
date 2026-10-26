@@ -7,11 +7,12 @@ import { startMcpOAuth, completeMcpOAuth } from "@/lib/mcpConnectorOAuth";
 import { decryptMcpSecret, disconnectMcp, encryptMcpSecret, grantMcpTools, listMcpConnections, ownMcpConnection } from "@/lib/mcpConnectorStore";
 import { invokeMcpTool } from "@/lib/mcpConnectorExecution";
 import { buildAccountDataExport } from "@/lib/accountDataExport";
+import { assertMcpTestDatabase } from "../fixtures/mcpTestDatabase";
 let fixture: Awaited<ReturnType<typeof startMcpSyntheticServer>>;
 const alice = `mcp-oauth-${randomUUID()}`, bob = `mcp-oauth-${randomUUID()}`;
 const callback = "http://127.0.0.1:3131/api/mcp/oauth/callback";
 before(async () => {
-  assert.ok(process.env.DATABASE_URL?.includes("127.0.0.1:56439") && process.env.DATABASE_URL?.includes("mcp_preview_test"), "disposable local DB only");
+  assertMcpTestDatabase();
   process.env.MCP_CONNECTOR_PREVIEW_ENABLED = "true"; process.env.MCP_CONNECTOR_SYNTHETIC_OAUTH = "true";
   process.env.OAUTH_TOKEN_ENCRYPTION_KEY = "synthetic-mcp-encryption-key-32-characters";
   process.env.NEXTAUTH_SECRET = "synthetic-mcp-audit-integrity-key";

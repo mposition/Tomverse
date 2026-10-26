@@ -13,11 +13,12 @@ import { MockLanguageModelV4 } from "ai/test";
 import { createChatBudget } from "@/lib/chatSecurity";
 import { estimateTokenBreakdown } from "@/lib/chatTokenEstimate";
 import { getModel } from "@/lib/models";
+import { assertMcpTestDatabase } from "../fixtures/mcpTestDatabase";
 
 let fixture: Awaited<ReturnType<typeof startMcpSyntheticServer>>;
 const alice = `mcp-test-${randomUUID()}`, bob = `mcp-test-${randomUUID()}`;
 before(async () => {
-  assert.ok(process.env.DATABASE_URL?.includes("127.0.0.1:56439") && process.env.DATABASE_URL?.includes("mcp_preview_test"), "disposable local DB only");
+  assertMcpTestDatabase();
   process.env.MCP_CONNECTOR_PREVIEW_ENABLED = "true";
   process.env.OAUTH_TOKEN_ENCRYPTION_KEY = "synthetic-mcp-encryption-key-32-characters";
   process.env.NEXTAUTH_SECRET = "synthetic-mcp-audit-integrity-key";
