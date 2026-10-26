@@ -197,14 +197,14 @@ test("version 45 records the selection rule the code applies", () => {
 test("a non-Claude v22 profile joins the catalog only behind the multi-provider switch", () => {
   const registrations = [registration("claude-impl", "implementation"),
     registration("codex-impl", "implementation"), registration("cursor-impl", "implementation")];
-  const v22 = (model) => ({ model, roles: ["implement"], tools: ["repo_write"] });
+  const v22 = (model, roles = ["implement"], tools = ["repo_write"]) => ({ model, roles, tools });
   const capabilities = new Map([
     ["claude-impl", { capability: { model: null, routingTags: ["implementation"],
       toolCapabilities: [], v22: v22("claude-sonnet-5-5") } }],
     ["codex-impl", { capability: { model: null, routingTags: ["implementation"],
       toolCapabilities: [], v22: v22("gpt-6-luna") } }],
     ["cursor-impl", { capability: { model: null, routingTags: ["implementation"],
-      toolCapabilities: [], v22: v22("composer-2.5") } }],
+      toolCapabilities: [], v22: v22("composer-2.5", ["investigate"], ["repo_read"]) } }],
   ]);
   const derive = (multiProvider) => deriveAmuxWorkerCatalog({ registrations, capabilities,
     latches: new Map(), multiProvider });

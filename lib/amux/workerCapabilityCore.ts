@@ -22,6 +22,7 @@ import {
   amuxV22OneShotRoleSupported,
   amuxV22OneShotRouteSupported,
   amuxV22ProviderForClass,
+  amuxV22ProviderRoleSupported,
   amuxV22RequiredTool,
 } from "./v22WorkerClaimCore.ts";
 import {
@@ -112,7 +113,8 @@ export const AMUX_WORKER_CAPABILITY_REFUSALS = [
   "tag_above_ceiling",
   "tag_requires_verified",
   "tools_invalid",
-  "v22_not_claude",
+  "v22_provider_unsupported",
+  "v22_role_provider",
   "v22_model_unsupported",
   "v22_roles_invalid",
   "v22_role_unknown",
@@ -175,7 +177,7 @@ export function amuxWorkerCapabilityRefusal(
   }
   if (v22 !== null) {
     const provider = amuxV22ProviderForClass(registration.providerClass);
-    if (provider === null) return "v22_not_claude";
+    if (provider === null) return "v22_provider_unsupported";
     if (!amuxV22OneShotRouteSupported(provider, v22.model)) return "v22_model_unsupported";
     if (v22.roles.length < 1 || v22.roles.length > AMUX_WORKER_CAPABILITY_LIMITS.v22RolesMax ||
         new Set(v22.roles).size !== v22.roles.length) {
@@ -192,6 +194,7 @@ export function amuxWorkerCapabilityRefusal(
           !amuxV22OneShotRoleSupported(role)) {
         return "v22_role_unknown";
       }
+      if (!amuxV22ProviderRoleSupported(provider, role)) return "v22_role_provider";
       if (!amuxWorkerMeetsRequirement(registration, requirement)) {
         return requirementRefusal(requirement, "v22_role_above_ceiling", "v22_role_requires_verified");
       }
@@ -218,10 +221,11 @@ export function amuxWorkerCapabilityWithinCeiling(
   if (routingTags.length === 0) return null;
   let v22 = capability.v22;
   if (v22 !== null) {
+    const provider = amuxV22ProviderForClass(registration.providerClass);
     const roles = v22.roles.filter((role) =>
-      Object.hasOwn(AMUX_WORKER_V22_ROLE_REQUIREMENTS, role) && allowed(AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]));
-    v22 = roles.length > 0 && amuxV22ProviderForClass(registration.providerClass) !== null ?
-      { ...v22, roles } : null;
+      Object.hasOwn(AMUX_WORKER_V22_ROLE_REQUIREMENTS, role) && allowed(AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]) &&
+      provider !== null && amuxV22ProviderRoleSupported(provider, role));
+    v22 = roles.length > 0 ? { ...v22, roles } : null;
   }
   return { ...capability, routingTags, v22 };
 }

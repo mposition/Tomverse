@@ -123,10 +123,18 @@ test("a v22 profile is on its provider's model, with each role's tool, within th
     , "v22_model_unsupported");
   // Owner decision 2026-10-26: every provider class may run v22; only a
   // Claude worker is held to a claude-* model.
-  for (const worker of ["codex-impl", "copilot-impl", "cursor-impl"]) {
+  for (const worker of ["codex-impl", "copilot-impl"]) {
     assert.equal(amuxWorkerCapabilityRefusal(registration(worker, "implementation"),
       capability(["implementation"], v22(["implement"], ["repo_write"], "gpt-6-luna"))), null);
   }
+  // Cursor's print mode has its shell once it may write: read roles only.
+  assert.equal(amuxWorkerCapabilityRefusal(registration("cursor-impl", "implementation"),
+    capability(["implementation"], v22(["implement"], ["repo_write"], "auto"))), "v22_role_provider");
+  assert.equal(amuxWorkerCapabilityRefusal(registration("cursor-impl", "implementation"),
+    capability(["implementation"], v22(["investigate"], ["repo_read"], "auto"))), null);
+  assert.equal(amuxWorkerCapabilityWithinCeiling(registration("cursor-impl", "implementation"),
+    capability(["implementation"], v22(["implement", "investigate"], ["repo_read", "repo_write"], "auto")))
+    .v22.roles.join(), "investigate");
   assert.equal(amuxWorkerCapabilityRefusal(registration("cursor-impl", "implementation"),
     capability(["implementation"], v22(["review"], ["repo_read"], "auto"))), "v22_role_requires_verified");
 });

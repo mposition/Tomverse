@@ -730,8 +730,13 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
   // A Claude model or the Claude-only read-only retry is refused before any spawn.
   await assert.rejects(() => runAmuxV22OneShot({ ...investigate, modelId: "gpt 6" }, codex,
     { syntheticPlatform: true, spawnChild: fake.spawnChild }), /invalid v22 one-shot request/);
-  const claudeOnly = fakeSpawn(output);
+  // Cursor takes read roles only: implement is refused before any spawn.
   await assert.rejects(() => runAmuxV22OneShot(request, { ...config, provider: "cursor" },
+    { syntheticPlatform: true, spawnChild: fake.spawnChild }), /invalid v22 one-shot request/);
+  assert.equal(fake.calls.length, 1);
+  const claudeOnly = fakeSpawn(output);
+  await assert.rejects(() => runAmuxV22OneShot({ ...request, role: "investigate" },
+    { ...config, provider: "cursor" },
     { syntheticPlatform: true, spawnChild: claudeOnly.spawnChild }).then((value) => {
     // The request is valid for Cursor (any model name); a Claude JSON result
     // has no Cursor terminal event, so the run is unknown, not failed.

@@ -210,6 +210,6 @@ ALTER TABLE "AmuxCliUsageEvent"
       "projectedApiCostMicrousd" IS NOT NULL AND
       "projectedApiCostMicrousd" BETWEEN 0 AND 3400000 AND
       "pricingVersion" IS NOT NULL AND
-      "actualApiCostMicrousd" IS NULL)));;
+      "actualApiCostMicrousd" IS NULL)));
 
 COMMIT;

@@ -26,17 +26,19 @@ export const amuxV22OneShotRoleSupported = (role: string) =>
  * always on; the others enter the catalog only while
  * TOMVERSE_AMUX_V22_MULTI_PROVIDER is `enabled`. Every route is priced from
  * Admin › Models by its model ID, so a model missing there holds the route.
+ * Cursor's print mode cannot be kept from its shell once it may write, so a
+ * Cursor worker takes the read roles only (`implement: false`).
  */
 const ANY_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 export const AMUX_V22_PROVIDERS = Object.freeze({
   anthropic: Object.freeze({ providerClass: "claude", cli: "claude",
-    model: /^claude-[A-Za-z0-9._-]{1,120}$/ }),
+    model: /^claude-[A-Za-z0-9._-]{1,120}$/, implement: true }),
   openai: Object.freeze({ providerClass: "codex", cli: "codex",
-    model: ANY_MODEL }),
+    model: ANY_MODEL, implement: true }),
   "github-copilot": Object.freeze({ providerClass: "copilot", cli: "copilot",
-    model: ANY_MODEL }),
+    model: ANY_MODEL, implement: true }),
   cursor: Object.freeze({ providerClass: "cursor", cli: "cursor",
-    model: ANY_MODEL }),
+    model: ANY_MODEL, implement: false }),
 });
 export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
 export const AMUX_V22_MULTI_PROVIDER_ENV = "TOMVERSE_AMUX_V22_MULTI_PROVIDER";
@@ -49,6 +51,12 @@ export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {
 export const amuxV22ProviderForClass = (providerClass: string): AmuxV22Provider | null =>
   (Object.keys(AMUX_V22_PROVIDERS) as AmuxV22Provider[]).find((provider) =>
     AMUX_V22_PROVIDERS[provider].providerClass === providerClass) ?? null;
+/** Whether this provider's one-shot run may take this role. */
+export const amuxV22ProviderRoleSupported = (provider: string, role: string) => {
+  const known = amuxV22Provider(provider);
+  return known !== null && amuxV22OneShotRoleSupported(role) &&
+    (role !== "implement" || AMUX_V22_PROVIDERS[known].implement);
+};
 export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) => {
   const known = amuxV22Provider(provider);
   return known !== null && AMUX_V22_PROVIDERS[known].model.test(modelId);
