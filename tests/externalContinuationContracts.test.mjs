@@ -995,6 +995,9 @@ test("the service writes the endpoint's product through the shared writer", () =
         source,
         /selectionMode:\s*input\.productKey === CHAT_PRODUCT_KEY \? "auto" : "manual"/
     );
+    // Web search starts where every other new conversation starts, not at the
+    // column default "off" (owner report 2026-10-26).
+    assert.match(source, /webSearchMode: APP_DEFAULTS\.defaultWebSearchMode,/);
 });
 
 test("the default continuation is Chat only where Chat is offered", () => {
