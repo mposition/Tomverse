@@ -250,12 +250,14 @@ where
 }
 
 /// A v22 delivery's model name, of any provider (owner decision 2026-10-26:
-/// Codex, Copilot and Cursor workers run v22 too). The shape is the app's
-/// `amuxV22OneShotRouteSupported`; whether the model belongs to the worker's
-/// own CLI is the sidecar's check, which knows its provider.
+/// Codex, Copilot and Cursor workers run v22 too). The bounds are the app's
+/// `amuxV22OneShotRouteSupported`: a `claude-` name up to 127 bytes, any
+/// other up to 120. Whether the model belongs to the worker's own CLI is the
+/// sidecar's check, which knows its provider.
 pub fn v22_model_id_valid(model_id: &str) -> bool {
     let bytes = model_id.as_bytes();
-    !bytes.is_empty() && bytes.len() <= 127 && bytes[0].is_ascii_alphanumeric() &&
+    let limit = if model_id.starts_with("claude-") { 127 } else { 120 };
+    !bytes.is_empty() && bytes.len() <= limit && bytes[0].is_ascii_alphanumeric() &&
         bytes.iter().all(|byte| byte.is_ascii_alphanumeric() ||
             matches!(byte, b'.' | b'_' | b':' | b'-'))
 }
@@ -1923,10 +1925,14 @@ mod quota_tests {
             "claude-sonnet-5-5", "grok-4.7-high", "a:b_c"] {
             assert!(v22_model_id_valid(model), "{model}");
         }
-        let long = "a".repeat(128);
-        for model in ["", "-leading", ".x", "gpt 6", "gpt/6", "x;rm", long.as_str()] {
+        let long_claude = format!("claude-{}", "a".repeat(120));
+        assert!(v22_model_id_valid(&long_claude));
+        assert!(!v22_model_id_valid(&format!("{long_claude}a")));
+        let other = "a".repeat(121);
+        for model in ["", "-leading", ".x", "gpt 6", "gpt/6", "x;rm", other.as_str()] {
             assert!(!v22_model_id_valid(model), "{model}");
         }
+        assert!(v22_model_id_valid(&"a".repeat(120)));
     }
 
     #[test]

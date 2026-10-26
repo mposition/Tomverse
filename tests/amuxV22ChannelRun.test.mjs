@@ -40,6 +40,10 @@ test("a read role gets no write tool; Copilot never gets a shell; Cursor never w
   // A -c table merges into CODEX_HOME's config; the user config is not read.
   assert.ok(codex.includes("--ignore-user-config") && !codex.some((part) =>
     part.startsWith("mcp_servers")));
+  // No execpolicy allow rule can run a command outside the sandbox, and
+  // nothing waits on an approval (the Decision Maker launcher's flags).
+  assert.deepEqual(codex.slice(0, 4), ["-a", "never", "--no-daemon", "exec"]);
+  assert.ok(codex.includes("--ignore-rules"));
   assert.ok(!codex.some((part) => /bypass|dangerously|yolo/.test(part)));
   const copilot = amuxV22ChannelArgs("github-copilot", request("implement"), "/w");
   assert.ok(copilot.includes("edit") && copilot.includes("create") &&

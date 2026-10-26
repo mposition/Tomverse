@@ -718,7 +718,7 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
   assert.equal(fake.calls.length, 1);
   const [call] = fake.calls;
   assert.equal(call.binary, "/opt/tomverse-amux-v22/codex");
-  assert.deepEqual(call.args.slice(0, 1), ["exec"]);
+  assert.deepEqual(call.args.slice(0, 4), ["-a", "never", "--no-daemon", "exec"]);
   assert.ok(call.args.includes("read-only") && call.args.includes("gpt-6-luna"));
   assert.equal(call.spawnOptions.env.CODEX_HOME, codex.claudeConfigDir);
   assert.equal(call.spawnOptions.env.CLAUDE_CONFIG_DIR, undefined);
