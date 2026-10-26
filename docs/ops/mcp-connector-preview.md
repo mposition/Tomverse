@@ -147,10 +147,18 @@ GitHub → Connect starts the ordinary owner-bound OAuth flow without token entr
 Actual GitHub OAuth/MCP compatibility remains unverified until that consent flow
 and scoped calls run successfully. Product paid-model calls remain zero.
 
-Local OAuth increment verification: 22 protocol/security/provider-profile tests,
+Local OAuth increment verification: 23 protocol/security/provider-profile tests,
 19 disposable-DB tests and 9 transport/telemetry/monitoring regressions pass.
 Windows DPAPI round-trip self-test passes with synthetic data. Lint and the full
 TypeScript check pass (the latter needs a larger heap for this repository).
+The optimized build passes as well. Claude accepted the OAuth boundary at
+`38d78ecc2` in `r-20261026-001231-00789c`. Its conditional schema-serialization
+concern is covered by a pinned SDK behavior test: JSON tool schemas are enumerable
+and included in the budget estimate. GitHub identifies `mposition` as a personal
+User; the setup UI explicitly requires signing in as that account. Misconfigured
+partial operator environment settings still fail closed for the connector list.
+This accepted review remains applicable after the follow-up copy/test/evidence
+changes, which do not change the reviewed authority or credential boundary.
 This evidence contains no actual GitHub App creation, OAuth consent, issue read
 or issue write.
 

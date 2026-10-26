@@ -55,7 +55,7 @@ export function createGithubPreviewSetup(deps: { exchange: (code: string) => Pro
       res.writeHead(303, { Location: "/" }); res.end(); return;
     }
     if (url.pathname !== "/") { res.writeHead(404); res.end(); return; }
-    let body = `<h1>GitHub OAuth setup</h1><p>Create a private GitHub App for this local preview. Repository: <strong>${REPOSITORY}</strong>.</p><p>Requested access: Issues read/write and repository metadata read. Webhooks are disabled. No issues are read or created during registration.</p>`;
+    let body = `<h1>GitHub OAuth setup</h1><p>Sign in to GitHub as <strong>mposition</strong> before creating this private app. Repository: <strong>${REPOSITORY}</strong>. Another account's registration cannot be used here.</p><p>Requested access: Issues read/write and repository metadata read. Webhooks are disabled. No issues are read or created during registration.</p>`;
     if (phase === "pending") body += `<form action="https://github.com/settings/apps/new?state=${state}" method="post"><input type="hidden" name="manifest" value="${escapeHtml(JSON.stringify(manifest))}"><button>Create GitHub App</button></form>`;
     else if (phase === "complete") body += `<p>App credentials are encrypted for your Windows account outside the repository.</p><p><a href="https://github.com/apps/${slug}/installations/new" rel="noreferrer">Install on TomverseCode only</a></p><p>Then start the local preview and choose Plugins → GitHub → Connect. Registration does not enable Dev or Production.</p>`;
     else body += `<p>Registration ${phase === "unknown" ? "could not be confirmed. Check GitHub App settings before restarting; the exchange will not be retried." : "is in progress."}</p>`;
@@ -114,7 +114,8 @@ async function main() {
     persist: async config => { await mkdir(folder, { recursive: true }); await writeFile(path, dpapi("protect", JSON.stringify(config)), { flag: "wx", mode: 0o600 }); },
   });
   await new Promise<void>((resolve, reject) => { setup.server.once("error", reject); setup.server.listen(3132, "127.0.0.1", resolve); });
-  const opener = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Start-Process -WindowStyle Hidden '${setup.bootstrapUrl}'`], { windowsHide: true, stdio: "ignore" });
+  // Keep the helper hidden; the browser is the interactive owner-consent surface.
+  const opener = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Start-Process '${setup.bootstrapUrl}'`], { windowsHide: true, stdio: "ignore" });
   opener.on("error", () => { setup.server.close(); process.exitCode = 1; });
   console.log("GitHub App registration opened in your browser. The setup expires in 15 minutes; no credentials are printed.");
   setTimeout(() => setup.server.close(), 15 * 60_000).unref();

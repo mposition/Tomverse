@@ -4,6 +4,14 @@ import { auth, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { githubOAuthTokenRequest } from "@/lib/mcpConnectorGitHub";
 import { mcpServers } from "@/lib/mcpConnectorPolicy";
+import { jsonSchema, tool } from "ai";
+
+test("the pinned AI SDK exposes complete tool schemas to the budget serializer", () => {
+  const schema = { type: "object", properties: { owner: { type: "string", const: "mposition" }, repo: { type: "string", const: "TomverseCode" } } };
+  const definition = tool({ description: "Synthetic connector definition", inputSchema: jsonSchema(schema) });
+  const serialized = JSON.parse(JSON.stringify({ synthetic: definition }));
+  assert.deepEqual(serialized.synthetic.inputSchema.jsonSchema, schema);
+});
 
 test("the pinned SDK exchanges a confidential GitHub App code and refreshes an empty-scope response", async () => {
   const [server] = mcpServers({ NODE_ENV: "test", MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_GITHUB_OAUTH_CLIENT_ID: "synthetic-client",
