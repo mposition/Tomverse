@@ -66,6 +66,13 @@ const sessionIntakeOn = () =>
   amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
     process.env[AMUX_V4_IDEA_READBACK_ENV]);
 
+/** Reading back a stored session idea needs only the read-back switches: an
+ * owner who turns session writes off after a lost answer must still recover
+ * it, or the v4 read would report a committed session idea as partial. */
+const sessionReadbackOn = () =>
+  amuxSessionIntakeReadbackEnabled(process.env[AMUX_SESSION_INTAKE_READBACK_ENV],
+    process.env[AMUX_V4_IDEA_READBACK_ENV]);
+
 const ADMIN_SOURCE = Object.freeze({ toolName: "tomverse-admin",
   modelProvider: "operator", sessionDisplay: "Admin idea input" });
 
@@ -197,7 +204,7 @@ export async function GET(request: Request) {
     // A session idea saved from Admin has the operator as its actor, so the v4 owner
     // read finds the row and, with no v4-shaped audit, calls it partial. The session
     // read answers first (it is absent for any row that is not a session idea).
-    if (sessionIntakeOn()) {
+    if (sessionReadbackOn()) {
       const seen = await readAmuxIdeaSessionSubmissionRequest(requestId);
       if (seen.status !== "absent") {
         return NextResponse.json(seen.status === "committed"
