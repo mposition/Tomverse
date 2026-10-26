@@ -1,16 +1,29 @@
 import { z } from "zod";
 import { detectSecrets } from "./engineeringAgentSecretPatterns";
+import { AGENT_OFFICE_AMUX_ROSTER } from "./agentOffice/amuxRoster";
 
-/** Pilot scope: one existing resident session; never an execution allowlist. */
+/** Owner-approved resident monitoring scope; never an execution allowlist. */
 export const AGENT_OFFICE_CLI_WORKER = "codex-impl";
+export type AgentOfficeCliWorker = (typeof AGENT_OFFICE_AMUX_ROSTER)[number]["name"];
+export const AGENT_OFFICE_CLI_WORKERS = Object.freeze(AGENT_OFFICE_AMUX_ROSTER.map(worker => worker.name) as
+  [AgentOfficeCliWorker, ...AgentOfficeCliWorker[]]);
+export function isAgentOfficeCliWorker(value: unknown): value is AgentOfficeCliWorker {
+  return typeof value === "string" && AGENT_OFFICE_CLI_WORKERS.includes(value as AgentOfficeCliWorker);
+}
+export function agentOfficeCliProvider(worker: AgentOfficeCliWorker) {
+  const provider = AGENT_OFFICE_AMUX_ROSTER.find(entry => entry.name === worker)?.provider;
+  if (!provider) throw new TypeError("invalid worker");
+  return { openai: "codex", anthropic: "claude", cursor: "cursor", "github-copilot": "copilot" }[provider] as
+    "codex" | "claude" | "cursor" | "copilot";
+}
 export const AGENT_OFFICE_CLI_MAX_BYTES = 65_536;
 export const AGENT_OFFICE_CLI_STALE_MS = 20_000;
 export const AGENT_OFFICE_CLI_TTL_MS = 15 * 60_000;
 export const AGENT_OFFICE_CLI_POLL_MS = 5_000;
 
 export const agentOfficeCliSnapshotSchema = z.object({
-  worker: z.literal(AGENT_OFFICE_CLI_WORKER),
-  source: z.literal("amux-codex-rollout"),
+  worker: z.enum(AGENT_OFFICE_CLI_WORKERS),
+  source: z.enum(["amux-codex-rollout", "amux-transcript", "amux-terminal"]),
   capturedAt: z.string().datetime(),
   truncated: z.boolean(),
   events: z.array(z.object({
@@ -19,7 +32,8 @@ export const agentOfficeCliSnapshotSchema = z.object({
   }).strict()).max(80),
   rawOutput: z.string().max(8_000),
 }).strict().refine((value) => new TextEncoder().encode(JSON.stringify(value)).length <=
-  AGENT_OFFICE_CLI_MAX_BYTES);
+  AGENT_OFFICE_CLI_MAX_BYTES).refine(value => value.source !== "amux-codex-rollout" ||
+    agentOfficeCliProvider(value.worker) === "codex");
 
 export type AgentOfficeCliSnapshot = z.infer<typeof agentOfficeCliSnapshotSchema>;
 export type AgentOfficeCliReading = {

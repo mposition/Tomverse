@@ -9,12 +9,14 @@ import { adminFetch, isAdminFetchAbort } from "@/lib/adminFetch";
 import { shouldIssueAdminPoll } from "@/lib/adminPollTick";
 import { describeAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminAgentOfficeCliMessages } from "@/lib/adminMessages/agentOfficeCliMonitor";
-import { AGENT_OFFICE_CLI_POLL_MS, AGENT_OFFICE_CLI_WORKER,
-  type AgentOfficeCliReading } from "@/lib/agentOfficeCliMonitorCore";
+import { AGENT_OFFICE_CLI_POLL_MS, agentOfficeCliProvider,
+  type AgentOfficeCliReading, type AgentOfficeCliWorker } from "@/lib/agentOfficeCliMonitorCore";
 import { aestStamp } from "@/lib/agentOffice/time";
 import styles from "./agentOfficeCliMonitor.module.css";
 
-export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: () => void; avatar?: ReactNode }) {
+export default function AgentOfficeCliMonitor({ worker, onClose, avatar }: {
+  worker: AgentOfficeCliWorker; onClose: () => void; avatar?: ReactNode;
+}) {
   const m = useAdminMessages(adminAgentOfficeCliMessages);
   const { locale } = useAdminLocale();
   const [reading, setReading] = useState<AgentOfficeCliReading | null>(null);
@@ -59,7 +61,7 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
         documentVisible: document.visibilityState === "visible", trigger })) return;
       inFlight = true;
       try {
-        const response = await adminFetch(`/api/admin/office/cli-monitor?worker=${AGENT_OFFICE_CLI_WORKER}`,
+        const response = await adminFetch(`/api/admin/office/cli-monitor?worker=${worker}`,
           { cache: "no-store", signal: controller.signal, timeoutMs: 10_000 });
         if (disposed) return;
         if (!response.ok) {
@@ -73,6 +75,10 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
         }
         const next = await response.json() as AgentOfficeCliReading;
         if (disposed) return;
+        if (next.snapshot && next.snapshot.worker !== worker) {
+          setReading(null);
+          throw new Error("worker_mismatch");
+        }
         setReading(next);
         setAccessBlocked(false);
         setFailure(null);
@@ -88,7 +94,7 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
     document.addEventListener("visibilitychange", visible);
     return () => { disposed = true; controller.abort(); window.clearInterval(timer);
       document.removeEventListener("visibilitychange", visible); };
-  }, [paused, retry, locale, m.failed]);
+  }, [worker, paused, retry, locale, m.failed]);
 
   const snapshot = reading?.snapshot;
   useEffect(() => {
@@ -110,7 +116,7 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
       <header className={styles.header}>
         <div className={styles.identity}>
           <span className={styles.avatar} aria-hidden="true">{avatar ?? ">_"}</span>
-          <h2 id="office-cli-title">{AGENT_OFFICE_CLI_WORKER}</h2>
+          <h2 id="office-cli-title">{worker}</h2>
           <span className={styles.status} data-state={paused ? "paused" : state ?? "unavailable"}>{label}</span>
           <div className={styles.windowControls}>
             <button type="button" onClick={() => setExpanded(!expanded)} aria-label={expanded ? m.collapse : m.expand}>
@@ -119,10 +125,11 @@ export default function AgentOfficeCliMonitor({ onClose, avatar }: { onClose: ()
             <button ref={closeRef} type="button" onClick={onClose} aria-label={m.close}><X size={18} /></button>
           </div>
         </div>
-        <div className={styles.meta}><span>{m.room}</span><span className={styles.readOnly}>{m.readOnly}</span></div>
+        <div className={styles.meta}><span>{m.room} / {m.providers[agentOfficeCliProvider(worker)]}</span><span className={styles.readOnly}>{m.readOnly}</span></div>
         <div className={styles.meta}>
           <select aria-label={m.session} value="current" onChange={() => {}}><option value="current">{m.current}</option></select>
           {snapshot ? <span>{m.captured} {aestStamp(snapshot.capturedAt)}</span> : null}
+          {snapshot ? <span>{m.sources[snapshot.source]}</span> : null}
         </div>
       </header>
       <div className={styles.toolbar}>
