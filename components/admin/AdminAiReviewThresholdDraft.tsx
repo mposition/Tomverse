@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { AdminLocale } from "@/lib/adminLocale";
+import { adminMessagesFor, type AdminLocale } from "@/lib/adminLocale";
+import { adminAiReviewThresholdDraftMessages } from "@/lib/adminMessages/aiReviewPreparation";
 import {
   AI_REVIEW_JUDGED_CEILINGS,
   AI_REVIEW_JUDGED_FLOORS,
@@ -17,43 +18,23 @@ export function AdminAiReviewThresholdDraft({
 }: {
   locale: AdminLocale;
 }) {
-  const ko = locale === "ko";
+  const m = adminMessagesFor(adminAiReviewThresholdDraftMessages, locale);
   const [draft, setDraft] = useState(emptyJudgedThresholdDraft);
   const [downloaded, setDownloaded] = useState(false);
   const problems = judgedThresholdProblems(draft, false);
   const number = (value: string) => (value === "" ? null : Number(value));
-  const labels: Record<string, string> = ko
-    ? {
-        contradictionRecall: "모순 재현율 하한",
-        contradictionPrecision: "모순 정밀도 하한",
-        omissionRecall: "누락 재현율 하한",
-        omissionPrecision: "누락 정밀도 하한",
-        exactQuoteMatchRate: "원문 인용 일치율 하한",
-        schemaValidRate: "출력 형식 준수율 하한",
-        missedEveryPlantedIssueRate: "심은 문제 전무보고율 상한",
-        inventedFindingRate: "지어낸 발견 비율 상한",
-        maxLanguageArmGap: "언어 간 최대 격차",
-        maxTaskTypeArmShortfall: "작업 유형별 허용 차이",
-        minBlindReviewedCases: "블라인드 검토 최소 사례 수",
-      }
-    : {};
+  const labels: Record<string, string> = m.labels;
   return (
     <details
       className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
       data-testid="ai-review-threshold-draft"
     >
       <summary className="cursor-pointer font-semibold text-zinc-100">
-        {ko
-          ? "평가 준비 · 품질 기준 초안"
-          : "Evaluation preparation · threshold draft"}
+        {m.title}
       </summary>
-      <p className="my-4 text-sm text-zinc-400">
-        {ko
-          ? "관측 점수를 보고 기준을 조정하지 마세요. 이 양식은 미승인 초안을 내려받으며, 게이트나 서명을 변경하지 않습니다. 비율은 0~1로 입력합니다."
-          : "Choose criteria before inspecting observed scores. Download an unsigned draft; this does not change gates or signatures. Enter rates from 0 to 1."}
-      </p>
+      <p className="my-4 text-sm text-zinc-400">{m.description}</p>
       <label className="block text-sm text-zinc-200">
-        {ko ? "임계값 버전" : "Threshold version"}
+        {m.version}
         <input
           className={`${field} mt-2`}
           value={draft.version}
@@ -116,7 +97,7 @@ export function AdminAiReviewThresholdDraft({
           </label>
         ))}
         <label className="text-sm text-zinc-200">
-          {ko ? "음성 사례 부분집합" : "Negative-case subset"}
+          {m.negativeSubset}
           <select
             className={`${field} mt-2`}
             value={draft.negativeSubset.policy}
@@ -134,16 +115,14 @@ export function AdminAiReviewThresholdDraft({
               })
             }
           >
-            <option value="undecided">{ko ? "미결정" : "Undecided"}</option>
-            <option value="diagnostic">
-              {ko ? "진단으로만 표시" : "Diagnostic only"}
-            </option>
-            <option value="gate">{ko ? "상한 적용" : "Apply a ceiling"}</option>
+            <option value="undecided">{m.undecided}</option>
+            <option value="diagnostic">{m.diagnosticOnly}</option>
+            <option value="gate">{m.applyCeiling}</option>
           </select>
         </label>
         {draft.negativeSubset.policy === "gate" && (
           <label className="text-sm text-zinc-200">
-            {ko ? "음성 부분집합 상한" : "Negative subset ceiling"}
+            {m.negativeCeiling}
             <input
               className={`${field} mt-2`}
               type="number"
@@ -165,7 +144,7 @@ export function AdminAiReviewThresholdDraft({
         )}
       </div>
       <label className="block text-sm text-zinc-200">
-        {ko ? "선택 근거" : "Rationale"}
+        {m.rationale}
         <textarea
           className={`${field} my-2`}
           value={draft.rationale}
@@ -174,11 +153,7 @@ export function AdminAiReviewThresholdDraft({
           }
         />
       </label>
-      <p className="mb-3 text-xs text-zinc-400">
-        {ko
-          ? "모순·누락의 네 하한은 키워드 진단입니다. 새 오류율 두 개만 judged 지표입니다."
-          : "The four contradiction/omission floors remain keyword diagnostics. Only the two new error rates use judged evidence."}
-      </p>
+      <p className="mb-3 text-xs text-zinc-400">{m.metricNotice}</p>
       <button
         type="button"
         className="min-h-10 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-100 disabled:opacity-40"
@@ -192,14 +167,10 @@ export function AdminAiReviewThresholdDraft({
           setDownloaded(true);
         }}
       >
-        {ko ? "미승인 기준 초안 내려받기" : "Download unsigned threshold draft"}
+        {m.download}
       </button>
       <p role="status" className="mt-3 text-xs text-zinc-400">
-        {downloaded
-          ? ko
-            ? "미승인 초안을 내려받았습니다."
-            : "Unsigned draft downloaded."
-          : `${problems.length} ${ko ? "개 입력을 확인하세요." : "input issue(s) remain."}`}
+        {downloaded ? m.downloaded : m.inputIssues(problems.length)}
       </p>
     </details>
   );

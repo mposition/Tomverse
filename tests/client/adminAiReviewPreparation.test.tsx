@@ -65,3 +65,26 @@ test("threshold preparation leaves every new bound empty and cannot approve", ()
   assert.match(html, /관측 점수를 보고 기준을 조정하지 마세요/);
   assert.doesNotMatch(html, /50\.0%|33\.3%/);
 });
+
+test("English preparation panels render catalogue copy and readable threshold labels", () => {
+  const catalog = readAiReviewPreparationCatalog();
+  const progress = aiReviewM5Progress(catalog, {
+    state: "unconfigured",
+    reports: [],
+    problems: [],
+  });
+  const html = renderToStaticMarkup(
+    <>
+      <AdminAiReviewPreparationPanel catalog={catalog} locale="en" />
+      <AdminAiReviewThresholdDraft locale="en" />
+      <AdminAiReviewM5Progress progress={progress} locale="en" />
+    </>,
+  );
+  assert.match(html, /Download edit proposal/);
+  assert.match(html, /Download sample proposal/);
+  assert.match(html, /Contradiction recall floor/);
+  assert.match(html, /input issue\(s\) remain/);
+  assert.match(html, /M5 operational evidence/);
+  assert.match(html, /Not configured/);
+  assert.doesNotMatch(html, />contradictionRecall<|>평가 준비/);
+});
