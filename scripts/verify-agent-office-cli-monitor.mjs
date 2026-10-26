@@ -28,15 +28,32 @@ const fixture = { state: "live", receivedAt: new Date().toISOString(), snapshot:
     {kind:"tool",text:"exec_command\nnpm test"}, {kind:"output",text:"24 passed\n<script>window.untrustedExecuted=true</script>"}],
   rawOutput: "$ npm test\n24 passed\nWaiting for the next task",
 } };
-let reads = 0, forbidden = 0, mode = "live";
+const workerNames = ["claude-chore", "claude-contract", "claude-impl", "claude-review", "codex-chore", "codex-contract", "codex-impl",
+  "cursor-chore", "cursor-impl", "cursor-worker", "copilot-chore", "copilot-impl", "copilot-worker"];
+const readingFor = worker => ({ ...fixture, state: mode === "stale" ? "stale" : "live", snapshot: {
+  ...fixture.snapshot, worker,
+  source: worker.startsWith("codex-") ? "amux-codex-rollout" : worker.startsWith("claude-") ? "amux-transcript" : "amux-terminal",
+  events: [...(worker.startsWith("codex-") ? fixture.snapshot.events : []), {kind:"output",text:`Captured from ${worker}`}],
+  rawOutput: worker === "codex-impl" ? fixture.snapshot.rawOutput : `Terminal for ${worker}`,
+} });
+let reads = 0, forbidden = 0, mode = "live", holdWorker = null, releaseHeld;
+const requestedWorkers = new Set();
 const server = createServer(async (req,res) => {
   if (req.url.startsWith("/api/admin/office/cli-monitor")) {
     if (req.method !== "GET") forbidden++;
     reads++;
+    const worker = new URL(req.url,"http://localhost").searchParams.get("worker");
+    requestedWorkers.add(worker);
     res.setHeader("Content-Type", "application/json");
+    if (worker === holdWorker) {
+      holdWorker = null;
+      const reading = readingFor(worker);
+      releaseHeld = () => { if(!res.destroyed) res.end(JSON.stringify(reading)); };
+      return;
+    }
     if (mode === "reauth") {res.statusCode=428;res.end(JSON.stringify({error:"ADMIN_REAUTHENTICATION_REQUIRED"}));}
     else if(mode === "unavailable") res.end(JSON.stringify({state:"unavailable",receivedAt:null,snapshot:null}));
-    else res.end(JSON.stringify({...fixture,state:mode}));
+    else res.end(JSON.stringify(readingFor(mode === "mismatch" ? "codex-chore" : worker)));
     return;
   }
   if(req.url==="/ui.js"||req.url==="/ui.css") {
@@ -51,10 +68,10 @@ await new Promise(r=>server.listen(0,"127.0.0.1",r));
 const browser=await chromium.launch({headless:true});
 const page=await browser.newPage({viewport:{width:1600,height:1050}});
 const errors=[];page.on("pageerror",e=>errors.push(e.message));
-const open=async()=>{
-  const person=page.getByTestId("agent-office-amux-person").filter({hasText:"codex-impl"});
+const open=async(worker="codex-impl")=>{
+  const person=page.getByTestId("agent-office-amux-person").filter({hasText:worker});
   await person.focus();await person.press("Enter");await page.getByTestId("agent-office-view-cli").click();
-  await page.getByTestId("agent-office-cli-monitor").getByText("Inspect the office reconnect behavior.",{exact:true}).waitFor();
+  await page.getByTestId("agent-office-cli-monitor").getByText(`Captured from ${worker}`,{exact:true}).waitFor();
 };
 const checkTranscriptLayout=async()=>{
   const layout=await page.getByTestId("agent-office-cli-monitor").evaluate(el=>{
@@ -86,6 +103,35 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await open();
   const monitor=page.getByTestId("agent-office-cli-monitor");
+  assert.equal(await page.getByTestId("agent-office-amux-person").count(),13);
+  let previous="codex-impl";
+  for(const worker of workerNames){
+    await open(worker);
+    await monitor.getByRole("heading",{name:worker,exact:true}).waitFor();
+    if(worker!==previous) assert.equal(await monitor.getByText(`Captured from ${previous}`,{exact:true}).count(),0);
+    assert.equal(await monitor.locator('textarea,input:not([type="search"]),[contenteditable="true"]').count(),0);
+    await monitor.getByRole("tab",{name:"Raw output",exact:true}).click();
+    await monitor.getByText(worker==="codex-impl"?fixture.snapshot.rawOutput:`Terminal for ${worker}`,{exact:true}).waitFor();
+    previous=worker;
+  }
+  assert.deepEqual([...requestedWorkers].sort(),[...workerNames].sort());
+  await open();
+  await monitor.getByRole("button",{name:"Pause updates",exact:true}).click();
+  holdWorker="codex-impl";
+  await monitor.getByRole("button",{name:"Resume updates",exact:true}).click();
+  await page.waitForTimeout(100);assert.equal(typeof releaseHeld,"function");
+  await open("claude-impl");releaseHeld();await page.waitForTimeout(100);
+  assert.equal(await monitor.getByText("Captured from codex-impl",{exact:true}).count(),0);
+  await monitor.getByRole("heading",{name:"claude-impl",exact:true}).waitFor();
+  await open();
+  await monitor.getByRole("button",{name:"Pause updates",exact:true}).click();
+  mode="mismatch";
+  await monitor.getByRole("button",{name:"Resume updates",exact:true}).click();
+  await monitor.getByText("Reconnecting",{exact:true}).first().waitFor();
+  assert.equal(await monitor.locator('[data-kind]').count(),0);
+  mode="live";
+  await monitor.getByRole("button",{name:"Close CLI monitor",exact:true}).click();
+  await open();
   assert.equal(await monitor.locator("textarea").count(),0);
   assert.equal(await monitor.locator('input:not([type="search"])').count(),0);
   assert.equal(await page.evaluate(()=>window.untrustedExecuted),undefined);
@@ -131,6 +177,6 @@ try {
   assert.equal(await monitor.getByText("Reconnecting",{exact:true}).count(),0);
   assert.equal(await monitor.getByText("Inspect the office reconnect behavior.",{exact:true}).count(),0);
   assert.equal(forbidden,0);assert.deepEqual(errors,[]);
-  await writeFile(resolve(dir,"result.json"),JSON.stringify({pass:true,reads,forbidden,checks:["office entry","read only","search","raw output","pause/resume","expand/Escape","stale connection","mobile overflow","reauth clears content","untrusted text escaped","right-aligned prompt bubbles and long text wrapping","office-matched height across four viewports"]},null,2));
-  console.log(JSON.stringify({pass:true,reads,forbidden,checks:12,artifacts:dir}));
+  await writeFile(resolve(dir,"result.json"),JSON.stringify({pass:true,reads,forbidden,checks:["office entry","read only","search","raw output","pause/resume","expand/Escape","stale connection","mobile overflow","reauth clears content","untrusted text escaped","right-aligned prompt bubbles and long text wrapping","office-matched height across four viewports","all 13 worker entries and isolated output","late worker response ignored after switching","mismatched worker response clears content"]},null,2));
+  console.log(JSON.stringify({pass:true,reads,forbidden,checks:15,artifacts:dir}));
 }finally{await browser.close();await new Promise(r=>server.close(r));}

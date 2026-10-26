@@ -12,7 +12,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import { adminAgentOfficeCliMessages } from "@/lib/adminMessages/agentOfficeCliMonitor";
-import { AGENT_OFFICE_CLI_WORKER } from "@/lib/agentOfficeCliMonitorCore";
+import { isAgentOfficeCliWorker, type AgentOfficeCliWorker } from "@/lib/agentOfficeCliMonitorCore";
 import {
   amuxRoomView,
   engineeringLiveDept,
@@ -216,7 +216,7 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
   // A seated figure is not an engine agent: it is named by its room and the
   // name its record gives it, and its profile is re-read from that record.
   const [seated, setSeated] = useState<{ room: AgentOfficeSeatedRoom; name: string } | null>(null);
-  const [cliOpen, setCliOpen] = useState(false);
+  const [cliWorker, setCliWorker] = useState<AgentOfficeCliWorker | null>(null);
   const onSelectSeated = useCallback((room: AgentOfficeSeatedRoom, name: string) => setSeated({ room, name }), []);
   // A room's name opens what its team does, written from its code and policy.
   const [teamInfo, setTeamInfo] = useState<AgentOfficeTeamId | null>(null);
@@ -375,10 +375,10 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
               onSelectTeam={onSelectTeam}
               onCopyReport={copyReport}
               onDownloadReport={downloadReport}
-              cliMonitor={cliOpen && cliMonitorEnabled ? <AgentOfficeCliMonitor
+              cliMonitor={cliWorker && cliMonitorEnabled ? <AgentOfficeCliMonitor key={cliWorker} worker={cliWorker}
                 avatar={<PixelEmployee {...agentOfficeSeatedClothes("amux", Math.max(0,
-                  amuxView.workers.findIndex(worker => worker.name === AGENT_OFFICE_CLI_WORKER)))} />}
-                onClose={() => setCliOpen(false)} /> : null}
+                  amuxView.workers.findIndex(worker => worker.name === cliWorker)))} />}
+                onClose={() => setCliWorker(null)} /> : null}
             />
           ) : (
             <DashboardView
@@ -419,8 +419,8 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
           reviewView={reviewView}
           decisionView={decisionView}
           quotaView={quotaView}
-          onViewCli={cliMonitorEnabled && seated.room === "amux" && seated.name === AGENT_OFFICE_CLI_WORKER
-            ? () => { setSeated(null); setCliOpen(true); goLive(); } : undefined}
+          onViewCli={cliMonitorEnabled && seated.room === "amux" && isAgentOfficeCliWorker(seated.name)
+            ? () => { setSeated(null); setCliWorker(seated.name as AgentOfficeCliWorker); goLive(); } : undefined}
           onClose={() => setSeated(null)}
         />
       ) : null}
