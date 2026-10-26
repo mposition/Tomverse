@@ -545,8 +545,10 @@ export async function pullAmuxWorkDelivery(input: {
             executionGrade: assignment.grade,
             ...(reviewScope ? {
               // The review server's author is the CLI that wrote the change.
-              reviewAuthor: AMUX_V22_PROVIDERS[amuxV22Provider(assignment.provider) ??
-                "anthropic"].cli,
+              reviewAuthor: (() => {
+                const provider = amuxV22Provider(assignment.provider);
+                return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
+              })(),
               reviewAuthorVendor: assignment.provider,
               reviewScope,
               ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),

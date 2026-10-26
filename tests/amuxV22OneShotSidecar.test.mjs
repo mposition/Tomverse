@@ -734,6 +734,14 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
   await assert.rejects(() => runAmuxV22OneShot(request, { ...config, provider: "cursor" },
     { syntheticPlatform: true, spawnChild: fake.spawnChild }), /invalid v22 one-shot request/);
   assert.equal(fake.calls.length, 1);
+  // An MCP configuration beside Cursor stops the run before its CLI starts.
+  const guarded = fakeSpawn(output);
+  const blocked = await runAmuxV22OneShot({ ...request, role: "investigate" },
+    { ...config, provider: "cursor" }, { syntheticPlatform: true,
+      spawnChild: guarded.spawnChild, channelPreflight: () => "mcp_config_present" });
+  assert.equal(guarded.calls.length, 0);
+  assert.deepEqual([blocked.kind, blocked.cliStarted, blocked.failure],
+    ["failed", false, "mcp_config_present"]);
   const claudeOnly = fakeSpawn(output);
   await assert.rejects(() => runAmuxV22OneShot({ ...request, role: "investigate" },
     { ...config, provider: "cursor" },

@@ -7,7 +7,8 @@ import test from "node:test";
 
 import { amuxCliPricedModelId, estimateAmuxCliApiCost, makeAmuxCliUsageReceipt } from
   "../lib/amux/cliUsageLedgerCore.ts";
-import { amuxV22ChannelArgs, amuxV22ChannelEnv, parseAmuxV22ChannelOutput } from
+import { amuxV22ChannelArgs, amuxV22ChannelEnv, amuxV22ChannelPreflight,
+  parseAmuxV22ChannelOutput } from
   "../lib/amux/v22ChannelRun.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
   "../lib/amux/v22TaskExecutionCore.ts";
@@ -185,4 +186,24 @@ test("a tool outside the role's list makes the run unknown, never trusted", () =
   assert.equal(cursor("shellToolCall").valid, false);
   assert.equal(cursor("editToolCall").valid, false);
   assert.equal(cursor("readToolCall").valid, true);
+});
+
+test("Codex writes the checkout only; Cursor never starts beside an MCP configuration", () => {
+  // Measured on the runner without these, /tmp and a CODEX_HOME writable root
+  // were writable from the workspace-write shell.
+  const codex = amuxV22ChannelArgs("openai", request("implement"), "/w");
+  for (const setting of ["sandbox_workspace_write.writable_roots=[]",
+    "sandbox_workspace_write.exclude_slash_tmp=true",
+    "sandbox_workspace_write.exclude_tmpdir_env_var=true"])
+    assert.equal(codex[codex.indexOf(setting) - 1], "-c", setting);
+  const config = { worktreePath: "/w", homePath: "/h", claudeConfigDir: "/c" };
+  const seen = [];
+  assert.equal(amuxV22ChannelPreflight("cursor", config,
+    { exists: (file) => { seen.push(file.replaceAll("\\", "/")); return false; } }), null);
+  assert.deepEqual(seen, ["/w/.cursor/mcp.json", "/h/.cursor/mcp.json", "/c/cursor/mcp.json"]);
+  for (const present of seen)
+    assert.equal(amuxV22ChannelPreflight("cursor", config,
+      { exists: (file) => file.replaceAll("\\", "/") === present }), "mcp_config_present");
+  for (const provider of ["openai", "github-copilot"])
+    assert.equal(amuxV22ChannelPreflight(provider, config, { exists: () => true }), null);
 });
