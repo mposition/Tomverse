@@ -44,16 +44,20 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
 });
 
 test("only same-repository, ready develop pull requests from agent or Dependabot branches, at most twice", () => {
-  const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", draft: false, sameRepository: true, commitMessages: ["feat: a"], commitCount: 1 };
+  const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", draft: false, sameRepository: true, author: "mposition", commitMessages: ["feat: a"], commitCount: 1 };
+  const bot = { headBranch: "dependabot/npm_and_yarn/develop/group-9a3125fb27", author: "dependabot[bot]" };
   assert.deepEqual(judgePrCiAutoFixTarget(base), { push: true });
   assert.deepEqual(judgePrCiAutoFixTarget({ ...base, headBranch: "codex/to-develop/y" }), { push: true });
   // Owner 2026-10-26: Dependabot's updates into develop are served too.
-  assert.deepEqual(judgePrCiAutoFixTarget({ ...base, headBranch: "dependabot/npm_and_yarn/develop/group-9a3125fb27" }), { push: true });
+  assert.deepEqual(judgePrCiAutoFixTarget({ ...base, ...bot }), { push: true });
   for (const [change, reason] of [
     [{ sameRepository: false }, "fork"],
     [{ baseBranch: "main" }, "base_not_develop"],
     // A security update Dependabot opens against main stays a person's.
-    [{ headBranch: "dependabot/npm_and_yarn/next-16.4.2", baseBranch: "main" }, "base_not_develop"],
+    [{ ...bot, headBranch: "dependabot/npm_and_yarn/next-16.4.2", baseBranch: "main" }, "base_not_develop"],
+    // A person who names a branch dependabot/ does not get Dependabot's root allowance.
+    [{ ...bot, author: "mposition" }, "dependabot_branch_not_by_dependabot"],
+    [{ ...bot, author: "" }, "dependabot_branch_not_by_dependabot"],
     [{ draft: true }, "draft"],
     [{ headBranch: "dependabot" }, "branch_not_served"],
     [{ headBranch: "my-dependabot/x" }, "branch_not_served"],

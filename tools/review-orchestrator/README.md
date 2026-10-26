@@ -504,9 +504,9 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
 운영자 결정 2026-10-23). PR 하나에 자동 수정 커밋은 최대 2개이고, head 하나에 한 번만 시도합니다.
 
 **Dependabot PR(운영자 결정 2026-10-26).**
-- main으로 가는 보안 업데이트는 대상이 아닙니다.
+- main으로 가는 보안 업데이트는 대상이 아닙니다. Dependabot이 연 PR만 대상이고, 사람이 `dependabot/` 이름으로 만든 브랜치는 대상이 아닙니다.
 - 수정은 업데이트된 패키지에 맞춰 앱 코드를 고치는 것입니다. 패키지 버전과 `package.json`·lock은 그대로 둡니다.
-- 루트에서는 앱 빌드·계측 설정(`next.config.*`, `sentry.*.config.ts`, `instrumentation*.ts`)만 고칠 수 있습니다.
+- 루트에서는 앱 빌드·계측 설정(`next.config.ts|mjs|js`, `sentry.client|server|edge.config.ts`, `instrumentation.ts`, `instrumentation-client.ts`)만 고칠 수 있습니다.
   `proxy.ts`와 검사 설정(`tsconfig`, `eslint`, `playwright` 등)은 계속 막힙니다.
 - 다른 계정의 커밋이 들어간 PR은 Dependabot이 더 이상 자동 rebase하지 않습니다. `@dependabot recreate`를
   쓰면 자동 수정 커밋은 지워집니다.

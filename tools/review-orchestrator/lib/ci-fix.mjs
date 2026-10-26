@@ -22,6 +22,8 @@ export const CI_FIX_WORKFLOWS = Object.freeze([
 /** lib/prCiAutoFixGuardCore.ts PR_CI_AUTO_FIX_BRANCH; the workflow judges with that one. */
 export const CI_FIX_BRANCH = /^((claude|codex)\/to-develop|dependabot)\/[A-Za-z0-9._/-]+$/;
 export const CI_FIX_DEPENDABOT_BRANCH = /^dependabot\/[A-Za-z0-9._/-]+$/;
+/** A dependabot/ head is served only when Dependabot opened the pull request, as the guard requires. */
+export const CI_FIX_DEPENDABOT_AUTHOR = "dependabot[bot]";
 export const CI_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
 export const CI_FIX_MAX_ATTEMPTS = 2;
 /** workflow_dispatch takes 65,535 characters of inputs in all. */
@@ -39,7 +41,8 @@ export function servedPulls(pulls) {
   return pulls
     .filter((pull) => pull?.base?.ref === "develop" && pull.draft !== true
       && pull.head?.repo?.full_name === pull.base?.repo?.full_name
-      && CI_FIX_BRANCH.test(pull.head?.ref ?? "") && /^[0-9a-f]{40}$/.test(pull.head?.sha ?? ""))
+      && CI_FIX_BRANCH.test(pull.head?.ref ?? "") && /^[0-9a-f]{40}$/.test(pull.head?.sha ?? "")
+      && (!CI_FIX_DEPENDABOT_BRANCH.test(pull.head.ref) || pull.user?.login === CI_FIX_DEPENDABOT_AUTHOR))
     .sort((a, b) => a.number - b.number);
 }
 

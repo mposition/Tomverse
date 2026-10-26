@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import {
   CI_FIX_BRANCH,
+  CI_FIX_DEPENDABOT_AUTHOR,
   CI_FIX_DEPENDABOT_BRANCH,
   CI_FIX_MAX_PATCH_CHARS,
   CI_FIX_MAX_QUEUED_PER_HOUR,
@@ -33,7 +34,7 @@ import {
   writeDispatchRequest,
 } from "../tools/review-orchestrator/lib/ci-fix.mjs";
 import {
-  PR_CI_AUTO_FIX_BRANCH, PR_CI_AUTO_FIX_DEPENDABOT_BRANCH, PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES, judgePrCiAutoFixDiff,
+  PR_CI_AUTO_FIX_BRANCH, PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR, PR_CI_AUTO_FIX_DEPENDABOT_BRANCH, PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES, judgePrCiAutoFixDiff,
 } from "../lib/prCiAutoFixGuardCore.ts";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import {
@@ -67,7 +68,9 @@ test("only ready same-repository agent and Dependabot pull requests into develop
   const served = servedPulls([
     pull(9, "claude/to-develop/b", SHA_A),
     pull(3, "codex/to-develop/a", SHA_B),
-    pull(10, "dependabot/npm_and_yarn/develop/group-9a3125fb27", SHA_A),
+    pull(10, "dependabot/npm_and_yarn/develop/group-9a3125fb27", SHA_A, { user: { login: "dependabot[bot]" } }),
+    // A person's branch named dependabot/ is not Dependabot's.
+    pull(12, "dependabot/npm_and_yarn/develop/by-hand", SHA_A, { user: { login: "mposition" } }),
     { ...pull(11, "dependabot/npm_and_yarn/next-16.4.2", SHA_A), base: { ref: "main", repo: { full_name: "o/r" } } },
     pull(4, "feature/x", SHA_A),
     pull(5, "claude/to-develop/draft", SHA_A, { draft: true }),
@@ -81,6 +84,7 @@ test("only ready same-repository agent and Dependabot pull requests into develop
 test("the proposer serves exactly the branches the workflow's guard serves", () => {
   assert.equal(CI_FIX_BRANCH.source, PR_CI_AUTO_FIX_BRANCH.source);
   assert.equal(CI_FIX_DEPENDABOT_BRANCH.source, PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.source);
+  assert.equal(CI_FIX_DEPENDABOT_AUTHOR, PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR);
 });
 
 test("a head is ready only when every required workflow's newest run has finished", () => {
@@ -126,7 +130,7 @@ test("the prompt keeps logs as data and names the paths the guard refuses", () =
   assert.match(prompt, /Edit no file at the repository root\./);
 });
 
-test("a Dependabot prompt names exactly the root files the guard allows it", () => {
+test("a Dependabot prompt names only root files the guard allows it", () => {
   const prompt = ciFixPrompt({ workflows: ["PR Fast Gate"], logFile: "/x/ci.log", headBranch: "dependabot/npm_and_yarn/develop/g" });
   assert.doesNotMatch(prompt, /Edit no file at the repository root\./);
   const named = prompt.match(/you may edit only ([^;]+);/)[1].split(/, | and /);

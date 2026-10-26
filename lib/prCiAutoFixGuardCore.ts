@@ -18,6 +18,8 @@ export const PR_CI_AUTO_FIX_MAX_ATTEMPTS = 2;
  */
 export const PR_CI_AUTO_FIX_BRANCH = /^((claude|codex)\/to-develop|dependabot)\/[A-Za-z0-9._/-]+$/;
 export const PR_CI_AUTO_FIX_DEPENDABOT_BRANCH = /^dependabot\/[A-Za-z0-9._/-]+$/;
+/** The only author a dependabot/ head is served for. */
+export const PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR = "dependabot[bot]";
 /**
  * Root files a fix to a Dependabot update may change (owner 2026-10-26): how
  * the app itself is built and instrumented, which a major update of Next.js
@@ -99,6 +101,8 @@ export function judgePrCiAutoFixTarget(input: {
   baseBranch: string;
   draft: boolean;
   sameRepository: boolean;
+  /** The pull request's author login as GitHub reports it. */
+  author: string;
   commitMessages: readonly string[];
   /** The number of commits GitHub says the pull request has; the attempt count is only trusted when every one was read. */
   commitCount: number;
@@ -108,6 +112,11 @@ export function judgePrCiAutoFixTarget(input: {
   if (input.baseBranch !== "develop") reasons.push("base_not_develop");
   if (input.draft) reasons.push("draft");
   if (!PR_CI_AUTO_FIX_BRANCH.test(input.headBranch)) reasons.push("branch_not_served");
+  // A dependabot/ name alone is not Dependabot: a person with push access can
+  // name a branch so, and the root allowance follows the name.
+  if (PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.test(input.headBranch) && input.author !== PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR) {
+    reasons.push("dependabot_branch_not_by_dependabot");
+  }
   if (!Number.isInteger(input.commitCount) || input.commitMessages.length !== input.commitCount) reasons.push("commits_incomplete");
   const attempts = input.commitMessages.filter((m) => m.startsWith(PR_CI_AUTO_FIX_COMMIT_PREFIX)).length;
   if (attempts >= PR_CI_AUTO_FIX_MAX_ATTEMPTS) reasons.push("attempts_exhausted");
