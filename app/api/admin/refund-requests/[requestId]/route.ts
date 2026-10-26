@@ -1,4 +1,6 @@
 export const dynamic = "force-dynamic";
+import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
@@ -503,10 +505,13 @@ export async function PATCH(req: Request, context: RouteContext) {
         });
 
         if (refundRequest.userId) {
+          await lockSubscriptionAccount(tx, refundRequest.userId);
+          const entitlement = await tx.user.findUniqueOrThrow({ where: { id: refundRequest.userId } });
           await tx.user.update({
             where: { id: refundRequest.userId },
             data: {
-              plan: "Free",
+              plan: effectivePlanForAccess({ ...entitlement, plan: "Free", webSubscriptionPlan: "Free" }),
+              webSubscriptionPlan: "Free",
               stripeCustomerId: null,
               stripeSubscriptionId: null,
               stripePriceId: null,

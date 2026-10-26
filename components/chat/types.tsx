@@ -205,6 +205,7 @@ export type Message = {
    * behind either.
    */
   isGeneratingArtifact?: boolean;
+  mcpProgress?: import("@/lib/mcpConnectorProgress").McpProgressState;
   /**
    * Present when this bubble is part of an imported transcript rather than a
    * turn taken in Tomverse.

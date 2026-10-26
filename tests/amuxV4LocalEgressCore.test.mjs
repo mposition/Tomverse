@@ -204,10 +204,13 @@ test("proxy caps simultaneous tunnels and releases a slot after disconnect", asy
     const closed = once(sockets[0], "close");
     const proxyClientClosed = once(proxyClients[0], "close");
     const upstreamClosed = once(echoSockets[0], "close");
+    // A peer's close can precede the proxy's own close/release callback.
+    const released = once(proxyClients[0], "close");
     sockets[0].destroy();
     await closed;
     await proxyClientClosed;
     await upstreamClosed;
+    await released;
     sockets.push(await openTunnel());
   } finally {
     for (const socket of sockets) socket.destroy();

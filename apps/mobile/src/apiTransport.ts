@@ -1,4 +1,4 @@
-import { createApiClient, ApiClientError } from "@tomverse/api-client";
+import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
 import { consumeChatStream } from "../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
 import { toChatRequestMessage } from "../../../lib/chatMessageSerialization";
@@ -11,25 +11,30 @@ import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArt
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
 import { uploadMobileFile } from "./nativeUpload";
-import type { ChatTransport, Conversation, MobileAttachment, MobileCapabilities } from "./chatTransport";
+import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
 
-type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+import { nativeChatLocation } from "./chatLocation";
+import type { MobileRequestInit } from "./authenticatedFetch";
+
+/** A factory is evaluated by the credential boundary immediately before dispatch. */
+type ApiFetch = (path: string, init?: MobileRequestInit) => Promise<Response>;
 type Attempt = { assistantMessageId: string; partialContent: string; status: string; actualModelId?: string; requestedModelId: string };
-export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth, saveFile = saveMobileResponse, uploadFile = uploadMobileFile): ChatTransport {
+export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = MobileAuth, saveFile = saveMobileResponse, uploadFile = uploadMobileFile, location = nativeChatLocation): ChatTransport {
   const requestedTitles = new Set<string>();
   const listeners = new Set<() => void>();
   const unlockGrants = new Map<string, string>();
   const pinSequences = new Map<string, number>();
+  let locationIdentity: string | null = null;
   let sessionRevision = 0;
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
   let capabilityRequest: Promise<MobileCapabilities> | null = null;
   const routedModelByMessage = new Map<string, string>();
-  const clearSessionState = () => { sessionRevision++; capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
+  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
-  const run: ApiFetch = async (path, init) => {
+  const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (unlockGrants.size && /^\/api\/conversations(?:\/|\?)/.test(path)) {
+      if (typeof init !== "function" && unlockGrants.size && /^\/api\/conversations(?:\/|\?)/.test(path)) {
         const headers = new Headers(init?.headers);
         headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
         init = { ...init, headers };
@@ -103,7 +108,21 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const modelId = attempt?.actualModelId ?? message.modelId;
       return { ...message, ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
     });
-    return { ...item, messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
+    // A continuation carries its imported original; an unreadable source is
+    // drawn as the divider alone rather than as an ordinary empty chat.
+    const imported = item.surface === "continuation" ? await continuationSource(id).catch(() => undefined) : undefined;
+    return { ...item, ...(imported ? { imported } : {}), messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
+  }
+  // The imported original of a continuation, one page at a time; `offset`
+  // omitted asks for the page that ends at the divider (policy §8.2 of
+  // docs/policy/external-conversation-continuation.md).
+  async function continuationSource(id: string, offset?: number): Promise<ImportedTranscript> {
+    const value = await request<{ provider: string; importedAt: string; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; sourceModelLabel?: string | null }> } }>(
+      `${pathFor(id)}/continuation?offset=${offset === undefined ? "end" : Math.max(0, Math.trunc(offset))}`, { cache: "no-store" });
+    const status = value.source.status === "deleted" || value.source.status === "locked" ? value.source.status : "available";
+    const messages = status === "available" ? (value.source.messages ?? []).filter(message => message.role === "user" || message.role === "assistant")
+      .map(message => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content, sourceModelLabel: message.sourceModelLabel ?? null })) : [];
+    return { provider: value.provider, importedAt: value.importedAt, status, messages, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100 };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
     await request(pathFor(id), json("PATCH", { selectionMode: auto ? "auto" : "manual", ...(!auto ? { selectedModels: [modelId] } : {}) }));
@@ -130,10 +149,26 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     const controller = new AbortController();
     const abort = () => controller.abort(); signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) controller.abort();
-    const watchdog = createChatLivenessWatchdog({ onExpire: abort });
+    const scope = locationIdentity;
+    const revision = sessionRevision;
+    let watchdog: ReturnType<typeof createChatLivenessWatchdog> | undefined;
     try {
-      const response = await run("/api/chat", { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
-        assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}) }), signal: controller.signal });
+      const fix = await location.readForTurn(scope, controller.signal, {
+        turnId: sourceId,
+        requiresLocation: () => requestChatLocationIntent(String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? ""), (path, init) => run(path, () => {
+          if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+          return init ?? {};
+        })),
+      });
+      controller.signal.throwIfAborted();
+      watchdog = createChatLivenessWatchdog({ onExpire: abort });
+      const response = await run("/api/chat", () => {
+        controller.signal.throwIfAborted();
+        if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+        return { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
+          assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
+          ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }), signal: controller.signal };
+      });
       watchdog.noteHeaders();
       // Auto's choice arrives only as a header, as on the web; it is kept for
       // this session and attached to the message when the conversation reloads.
@@ -162,9 +197,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       finally { reader.releaseLock(); }
       const final = await load(persisted.id);
       if (!final.messages.some(message => message.id === assistantMessageId && ["normal", "incomplete"].includes(message.status ?? ""))) throw Error("CHAT_OUTCOME_PENDING");
-    } finally { watchdog.stop(); signal.removeEventListener("abort", abort); }
+    } finally { watchdog?.stop(); signal.removeEventListener("abort", abort); }
   }
   return {
+    location,
     history: {
       projects: async () => { await historySupport(); return (await request<{ projects: import("./chatTransport").HistoryProject[] }>("/api/projects")).projects; },
       saveProject: (id, name) => historyWrite(id ? `/api/projects/${encodeURIComponent(id)}` : "/api/projects", id ? "PATCH" : "POST", { name }),
@@ -260,7 +296,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     deviceSecurity: () => bridge.getDeviceSecurity?.() ?? Promise.resolve({ available: false, enabled: false, locked: false }),
     setDeviceLock: async (enabled, reason) => { await bridge.setDeviceLock({ enabled, reason }); window.dispatchEvent(new Event("tomverse-device-security-changed")); },
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
-    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => row.surface === "workspace" && ["chat", "image"].includes(row.kind)),
+    // A Review continuation is listed with Review (owner request 2026-10-26).
+    listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations")).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
     createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
@@ -273,7 +310,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     imageHistory: async id => { await requireParity(); return request(`${pathFor(id)}/generations`); },
     imageRequest: async key => { await requireParity(); return request(`/api/images/generations?requestKey=${encodeURIComponent(key)}`); },
     imageGroup: async (id) => { await requireParity(); return request(`/api/images/groups/${encodeURIComponent(id)}`); },
-    account: () => request("/api/user/account"),
+    account: async () => {
+      const revision = sessionRevision;
+      const profile = await request<{ id: string; name?: string | null; email?: string | null; actionsEnabled: boolean }>("/api/user/account");
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      locationIdentity = profile.id; location.setIdentity(profile.id);
+      return profile;
+    },
     exportAccount: async () => {
       const ticket = await request<{ downloadPath: string }>("/api/user/account/export", json("POST", {}));
       if (!/^\/api\/user\/account\/export\/[A-Za-z0-9_-]{32,128}$/.test(ticket.downloadPath)) throw Error("EXPORT_PATH_INVALID");
@@ -284,6 +327,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     deleteAccount: async (confirmationText) => {
       if (confirmationText !== "DELETE MY ACCOUNT") throw Error("CONFIRMATION_REQUIRED");
       await request("/api/user/account", json("DELETE", { confirm: true, confirmationText }));
+      clearSessionState();
     },
     downloadArtifact: async (artifact) => {
       if (artifact.status !== "ready") throw Error("ARTIFACT_UNAVAILABLE");
@@ -294,16 +338,19 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       await saveFile(new Response(bytes, { headers: response.headers }), artifact.filename);
     },
     onSessionLost: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    session: async () => (await bridge.hasSession()).signedIn,
-    signIn: async () => { await bridge.signIn(); },
+    session: async () => { const active = (await bridge.hasSession()).signedIn; if (!active) clearSessionState(); return active; },
+    signIn: async () => { clearSessionState(); await bridge.signIn(); },
     requestEmailCode: (email, language) => bridge.requestEmailCode({ email, language }),
-    verifyEmailCode: (email, code) => bridge.verifyEmailCode({ email, code }),
+    verifyEmailCode: (email, code) => { clearSessionState(); return bridge.verifyEmailCode({ email, code }); },
     signOut: () => { clearSessionState(); return bridge.signOut(); },
     list: async () => {
-      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean }>>("/api/conversations");
-      return rows.filter((row) => row.surface === "chat" && row.kind === "chat");
+      const rows = await request<Array<{ id: string; title: string; surface: string; kind: string; isLocked: boolean; productKey?: string | null }>>("/api/conversations");
+      // A Chat continuation is a Chat conversation with its imported original
+      // above it, so it is listed with Chat (owner request 2026-10-26).
+      return rows.filter((row) => row.kind === "chat" && (row.surface === "chat" || (row.surface === "continuation" && row.productKey === "chat")));
     },
     load,
+    continuationSource,
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,

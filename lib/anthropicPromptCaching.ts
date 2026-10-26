@@ -265,7 +265,9 @@ export const ANTHROPIC_PROMPT_CACHE_TTL = "5m" as const;
  * breakpoints: the SDK places the breakpoint on the last cacheable block and
  * moves it forward as the conversation grows, which is exactly the multi-turn
  * pattern this application needs, and it needs no per-block bookkeeping in a
- * prompt assembled by several different code paths.
+ * prompt assembled by several different code paths. A location-aware chat
+ * instead caches only complete history before the current user turn, omits
+ * these automatic options, and sends no marker without reusable history. The allowed path, TTL and reservation stay the same.
  *
  * Returns options rather than mutating any, so the caller merges it one
  * namespace deep and `thinking`/`effort` -- which live in the same `anthropic`

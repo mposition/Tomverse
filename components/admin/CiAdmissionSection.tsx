@@ -24,16 +24,23 @@ type View = CiAdmissionView;
 
 const RUNNER_REFRESH_MS = 20_000;
 const VIEW_REFRESH_MS = 20_000;
+const SLOW_ACTION_TIMEOUT_MS = 60_000;
 
 /**
  * Who holds GitHub runners right now (lib/ciRunnerUsage.ts), read again every
  * 20 seconds while the page is visible and at once when it becomes visible
  * again; null until the first answer. The server shares one cached read among
- * all viewers.
+ * all viewers. A read GitHub failed keeps the last good reading on screen with
+ * its failure, rather than swapping the cards for the latest round's record
+ * and back (2026-10-25: the running cards came and went).
  */
 function useRunnerUsage(): CiRunnerUsage | null {
   // Read after the page renders, so a slow GitHub read never holds the page.
   const [usage, setUsage] = useState<CiRunnerUsage | null>(null);
+  const keep = (next: CiRunnerUsage) =>
+    setUsage((previous) =>
+      next.status === "unavailable" && previous?.status === "ok" ? { ...previous, failure: next.failure } : next,
+    );
   useEffect(() => {
     let stopped = false;
     // One request at a time, none from a background tab's timer
@@ -44,7 +51,7 @@ function useRunnerUsage(): CiRunnerUsage | null {
       inFlight = true;
       try {
         const response = await adminFetch("/api/admin/ci-admission/runners", { cache: "no-store" });
-        if (response.ok && !stopped) setUsage((await response.json()) as CiRunnerUsage);
+        if (response.ok && !stopped) keep((await response.json()) as CiRunnerUsage);
       } catch {
         // The next tick tries again; the last reading stays on screen.
       } finally {
@@ -113,6 +120,7 @@ const EVENT_DOT: Record<CiAdmissionEvent["kind"], string> = {
   cancelled: "bg-zinc-400",
   failed: "bg-amber-300",
   stopped: "bg-rose-400",
+  updated: "bg-sky-400",
 };
 
 const STATUS_BADGE: Record<CiAdmissionEntryStatus, string> = {
@@ -123,6 +131,7 @@ const STATUS_BADGE: Record<CiAdmissionEntryStatus, string> = {
   checking: "bg-zinc-800 text-zinc-400",
   conflict: "bg-amber-300/15 text-amber-300",
   behind: "bg-amber-300/15 text-amber-300",
+  updating: "bg-sky-400/15 text-sky-300",
   hold: "bg-amber-300/15 text-amber-300",
   held: "bg-rose-400/15 text-rose-300",
 };
@@ -280,6 +289,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        // A stop waits for a round already running; "Run a round now" waits for its own.
+        timeoutMs: body.action === "stop" || body.action === "evaluate" ? SLOW_ACTION_TIMEOUT_MS : undefined,
       });
       const payload = (await response.json().catch(() => ({}))) as Partial<View> & {
         code?: unknown;
@@ -303,7 +314,8 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       }
       if (!response.ok || !payload.state) {
         restore();
-        setNotice(m.saveFailed);
+        // "The previous order is back" only where an order was put back.
+        setNotice(rollback ? m.saveFailed : fill(m.requestFailed, { status: response.status }));
         return;
       }
       setView(payload as View);
@@ -332,7 +344,14 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
       }
     } catch {
       restore();
-      setNotice(m.saveFailed);
+      if (rollback) {
+        setNotice(m.saveFailed);
+      } else {
+        // No answer is not a failure: the server may still be stopping it.
+        // What it did shows in the line and the recent decisions.
+        setNotice(m.noAnswer);
+        await load();
+      }
     } finally {
       setBusy(false);
     }
@@ -449,7 +468,9 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           const need = !handled ? 0 : owner.number !== null ? unitsOf(kind) : deployUnits(owner.base!);
           return { owner, kind, runners: ciRunnerCount(need, owner, now), handled };
         })
-        .filter((card) => card.runners > 0)
+        // A pull request or deploy with a run in progress stays even between
+        // its job waves, when it holds no runner for a few seconds.
+        .filter((card) => card.runners > 0 || card.owner.number !== null || card.handled)
         .sort((a, b) => cardRank(a, order) - cardRank(b, order))
     : [
         ...(state.lastRound?.deploys ?? []).map((deploy) => storedCard("deploy", deploy.branch, deploy.sha, null, deploy.title, deploy.runners ?? deployUnits(deploy.branch))),
@@ -468,10 +489,20 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
     waiting: m.statusWaiting,
     conflict: m.statusConflict,
     behind: m.statusBehind,
+    updating: m.statusUpdating,
     hold: m.statusHold,
     checking: m.statusChecking,
     held: m.statusHeld,
   };
+
+  // A draft "next" in line whose latest release GitHub refused: each round
+  // asks again and fails again, so say why rather than "being marked ready"
+  // for ever (2026-10-25: #2968 and #2969 stayed "next" with runners free).
+  const releaseFailure = new Map<number, string>();
+  for (const event of state.events) {
+    if (event.kind === "released") releaseFailure.delete(event.number);
+    else if (event.kind === "failed" && event.detail?.startsWith("release:")) releaseFailure.set(event.number, event.detail.slice("release:".length));
+  }
 
   const rowBody = (entry: CiAdmissionQueueEntry, rank: number, floating: boolean) => {
     const kind = kindOf(entry);
@@ -493,10 +524,15 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           </span>
         </div>
         <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[entry.status]}`}
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+            entry.status === "next" && releaseFailure.has(entry.number) ? "bg-rose-400/15 text-rose-300" : STATUS_BADGE[entry.status]
+          }`}
           data-testid={floating ? undefined : `ci-admission-status-${entry.number}`}
+          title={entry.status === "next" ? releaseFailure.get(entry.number) : undefined}
         >
-          {statusText[entry.status]}
+          {entry.status === "next" && releaseFailure.has(entry.number)
+            ? fill(m.statusReleaseFailed, { failure: releaseFailure.get(entry.number)! })
+            : statusText[entry.status]}
         </span>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[kind]}`}>{badgeText(kind)}</span>
       </>
@@ -532,8 +568,10 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           ) : state.lastRound ? (
             <span className="text-xs text-zinc-500">{fill(m.lastRound, { at: clock(state.lastRound.at) })}</span>
           ) : null}
-          {runnerUsage?.status === "unavailable" ? (
-            <span className="text-xs text-amber-300">{fill(m.runnerUnavailable, { failure: runnerUsage.failure })}</span>
+          {runnerUsage?.status === "unavailable" || live?.failure ? (
+            <span className="text-xs text-amber-300">
+              {fill(m.runnerUnavailable, { failure: runnerUsage?.status === "unavailable" ? runnerUsage.failure : (live?.failure ?? "") })}
+            </span>
           ) : null}
           <span className="ml-auto text-xs text-zinc-400">{m.budget}</span>
           <div className="inline-flex items-center rounded-lg border border-zinc-700">
@@ -799,6 +837,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
                         cancelled: m.eventCancelled,
                         failed: m.eventFailed,
                         stopped: m.eventStopped,
+                        updated: m.eventUpdated,
                       }[event.kind]
                     }
                   </span>

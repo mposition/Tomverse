@@ -1,6 +1,8 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { parseChatLocation } from "@tomverse/chat-core";
+import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
 import {
     buildAttachmentPromptText,
     inertFilename,
@@ -112,6 +114,7 @@ import {
 } from "@/lib/modelGenerationCompatibility";
 import {
     ANTHROPIC_PROMPT_CACHE_TTL,
+    anthropicPromptCacheApplies,
     type AnthropicPromptCachePath,
 } from "@/lib/anthropicPromptCaching";
 import {
@@ -299,6 +302,10 @@ import {
 } from "@/lib/providerMonitoring";
 import { observeServedProcessingTier } from "@/lib/servedProcessingTier";
 import { z } from "zod";
+import { buildMcpChatTools, MCP_CHAT_MAX_STEPS } from "@/lib/mcpConnectorChatTool";
+import { buildMcpProgressChunk } from "@/lib/mcpConnectorProgress";
+import { MCP_UNTRUSTED_NOTICE, mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
+import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
 import {
     apiSecurityResponse,
     assertMessageCapacity,
@@ -1091,6 +1098,7 @@ async function handleChatPost(
     // CHAT-LATENCY-01. The start of every server-side duration this turn
     // reports (lib/chatTurnTiming.ts).
     const requestReceivedAt = Date.now();
+    let mcpConnector: Awaited<ReturnType<typeof buildMcpChatTools>> | null = null;
     // One timing line per turn, whichever path ends it: the stream's
     // settlement or the request failure path below. Shared, so a turn that
     // settled and then threw on its way out is not written twice.
@@ -1301,6 +1309,9 @@ async function handleChatPost(
         if (routeAuth.response) return routeAuth.response;
         const session = routeAuth.session;
         const body = await readChatJsonBody(req);
+        const currentLocation = parseChatLocation(
+            (body as { currentLocation?: unknown } | null)?.currentLocation
+        );
         const {
             messages,
             modelId,
@@ -1310,6 +1321,7 @@ async function handleChatPost(
             turnstileToken,
             deepResearchDepth,
             webSearchMode,
+            mcpConnectionId,
             admissionToken,
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
@@ -1317,6 +1329,9 @@ async function handleChatPost(
             guestAutoCapability,
             guestClientTurnId,
         } = validateChatPayload(body);
+        if (mcpConnectionId && (!mcpPreviewEnabled() || !session?.user?.id)) {
+            throw new ChatAccessError(403, "MCP_CONNECTOR_UNAVAILABLE", "Sign in and enable the connector preview to use a selected plugin.");
+        }
         persistenceSourceUserMessageId = sourceUserMessageId;
         {
             const attachments = messages.flatMap((message) =>
@@ -1698,6 +1713,7 @@ async function handleChatPost(
                           routerModelId: true,
                           routerChallengerTurns: true,
                           productKey: true,
+                          continuationBridge: { select: { id: true } },
                       },
                   })
                 : null;
@@ -2080,6 +2096,10 @@ async function handleChatPost(
             !guestAutoSelection?.routed &&
             Boolean(session?.user?.id && conversationId && assistantMessageId) &&
             conversationRouting?.productKey === "chat" &&
+            // A Chat continuation stays text-only: `startChatImageTurn` refuses
+            // a bridged conversation, so an image decision here would leave
+            // the question with no answer (docs/policy/external-conversation-continuation.md §5.1).
+            !conversationRouting?.continuationBridge &&
             !admissionToken &&
             !deepResearchDepth &&
             !promptRefinerDecision &&
@@ -3206,6 +3226,7 @@ async function handleChatPost(
             }
         }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
+            currentLocation,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             autoRouted,
@@ -3230,6 +3251,18 @@ async function handleChatPost(
             continuationSeed,
         });
         const artifactToolPlan = turnSystemBlocks.artifactPlan;
+        if (mcpConnectionId) {
+            if (conversationProductKey !== "chat" || isDeepResearchTurn) throw new ChatAccessError(400, "MCP_CHAT_REQUIRED", "Plugins are available in Chat with a model that supports tools.");
+            try {
+                mcpConnector = await buildMcpChatTools({ userId: session!.user.id,
+                    connectionId: mcpConnectionId, modelId: modelConfig.id, nativeSearch: nativeSearchEnabled,
+                    signal: req.signal, onState: state => {
+                        try { streamController?.enqueue(buildMcpProgressChunk(state)); } catch { /* The client has closed its stream. */ }
+                    } });
+            } catch {
+                throw new ChatAccessError(400, "MCP_CONNECTION_OR_MODEL_UNAVAILABLE", "The selected connection or model cannot use these tools. Check Plugins, or choose a model with tool support and turn off native web search.");
+            }
+        }
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
@@ -3238,6 +3271,11 @@ async function handleChatPost(
             contextSystemPrompt,
             blocks: turnSystemBlocks,
         });
+        if (mcpConnector) {
+            formattedMessages.push({ role: "system", content: MCP_UNTRUSTED_NOTICE });
+            inputEstimate.addText(MCP_UNTRUSTED_NOTICE);
+            estimatedInputTokens += estimateTextTokens(MCP_UNTRUSTED_NOTICE);
+        }
         // Priced like any other input, and counted by the same builder that
         // produced the blocks so preflight cannot arrive at a different
         // number. The tool *definitions* are a separate cost the provider adds
@@ -4029,6 +4067,12 @@ async function handleChatPost(
                 ],
             });
         }
+        const uncachedLocationMessages = [...formattedMessages];
+        appendChatLocationContext(uncachedLocationMessages, currentLocation);
+        const locationCacheBreakpoint = appendChatLocationContext(
+            formattedMessages, currentLocation,
+            anthropicPromptCacheApplies(modelConfig, promptCachePath)
+        );
         /*
           Fail closed on files that are gone and have not been acknowledged.
 
@@ -4121,6 +4165,8 @@ async function handleChatPost(
                 // authorise it.
                 promptCachePath,
                 reservationOnlyInputTokens,
+                additionalToolInputTokens: mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0,
+                toolInputPasses: mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -4137,9 +4183,12 @@ async function handleChatPost(
         // That figure is clamped to the plan's input ceiling, so a request over
         // *that* limit was already refused by `createChatBudget` with
         // CHAT_INPUT_TOKEN_LIMIT before reaching here.
+        const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;
+        // A multi-pass (MCP) reservation sums every pass; the window only has
+        // to hold one, so the guard reads the single-pass view of the budget.
         const outputBudget = fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            reservedInputTokens: budget.inputTokens,
+            reservedInputTokens: contextInputTokens,
             requestOutputCapTokens: budget.maxOutputTokens,
             providerMaxOutputTokens: budget.providerMaxOutputTokens,
         });
@@ -4156,6 +4205,10 @@ async function handleChatPost(
         // unfitted figure -- over-reserving is refunded at settlement, and
         // reserving less than the answer might cost protects nothing.
         const requestMaxOutputTokens = outputBudget.outputTokens;
+        // Reuse the existing reservation: every MCP model step shares this
+        // input/output allowance instead of acquiring its own paid budget.
+        mcpConnector?.setBudget({ inputTokens: budget.inputTokens, outputTokens: requestMaxOutputTokens,
+            instructions: formattedMessages.filter(m => m.role === "system").map(m => m.content).join("\n") });
         // Shadow routing (docs/policy/tomverse-chat-delivery-plan.md §6 step 3).
         // The Router's rules run on this turn and the decision is recorded; the
         // model the user selected is what executes. Handed to `after()` and
@@ -4647,7 +4700,7 @@ async function handleChatPost(
           registers no application tool behaves exactly as it does today.
         */
         const combinedToolConfig =
-            webSearchToolConfig || appManagedSearchTool || artifactToolConfig
+            webSearchToolConfig || appManagedSearchTool || artifactToolConfig || mcpConnector
                 ? {
                       ...(webSearchToolConfig ?? {}),
                       tools: {
@@ -4660,6 +4713,7 @@ async function handleChatPost(
                           // retrieval tool on the request to be exclusive with.
                           ...(appManagedSearchTool?.tools ?? {}),
                           ...(artifactToolConfig?.tools ?? {}),
+                          ...(mcpConnector?.tools ?? {}),
                       },
                       // A search tool with no tool loop is a search the model
                       // never gets to read: the SDK stops after one step, and
@@ -4744,7 +4798,7 @@ async function handleChatPost(
             // The same value the budget above was given -- see there. A no-op
             // for every provider but Anthropic, and a no-op on a searching turn
             // whatever the provider: see lib/anthropicPromptCaching.ts.
-            promptCachePath,
+            promptCachePath: locationCacheBreakpoint ? undefined : promptCachePath,
         });
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -4768,6 +4822,9 @@ async function handleChatPost(
          */
         const { messages: sdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
+        const fallbackSdkMessages = locationCacheBreakpoint
+            ? splitProviderInstructions(uncachedLocationMessages).messages
+            : sdkMessages;
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -4818,7 +4875,7 @@ async function handleChatPost(
             provider: modelConfig.provider,
             messages: manifestMessages,
             tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
-            tokenCount: budget.inputTokens,
+            tokenCount: contextInputTokens,
             // An unbounded budget means the model declares no window. The
             // manifest still needs a number for its within-window CHECK, and
             // the honest one is the request itself: a request cannot exceed a
@@ -4827,7 +4884,7 @@ async function handleChatPost(
             contextWindowTokens:
                 outputBudget.kind === "fitted"
                     ? outputBudget.limitTokens
-                    : budget.inputTokens + requestMaxOutputTokens,
+                    : contextInputTokens + requestMaxOutputTokens,
             estimatedInputTokens,
             reservedInputTokens: budget.inputTokens,
             requestOutputCapTokens: budget.maxOutputTokens,
@@ -4845,7 +4902,9 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             maxOutputTokens: requestMaxOutputTokens,
-            settings: generationSettings as Record<string, unknown>,
+            settings: { ...generationSettings, ...(locationCacheBreakpoint?.historyBreakpoint != null ? {
+                locationCacheBreakpoint: { position: "stable_history", messageIndex: locationCacheBreakpoint.historyBreakpoint, ttl: ANTHROPIC_PROMPT_CACHE_TTL },
+            } : {}) } as Record<string, unknown>,
             // Named rather than embedded when the artifact tool is present:
             // the tool object carries an `execute` closure and a Zod schema,
             // neither of which survives `JSON.stringify`, and one of which can
@@ -4906,6 +4965,11 @@ async function handleChatPost(
                             : undefined,
                     ...generationSettings,
                     ...(combinedToolConfig ?? {}),
+                    ...(mcpConnector ? {
+                        maxRetries: 0,
+                        stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
+                        prepareStep: mcpConnector.prepareStep,
+                    } : {}),
                 })
         );
         // The fallback drill's deliberate failure, if this request asked for
@@ -5492,6 +5556,7 @@ async function handleChatPost(
             }
         };
         const cancelSourceSafely = async (reason?: unknown) => {
+            mcpConnector?.cancel();
             // AI SDK text streams are tee branches. Cancelling the reader only
             // cancels that branch; the provider receives cancellation through
             // the signal passed to streamText. Abort it first, then release the
@@ -6032,7 +6097,7 @@ async function handleChatPost(
                 await recordDispatchStarted(nextRecord);
                 nextStream = await streamText({
                     model: plan.activeModel,
-                    messages: sdkMessages,
+                    messages: fallbackSdkMessages,
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     abortSignal: AbortSignal.any([
                         req.signal,
@@ -6478,6 +6543,11 @@ async function handleChatPost(
                                     : undefined,
                             providerCitations: perplexitySearchCitations,
                         });
+                        if (mcpConnector) {
+                            webSearchExecution.citations = sanitizeWebSearchCitations([
+                                ...webSearchExecution.citations, ...mcpConnector.sources(),
+                            ]);
+                        }
                         // A provider that hit its output ceiling returns HTTP
                         // 200 with real text and a `length` finish reason.
                         // Recorded so the answer is never presented as
@@ -6632,7 +6702,11 @@ async function handleChatPost(
                                 /*
                                   Provider-private state for replaying a
                                   reasoning model exactly -- and not stored at
-                                  all on a turn that called the artifact tool.
+                                  all on a turn that called the artifact tool
+                                  or received an ephemeral device location.
+                                  Private reasoning and tool inputs can echo
+                                  that fix; keeping them would replay it after
+                                  location is disabled or the tab reloads.
 
                                   `response.messages` carries that turn's tool
                                   call and its result verbatim. Replaying them
@@ -6650,7 +6724,9 @@ async function handleChatPost(
                                 const providerContext =
                                     dispatched.reasoning !== undefined &&
                                     responseResult.status === "fulfilled" &&
-                                    !artifactCollector?.wasInvoked
+                                    !artifactCollector?.wasInvoked &&
+                                    !mcpConnector &&
+                                    !currentLocation
                                         ? serializeProviderResponseMessages(
                                               responseResult.value.messages
                                           )
@@ -7205,6 +7281,7 @@ async function handleChatPost(
         leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
         return response;
     } catch (error: unknown) {
+        mcpConnector?.cancel();
         /*
           The last catch, and the one that used to get this wrong.
 

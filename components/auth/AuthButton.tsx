@@ -1,5 +1,6 @@
 ﻿// components/auth/AuthButton.tsx
 "use client";
+import { storeBillingDeletionNotice } from "@/locales/storeBilling";
 
 import { UsagePercentGauge } from "@/components/chat/UsagePercentGauge";
 import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
@@ -132,10 +133,11 @@ export function AuthButton({
         | { kind: "ready"; conversations: number; bytes: number }
     >({ kind: "hidden" });
     // Status line for the memory row. Unlike the import entry this is never a
-    // visibility probe -- memory review is always reachable (policy §15) -- so
-    // an unavailable API only costs the row its status, never the row.
+    // visibility probe -- memory settings are always reachable
+    // (docs/policy/external-conversation-import-and-memory.md §15) -- so an unavailable API only costs the row its
+    // status, never the row.
     const [memoryEntryStatus, setMemoryEntryStatus] = useState<
-        { masterEnabled: boolean; candidates: number } | null
+        { masterEnabled: boolean } | null
     >(null);
     // Settings-list row a detail page asked to return to, kept until the row
     // it names has actually rendered: the import row only appears once the
@@ -440,7 +442,7 @@ export function AuthButton({
         };
     }, [isModalOpen, activeSettingsTab, session?.user]);
 
-    // Status line for the memory row. Both endpoints stay reachable with the
+    // Status line for the memory row. The endpoint stays reachable with the
     // rollout flag off (policy §15), so a failure here is a network fact and
     // not a feature probe: the row renders either way, just without a status.
     //
@@ -452,36 +454,20 @@ export function AuthButton({
             return;
         }
         let cancelled = false;
-        Promise.all([
-            fetch("/api/memories/settings", { cache: "no-store" }),
-            fetch("/api/memories?status=candidate&limit=1", {
-                cache: "no-store",
-            }),
-        ])
-            .then(async ([settingsResponse, candidateResponse]) => {
-                // Both bodies, on every path out of here. `Promise.all` means
-                // one refusal used to strand the other response's body unread
-                // as well, and a cancelled effect stranded both -- the request
-                // then stays in flight for the life of the page (see
-                // lib/apiCacheControlPolicy.ts).
-                if (cancelled || !settingsResponse.ok || !candidateResponse.ok) {
+        fetch("/api/memories/settings", { cache: "no-store" })
+            .then(async (settingsResponse) => {
+                // The body on every path out of here: a stranded one stays in
+                // flight for the life of the page (lib/apiCacheControlPolicy.ts).
+                if (cancelled || !settingsResponse.ok) {
                     await discardResponseBody(settingsResponse);
-                    await discardResponseBody(candidateResponse);
                     return;
                 }
                 const settings = (await settingsResponse.json()) as {
                     masterEnabled?: boolean;
                 } | null;
-                const candidates = (await candidateResponse.json()) as {
-                    total?: number;
-                } | null;
                 if (cancelled) return;
                 setMemoryEntryStatus({
                     masterEnabled: settings?.masterEnabled !== false,
-                    candidates:
-                        typeof candidates?.total === "number"
-                            ? candidates.total
-                            : 0,
                 });
             })
             .catch(() => {
@@ -492,21 +478,12 @@ export function AuthButton({
         };
     }, [isModalOpen, activeSettingsTab, session?.user]);
 
-    // "Used in new chats · 3 awaiting review" -- the state first, then the
-    // thing that needs doing, and only when there is one.
+    // "Used in new chats" or not. There is no review queue to count since
+    // 2026-10-24: extracted memories activate by themselves.
     const memoryEntryStatusText = memoryEntryStatus
-        ? [
-              memoryEntryStatus.masterEnabled
-                  ? t("memoryReview.dataTabStatusOn")
-                  : t("memoryReview.dataTabStatusOff"),
-              ...(memoryEntryStatus.candidates > 0
-                  ? [
-                        formatCopy("memoryReview.dataTabStatusPending", {
-                            count: String(memoryEntryStatus.candidates),
-                        }),
-                    ]
-                  : []),
-          ].join(" · ")
+        ? memoryEntryStatus.masterEnabled
+            ? t("memoryReview.dataTabStatusOn")
+            : t("memoryReview.dataTabStatusOff")
         : null;
 
     // Picks up the redirect from /api/user/login-methods/oauth/callback (the
@@ -2361,6 +2338,9 @@ export function AuthButton({
                         </div>
                         <p className="mt-2 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
                             {t("auth.deleteAccountImmediateDescription")}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-red-700 dark:text-red-100" data-testid="delete-account-store-billing-notice">
+                            {storeBillingDeletionNotice(globalLang)}
                         </p>
                         <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
                             <input

@@ -82,6 +82,14 @@ export function amuxV19MaxSessionCycleStatus(result) {
       if (STATES.test(result?.[key] ?? "")) parts.push(`${key}=${result[key]}`);
     }
     if (result?.haltReleased === false) parts.push("haltReleased=false");
+    // Counts of failed Read/Grep/Glob calls the analysis recovered from.
+    for (const [tool, key] of [["Read", "readErrors"], ["Grep", "grepErrors"],
+      ["Glob", "globErrors"]]) {
+      const count = result?.toolErrors?.[tool];
+      if (Number.isSafeInteger(count) && count > 0 && count <= 1_000_000) {
+        parts.push(`${key}=${count}`);
+      }
+    }
   }
   if (analysis) {
     parts.push(...analysisParts(result.analysis));

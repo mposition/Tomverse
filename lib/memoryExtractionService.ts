@@ -28,17 +28,11 @@ import {
     type MemoryExtractionEvalEntry,
 } from "@/lib/memoryExtractionEvalRegister";
 import { getModelPricingProfile } from "@/lib/modelPricing";
-import {
-    AVAILABLE_MODELS,
-    canUseModelWithPlan,
-    getModelUsageCredits,
-    type ModelTier,
-} from "@/lib/models";
+import { AVAILABLE_MODELS } from "@/lib/models";
 import {
     reserveExtractionRunCredits,
     settleExtractionRunCredits,
 } from "@/lib/memoryExtractionCredits";
-import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import { prisma } from "@/lib/prisma";
 import { getProviderCostBudget } from "@/lib/providerCostBudget";
@@ -112,14 +106,16 @@ const subBudgetEnv = (
 });
 
 /**
- * Resolves the §12.1 effective pair for one user, or throws the §18 error.
- * Register approval, operational revocation, verified pricing, plan access
- * and prompt-version match all live here so every caller gets one answer.
+ * Resolves the §12.1 effective pair, or throws the §18 error. Register
+ * approval, operational revocation, verified pricing and prompt-version match
+ * all live here so every caller gets one answer.
+ *
+ * No plan check: extraction is free and Tomverse pays for it (owner decision
+ * 2026-10-24), so the model is not one the account chooses or is charged for.
  */
 export async function resolveEffectiveExtractionPair(input: {
     extractionModelId: string;
     promptVersion: string;
-    plan: ModelTier | "Guest";
     register?: readonly MemoryExtractionEvalEntry[];
 }) {
     const revoked = await getMemoryExtractionRevokedPairs();
@@ -135,12 +131,7 @@ export async function resolveEffectiveExtractionPair(input: {
     const model = AVAILABLE_MODELS.find(
         (candidate) => candidate.id === input.extractionModelId
     );
-    if (
-        !entry ||
-        !pricing ||
-        !model ||
-        !canUseModelWithPlan(input.plan, model)
-    ) {
+    if (!entry || !pricing || !model) {
         // One code for every reason (§18): which condition failed is an
         // operational detail, not something a probing client learns.
         throw new ApiSecurityError(
@@ -183,7 +174,7 @@ function refuseLockedSelection(
 }
 
 /**
- * The §11 pre-run figure: chunk plan and credit/cost estimate over the
+ * The §11 pre-run figure: chunk plan and provider cost estimate over the
  * user's finalized conversations. Pure math over stored byte counts — no
  * provider contact, no reservation.
  */
@@ -191,7 +182,6 @@ export async function estimateMemoryExtraction(input: {
     userId: string;
     extractionModelId: string;
     promptVersion: string;
-    plan: ModelTier | "Guest";
     selectedConversationIds: string[];
     register?: readonly MemoryExtractionEvalEntry[];
 }): Promise<
@@ -201,7 +191,7 @@ export async function estimateMemoryExtraction(input: {
         chunks: ExtractionChunkPlan[];
     }
 > {
-    const { pricing, model } = await resolveEffectiveExtractionPair(input);
+    const { pricing } = await resolveEffectiveExtractionPair(input);
 
     const selected = await prisma.externalConversation.findMany({
         where: {
@@ -228,7 +218,7 @@ export async function estimateMemoryExtraction(input: {
 
     // Sorted by id before planning. Chunk boundaries depend on the order the
     // conversations arrive in, and `findMany` makes no ordering promise, so
-    // without this the estimate the user confirms and the plan the run stores
+    // without this the estimate and the plan the run stores
     // could disagree between two calls over the same selection.
     const chunks = planExtractionChunks(
         [...selected]
@@ -243,7 +233,9 @@ export async function estimateMemoryExtraction(input: {
     const estimate = estimateExtraction(chunks, {
         inputMicroUsdPerMTokens: tier.inputUsdPerMillionTokens * 1_000_000,
         outputMicroUsdPerMTokens: tier.outputUsdPerMillionTokens * 1_000_000,
-        creditsPerCall: getModelUsageCredits(model),
+        // Free to the account (owner decision 2026-10-24). The cost above is
+        // still estimated: it is what the provider budget is checked against.
+        creditsPerCall: 0,
     });
     return { ...estimate, conversationCount: selected.length, chunks };
 }
@@ -351,31 +343,15 @@ async function assertExtractionBudget(
 }
 
 /**
- * The monthly and daily plan credit limits the reservation allocates against.
- *
- * A Guest never reaches here -- §11 requires an approved pair on the account's
- * plan and guests have no account -- but the type allows one, so it resolves
- * to no plan credits rather than to a plan's limits by accident.
+ * Creates a run over the given conversations. Since 2026-10-24 runs are
+ * started by the server when an import finishes (lib/memoryExtractionAuto.ts),
+ * never by a user confirming an estimate, and they cost the account nothing.
  */
-async function extractionPlanLimits(plan: ModelTier | "Guest") {
-    if (plan === "Guest") {
-        return { monthlyMessageLimit: 0, dailyMessageLimit: 0 };
-    }
-    const billingPlan = await getBillingPlanByTier(plan);
-    return {
-        monthlyMessageLimit: billingPlan?.monthlyMessageLimit ?? 0,
-        dailyMessageLimit: billingPlan?.dailyMessageLimit ?? 0,
-    };
-}
-
 export async function createMemoryExtractionRun(input: {
     userId: string;
     extractionModelId: string;
     promptVersion: string;
-    plan: ModelTier | "Guest";
     selectedConversationIds: string[];
-    /** §11: the user confirms the shown estimate; a stale confirm re-asks. */
-    confirmedCredits: number;
     register?: readonly MemoryExtractionEvalEntry[];
     now?: Date;
     environment?: Record<string, string | undefined>;
@@ -388,25 +364,12 @@ export async function createMemoryExtractionRun(input: {
     await assertUserOperationalAccess(input.userId);
     const { pricing } = await resolveEffectiveExtractionPair(input);
     const estimate = await estimateMemoryExtraction(input);
-    if (estimate.estimatedCredits !== input.confirmedCredits) {
-        // The selection changed under the confirmation dialog. Same shape as
-        // the import selection guard: re-show, never silently re-price.
-        throw new ApiSecurityError(
-            409,
-            "MEMORY_ESTIMATE_CHANGED",
-            "The estimate no longer matches the selection."
-        );
-    }
     await assertExtractionBudget(
         pricing.provider,
         estimate.estimatedCostMicroUsd,
         now,
         input.environment ?? process.env
     );
-
-    // Read outside the transaction: it is configuration, and holding the run
-    // lock while querying it would widen the lock for no benefit.
-    const planLimits = await extractionPlanLimits(input.plan);
 
     const sourceSelection = [...new Set(input.selectedConversationIds)].sort();
     return prisma.$transaction(async (tx) => {
@@ -477,17 +440,18 @@ export async function createMemoryExtractionRun(input: {
                 pricingVersion: `${estimate.basis}:${pricing.modelId}`,
             },
         });
-        // Entitlement, in the same transaction as the run and its chunks: a
-        // run can never exist without the reservation that paid for it, and a
-        // refused reservation leaves no run, no chunks and no charge. The
-        // provider budget checked above is the separate operational layer and
-        // stays a per-chunk re-check in the slice driver (AGENTS.md).
+        // The reservation row, in the same transaction as the run and its
+        // chunks. It reserves zero credits -- extraction is free to the
+        // account -- and still records the estimated provider cost Tomverse
+        // pays, which settlement scales to the chunks that ran. The provider
+        // budget checked above is the operational layer and stays a
+        // per-chunk re-check in the slice driver (AGENTS.md).
         await reserveExtractionRunCredits({
             tx,
             userId: input.userId,
             runId: run.id,
-            plan: planLimits,
-            credits: estimate.estimatedCredits,
+            plan: { monthlyMessageLimit: 0, dailyMessageLimit: 0 },
+            credits: 0,
             costMicroUsd: estimate.estimatedCostMicroUsd,
             chunkTotal: estimate.chunkCount,
             provider: pricing.provider,
@@ -499,7 +463,7 @@ export async function createMemoryExtractionRun(input: {
             // profile by construction.
             costSource: pricing.priceSource,
             // Frozen here on purpose: a price change afterwards must not
-            // re-settle a run the user already confirmed at these numbers.
+            // re-settle the cost recorded for a run already started.
             pricingSnapshot: {
                 basis: estimate.basis,
                 modelId: pricing.modelId,
@@ -825,9 +789,17 @@ export async function completeExtractionChunk(
         }
         const chunk = await tx.memoryExtractionChunk.findUnique({
             where: { runId_chunkIndex: { runId: lease.runId, chunkIndex } },
-            select: { attemptCount: true },
+            select: { id: true, attemptCount: true },
         });
         if (!chunk) return { applied: false, runStatus: "unknown" };
+        // Attempts handed back because memory was off are not failures and
+        // do not spend the retry budget (pauseExtractionChunk).
+        const pausedAttempts =
+            result.outcome === "failed"
+                ? await tx.memoryExtractionProviderCall.count({
+                      where: { chunkId: chunk.id, failureCode: "memory_off" },
+                  })
+                : 0;
 
         /*
           `skipped` is terminal and never goes through `chunkFailureDisposition`.
@@ -841,7 +813,9 @@ export async function completeExtractionChunk(
                 ? ({ status: "completed" } as const)
                 : result.outcome === "skipped"
                   ? ({ status: "skipped" } as const)
-                  : chunkFailureDisposition({ attemptCount: chunk.attemptCount });
+                  : chunkFailureDisposition({
+                        attemptCount: Math.max(0, chunk.attemptCount - pausedAttempts),
+                    });
         const settledNow =
             disposition.status === "completed" || disposition.status === "skipped";
 
@@ -954,6 +928,36 @@ export async function completeExtractionChunk(
     });
 }
 
+/**
+ * Hands a claimed chunk back to pending without recording a failure.
+ *
+ * For memory turned off while the provider was answering: that is the user's
+ * choice, not a failure of the chunk, so it must not count against the
+ * chunk's bounded attempts -- otherwise turning memory off on a chunk's last
+ * attempt would end the whole run as failed. `attemptCount` itself keeps
+ * rising, because with the chunk it is the identity of each provider call
+ * in the ledger; the attempt is instead left out of the retry budget by its
+ * ledger row's `memory_off` failure code (`completeExtractionChunk`).
+ * Fenced on the lease like every other chunk write.
+ */
+export async function pauseExtractionChunk(
+    lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">,
+    chunkIndex: number,
+    now: Date = new Date()
+): Promise<boolean> {
+    const paused = await prisma.$executeRaw`
+        UPDATE "MemoryExtractionChunk"
+        SET "status" = 'pending',
+            "leaseGeneration" = NULL,
+            "updatedAt" = ${now}
+        WHERE "runId" = ${lease.runId}
+          AND "chunkIndex" = ${chunkIndex}
+          AND "status" = 'running'
+          AND "leaseGeneration" = ${lease.leaseGeneration}
+    `;
+    return paused === 1;
+}
+
 /** User cancel: deterministic release, terminal state, idempotent. */
 export async function cancelMemoryExtractionRun(userId: string, runId: string) {
     const run = await loadOwnedRun(userId, runId);
@@ -1031,7 +1035,8 @@ export type ExtractionSliceResult = {
  * A run is durable and a slice may be picked up minutes or hours later, so
  * none of these can be decided once at creation: the rollout flag may have
  * been turned off, the (model, promptVersion) pair may have been revoked
- * without a deploy, the user's plan may have changed, and the batch
+ * without a deploy, the account may have been deleted or turned memory off,
+ * and the batch
  * sub-budget may have been spent by other runs. Each is re-read immediately
  * before a provider call, never cached across chunks.
  */
@@ -1044,15 +1049,17 @@ async function extractionDispatchBlocker(
     if (!(await isMemoryExtractionEnabled())) return "feature_disabled";
     const user = await prisma.user.findUnique({
         where: { id: lease.userId },
-        select: { plan: true },
+        select: { id: true, memorySettings: { select: { masterEnabled: true } } },
     });
     if (!user) return "owner_missing";
+    // Memory turned off after the run started: nothing more is sent. The run
+    // stays pending and continues if the user turns memory back on.
+    if (user.memorySettings?.masterEnabled === false) return "memory_off";
     let pricing;
     try {
         ({ pricing } = await resolveEffectiveExtractionPair({
             extractionModelId: lease.extractionModelId,
             promptVersion: lease.promptVersion,
-            plan: (user.plan as ModelTier) ?? "Free",
             register,
         }));
     } catch {
@@ -1225,6 +1232,13 @@ export async function driveMemoryExtractionRunSlice(input: {
         const applied0 = timedOut
             ? { outcome: "failed" as const, code: "chunk_timeout" }
             : result;
+
+        if (applied0.outcome === "failed" && applied0.code === "memory_off") {
+            // Not a failure: the chunk goes back unspent and the run waits,
+            // blocked, until memory is back on.
+            await pauseExtractionChunk(lease, chunk.chunkIndex);
+            return stop("blocked", "memory_off");
+        }
 
         const applied = await completeExtractionChunk(
             lease,

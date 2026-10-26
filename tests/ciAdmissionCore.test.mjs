@@ -7,9 +7,11 @@ import {
   CI_ADMISSION_RAMP_MS,
   CI_ADMISSION_WAIT_RECHECK_MS,
   CI_ADMISSION_RELEASE_GRACE_MS,
+  CI_ADMISSION_UPDATE_RETRY_MS,
   ciAdmissionDraftsToCheck,
   ciAdmissionOrder,
   ciAdmissionUnits,
+  ciAdmissionUpdatesBranchOf,
   ciRunKey,
   ciRunnerCount,
   ciRunnerOwnerKey,
@@ -88,6 +90,8 @@ test("the line is every open handled pull request, drafts included: stored order
   const order = ciAdmissionOrder(lineOf(20, 99, 30), open).map((p) => p.number);
   // 99 is closed; 40 (stacked) and 50 (a fork) are not handled; 5 and 10 are new, by number.
   assert.deepEqual(order, [20, 30, 5, 10]);
+  // A ci:hold label takes a pull request out of the line wherever it was.
+  assert.deepEqual(ciAdmissionOrder(lineOf(20, 30), open.map((p) => (p.number === 20 ? { ...p, labels: [CI_ADMISSION_HOLD_LABEL] } : p))).map((p) => p.number), [30, 5, 10]);
 });
 
 test("the same GitHub snapshot judged again gives the same line: nothing appears and disappears", () => {
@@ -113,7 +117,7 @@ test("drafts the slots reach are marked ready from the top, within the budget", 
   assert.deepEqual(evaluation.state.queue.map((e) => e.draft), [false, false, false, true]);
 });
 
-test("a draft with a conflict, behind its base, held by label, or not checked yet is passed over and says why", () => {
+test("a draft with a conflict, behind its base, or not checked yet is passed over and says why; one labelled ci:hold is not in the line", () => {
   const open = [pull(1), pull(2), pull(3, { labels: [CI_ADMISSION_HOLD_LABEL] }), pull(4), pull(5), pull(6)];
   const checks = new Map([
     [1, { conflict: true, behind: false }],
@@ -122,8 +126,12 @@ test("a draft with a conflict, behind its base, held by label, or not checked ye
     [5, clean],
     [6, { conflict: false, behind: null }],
   ]);
-  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4, 5, 6) }), openPulls: open, checks });
-  assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "behind", 3: "hold", 4: "checking", 5: "next", 6: "next" });
+  const queue = lineOf(1, 2, 3, 4, 5, 6).map((entry) => ({ ...entry, title: `Pull ${entry.number}` }));
+  // Branch updates off: a draft behind its base is only passed over.
+  const evaluation = judge({ state: state({ queue }), openPulls: open, checks, updateBranches: false });
+  assert.deepEqual(statuses(evaluation), { 1: "conflict", 2: "behind", 4: "checking", 5: "next", 6: "next" });
+  // Left the line while open: not recorded as closed.
+  assert.equal(evaluation.state.events.filter((e) => e.kind === "dropped").length, 0);
   // Behind unknown (no permission to compare) does not block.
   assert.deepEqual(kinds(evaluation), ["release:5", "release:6"]);
 });
@@ -144,7 +152,8 @@ test("nothing jumps a higher draft: one that does not fit stops the drafts below
 
 test("a ready pull request lower in line whose CI runs past the budget goes back to draft", () => {
   const open = [pull(1, { draft: false }), pull(2), pull(3, { draft: false }), pull(4, { draft: false })];
-  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4) }), openPulls: open, running: runs(open[0], open[2], open[3]), checks: checksFor(open) });
+  // GitHub's jobs read (none listed: each CI at its need), so the count is real enough to cancel on.
+  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4) }), openPulls: open, running: runs(open[0], open[2], open[3]), checks: checksFor(open), runners: [] });
   // 1 runs (1), 2 is reached (2), 3 runs (3); 4 is past the budget.
   assert.deepEqual(statuses(evaluation), { 1: "running", 2: "next", 3: "running", 4: "held" });
   // 2 waits until 4's cancelled runs stop: they still hold runners.
@@ -161,6 +170,24 @@ test("a ready pull request lower in line whose CI runs past the budget goes back
     nowMs: T0 + 30_000,
   });
   assert.deepEqual(kinds(later), ["release:2"]);
+});
+
+test("a running pull request is not sent back to draft when GitHub's jobs went unread, or within the grace after admission marked it ready", () => {
+  const open = [pull(1, { draft: false }), pull(3, { draft: false }), pull(4, { draft: false })];
+  const base = { state: state({ queue: lineOf(1, 3, 4) }), openPulls: open, running: runs(...open), checks: checksFor(open) };
+  // 1 + 1 + 1 runners with a deploy holding 1 of 3: 4 is past the budget.
+  const deploys = [{ branch: "develop", sha: "d".repeat(40), title: "Merge" }];
+  assert.deepEqual(kinds(judge({ ...base, deploys, runners: [] })), ["hold:4"]);
+  // Unread: every CI at its need is a different sum from the round that released it; nothing is cancelled on it.
+  const unread = judge({ ...base, deploys, runners: null });
+  assert.deepEqual(kinds(unread), []);
+  assert.equal(statuses(unread)[4], "running");
+  // Marked ready by admission five minutes ago: kept; eleven minutes ago: held.
+  const releasedEvent = (minutes) => ({ at: new Date(T0 - minutes * 60_000).toISOString(), kind: "released", number: 4, shadow: false, detail: null });
+  const recent = judge({ ...base, deploys, runners: [], state: state({ queue: lineOf(1, 3, 4), events: [releasedEvent(5)] }) });
+  assert.deepEqual(kinds(recent), []);
+  const older = judge({ ...base, deploys, runners: [], state: state({ queue: lineOf(1, 3, 4), events: [releasedEvent(11)] }) });
+  assert.deepEqual(kinds(older), ["hold:4"]);
 });
 
 test("a ready pull request whose CI is not running takes no slot and is left alone", () => {
@@ -213,7 +240,7 @@ test("a pending status admission left is cleared once its pull request is ready 
   assert.deepEqual(kinds(evaluation).filter((k) => k.startsWith("clear_status")), ["clear_status:1", "clear_status:2", "clear_status:3"]);
 });
 
-test("GitHub is asked only about drafts the free slots reach, held ones skipped, at most the limit", () => {
+test("GitHub is asked only about drafts the free slots reach, ci:hold ones not in line, at most the limit", () => {
   const open = Array.from({ length: CI_ADMISSION_CHECK_LIMIT + 3 }, (_, i) =>
     pull(i + 1, i === 0 ? { labels: [CI_ADMISSION_HOLD_LABEL] } : i === 1 ? { draft: false } : {}),
   );
@@ -329,4 +356,61 @@ test("a CI needing more than the budget still runs alone", () => {
   const main = [pull(9, { base: "main" })];
   const small = judge({ state: { ...emptyCiAdmissionState(), capacity: 20, queue: lineOf(9) }, openPulls: main, checks: checksFor(main) });
   assert.deepEqual(kinds(small), ["release:9"]);
+});
+
+test("a draft the slots reach that is behind its base has its branch updated once per head, then is released on its new head", () => {
+  const behind = [pull(1), pull(2)];
+  const checks = new Map([[1, { conflict: false, behind: true }], [2, clean]]);
+  const first = judge({ state: state({ queue: lineOf(1, 2) }), openPulls: behind, checks });
+  assert.deepEqual(kinds(first), ["update_branch:1", "release:2"]);
+  assert.deepEqual(statuses(first), { 1: "updating", 2: "next" });
+  assert.equal(first.state.events.find((e) => e.number === 1).kind, "updated");
+  assert.notEqual(first.nextCheckInMs, null, "judged again while GitHub merges");
+  // GitHub has not moved the head yet: not asked again.
+  const again = judge({ state: first.state, openPulls: [behind[0], { ...behind[1], draft: false }], checks, nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(again).filter((k) => k.startsWith("update_branch")), []);
+  assert.equal(statuses(again)[1], "updating");
+  // Long enough without a new head: asked again.
+  const retry = judge({ state: first.state, openPulls: [behind[0]], checks, nowMs: T0 + CI_ADMISSION_UPDATE_RETRY_MS });
+  assert.deepEqual(kinds(retry), ["update_branch:1"]);
+  // The new head is up to date: released like any draft.
+  const updated = { ...behind[0], headSha: "a".repeat(40) };
+  const done = judge({ state: first.state, openPulls: [updated], checks: new Map([[1, clean]]), nowMs: T0 + 60_000 });
+  assert.deepEqual(kinds(done), ["release:1"]);
+  assert.deepEqual(done.state.updating, []);
+});
+
+test("shadow records the branch update it would ask for; a stored state from before has no updates", () => {
+  const open = [pull(1)];
+  const shadow = judge({ state: state(), openPulls: open, checks: new Map([[1, { conflict: false, behind: true }]]), shadow: true });
+  assert.equal(shadow.state.events.at(-1).shadow, true);
+  const { updating, ...before } = emptyCiAdmissionState();
+  assert.deepEqual(updating, []);
+  assert.deepEqual(parseCiAdmissionState(JSON.stringify(before)).updating, []);
+});
+
+test("a branch is brought up to date only for a pull request into develop from a working branch: never a deploy branch", () => {
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "claude/to-develop/x", fork: false }), true);
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "dependabot/npm_and_yarn/x", fork: false }), true);
+  for (const head of ["main", "develop", "release/2026-10-25", "hotfix/x"]) {
+    assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head, fork: false }), false, head);
+  }
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "main", head: "release/train-1", fork: false }), false);
+  assert.equal(ciAdmissionUpdatesBranchOf({ base: "develop", head: "x", fork: true }), false);
+  // A release behind main stays "behind": no update is asked for.
+  const release = [pull(1, { base: "main", head: "release/x" })];
+  const judged = judge({ state: state({ queue: lineOf(1) }), openPulls: release, checks: new Map([[1, { conflict: false, behind: true }]]) });
+  assert.deepEqual(kinds(judged), []);
+  assert.equal(statuses(judged)[1], "behind");
+});
+
+test("a ci:hold pull request out of the line still counts the runners its CI holds when GitHub's jobs are unread", () => {
+  const held = pull(1, { draft: false, labels: [CI_ADMISSION_HOLD_LABEL] });
+  const open = [held, pull(2), pull(3)];
+  const judged = judge({ state: state({ capacity: 2, queue: lineOf(2, 3) }), openPulls: open, running: runs(held), checks: checksFor(open), runners: null });
+  // 1 holds one of the two runners: only one more draft fits.
+  assert.deepEqual(kinds(judged), ["release:2"]);
+  assert.equal(judged.used, 2);
+  assert.deepEqual(judged.state.lastRound.running.map((r) => r.number).sort(), [1, 2]);
+  assert.equal(judged.state.lastRound.running.find((r) => r.number === 1).title, "Pull 1");
 });

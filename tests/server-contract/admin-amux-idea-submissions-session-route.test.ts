@@ -185,6 +185,24 @@ test("a session idea reads back as committed even when the v4 owner read sees it
     }
   }));
 
+test("a session idea still reads back after session writes are turned off", () =>
+  withSwitches({ TOMVERSE_AMUX_SESSION_INTAKE_READBACK: "enabled",
+    TOMVERSE_AMUX_V4_IDEA_READBACK: "enabled" }, async () => {
+    world.owned = { requestId, status: "partial", ideaId: "session-idea" };
+    world.seen = { requestId, status: "committed", ideaId: "session-idea",
+      reservationId: "r", hasExternalSources: false };
+    try {
+      const { GET } = await loadRoute();
+      const response = await GET(new Request(
+        `https://tomverse.test/api/admin/amux/ideas/submissions?requestId=${requestId}`));
+      assert.deepEqual(await response.json(), { requestId, status: "committed",
+        ideaId: "session-idea", origin: "session", hasExternalSources: false });
+    } finally {
+      world.owned = { requestId, status: "absent" };
+      world.seen = { status: "absent" };
+    }
+  }));
+
 test("a row that is not a session idea still reads back through the v4 owner path", () =>
   withSwitches(SWITCHES, async () => {
     world.owned = { requestId, status: "committed", ideaId: "v4-idea" };

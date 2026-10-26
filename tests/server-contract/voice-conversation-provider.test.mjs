@@ -5,6 +5,22 @@ import { createVoiceProviderSession, sendVoiceProviderResult } from "../../lib/v
 const originalFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = originalFetch; });
 
+test("provider creation obeys the remaining funding deadline and refuses invalid bounds before dispatch", async () => {
+  let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    calls++;
+    await new Promise((resolve, reject) => {
+      const keepalive = setTimeout(resolve, 1_000);
+      init.signal.addEventListener("abort", () => { clearTimeout(keepalive); reject(init.signal.reason); }, { once: true });
+    });
+    assert.fail("A slow provider must be aborted at the funded startup deadline");
+  };
+  for (const value of [0, -1, 15_001, NaN]) await assert.rejects(createVoiceProviderSession("fixture", [], value), /Invalid voice startup deadline/);
+  assert.equal(calls, 0);
+  await assert.rejects(createVoiceProviderSession("fixture", [], 20), error => error.name === "TimeoutError");
+  assert.equal(calls, 1);
+});
+
 test("WebRTC creation uses the documented session-scoped frontend permissions and event selectors", async () => {
   // https://developers.openai.com/api/reference/resources/live/methods/create
   let submitted;

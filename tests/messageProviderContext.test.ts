@@ -27,6 +27,13 @@ test("provider reasoning state round-trips privately for a later turn", () => {
   );
 });
 
+test("ephemeral MCP tool calls and results are neither stored nor replayed", () => {
+  const response = [{ role: "assistant", content: [{ type: "tool-call", toolName: "mcp_secret", toolCallId: "one", input: { query: "private" } }] },
+    { role: "tool", content: [{ type: "tool-result", toolName: "mcp_secret", toolCallId: "one", output: { type: "text", value: "raw external document" } }] }];
+  assert.equal(serializeProviderResponseMessages(response), null);
+  assert.equal(parseProviderResponseMessages(response), null);
+});
+
 test("provider reasoning state is bounded and accepts response roles only", () => {
   assert.equal(
     serializeProviderResponseMessages([

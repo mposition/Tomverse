@@ -65,7 +65,11 @@ lib/promptRefinerModelPrompt.ts text eol=lf
 lib/promptInjectionAudit.ts text eol=lf
 lib/promptRefinerSuggestion.ts text eol=lf
 lib/routerDevelopmentBenchmark.ts text eol=lf
+lib/providerUsageCost.ts text eol=lf
 scripts/prompt-refiner-shadow-harness.mjs text eol=lf
+
+# Applied migration bytes must match their recorded checksum on Windows too.
+prisma/migrations/20260802020000_registry_prices_inherit_profile/migration.sql text eol=lf
 
 # Prompt Refiner admission-readiness evidence is verified as exact bytes.
 #

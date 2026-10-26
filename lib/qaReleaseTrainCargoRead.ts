@@ -6,31 +6,35 @@ import {
   qaReleaseTrainCargoCandidates,
   type QaReleaseTrainCargoCandidate,
 } from "@/lib/qaReleaseTrainCargoCore";
+import { createGithubRepoReader, githubReadFailure } from "@/lib/githubRepoRead";
 
 /**
- * Reads the next train's candidates for Admin (lib/qaReleaseTrainCargoCore.ts).
- * The repository is public, so GitHub is read without a credential, as S-M3
- * does. Unauthenticated reads are rationed per address, so one read is kept
- * for ten minutes and shared by every viewer; files are read only for pull
- * requests that could ride. A failed read is "unread", never "none".
+ * Reads the next train's candidates for Admin (lib/qaReleaseTrainCargoCore.ts),
+ * GitHub through lib/githubRepoRead.ts. One read is kept for ten minutes and
+ * shared by every viewer; each main pull request's commits are read to learn
+ * what it carries, and files only for pull requests that could ride. A failed read is "unread" with why, never "none", and is kept for a
+ * minute so a page left open does not spend the hourly allowance retrying.
  */
-const API = "https://api.github.com/repos/mposition/Tomverse";
-const TIMEOUT_MS = 5_000;
 const CACHE_MS = 10 * 60 * 1000;
+const FAILURE_CACHE_MS = 60 * 1000;
+/** A Refresh newer than this reuses the read just made. */
+const FRESH_MIN_MS = 30 * 1000;
 const FILE_READS_AT_ONCE = 6;
+/** GitHub lists at most 250 commits of a pull request. */
+const COMMIT_PAGE_CAP = 3;
 
-export type QaReleaseTrainCargoCandidatesRead = { status: "ok"; readAt: string; candidates: QaReleaseTrainCargoCandidate[] } | { status: "unread" };
-
-const readJson = async (path: string): Promise<unknown> => {
-  const response = await fetch(`${API}${path}`, {
-    headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-    cache: "no-store",
-    redirect: "error",
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`github_${response.status}`);
-  return response.json();
-};
+export type QaReleaseTrainCargoCandidatesRead =
+  | {
+      status: "ok";
+      readAt: string;
+      candidates: QaReleaseTrainCargoCandidate[];
+      /**
+       * Set when the newest read failed and these are the last good one's
+       * candidates: the page keeps its list and says why it is not newer.
+       */
+      stale?: { failure: string; failedAt: string };
+    }
+  | { status: "unread"; failure: string };
 
 /**
  * Closed pull requests into `base`, newest update first, page by page until
@@ -40,7 +44,7 @@ const readJson = async (path: string): Promise<unknown> => {
  * main release would offer what it already carried.
  */
 const PAGE_CAP = 8;
-async function readClosedSince(base: string, sinceMs: number): Promise<unknown[]> {
+async function readClosedSince(readJson: (path: string) => Promise<unknown>, base: string, sinceMs: number): Promise<unknown[]> {
   const pulls: unknown[] = [];
   for (let page = 1; page <= PAGE_CAP; page += 1) {
     const list = await readJson(`/pulls?state=closed&base=${base}&sort=updated&direction=desc&per_page=100&page=${page}`);
@@ -52,43 +56,166 @@ async function readClosedSince(base: string, sinceMs: number): Promise<unknown[]
   throw new Error("github_pages");
 }
 
-let cached: { atMs: number; value: QaReleaseTrainCargoCandidatesRead } | null = null;
+/** A pull request's commits, or null when not all of them could be read. */
+async function readCommits(
+  readJson: (path: string) => Promise<unknown>,
+  number: number,
+): Promise<{ sha: string; message: string; merge: boolean }[] | null> {
+  try {
+    const commits: { sha: string; message: string; merge: boolean }[] = [];
+    for (let page = 1; page <= COMMIT_PAGE_CAP; page += 1) {
+      const list = await readJson(`/pulls/${number}/commits?per_page=100&page=${page}`);
+      if (!Array.isArray(list)) return null;
+      for (const item of list) {
+        const commit = item as { sha?: unknown; parents?: unknown; commit?: { message?: unknown } };
+        commits.push({
+          sha: String(commit.sha ?? ""),
+          message: String(commit.commit?.message ?? ""),
+          merge: Array.isArray(commit.parents) && commit.parents.length > 1,
+        });
+      }
+      if (list.length < 100) return commits;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
-export async function readQaReleaseTrainCargoCandidates(nowMs = Date.now()): Promise<QaReleaseTrainCargoCandidatesRead> {
-  if (cached && nowMs - cached.atMs < CACHE_MS) return cached.value;
+/** Runs `work` for every item, FILE_READS_AT_ONCE at a time. */
+async function inBatches<T>(items: readonly T[], work: (item: T) => Promise<void>): Promise<void> {
+  for (let index = 0; index < items.length; index += FILE_READS_AT_ONCE) {
+    await Promise.all(items.slice(index, index + FILE_READS_AT_ONCE).map(work));
+  }
+}
+
+/** `failed`: this read failed (its value is the last good one marked stale, or unread), so it is retried after a minute. */
+let cached: { atMs: number; value: QaReleaseTrainCargoCandidatesRead; failed: boolean } | null = null;
+/** The last read that succeeded: what a failed read falls back to. */
+let lastGood: Extract<QaReleaseTrainCargoCandidatesRead, { status: "ok" }> | null = null;
+
+/**
+ * The last candidates read, whatever their age, without reading GitHub: for
+ * a page that only wants titles and must not wait on the full read (it took
+ * 20-28 seconds on a cold production server on 2026-10-25, and the release
+ * train tab waited on it). Null before the first read.
+ */
+export function peekQaReleaseTrainCargoCandidates(): QaReleaseTrainCargoCandidatesRead | null {
+  return cached?.value ?? null;
+}
+
+/**
+ * The candidates, from the shared read while it is fresh enough. `fresh` (the
+ * train tab's "Read GitHub again", or a save on it) reads GitHub again unless
+ * a read is under FRESH_MIN_MS old, so several operators pressing it spend
+ * one read. A read already under way answers every caller that arrives
+ * meanwhile: one press starts several at once (the tab, its picker and its
+ * emergency panel), and each would otherwise read GitHub in full.
+ */
+export async function readQaReleaseTrainCargoCandidates(
+  nowMs = Date.now(),
+  options: { fresh?: boolean } = {},
+): Promise<QaReleaseTrainCargoCandidatesRead> {
+  const keepMs = options.fresh ? FRESH_MIN_MS : cached?.failed ? FAILURE_CACHE_MS : CACHE_MS;
+  if (cached && nowMs - cached.atMs < keepMs) return cached.value;
+  if (inFlight) return inFlight;
+  inFlight = readFromGithub(nowMs).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+let inFlight: Promise<QaReleaseTrainCargoCandidatesRead> | null = null;
+
+/**
+ * Every open main pull request, page by page, as the train service and the
+ * departure board read them: one past the first hundred can still carry a
+ * candidate. A list longer than the cap is a failed read, never a partial one.
+ */
+const OPEN_PAGE_CAP = 3;
+async function readOpenMain(readJson: (path: string) => Promise<unknown>): Promise<unknown[]> {
+  const pulls: unknown[] = [];
+  for (let page = 1; page <= OPEN_PAGE_CAP; page += 1) {
+    const list = await readJson(`/pulls?state=open&base=main&per_page=100&page=${page}`);
+    if (!Array.isArray(list)) throw new Error("github_shape");
+    pulls.push(...list);
+    if (list.length < 100) return pulls;
+  }
+  throw new Error("github_pages");
+}
+
+async function readFromGithub(nowMs: number): Promise<QaReleaseTrainCargoCandidatesRead> {
+  const readJson = createGithubRepoReader();
   try {
     const sinceMs = nowMs - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000;
+    // Each list says where it failed: `develop:github_403`, `open:timeout`.
+    const at = <T,>(where: string, read: Promise<T>) =>
+      read.catch((error: unknown) => {
+        throw new ReadFailure(`${where}:${githubReadFailure(error)}`);
+      });
     const [mergedDevelopJson, mergedMainJson, openMainJson] = await Promise.all([
-      readClosedSince("develop", sinceMs),
+      at("develop", readClosedSince(readJson, "develop", sinceMs)),
       // A release that carried a candidate was merged after it, so inside the window too.
-      readClosedSince("main", sinceMs),
-      readJson("/pulls?state=open&base=main&per_page=100"),
+      at("main", readClosedSince(readJson, "main", sinceMs)),
+      at("open", readOpenMain(readJson)),
     ]);
-    // First without files, to learn which could ride; only those are read.
-    const unchecked = qaReleaseTrainCargoCandidates({ mergedDevelopJson, mergedMainJson, openMainJson, files: new Map(), nowMs })
+    // What each main pull request in the window really carries: its commits,
+    // beside the numbers its title names.
+    const mainPulls = [
+      ...(Array.isArray(mergedMainJson) ? mergedMainJson : []).filter((pull) => {
+        const mergedAt = (pull as { merged_at?: unknown }).merged_at;
+        return typeof mergedAt === "string" && Date.parse(mergedAt) >= sinceMs;
+      }),
+      ...openMainJson,
+    ]
+      .map((pull) => (pull as { number?: unknown }).number)
+      .filter((number): number is number => typeof number === "number");
+    const mainCommits = new Map<number, { sha: string; message: string }[]>();
+    await inBatches(mainPulls, async (number) => {
+      const commits = await readCommits(readJson, number);
+      // More commits than the pages read (a whole-develop release), or not
+      // read: what its title names decides.
+      if (commits) mainCommits.set(number, commits);
+    });
+    // First without files, to learn which could ride; only those are read,
+    // with their own commits (merge commits left out) to tell whether main
+    // already holds every one of them.
+    const unchecked = qaReleaseTrainCargoCandidates({ mergedDevelopJson, mergedMainJson, openMainJson, files: new Map(), mainCommits, nowMs })
       .filter((candidate) => candidate.status === "unchecked")
       .slice(0, QA_RELEASE_TRAIN_CARGO_MAX);
     const files = new Map<number, string[]>();
-    for (let index = 0; index < unchecked.length; index += FILE_READS_AT_ONCE) {
-      await Promise.all(
-        unchecked.slice(index, index + FILE_READS_AT_ONCE).map(async ({ number }) => {
-          try {
-            const list = await readJson(`/pulls/${number}/files?per_page=100`);
-            if (Array.isArray(list)) files.set(number, list.map((file) => String((file as { filename?: unknown }).filename ?? "")));
-          } catch {
-            // Left unchecked: the train itself still leaves a workflow change out.
-          }
-        }),
-      );
-    }
+    const developCommits = new Map<number, string[]>();
+    await inBatches(
+      unchecked.map((candidate) => candidate.number),
+      async (number) => {
+        const [list, commits] = await Promise.all([readJson(`/pulls/${number}/files?per_page=100`).catch(() => null), readCommits(readJson, number)]);
+        // Files not read: left unchecked; the train itself still leaves a workflow change out.
+        if (Array.isArray(list)) files.set(number, list.map((file) => String((file as { filename?: unknown }).filename ?? "")));
+        if (commits) developCommits.set(number, commits.filter((commit) => !commit.merge).map((commit) => commit.sha));
+      },
+    );
     const value: QaReleaseTrainCargoCandidatesRead = {
       status: "ok",
       readAt: new Date(nowMs).toISOString(),
-      candidates: qaReleaseTrainCargoCandidates({ mergedDevelopJson, mergedMainJson, openMainJson, files, nowMs }),
+      candidates: qaReleaseTrainCargoCandidates({ mergedDevelopJson, mergedMainJson, openMainJson, files, mainCommits, developCommits, nowMs }),
     };
-    cached = { atMs: nowMs, value };
+    cached = { atMs: nowMs, value, failed: false };
+    lastGood = value;
     return value;
-  } catch {
-    return { status: "unread" };
+  } catch (error) {
+    // A failed read no longer blanks the page (owner, 2026-10-26: "GitHub
+    // could not be read" came up too often): the last good list stays, marked
+    // with why it is not newer, and the read is retried after a minute. Why
+    // it failed goes to the log too, a code only, never a URL or a body.
+    const failure = error instanceof ReadFailure ? error.message : githubReadFailure(error);
+    console.warn(JSON.stringify({ event: "qa_release_train_cargo_read_failed", failure, lastGoodAt: lastGood?.readAt ?? null }));
+    const value: QaReleaseTrainCargoCandidatesRead = lastGood
+      ? { ...lastGood, stale: { failure, failedAt: new Date(nowMs).toISOString() } }
+      : { status: "unread", failure };
+    cached = { atMs: nowMs, value, failed: true };
+    return value;
   }
 }
+
+/** A list read that failed, named by where: its message is the failure code shown and logged. */
+class ReadFailure extends Error {}

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
 
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { prisma } from "@/lib/prisma";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { createResourceUnlockCookie } from "@/lib/conversationLock";
@@ -157,6 +158,7 @@ test("creating a continuation writes the conversation and the bridge together", 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -170,9 +172,9 @@ test("creating a continuation writes the conversation and the bridge together", 
             userId: true,
         },
     });
-    // §3.1: the product is Review, stated by the service's own constant. Not
-    // chat, not derived from `kind`, not derived from `selectionMode`, and not
-    // derived from how many models the row starts with.
+    // §3.1: the product is the one the endpoint stated -- Review here. Not
+    // derived from `kind`, not derived from `selectionMode`, and not derived
+    // from how many models the row starts with.
     assert.equal(conversation.productKey, "review");
     assert.equal(conversation.kind, "chat");
     assert.equal(conversation.selectionMode, "manual");
@@ -194,6 +196,61 @@ test("creating a continuation writes the conversation and the bridge together", 
     assert.equal(bridge.seedMessageCount, 6);
 });
 
+test("a Chat continuation is one Smart Adaptive model with the same bridge", async () => {
+    // Owner decision 2026-10-25: continuing an import opens Chat by default.
+    const user = await createUser();
+    const { snapshot } = await seedSnapshot(user.id);
+
+    const result = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        productKey: "chat",
+        request: requestWithGrant(),
+    });
+
+    const conversation = await prisma.conversation.findUniqueOrThrow({
+        where: { id: result.conversationId },
+        select: {
+            productKey: true,
+            kind: true,
+            selectionMode: true,
+            selectedModels: true,
+            webSearchMode: true,
+        },
+    });
+    assert.equal(conversation.productKey, "chat");
+    assert.equal(conversation.kind, "chat");
+    assert.equal(conversation.selectionMode, "auto");
+    assert.equal(JSON.parse(conversation.selectedModels ?? "[]").length, 1);
+    // The same web-search default as a fresh conversation, not the column's "off".
+    assert.equal(conversation.webSearchMode, APP_DEFAULTS.defaultWebSearchMode);
+    const bridge = await getContinuationBridge(user.id, result.conversationId);
+    assert.equal(bridge?.externalConversationId, snapshot.id);
+
+    // Comparing in Review is a second fork of the same snapshot; the Chat row
+    // keeps its product.
+    const review = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        productKey: "review",
+        request: requestWithGrant(),
+    });
+    assert.notEqual(review.conversationId, result.conversationId);
+    const rows = await prisma.conversation.findMany({
+        where: { id: { in: [result.conversationId, review.conversationId] } },
+        select: { id: true, productKey: true, selectionMode: true },
+    });
+    assert.deepEqual(
+        Object.fromEntries(rows.map((row) => [row.id, [row.productKey, row.selectionMode]])),
+        {
+            [result.conversationId]: ["chat", "auto"],
+            [review.conversationId]: ["review", "manual"],
+        }
+    );
+});
+
 test("no imported message is copied into the Message table", async () => {
     const user = await createUser();
     const { snapshot } = await seedSnapshot(user.id);
@@ -202,6 +259,7 @@ test("no imported message is copied into the Message table", async () => {
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -230,6 +288,7 @@ test("the imported model label never becomes a runtime model id", async () => {
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -262,12 +321,14 @@ test("a retried request with the same key returns the same conversation", async 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: key,
+        productKey: "review",
         request: requestWithGrant(),
     });
     const second = await createExternalContinuation({
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: key,
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -291,12 +352,14 @@ test("two concurrent requests with one key both get the same conversation", asyn
             userId: user.id,
             externalConversationId: snapshot.id,
             idempotencyKey: key,
+            productKey: "review",
             request: requestWithGrant(),
         }),
         createExternalContinuation({
             userId: user.id,
             externalConversationId: snapshot.id,
             idempotencyKey: key,
+            productKey: "review",
             request: requestWithGrant(),
         }),
     ]);
@@ -331,6 +394,7 @@ test("a source with nothing seedable is reported as an empty selection", async (
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -352,6 +416,7 @@ test("the surface a conversation opens at is decided from the row", async () => 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     const ordinary = await prisma.conversation.create({
@@ -399,12 +464,14 @@ test("a new key from the same source is a second, deliberate fork", async () => 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     const second = await createExternalContinuation({
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -424,6 +491,7 @@ test("a conversation can carry only one bridge", async () => {
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -457,6 +525,7 @@ test("an unknown provider is refused by the database's own allowlist", async () 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -478,6 +547,7 @@ test("another account's snapshot is not found, not refused", async () => {
             userId: stranger.id,
             externalConversationId: snapshot.id,
             idempotencyKey: randomUUID(),
+            productKey: "review",
             request: requestWithGrant(),
         }),
         (error: unknown) =>
@@ -497,6 +567,7 @@ test("a locked snapshot needs an external_conversation grant to be continued", a
             userId: user.id,
             externalConversationId: snapshot.id,
             idempotencyKey: randomUUID(),
+            productKey: "review",
             request: requestWithGrant(),
         }),
         (error: unknown) => (error as { status?: number }).status === 423
@@ -506,6 +577,7 @@ test("a locked snapshot needs an external_conversation grant to be continued", a
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant({
             userId: user.id,
             resourceId: snapshot.id,
@@ -526,6 +598,7 @@ test("a grant for another resource does not open this one", async () => {
             userId: user.id,
             externalConversationId: snapshot.id,
             idempotencyKey: randomUUID(),
+            productKey: "review",
             request: requestWithGrant({
                 userId: user.id,
                 resourceId: other.snapshot.id,
@@ -543,6 +616,7 @@ test("a re-locked snapshot stops seeding without touching the conversation", asy
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -585,6 +659,7 @@ test("deleting the source keeps the conversation and every message in it", async
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     await prisma.message.createMany({
@@ -635,6 +710,7 @@ test("deleting the source stops the seed and shows a tombstone", async () => {
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -662,6 +738,7 @@ test("deleting the whole import behaves the same way", async () => {
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     await prisma.message.create({
@@ -691,6 +768,7 @@ test("deleting the conversation takes its bridge and leaves the source", async (
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -715,6 +793,7 @@ test("deleting the account leaves no bridge behind", async () => {
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -755,6 +834,7 @@ test("another account cannot read a bridge or its timeline", async () => {
         userId: owner.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -783,6 +863,7 @@ test("the timeline returns the imported turns and no storage identifiers", async
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -819,6 +900,7 @@ test("a prompt-injection payload stays inside the fenced region", async () => {
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -861,6 +943,7 @@ test("a flag change this process never saw still stops the excerpt", async () =>
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -904,6 +987,7 @@ test("the rollback takes the excerpt, never the conversation or its messages", a
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     await prisma.message.create({
@@ -957,12 +1041,14 @@ test("the list counts this account's continuations and nobody else's", async () 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     const second = await createExternalContinuation({
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     const strangerConversation = await prisma.conversation.create({
@@ -1039,6 +1125,7 @@ test("one grouped read answers a whole page of sources", async () => {
                 userId: user.id,
                 externalConversationId: snapshot.id,
                 idempotencyKey: randomUUID(),
+                productKey: "review",
                 request: requestWithGrant(),
             });
         }
@@ -1280,6 +1367,7 @@ test("a snapshot delete and a whole-import delete racing on one import both sett
             userId: user.id,
             externalConversationId: snapshot.id,
             idempotencyKey: randomUUID(),
+            productKey: "review",
             request: requestWithGrant(),
         });
 
@@ -1356,12 +1444,14 @@ test("a continuation keeps its source's title only when the owner asked", async 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     const notKept = await createExternalContinuation({
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -1390,6 +1480,7 @@ test("a name the owner set after confirming is kept, and the delete proceeds", a
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     await prisma.conversation.update({
@@ -1413,6 +1504,7 @@ test("a lock set after confirming refuses the whole delete and writes nothing", 
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     await prisma.conversation.update({
@@ -1443,6 +1535,7 @@ test("another account's conversation id is not consent for anything", async () =
         userId: other.id,
         externalConversationId: otherSnapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 
@@ -1463,12 +1556,14 @@ test("a whole-import delete keeps the chosen titles and previews them without ti
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
     const second = await createExternalContinuation({
         userId: user.id,
         externalConversationId: snapshot.id,
         idempotencyKey: randomUUID(),
+        productKey: "review",
         request: requestWithGrant(),
     });
 

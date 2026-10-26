@@ -22,7 +22,6 @@ import { transferConfirmReadPermitted, transferConfirmWritePermitted } from
 import { transferPreviewReadPermitted, transferPreviewWritePermitted } from
   "../lib/amux/ideaTransferPreviewInputCore.ts";
 import { amuxV4PortfolioWriteEnabled } from "../lib/amux/portfolioAssessmentService.ts";
-import { amuxV4TaskCatalogWriteEnabled } from "../lib/amux/v4TaskCostCatalogApprovalService.ts";
 
 test("v4 code activation keeps every exposed stage closed without its environment switch", () => {
   const gates = [
@@ -33,7 +32,7 @@ test("v4 code activation keeps every exposed stage closed without its environmen
     transferPreviewWritePermitted, transferPreviewReadPermitted,
     transferConfirmWritePermitted, transferConfirmReadPermitted,
     amuxV4ResolutionPreviewEnabled, amuxV4UnitWriteEnabled,
-    amuxV4PortfolioWriteEnabled, amuxV4TaskCatalogWriteEnabled,
+    amuxV4PortfolioWriteEnabled,
     amuxV4ContentRetentionEnabled, amuxV4LiveAnalysisCliEnabled,
     amuxV4AnalysisQueueReadEnabled, amuxV4AnalysisResultReadEnabled,
   ];

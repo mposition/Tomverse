@@ -14,7 +14,7 @@ import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
 import { assertUserOperationalAccess, getChatCostGuardrails, getUserChatUsageKey, holdChatUsageBucket, readUsageBucketCount, usagePeriodStart } from "@/lib/chatSecurity";
 import { getBillingPlanByTier, getBillingPlansWithFieldSources, planIdForTier } from "@/lib/billingConfig";
-import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 import { getProviderCostBudget } from "@/lib/providerCostBudget";
 import { providerBucketKey } from "@/lib/chatProviderHolds";
 import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
@@ -116,7 +116,7 @@ const receipt = (task: Task, records: Call[]) => ({ reservationId: task.id, stat
 async function account(userId: string, tx?: Tx) {
     if (!tx)
         await assertUserOperationalAccess(userId);
-    const user = await (tx ?? prisma).user.findUnique({ where: { id: userId }, select: { plan: true, subscriptionStatus: true, subscriptionCurrentPeriodEnd: true, billingRiskStatus: true,
+    const user = await (tx ?? prisma).user.findUnique({ where: { id: userId }, select: { plan: true, ...STORE_ENTITLEMENT_SELECT, subscriptionStatus: true, subscriptionCurrentPeriodEnd: true, billingRiskStatus: true,
             accountStatus: true, accountSuspendedUntil: true, aiUsageRestricted: true, aiUsageRestrictedUntil: true } });
     const now = new Date();
     if (!user || user.billingRiskStatus === "disputed_hold" || user.accountStatus === "pending_deletion" ||

@@ -230,10 +230,11 @@ test("a consent copy version that makes no promise has changed the promise in ev
   }
 });
 
-test("the published version of each document is the one approved as carrying the amendment", () => {
+test("the changed privacy page is observed separately from the original amendment approval", () => {
   // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
-  // mposition on 2026-10-03.
-  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], [AMENDED_DOCUMENT_EVIDENCE["/privacy"].contentSha256]);
+  // mposition on 2026-10-03, with main's approved memory-section rewrite.
+  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], ["eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8"]);
+  assert.equal(APPROVED_AMENDED_DIGESTS["/privacy"].includes(AMENDED_DOCUMENT_EVIDENCE["/privacy"].contentSha256), false);
   assert.deepEqual(APPROVED_AMENDED_DIGESTS["/terms"], [AMENDED_DOCUMENT_EVIDENCE["/terms"].contentSha256]);
   assert.equal(AMENDED_DOCUMENT_EVIDENCE["/privacy"].date, "2026-11-16");
   // A future effective date is not a lastmod (lib/sitemapContentDates.ts).
@@ -241,12 +242,11 @@ test("the published version of each document is the one approved as carrying the
   assert.equal(AMENDED_DOCUMENT_EVIDENCE["/terms"].date, "2026-11-16");
 });
 
-test("the documents are published, and only the notice and the date stand between them and release notes", () => {
+test("the location disclosure keeps release notes closed even after the notice and effective date", () => {
   assert.equal(CHANGE_NOTICE_TEMPLATE_KEY, "policy_change_notice");
   assert.equal(CHANGE_NOTICE_APPROVED_CONTENT_HASHES.length, 7);
   assert.equal(documentFacts().length, 2);
-  // No notice sent: the documents themselves raise nothing once the date has
-  // passed, and before it each one says so.
+  // Observation does not approve a changed page for release-note sends.
   const unsent = {
     templateKey: "policy_change_notice",
     classification: "legal",
@@ -263,7 +263,8 @@ test("the documents are published, and only the notice and the date stand betwee
   const after = publicationProblems({ documents: documentFacts(), notice: unsent, now: NOW }).map(
     (problem) => `${problem.subject}:${problem.refusal}`
   );
-  assert.ok(!after.some((entry) => entry.startsWith("/")), after.join(", "));
+  assert.ok(after.includes("/privacy:document_not_amended"), after.join(", "));
+  assert.ok(!after.some((entry) => entry.startsWith("/terms:")), after.join(", "));
   assert.ok(after.includes("policy_change_notice:change_notice_not_sent"), after.join(", "));
   const before = publicationProblems({
     documents: documentFacts(),
@@ -272,6 +273,9 @@ test("the documents are published, and only the notice and the date stand betwee
   }).map((problem) => `${problem.subject}:${problem.refusal}`);
   assert.ok(before.includes("/privacy:effective_date_not_reached"), before.join(", "));
   assert.ok(before.includes("/terms:effective_date_not_reached"), before.join(", "));
+  const delivered = { ...unsent, told: 10, untold: 0 };
+  const readyNoticeProblems = publicationProblems({ documents: documentFacts(), notice: delivered, now: NOW });
+  assert.ok(readyNoticeProblems.some((entry) => entry.subject === "/privacy" && entry.refusal === "document_not_amended"));
 });
 
 test("the test seam cannot be used outside tests", async () => {

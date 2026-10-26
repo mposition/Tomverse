@@ -18,7 +18,8 @@ const tx = {
   },
 };
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { $transaction: async callback => {
-  const snapshot = structuredClone(w); try { return await callback(tx); } catch (error) { w = snapshot; throw error; }
+  const { onWalletLock, onFunding, ...data } = w;
+  const snapshot = { ...structuredClone(data), onWalletLock, onFunding }; try { return await callback(tx); } catch (error) { w = snapshot; throw error; }
 } } } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ApiSecurityError: SecurityError } });
 mock.module(mod("lib/providerCostBudget.ts"), { namedExports: { getProviderCostGuardrailLimits: () => ({ day: 1000000, month: 10000000 }) } });
@@ -29,7 +30,7 @@ mock.module(mod("lib/chatSecurity.ts"), { namedExports: {
   incrementUsageBucket: async (_tx, _key, period, _start, limit, amount) => { if (period.startsWith("provider-cost") && w.providerBudgetBlocked || w.buckets[period] + amount > limit) return false; w.buckets[period] += amount; return true; },
 } });
 mock.module(mod("lib/userDailyUsage.ts"), { namedExports: { getUserDayWindow: async (_tx, _userId, now = new Date()) => ({ start: new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())), end: new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1)) }) } });
-mock.module(mod("lib/creditDebt.ts"), { namedExports: { lockCreditAccount: async () => {}, offsetCreditDebt: async () => ({ offsetCredits: w.debt ?? 0 }) } });
+mock.module(mod("lib/creditDebt.ts"), { namedExports: { lockCreditAccount: async () => { await w.onWalletLock?.(); }, offsetCreditDebt: async () => ({ offsetCredits: w.debt ?? 0 }) } });
 mock.module(mod("lib/creditLedger.ts"), { namedExports: {
   reserveAddOnCredits: async (_tx, input) => { w.addOnReserved += input.credits; w.purchased -= input.credits; return [{ lotId: "lot", purchaseId: "purchase", credits: input.credits, fundedCostMicroUsd: input.fundedCostMicroUsd }]; },
   settleAddOnCredits: async (_tx, input) => { w.addOnSettlements.push(input); },
@@ -38,6 +39,7 @@ mock.module(mod("lib/providerUsageAccounting.ts"), { namedExports: { recordInter
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   reserveVoiceBudgets: async ({ subjectKey, seconds, client }) => {
     assert.equal(client, tx);
+    await w.onFunding?.();
     if ((w.voiceHeld ?? 0) + seconds > (w.voiceLimit ?? Infinity)) throw new SecurityError(429, 'VOICE_OPERATIONAL_LIMIT_REACHED', 'Daily voice time exhausted');
     w.voiceHeld = (w.voiceHeld ?? 0) + seconds;
     if (w.budgetError) throw new Error("Provider budget exhausted");
@@ -152,6 +154,32 @@ test("voice shares OpenAI cost buckets and a refusal rolls back the wallet", asy
 const continuousInput = () => ({ userId: "owner", requestId: "rolling-1", conversationId: "chat-1", creditsPerMinute: 36 });
 const lease = () => { w.row.reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString(); };
 
+test("wallet-lock and funding delays do not consume the initial or renewed session window", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  w.onWalletLock = () => { t.mock.timers.tick(20_000); };
+  w.onFunding = () => { t.mock.timers.tick(20_000); };
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  assert.equal(Date.parse(row.reservationPayload.closeAt) - Date.now(), 30_000);
+  assert.equal(row.createdAt.getTime(), Date.now());
+  delete w.onWalletLock; delete w.onFunding;
+  t.mock.timers.tick(15_000); lease();
+  const renewed = await extendVoiceConversationCredits(row.id, "owner");
+  assert.equal(Date.parse(renewed.closeAt) - Date.now(), 45_000);
+});
+
+test("nullable purchase references remain settleable and malformed references are refused", async () => {
+  w.monthlyLimit = w.dailyLimit = 10; w.purchased = 100;
+  const row = await reserveContinuousVoiceCredits(continuousInput());
+  row.reservationPayload.funding[0].addOnEntries[0].purchaseId = null;
+  assert.equal(readVoiceCreditPayload(row.reservationPayload).funding[0].addOnEntries[0].purchaseId, null);
+  const invalid = structuredClone(row.reservationPayload);
+  invalid.funding[0].addOnEntries[0].purchaseId = 0;
+  assert.throws(() => readVoiceCreditPayload(invalid), /Invalid voice funding/);
+  await settleVoiceConversationCredits(row.id, 5, true);
+  assert.equal(w.row.status, "settled"); assert.equal(w.row.settledCredits, 3);
+  assert.equal(w.addOnSettlements[0].entries[0].purchaseId, null);
+});
+
 test("one continuously funded session passes 900 seconds with cumulative rounding and one settlement", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   w.monthlyLimit = w.dailyLimit = 10_000;
@@ -190,11 +218,17 @@ test("renewal is idempotent while funded and cannot revive expired, closing, rec
 });
 
 test("small available balances can start without reserving the entire old session maximum", async () => {
-  w.monthlyLimit = 30; w.dailyLimit = 30;
+  w.monthlyLimit = 33; w.dailyLimit = 33;
   const row = await reserveContinuousVoiceCredits(continuousInput());
-  assert.ok(row.reservedCredits <= 30); assert.ok(row.reservationPayload.maxSeconds >= 45);
+  assert.equal(row.reservedCredits, 33); assert.equal(row.reservationPayload.maxSeconds, 55);
   await settleVoiceConversationCredits(row.id, 10, true);
   assert.equal(w.buckets.month, 6); assert.equal(w.providerCosts[0], 12_500);
+});
+
+test("a balance without viable startup headroom is refused without retaining any hold", async () => {
+  w.monthlyLimit = w.dailyLimit = 32;
+  await assert.rejects(reserveContinuousVoiceCredits(continuousInput()), e => e.code === "CREDIT_BALANCE_INSUFFICIENT");
+  assert.equal(w.row, null); assert.equal(w.buckets.month, 0); assert.equal(w.voiceHeld ?? 0, 0);
 });
 
 for (const limit of ["wallet", "daily", "voice", "provider"]) test(`${limit} exhaustion refuses additional funding without losing the existing hold`, async t => {

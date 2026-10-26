@@ -4,6 +4,7 @@ import {
     analyzeExtractionChunk,
     type ExtractionModelAdapter,
 } from "@/lib/memoryExtractionPipeline";
+import { startAwaitingAutomaticExtractions } from "@/lib/memoryExtractionAuto";
 import { commitExtractionChunk } from "@/lib/memoryExtractionCommit";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import {
@@ -30,7 +31,7 @@ import {
 } from "@/lib/memoryExtractionService";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import type { ExtractionSourceConversationInput } from "@/lib/memoryExtractionPrompt";
-import type { AiModel, ModelTier } from "@/lib/models";
+import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -320,23 +321,14 @@ export async function handleMemoryExtractionChunk({
         return { outcome: "skipped" };
     }
 
-    const owner = await prisma.user.findUnique({
-        where: { id: lease.userId },
-        select: { plan: true },
-    });
     let pricing;
     let model;
     try {
         // Re-resolved here rather than cached from run creation: a pair can be
-        // revoked without a deploy, and a plan can change while a run sits
-        // pending (§12.1).
+        // revoked without a deploy while a run sits pending (§12.1).
         ({ pricing, model } = await resolveEffectiveExtractionPair({
             extractionModelId: lease.extractionModelId,
             promptVersion: lease.promptVersion,
-            plan:
-                owner?.plan === "Pro" || owner?.plan === "Max"
-                    ? (owner.plan as ModelTier)
-                    : "Free",
             register,
         }));
     } catch {
@@ -524,7 +516,7 @@ export async function handleMemoryExtractionChunk({
         promptVersion: lease.promptVersion,
         decisions: analysis.decisions,
     });
-    await closeCost(commit.committed ? undefined : "fenced_out");
+    await closeCost(commit.committed ? undefined : commit.reason);
 
     if (commit.committed && commit.unsourced > 0) {
         // Recorded after the transaction, never inside it: a counter written
@@ -549,7 +541,9 @@ export async function handleMemoryExtractionChunk({
             ...(commit.committed
                 ? {
                       stored: commit.stored,
-                      individualReview: commit.individualReview,
+                      superseded: commit.superseded,
+                      withheld: commit.withheld,
+                      outranked: commit.outranked,
                       discarded: commit.discarded,
                       unsourced: commit.unsourced,
                   }
@@ -559,7 +553,12 @@ export async function handleMemoryExtractionChunk({
         })
     );
 
-    if (!commit.committed) return failed("lease_lost");
+    if (!commit.committed) {
+        // Memory off: the slice driver hands the chunk back unspent
+        // (pauseExtractionChunk) and the run waits behind the memory_off
+        // dispatch block until memory is back on.
+        return failed(commit.reason === "memory_off" ? "memory_off" : "lease_lost");
+    }
     return { outcome: "completed" };
 }
 
@@ -670,6 +669,8 @@ export async function kickMemoryExtractionRun(runId: string): Promise<void> {
 
 export type MemoryExtractionDispatchResult = {
     reclaimedRuns: number;
+    /** Runs started for imports that could not start one when they finished. */
+    autoStartedRuns: number;
     dispatchedRuns: number;
     chunksProcessed: number;
     /** Pending runs this pass had no time left for; the next pass takes them. */
@@ -705,9 +706,34 @@ export async function dispatchPendingMemoryExtractionRuns(
     } = {}
 ): Promise<MemoryExtractionDispatchResult> {
     const { reclaimedRuns } = await reconcileExpiredMemoryExtractionRuns(now);
+    // Before the pending query, so a run started here is driven in this same
+    // pass. A failure to start is logged and never stops the recovery below.
+    const autoStartedRuns = await startAwaitingAutomaticExtractions({
+        now,
+        register: overrides.register,
+        environment: overrides.environment,
+    }).catch((error) => {
+        console.error(
+            JSON.stringify({
+                event: "memory_extraction_auto_start_failed",
+                errorName: error instanceof Error ? error.name : "UnknownError",
+            })
+        );
+        return 0;
+    });
 
     const pending = await prisma.memoryExtractionRun.findMany({
-        where: { status: "pending" },
+        // A run parked because its account turned memory off would only be
+        // blocked again, and five of them would fill every pass.
+        where: {
+            status: "pending",
+            user: {
+                OR: [
+                    { memorySettings: null },
+                    { memorySettings: { masterEnabled: true } },
+                ],
+            },
+        },
         // Oldest first: a run that has been waiting longest is the one whose
         // owner has been waiting longest, and it keeps a busy account from
         // starving the queue behind it.
@@ -769,16 +795,28 @@ export async function dispatchPendingMemoryExtractionRuns(
         }
     }
 
-    if (reclaimedRuns > 0 || dispatchedRuns > 0 || skippedForTime > 0) {
+    if (
+        reclaimedRuns > 0 ||
+        autoStartedRuns > 0 ||
+        dispatchedRuns > 0 ||
+        skippedForTime > 0
+    ) {
         console.info(
             JSON.stringify({
                 event: "memory_extraction_dispatch",
                 reclaimedRuns,
+                autoStartedRuns,
                 dispatchedRuns,
                 chunksProcessed,
                 skippedForTime,
             })
         );
     }
-    return { reclaimedRuns, dispatchedRuns, chunksProcessed, skippedForTime };
+    return {
+        reclaimedRuns,
+        autoStartedRuns,
+        dispatchedRuns,
+        chunksProcessed,
+        skippedForTime,
+    };
 }

@@ -583,13 +583,14 @@ test("the experiment row stores the caller limit and locks before it reserves", 
     assert.equal(closed.ok, true);
 });
 
-test("the ordinary chat retry line is unchanged and this path does not borrow the held refusals", () => {
+test("ordinary chat keeps provider retry defaults, MCP forbids retries, and pinned execution never borrows held refusals", () => {
     const chat = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
     const pinned = readFileSync(new URL("../lib/pinnedDeploymentRoute.ts", import.meta.url), "utf8");
     const execution = readFileSync(new URL("../lib/pinnedDeploymentExecution.ts", import.meta.url), "utf8");
     const budget = readFileSync(new URL("../lib/pinnedDeploymentBudget.ts", import.meta.url), "utf8");
     const placement = readFileSync(new URL("../lib/pinnedDeploymentPlacement.ts", import.meta.url), "utf8");
     assert.match(chat, /maxRetries: modelConfig\.provider === "zhipu" \? 0 : undefined/);
+    assert.match(chat, /\.\.\.\(mcpConnector \? \{\s*maxRetries: 0,/);
     assert.match(chat, /authenticatedAccountId: session\?\.user\?\.id \?\? null/);
     const entrance = chat.indexOf("await enterPinnedDeploymentChat");
     const stream = chat.indexOf("streamText({");

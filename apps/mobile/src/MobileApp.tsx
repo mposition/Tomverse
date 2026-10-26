@@ -19,10 +19,14 @@ import { Sheet } from "./Sheet";
 import { AnswerReport } from "./AnswerReport";
 import { mobileErrorText } from "../../../locales/mobileErrors";
 import { EmailLogin } from "./EmailLogin";
+import { mobileLoginCopy, mobileLoginError } from "../../../locales/mobileLogin";
 import { AnswerContent } from "./AnswerContent";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import { AccountScreen } from "./AccountScreen";
 import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
+import { ImportedTranscript } from "./ImportedTranscript";
+import { reviewSeedFromChat } from "../../../lib/chatReviewHandoff";
+import { mobileCompareInReviewCopy } from "../../../locales/mobileCompareInReview";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 function AnswerAttribution({ message, language }: { message: ChatMessage; language: MobileLanguage }) {
@@ -41,6 +45,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   });
   const [theme, setTheme] = useState(() => localStorage.getItem("tomverse-theme") ?? "system");
   const copy = mobileCopy[language];
+  const loginCopy = mobileLoginCopy[language];
   const workspaceCopy = mobileWorkspaceCopy[language];
   const [signedIn, setSignedIn] = useState(false);
   const [voiceRevision, setVoiceRevision] = useState(0);
@@ -67,6 +72,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   // a reopened claimed or streaming attempt does not yet.
   const reportable = (message: { content: string; status?: string }) =>
     Boolean(transport.reportAnswer) && Boolean(message.content.trim()) && [undefined, "normal", "incomplete"].includes(message.status);
+  // "Compare in Review" (lib/chatReviewHandoff.ts): a finished answer's
+  // question opens as a new Review draft, through the same review:new draft
+  // the welcome starters use. Nothing is sent; this conversation is unchanged.
+  const comparable = (message: ChatMessage) =>
+    message.role === "assistant" && Boolean(message.content.trim()) && [undefined, "normal", "incomplete"].includes(message.status);
   const [offline, setOffline] = useState(!navigator.onLine);
   const abort = useRef<AbortController | null>(null);
   const epoch = useRef(0);
@@ -139,7 +149,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         const list = await transport.list();
       if (current !== requestEpoch.current) return;
       setSignedIn(true); setChats(list);
-    } catch { if (current === requestEpoch.current) setError(demo ? copy.error : copy.native); }
+    } catch (failure) { if (current === requestEpoch.current) setError(mobileLoginError(failure, language, "browser")); }
     finally { if (current === requestEpoch.current) setLoading(false); }
   }
   async function signOut() {
@@ -235,6 +245,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     else { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
     setView("chat");
   }
+  function compareInReview(messageId: string) {
+    if (!conversation || streaming || reviewBusy || uncertain) return;
+    const seed = reviewSeedFromChat(conversation.messages, messageId, mobileCompareInReviewCopy(language).context);
+    if (!seed) return;
+    preserveNativeDraft(owner, "review:new", seed);
+    switchProduct("review");
+  }
   function switchProduct(next: "chat" | "review") {
     if (next === product) return;
     requestEpoch.current++;
@@ -267,7 +284,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     {error && <div role="alert" className="notice error">{error}</div>}
     {!signedIn ? <section className="welcome">
       <div className="welcome-mark"><AppIcon name="logo" /></div><h1>{copy.welcome}</h1><p>{copy.intro}</p>
-      <button className="primary" onClick={() => { if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true); else void signIn(); }} disabled={loading}>{copy.signIn} <span aria-hidden="true">→</span></button>
+      <button className="primary" onClick={() => void signIn()} disabled={loading} aria-describedby="browser-sign-in-note">{copy.signIn} <span aria-hidden="true">→</span></button>
+      <p id="browser-sign-in-note" className="browser-sign-in-note">{loginCopy.browserIntro}</p>
+      {transport.requestEmailCode && transport.verifyEmailCode && <button type="button" className="sign-in-email" disabled={loading} onClick={() => { setError(""); setEmailLogin(true); }}>{loginCopy.inAppEmail}</button>}
     </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={() => setView("chat")} onBusyChange={setReviewBusy} historyFooter={accountFooter} newConversationRequest={newReviewRequest} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
       <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
         const scope = epoch.current; const rows = await transport.list();
@@ -276,18 +295,20 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }} />
     </ConversationListScreen> : <>
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
-        {!conversation?.messages.length && !streaming && <WorkspaceWelcome product="chat" language={language} transport={transport} onSeed={(text, starter) => {
+        {/* A continuation is never a blank new chat: its original is its start. */}
+        {conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}
+        {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <WorkspaceWelcome product="chat" language={language} transport={transport} onSeed={(text, starter) => {
           if (starter === "compareAnswers" || starter === "compareImageModels") { preserveNativeDraft(owner, "review:new", text); setProduct("review"); setView("chat"); }
           else { setDraft(text); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); if (starter === "sourcedAnswer" && conversation && conversation.webSearchMode !== "always") void configureTools({ webSearchMode: "always" }).catch(() => {}); }
         }} />}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />
       </section>
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
       <button className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><AppIcon name="spark" />{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? workspaceCopy.model}<span aria-hidden="true">⌄</span></button>
-      <Composer copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(() => undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
+      <Composer locationIdentity={owner} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(() => undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
     {accountOpen && <Sheet title={copy.account} closeLabel={copy.close} onClose={() => setAccountOpen(false)}><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}

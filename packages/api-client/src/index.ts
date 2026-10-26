@@ -22,6 +22,43 @@ export function filenameFromContentDisposition(
 }
 
 export type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+/** An intent signal can request permission; it never contains device data. */
+export async function requestChatLocationIntent(text: string, transport: ApiFetch, options: { turnstileToken?: string } = {}): Promise<boolean> {
+  const post = async (turnstileToken?: string) => {
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await transport("/api/chat/location-intent", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.slice(0, 8_000), ...(turnstileToken ? { turnstileToken } : {}) }), signal: controller.signal,
+      });
+      return { response, body: await response.json().catch(() => null) };
+    } finally { clearTimeout(deadline); }
+  };
+  if (options.turnstileToken) {
+    // Redeem the single-use token and receive its cookie before any model wait.
+    // An unknown redemption outcome must never fall through and reuse the token.
+    try {
+      const { response, body } = await post(options.turnstileToken);
+      if (!response.ok) throw new ApiClientError(response.status, body?.code ?? "TURNSTILE_UNAVAILABLE");
+    } catch (error) {
+      if (error instanceof ApiClientError) throw error;
+      throw new ApiClientError(503, "TURNSTILE_UNAVAILABLE");
+    }
+  }
+  try {
+    const { response, body } = await post();
+    if (!response.ok) {
+      if (body?.code === "TURNSTILE_REQUIRED") throw new ApiClientError(response.status, body.code);
+      return false;
+    }
+    return body?.requiresLocation === true;
+  } catch (error) {
+    if (error instanceof ApiClientError && error.code === "TURNSTILE_REQUIRED") throw error;
+    return false;
+  }
+}
 export class ApiClientError extends Error {
   constructor(public status: number, public code: string) { super(code); }
 }

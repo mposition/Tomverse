@@ -63,6 +63,11 @@ const prismaStub = {
     updateMany: async () => ({ count: 1 }),
   },
   account: { findMany: async () => [], update: async () => ({}) },
+  mcpOAuthFlow: {
+    updateMany: async () => ({ count: 0 }),
+    deleteMany: async () => ({ count: 0 }),
+  },
+  mcpInvocation: { updateMany: async () => ({ count: 0 }) },
   session: { deleteMany: async () => ({ count: 2 }) },
   billingPromotionRedemption: {
     findMany: async () => [],

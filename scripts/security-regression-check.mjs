@@ -614,17 +614,19 @@ const checks = [
     // search adds 6,400 input tokens the raw estimate does not carry, so
     // comparing the estimate let a searching turn sit that far over the limit
     // and fail at the provider -- after a reservation and a dispatched call --
-    // instead of here, for free
-    // (docs/ops/tomverse-chat-context-window-rollout.md).
-    name: "The context-window guard measures the reserved input, not the raw estimate",
+    // instead of here, for free. MCP reserves repeated paid steps separately;
+    // the window bounds one request, including its tool overhead, rather than
+    // that aggregate cost reservation (docs/ops/mcp-connector-preview.md).
+    name: "The context-window guard measures reserved per-request input including tools",
     file: "app/api/chat/route.ts",
     test: (source) => {
       const guard = source.slice(
-        source.indexOf("fitChatOutputToContextWindow({"),
+        source.indexOf("const contextInputTokens = "),
         source.indexOf("MODEL_CONTEXT_WINDOW_EXCEEDED")
       );
       return (
-        guard.includes("reservedInputTokens: budget.inputTokens") &&
+        guard.includes("const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;") &&
+        guard.includes("reservedInputTokens: contextInputTokens") &&
         !guard.includes("estimatedInputTokens")
       );
     },
@@ -833,11 +835,14 @@ const checks = [
     },
   },
   {
-    // The refusal carries its own 403 and code. Falling through to the route's
-    // generic handler would tell a suspended account the server broke.
-    name: "The extraction route answers an account refusal with its own status",
-    file: "app/api/memories/extraction-runs/route.ts",
-    test: (source) => source.includes("chatErrorResponse(error)"),
+    // Runs are started by the server when an import finishes (2026-10-24),
+    // so an account refusal has no route to answer through: it is reported as
+    // a skip with its own code, never thrown as a server failure.
+    name: "Automatic extraction reports an account refusal as a coded skip",
+    file: "lib/memoryExtractionAuto.ts",
+    test: (source) =>
+      source.includes("error instanceof ApiSecurityError") &&
+      source.includes("reason: error.code"),
   },
   {
     // The route makes two unguarded Stripe calls and one catch handles both.

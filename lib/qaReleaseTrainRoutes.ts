@@ -4,12 +4,12 @@ import { z } from "zod";
 
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
 import { QA_RELEASE_TRAIN_MAX_PREDECESSORS } from "@/lib/qaReleaseTrainCore";
-import { admitQaReleaseTrain, readQaReleaseTrainSelection, reportQaReleaseTrain } from "@/lib/qaReleaseTrainStore";
+import { admitQaReleaseTrain, readQaReleaseTrainSelection, recordQaReleaseTrainSchedule, reportQaReleaseTrain } from "@/lib/qaReleaseTrainStore";
 
 /**
  * The release train's app call (docs/policy/qa-release-agent.md section 8 item
- * 12): read the cargo the operator picked, admit a departure, or report what
- * it did. Authenticated by the merge
+ * 12): tell the departure hours it runs on, read the cargo the operator
+ * picked, admit a departure, or report what it did. Authenticated by the merge
  * lane's own secret, with the revision the service carries.
  */
 const SLOT = z.string().regex(/^\d{8}-\d{4}$/);
@@ -17,8 +17,18 @@ const SHA = z.string().regex(/^[0-9a-f]{40}$/);
 const PR = z.number().int().positive().max(1_000_000_000);
 
 const body = z.union([
+  z
+    .object({
+      phase: z.literal("schedule"),
+      hours: z
+        .array(z.number().int().min(0).max(23))
+        .min(1)
+        .max(24)
+        .refine((hours) => new Set(hours).size === hours.length),
+    })
+    .strict(),
   z.object({ phase: z.literal("selection") }).strict(),
-  z.object({ phase: z.literal("admit"), slot: SLOT }).strict(),
+  z.object({ phase: z.literal("admit"), slot: SLOT, emergencyRequestId: z.string().min(1).max(64).optional() }).strict(),
   z
     .object({
       phase: z.literal("report"),
@@ -33,7 +43,7 @@ const body = z.union([
           z
             .object({
               number: PR,
-              outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows"]),
+              outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows", "in_open_train"]),
               predecessors: z.array(PR).max(QA_RELEASE_TRAIN_MAX_PREDECESSORS).optional(),
             })
             .strict(),
@@ -64,12 +74,20 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
   if (!parsed.success) return { status: 400, body: { error: "invalid_request" } };
   const input = parsed.data;
   try {
+    if (input.phase === "schedule") {
+      // Display only (Admin's next train): no revision check, no audit row.
+      await recordQaReleaseTrainSchedule(input.hours);
+      return { status: 200, body: { recorded: true } };
+    }
     if (input.phase === "selection") {
-      // Read only: the numbers the next train carries, picked in Admin.
-      return { status: 200, body: { numbers: (await readQaReleaseTrainSelection()).numbers } };
+      // Read only: the numbers the next scheduled train carries, and an
+      // emergency request's numbers when one is waiting, both picked in Admin.
+      const next = await readQaReleaseTrainSelection();
+      const pending = next.emergency.pending;
+      return { status: 200, body: { numbers: next.numbers, emergency: pending ? { id: pending.id, numbers: pending.numbers } : null } };
     }
     if (input.phase === "admit") {
-      const result = await admitQaReleaseTrain({ callerRevision, slot: input.slot });
+      const result = await admitQaReleaseTrain({ callerRevision, slot: input.slot, emergencyRequestId: input.emergencyRequestId });
       return result.admitted ? { status: 200, body: result } : { status: 409, body: result };
     }
     const report = { slot: input.slot, outcome: input.outcome, pullRequestNumber: input.pullRequestNumber, branch: input.branch, rcSha: input.rcSha, failure: input.failure, picks: input.picks };

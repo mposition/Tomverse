@@ -262,7 +262,8 @@ test("assistant markdown renders headings and tables as distinct blocks", async 
 
 // UX-011 / COMPOSER-FOCUS-CLIP-01 - the primary composer must expose a visible
 // keyboard focus indicator. The textarea delegates that indicator to its
-// rounded container so the composer's overflow cannot clip it.
+// prompt surface, which draws an inset underline the composer's overflow
+// cannot clip.
 test("the composer shows a focus indicator when focused", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/review");
@@ -271,20 +272,22 @@ test("the composer shows a focus indicator when focused", async ({ page }) => {
     .getByTestId("chat-textarea")
     .evaluate((element) => {
       element.focus();
-      const composer = element.closest<HTMLElement>('[data-testid="chat-input"]');
-      if (!composer) return null;
-      const style = getComputedStyle(composer);
+      const surface = element.closest<HTMLElement>(".composer-prompt-surface");
+      if (!surface?.closest('[data-testid="chat-input"]')) return null;
+      const marker = getComputedStyle(surface, "::after");
       return {
         matchesFocusVisible: element.matches(":focus-visible"),
         focusRingOwner: element.getAttribute("data-focus-ring"),
-        outlineStyle: style.outlineStyle,
-        outlineWidth: parseFloat(style.outlineWidth),
+        markerContent: marker.content,
+        borderStyle: marker.borderBottomStyle,
+        borderWidth: parseFloat(marker.borderBottomWidth),
       };
     });
 
-  expect(focusState, "expected the textarea to be inside the composer").not.toBeNull();
+  expect(focusState, "expected the textarea to be inside the composer prompt surface").not.toBeNull();
   expect(focusState!.matchesFocusVisible).toBe(true);
   expect(focusState!.focusRingOwner).toBe("container");
-  expect(focusState!.outlineStyle).not.toBe("none");
-  expect(focusState!.outlineWidth).toBeGreaterThan(0);
+  expect(focusState!.markerContent).not.toBe("none");
+  expect(focusState!.borderStyle).not.toBe("none");
+  expect(focusState!.borderWidth).toBeGreaterThan(0);
 });
