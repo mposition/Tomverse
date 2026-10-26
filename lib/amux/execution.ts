@@ -40,7 +40,7 @@ import {
 import { AmuxV4TaskCatalogApprovalError,
   calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
-import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
 import { classifyAmuxExecutionPath,
@@ -63,7 +63,6 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   AMUX_V22_TASK_EXECUTION_ENV, amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
-  v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
@@ -401,10 +400,12 @@ export async function startAmuxV22TaskExecution(input: {
         return { started: false as const,
           reason: "cost_unverified" as const };
       }
+      // Owner decision 2026-10-25: a higher cost never stops an ordinary run;
+      // a route outside its confirmed receipt still does.
       // Policy v48: the FIRST Task retry's added route is reconfirmed by the
       // owner's final consent; that is checked once the recovery is read.
-      const ceilingAllowed = checkV4TaskApprovedCeiling(approved,
-        { ok: true, receipt: cost.receipt }).decision === "allow";
+      const ceilingAllowed = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approved,
+        { ok: true, receipt: cost.receipt }), !!assignment.recoveryApprovalId) === "allow";
       if (!ceilingAllowed && !assignment.recoveryApprovalId) {
         return { started: false as const,
           reason: "cost_reconfirmation_required" as const };
@@ -494,12 +495,7 @@ export async function startAmuxV22TaskExecution(input: {
             catalogApprovalId: cost.approvalId,
             costDigest: recoveryCost!.costDigest,
           }) && BigInt(route.perAttemptMicroUsd) <= assignment.perAttemptMicroUsd :
-          v22ExecutionCostWithinAssignment({
-            assignedMicroUsd: assignment.perAttemptMicroUsd,
-            currentMicroUsd: BigInt(route.perAttemptMicroUsd),
-            approvedCeilingMicroUsd: BigInt(approved.ceilingMicroUsd),
-            priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
-          }))) {
+          true)) {
         return { started: false as const, reason: "cost_unverified" as const };
       }
       let publicationRunId: string | null = null;
@@ -1521,6 +1517,7 @@ export async function settleAmuxV22TaskExecution(input: {
         attemptId: attempt.id, invocationIds: expectedIds, events,
         outcome: input.outcome,
         reservedCostMicrousd: attempt.reservedCostMicrousd,
+        budgetBound: !!settlementRecovery?.riskAcceptanceId,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
         expectedExecutionSource: apiExecutionReceipt ?

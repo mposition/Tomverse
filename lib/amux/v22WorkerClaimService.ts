@@ -20,9 +20,10 @@ import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
   "./autoPromotionService.ts";
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
-import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
+import { amuxTaskRoutePrice } from "./v4TaskCostAutoCatalogCore.ts";
 import { amuxV22ApiModelAccessCurrent, readAmuxV22RecoveryAuthority } from
   "./v22TaskRecoveryService.ts";
 import { amuxV22RecoveryAddedRouteConsented, amuxV22RecoveryCost, amuxV22RecoveryStartAllowed,
@@ -223,8 +224,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
         amuxV22RecoveryAddedRouteConsented(approvedCost, approved.receipt, recovery.routeId);
       if (reconfirmOnly && !addedRouteConsented)
         throw new BoardImportError("task_not_ready", 409);
-      if (checkV4TaskApprovedCeiling(approvedCost,
-        { ok: true, receipt: approved.receipt }).decision !== "allow" && !addedRouteConsented) {
+      if (v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approvedCost,
+        { ok: true, receipt: approved.receipt }), !!recovery) !== "allow" && !addedRouteConsented) {
         throw new BoardImportError("cost_reconfirmation_required", 409);
       }
       const requiredTool = amuxV22RequiredTool(card.taskRole);
@@ -360,6 +361,12 @@ async function claimCandidate(taskId: string, assignmentId: string,
              pinned.protocolCapabilities[0] !== recovery.readOnlyExecutorKind))) {
         throw new BoardImportError("worker_unavailable", 409);
       }
+      // The prices this assignment reserves against. Its CLI usage is settled
+      // at these, never at a price the registry gives later.
+      const routePrice = amuxTaskRoutePrice(approved.catalog, route.routeId);
+      if (!routePrice || routePrice.modelId !== route.modelId) {
+        throw new BoardImportError("worker_unavailable", 409);
+      }
       const auditId = await writeSystemAuditLog({ tx,
         systemActor: AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR,
         action: "amux.v22.worker.assigned",
@@ -369,7 +376,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
           promotionReceiptId: promotion.id, lane: lane.lane,
           laneDecisionSequence: lane.sequence?.toString() ?? null,
           routeId: route.routeId, catalogApprovalId: approved.approvalId,
-          costReceiptDigest: recoveryApproved.receipt.receiptDigest,
+          costReceiptDigest: recoveryApproved.receipt.receiptDigest, routePrice,
           v52GradeRouting: exactGradeRouting,
           ...(recovery ? { recoveryApprovalId: recovery.id,
             recoveryCostDigest: recovery.costDigest } : {}),

@@ -247,14 +247,20 @@ test("the one-shot request and CLI command have bounded capabilities", () => {
   assert.deepEqual(parseAmuxV22OneShotRequest(request, "worker-a"), request);
   assert.throws(() => parseAmuxV22OneShotRequest({ ...request,
     worker: "worker-b" }, "worker-a"));
-  assert.throws(() => parseAmuxV22OneShotRequest({ ...request,
-    budgetMicrousd: 5_000_001 }, "worker-a"));
+  // No fixed per-attempt cap (owner decision 2026-10-25): the reservation is
+  // the budget. Only a non-positive or unsafe amount is refused.
+  assert.equal(parseAmuxV22OneShotRequest({ ...request,
+    budgetMicrousd: 5_000_001 }, "worker-a").budgetMicrousd, 5_000_001);
+  for (const budgetMicrousd of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => parseAmuxV22OneShotRequest({ ...request, budgetMicrousd }, "worker-a"));
+  }
   assert.throws(() => parseAmuxV22OneShotRequest({ ...request,
     worktreePath: "/etc" }, "worker-a"));
   const args = amuxV22ClaudeArgs(request);
   assert.ok(args.includes("--restricted"));
   assert.ok(args.includes("--permission-prompts"));
-  assert.equal(args[args.indexOf("--max-budget-usd") + 1], "1.250000");
+  assert.equal(args.includes("--max-budget-usd"), false,
+    "an ordinary run has no dollar stop (owner decision 2026-10-25)");
   assert.equal(args[args.indexOf("--tools") + 1],
     "Read,Grep,Glob,Edit,Write");
   assert.equal(args.some((arg) => arg.includes("Bash")), false);

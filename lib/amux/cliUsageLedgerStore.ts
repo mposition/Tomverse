@@ -5,8 +5,11 @@ import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
-import { inspectV4TaskCostCatalog, type V4TaskCostCatalog } from
-  "@/lib/amux/v4TaskCostCatalogCore";
+import { amuxTaskRoutePrice, parseAmuxTaskRoutePrice } from "@/lib/amux/v4TaskCostAutoCatalogCore";
+import { inspectV4TaskCostCatalog } from "@/lib/amux/v4TaskCostCatalogCore";
+
+type AcceptedAssignment = { id: string; authorizationAuditLogId: string;
+  catalogApprovalId: string; routeId: string };
 import { amuxCliUsageReceiptDigest, amuxCliUsageReceiptSchema,
   amuxUsageLedgerReceiptSchema,
   estimateAmuxCliApiCost, v22ReceiptModelMatchesAssignment,
@@ -79,38 +82,52 @@ async function authoritativeApiExecutionFrame(
       } : null;
 }
 
-async function approvedTaskPrice(tx: Prisma.TransactionClient,
-  receipt: Receipt): Promise<AmuxCliApiPrice | null> {
-  if (receipt.binding.kind !== "task_attempt" || !receipt.actualModelId ||
-      receipt.actualModelId === "multi_model") return null;
-  const row = await tx.amuxV4TaskCostCatalogApproval.findFirst({
-    orderBy: { version: "desc" },
+/** An assignment made before prices were recorded with it reserved against an
+ * owner-approved catalog, kept immutable in AmuxV4TaskCostCatalogApproval;
+ * its route is priced from that exact approved row. */
+async function retainedApprovalRoutePrice(tx: Prisma.TransactionClient,
+  assignment: { catalogApprovalId: string; routeId: string }) {
+  const row = await tx.amuxV4TaskCostCatalogApproval.findUnique({
+    where: { id: assignment.catalogApprovalId },
+    select: { status: true, catalog: true, catalogDigest: true },
   });
-  if (!row || row.status !== "approved" || row.revokedAt !== null) return null;
+  if (!row || row.status !== "approved") return null;
   const inspection = inspectV4TaskCostCatalog(row.catalog);
   if (!inspection.ok || inspection.catalogDigest !== row.catalogDigest) return null;
+  return amuxTaskRoutePrice(row.catalog, assignment.routeId);
+}
+
+/** The price a v22 assignment reserved against, recorded in its own audit
+ * entry (owner decision 2026-10-25: no approved catalog to look prices up
+ * in). Usage is settled at that price, never at one the registry gives
+ * later; anything that does not match it exactly is left unpriced. */
+async function assignmentRoutePrice(tx: Prisma.TransactionClient, receipt: Receipt,
+  assignment: AcceptedAssignment | null):
+  Promise<AmuxCliApiPrice | null> {
+  if (!assignment || !receipt.actualModelId ||
+      receipt.actualModelId === "multi_model") return null;
   const audit = await tx.adminAuditLog.findUnique({
-    where: { id: row.approvalAuditLogId },
-    select: { action: true, actorUserId: true, targetId: true,
-      targetType: true, entryHash: true },
+    where: { id: assignment.authorizationAuditLogId },
+    select: { action: true, targetId: true, targetType: true,
+      entryHash: true, metadata: true },
   });
-  if (!audit?.entryHash || audit.action !== "amux.v4.task_catalog.approve" ||
-      audit.actorUserId !== row.approvedByUserId || audit.targetId !== row.id ||
-      audit.targetType !== "AmuxV4TaskCostCatalogApproval") return null;
-  const catalog = row.catalog as unknown as V4TaskCostCatalog;
-  const candidates = catalog.routes.filter((route) => route.enabled &&
-    route.workerName === receipt.worker && route.provider === receipt.provider &&
-    route.modelId === receipt.actualModelId &&
-    route.pricingVerifiedAt <= receipt.endedAt &&
-    route.pricingExpiresAt > receipt.endedAt);
-  if (candidates.length !== 1) return null;
-  const route = candidates[0];
-  return { provider: receipt.provider, modelId: receipt.actualModelId,
-    version: row.pricingVersion,
-    uncachedInputMicroUsdPerMillion: route.uncachedInputMicroUsdPerMillion,
-    cacheReadMicroUsdPerMillion: route.cacheReadMicroUsdPerMillion,
-    cacheWriteMicroUsdPerMillion: route.cacheWriteMicroUsdPerMillion,
-    outputMicroUsdPerMillion: route.outputMicroUsdPerMillion,
+  if (!audit?.entryHash || audit.action !== "amux.v22.worker.assigned" ||
+      audit.targetType !== "AmuxV22WorkerAssignment" ||
+      audit.targetId !== assignment.id) return null;
+  const metadata = audit.metadata as Record<string, unknown> | null;
+  const price = metadata && Object.hasOwn(metadata, "routePrice") ?
+    parseAmuxTaskRoutePrice(metadata.routePrice) :
+    await retainedApprovalRoutePrice(tx, assignment);
+  if (!price || price.modelId !== receipt.actualModelId) return null;
+  // No verified cache-write rate: a run that wrote to the cache stays unpriced.
+  if (price.cacheWriteMicroUsdPerMillion === 0 &&
+      (receipt.observed?.cacheCreationInputTokens ?? 0) > 0) return null;
+  return { provider: receipt.provider, modelId: price.modelId,
+    version: price.pricingVersion,
+    uncachedInputMicroUsdPerMillion: price.uncachedInputMicroUsdPerMillion,
+    cacheReadMicroUsdPerMillion: price.cacheReadMicroUsdPerMillion,
+    cacheWriteMicroUsdPerMillion: price.cacheWriteMicroUsdPerMillion,
+    outputMicroUsdPerMillion: price.outputMicroUsdPerMillion,
     reasoningOutputMicroUsdPerMillion: null };
 }
 
@@ -135,6 +152,7 @@ async function recordUsage(tx: Prisma.TransactionClient,
       receiptDigest: digest, auditId: null };
   }
   let taskId: string | null = null;
+  let assignment: AcceptedAssignment | null = null;
   if (receipt.binding.kind === "task_attempt") {
     const attempt = await tx.amuxExecutionAttempt.findUnique({
       where: { id: receipt.binding.attemptId },
@@ -143,6 +161,7 @@ async function recordUsage(tx: Prisma.TransactionClient,
         task: { select: { sourceSystem: true,
           v22AssignmentId: true,
           v22AcceptedAssignment: { select: {
+            id: true, authorizationAuditLogId: true, catalogApprovalId: true, routeId: true,
             workerName: true, provider: true, modelId: true,
           } },
         } },
@@ -168,6 +187,9 @@ async function recordUsage(tx: Prisma.TransactionClient,
       throw new AmuxCliUsageLedgerError("binding_mismatch");
     }
     taskId = attempt.taskId;
+    if (attempt.task.sourceSystem === "admin-idea-v4") {
+      assignment = attempt.task.v22AcceptedAssignment;
+    }
   } else {
     const hold = await tx.amuxIdeaAnalysisBudgetHold.findUnique({
       where: { id: receipt.binding.holdId },
@@ -182,7 +204,7 @@ async function recordUsage(tx: Prisma.TransactionClient,
   }
   const price = apiAuditBinding ?
     apiExecutionFramePrice(apiAuditBinding.apiExecutionFrame) :
-    await approvedTaskPrice(tx, receipt);
+    await assignmentRoutePrice(tx, receipt, assignment);
   const projected = estimateAmuxCliApiCost(receipt, price);
   const usage = receipt.observed;
   const id = randomUUID();

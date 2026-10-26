@@ -8,8 +8,6 @@ import { AmuxDecisionMakerRequestsPanel } from "@/components/admin/AmuxDecisionM
 import { AmuxDecisionMakerSwitchPanel } from "@/components/admin/AmuxDecisionMakerSwitchPanel";
 import { AmuxDecisionMakerWorkPointer } from "@/components/admin/AmuxDecisionMakerWorkPointer";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
-import { AmuxTaskCostCatalogApprovalPanel,
-  type AmuxTaskCatalogCaps } from "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
 import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
 import { AmuxFrontierModelRegistrationPanel } from "@/components/admin/AmuxFrontierModelRegistrationPanel";
 import { AmuxOperatingScopePanel } from "@/components/admin/AmuxOperatingScopePanel";
@@ -46,10 +44,6 @@ import { readAmuxWorkerCapabilitiesForAdmin } from "@/lib/amux/workerCapabilityA
 import { readAmuxWorkerRegistryForAdmin } from "@/lib/amux/workerRegistryAdminRead";
 import { amuxWorkerRegistryWritesOpen } from "@/lib/amux/workerRegistryCore";
 import { authOptions } from "@/lib/auth";
-import { AMUX_V4_TASK_CATALOG_WRITE_ENV, amuxV4TaskCatalogWriteEnabled,
-  readCurrentAmuxV4TaskCatalog } from "@/lib/amux/v4TaskCostCatalogApprovalService";
-import { AMUX_TASK_CATALOG_DEFAULT_CAPS, AMUX_TASK_CATALOG_GRADES } from
-  "@/lib/amux/v4TaskCostCatalogDraftCore";
 import {
   AMUX_V4_FRONTIER_CATALOG_READ_ENV,
   AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
@@ -100,29 +94,20 @@ export default async function AdminAmuxSettingsPage({
     // Every admin role reads the list; only the owner is offered changes, and
     // the route decides that again. Each of the three reads that fails is
     // shown as such, never as an empty list or a guessed connection.
-    // The Task cost catalog prices these workers, so the owner approves it
-    // here (owner decision 2026-10-25); a failed read shows as unreadable.
-    const [registry, capabilities, live, catalog] = await Promise.all([
+    const [registry, capabilities, live] = await Promise.all([
       readAmuxWorkerRegistryForAdmin().catch(() => null),
       readAmuxWorkerCapabilitiesForAdmin().catch(() => null),
       readAgentOfficeAmuxWorkers(),
-      isOwner ? readCurrentAmuxV4TaskCatalog().catch(() => null) : null,
     ]);
-    const catalogCaps: Partial<AmuxTaskCatalogCaps> =
-      (catalog && "caps" in catalog ? catalog.caps : undefined) ?? {};
     return <div className="flex min-w-0 flex-col gap-5">{tabs}
       <AmuxWorkersOverviewPanel registry={registry} capabilities={capabilities} live={live}
-        readAtMs={currentTimeMs()} isOwner={isOwner} />
-      {isOwner ? <AmuxTaskCostCatalogApprovalPanel current={catalog}
-        initialCaps={Object.fromEntries(AMUX_TASK_CATALOG_GRADES.map((grade) =>
-          [grade, catalogCaps[grade] ?? AMUX_TASK_CATALOG_DEFAULT_CAPS[grade]])) as AmuxTaskCatalogCaps}
-        approvalAvailable={amuxV4TaskCatalogWriteEnabled(
-          process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} /> : null}</div>;
+        readAtMs={currentTimeMs()} isOwner={isOwner} /></div>;
   }
   // Owner only (the tab's viewRoles); resolveAdminTabFor has already refused other roles.
   // Approved backlog redesign, screen C: the monthly analysis budget, the
-  // approved analysis models, each behind the same server switches as before;
-  // the Task cost catalogue moved to the Workers tab it prices.
+  // approved analysis models, each behind the same server switches as before.
+  // Task costs need no approval: they come from the worker registry and
+  // Admin › Models (owner decision 2026-10-25).
   if (tab.id === "analysis") {
     const budgetAvailable = process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
       process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled";

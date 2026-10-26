@@ -343,7 +343,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
         label: "자동 편입",
         description: "준비된 Task를 담당 없는 Todo에 편입하는 owner 승인",
       },
-      workers: { label: "Worker", description: "AI worker를 등록하고, 할 수 있는 일을 정하고, 켜고 끄며, Task 비용표를 승인합니다" },
+      workers: { label: "Worker", description: "AI worker를 등록하고, 할 수 있는 일을 정하고, 켜고 끕니다" },
       safety: { label: "실행 안전·복구", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
       "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
       analysis: { label: "분석 설정", description: "분석 월 예산과 승인된 분석 모델" },
