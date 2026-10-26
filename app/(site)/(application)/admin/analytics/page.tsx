@@ -161,7 +161,10 @@ export default async function AdminAnalyticsPage({
           locale={locale}
         />
         <AdminAiReviewJudgedPanel catalog={catalog} locale={locale} />
-        <details className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+        <details
+          open
+          className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5"
+        >
           <summary className="cursor-pointer text-sm font-semibold text-zinc-200">
             {messages.operational}
           </summary>
