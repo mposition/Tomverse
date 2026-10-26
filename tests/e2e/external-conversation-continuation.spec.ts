@@ -2329,6 +2329,51 @@ test.describe("a continuation opens in its product's workspace", () => {
         expect(api.createBodies).toHaveLength(0);
     });
 
+    test("a Chat answer opens its question, with earlier questions, as a new Review draft", async ({
+        page,
+    }) => {
+        /*
+          Owner request 2026-10-26: a way from Chat to Review. The Chat
+          conversation stays as it is; the answer's question opens as a Review
+          draft the user sends themselves (lib/chatReviewHandoff.ts).
+        */
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page, { autoSelectionOffered: true });
+        const api = await mockContinuationApi(page, {
+            product: "chat",
+            tomverseMessages: [
+                { id: "q1", role: "user", content: "도쿄 3일 여행 계획 짜줘" },
+                { id: "r1", role: "assistant", content: "1일차 ...", modelId: PRIMARY_MODEL },
+                { id: "q2", role: "user", content: "더 저렴하게" },
+                { id: "r2", role: "assistant", content: "저렴한 계획 ...", modelId: PRIMARY_MODEL },
+            ],
+        });
+        await mockConversationList(page, [
+            {
+                id: CONVERSATION_ID,
+                title: "Continued from an imported chat",
+                surface: "continuation",
+                sourceTitle: SOURCE_CONVERSATION_TITLE,
+            },
+        ]);
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+
+        const compare = page.getByTestId("chat-compare-in-review");
+        // One per finished Tomverse answer; never on an imported bubble.
+        await expect(compare).toHaveCount(2);
+        await expect(
+            page.locator('[data-message-source="imported"]').getByTestId("chat-compare-in-review")
+        ).toHaveCount(0);
+        await compare.last().click();
+
+        await expect(page).toHaveURL(/\/review(\?|$)/);
+        await expect(page.getByTestId("chat-textarea")).toHaveValue(
+            "이전 질문:\n- 도쿄 3일 여행 계획 짜줘\n\n더 저렴하게"
+        );
+        // Prefilled, not sent.
+        expect(api.chatRequests).toBe(0);
+    });
+
     test("a Review continuation is the Review workspace, with no Chat-only controls", async ({
         page,
     }) => {

@@ -118,6 +118,7 @@ export type DesktopChatShellProps = {
   onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
+  onCompareInReview?: (seed: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -428,6 +429,7 @@ export function DesktopChatShell({
   onProductSwitch,
   transcriptScope = "model",
   onRestorePrompt,
+  onCompareInReview,
   conversations,
   currentChatId,
   selectedModels,
@@ -1373,6 +1375,7 @@ export function DesktopChatShell({
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
+                  onCompareInReview={onCompareInReview}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
