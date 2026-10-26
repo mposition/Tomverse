@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
 
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { prisma } from "@/lib/prisma";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { createResourceUnlockCookie } from "@/lib/conversationLock";
@@ -210,12 +211,20 @@ test("a Chat continuation is one Smart Adaptive model with the same bridge", asy
 
     const conversation = await prisma.conversation.findUniqueOrThrow({
         where: { id: result.conversationId },
-        select: { productKey: true, kind: true, selectionMode: true, selectedModels: true },
+        select: {
+            productKey: true,
+            kind: true,
+            selectionMode: true,
+            selectedModels: true,
+            webSearchMode: true,
+        },
     });
     assert.equal(conversation.productKey, "chat");
     assert.equal(conversation.kind, "chat");
     assert.equal(conversation.selectionMode, "auto");
     assert.equal(JSON.parse(conversation.selectedModels ?? "[]").length, 1);
+    // The same web-search default as a fresh conversation, not the column's "off".
+    assert.equal(conversation.webSearchMode, APP_DEFAULTS.defaultWebSearchMode);
     const bridge = await getContinuationBridge(user.id, result.conversationId);
     assert.equal(bridge?.externalConversationId, snapshot.id);
 

@@ -371,6 +371,11 @@ async function createContinuationRows(input: {
                 // `POST /api/conversations` uses. §8.3: no continuation-specific
                 // default combination.
                 selectedModels: JSON.stringify(input.selectedModels),
+                // The new-conversation default every other create uses
+                // (`conversationCreateHandler`). Omitted, the row fell to the
+                // column default "off" and a continuation opened with web
+                // search off where a fresh Chat or Review has it on.
+                webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
             },
             { id: true }
         );
