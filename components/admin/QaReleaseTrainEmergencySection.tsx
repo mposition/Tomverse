@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useQaReleaseTrainReads } from "@/components/admin/QaReleaseTrainRefresher";
-import { announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
-import { adminFetch } from "@/lib/adminFetch";
+import { QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS, announceQaReleaseTrainChanged, card } from "@/components/admin/qaReleaseTabParts";
+import { adminFetch, isAdminFetchTimeout } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
 import { adminQaReleaseTrainMessages } from "@/lib/adminMessages/qaReleaseTrain";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -34,7 +34,8 @@ export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }
   const m = useAdminMessages(adminQaReleaseTrainMessages);
   const common = useAdminMessages(adminAgentDigestsMessages);
   const [view, setView] = useState<View | null>(null);
-  const [failed, setFailed] = useState(false);
+  // "slow": the read outlasted the wait; the server goes on and keeps it for the next try.
+  const [failed, setFailed] = useState<false | "error" | "slow">(false);
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<number[]>([]);
@@ -49,7 +50,7 @@ export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }
 
   useEffect(() => {
     let cancelled = false;
-    adminFetch(reads.fresh ? `${READ_API}?fresh=1` : READ_API, { cache: "no-store" })
+    adminFetch(reads.fresh ? `${READ_API}?fresh=1` : READ_API, { cache: "no-store", timeoutMs: QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS })
       .then((response) => {
         if (!response.ok) throw new Error(String(response.status));
         return response.json() as Promise<View>;
@@ -59,8 +60,8 @@ export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }
         setView(next);
         setFailed(false);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((error: unknown) => {
+        if (!cancelled) setFailed(isAdminFetchTimeout(error) ? "slow" : "error");
       });
     return () => {
       cancelled = true;
@@ -172,7 +173,7 @@ export function QaReleaseTrainEmergencySection({ canWrite, openUnknown = false }
 
       {editing ? (
         <div className="mt-3 flex flex-col gap-3 rounded-lg border border-red-400/40 p-3" data-testid="qa-release-train-emergency-form">
-          {failed || view?.candidates.status === "unread" ? <p className="text-sm text-amber-300">{m.emergencyUnread}</p> : null}
+          {failed || view?.candidates.status === "unread" ? <p className="text-sm text-amber-300">{failed === "slow" ? m.emergencySlow : m.emergencyUnread}</p> : null}
           <div className="flex flex-col gap-1.5">
             <span className="text-xs text-zinc-400">{m.emergencyPulls}</span>
             <div className="flex flex-wrap gap-1.5">
