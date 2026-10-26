@@ -284,6 +284,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // body pairs an intent with its own manifest; no commit-deadline marker,
   // classifier or deferred trigger changes.
   "20261024010000_amux_v19_read_manifest_per_page",
+  // v22 on every provider class, owner decision 2026-10-26: the capability
+  // guard body and three CHECK constraints admit the Codex, Copilot and Cursor
+  // CLIs; no commit-deadline marker, classifier or deferred trigger changes.
+  "20261026100000_amux_v22_all_providers",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

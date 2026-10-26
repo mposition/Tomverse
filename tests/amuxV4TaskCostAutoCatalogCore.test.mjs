@@ -15,11 +15,11 @@ import {
 
 const NOW = "2026-10-25T01:02:03.000Z";
 const workers = [
-  { workerName: "claude-chore", modelId: "claude-haiku-4-5", roles: ["investigate"],
+  { workerName: "claude-chore", provider: "anthropic", modelId: "claude-haiku-4-5", roles: ["investigate"],
     roleCeiling: "chore" },
-  { workerName: "claude-impl", modelId: "claude-sonnet-5",
+  { workerName: "claude-impl", provider: "anthropic", modelId: "claude-sonnet-5",
     roles: ["implement", "investigate", "review"], roleCeiling: "implementation" },
-  { workerName: "claude-contract", modelId: "claude-opus-4-8",
+  { workerName: "claude-contract", provider: "anthropic", modelId: "claude-opus-4-8",
     roles: ["design", "implement", "investigate"], roleCeiling: "contract" },
 ];
 // Verified five-minute write rates are 1.25x input.
@@ -141,9 +141,9 @@ test("an assignment records exactly its route's prices, and only that shape read
 
 test("a worker without a price, a role ceiling or a Task role is left out", () => {
   const result = derive({ workers: [...workers,
-    { workerName: "claude-new", modelId: "claude-unknown", roles: ["investigate"], roleCeiling: "chore" },
-    { workerName: "claude-odd", modelId: "claude-sonnet-5", roles: ["implement"], roleCeiling: null },
-    { workerName: "claude-reviewer", modelId: "claude-sonnet-5", roles: ["review"], roleCeiling: "contract" }] });
+    { workerName: "claude-new", provider: "anthropic", modelId: "claude-unknown", roles: ["investigate"], roleCeiling: "chore" },
+    { workerName: "claude-odd", provider: "anthropic", modelId: "claude-sonnet-5", roles: ["implement"], roleCeiling: null },
+    { workerName: "claude-reviewer", provider: "anthropic", modelId: "claude-sonnet-5", roles: ["review"], roleCeiling: "contract" }] });
   assert.equal(result.catalog.routes.length, 3);
   assert.equal(result.catalogDigest, derive().catalogDigest,
     "a worker that cannot be priced does not change the catalog");

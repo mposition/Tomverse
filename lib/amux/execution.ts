@@ -64,6 +64,7 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   AMUX_V22_TASK_EXECUTION_ENV, amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionReceiptVerified,
+  v22ExecutionSourceForProvider,
   v22ReadOnlyApiReceiptMatchesUsage,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
@@ -1520,8 +1521,11 @@ export async function settleAmuxV22TaskExecution(input: {
         budgetBound: !!settlementRecovery?.riskAcceptanceId,
         resultStored: storedResult?.taskId === task.id &&
           storedResult.bodyPurgedAt === null,
+        // The assignment's provider names the CLI that ran it; an unknown
+        // provider matches no source and never settles.
         expectedExecutionSource: apiExecutionReceipt ?
-          "anthropic_messages_api" : "claude_result",
+          "anthropic_messages_api" :
+          v22ExecutionSourceForProvider(settlementAssignment?.provider ?? "anthropic"),
       }) && (!apiExecutionReceipt || (events.length === 1 &&
         v22ReadOnlyApiReceiptMatchesUsage({ attemptId: attempt.id,
           outcome: input.outcome,

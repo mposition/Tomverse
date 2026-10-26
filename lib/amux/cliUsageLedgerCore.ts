@@ -24,8 +24,8 @@ export const amuxUsageLedgerReceiptSchema = z.object({
     z.object({ kind: z.literal("idea_analysis"), holdId: id }).strict(),
   ]),
   worker: id,
-  cli: z.enum(["codex", "claude", "anthropic_api"]),
-  provider: z.enum(["openai", "anthropic"]),
+  cli: z.enum(["codex", "claude", "copilot", "cursor", "anthropic_api"]),
+  provider: z.enum(["openai", "anthropic", "github-copilot", "cursor"]),
   selectedModelId: model,
   actualModelId: model.nullable(),
   cliVersion: z.string().regex(/^[A-Za-z0-9._+-]{1,80}$/).nullable(),
@@ -34,8 +34,8 @@ export const amuxUsageLedgerReceiptSchema = z.object({
   endedAt: z.string().datetime({ offset: false }),
   status: z.enum(["succeeded", "failed", "interrupted", "outcome_unknown"]),
   completeness: z.enum(["reported_complete", "reported_partial", "unknown"]),
-  source: z.enum(["codex_jsonl", "claude_result",
-    "anthropic_messages_api", "unreported"]),
+  source: z.enum(["codex_jsonl", "claude_result", "copilot_json",
+    "cursor_stream", "anthropic_messages_api", "unreported"]),
   observed: counts.nullable(),
   inputTokensIncludeCacheRead: z.boolean(),
   inputTokensIncludeCacheWrite: z.boolean().nullable(),
@@ -45,11 +45,15 @@ export const amuxUsageLedgerReceiptSchema = z.object({
   if (value.cli === "codex" && value.provider !== "openai" ||
       value.cli === "claude" && value.provider !== "anthropic" ||
       value.cli === "anthropic_api" && value.provider !== "anthropic" ||
+      value.cli === "copilot" && value.provider !== "github-copilot" ||
+      value.cli === "cursor" && value.provider !== "cursor" ||
       Date.parse(value.endedAt) < Date.parse(value.startedAt) ||
       (value.completeness === "unknown") !== (value.observed === null) ||
       (value.source === "unreported") !== (value.observed === null) ||
       (value.source === "codex_jsonl" && value.cli !== "codex") ||
       (value.source === "claude_result" && value.cli !== "claude") ||
+      (value.source === "copilot_json" && value.cli !== "copilot") ||
+      (value.source === "cursor_stream" && value.cli !== "cursor") ||
       (value.source === "anthropic_messages_api" &&
         value.cli !== "anthropic_api") ||
       (value.cli === "codex" &&
@@ -58,6 +62,12 @@ export const amuxUsageLedgerReceiptSchema = z.object({
       (value.cli === "claude" &&
         (value.inputTokensIncludeCacheRead ||
           value.inputTokensIncludeCacheWrite !== false)) ||
+      // Measured for v19 (2026-10-20): Copilot input includes cache reads,
+      // Cursor's does not; neither reports reasoning apart from output.
+      (value.cli === "copilot" && (!value.inputTokensIncludeCacheRead ||
+        value.reasoningOutputIncludedInOutput !== null)) ||
+      (value.cli === "cursor" && (value.inputTokensIncludeCacheRead ||
+        value.reasoningOutputIncludedInOutput !== null)) ||
       (value.cli === "anthropic_api" &&
         (value.authentication !== "api_key" || value.cliVersion !== null ||
           value.completeness !== "reported_complete" ||
@@ -98,9 +108,15 @@ export const amuxCliUsageReceiptSchema = amuxUsageLedgerReceiptSchema
 export type AmuxUsageLedgerReceipt =
   z.infer<typeof amuxUsageLedgerReceiptSchema>;
 export type AmuxCliUsageReceipt = AmuxUsageLedgerReceipt & {
-  cli: "codex" | "claude";
-  source: "codex_jsonl" | "claude_result" | "unreported";
+  cli: "codex" | "claude" | "copilot" | "cursor";
+  source: "codex_jsonl" | "claude_result" | "copilot_json" | "cursor_stream" |
+    "unreported";
 };
+
+const CLI_PROVIDER = { codex: "openai", claude: "anthropic",
+  copilot: "github-copilot", cursor: "cursor" } as const;
+const CLI_SOURCE = { codex: "codex_jsonl", claude: "claude_result",
+  copilot: "copilot_json", cursor: "cursor_stream" } as const;
 
 /** v22 accepts no silent CLI model fallback. A different served model has a
  * different approved route and price and therefore cannot settle this Task. */
@@ -135,7 +151,7 @@ export function makeAmuxCliUsageReceipt(input: Omit<AmuxCliUsageReceipt,
       ? "multi_model" : null;
   return amuxCliUsageReceiptSchema.parse({ ...rest, version: 1,
     cli: observation.cli,
-    provider: observation.cli === "codex" ? "openai" : "anthropic",
+    provider: CLI_PROVIDER[observation.cli],
     actualModelId,
     completeness: observation.completeness,
     observed: observation.observed,
@@ -144,12 +160,12 @@ export function makeAmuxCliUsageReceipt(input: Omit<AmuxCliUsageReceipt,
     reasoningOutputIncludedInOutput: observation.reasoningOutputIncludedInOutput,
     completedTurns: observation.completedTurns,
     source: observation.observed === null ? "unreported" :
-      observation.cli === "codex" ? "codex_jsonl" : "claude_result",
+      CLI_SOURCE[observation.cli],
   }) as AmuxCliUsageReceipt;
 }
 
 export type AmuxCliApiPrice = {
-  provider: "openai" | "anthropic";
+  provider: AmuxUsageLedgerReceipt["provider"];
   modelId: string;
   version: string;
   uncachedInputMicroUsdPerMillion: number;
@@ -159,13 +175,21 @@ export type AmuxCliApiPrice = {
   reasoningOutputMicroUsdPerMillion: number | null;
 };
 
+/** The model a receipt is priced as. Codex and Cursor never name the model
+ * that answered, so theirs is the selected one (the same rule v22 settlement
+ * uses, lib/amux/v22TaskExecutionCore.ts); any other CLI must name it. */
+export function amuxCliPricedModelId(receipt: AmuxUsageLedgerReceipt): string | null {
+  const modelId = receipt.actualModelId ??
+    (receipt.cli === "codex" || receipt.cli === "cursor" ? receipt.selectedModelId : null);
+  return modelId === "multi_model" ? null : modelId;
+}
+
 /** This is a future API-key conversion estimate, never subscription billing. */
 export function estimateAmuxCliApiCost(receipt: AmuxUsageLedgerReceipt,
   price: AmuxCliApiPrice | null): bigint | null {
   const usage = receipt.observed;
   if (!usage || !price || receipt.completeness !== "reported_complete" ||
-      receipt.actualModelId !== price.modelId ||
-      receipt.actualModelId === "multi_model" ||
+      amuxCliPricedModelId(receipt) !== price.modelId ||
       receipt.provider !== price.provider ||
       !/^[A-Za-z0-9._:-]{1,160}$/.test(price.version) ||
       ![price.uncachedInputMicroUsdPerMillion,

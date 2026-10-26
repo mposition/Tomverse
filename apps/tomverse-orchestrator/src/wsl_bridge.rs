@@ -249,6 +249,23 @@ where
     Some(BridgeArgs::Worker(name))
 }
 
+/// A v22 delivery's model name, of any provider (owner decision 2026-10-26:
+/// Codex, Copilot and Cursor workers run v22 too). It is the app's
+/// `amuxV22OneShotRouteSupported` grammar: `claude-` and 1 to 120 of
+/// [A-Za-z0-9._-], or any other name of 1 to 120 such characters starting
+/// with a letter or digit. Whether the model belongs to the worker's own CLI
+/// is the sidecar's check, which knows its provider.
+pub fn v22_model_id_valid(model_id: &str) -> bool {
+    let plain = |part: &[u8]| part.iter().all(|byte| byte.is_ascii_alphanumeric() ||
+        matches!(byte, b'.' | b'_' | b'-'));
+    let bytes = model_id.as_bytes();
+    match model_id.strip_prefix("claude-") {
+        Some(rest) => (1..=120).contains(&rest.len()) && plain(rest.as_bytes()),
+        None => (1..=120).contains(&bytes.len()) && bytes[0].is_ascii_alphanumeric() &&
+            plain(bytes),
+    }
+}
+
 /// The sidecar socket of a v22 worker's `--worker` bridge (orchestration
 /// policy version 55, section 2), computed from the worker's name, never
 /// read from the environment.
@@ -1907,6 +1924,23 @@ mod quota_tests {
             "observed_at":"2026-10-12T00:00:00.000Z","reset_at":"2026-10-12T07:00:00.000Z"}})
     }
     #[test]
+    fn v22_delivery_model_names_any_provider_but_only_a_plain_id() {
+        for model in ["claude-opus-5-5", "gpt-6-luna", "composer-2.5", "auto",
+            "claude-sonnet-5-5", "grok-4.7-high", "a.b_c"] {
+            assert!(v22_model_id_valid(model), "{model}");
+        }
+        let long_claude = format!("claude-{}", "a".repeat(120));
+        assert!(v22_model_id_valid(&long_claude));
+        assert!(!v22_model_id_valid(&format!("{long_claude}a")));
+        let other = "a".repeat(121);
+        for model in ["", "-leading", ".x", "gpt 6", "gpt/6", "x;rm", "a:b", "claude-",
+            "claude-a:b", other.as_str()] {
+            assert!(!v22_model_id_valid(model), "{model}");
+        }
+        assert!(v22_model_id_valid(&"a".repeat(120)));
+    }
+
+    #[test]
     fn quota_binds_worker_request_source_and_freshness() {
         let id = "00000000-0000-4000-8000-000000000001";
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T00:00:01Z").unwrap().timestamp();
@@ -2539,7 +2573,7 @@ impl LocalAmux for HttpLocal {
         instance_id: &str, generation: i64) -> Result<V22SidecarState> {
         let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
         if delivery.assignment_id.is_none() ||
-            !profile.model_id.starts_with("claude-") ||
+            !v22_model_id_valid(&profile.model_id) ||
             profile.budget_microusd < 1 || profile.budget_microusd > 5_000_000 ||
             delivery.prompt.len() > 32 * 1024 {
             bail!("invalid v22 one-shot delivery");
