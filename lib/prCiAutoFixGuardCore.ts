@@ -12,8 +12,22 @@ import { judgeQaReleaseMergeLaneExclusion } from "./qaReleaseMergeLaneExclusionC
 
 export const PR_CI_AUTO_FIX_MAX_CHANGED_LINES = 400;
 export const PR_CI_AUTO_FIX_MAX_ATTEMPTS = 2;
-/** Head branches the auto-fix serves: agent sessions that open develop pull requests. */
-export const PR_CI_AUTO_FIX_BRANCH = /^(claude|codex)\/to-develop\/[A-Za-z0-9._/-]+$/;
+/**
+ * Head branches the auto-fix serves: agent sessions that open develop pull
+ * requests, and Dependabot's updates into develop (owner 2026-10-26).
+ */
+export const PR_CI_AUTO_FIX_BRANCH = /^((claude|codex)\/to-develop|dependabot)\/[A-Za-z0-9._/-]+$/;
+export const PR_CI_AUTO_FIX_DEPENDABOT_BRANCH = /^dependabot\/[A-Za-z0-9._/-]+$/;
+/** The only author a dependabot/ head is served for. */
+export const PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR = "dependabot[bot]";
+/**
+ * Root files a fix to a Dependabot update may change (owner 2026-10-26): how
+ * the app itself is built and instrumented, which a major update of Next.js
+ * or Sentry can require. Every other root file -- how the checks run --
+ * stays fenced, and so does proxy.ts (request handling and auth redirects).
+ */
+export const PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES =
+  /^(next\.config\.(ts|mjs|js)|sentry\.(client|server|edge)\.config\.ts|instrumentation(-client)?\.ts)$/;
 export const PR_CI_AUTO_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
 
 export type PrCiAutoFixVerdict = { push: true } | { push: false; reasons: string[] };
@@ -27,13 +41,21 @@ const CONTRACT_DOCUMENT = /^docs\/(policy|ui-contracts|release-gates)\//;
  * person or an agent session wrote it (owner 2026-10-23 narrowed the lane to
  * the minimum; the auto-fix keeps the wider fence): everything under
  * .github/ and scripts/ (the checks and what they run), any file at the
- * repository root (how checks run and are configured), and every package
+ * repository root (how checks run and are configured; a Dependabot fix may
+ * change PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES only), and every package
  * manifest or npm config wherever it sits (`npm ci` runs install scripts).
  */
 const AUTO_FIX_FENCE = /^(\.github|scripts)\//;
 const PACKAGE_FILE = /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|\.npmrc)$/i;
 
-export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: string }): PrCiAutoFixVerdict {
+export function judgePrCiAutoFixDiff(input: {
+  nameStatus: string;
+  numstat: string;
+  /** The pull request's head branch; without it no root file is allowed. */
+  headBranch?: string;
+}): PrCiAutoFixVerdict {
+  const dependabot = PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.test(input.headBranch ?? "");
+  const fencedRoot = (path: string) => !path.includes("/") && !(dependabot && PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES.test(path));
   const reasons = new Set<string>();
   const changedFiles: { path: string; previousPath?: string }[] = [];
   for (const line of input.nameStatus.split("\n").filter((l) => l.trim() !== "")) {
@@ -50,7 +72,7 @@ export function judgePrCiAutoFixDiff(input: { nameStatus: string; numstat: strin
       // lane may merge one a person wrote (owner 2026-10-23): a model fixing
       // CI must not rewrite another feature's policy to make its change pass.
       if (path && CONTRACT_DOCUMENT.test(path)) reasons.add("gate_path");
-      if (path && (AUTO_FIX_FENCE.test(path) || !path.includes("/") || PACKAGE_FILE.test(path))) reasons.add("gate_path");
+      if (path && (AUTO_FIX_FENCE.test(path) || fencedRoot(path) || PACKAGE_FILE.test(path))) reasons.add("gate_path");
     }
   }
   const lane = judgeQaReleaseMergeLaneExclusion({
@@ -79,6 +101,8 @@ export function judgePrCiAutoFixTarget(input: {
   baseBranch: string;
   draft: boolean;
   sameRepository: boolean;
+  /** The pull request's author login as GitHub reports it. */
+  author: string;
   commitMessages: readonly string[];
   /** The number of commits GitHub says the pull request has; the attempt count is only trusted when every one was read. */
   commitCount: number;
@@ -88,6 +112,11 @@ export function judgePrCiAutoFixTarget(input: {
   if (input.baseBranch !== "develop") reasons.push("base_not_develop");
   if (input.draft) reasons.push("draft");
   if (!PR_CI_AUTO_FIX_BRANCH.test(input.headBranch)) reasons.push("branch_not_served");
+  // A dependabot/ name alone is not Dependabot: a person with push access can
+  // name a branch so, and the root allowance follows the name.
+  if (PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.test(input.headBranch) && input.author !== PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR) {
+    reasons.push("dependabot_branch_not_by_dependabot");
+  }
   if (!Number.isInteger(input.commitCount) || input.commitMessages.length !== input.commitCount) reasons.push("commits_incomplete");
   const attempts = input.commitMessages.filter((m) => m.startsWith(PR_CI_AUTO_FIX_COMMIT_PREFIX)).length;
   if (attempts >= PR_CI_AUTO_FIX_MAX_ATTEMPTS) reasons.push("attempts_exhausted");
