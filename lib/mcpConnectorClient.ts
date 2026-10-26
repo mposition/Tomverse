@@ -52,7 +52,8 @@ export async function resolvePublicMcpEndpoint(server: McpServerPolicy, signal: 
 
 // DNS is checked and the selected address is pinned to the actual socket.
 // No automatic redirects, discovery, OAuth, cookies, SSE reconnection or retry.
-export function guardedMcpFetch(server: McpServerPolicy, token: string | null, signal: AbortSignal, oauthEndpoint = false) {
+export function guardedMcpFetch(server: McpServerPolicy, token: string | null, signal: AbortSignal, oauthEndpoint = false, expectedClientAuthorization?: string) {
+  if ((oauthEndpoint && token) || (!oauthEndpoint && expectedClientAuthorization)) throw new McpConnectorError("oauth_client_authorization_refused");
   const { url, synthetic } = validateMcpEndpoint(server, oauthEndpoint);
   let requests = 0;
   return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -65,7 +66,13 @@ export function guardedMcpFetch(server: McpServerPolicy, token: string | null, s
     combined.throwIfAborted();
     const { addresses } = await resolvePublicMcpEndpoint(server, combined, oauthEndpoint);
     const headers = new Headers(init?.headers);
+    const suppliedAuthorization = headers.get("authorization");
     headers.delete("cookie"); headers.delete("authorization");
+    if (oauthEndpoint && suppliedAuthorization) {
+      if (!expectedClientAuthorization || expectedClientAuthorization.length > 8192 || !/^Basic [A-Za-z0-9+/]+=*$/.test(expectedClientAuthorization) || suppliedAuthorization !== expectedClientAuthorization)
+        throw new McpConnectorError("oauth_client_authorization_refused");
+      headers.set("authorization", expectedClientAuthorization);
+    }
     if (token) headers.set("authorization", `Bearer ${token}`);
     headers.set("host", url.host);
     headers.set("user-agent", "Tomverse-MCP-Preview/1.0");

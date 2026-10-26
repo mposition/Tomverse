@@ -10,7 +10,7 @@ export const SYNTHETIC_DOCUMENTS = [
 ];
 export const SYNTHETIC_GOLD = { dueDate: "30 October", owner: "Mina", blocker: "billing QA" };
 
-export async function startMcpSyntheticServer() {
+export async function startMcpSyntheticServer(options: { basicClientAuth?: boolean; noScope?: boolean } = {}) {
   let writes = 0;
   let requests = 0;
   let paused: Promise<void> | null = null, resume: (() => void) | null = null;
@@ -27,7 +27,8 @@ export async function startMcpSyntheticServer() {
     if (url.pathname === "/register" && req.method === "POST") {
       let body = ""; for await (const chunk of req) body += chunk;
       const metadata = JSON.parse(body);
-      json(201, { ...metadata, client_id: "synthetic-client", client_id_issued_at: Math.floor(Date.now() / 1000) }); return;
+      json(201, { ...metadata, client_id: "synthetic-client", client_id_issued_at: Math.floor(Date.now() / 1000),
+        ...(options.basicClientAuth ? { client_secret: "synthetic-oauth-client-secret", token_endpoint_auth_method: "client_secret_basic" } : {}) }); return;
     }
     if (url.pathname === "/authorize" && req.method === "GET") {
       const code = randomUUID(), redirect = url.searchParams.get("redirect_uri") || "";
@@ -43,8 +44,11 @@ export async function startMcpSyntheticServer() {
       const params = new URLSearchParams(body), code = params.get("code") || "", saved = codes.get(code);
       const challenge = createHash("sha256").update(params.get("code_verifier") || "").digest("base64url");
       codes.delete(code);
-      if (!saved || saved.challenge !== challenge || saved.redirect !== params.get("redirect_uri") || params.get("client_id") !== "synthetic-client") { json(400, { error: "invalid_grant" }); return; }
-      tokenExchanges++; json(200, { access_token: "synthetic-oauth-access", token_type: "Bearer", expires_in: 3600, scope: "read write" }); return;
+      const validClient = options.basicClientAuth
+        ? req.headers.authorization === `Basic ${Buffer.from("synthetic-client:synthetic-oauth-client-secret").toString("base64")}`
+        : params.get("client_id") === "synthetic-client";
+      if (!saved || saved.challenge !== challenge || saved.redirect !== params.get("redirect_uri") || !validClient) { json(400, { error: "invalid_grant" }); return; }
+      tokenExchanges++; json(200, { access_token: "synthetic-oauth-access", token_type: "Bearer", expires_in: 3600, ...(options.noScope ? {} : { scope: "read write" }) }); return;
     }
     if (req.url === "/redirect") { res.writeHead(307, { location: "http://169.254.169.254/" }); res.end(); return; }
     if (req.url !== "/mcp") { res.writeHead(404); res.end(); return; }

@@ -10,6 +10,7 @@
     "node": "22.x"
   },
   "scripts": {
+    "mcp:providers": "node --conditions=react-server --import tsx scripts/list-mcp-providers.ts",
     "setup:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts",
     "dev:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts --dev",
     "test:code-managed": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/codeManagedCore.test.mjs tests/server-contract/code-managed-provider.test.mjs tests/server-contract/code-managed-route.test.mjs tests/server-contract/code-managed-reconciliation-route.test.mjs",

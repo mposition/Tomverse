@@ -88,3 +88,32 @@ test("OAuth token redirects cannot forward credentials to a metadata endpoint", 
   assert.equal(fixture.tokenExchanges, count);
   assert.equal((await prisma.mcpConnection.findUniqueOrThrow({ where: { userId_serverId: { userId: alice, serverId: "synthetic" } } })).status, "disconnected");
 });
+
+test("SDK confidential DCR uses bound Basic client authentication with an empty provider scope", async () => {
+  const basic = await startMcpSyntheticServer({ basicClientAuth: true, noScope: true });
+  const owner = `mcp-basic-${randomUUID()}`;
+  const oldPort = process.env.MCP_CONNECTOR_SYNTHETIC_PORT;
+  process.env.MCP_CONNECTOR_SYNTHETIC_PORT = String(basic.port);
+  process.env.MCP_CONNECTOR_SYNTHETIC_TOKEN_AUTH_METHOD = "client_secret_basic";
+  process.env.MCP_CONNECTOR_SYNTHETIC_NO_SCOPE = "true";
+  await prisma.user.create({ data: { id: owner } });
+  try {
+    const started = await startMcpOAuth(owner, "synthetic", callback);
+    const authorization = new URL(started.authorizationUrl!);
+    assert.equal(authorization.searchParams.get("scope"), null);
+    const response = await fetch(authorization, { redirect: "manual" });
+    const returned = new URL(response.headers.get("location")!);
+    const connected = await completeMcpOAuth(owner, returned.searchParams.get("state")!, returned.searchParams.get("code")!, returned.searchParams.get("iss")!);
+    assert.ok(connected.catalog.some(tool => tool.name === "read"));
+    assert.equal(basic.tokenExchanges, 1); assert.ok(basic.oauthMcpRequests >= 2);
+    const row = await prisma.mcpConnection.findUniqueOrThrow({ where: { id: connected.id } });
+    assert.ok(row.oauthCiphertext?.startsWith("enc:v1:"));
+    assert.equal(row.oauthCiphertext?.includes("synthetic-oauth-client-secret"), false);
+    assert.equal(JSON.stringify(await listMcpConnections(owner)).includes("synthetic-oauth-client-secret"), false);
+  } finally {
+    process.env.MCP_CONNECTOR_SYNTHETIC_PORT = oldPort;
+    delete process.env.MCP_CONNECTOR_SYNTHETIC_TOKEN_AUTH_METHOD;
+    delete process.env.MCP_CONNECTOR_SYNTHETIC_NO_SCOPE;
+    await prisma.user.deleteMany({ where: { id: owner } }); await basic.close();
+  }
+});

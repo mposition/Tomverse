@@ -1,5 +1,8 @@
 # MCP-01 Connector Preview
 
+Provider expansion after #3032: see [current coverage and setup](mcp-provider-expansion.md).
+The ledger below records the original feature implementation before its merge.
+
 Baseline: `origin/develop` at `7b18707463ba6a04ed399843c23935dcb287133b`.
 Branch: `codex/to-develop/mcp-01-preview`. Existing checkout changes were
 preserved in their original checkout. On 26 October 2026 the owner authorised

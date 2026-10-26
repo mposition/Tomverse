@@ -1,4 +1,5 @@
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { MCP_PROVIDERS, mcpProvider } from "@/lib/mcpProviderCatalog";
 
 export type PluginTool = { name: string; mode: "read" | "confirm"; inputSchema?: Record<string, unknown> };
 export type PluginConnection = { id: string; serverId: string; name: string; status: string; catalog: PluginTool[]; grants: PluginTool[]; version: number };
@@ -15,15 +16,7 @@ export async function readPluginInventory(signal?: AbortSignal): Promise<PluginI
   }
   return response.json();
 }
-export const PLUGIN_PROVIDERS = [
-  { id: "github", name: "GitHub", description: "Issues, pull requests and code" },
-  { id: "railway", name: "Railway", description: "Services and deployment workflows" },
-  { id: "notion", name: "Notion", description: "Pages and workspace knowledge" },
-  { id: "linear", name: "Linear", description: "Issues and project updates" },
-  { id: "slack", name: "Slack", description: "Channels and team messages" },
-] as const;
+export const PLUGIN_PROVIDERS = MCP_PROVIDERS;
 export function pluginLogo(name: string): string | undefined {
-  const lower = name.toLowerCase();
-  const match = PLUGIN_PROVIDERS.find(p => lower === p.id || lower.startsWith(p.id + " ") || lower.startsWith(p.id + "-"));
-  return match ? `/plugins/${match.id}.svg` : undefined;
+  return mcpProvider(name)?.logo || undefined;
 }
