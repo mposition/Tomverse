@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { request } from "node:http";
+import { spawnSync } from "node:child_process";
 import { createGithubPreviewSetup, githubPreviewAppConfig, githubPreviewManifest } from "../scripts/mcp-github-app-setup";
 const app = { client_id: "Iv1.synthetic", client_secret: "synthetic-client-secret-123", slug: "tomverse-local-synthetic", owner: { login: "mposition" },
   permissions: { issues: "write", metadata: "read" }, pem: "synthetic-pem", webhook_secret: "synthetic-webhook" };
+
+test("the pinned Next development tracer honors the local preview's private-query recording guard", () => {
+  const program = 'let count=0;require("next/dist/trace/report").reporter.report=()=>count++;require("next/dist/trace").trace("handle-request",undefined,{url:"/api/mcp/oauth/callback?code=synthetic&state=synthetic"}).stop();process.stdout.write(String(count));';
+  for (const [threshold, expected] of [["-1", "1"], [String(Number.MAX_SAFE_INTEGER), "0"]]) {
+    const result = spawnSync(process.execPath, ["-e", program], { env: { ...process.env, NEXT_TRACE_SPAN_THRESHOLD_MS: threshold }, encoding: "utf8", windowsHide: true });
+    assert.equal(result.status, 0); assert.equal(result.stdout, expected);
+  }
+});
 function getLocal(origin: string, path: string, cookie = "", host = "127.0.0.1:3132") {
   return new Promise<Response>((resolve, reject) => {
     const req = request(`${origin}${path}`, { headers: { Host: host, Cookie: cookie } }, res => {

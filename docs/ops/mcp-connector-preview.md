@@ -17,7 +17,7 @@ authorised by this work.
 | T06 UI | Complete | Desktop/mobile browser flow and dark theme | Not deployed | Not deployed |
 | T07 Boundary/regression checks | Complete locally | Protocol/DB/security 26, existing unit regressions 131, UI 10, zoom rechecks 2 | Not deployed | Not deployed |
 | T08 Independent review | Accepted | Claude: r-20261025-230233-b98a8f, head 3c5426a6e | Not deployed | Not deployed |
-| T09 Real service verification | OAuth adapter implemented locally; private app registered | GitHub mposition/TomverseCode selected; repository installation, OAuth consent and actual MCP access pending | Not performed | Not performed |
+| T09 Real service verification | GitHub OAuth/search/read/source path verified locally | Real GitHub MCP, zero-hit issue search, existing PR #35 read, mock-model Chat answer; live writes not exercised | Not deployed | Not deployed |
 | T10 Operational rollout | Not authorised | Separate push/merge/deploy/activation approval | Not performed | Not performed |
 
 Synthetic success is not evidence of compatibility with GitHub, Railway,
@@ -111,8 +111,11 @@ Metadata read. The host permits only `search_issues`, `issue_read/get` and
 `issue_write/create` in `mposition/TomverseCode` (repository ID `1309523852`).
 Writes still require a separate one-use approval for the exact arguments.
 Searches require plain terms; qualifiers and boolean scope overrides are refused.
-Only issue bodies actually read by the bound `issue_read/get` call create source
-cards. Provider content and search hits do not grant source status themselves.
+Only bodies actually read by the bound `issue_read/get` call create source cards.
+GitHub's Issues API also returns pull requests; their exact bound `/pull/<number>`
+URL is retained instead of inventing an `/issues/` URL. Provider content and search
+hits do not grant source status themselves. Documented zero-hit issue responses
+map to the existing no-results state.
 
 Use `MCP_GITHUB_OAUTH_CLIENT_ID`, `MCP_GITHUB_OAUTH_CLIENT_SECRET`,
 `MCP_GITHUB_REPOSITORY` and `MCP_GITHUB_REPOSITORY_ID` for the built-in profile.
@@ -144,9 +147,8 @@ successful credential storage. The owner does not need to click an intermediate
 installation link. Failed/unknown storage stays on the local status page, and a
 replayed callback cannot redirect again. Three setup-flow tests cover these cases.
 The local private app registration and CurrentUser-encrypted storage were observed
-on 26 October 2026. Chrome displays the installation page for the `mposition`
-account; repository selection and final installation/OAuth consent remain owner
-actions. No GitHub issue content has been read or written by this verification.
+on 26 October 2026. The owner installed it on `mposition/TomverseCode` only and
+completed OAuth. Installation and consent were owner actions.
 
 `npm run dev:mcp-github` loads that encrypted registration into a loopback-only
 development child. It requires a disposable DB on `127.0.0.1:56439` with
@@ -163,8 +165,41 @@ the corrected issuer above. Exact issuer matching and policy-digest binding are
 retained; old pending authorizations are not silently migrated or replayed.
 Callback redirects expose only a fixed failure category, never code/state or
 remote error text; the UI distinguishes expired authorization and sign-in needs.
-Actual token exchange/MCP compatibility remains unverified until a fresh bound
-flow and scoped calls succeed. Product paid-model calls remain zero.
+The corrected fresh authorization completed real code exchange and Streamable
+HTTP initialization/tool listing. The local connection contains exactly two
+selected read tools: `search_issues` and `issue_read`; `issue_write` remains an
+unselected confirmation-only catalog tool. Actual MCP searches for `MCP`, `bug`
+and `*` returned zero hits; an independent read-only metadata check confirmed the
+repository currently has no issues. Existing closed PR #35 was then read via
+MCP `issue_read/get`: 2,347 UTF-8 body bytes, with the actual source
+`https://github.com/mposition/TomverseCode/pull/35`. The normalized payload was
+3,231 bytes, within the existing 8,000-byte per-result bound.
+
+A mock model used the existing Chat tool adapter for three steps: real MCP
+search, real MCP read, and an answer containing the verified source. This is
+actual provider/transport evidence, not a paid-LLM quality evaluation or a claim
+that every provider is compatible. External writes and product paid-model calls
+remain zero. Actual GitHub write execution, provider-side token revocation,
+other services, deployed Dev/Production and operational activation remain untested.
+
+Claude accepted the canonical-issuer correction at `9c3c37e8c` in
+`r-20261026-013010-07ae1a`. Follow-up changes cover safe UI wording, dependency
+test typing, zero-hit status and GitHub's documented issue/PR source shape; they
+do not expand the reviewed credential recipient, server, tool or repository scope.
+
+Final focused checks pass: 19 boundary/provider tests, 2 callback/telemetry tests,
+18 disposable-DB tests and 4 setup/Next-trace tests. The actual connected row also
+passed owner-isolation, unselected-write refusal, encrypted credential/session
+storage and credential-free public-projection checks. The connection remains
+connected with the two read grants after local preview restart.
+
+Next 16 development performance traces record full request URLs independently of
+the request-log ignore setting. The loopback preview child now disables those
+private performance spans using the installed version's threshold; a behavior
+test pins that support. Existing local callback/sign-in trace queries were
+redacted, and an HTTP callback probe after restart produced no performance trace
+file or recorded authentication query. Runtime authorization/audit checks remain
+enabled; this helper setting does not alter deployed logging or permissions.
 
 Local OAuth increment verification: 23 protocol/security/provider-profile tests,
 19 disposable-DB tests and 9 transport/telemetry/monitoring regressions pass.
@@ -236,5 +271,7 @@ channels from a malicious credential recipient are outside text-filter guarantee
 
 - SDK client and Streamable HTTP examples: https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x
 - GitHub remote MCP/authentication: https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md
+- GitHub OAuth metadata: https://github.com/.well-known/oauth-authorization-server/login/oauth
+- GitHub Issues API and pull-request records: https://docs.github.com/en/rest/issues/issues#get-an-issue
 - Railway remote MCP/authentication: https://docs.railway.com/ai/mcp-server
 - Design: https://www.figma.com/design/k3aAzURkUUqVVLI8yAj4F7?node-id=2-16

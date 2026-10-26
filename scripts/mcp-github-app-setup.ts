@@ -91,6 +91,9 @@ async function main() {
     const config = JSON.parse(dpapi("unprotect", await readFile(path, "utf8"))) as AppConfig;
     if (config.repository !== REPOSITORY || config.repositoryId !== REPOSITORY_ID) throw new Error("Stored app does not match the preview repository.");
     const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "development", DATABASE_URL: db.href, DIRECT_DATABASE_URL: db.href,
+      // Next 16's private dev performance trace ignores incomingRequests.ignore
+      // and records callback query strings. Disable it only in this local child.
+      NEXT_TRACE_SPAN_THRESHOLD_MS: String(Number.MAX_SAFE_INTEGER),
       PUBLIC_APP_URL: "http://127.0.0.1:3131", NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3131", NEXT_PUBLIC_SHARE_BASE_URL: "http://127.0.0.1:3131",
       NEXTAUTH_URL: "http://127.0.0.1:3131", NEXTAUTH_SECRET: config.sessionSecret,
       OAUTH_TOKEN_ENCRYPTION_KEY: config.encryptionKey, MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_SERVERS: "[]",

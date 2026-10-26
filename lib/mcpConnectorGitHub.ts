@@ -35,6 +35,21 @@ export function githubScopedModelSchema(server: McpServerPolicy, tool: string, s
     required: [...new Set([...(Array.isArray(schema.required) ? schema.required : []), "owner", "repo"])] };
 }
 
+export function githubIssueSearchIsEmpty(server: McpServerPolicy, tool: string, raw: unknown) {
+  if (server.sourceAdapter !== "github-issues" || tool !== "search_issues" || !server.readTools.includes(tool)) return false;
+  const result = raw as { isError?: boolean; structuredContent?: unknown; content?: Array<{ type?: unknown; text?: unknown }> };
+  if (!result || result.isError) return false;
+  const candidates = [result.structuredContent];
+  for (const part of result.content || []) if (part.type === "text" && typeof part.text === "string") {
+    try { candidates.push(JSON.parse(part.text)); } catch { /* Only documented JSON search records establish an empty result. */ }
+  }
+  return candidates.some(value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const search = value as Record<string, unknown>;
+    return search.total_count === 0 && Array.isArray(search.items) && search.items.length === 0;
+  });
+}
+
 // Explicit source mapping for GitHub's documented issue_read/get response.
 // Search hits, comments, body links and write responses never create citations.
 export function githubIssueReadSources(server: McpServerPolicy, tool: string, args: Record<string, unknown>, raw: unknown): McpReadSource[] {
@@ -50,7 +65,8 @@ export function githubIssueReadSources(server: McpServerPolicy, tool: string, ar
   for (const part of result.content || []) if (part.type === "text" && typeof part.text === "string") {
     try { candidates.push(JSON.parse(part.text)); } catch { /* Plain prose is not a verified issue record. */ }
   }
-  const expectedPath = `/${args.owner}/${args.repo}/issues/${args.issue_number}`.toLowerCase();
+  // GitHub's Issues API also returns pull requests, with their actual /pull URL.
+  const expectedPaths = new Set(["issues", "pull"].map(kind => `/${args.owner}/${args.repo}/${kind}/${args.issue_number}`.toLowerCase()));
   for (const value of candidates) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const issue = value as Record<string, unknown>;
@@ -59,7 +75,7 @@ export function githubIssueReadSources(server: McpServerPolicy, tool: string, ar
     if (typeof uri !== "string") continue;
     try {
       const url = new URL(uri);
-      if (url.origin === "https://github.com" && !url.username && !url.password && !url.search && !url.hash && url.pathname.toLowerCase() === expectedPath)
+      if (url.origin === "https://github.com" && !url.username && !url.password && !url.search && !url.hash && expectedPaths.has(url.pathname.toLowerCase()))
         return [{ url: url.href, title: issue.title.slice(0, 120), sourceProvider: "mcp" }];
     } catch { /* Refuse malformed or unbound source identifiers. */ }
   }

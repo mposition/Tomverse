@@ -15,7 +15,8 @@ test("callback scrubs credentials and returns only registered failure categories
   assert.equal(good.headers.get("location"), "http://127.0.0.1:3131/plugins?oauth=connected");
   assert.equal(good.headers.get("referrer-policy"), "no-referrer");
   for (const [input, expected] of [["oauth_issuer_mismatch", "oauth_issuer_mismatch"], ["sign_in_required", "sign_in_required"],
-    ["oauth_flow_expired", "oauth_flow_expired"], ["synthetic-secret-from-provider", "connector_request_failed"]]) {
+    ["oauth_flow_expired", "oauth_flow_expired"], ["connector_disabled", "connector_disabled"], ["API_RATE_LIMITED", "API_RATE_LIMITED"],
+    ["oauth_authorization_failed", "oauth_authorization_failed"], ["synthetic-secret-from-provider", "connector_request_failed"]]) {
     failure = input;
     const response = await GET(new Request(url)), destination = response.headers.get("location");
     assert.equal(destination, `http://127.0.0.1:3131/plugins?oauth=failed&reason=${expected}`);

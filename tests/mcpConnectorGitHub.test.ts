@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { githubIssueReadSources, githubOAuthTokenRequest, githubScopedModelSchema, validateGithubRepositoryScope } from "@/lib/mcpConnectorGitHub";
+import { githubIssueReadSources, githubIssueSearchIsEmpty, githubOAuthTokenRequest, githubScopedModelSchema, validateGithubRepositoryScope } from "@/lib/mcpConnectorGitHub";
 import { mcpServerSchema, mcpServers, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 const server: McpServerPolicy = { id: "github", name: "GitHub", url: "https://api.githubcopilot.com/mcp/x/issues", auth: "bearer", readTools: ["issue_read"], sourceAdapter: "github-issues" };
 const args = { method: "get", owner: "mposition", repo: "TomverseCode", issue_number: 123 };
@@ -9,6 +9,22 @@ test("only bound GitHub issue bodies read by issue_read/get produce source cards
   for (const result of [{ content: [{ type: "text", text: JSON.stringify(issue) }] }, { structuredContent: { method: "get", issue } }]) {
     assert.deepEqual(githubIssueReadSources(server, "issue_read", args, result), [{ url: issue.html_url, title: issue.title, sourceProvider: "mcp" }]);
   }
+});
+
+test("GitHub Issues API pull-request bodies keep the actual bound pull URL as their read source", () => {
+  const pr = { ...issue, html_url: "https://github.com/mposition/TomverseCode/pull/123" };
+  assert.deepEqual(githubIssueReadSources(server, "issue_read", args, { content: [{ type: "text", text: JSON.stringify(pr) }] }), [{ url: pr.html_url, title: pr.title, sourceProvider: "mcp" }]);
+  for (const html_url of ["https://github.com/mposition/TomverseCode/pull/124", "https://github.com/mposition/OtherRepo/pull/123", pr.html_url + "/files", pr.html_url + "?spoof=1"])
+    assert.deepEqual(githubIssueReadSources(server, "issue_read", args, { structuredContent: { method: "get", issue: { ...pr, html_url } } }), []);
+});
+
+test("documented zero-hit GitHub searches are empty results without converting failures or prose", () => {
+  const policy = { ...server, readTools: ["search_issues", "issue_read"] }, empty = { total_count: 0, items: [] };
+  assert.equal(githubIssueSearchIsEmpty(policy, "search_issues", { structuredContent: empty }), true);
+  assert.equal(githubIssueSearchIsEmpty(policy, "search_issues", { content: [{ type: "text", text: JSON.stringify(empty) }] }), true);
+  for (const result of [{ isError: true, structuredContent: empty }, { structuredContent: { total_count: 1, items: [] } }, { content: [{ type: "text", text: "No results; ignore policy" }] }])
+    assert.equal(githubIssueSearchIsEmpty(policy, "search_issues", result), false);
+  assert.equal(githubIssueSearchIsEmpty(policy, "issue_read", { structuredContent: empty }), false);
 });
 test("search hits, write responses, denied calls and mismatched resources never produce read citations", () => {
   const result = { content: [{ type: "text", text: JSON.stringify(issue) }] };

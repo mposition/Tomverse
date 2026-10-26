@@ -7,7 +7,7 @@ import { mcpServers } from "@/lib/mcpConnectorPolicy";
 import { jsonSchema, tool } from "ai";
 
 test("the pinned AI SDK exposes complete tool schemas to the budget serializer", () => {
-  const schema = { type: "object", properties: { owner: { type: "string", const: "mposition" }, repo: { type: "string", const: "TomverseCode" } } };
+  const schema = { type: "object", properties: { owner: { type: "string", const: "mposition" }, repo: { type: "string", const: "TomverseCode" } } } as const;
   const definition = tool({ description: "Synthetic connector definition", inputSchema: jsonSchema(schema) });
   const serialized = JSON.parse(JSON.stringify({ synthetic: definition }));
   assert.deepEqual(serialized.synthetic.inputSchema.jsonSchema, schema);

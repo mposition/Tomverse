@@ -8,7 +8,7 @@ import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError, mcpServer } from "
 import { connectorInputSchema, normalizeMcpResult, validateMcpArguments } from "@/lib/mcpConnectorSchema";
 import { auditMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest, ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
 import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
-import { githubIssueReadSources, validateGithubRepositoryScope } from "@/lib/mcpConnectorGitHub";
+import { githubIssueReadSources, githubIssueSearchIsEmpty, validateGithubRepositoryScope } from "@/lib/mcpConnectorGitHub";
 
 export type McpToolOutcome = Awaited<ReturnType<typeof normalizeMcpResult>> & { notice: string; approvalId?: string };
 const safeError = (e: unknown) => e instanceof McpConnectorError ? e.code :
@@ -72,6 +72,7 @@ async function performMcp(input: { userId: string; connectionId: string; version
     });
     await current(); signal.throwIfAborted();
     const normalized = normalizeMcpResult(result);
+    if (githubIssueSearchIsEmpty(server, name, result)) normalized.status = "no_results";
     if (grant.mode === "confirm" && normalized.status === "server_error") throw new McpConnectorError("outcome_unknown");
     const token = decryptMcpSecret(connection.credentialCiphertext);
     if (containsMcpCredential(result, token)) throw new McpConnectorError("credential_echo_refused");
