@@ -11,8 +11,10 @@ import {
 
 /**
  * CI admission's GitHub port: its own GitHub App, installed on this one
- * repository with Pull requests, Actions and Commit statuses write, Metadata
- * read.
+ * repository with Pull requests, Actions, Commit statuses and Contents write,
+ * Metadata read. Contents write is asked for only by the calls that need it:
+ * draft/ready (GitHub's rule for changing a pull request's stage) and
+ * update-branch; every other token is issued without it.
  *
  * Writes, and nothing else: convert a pull request to draft, mark one ready
  * for review, cancel a pull_request workflow run of a held pull request, a
@@ -225,9 +227,14 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
     if (answer.status !== 200) throw new Error(`github_${answer.status}`);
     return answer.json();
   };
+  // Draft and ready are a pull request's stage, which GitHub lets only those
+  // with write access to the repository change: Pull requests write alone is
+  // refused (FORBIDDEN, 2026-10-25: no conversion either way ever succeeded).
+  // So these two mutations, and only they, ask for Contents write too.
+  const STAGE_PERMISSIONS = { pull_requests: "write", contents: "write", metadata: "read" };
   const graphql = async (mutation: string, id: string) => {
     if (!/^[A-Za-z0-9_=-]{1,100}$/.test(id)) throw new Error("node_id_invalid");
-    const answer = await call("POST", `${API}/graphql`, await installationToken(), { query: mutation, variables: { id } });
+    const answer = await call("POST", `${API}/graphql`, await installationToken(STAGE_PERMISSIONS), { query: mutation, variables: { id } });
     if (answer.status !== 200) throw new Error(`github_graphql_${answer.status}`);
     const body = record(answer.json());
     if (body.errors !== undefined) {
