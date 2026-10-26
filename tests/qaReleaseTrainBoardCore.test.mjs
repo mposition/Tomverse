@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { QA_RELEASE_TRAIN_BOARD_RUNNING_MS, qaReleaseTrainBoardRows, qaReleaseTrainOpenTrains, qaReleaseTrainPullStates } from "../lib/qaReleaseTrainBoardCore.ts";
+import {
+  QA_RELEASE_TRAIN_BOARD_DAYS,
+  QA_RELEASE_TRAIN_BOARD_RUNNING_MS,
+  qaReleaseTrainBoardDays,
+  qaReleaseTrainBoardRows,
+  qaReleaseTrainBoardSinceMs,
+  qaReleaseTrainOpenTrains,
+  qaReleaseTrainPullStates,
+} from "../lib/qaReleaseTrainBoardCore.ts";
 
 test("the open trains come from GitHub's open list, whatever the board's history holds", () => {
   assert.deepEqual(
@@ -116,4 +124,26 @@ test("a train whose state GitHub did not give is unknown, never boarding; a clos
   assert.deepEqual(rows.map((r) => r.status), ["unknown", "cancelled"]);
   // The service is killed at ten minutes: past eleven, a train with no report never will have one.
   assert.equal(QA_RELEASE_TRAIN_BOARD_RUNNING_MS, 11 * 60 * 1000);
+});
+
+test("the board holds seven AEST days, today first, each with only its own trains", () => {
+  // 2026-10-26 09:30 AEST.
+  const nowMs = Date.parse("2026-10-25T23:30:00Z");
+  // Midnight AEST six days before: 2026-10-20 00:00 AEST.
+  assert.equal(new Date(qaReleaseTrainBoardSinceMs(nowMs)).toISOString(), "2026-10-19T14:00:00.000Z");
+  const at = (iso) => ({ slot: iso, admittedAt: iso });
+  const days = qaReleaseTrainBoardDays(
+    [at("2026-10-25T22:00:00Z"), at("2026-10-25T13:59:00Z"), at("2026-10-25T14:00:00Z"), at("2026-10-19T14:00:00Z")],
+    nowMs,
+  );
+  assert.equal(days.length, QA_RELEASE_TRAIN_BOARD_DAYS);
+  assert.deepEqual(
+    days.map((d) => d.day),
+    ["2026-10-26", "2026-10-25", "2026-10-24", "2026-10-23", "2026-10-22", "2026-10-21", "2026-10-20"],
+  );
+  assert.equal(days[0].weekday, 1);
+  // 14:00Z is midnight AEST: the next day's first minute.
+  assert.deepEqual(days[0].rows.map((r) => r.slot), ["2026-10-25T22:00:00Z", "2026-10-25T14:00:00Z"]);
+  assert.deepEqual(days[1].rows.map((r) => r.slot), ["2026-10-25T13:59:00Z"]);
+  assert.deepEqual(days[6].rows.map((r) => r.slot), ["2026-10-19T14:00:00Z"]);
 });

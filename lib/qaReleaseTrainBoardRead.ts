@@ -1,18 +1,25 @@
 import "server-only";
 
 import { createGithubRepoReader } from "@/lib/githubRepoRead";
-import { qaReleaseTrainBoardRows, qaReleaseTrainOpenTrains, qaReleaseTrainPullStates, type QaReleaseTrainBoardRow } from "@/lib/qaReleaseTrainBoardCore";
+import {
+  qaReleaseTrainBoardRows,
+  qaReleaseTrainBoardSinceMs,
+  qaReleaseTrainOpenTrains,
+  qaReleaseTrainPullStates,
+  type QaReleaseTrainBoardRow,
+} from "@/lib/qaReleaseTrainBoardCore";
 import { peekQaReleaseTrainCargoCandidates } from "@/lib/qaReleaseTrainCargoRead";
-import { readQaReleaseTrainAdmissions, readQaReleaseTrainReports } from "@/lib/qaReleaseTrainStore";
+import { readQaReleaseTrainAdmissions, readQaReleaseTrainReportsFor } from "@/lib/qaReleaseTrainStore";
 
 /**
- * Reads the departure board (lib/qaReleaseTrainBoardCore.ts): the newest
- * trains from the audit chain, their main pull requests' states from GitHub
+ * Reads the departure board (lib/qaReleaseTrainBoardCore.ts): the trains of
+ * the last seven AEST days from the audit chain (the board pages them by day), their main pull requests' states from GitHub
  * through lib/githubRepoRead.ts (the CI admission App's token when
  * configured, as the cargo read), and pull request titles from whatever the
  * cargo read last read -- never waiting on that read, which is many GitHub
  * calls (a cold production server took 20-28 seconds on 2026-10-25, and the
- * tab did not move until it ended); the tab's own panels start it. Every open main pull request is read, page by page,
+ * tab did not move until it ended); the tab's own panels start it. Every
+ * open main pull request is read, page by page,
  * so the open trains come from that list, not from the board's limited
  * history, and a train missing from it is not open; each such train's own
  * pull request then says whether it was merged or closed. Reads are shared
@@ -26,7 +33,8 @@ const CLOSED_CACHE_MS = 30 * 60 * 1000;
 const FAILURE_CACHE_MS = 60 * 1000;
 /** "Read GitHub again" expires a cached read older than this; a newer one is kept, so clicks cannot spend the allowance. */
 const FRESH_MIN_MS = 30 * 1000;
-const BOARD_ROWS = 20;
+/** Settled trains' pull requests are read this many at a time, so a cold week does not burst GitHub. */
+const PULL_READS_AT_ONCE = 8;
 /** Open main pull requests beyond this many pages are not read: the open list is then unread, never partial. */
 const OPEN_PAGE_CAP = 3;
 
@@ -89,11 +97,8 @@ async function readPull(readJson: (path: string) => Promise<unknown>, number: nu
 export async function readQaReleaseTrainBoard(nowMs = Date.now()): Promise<QaReleaseTrainBoard> {
   const readJson = createGithubRepoReader();
   const candidates = peekQaReleaseTrainCargoCandidates();
-  const [admissions, reports, open] = await Promise.all([
-    readQaReleaseTrainAdmissions(BOARD_ROWS),
-    readQaReleaseTrainReports(BOARD_ROWS * 2),
-    readOpen(readJson, nowMs),
-  ]);
+  const [admissions, open] = await Promise.all([readQaReleaseTrainAdmissions(new Date(qaReleaseTrainBoardSinceMs(nowMs))), readOpen(readJson, nowMs)]);
+  const reports = await readQaReleaseTrainReportsFor(admissions.map((admission) => admission.slot));
   // Trains on the board that opened a pull request no longer open: their own state.
   const shown = new Set(admissions.map((admission) => admission.slot));
   const openNumbers = new Set((open ?? []).map((pull) => (pull as { number?: unknown }).number));
@@ -103,7 +108,10 @@ export async function readQaReleaseTrainBoard(nowMs = Date.now()): Promise<QaRel
       : [...new Set(reports.filter((r) => shown.has(r.slot) && r.report.pullRequestNumber !== null).map((r) => r.report.pullRequestNumber as number))].filter(
           (number) => !openNumbers.has(number),
         );
-  const settledJson = await Promise.all(settled.map((number) => readPull(readJson, number, nowMs)));
+  const settledJson: (unknown | null)[] = [];
+  for (let index = 0; index < settled.length; index += PULL_READS_AT_ONCE) {
+    settledJson.push(...(await Promise.all(settled.slice(index, index + PULL_READS_AT_ONCE).map((number) => readPull(readJson, number, nowMs)))));
+  }
   const titles = new Map(candidates?.status === "ok" ? candidates.candidates.map((c) => [c.number, c.title] as const) : []);
   const pullStates = qaReleaseTrainPullStates([...settledJson.filter((json) => json !== null), ...(open ?? [])]);
   return {

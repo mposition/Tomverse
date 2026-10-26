@@ -218,10 +218,18 @@ export async function readQaReleaseTrainEmergency(db: Prisma.TransactionClient =
 
 export type QaReleaseTrainAdmission = { slot: string; at: Date; emergency: boolean };
 
-/** The newest admissions of either kind, for the departure board: a train admitted but not yet reported is still on it. */
-export async function readQaReleaseTrainAdmissions(limit = 20): Promise<QaReleaseTrainAdmission[]> {
+/**
+ * Admissions of either kind since a moment, newest first, for the departure
+ * board: a train admitted but not yet reported is still on it. `limit` only
+ * bounds a runaway week; the board's week is far below it.
+ */
+export async function readQaReleaseTrainAdmissions(since: Date, limit = 200): Promise<QaReleaseTrainAdmission[]> {
   const rows = await prisma.adminAuditLog.findMany({
-    where: { action: { in: [QA_RELEASE_TRAIN_ADMITTED_ACTION, QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION] }, targetType: TARGET_TYPE },
+    where: {
+      action: { in: [QA_RELEASE_TRAIN_ADMITTED_ACTION, QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION] },
+      targetType: TARGET_TYPE,
+      createdAt: { gte: since },
+    },
     orderBy: { createdAt: "desc" },
     take: limit,
     select: { action: true, targetId: true, createdAt: true },
@@ -229,6 +237,21 @@ export async function readQaReleaseTrainAdmissions(limit = 20): Promise<QaReleas
   return rows.flatMap((row) =>
     typeof row.targetId === "string" ? [{ slot: row.targetId, at: row.createdAt, emergency: row.action === QA_RELEASE_TRAIN_EMERGENCY_ADMITTED_ACTION }] : [],
   );
+}
+
+/** The reports of these trains, newest first. Rows that do not parse are left out. */
+export async function readQaReleaseTrainReportsFor(slots: readonly string[]): Promise<QaReleaseTrainRecord[]> {
+  if (slots.length === 0) return [];
+  const rows = await prisma.adminAuditLog.findMany({
+    where: { action: QA_RELEASE_TRAIN_REPORTED_ACTION, targetType: TARGET_TYPE, targetId: { in: [...slots] } },
+    orderBy: { createdAt: "desc" },
+    select: { targetId: true, createdAt: true, metadata: true },
+  });
+  return rows.flatMap((row) => {
+    const metadata = row.metadata as Partial<QaReleaseTrainReport> | null;
+    if (!metadata || typeof metadata.outcome !== "string" || !Array.isArray(metadata.picks) || typeof row.targetId !== "string") return [];
+    return [{ slot: row.targetId, at: row.createdAt, report: metadata as QaReleaseTrainReport }];
+  });
 }
 
 /**

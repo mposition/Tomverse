@@ -86,3 +86,24 @@ test("while the tab reads, it says so (the click is never left without an answer
   assert.match(html, /role="status"/);
   assert.match(html, /Reading the release train/);
 });
+
+test("the board pages the last seven AEST days, opening on the newest day that had a train", () => {
+  const html = renderToStaticMarkup(
+    <QaReleaseTrainBoard
+      rows={[row({}), row({ slot: "20261024-1700", admittedAt: "2026-10-24T07:01:00Z", status: "empty", included: [], leftOut: [] })]}
+      pullsRead={true}
+      // 2026-10-26 07:00 AEST: no train yet today.
+      nowMs={Date.parse("2026-10-25T21:00:00Z")}
+    />,
+  );
+  assert.equal(html.match(/data-testid="qa-release-train-board-day-[0-9]/g)?.length, 7);
+  assert.ok(html.includes('aria-label="10-26 Mon, 0 trains"'));
+  assert.match(html, /aria-pressed="true" aria-label="10-25 Sun, 1 trains"/);
+  // Only the chosen day's trains, and its totals.
+  assert.match(html, /qa-release-train-board-row-20261025-1100/);
+  assert.doesNotMatch(html, /qa-release-train-board-row-20261024-1700/);
+  assert.match(html, /10-25 Sun · 1 trains · 1 rode · 1 left out · 1 arrived/);
+  // An empty day cannot be picked; older trains are named as kept elsewhere.
+  assert.match(html, /<button[^>]*disabled=""[^>]*data-testid="qa-release-train-board-day-2026-10-26"/);
+  assert.match(html, /Only the last 7 days show here/);
+});
