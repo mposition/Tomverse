@@ -1,5 +1,5 @@
 [Unit]
-Description=Tomverse read-only CLI monitor (codex-impl pilot)
+Description=Tomverse read-only CLI monitor (AMUX residents)
 After=network-online.target
 Wants=network-online.target
 
