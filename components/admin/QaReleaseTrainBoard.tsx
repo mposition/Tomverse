@@ -5,7 +5,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { aestStamp } from "@/lib/agentOffice/time";
 import { adminQaReleaseTrainMessages } from "@/lib/adminMessages/qaReleaseTrain";
-import type { QaReleaseTrainBoardRow, QaReleaseTrainBoardStatus } from "@/lib/qaReleaseTrainBoardCore";
+import { qaReleaseTrainBoardDays, type QaReleaseTrainBoardRow, type QaReleaseTrainBoardStatus } from "@/lib/qaReleaseTrainBoardCore";
 
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
@@ -52,12 +52,17 @@ function Flap({ char, delay }: { char: string; delay: number }) {
 
 /**
  * The release train tab's departure board (lib/qaReleaseTrainBoardCore.ts):
- * newest train first, each row opening to what rode, what was left out and
+ * the last seven AEST days, one day at a time, newest train first, each row opening to what rode, what was left out and
  * why, and where its main pull request stands.
  */
 export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleaseTrainBoardRow[]; pullsRead: boolean; nowMs: number }) {
   const m = useAdminMessages(adminQaReleaseTrainMessages);
   const [open, setOpen] = useState<string | null>(null);
+  const days = qaReleaseTrainBoardDays(rows, nowMs);
+  // The newest day that had a train, so an empty morning does not hide yesterday.
+  const [dayIndex, setDayIndex] = useState(() => Math.max(0, days.findIndex((day) => day.rows.length > 0)));
+  const selected = days[dayIndex];
+  const weekdays = m.boardWeekdays.split(",");
   const [clock, setClock] = useState(nowMs);
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 30_000);
@@ -108,6 +113,63 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
           <h2 className="font-mono text-base tracking-[0.2em] text-[#f5c46b]">{m.boardTitle.toUpperCase()}</h2>
           <span className="font-mono text-xs text-[#8a8984]">{aestClock(new Date(clock).toISOString())} AEST</span>
         </div>
+        <div className="mb-3 flex items-center gap-1.5 px-2">
+          <button
+            type="button"
+            className="rounded-md px-2 py-1 font-mono text-sm text-[#f5c46b] hover:bg-[#2a2a27] disabled:text-[#4a4945] disabled:hover:bg-transparent"
+            aria-label={m.boardPrevDay}
+            disabled={dayIndex === days.length - 1}
+            onClick={() => setDayIndex(dayIndex + 1)}
+            data-testid="qa-release-train-board-prev-day"
+          >
+            ‹
+          </button>
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto" role="group" aria-label={m.boardDays}>
+            {days.map((day, index) => {
+              const current = index === dayIndex;
+              const weekday = weekdays[day.weekday] ?? "";
+              return (
+                <button
+                  key={day.day}
+                  type="button"
+                  className={`flex min-w-[3.5rem] shrink-0 flex-col items-center rounded-md px-2 py-1 font-mono text-[11px] leading-4 ${
+                    current ? "bg-[#f5c46b] text-[#1c1c1a]" : "bg-[#2a2a27] text-[#d6d4cb] hover:bg-[#34342f] disabled:bg-transparent disabled:text-[#4a4945]"
+                  }`}
+                  aria-pressed={current}
+                  aria-label={m.boardDayChip.replace("{day}", day.day.slice(5)).replace("{weekday}", weekday).replace("{count}", String(day.rows.length))}
+                  disabled={day.rows.length === 0 && !current}
+                  onClick={() => setDayIndex(index)}
+                  data-testid={`qa-release-train-board-day-${day.day}`}
+                >
+                  <span aria-hidden="true">{day.day.slice(5)}</span>
+                  <span aria-hidden="true">
+                    {weekday} · {day.rows.length}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="rounded-md px-2 py-1 font-mono text-sm text-[#f5c46b] hover:bg-[#2a2a27] disabled:text-[#4a4945] disabled:hover:bg-transparent"
+            aria-label={m.boardNextDay}
+            disabled={dayIndex === 0}
+            onClick={() => setDayIndex(dayIndex - 1)}
+            data-testid="qa-release-train-board-next-day"
+          >
+            ›
+          </button>
+        </div>
+        {rows.length > 0 ? (
+          <p className="mb-2 px-2 font-mono text-[11px] text-[#a3a29b]" data-testid="qa-release-train-board-day-summary">
+            {m.boardDaySummary
+              .replace("{day}", `${selected.day.slice(5)} ${weekdays[selected.weekday] ?? ""}`)
+              .replace("{trains}", String(selected.rows.length))
+              .replace("{rode}", String(selected.rows.reduce((sum, row) => sum + row.included.length, 0)))
+              .replace("{left}", String(selected.rows.reduce((sum, row) => sum + row.leftOut.length, 0)))
+              .replace("{arrived}", String(selected.rows.filter((row) => row.status === "arrived").length))}
+          </p>
+        ) : null}
         <div className={`${GRID} px-2 pb-1 font-mono text-[11px] text-[#8a8984]`}>
           <span>{m.boardTime}</span>
           <span>{m.boardTrain}</span>
@@ -115,11 +177,11 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
           <span className="hidden sm:block">{m.boardPull}</span>
           <span className="text-right sm:text-left">{m.boardStatus}</span>
         </div>
-        {rows.length === 0 ? (
-          <p className="px-2 py-4 text-sm text-[#c9c7bd]">{m.boardEmpty}</p>
+        {selected.rows.length === 0 ? (
+          <p className="px-2 py-4 text-sm text-[#c9c7bd]">{rows.length === 0 ? m.boardEmpty : m.boardDayEmpty}</p>
         ) : (
           <ul className="flex flex-col">
-            {rows.map((row, index) => {
+            {selected.rows.map((row, index) => {
               const key = row.slot;
               const expanded = open === key;
               return (
@@ -252,6 +314,7 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
           {m.legendEmergency}
         </span>
       </div>
+      <p className="text-xs text-zinc-500">{m.boardWeekNote}</p>
       {pullsRead ? null : <p className="text-xs text-amber-300">{m.boardPullsUnread}</p>}
     </section>
   );
