@@ -134,3 +134,75 @@ test("a conflict names the earlier develop pull requests that changed its confli
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Owner, 2026-10-27: a pick that conflicts boards the develop pull requests it
+// needs first and rides; what it could not ride with is undone, not half-kept.
+test("a conflicting pick boards the develop pull requests it needs and rides; otherwise nothing is kept", async () => {
+  const root = mkdtempSync(join(tmpdir(), "train-git-board-test-"));
+  try {
+    const repo = join(root, "origin");
+    const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", repo]);
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "shared.txt"), "line\n");
+    writeFileSync(join(repo, "lone.txt"), "line\n");
+    git("add", ".");
+    git("commit", "--quiet", "-m", "base");
+    git("switch", "--quiet", "-c", "develop");
+    const mergePull = (number, file, text) => {
+      git("switch", "--quiet", "-c", `feature-${number}`, "develop");
+      writeFileSync(join(repo, file), text);
+      git("add", ".");
+      git("commit", "--quiet", "-m", `change ${number}`);
+      git("switch", "--quiet", "develop");
+      git("merge", "--quiet", "--no-ff", "-m", `Merge pull request #${number} from mposition/feature-${number}`, "-m", `title ${number}`, `feature-${number}`);
+      return git("rev-parse", "HEAD");
+    };
+    // #11 needs #10 (same lines); #21 changes lone.txt, which main changed its own way.
+    mergePull(10, "shared.txt", "ten\n");
+    const eleven = mergePull(11, "shared.txt", "eleven\n");
+    const twentyOne = mergePull(21, "lone.txt", "twenty-one\n");
+    git("switch", "--quiet", "main");
+    writeFileSync(join(repo, "lone.txt"), "main's own\n");
+    git("add", ".");
+    git("commit", "--quiet", "-m", "main moves");
+    const mainSha = git("rev-parse", "HEAD");
+    const now = new Date().toISOString();
+
+    const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo, autoPredecessors: true });
+    try {
+      const result = await ports.assemble("release/train-20261027-1100", [
+        { number: 11, title: "eleven", mergeCommitSha: eleven, mergedAt: now },
+        { number: 21, title: "twenty-one", mergeCommitSha: twentyOne, mergedAt: now },
+      ], 30);
+      assert.deepEqual(result.picks, [
+        { number: 10, outcome: "included", boardedFor: 11 },
+        { number: 11, outcome: "included" },
+        // No develop pull request explains #21's conflict: left out as before.
+        { number: 21, outcome: "conflict", predecessors: [] },
+      ]);
+      assert.deepEqual(result.boarded.map((b) => [b.number, b.title]), [[10, "title 10"]]);
+      await ports.push("release/train-20261027-1100");
+      assert.equal(git("show", "release/train-20261027-1100:shared.txt"), "eleven");
+      assert.equal(git("show", "release/train-20261027-1100:lone.txt"), "main's own");
+      assert.equal(git("rev-parse", "release/train-20261027-1100~2"), mainSha);
+    } finally {
+      await ports.cleanup();
+    }
+
+    // One seat: #11 cannot ride with #10, so neither boards and the branch is main.
+    const full = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo, autoPredecessors: true });
+    try {
+      const result = await full.assemble("release/train-20261027-1400", [{ number: 11, title: "eleven", mergeCommitSha: eleven, mergedAt: now }], 1);
+      assert.deepEqual(result.picks, [{ number: 11, outcome: "conflict", predecessors: [10] }]);
+      assert.deepEqual(result.boarded, []);
+      assert.equal(result.headSha, mainSha);
+    } finally {
+      await full.cleanup();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

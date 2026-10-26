@@ -113,11 +113,20 @@ export function createQaReleaseTrainGithubPorts(input: { http: QaReleaseHttp; to
   };
 }
 
+/** How deep a conflict's predecessors are followed: a predecessor that conflicts in turn may board its own, this many levels down. */
+const BOARDING_DEPTH = 3;
+
 /**
  * `remote` is for tests only: a local repository path stands in for GitHub,
- * and the push goes to it without a token.
+ * and the push goes to it without a token. `autoPredecessors` (owner,
+ * 2026-10-27; on unless `QA_RELEASE_TRAIN_AUTO_PREDECESSORS=false`): a pick
+ * that conflicts boards the develop pull requests it needs first.
  */
-export function createQaReleaseTrainGitPorts(input: { token: () => Promise<string>; remote?: string }): QaReleaseTrainPorts["git"] & { cleanup(): Promise<void> } {
+export function createQaReleaseTrainGitPorts(input: {
+  token: () => Promise<string>;
+  remote?: string;
+  autoPredecessors?: boolean;
+}): QaReleaseTrainPorts["git"] & { cleanup(): Promise<void> } {
   let dir: string | null = null;
   const git = async (args: string[], options: { cwd?: string; allowFail?: boolean; extraEnv?: Record<string, string> } = {}) => {
     try {
@@ -136,14 +145,86 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
     }
   };
   // Develop pull requests merged before this one, within the Admin window, that
-  // changed a file the pick conflicted on: what main most likely lacks. The
-  // fetch of the merge commit brought develop's history; a failed read names none.
-  const predecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<number[]> => {
+  // changed a file the pick conflicted on, newest first: what main most likely
+  // lacks. The fetch of the merge commit brought develop's history; a failed
+  // read names none. Each comes with its merge commit, so it can board.
+  const predecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<QaReleaseTrainCandidate[]> => {
     if (files.length === 0) return [];
     const since = new Date(Date.parse(pull.mergedAt) - QA_RELEASE_TRAIN_CANDIDATE_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const log = await git(["log", "--first-parent", `--since=${since}`, "--format=%s", `${pull.mergeCommitSha}^1`, "--", ...files], { allowFail: true });
-    const numbers = log.stdout.split("\n").map(qaReleaseTrainMergedPullNumber).filter((n): n is number => n !== null && n !== pull.number);
-    return [...new Set(numbers)].slice(0, QA_RELEASE_TRAIN_MAX_PREDECESSORS);
+    // GitHub's merge commit: subject "Merge pull request #N from ...", body's first line the pull request's title.
+    const log = await git(["log", "--first-parent", `--since=${since}`, "--format=%H%x1f%cI%x1f%s%x1f%b%x1e", `${pull.mergeCommitSha}^1`, "--", ...files], {
+      allowFail: true,
+    });
+    const found = new Map<number, QaReleaseTrainCandidate>();
+    for (const entry of log.stdout.split("\x1e")) {
+      const [sha = "", mergedAt = "", subject = "", body = ""] = entry.trim().split("\x1f");
+      const number = qaReleaseTrainMergedPullNumber(subject);
+      if (number === null || number === pull.number || found.has(number) || !SHA.test(sha)) continue;
+      found.set(number, { number, title: body.split("\n")[0].trim(), mergeCommitSha: sha, mergedAt: mergedAt || pull.mergedAt });
+    }
+    return [...found.values()].slice(0, QA_RELEASE_TRAIN_MAX_PREDECESSORS);
+  };
+  type Attempt = { result: "applied" | "empty" | "workflows" } | { result: "conflict"; files: string[] };
+  // One cherry-pick onto the train branch; whatever it does not keep is undone.
+  const pickOnce = async (sha: string): Promise<Attempt> => {
+    const before = (await git(["rev-parse", "HEAD"])).stdout;
+    const picked = await git(["cherry-pick", "-m", "1", sha], { allowFail: true });
+    if (picked.ok && (await git(["rev-parse", "HEAD"])).stdout !== before) {
+      // The App has no workflows permission, and GitHub refuses a push that
+      // adds or changes a workflow file without it: the whole train would
+      // fail. Such a pull request comes back off and is released alone.
+      const touched = (await git(["diff", "--name-only", before, "HEAD"])).stdout.split("\n");
+      if (touched.some((file) => file.startsWith(".github/workflows/"))) {
+        await git(["reset", "--quiet", "--hard", before]);
+        return { result: "workflows" };
+      }
+      return { result: "applied" };
+    }
+    // A pick that stopped with nothing to apply and no conflict is already on main.
+    const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"])).stdout;
+    const staged = await git(["diff", "--cached", "--quiet"], { allowFail: true });
+    if (unmerged === "" && staged.ok) {
+      await git(["cherry-pick", "--skip"], { allowFail: true });
+      return { result: "empty" };
+    }
+    await git(["cherry-pick", "--abort"]);
+    return { result: "conflict", files: unmerged.split("\n").filter((file) => file !== "") };
+  };
+  /**
+   * A pick, and when it conflicts, the develop pull requests it needs boarded
+   * first (oldest first, each the same way, BOARDING_DEPTH levels down), then
+   * the pick again. Short of the pick riding in the end, everything is undone:
+   * the branch is as before and nothing boarded. `seats` is how many may still
+   * ride, the pick included; `aboard` is what already rides.
+   */
+  const board = async (
+    pull: QaReleaseTrainCandidate,
+    depth: number,
+    seats: number,
+    aboard: ReadonlySet<number>,
+  ): Promise<{ result: "applied"; boarded: QaReleaseTrainCandidate[] } | { result: "empty" | "workflows" } | { result: "conflict"; files: string[] }> => {
+    const first = await pickOnce(pull.mergeCommitSha);
+    if (first.result !== "conflict") return first.result === "applied" ? { result: "applied", boarded: [] } : { result: first.result };
+    if (!input.autoPredecessors || depth >= BOARDING_DEPTH) return first;
+    const mark = (await git(["rev-parse", "HEAD"])).stdout;
+    const boarded: QaReleaseTrainCandidate[] = [];
+    const undo = async () => {
+      await git(["reset", "--quiet", "--hard", mark]);
+      return first;
+    };
+    const needed = (await predecessors(pull, first.files)).filter((p) => !aboard.has(p.number)).reverse();
+    for (const needs of needed) {
+      // Already reachable from main: nothing to board.
+      if ((await git(["merge-base", "--is-ancestor", needs.mergeCommitSha, "HEAD"], { allowFail: true })).ok) continue;
+      if (boarded.length + 1 >= seats) return undo();
+      const taken = new Set([...aboard, ...boarded.map((b) => b.number), pull.number]);
+      const ride = await board(needs, depth + 1, seats - 1 - boarded.length, taken);
+      if (ride.result === "applied") boarded.push(...ride.boarded, needs);
+      else if (ride.result !== "empty") return undo();
+    }
+    if (boarded.length === 0) return undo();
+    const again = await pickOnce(pull.mergeCommitSha);
+    return again.result === "applied" ? { result: "applied", boarded } : undo();
   };
   return {
     async assemble(branch, cargo, capacity) {
@@ -159,8 +240,14 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
       if (cargo.length > 0) await git(["fetch", "--quiet", "--filter=blob:none", "origin", ...cargo.map((c) => c.mergeCommitSha)]);
       await git(["switch", "--quiet", "-c", branch]);
       const picks: QaReleaseTrainPick[] = [];
+      const boarded: QaReleaseTrainCandidate[] = [];
+      const riding = () => picks.filter((p) => p.outcome === "included").length;
+      const picked = new Set(cargo.map((c) => c.number));
       for (const pull of cargo) {
-        if (picks.filter((p) => p.outcome === "included").length >= capacity) {
+        // Boarded earlier for a later pick's sake (cargo is in develop merge
+        // order, so only when it was left out first): it rides already.
+        if (picks.some((p) => p.number === pull.number)) continue;
+        if (riding() >= capacity) {
           picks.push({ number: pull.number, outcome: "over_capacity" });
           continue;
         }
@@ -169,35 +256,28 @@ export function createQaReleaseTrainGitPorts(input: { token: () => Promise<strin
           picks.push({ number: pull.number, outcome: "already_in_main" });
           continue;
         }
-        const before = (await git(["rev-parse", "HEAD"])).stdout;
-        const picked = await git(["cherry-pick", "-m", "1", pull.mergeCommitSha], { allowFail: true });
-        if (picked.ok && (await git(["rev-parse", "HEAD"])).stdout !== before) {
-          // The App has no workflows permission, and GitHub refuses a push that
-          // adds or changes a workflow file without it: the whole train would
-          // fail. Such a pull request comes back off and is released alone.
-          const touched = (await git(["diff", "--name-only", before, "HEAD"])).stdout.split("\n");
-          if (touched.some((file) => file.startsWith(".github/workflows/"))) {
-            await git(["reset", "--quiet", "--hard", before]);
-            picks.push({ number: pull.number, outcome: "changes_workflows" });
-            continue;
+        const aboard = new Set(picks.filter((p) => p.outcome === "included").map((p) => p.number));
+        const ride = await board(pull, 0, capacity - riding(), aboard);
+        if (ride.result === "applied") {
+          for (const needs of ride.boarded) {
+            // A pick left out earlier in this train rides now as a predecessor:
+            // the operator's own, so no boardedFor.
+            const earlier = picks.findIndex((p) => p.number === needs.number);
+            if (earlier !== -1) picks.splice(earlier, 1);
+            picks.push(picked.has(needs.number) ? { number: needs.number, outcome: "included" } : { number: needs.number, outcome: "included", boardedFor: pull.number });
+            if (!picked.has(needs.number)) boarded.push(needs);
           }
           picks.push({ number: pull.number, outcome: "included" });
-          continue;
-        }
-        // A pick that stopped with nothing to apply and no conflict is already on main.
-        const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"])).stdout;
-        const staged = await git(["diff", "--cached", "--quiet"], { allowFail: true });
-        if (unmerged === "" && staged.ok) {
-          await git(["cherry-pick", "--skip"], { allowFail: true });
+        } else if (ride.result === "workflows") {
+          picks.push({ number: pull.number, outcome: "changes_workflows" });
+        } else if (ride.result === "empty") {
           picks.push({ number: pull.number, outcome: "already_in_main" });
         } else {
-          await git(["cherry-pick", "--abort"]);
-          const conflicted = unmerged.split("\n").filter((file) => file !== "");
-          picks.push({ number: pull.number, outcome: "conflict", predecessors: await predecessors(pull, conflicted) });
+          picks.push({ number: pull.number, outcome: "conflict", predecessors: (await predecessors(pull, ride.files)).map((p) => p.number) });
         }
       }
       const headSha = (await git(["rev-parse", "HEAD"])).stdout;
-      return { mainSha, headSha, picks };
+      return { mainSha, headSha, picks, boarded };
     },
     async push(branch) {
       if (!dir) throw new Error("git_not_assembled");
@@ -263,7 +343,22 @@ export function createQaReleaseTrainAppPorts(input: { http: QaReleaseHttp; env: 
         : { admitted: false, reason: typeof answer.body.reason === "string" ? answer.body.reason : "unknown" };
     },
     async report(report) {
-      const answer = await call({ phase: "report", ...report });
+      const send = (picks: QaReleaseTrainPick[]) => call({ phase: "report", ...report, picks });
+      let answer;
+      try {
+        answer = await send(report.picks);
+      } catch (error) {
+        // An app older than boarded predecessors refuses `boardedFor` (400:
+        // nothing was written). Sent again without it, the report still lands.
+        if (!(error instanceof Error && error.message === "app_400") || !report.picks.some((p) => p.boardedFor !== undefined)) throw error;
+        answer = await send(
+          report.picks.map((pick) => {
+            const plain = { ...pick };
+            delete plain.boardedFor;
+            return plain;
+          }),
+        );
+      }
       if (answer.status !== 200) throw new Error("app_report_refused");
     },
   };

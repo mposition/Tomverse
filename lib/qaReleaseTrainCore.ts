@@ -129,6 +129,11 @@ export type QaReleaseTrainPick = {
    * only those that are not.
    */
   predecessors?: number[];
+  /**
+   * An included pull request the operator did not pick, boarded because the
+   * named pick conflicted without it (owner, 2026-10-27).
+   */
+  boardedFor?: number;
 };
 
 /** At most this many predecessors are named for one conflict. */
@@ -188,8 +193,8 @@ export function qaReleaseTrainPullRequest(input: {
   // again; an emergency train's do not (its request is spent).
   const reason = {
     conflict: input.emergency
-      ? "cherry-pick conflict on main; pick it for a later train, with the develop pull requests Admin names it needs first"
-      : "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs first",
+      ? "cherry-pick conflict on main even with the develop pull requests it needs boarded first; pick it for a later train"
+      : "cherry-pick conflict on main even with the develop pull requests it needs boarded first; it rides the next train again",
     over_capacity: input.emergency ? "train full; pick it for a later train" : "train full; it rides the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;
@@ -198,7 +203,7 @@ export function qaReleaseTrainPullRequest(input: {
     "",
     `## Included (${included.length})`,
     "",
-    ...included.map((p) => `- #${p.number} ${title(p.number)}`),
+    ...included.map((p) => `- #${p.number} ${title(p.number)}${p.boardedFor === undefined ? "" : ` (not picked; boarded because #${p.boardedFor} needs it)`}`),
     "",
     `## Left out (${left.length})`,
     "",

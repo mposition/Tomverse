@@ -44,12 +44,16 @@ export type QaReleaseTrainPorts = {
      * On a fresh clone of main: a branch with each commit cherry-picked with
      * -m 1, in order, a conflict aborted and left out, an already applied one
      * skipped; once `capacity` have ridden, the rest are over capacity without
-     * being picked. Returns main's head before the picks and the branch head after.
+     * being picked. A conflict may board the develop pull requests it needs
+     * first (`boarded`, the operator did not pick them). Returns main's head
+     * before the picks and the branch head after.
      */
     assemble(branch: string, cargo: readonly QaReleaseTrainCandidate[], capacity: number): Promise<{
       mainSha: string;
       headSha: string;
       picks: QaReleaseTrainPick[];
+      /** Absent: nothing boarded. */
+      boarded?: QaReleaseTrainCandidate[];
     }>;
     push(branch: string): Promise<void>;
   };
@@ -248,7 +252,7 @@ export async function runQaReleaseTrainRound(
   }
   const pr = qaReleaseTrainPullRequest({
     slot: departure.slot,
-    candidates: cargo,
+    candidates: [...cargo, ...(assembled.boarded ?? [])],
     picks,
     rcSha: assembled.headSha,
     rollbackSha: assembled.mainSha,
