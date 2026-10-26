@@ -5,6 +5,10 @@ Prepared on 2026-10-26 from origin/main
 Xcode build. Swift compilation, Simulator execution and physical-device acceptance
 have not been performed on Windows.
 
+For the selected Codemagic personal-account path, see
+[the Codemagic setup](ios-codemagic.md). Its manual `ios-simulator` workflow runs
+the unsigned build below on a hosted Mac after the prepared branch is connected.
+
 ## What is ready
 
 - The existing React/Vite app, Swift session/file plugins, RevenueCat, browser

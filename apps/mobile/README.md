@@ -97,6 +97,11 @@ Xcode 26+. It does not sign, upload, enroll a service or submit to a store.
 See [remote iOS build handoff](../../docs/ops/ios-remote-build.md) for clean-machine
 setup, output paths, validation evidence and the remaining Mac/device checks.
 
+The repository-root `codemagic.yaml` also provides a manual, unsigned Simulator
+build on a hosted Mac mini M2. See [Codemagic setup](../../docs/ops/ios-codemagic.md)
+for connecting the personal account, selecting the prepared branch and reading
+the artifacts. Apple membership is needed later for TestFlight device distribution.
+
 ## Authentication and operational boundary
 
 The primary sign-in action opens the existing web sign-in flow in the system

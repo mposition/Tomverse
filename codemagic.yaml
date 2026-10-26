@@ -1,0 +1,43 @@
+# Start this workflow manually in Codemagic. It needs no Apple credentials and
+# creates a Simulator application, not an installable iPhone/iPad IPA.
+workflows:
+  ios-simulator:
+    name: Tomverse iOS Simulator
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      node: "22.22.2"
+      xcode: "26.6"
+    scripts:
+      - name: Install locked dependencies
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          node --version
+          xcodebuild -version
+          npm ci --no-audit --no-fund
+      - name: Prepare the bundled iOS project
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          npm run prepare:ios
+          npm run test:ios-prebuild
+          mkdir -p .tmp/codemagic
+          npm run --silent check:ios-prebuild > .tmp/codemagic/prebuild.json
+      - name: Compile without signing
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          npm run build:ios 2>&1 | tee .tmp/codemagic/xcodebuild.log
+      - name: Package the Simulator application
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          test -d .tmp/ios-build/Debug-simulator/Build/Products/Debug-iphonesimulator/App.app
+          ditto -c -k --sequesterRsrc --keepParent \
+            .tmp/ios-build/Debug-simulator/Build/Products/Debug-iphonesimulator/App.app \
+            .tmp/codemagic/tomverse-ios-simulator.zip
+    artifacts:
+      - .tmp/codemagic/prebuild.json
+      - .tmp/codemagic/xcodebuild.log
+      - .tmp/codemagic/tomverse-ios-simulator.zip
