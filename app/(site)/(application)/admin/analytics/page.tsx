@@ -1,6 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import { AdminAiReviewScorecardPanel } from "@/components/admin/AdminAiReviewScorecardPanel";
+import { AdminAiReviewJudgedPanel } from "@/components/admin/AdminAiReviewJudgedPanel";
+import { readAiReviewJudgedRunCatalog } from "@/lib/aiReviewJudgedRunReport";
+import { getAdminLocale, getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAiReviewJudgedMessages } from "@/lib/adminMessages/aiReviewJudged";
 import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
 import { AdminMemoryRevocationPanel } from "@/components/admin/AdminMemoryRevocationPanel";
 import { AdminPackageImportPanel } from "@/components/admin/AdminPackageImportPanel";
@@ -98,10 +102,16 @@ export default async function AdminAnalyticsPage({
         readAiReviewScorecard(windowDays)
       )
     );
+    const [locale, messages] = await Promise.all([getAdminLocale(), getAdminMessages(adminAiReviewJudgedMessages)]);
+    const catalog = readAiReviewJudgedRunCatalog();
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AdminAiReviewScorecardPanel scorecards={scorecards} />
+        <AdminAiReviewJudgedPanel catalog={catalog} locale={locale} />
+        <details className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+          <summary className="cursor-pointer text-sm font-semibold text-zinc-200">{messages.operational}</summary>
+          <div className="mt-5"><AdminAiReviewScorecardPanel scorecards={scorecards} /></div>
+        </details>
       </div>
     );
   }

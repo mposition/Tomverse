@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { AVAILABLE_MODELS } from "@/lib/models";
+import { toPublicCatalogModel } from "@/lib/publicModelCatalog";
 import {
   expectNoHorizontalOverflow,
   mockChatStream,
@@ -269,6 +271,9 @@ function watchConsole(page: Page): ConsoleWatch {
     if (/Can't reach database server|guest_conversation_title_failed/.test(text)) {
       return;
     }
+    // Next dev forwards these server-only, DB-free fallback diagnostics to
+    // the browser. Keep all other console errors and hydration warnings.
+    if (text.includes(" Server ") && text.includes("PrismaClientKnownRequestError") && /Failed to load (help guide flags|public app settings) for chat:/.test(text)) return;
     if (/hydrat|did not match|server HTML/i.test(text)) watch.hydration.push(text);
     else if (message.type() === "error") watch.errors.push(text);
   });
@@ -279,6 +284,9 @@ function watchConsole(page: Page): ConsoleWatch {
 async function startGuestJourney(page: Page, options: JourneyOptions) {
   const { viewport, lang = "en" } = options;
   await prepareGuestPage(page, "en");
+  await page.route("**/api/models/catalog", (route) => route.fulfill({
+    json: {models: AVAILABLE_MODELS.map(toPublicCatalogModel)},
+  }));
   await suppressTransientUi(page);
   await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT, options.guestUsage ?? {});
   await mockChatStream(page, "Stage the migration and keep a full snapshot.");
@@ -415,7 +423,8 @@ test.describe("guest journey: attach a file, compare, review", { tag: "@ui-risk"
 
       // 6. And the result does not pretend to be something it is not.
       await expect(page.getByTestId("ai-review-guest-not-saved")).toBeVisible();
-      await expect(page.getByTestId("ai-review-verify-guest-locked")).toBeVisible();
+      await page.locator('[data-testid="ai-review-workspace"]:visible').getByRole("button", {name: /확인이 필요한 내용|Verification needed|Needs verification/}).click();
+      await expect(page.locator('[data-testid="ai-review-verify-guest-locked"]:visible')).toBeVisible();
 
       await expectNoHorizontalOverflow(page);
       expect(watch.hydration, "hydration warnings").toEqual([]);
