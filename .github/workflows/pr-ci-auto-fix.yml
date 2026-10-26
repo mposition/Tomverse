@@ -2,7 +2,8 @@
 #
 # The model runs on the AMUX server, not here. tools/review-orchestrator/bin/
 # pr-ci-auto-fix.mjs polls for a ready develop pull request from
-# claude/to-develop/** or codex/to-develop/** whose required CI failed, asks
+# claude/to-develop/**, codex/to-develop/** or dependabot/** (owner
+# 2026-10-26) whose required CI failed, asks
 # the Claude Code CLI signed in to the server's subscription for the smallest
 # fix, and leaves the patch in an outbox; bin/pr-ci-auto-fix-sender.mjs, under
 # its own account with the only token that can dispatch, dispatches this
@@ -16,14 +17,16 @@
 # Every input is untrusted: whoever can dispatch can send any patch. So:
 # - target: a trusted checkout of the default branch re-decides everything
 #   from GitHub's own records -- the pull request is open at exactly head_sha
-#   and served (same repository, develop base, not draft, agent branch, every
+#   and served (same repository, develop base, not draft, served branch, every
 #   commit read, fewer than two auto-fix commits), and each named run is a
 #   failed pull_request run of a required workflow on that same commit and
 #   the newest run of that workflow there.
 # - publish: a fresh runner with a trusted checkout runs
 #   scripts/pr-ci-auto-fix-guard.mjs against the patch applied to a clean
 #   checkout of the pull request (no gate path -- the merge lane's own list --,
-#   no test file, no deletion, no binary, at most 400 changed lines) and only
+#   no test file, no deletion, no binary, at most 400 changed lines; a root
+#   file only for a Dependabot head, and only the app's own build and
+#   instrumentation config) and only
 #   then pushes with GH_AUTOMATION_PAT, leased to the commit CI ran on. It
 #   installs and runs nothing from the pull request.
 
@@ -152,13 +155,15 @@ jobs:
         id: judge
         env:
           PATCH_GZ_B64: ${{ inputs.patch_gz_b64 }}
+          # From the target job's read of the pull request, not from the dispatch.
+          HEAD_BRANCH: ${{ needs.target.outputs.head_branch }}
         run: |
           mkdir -p patch
           # A bounded read: the guard's 400-line cap is far below this.
           printf '%s' "$PATCH_GZ_B64" | base64 -d | gunzip | head -c 4000000 > patch/fix.patch
           if [ ! -s patch/fix.patch ]; then echo "The patch is empty."; echo "push=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           git -C pr apply --binary --index "$GITHUB_WORKSPACE/patch/fix.patch"
-          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs diff pr; then
+          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs diff pr "$HEAD_BRANCH"; then
             echo "push=true" >> "$GITHUB_OUTPUT"
           else
             echo "push=false" >> "$GITHUB_OUTPUT"

@@ -189,7 +189,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      있는 것만 남김). 나머지 `.github/**`(감사 기록 등), `scripts/**`, 저장소 루트 설정, `package.json`·lock 파일, 다른 기능의
      정책·UI 계약 문서는 되돌릴 수 있는 코드로 보고 레인이 병합합니다 — PR의 CI가 이미 그 내용으로 돌았습니다. CI 자동 수정은
      모델이 쓰는 변경이므로 이전의 넓은 경계(`.github/**`, `scripts/**`, 루트 파일, package 파일, 계약 문서)를 그대로 둡니다
-     (`lib/prCiAutoFixGuardCore.ts`). 같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
+     (`lib/prCiAutoFixGuardCore.ts`). 예외는 하나입니다: develop으로 가는 Dependabot PR(`dependabot/**`)의 수정은 루트의 앱
+     빌드·계측 설정(`next.config.*`, `sentry.*.config.ts`, `instrumentation*.ts`)만 고칠 수 있습니다(운영자 결정 2026-10-26).
+     같은 check가 같은 head에서 여러 번 돌면 가장 최근 run만 봅니다.
    - 변경 경로에 이 Agent 자신의 파일(부록 A, 판정은 PR base의 목록으로).
    - 이 Agent의 테이블(`AgentDigestItem`, `QaRelease`로 시작하는 테이블)을 이름 대는 migration. 판정은 변경된
      `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.

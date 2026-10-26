@@ -43,15 +43,20 @@ test("gate paths, tests, deletions, binaries, empty and large diffs are refused"
   }
 });
 
-test("only same-repository, ready develop pull requests from agent branches, at most twice", () => {
+test("only same-repository, ready develop pull requests from agent or Dependabot branches, at most twice", () => {
   const base = { headBranch: "claude/to-develop/x", baseBranch: "develop", draft: false, sameRepository: true, commitMessages: ["feat: a"], commitCount: 1 };
   assert.deepEqual(judgePrCiAutoFixTarget(base), { push: true });
   assert.deepEqual(judgePrCiAutoFixTarget({ ...base, headBranch: "codex/to-develop/y" }), { push: true });
+  // Owner 2026-10-26: Dependabot's updates into develop are served too.
+  assert.deepEqual(judgePrCiAutoFixTarget({ ...base, headBranch: "dependabot/npm_and_yarn/develop/group-9a3125fb27" }), { push: true });
   for (const [change, reason] of [
     [{ sameRepository: false }, "fork"],
     [{ baseBranch: "main" }, "base_not_develop"],
+    // A security update Dependabot opens against main stays a person's.
+    [{ headBranch: "dependabot/npm_and_yarn/next-16.4.2", baseBranch: "main" }, "base_not_develop"],
     [{ draft: true }, "draft"],
-    [{ headBranch: "dependabot/npm/x" }, "branch_not_served"],
+    [{ headBranch: "dependabot" }, "branch_not_served"],
+    [{ headBranch: "my-dependabot/x" }, "branch_not_served"],
     [{ headBranch: "release/2026-10-20-x" }, "branch_not_served"],
     [{ commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`, "feat: b", `${PR_CI_AUTO_FIX_COMMIT_PREFIX}c`], commitCount: 3 }, "attempts_exhausted"],
     // A list cut short by paging cannot prove the attempt count.
@@ -62,4 +67,24 @@ test("only same-repository, ready develop pull requests from agent branches, at 
     assert.ok(verdict.reasons.includes(reason));
   }
   assert.deepEqual(judgePrCiAutoFixTarget({ ...base, commitMessages: [`${PR_CI_AUTO_FIX_COMMIT_PREFIX}a`], commitCount: 1 }), { push: true });
+});
+
+test("a Dependabot fix may change the app's own build and instrumentation config at the root, and nothing else there", () => {
+  const dependabot = "dependabot/npm_and_yarn/develop/infrastructure-and-observability-9a3125fb27";
+  const judge = (path, headBranch) => judgePrCiAutoFixDiff({ nameStatus: `M\t${path}`, numstat: `2\t1\t${path}`, headBranch });
+  for (const path of ["next.config.ts", "sentry.server.config.ts", "sentry.edge.config.ts", "sentry.client.config.ts",
+    "instrumentation.ts", "instrumentation-client.ts"]) {
+    assert.deepEqual(judge(path, dependabot), { push: true }, path);
+    // The same file stays fenced for an agent branch, and when the caller names no branch.
+    assert.deepEqual(judge(path, "claude/to-develop/x"), { push: false, reasons: ["gate_path"] }, path);
+    assert.deepEqual(judge(path, undefined), { push: false, reasons: ["gate_path"] }, path);
+  }
+  // How the checks run, request handling, and the packages themselves stay fenced.
+  for (const path of ["proxy.ts", "tsconfig.json", "eslint.config.mjs", "playwright.config.ts", "package.json",
+    "package-lock.json", ".npmrc", "next.config.ts.bak", "AGENTS.md"]) {
+    assert.equal(judge(path, dependabot).push, false, path);
+  }
+  // A rename onto an allowed name from a fenced one is still refused.
+  assert.equal(judgePrCiAutoFixDiff({ nameStatus: "R100\ttsconfig.json\tnext.config.ts", numstat: "0\t0\tnext.config.ts",
+    headBranch: dependabot }).push, false);
 });

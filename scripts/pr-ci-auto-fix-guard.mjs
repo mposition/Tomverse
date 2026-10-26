@@ -2,7 +2,10 @@
 // workflow .github/workflows/pr-ci-auto-fix.yml.
 //
 //   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json>
-//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff <checkout-dir>
+//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff <checkout-dir> [<head-branch>]
+//
+// `diff` takes the head branch the target job read from GitHub; without it no
+// root file is allowed.
 //
 // `target` reads the pull request and its commits as `gh api --paginate
 // --slurp` returned them; `diff` reads the diff against HEAD of another
@@ -35,9 +38,10 @@ if (mode === "target") {
   verdict = judgePrCiAutoFixDiff({
     nameStatus: git(["diff", "--name-status", "-M", "HEAD"]),
     numstat: git(["diff", "--numstat", "-M", "HEAD"]),
+    headBranch: commitsPath,
   });
 } else {
-  console.error("usage: pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> | diff <checkout-dir>");
+  console.error("usage: pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> | diff <checkout-dir> [<head-branch>]");
   process.exit(2);
 }
 console.log(JSON.stringify(verdict));
