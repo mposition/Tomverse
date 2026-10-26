@@ -186,6 +186,10 @@ test("a tool outside the role's list makes the run unknown, never trusted", () =
   assert.equal(copilot("bash", "implement").valid, false);
   assert.equal(copilot("edit", "investigate").valid, false);
   assert.equal(copilot("edit", "implement").valid, true);
+  // An empty final answer is not a success (as for Cursor).
+  assert.equal(parseAmuxV22ChannelOutput("github-copilot", jsonl(
+    { type: "assistant.message", data: { model: "m", toolRequests: [], content: "  " } },
+    { type: "result", exitCode: 0 }), { exitCode: 0, role: "investigate" }).success, false);
   const cursor = (tool) => parseAmuxV22ChannelOutput("cursor", jsonl(
     { type: "tool_call", tool_call: { [tool]: { args: {} } } },
     { type: "result", subtype: "success", is_error: false, result: "",
