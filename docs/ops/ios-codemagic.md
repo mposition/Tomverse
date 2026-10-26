@@ -13,10 +13,11 @@ the iOS bundle, runs the preparation and billing-boundary tests, compiles withou
 the Simulator application. There are no automatic triggers or publishing steps.
 
 Repository: `https://github.com/mposition/Tomverse`.
-Prepared branch: `codex/to-develop/ios-remote-build-prep`, based on the main
-revision recorded in [the remote-build handoff](ios-remote-build.md).
-The branch must be pushed before Codemagic can read this configuration. A merge
-to main or develop is not needed to build this branch.
+Prepared branch: `codex/to-develop/ios-remote-build-prep`. Its initial main revision
+and subsequent develop rebase are recorded in
+[the remote-build handoff](ios-remote-build.md). The six iOS patches were preserved
+unchanged when resolving PR #3044 on 2026-10-27. The branch is pushed and can be
+built directly; a merge to main or develop is not needed.
 
 ## Connect from Windows
 

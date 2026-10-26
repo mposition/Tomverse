@@ -5,6 +5,14 @@ Prepared on 2026-10-26 from origin/main
 Xcode build. Swift compilation, Simulator execution and physical-device acceptance
 have not been performed on Windows.
 
+On 2026-10-27, the six iOS preparation commits were rebased onto develop
+`45e9e11ca2a494fe1774c5816b822685fe228383` to resolve PR #3044's base conflict.
+All six patches were preserved unchanged. The PR now contains only the iOS
+preparation changes, excluding unrelated main-only AMUX release commits.
+Rebase validation passed: `prepare:ios`, 59 focused preparation, Codemagic,
+billing and wordmark cases, and the unsigned build dry run. These remain local
+checks; no cloud build, signed upload or real payment was performed.
+
 For the selected Codemagic personal-account path, see
 [the Codemagic setup](ios-codemagic.md). Its manual `ios-simulator` workflow runs
 the unsigned build below on a hosted Mac after the prepared branch is connected.
