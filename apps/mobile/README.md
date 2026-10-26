@@ -150,9 +150,9 @@ persistence checks remain in place. Cookie requests retain cookie authentication
 and CSRF checks. Live enrollment, paid calls, push, merge, deployment and store
 submission require their separate approvals.
 
-The existing `app.tomverse.shell` identifier is provisional. No production app
-IDs, Apple Team ID or signing certificate have been chosen by the owner. No
-association files are published or fabricated. The native declarations are
+The `app.tomverse.shell` Apple App ID and a Tomverse App Store Connect draft
+were registered on 2026-10-26. Signing certificates/profiles and payment activation
+remain operational setup. No association files are published or fabricated. The native declarations are
 preparation, not proof of verified links. Browser screenshots and sync output
 are not physical-device authentication evidence. iOS uses ASWebAuthenticationSession with an exact HTTPS callback, rather than
 relying on Safari same-domain navigation. Physical app-link and session evidence

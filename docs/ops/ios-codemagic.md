@@ -65,6 +65,12 @@ access configured inside Codemagic. The existing target supports iPhone and iPad
 on iOS/iPadOS 17.4+. Signed builds and TestFlight upload are a separate workflow;
 this file does not configure or perform them.
 
+The Apple App ID `app.tomverse.shell` and [Tomverse App Store Connect draft](https://appstoreconnect.apple.com/apps/6827148073/distribution)
+were registered on 2026-10-26. Seven payment products have draft records as noted
+in the billing runbook. Pricing, payment-account requirements, RevenueCat Apple
+credentials and signed-device acceptance still need completion before purchases
+are operational.
+
 ## Local verification
 
 Machine: local Windows PC. Shell: PowerShell. Directory: repository root.

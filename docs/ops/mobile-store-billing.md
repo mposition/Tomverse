@@ -83,8 +83,9 @@ their authenticated webhook before access is granted.
 
 ## Configuration before activation
 
-All switches default off. This implementation does not activate a deployed
-service, publish a build, register real products or make a live purchase.
+All switches default off. Source/build scripts do not activate a deployed
+service, publish a build, register products or make a live purchase. Separate
+Apple dashboard draft registrations are recorded below.
 
 API server:
 
@@ -160,8 +161,8 @@ Run cap sync after installing dependencies; the sync hook changes Android
 MainActivity to singleTop so banking-app confirmation does not cancel the
 purchase. The versioned iOS App target includes the In-App Purchase capability;
 `check:ios-prebuild` verifies that capability and Swift 5+ after sync.
-Finalize the currently provisional bundle/application ID before registering
-products. Store credentials, agreements, tax/banking details, product review,
+Keep the bundle/application ID consistent with each registered store app.
+Store credentials, agreements, tax/banking details, product review,
 pricing and a RevenueCat account are required operational setup; choose and
 approve the provider's commercial terms before production activation.
 The initial catalog uses standard recurring base plans without introductory,
@@ -214,14 +215,14 @@ The independent Android fixture suite remains in `tests/native-e2e`.
 After Apple membership activation, complete the account setup in the web
 dashboards before enabling purchases in an iOS build:
 
-1. Register the final Bundle ID and App Store Connect app. The source currently
-   retains `app.tomverse.shell`; no App Store registration is claimed by this
-   preparation. The Account Holder must complete the Paid Apps Agreement and
+1. The Apple App ID `app.tomverse.shell` and Tomverse App Store Connect app
+   `6827148073` were registered on 2026-10-26. The Account Holder must complete the Paid Apps Agreement and
    banking/tax information. Apple requires an active agreement for sandbox IAP.
-2. Register the four subscriptions and three consumable packs from the mapping
-   above, using the approved prices. Put Max at the higher level and Pro at the
-   lower level in one subscription group. Store product registration and pricing
-   have not been performed by these source changes.
+2. Draft records now exist for the four Apple subscriptions and three consumable
+   packs from the mapping above. Group `Tomverse Plans` (`22515689`) places both
+   Max variants at level 1 and both Pro variants at level 2. These are drafts,
+   with no pricing, availability or store review submission. Complete localized
+   product metadata and use approved prices before sandbox/device acceptance.
 3. Add the Apple app to the same RevenueCat project used for Android. Configure
    Apple's purchase-verification credentials and server notifications following
    RevenueCat's current Apple setup. Preserve the Google app, products and webhook
@@ -238,6 +239,12 @@ dashboards before enabling purchases in an iOS build:
 6. Produce a signed TestFlight build, install it on the test iPad, and execute the
    device acceptance scenarios above. Record verified purchase, refund and
    redelivery results before calling the iOS payment integration operational.
+
+The draft product IDs registered on 2026-10-26 are
+`app.tomverse.pro.monthly`, `app.tomverse.pro.annual`,
+`app.tomverse.max.monthly`, `app.tomverse.max.annual`,
+`app.tomverse.credits500`, `app.tomverse.credits1500` and
+`app.tomverse.credits4000`. No customer payment or store release was performed.
 
 Local iOS billing verification on 2026-10-26: 16 synthetic UI cases passed (eight
 scenarios in each browser), 13 existing core/route/webhook cases passed, and
