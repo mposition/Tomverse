@@ -193,8 +193,8 @@ export function qaReleaseTrainPullRequest(input: {
   // again; an emergency train's do not (its request is spent).
   const reason = {
     conflict: input.emergency
-      ? "cherry-pick conflict on main even with the develop pull requests it needs boarded first; pick it for a later train"
-      : "cherry-pick conflict on main even with the develop pull requests it needs boarded first; it rides the next train again",
+      ? "cherry-pick conflict on main; pick it for a later train, and Admin names the develop pull requests it needs"
+      : "cherry-pick conflict on main; it rides the next train again, and Admin names the develop pull requests it needs",
     over_capacity: input.emergency ? "train full; pick it for a later train" : "train full; it rides the next train",
     changes_workflows: "changes .github/workflows, which the train cannot push; release it on its own (release/** or hotfix/**)",
   } as const;

@@ -48,7 +48,13 @@ export type QaReleaseTrainPorts = {
      * first (`boarded`, the operator did not pick them). Returns main's head
      * before the picks and the branch head after.
      */
-    assemble(branch: string, cargo: readonly QaReleaseTrainCandidate[], capacity: number): Promise<{
+    assemble(
+      branch: string,
+      cargo: readonly QaReleaseTrainCandidate[],
+      capacity: number,
+      /** Pull requests riding an open train: never boarded as a predecessor. */
+      onOpenTrains?: readonly number[],
+    ): Promise<{
       mainSha: string;
       headSha: string;
       picks: QaReleaseTrainPick[];
@@ -134,6 +140,8 @@ export async function runQaReleaseTrainRound(
   // An emergency's pull requests already riding an open train: never picked
   // onto a second release branch, reported as such.
   let onOpenTrain: number[] = [];
+  // Every pull request open trains carry: a predecessor among them is not boarded again.
+  let openRiders: number[] = [];
   let step = "selection";
   try {
     const scheduledNow = qaReleaseTrainDeparture(nowMs, hours);
@@ -152,6 +160,7 @@ export async function runQaReleaseTrainRound(
         if (!emergencyLeft) {
           step = "open_trains";
           const riding = new Set((await ports.github.openTrains()).riders);
+          openRiders = [...riding];
           step = "cargo";
           const merged = orderQaReleaseTrainCandidates(await ports.github.cargo(selection.emergency.numbers));
           const riders = merged.filter((c) => !riding.has(c.number));
@@ -182,7 +191,9 @@ export async function runQaReleaseTrainRound(
       step = "branch";
       if (await ports.github.branchExists(branch)) return { exitCode: 0, train: "departure_done" };
       step = "open_trains";
-      openTrains = (await ports.github.openTrains()).count;
+      const open = await ports.github.openTrains();
+      openTrains = open.count;
+      openRiders = open.riders;
       step = "cargo";
       cargo = openTrains > 0 || selection.numbers.length === 0 ? [] : orderQaReleaseTrainCandidates(await ports.github.cargo(selection.numbers));
     }
@@ -229,7 +240,7 @@ export async function runQaReleaseTrainRound(
 
   let assembled;
   try {
-    assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO);
+    assembled = await ports.git.assemble(branch, cargo, QA_RELEASE_TRAIN_MAX_CARGO, openRiders);
   } catch (error) {
     // The port's own code (git_missing, git_clone ...) says what to fix.
     const message = error instanceof Error ? error.message : "";

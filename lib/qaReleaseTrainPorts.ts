@@ -195,17 +195,20 @@ export function createQaReleaseTrainGitPorts(input: {
    * first (oldest first, each the same way, BOARDING_DEPTH levels down), then
    * the pick again. Short of the pick riding in the end, everything is undone:
    * the branch is as before and nothing boarded. `seats` is how many may still
-   * ride, the pick included; `aboard` is what already rides.
+   * ride, the pick included; `aboard` is what already rides. A predecessor
+   * riding an open train (`elsewhere`) is never boarded a second time: the
+   * pick that needs it waits for that train instead.
    */
   const board = async (
     pull: QaReleaseTrainCandidate,
     depth: number,
     seats: number,
     aboard: ReadonlySet<number>,
+    elsewhere: ReadonlySet<number>,
   ): Promise<{ result: "applied"; boarded: QaReleaseTrainCandidate[] } | { result: "empty" | "workflows" } | { result: "conflict"; files: string[] }> => {
     const first = await pickOnce(pull.mergeCommitSha);
     if (first.result !== "conflict") return first.result === "applied" ? { result: "applied", boarded: [] } : { result: first.result };
-    if (!input.autoPredecessors || depth >= BOARDING_DEPTH) return first;
+    if (input.autoPredecessors === false || depth >= BOARDING_DEPTH) return first;
     const mark = (await git(["rev-parse", "HEAD"])).stdout;
     const boarded: QaReleaseTrainCandidate[] = [];
     const undo = async () => {
@@ -216,18 +219,26 @@ export function createQaReleaseTrainGitPorts(input: {
     for (const needs of needed) {
       // Already reachable from main: nothing to board.
       if ((await git(["merge-base", "--is-ancestor", needs.mergeCommitSha, "HEAD"], { allowFail: true })).ok) continue;
-      if (boarded.length + 1 >= seats) return undo();
+      if (elsewhere.has(needs.number) || boarded.length + 1 >= seats) return undo();
       const taken = new Set([...aboard, ...boarded.map((b) => b.number), pull.number]);
-      const ride = await board(needs, depth + 1, seats - 1 - boarded.length, taken);
+      const ride = await board(needs, depth + 1, seats - 1 - boarded.length, taken, elsewhere);
       if (ride.result === "applied") boarded.push(...ride.boarded, needs);
       else if (ride.result !== "empty") return undo();
     }
     if (boarded.length === 0) return undo();
     const again = await pickOnce(pull.mergeCommitSha);
-    return again.result === "applied" ? { result: "applied", boarded } : undo();
+    // Nothing left to apply: what it carries came with its predecessors, so it rides with them.
+    if (again.result === "applied" || again.result === "empty") return { result: "applied", boarded };
+    // A workflow change is released on its own, predecessors or not.
+    if (again.result === "workflows") {
+      await undo();
+      return { result: "workflows" };
+    }
+    return undo();
   };
   return {
-    async assemble(branch, cargo, capacity) {
+    async assemble(branch, cargo, capacity, onOpenTrains = []) {
+      const elsewhere = new Set(onOpenTrains);
       // A round that assembles twice (an empty emergency, then the scheduled
       // train) keeps one clone: the first is removed before the second.
       if (dir) await rm(dir, { recursive: true, force: true });
@@ -257,7 +268,7 @@ export function createQaReleaseTrainGitPorts(input: {
           continue;
         }
         const aboard = new Set(picks.filter((p) => p.outcome === "included").map((p) => p.number));
-        const ride = await board(pull, 0, capacity - riding(), aboard);
+        const ride = await board(pull, 0, capacity - riding(), aboard, elsewhere);
         if (ride.result === "applied") {
           for (const needs of ride.boarded) {
             // A pick left out earlier in this train rides now as a predecessor:

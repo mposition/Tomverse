@@ -121,7 +121,7 @@ test("a conflict names the earlier develop pull requests that changed its confli
     const eleven = mergePull(11, "shared.txt", "eleven\n");
     git("switch", "--quiet", "main");
 
-    const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo });
+    const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo, autoPredecessors: false });
     try {
       const result = await ports.assemble("release/train-20261024-1100", [
         { number: 11, title: "eleven", mergeCommitSha: eleven, mergedAt: new Date().toISOString() },
@@ -201,6 +201,16 @@ test("a conflicting pick boards the develop pull requests it needs and rides; ot
       assert.equal(result.headSha, mainSha);
     } finally {
       await full.cleanup();
+    }
+
+    // #10 rides an open train: never boarded a second time, so #11 waits for it.
+    const open = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo });
+    try {
+      const result = await open.assemble("release/train-20261027-1700", [{ number: 11, title: "eleven", mergeCommitSha: eleven, mergedAt: now }], 30, [10]);
+      assert.deepEqual(result.picks, [{ number: 11, outcome: "conflict", predecessors: [10] }]);
+      assert.equal(result.headSha, mainSha);
+    } finally {
+      await open.cleanup();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
