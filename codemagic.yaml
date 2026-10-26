@@ -22,7 +22,7 @@ workflows:
           set -euo pipefail
           npm run prepare:ios
           npm run test:ios-prebuild
-            npm run test:mobile-billing
+          npm run test:mobile-billing
           mkdir -p .tmp/codemagic
           npm run --silent check:ios-prebuild > .tmp/codemagic/prebuild.json
       - name: Compile without signing

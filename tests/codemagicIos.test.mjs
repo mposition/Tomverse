@@ -40,6 +40,10 @@ test("preparation and validation complete before the native build and artifact p
   assert.ok(scripts[prepare].includes("npm run test:mobile-billing"));
   assert.ok(scripts[compile].includes("set -euo pipefail"), "tee must not hide a failed Xcode build");
   assert.ok(scripts[archive].includes("test -d"), "do not archive a missing application");
+  const plan = iosBuildPlan(".");
+  const buildPath = plan.args[plan.args.indexOf("-derivedDataPath") + 1].replaceAll("\\", "/");
+  assert.ok(scripts[archive].includes(`${buildPath}/Build/Products/Debug-iphonesimulator/App.app`),
+    "archive the application from the build wrapper's output directory");
 });
 
 test("collected artifacts are limited to the readiness receipt, build log and Simulator zip", () => {
