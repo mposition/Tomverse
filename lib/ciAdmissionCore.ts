@@ -22,7 +22,9 @@
  *   every CI counts at its need. Other workflows' jobs count too.
  * - Runners go from the top of the line down. A ready pull request whose CI is
  *   running keeps its slots while they fit; one further down whose CI runs
- *   past the budget goes back to draft and its runs are cancelled. A draft
+ *   past the budget goes back to draft and its runs are cancelled -- but
+ *   never on a round that could not read GitHub's jobs, nor within
+ *   CI_ADMISSION_HOLD_GRACE_MS of admission marking it ready. A draft
  *   that the slots reach is marked ready -- CI starts -- when it has no
  *   conflict with its base and is not behind it; otherwise it is passed over
  *   and says why. The first draft that does not
@@ -60,6 +62,8 @@ export const CI_ADMISSION_RAMP_MS = 2 * 60 * 1000;
 export const CI_ADMISSION_WAIT_RECHECK_MS = 60_000;
 /** How long a released pull request is reserved before GitHub shows its runs. */
 export const CI_ADMISSION_RELEASE_GRACE_MS = 5 * 60 * 1000;
+/** How long after admission marks a pull request ready it is never sent back to draft. */
+export const CI_ADMISSION_HOLD_GRACE_MS = 10 * 60 * 1000;
 /** How long one head is left alone after its branch update was asked for, done or failed. */
 export const CI_ADMISSION_UPDATE_RETRY_MS = 10 * 60 * 1000;
 /** A pull request with this label is left out of the line: admission never marks it ready. */
@@ -465,6 +469,16 @@ export function evaluateCiAdmission(input: {
   const status = new Map<number, CiAdmissionEntryStatus>();
   const actions: CiAdmissionAction[] = [];
   const budget = state.capacity - fixedUnits;
+  // A running pull request is not sent back to draft -- its CI cancelled --
+  // when this round could not read GitHub's jobs (it counts every CI at its
+  // need, a different sum from the round that released it), nor within
+  // CI_ADMISSION_HOLD_GRACE_MS of admission marking it ready: a deploy's CI
+  // growing by a few jobs is not worth a cancelled run (2026-10-26: #2969
+  // marked ready at 11:02:15Z and back to draft at 11:02:29Z).
+  const releasedAt = new Map<number, number>();
+  for (const entry of state.events) if (entry.kind === "released" && !entry.shadow) releasedAt.set(entry.number, Date.parse(entry.at));
+  for (const entry of state.released) releasedAt.set(entry.number, Math.max(releasedAt.get(entry.number) ?? 0, entry.atMs));
+  const keepsRunning = (number: number) => input.runners == null || nowMs - (releasedAt.get(number) ?? -Infinity) < CI_ADMISSION_HOLD_GRACE_MS;
   let allotted = 0;
   let draftsBlocked = false;
   let waitingOnRuns = false;
@@ -476,7 +490,7 @@ export function evaluateCiAdmission(input: {
       const runners = Math.min(pullRunners.get(pull.number) ?? 0, state.capacity);
       if (!occupying(pull)) {
         status.set(pull.number, "done");
-      } else if (allotted + runners <= budget) {
+      } else if (allotted + runners <= budget || keepsRunning(pull.number)) {
         allotted += runners;
         status.set(pull.number, "running");
       } else {
