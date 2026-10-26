@@ -487,6 +487,10 @@ v1에는 이것이 없었고, 그래서 **만든 직후에는 정상으로 보�
 Review workspace로 열려 외부 원문·출처 구획이 사라졌습니다.** 결함이 가질 수 있는
 가장 나쁜 모양입니다.
 
+**네이티브 앱도 같습니다**(2026-10-26). `apps/mobile`은 이어가기를 저장된 제품의 목록
+(Chat 또는 Review)에 넣고, 열면 같은 순서로 provenance 한 줄 · 이전 원문 보기 · 점선 원문 ·
+divider를 그립니다(`apps/mobile/src/ImportedTranscript.tsx`). 원문 말풍선에는 신고 등 action이 없습니다.
+
 검색 결과는 자기 `surface`를 직접 싣습니다. 검색은 목록이 불러오지 않은 대화를
 가리킬 수 있고, 그때 workspace로 되돌아가면 같은 결함이 됩니다.
 
