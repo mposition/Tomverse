@@ -44,6 +44,7 @@ test("local setup requires an owner cookie and one-use state, refuses rebinding,
     assert.equal((await get("/callback?code=synthetic&state=forged", cookie)).status, 403);
     const outcomes = await Promise.all([get(`/callback?code=synthetic&state=${state}`, cookie), get(`/callback?code=synthetic&state=${state}`, cookie)]);
     assert.deepEqual(outcomes.map(r => r.status).sort(), [303, 403]);
+    assert.equal(outcomes.find(r => r.status === 303)!.headers.get("location"), `https://github.com/apps/${app.slug}/installations/new`);
     assert.equal(exchanges, 1); assert.equal(saves, 1);
     const complete = await (await get("/", cookie)).text();
     assert.ok(complete.includes("Install on TomverseCode only"));
@@ -61,7 +62,8 @@ test("unknown manifest exchange outcomes cannot be replayed, and setup expires",
   try {
     const boot = await get(new URL(setup.bootstrapUrl).pathname), cookie = boot.headers.get("set-cookie")!.split(";")[0];
     const page = await (await get("/", cookie)).text(), state = page.match(/\?state=([A-Za-z0-9_-]+)/)![1];
-    assert.equal((await get(`/callback?code=synthetic&state=${state}`, cookie)).status, 303);
+    const failed = await get(`/callback?code=synthetic&state=${state}`, cookie);
+    assert.equal(failed.status, 303); assert.equal(failed.headers.get("location"), "/");
     assert.equal((await get(`/callback?code=synthetic&state=${state}`, cookie)).status, 403); assert.equal(calls, 1);
     now = 15 * 60_000;
     assert.equal((await get("/", cookie)).status, 403);

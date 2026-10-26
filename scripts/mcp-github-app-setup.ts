@@ -52,7 +52,7 @@ export function createGithubPreviewSetup(deps: { exchange: (code: string) => Pro
       phase = "running";
       try { const config = githubPreviewAppConfig(await deps.exchange(code)); await deps.persist(config); slug = config.slug; phase = "complete"; }
       catch { phase = "unknown"; }
-      res.writeHead(303, { Location: "/" }); res.end(); return;
+      res.writeHead(303, { Location: phase === "complete" ? `https://github.com/apps/${slug}/installations/new` : "/" }); res.end(); return;
     }
     if (url.pathname !== "/") { res.writeHead(404); res.end(); return; }
     let body = `<h1>GitHub OAuth setup</h1><p>Sign in to GitHub as <strong>mposition</strong> before creating this private app. Repository: <strong>${REPOSITORY}</strong>. Another account's registration cannot be used here.</p><p>Requested access: Issues read/write and repository metadata read. Webhooks are disabled. No issues are read or created during registration.</p>`;

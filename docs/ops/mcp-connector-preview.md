@@ -17,7 +17,7 @@ authorised by this work.
 | T06 UI | Complete | Desktop/mobile browser flow and dark theme | Not deployed | Not deployed |
 | T07 Boundary/regression checks | Complete locally | Protocol/DB/security 26, existing unit regressions 131, UI 10, zoom rechecks 2 | Not deployed | Not deployed |
 | T08 Independent review | Accepted | Claude: r-20261025-230233-b98a8f, head 3c5426a6e | Not deployed | Not deployed |
-| T09 Real service verification | OAuth adapter implemented locally | GitHub mposition/TomverseCode selected; app registration, user consent and actual MCP access pending | Not performed | Not performed |
+| T09 Real service verification | OAuth adapter implemented locally; private app registered | GitHub mposition/TomverseCode selected; repository installation, OAuth consent and actual MCP access pending | Not performed | Not performed |
 | T10 Operational rollout | Not authorised | Separate push/merge/deploy/activation approval | Not performed | Not performed |
 
 Synthetic success is not evidence of compatibility with GitHub, Railway,
@@ -137,6 +137,15 @@ has a 15-minute state/cookie deadline and never retries an uncertain exchange.
 The UI only binds to `127.0.0.1:3132`; canonical product OAuth callback registration
 is `http://127.0.0.1:3131/api/mcp/oauth/callback` for this local app. Dev/Production
 must use separately registered canonical callbacks and their own secret settings.
+
+The manifest callback now redirects directly to GitHub's installation page after
+successful credential storage. The owner does not need to click an intermediate
+installation link. Failed/unknown storage stays on the local status page, and a
+replayed callback cannot redirect again. Three setup-flow tests cover these cases.
+The local private app registration and CurrentUser-encrypted storage were observed
+on 26 October 2026. Chrome displays the installation page for the `mposition`
+account; repository selection and final installation/OAuth consent remain owner
+actions. No GitHub issue content has been read or written by this verification.
 
 `npm run dev:mcp-github` loads that encrypted registration into a loopback-only
 development child. It requires a disposable DB on `127.0.0.1:56439` with
