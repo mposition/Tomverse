@@ -42,6 +42,7 @@ export const adminQaReleaseTrainMessages = defineAdminMessages({
     emergencyWithdrawn: "The emergency request was withdrawn.",
     emergencyDeparted: "The last emergency request left as train {slot}.",
     emergencyUnread: "The candidates could not be read. Try again in a few minutes.",
+    emergencySlow: "The candidates are still being read from GitHub. Reload in a minute.",
 
     boardTitle: "Departures",
     boardTime: "Time",
@@ -138,6 +139,7 @@ export const adminQaReleaseTrainMessages = defineAdminMessages({
     emergencyWithdrawn: "긴급 요청을 취소했습니다.",
     emergencyDeparted: "지난 긴급 요청은 {slot} 열차로 출발했습니다.",
     emergencyUnread: "후보를 읽지 못했습니다. 몇 분 뒤 다시 시도하세요.",
+    emergencySlow: "아직 GitHub에서 후보를 읽는 중입니다. 1분 뒤 다시 열어 주세요.",
 
     boardTitle: "출발",
     boardTime: "시각",

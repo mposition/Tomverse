@@ -11,6 +11,14 @@ export const QA_RELEASE_SECTION_IDS = {
   settings: "qa-release-settings",
 } as const;
 
+/**
+ * How long the train tab waits for the next train's candidates. A cold read
+ * is many GitHub calls and took 20-28 seconds in production on 2026-10-26;
+ * the console's usual 15 seconds cut every such read short (HTTP 499) and
+ * the tab said GitHub could not be read, while the server finished it.
+ */
+export const QA_RELEASE_TRAIN_CARGO_READ_TIMEOUT_MS = 60_000;
+
 /** The release train's own tab, where a failed train's attention item sends the operator. */
 export const QA_RELEASE_TRAIN_TAB_HREF = "/admin/qa-release?tab=train";
 
