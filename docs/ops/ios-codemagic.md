@@ -67,9 +67,16 @@ this file does not configure or perform them.
 
 The Apple App ID `app.tomverse.shell` and [Tomverse App Store Connect draft](https://appstoreconnect.apple.com/apps/6827148073/distribution)
 were registered on 2026-10-26. Seven payment products have draft records as noted
-in the billing runbook. Pricing, payment-account requirements, RevenueCat Apple
-credentials and signed-device acceptance still need completion before purchases
-are operational.
+in the billing runbook. On 2026-10-27 (AEST), the Paid Apps Agreement and required
+banking/tax records were confirmed Active. RevenueCat Apple app `appaefd8126bd`
+has a validated In-App Purchase key and seven manually linked products. English
+(U.S.) product names/descriptions are saved, and both Apple server notification
+URLs point to the RevenueCat app. Pricing, availability, isolated sandbox
+configuration, notification delivery and signed-device acceptance still need
+completion before purchases are operational. The Apple purchase key is
+stored outside this checkout; it is not a Codemagic signing credential. The
+public Apple SDK key has been obtained, but the workflow does not yet inject it
+or enable the billing build flag.
 
 ## Local verification
 

@@ -216,17 +216,34 @@ After Apple membership activation, complete the account setup in the web
 dashboards before enabling purchases in an iOS build:
 
 1. The Apple App ID `app.tomverse.shell` and Tomverse App Store Connect app
-   `6827148073` were registered on 2026-10-26. The Account Holder must complete the Paid Apps Agreement and
-   banking/tax information. Apple requires an active agreement for sandbox IAP.
+   `6827148073` were registered on 2026-10-26. The Paid Apps Agreement and required
+   banking/tax records were confirmed Active in App Store Connect on 2026-10-27
+   (AEST). Apple requires an active agreement for sandbox IAP.
 2. Draft records now exist for the four Apple subscriptions and three consumable
    packs from the mapping above. Group `Tomverse Plans` (`22515689`) places both
    Max variants at level 1 and both Pro variants at level 2. These are drafts,
-   with no pricing, availability or store review submission. Complete localized
-   product metadata and use approved prices before sandbox/device acceptance.
-3. Add the Apple app to the same RevenueCat project used for Android. Configure
-   Apple's purchase-verification credentials and server notifications following
-   RevenueCat's current Apple setup. Preserve the Google app, products and webhook
-   settings while adding the Apple app and product mapping.
+   with no pricing, availability or store review submission. English (U.S.)
+   display names/descriptions were saved for the group and all seven products
+   on 2026-10-27 (AEST). Use approved prices and complete review screenshots before
+   sandbox/device acceptance. Apple price points do not always match the existing
+   web catalog; differences require the owner's pricing decision before saving.
+3. RevenueCat project `210a4547` now contains Apple app `appaefd8126bd`, named
+   `Tomverse (App Store)`, with bundle ID `app.tomverse.shell`. On 2026-10-27
+   (AEST), the owner authorized generating and locally retaining an Apple In-App
+   Purchase key and registering it with this RevenueCat app. RevenueCat reports
+   **Valid credentials**. The private key stays outside the repository and build
+   artifacts. All seven exact Apple product IDs were added manually, with four
+   Subscription types and three Consumable types. Store-status checks remain
+   unavailable without the separate optional App Store Connect import API key;
+   this is distinct from successful purchase-key validation. No import API key
+   was created. No shared Offerings or entitlements were changed: the client
+   loads exact product IDs and the server resolves store subscriptions. Both Apple
+   Production and Sandbox server notification URLs were set to this RevenueCat
+   app's notification endpoint and confirmed after a page reload. No purchase or
+   refund notification has been received/tested yet. The RevenueCat option to
+   track new purchases directly from notifications remains off, preserving SDK
+   identity binding. Preserve the existing Google app, products, ownership rules
+   and shared webhook settings.
 4. In the iOS build environment, set `VITE_NATIVE_BILLING_ENABLED=true` and the
    actual `VITE_REVENUECAT_APPLE_API_KEY=appl_...`. Google `goog_...` and RevenueCat
    Test Store `test_...` keys cannot replace the Apple key. Server secrets remain
@@ -252,7 +269,8 @@ scenarios in each browser), 13 existing core/route/webhook cases passed, and
 passed with the capability retained. Xcode compilation and real StoreKit
 sandbox/device purchase acceptance remain outstanding.
 
-Official references checked 2026-10-25:
+Official references (billing rules checked 2026-10-25; Apple credential and
+notification setup rechecked 2026-10-27):
 
 - [Apple review guidelines 3.1.1–3.1.3](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase)
 - [Play payments policy](https://support.google.com/googleplay/android-developer/answer/9858738)
@@ -261,3 +279,5 @@ Official references checked 2026-10-25:
 - [Subscription changes](https://www.revenuecat.com/docs/subscription-guidance/managing-subscriptions)
 - [Apple IAP account and agreement setup](https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases/)
 - [RevenueCat Apple sandbox and TestFlight](https://www.revenuecat.com/docs/test-and-launch/sandbox/apple-app-store)
+- [RevenueCat Apple In-App Purchase key configuration](https://www.revenuecat.com/docs/service-credentials/itunesconnect-app-specific-shared-secret/in-app-purchase-key-configuration)
+- [RevenueCat Apple server notifications](https://www.revenuecat.com/docs/platform-resources/server-notifications/apple-server-notifications)
