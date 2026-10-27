@@ -239,8 +239,14 @@ export async function settleSentFixes({ ledger, pulls, github, record, now }) {
       continue;
     }
     try {
-      const commits = await github.json(`/pulls/${pull.number}/commits?per_page=100`);
-      const head = Array.isArray(commits) ? commits.find((commit) => commit?.sha === pull.head.sha) : undefined;
+      // Every page (GitHub lists at most 250): the head is the last commit.
+      let head;
+      for (let page = 1; page <= 3 && !head; page += 1) {
+        const commits = await github.json(`/pulls/${pull.number}/commits?per_page=100&page=${page}`);
+        if (!Array.isArray(commits)) break;
+        head = commits.find((commit) => commit?.sha === pull.head.sha);
+        if (commits.length < 100) break;
+      }
       if (!head) continue;
       const prefix = entry.kind === "conflict" ? CI_FIX_CONFLICT_COMMIT_PREFIX : CI_FIX_COMMIT_PREFIX;
       const ours = String(head.commit?.message ?? "").startsWith(prefix) && head.parents?.[0]?.sha === sha;

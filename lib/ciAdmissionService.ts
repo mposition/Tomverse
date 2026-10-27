@@ -224,7 +224,7 @@ export async function requestCiFixAgain(actor: AdminActor, number: number): Prom
   if (!found) return { outcome: "not_found" };
   if (!found.open) return { outcome: "not_open" };
   const fix = (await readCiFixView(prisma)).byPull[number];
-  if (!ciFixRetryable(fix, found.pull.headSha)) return { outcome: "not_retryable" };
+  if (!ciFixRetryable(fix, found.pull.headSha, Date.now())) return { outcome: "not_retryable" };
   if (!github.setLabel) return { outcome: "not_configured" };
   try {
     // Off, then on: the server acts only on a "labeled" event newer than the

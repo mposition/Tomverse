@@ -576,9 +576,9 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const fix = view.fix;
   const fixPanel = (entry: CiAdmissionQueueEntry) => {
     const found = fix?.byPull[entry.number];
-    const state = ciFixState(found, entry.headSha);
+    const state = ciFixState(found, entry.headSha, now);
     if (!found || !state) return null;
-    const retry = canWrite && ciFixRetryable(found, entry.headSha) && !fixAsked.has(entry.number);
+    const retry = canWrite && ciFixRetryable(found, entry.headSha, now) && !fixAsked.has(entry.number);
     // A pushed fix moved the head on: the try's reason no longer describes the new head.
     const reason = state === "not_fixed" || state === "refused" || state === "sent" ? m.fixReason[found.reason ?? "none"] : null;
     const toCommits = state === "pushed" || state === "sent";

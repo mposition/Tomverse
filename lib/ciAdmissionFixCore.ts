@@ -89,13 +89,17 @@ export function ciFixView(stored: StoredReviewStatus | null, nowMs: number, stal
  */
 export type CiFixState = "analysing" | "sent" | "pushed" | "not_fixed" | "failed" | "refused" | "not_published" | "exhausted";
 
-export function ciFixState(fix: CiFixTry | undefined, headSha: string): CiFixState | null {
+/** tools/review-orchestrator/lib/ci-fix.mjs: a try started this long ago and never ended crashed. */
+export const CI_FIX_STARTED_STALE_MS = 3_600_000;
+
+export function ciFixState(fix: CiFixTry | undefined, headSha: string, nowMs: number): CiFixState | null {
   if (!fix) return null;
   // Pushed only while the fix's own commit is the head: a later push is not the fix's result.
   if (fix.head !== headSha) return fix.outcome === "pushed" && fix.settled === headSha ? "pushed" : null;
   switch (fix.outcome) {
     case "started":
-      return "analysing";
+      // The server takes a crashed try up again on request; so does the screen.
+      return nowMs - Date.parse(fix.at) > CI_FIX_STARTED_STALE_MS ? "failed" : "analysing";
     case "queued":
       return "sent";
     case "no_change":
@@ -120,8 +124,8 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string): CiFixSta
 }
 
 /** Whether "Analyse again" can help: the current head was tried, not fixed, and not retried yet. */
-export function ciFixRetryable(fix: CiFixTry | undefined, headSha: string): boolean {
-  const state = ciFixState(fix, headSha);
+export function ciFixRetryable(fix: CiFixTry | undefined, headSha: string, nowMs: number): boolean {
+  const state = ciFixState(fix, headSha, nowMs);
   return fix !== undefined && !fix.retried && (state === "not_fixed" || state === "failed" || state === "refused" || state === "not_published");
 }
 

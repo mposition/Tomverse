@@ -64,7 +64,7 @@ test("a try says something only about the head it was made on, unless it was the
     NOW,
     REVIEW_ORCHESTRATOR_STALE_AFTER_MS,
   );
-  const states = [1, 2, 3, 4, 5, 6].map((pr) => ciFixState(view.byPull[pr], A));
+  const states = [1, 2, 3, 4, 5, 6].map((pr) => ciFixState(view.byPull[pr], A, NOW));
   assert.deepEqual(states, ["analysing", "sent", "not_fixed", "failed", "refused", "exhausted"]);
   // The head moved: only a fix the server saw become the head is "pushed";
   // a sent fix not settled yet, one something else replaced, and any other
@@ -74,15 +74,23 @@ test("a try says something only about the head it was made on, unless it was the
     NOW,
     REVIEW_ORCHESTRATOR_STALE_AFTER_MS,
   );
-  assert.equal(ciFixState(settled.byPull[1], B), "pushed");
-  assert.equal(ciFixState(settled.byPull[1], "c".repeat(40)), null, "a later push is not the fix's result");
-  assert.equal(ciFixState(settled.byPull[2], B), null);
+  assert.equal(ciFixState(settled.byPull[1], B, NOW), "pushed");
+  assert.equal(ciFixState(settled.byPull[1], "c".repeat(40), NOW), null, "a later push is not the fix's result");
+  assert.equal(ciFixState(settled.byPull[2], B, NOW), null);
   // Sent and never published: the head stayed, the try ended, another may follow.
-  assert.equal(ciFixState(settled.byPull[3], A), "not_published");
-  assert.equal(ciFixRetryable(settled.byPull[3], A), true);
-  assert.equal(ciFixState(view.byPull[2], B), null);
-  assert.equal(ciFixState(view.byPull[3], B), null);
-  assert.equal(ciFixState(undefined, A), null);
+  assert.equal(ciFixState(settled.byPull[3], A, NOW), "not_published");
+  assert.equal(ciFixRetryable(settled.byPull[3], A, NOW), true);
+  assert.equal(ciFixState(view.byPull[2], B, NOW), null);
+  assert.equal(ciFixState(view.byPull[3], B, NOW), null);
+  assert.equal(ciFixState(undefined, A, NOW), null);
+});
+
+test("a try started over an hour ago and never ended reads as failed, and may be tried again", () => {
+  const view = ciFixView(stored([entry(1, A, "started", { ageSeconds: 3_601 }), entry(2, A, "started", { ageSeconds: 600 })]), NOW, REVIEW_ORCHESTRATOR_STALE_AFTER_MS);
+  assert.equal(ciFixState(view.byPull[1], A, NOW), "failed");
+  assert.equal(ciFixRetryable(view.byPull[1], A, NOW), true);
+  assert.equal(ciFixState(view.byPull[2], A, NOW), "analysing");
+  assert.equal(ciFixRetryable(view.byPull[2], A, NOW), false);
 });
 
 test("analysing again helps only a tried, unfixed head not retried yet", () => {
@@ -92,10 +100,10 @@ test("analysing again helps only a tried, unfixed head not retried yet", () => {
     REVIEW_ORCHESTRATOR_STALE_AFTER_MS,
   );
   assert.deepEqual(
-    [1, 2, 3, 4, 5].map((pr) => ciFixRetryable(view.byPull[pr], A)),
+    [1, 2, 3, 4, 5].map((pr) => ciFixRetryable(view.byPull[pr], A, NOW)),
     [true, false, false, true, false],
   );
-  assert.equal(ciFixRetryable(view.byPull[1], B), false, "another head was not tried");
+  assert.equal(ciFixRetryable(view.byPull[1], B, NOW), false, "another head was not tried");
 });
 
 test("the round takes the label off only once the report shows the retry on the current head", () => {
