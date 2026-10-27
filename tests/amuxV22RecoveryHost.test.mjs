@@ -25,8 +25,11 @@ const request = { inspectionId: "00000000-0000-4000-8000-000000000003",
 const invocationId = "b".repeat(32);
 const unitProof = { rootOwnedUnit: true, controlGroupBound: true, processTreeStopped: true };
 const syntheticJournal = path => readFile(path, "utf8").catch(() => null);
+// The terminal write fsyncs the file and the directory, which can take far
+// longer than a few polls on a slow CI disk; giving up early lets the cleanup
+// rm race the still-running write and hide the real error behind ENOTEMPTY.
 async function finished(handler) {
-  for (let count = 0; count < 100; count += 1) {
+  for (const deadline = Date.now() + 10_000; Date.now() < deadline;) {
     if ((await handler({ op: "readback", attemptId })).kind !== "in_progress") return;
     await new Promise(resolve => setTimeout(resolve, 2));
   }
