@@ -499,10 +499,18 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   // asks again and fails again, so say why rather than "being marked ready"
   // for ever (2026-10-25: #2968 and #2969 stayed "next" with runners free).
   const releaseFailure = new Map<number, string>();
+  // Likewise a branch update GitHub refused: the line asks again only every
+  // ten minutes, so "being updated" would stand all that while (2026-10-26:
+  // a ruleset refused #3041's update for half an hour).
+  const updateFailure = new Map<number, string>();
   for (const event of state.events) {
     if (event.kind === "released") releaseFailure.delete(event.number);
+    else if (event.kind === "updated") updateFailure.delete(event.number);
     else if (event.kind === "failed" && event.detail?.startsWith("release:")) releaseFailure.set(event.number, event.detail.slice("release:".length));
+    else if (event.kind === "failed" && event.detail?.startsWith("update_branch:")) updateFailure.set(event.number, event.detail.slice("update_branch:".length));
   }
+  const failureOf = (entry: CiAdmissionQueueEntry) =>
+    entry.status === "next" ? releaseFailure.get(entry.number) : entry.status === "updating" ? updateFailure.get(entry.number) : undefined;
 
   const rowBody = (entry: CiAdmissionQueueEntry, rank: number, floating: boolean) => {
     const kind = kindOf(entry);
@@ -525,13 +533,13 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
         </div>
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-            entry.status === "next" && releaseFailure.has(entry.number) ? "bg-rose-400/15 text-rose-300" : STATUS_BADGE[entry.status]
+            failureOf(entry) ? "bg-rose-400/15 text-rose-300" : STATUS_BADGE[entry.status]
           }`}
           data-testid={floating ? undefined : `ci-admission-status-${entry.number}`}
-          title={entry.status === "next" ? releaseFailure.get(entry.number) : undefined}
+          title={failureOf(entry)}
         >
-          {entry.status === "next" && releaseFailure.has(entry.number)
-            ? fill(m.statusReleaseFailed, { failure: releaseFailure.get(entry.number)! })
+          {failureOf(entry)
+            ? fill(entry.status === "next" ? m.statusReleaseFailed : m.statusUpdateFailed, { failure: failureOf(entry)! })
             : statusText[entry.status]}
         </span>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[kind]}`}>{badgeText(kind)}</span>
