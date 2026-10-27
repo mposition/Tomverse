@@ -16,8 +16,11 @@ import {
 import {
   AMUX_WORKER_CATALOG_EXEMPT,
   AMUX_WORKER_REGISTRY_V31_SEED,
-  amuxWorkerProviderClassOf,
 } from "../lib/amux/workerRegistryCore.ts";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+
 
 const registration = (workerName, roleCeiling, desiredState = "active") => ({
   workerName,

@@ -340,6 +340,30 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // setup + the CLI model catalog (what each CLI lists, the newest links, the
+  // Admin › Models entries: 3, pinned by tests/amuxCliModelCatalogStore.test.mjs)
+  // + fence (owner decision 2026-10-27)
+  cliModelCatalogRead: {
+    operation: "cli_model_catalog_read",
+    prismaCallCeiling: 5,
+    isolation: "read",
+  },
+  // setup + an owner's link at its largest (audit chain lock, the name's newest
+  // link, the target model, the administrator audit's 4 with an integrity key,
+  // the event insert: 8, pinned by tests/amuxCliModelCatalogStore.test.mjs) +
+  // fence
+  cliModelLinkChange: {
+    operation: "cli_model_link_change",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // setup + the host's refresh of one CLI (the upsert and the unlisting: 2,
+  // pinned by tests/amuxCliModelCatalogStore.test.mjs) + fence
+  cliModelRefresh: {
+    operation: "cli_model_refresh",
+    prismaCallCeiling: 4,
+    isolation: "mutation",
+  },
   // setup + a question's routing at its largest (audit chain lock, the
   // request read, the switch read, the throughput read, the router's audit 4
   // with an integrity key, the request insert, the card text insert: 10,

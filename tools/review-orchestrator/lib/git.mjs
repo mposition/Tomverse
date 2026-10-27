@@ -15,7 +15,9 @@ export const SHA = /^[0-9a-f]{40}$/;
 export const BUNDLE_REF = /^refs\/review-orchestrator\/[0-9a-f]{16}$/;
 
 export function git(args, { cwd, allowFailure = false, maxBuffer = 64 * 1024 * 1024 } = {}) {
-  const result = spawnSync("git", args, {
+  // No detached auto-gc/maintenance: it outlives the call and keeps writing
+  // into the mirror while the state directory is being removed.
+  const result = spawnSync("git", ["-c", "gc.auto=0", "-c", "maintenance.auto=false", ...args], {
     cwd,
     encoding: "utf8",
     maxBuffer,

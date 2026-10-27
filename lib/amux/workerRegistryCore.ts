@@ -53,8 +53,12 @@ export const AMUX_WORKER_PROVIDER_CLASS_TABLE: Readonly<
   copilot: Object.freeze({ cli: "GitHub Copilot CLI", verified: false, maxRole: "implementation" }),
 });
 
-/** Section 3: the class is the name's prefix; the rest is 1-24 of [a-z0-9]. */
-export const AMUX_WORKER_NAME_PATTERN = /^(claude|codex|cursor|copilot)-[a-z0-9]{1,24}$/;
+/**
+ * A worker name: 1-40 lower-case letters, digits and hyphens, neither first
+ * nor last a hyphen. Owner decision 2026-10-27: the class (the CLI it runs) is
+ * chosen at registration and recorded with it, never read from the name.
+ */
+export const AMUX_WORKER_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/;
 
 /**
  * How the assignment catalog names a worker: `AMUX_MACHINE_ID_PATTERN` in
@@ -71,6 +75,7 @@ export type AmuxWorkerDesiredState = (typeof AMUX_WORKER_DESIRED_STATES)[number]
 
 export type AmuxWorkerSeedEntry = Readonly<{
   workerName: string;
+  providerClass: AmuxWorkerProviderClass;
   roleCeiling: AmuxWorkerRoleCeiling;
   desiredState: "requested" | "active";
 }>;
@@ -83,19 +88,19 @@ export type AmuxWorkerSeedEntry = Readonly<{
  * (`-chore` up to `chore`, `-impl` and `-worker` up to `implementation`).
  */
 export const AMUX_WORKER_REGISTRY_V31_SEED: readonly AmuxWorkerSeedEntry[] = Object.freeze([
-  { workerName: "claude-chore", roleCeiling: "chore", desiredState: "active" },
-  { workerName: "claude-contract", roleCeiling: "contract", desiredState: "active" },
-  { workerName: "claude-impl", roleCeiling: "implementation", desiredState: "active" },
-  { workerName: "claude-review", roleCeiling: "contract", desiredState: "active" },
-  { workerName: "codex-chore", roleCeiling: "chore", desiredState: "active" },
-  { workerName: "codex-contract", roleCeiling: "contract", desiredState: "active" },
-  { workerName: "codex-impl", roleCeiling: "implementation", desiredState: "active" },
-  { workerName: "cursor-chore", roleCeiling: "chore", desiredState: "requested" },
-  { workerName: "cursor-impl", roleCeiling: "implementation", desiredState: "requested" },
-  { workerName: "cursor-worker", roleCeiling: "implementation", desiredState: "requested" },
-  { workerName: "copilot-chore", roleCeiling: "chore", desiredState: "requested" },
-  { workerName: "copilot-impl", roleCeiling: "implementation", desiredState: "requested" },
-  { workerName: "copilot-worker", roleCeiling: "implementation", desiredState: "requested" },
+  { workerName: "claude-chore", providerClass: "claude", roleCeiling: "chore", desiredState: "active" },
+  { workerName: "claude-contract", providerClass: "claude", roleCeiling: "contract", desiredState: "active" },
+  { workerName: "claude-impl", providerClass: "claude", roleCeiling: "implementation", desiredState: "active" },
+  { workerName: "claude-review", providerClass: "claude", roleCeiling: "contract", desiredState: "active" },
+  { workerName: "codex-chore", providerClass: "codex", roleCeiling: "chore", desiredState: "active" },
+  { workerName: "codex-contract", providerClass: "codex", roleCeiling: "contract", desiredState: "active" },
+  { workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "active" },
+  { workerName: "cursor-chore", providerClass: "cursor", roleCeiling: "chore", desiredState: "requested" },
+  { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "implementation", desiredState: "requested" },
+  { workerName: "cursor-worker", providerClass: "cursor", roleCeiling: "implementation", desiredState: "requested" },
+  { workerName: "copilot-chore", providerClass: "copilot", roleCeiling: "chore", desiredState: "requested" },
+  { workerName: "copilot-impl", providerClass: "copilot", roleCeiling: "implementation", desiredState: "requested" },
+  { workerName: "copilot-worker", providerClass: "copilot", roleCeiling: "implementation", desiredState: "requested" },
 ].map((entry) => Object.freeze(entry as AmuxWorkerSeedEntry)));
 
 /** Section 3: the human audit actions, `amux.worker.*`. */
@@ -116,15 +121,13 @@ export const isAmuxWorkerRoleCeiling = (value: unknown): value is AmuxWorkerRole
 export const isAmuxWorkerDesiredState = (value: unknown): value is AmuxWorkerDesiredState =>
   isOneOf(AMUX_WORKER_DESIRED_STATES, value);
 
+/**
+ * A registrable name. The engineering adapter's runner is never one (version
+ * 34): the old prefix grammar refused it by its shape, the free grammar does
+ * by name, as the migration's CHECK does.
+ */
 export const isAmuxWorkerName = (value: unknown): value is string =>
-  typeof value === "string" && AMUX_WORKER_NAME_PATTERN.test(value);
-
-/** The class a valid name belongs to, or null. */
-export const amuxWorkerProviderClassOf = (workerName: unknown): AmuxWorkerProviderClass | null => {
-  if (!isAmuxWorkerName(workerName)) return null;
-  const prefix = workerName.slice(0, workerName.indexOf("-"));
-  return isAmuxWorkerProviderClass(prefix) ? prefix : null;
-};
+  typeof value === "string" && AMUX_WORKER_NAME_PATTERN.test(value) && !AMUX_WORKER_CATALOG_EXEMPT.includes(value);
 
 export const amuxWorkerRoleRank = (role: AmuxWorkerRoleCeiling): number =>
   AMUX_WORKER_ROLE_CEILINGS.indexOf(role);
@@ -153,15 +156,17 @@ export type AmuxWorkerRegistryChange = {
   expectedRevision: number;
 };
 
-/** A person's change, from untrusted input, or null. The class is the name's. */
+/** A person's change, from untrusted input, or null. The class is chosen, not read from the name. */
 export function parseAmuxWorkerRegistryChange(input: {
   workerName: unknown;
+  providerClass: unknown;
   roleCeiling: unknown;
   desiredState: unknown;
   expectedRevision: unknown;
 }): AmuxWorkerRegistryChange | null {
-  const providerClass = amuxWorkerProviderClassOf(input.workerName);
-  if (providerClass === null) return null;
+  if (!isAmuxWorkerName(input.workerName)) return null;
+  const providerClass = input.providerClass;
+  if (!isAmuxWorkerProviderClass(providerClass)) return null;
   if (!isAmuxWorkerRoleCeiling(input.roleCeiling)) return null;
   if (!isAmuxWorkerDesiredState(input.desiredState)) return null;
   const expectedRevision = input.expectedRevision;
@@ -180,6 +185,7 @@ export function parseAmuxWorkerRegistryChange(input: {
 
 export const AMUX_WORKER_REGISTRY_REFUSALS = [
   "role_above_class",
+  "class_changed",
   "stale_revision",
   "first_state_invalid",
   "retired",
@@ -212,6 +218,8 @@ export function amuxWorkerRegistryChangeRefusal(
     return change.desiredState === "requested" || change.desiredState === "active" ? null : "first_state_invalid";
   }
   if (previous.desiredState === "retired") return "retired";
+  // A name keeps the class it was registered with (the guard raises CLASS_CHANGED).
+  if (change.providerClass !== previous.providerClass) return "class_changed";
   if (amuxWorkerRoleRank(change.roleCeiling) > amuxWorkerRoleRank(previous.roleCeiling) &&
       change.desiredState !== "requested") {
     return "role_widening_requires_trial";
@@ -255,8 +263,8 @@ export function amuxWorkerRegistrationFromRow(row: {
   desiredState: unknown;
   revision: unknown;
 }): AmuxWorkerRegistration | null {
-  const providerClass = amuxWorkerProviderClassOf(row.workerName);
-  if (providerClass === null || row.providerClass !== providerClass) return null;
+  const providerClass = row.providerClass;
+  if (!isAmuxWorkerName(row.workerName) || !isAmuxWorkerProviderClass(providerClass)) return null;
   if (!isAmuxWorkerRoleCeiling(row.roleCeiling) || !isAmuxWorkerDesiredState(row.desiredState)) {
     return null;
   }
@@ -456,7 +464,8 @@ export const amuxWorkerSeedEntriesToRegister = (
 ): AmuxWorkerSeedEntry[] =>
   (view.seed ?? [])
     .filter((entry) => !entry.registered)
-    .map(({ workerName, roleCeiling, desiredState }) => ({ workerName, roleCeiling, desiredState }));
+    .map(({ workerName, providerClass, roleCeiling, desiredState }) =>
+      ({ workerName, providerClass, roleCeiling, desiredState }));
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -466,8 +475,7 @@ const isIso = (value: unknown): value is string =>
 
 const parseAdminRow = (value: unknown): AmuxWorkerRegistryAdminRow | null => {
   if (!isRecord(value)) return null;
-  const providerClass = amuxWorkerProviderClassOf(value.workerName);
-  if (providerClass === null || value.providerClass !== providerClass) return null;
+  if (!isAmuxWorkerName(value.workerName) || !isAmuxWorkerProviderClass(value.providerClass)) return null;
   if (!isAmuxWorkerRoleCeiling(value.roleCeiling) || !isAmuxWorkerRoleCeiling(value.classMaxRole)) return null;
   if (!isAmuxWorkerDesiredState(value.desiredState)) return null;
   if (typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1) return null;
@@ -501,6 +509,7 @@ export function parseAmuxWorkerRegistryAdminView(body: unknown): AmuxWorkerRegis
     for (const [index, entry] of body.seed.entries()) {
       const expected = AMUX_WORKER_REGISTRY_V31_SEED[index];
       if (!isRecord(entry) || entry.workerName !== expected.workerName ||
+          entry.providerClass !== expected.providerClass ||
           entry.roleCeiling !== expected.roleCeiling || entry.desiredState !== expected.desiredState ||
           !isBool(entry.registered)) {
         return null;

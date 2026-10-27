@@ -1329,6 +1329,17 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The ALTER TABLE that replaces the usage ledger's source and shape CHECKs to admit the Copilot and Cursor CLIs. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
   },
+  ...["AmuxWorkerRegistryEvent", "AmuxWorkerCapabilityEvent", "AdminAuditLog"].map((table) => ({
+    path: "prisma/migrations/20261027120000_amux_cli_models_and_worker_cli/migration.sql",
+    table,
+    tableMentions: table === "AdminAuditLog" ? 2 : 1,
+    writeVerbs: 18,
+    reason:
+      (table === "AdminAuditLog"
+        ? "Its two mentions are the new CLI model link table's foreign key to its audit row (ON DELETE RESTRICT) and the link guard's one SELECT EXISTS read of the person's audit row of the same transaction."
+        : `The one mention is the ALTER TABLE that replaces ${table}'s worker name CHECK with the free grammar (owner decision 2026-10-27: the CLI is chosen at registration, not read from the name).`) +
+      " The migration only replaces five name CHECKs, drops the registry's name/class CHECK and creates the CLI model tables with their append-only guard; its write verbs are DROP/ALTER clauses, the guard's TG_OP comparison and words of comments. It writes no row.",
+  })),
   {
     path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
     table: "AmuxWorkerCapabilityEvent",
@@ -3449,6 +3460,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "The same three EXECUTE reads in the replaced capability event guard (owner decision 2026-10-27 drops only the implement ceiling): the worker's newest registry event, its newest capability revision and one SELECT EXISTS on AdminAuditLog, each over a TG_TABLE_SCHEMA-qualified constant name quoted with %I and bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261027120000_amux_cli_models_and_worker_cli/migration.sql",
+    count: 1,
+    reason:
+      "One EXECUTE read in the CLI model link guard (owner decision 2026-10-27): a SELECT EXISTS on AdminAuditLog for the person's audit row of the same transaction naming this link, over a TG_TABLE_SCHEMA-qualified constant name quoted with %I because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. It reads and never writes.",
   },
   {
     path: "prisma/migrations/20261012170000_amux_verified_no_commit_halt_auto_clear/migration.sql",

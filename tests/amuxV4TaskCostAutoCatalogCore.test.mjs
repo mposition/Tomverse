@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { AMUX_CLI_MODEL_PRICED_ID_MAX, parseAmuxCliModelLinkChange } from "../lib/amux/cliModelCatalogCore.ts";
+
 import {
   AMUX_TASK_CATALOG_CAPS,
   amuxTaskRoutePrice,
@@ -13,7 +15,8 @@ import {
   inspectV52TaskCatalogGrades,
 } from "../lib/amux/v4TaskCostCatalogCore.ts";
 import { deriveAmuxWorkerCatalog } from "../lib/amux/workerDerivedCatalogCore.ts";
-import { amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
 
 const NOW = "2026-10-25T01:02:03.000Z";
 const workers = [
@@ -180,6 +183,26 @@ test("a dear model is priced, not left out: the reservation is the budget", () =
   assert.equal(dear.ok, true);
   assert.ok(BigInt(ceiling(dear.catalog, "design", "frontier").receipt.routes[0].perAttemptMicroUsd) >
     BigInt(5_000_000));
+});
+
+test("a linked route names its entry, and one whose source would not fit leaves the rest priced", () => {
+  // Review r-20261027-042558-2575fc: the catalog refuses a pricing source over
+  // 160 characters, so one long link must not take every other route with it.
+  const linked = (id) => (modelId) => modelId === "claude-sonnet-5"
+    ? { ...flat["claude-sonnet-5"], linkedModelId: id } : flat[modelId] ?? null;
+  const fits = "x".repeat(AMUX_CLI_MODEL_PRICED_ID_MAX);
+  const ok = derive({ priceFor: linked(fits) });
+  assert.equal(ok.ok, true);
+  const route = ok.catalog.routes.find((entry) => entry.workerName === "claude-impl");
+  assert.equal(route.pricingSource, `model-registry:${fits}`);
+  assert.equal(route.pricingSource.length, 160);
+  assert.equal(route.modelId, "claude-sonnet-5", "the route keeps the CLI's own name");
+  const tooLong = derive({ priceFor: linked("x".repeat(AMUX_CLI_MODEL_PRICED_ID_MAX + 1)) });
+  assert.equal(tooLong.ok, true);
+  assert.deepEqual(tooLong.catalog.routes.map((entry) => entry.workerName).sort(), ["claude-chore", "claude-contract"]);
+  // The link's own limit is the one that keeps every linked source within 160.
+  assert.equal(parseAmuxCliModelLinkChange({ cli: "cursor", cliModel: "x", pricedModelId: fits })?.pricedModelId, fits);
+  assert.equal(parseAmuxCliModelLinkChange({ cli: "cursor", cliModel: "x", pricedModelId: `${fits}y` }), null);
 });
 
 test("a chore worker's v22 implement profile prices routine implement Tasks (v52, 2026-10-27)", () => {
