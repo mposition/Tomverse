@@ -1,4 +1,4 @@
-# Codemagic: first unsigned iOS build
+# Codemagic: Simulator and internal TestFlight builds
 
 Prepared on 2026-10-26 for the owner's personal Codemagic account. The Apple
 Developer Program is not required for this Simulator compile. The workflow has
@@ -63,8 +63,52 @@ The Simulator ZIP cannot be installed on a physical iPad or iPhone. For iPad
 testing through TestFlight, the next stage needs an active Apple Developer
 Program membership, a final Bundle ID and App Store Connect app, and signing/API
 access configured inside Codemagic. The existing target supports iPhone and iPad
-on iOS/iPadOS 17.4+. Signed builds and TestFlight upload are a separate workflow;
-this file does not configure or perform them.
+on iOS/iPadOS 17.4+. The separate manual `ios-testflight` workflow below creates
+an internal-only signed IPA and uploads it to the existing App Store Connect app.
+
+## Internal TestFlight workflow
+
+The owner requested signed-device testing on 2026-10-27. `ios-testflight`
+(display name `Tomverse iOS TestFlight Internal`) prepares and verifies the same
+production bundle, assigns Codemagic's application-wide `PROJECT_BUILD_NUMBER`,
+applies the specified App Store signing profile, and archives the Release IPA.
+The first upload uses the existing marketing version 1.0 and bundle identifier
+`app.tomverse.shell` (App Store Connect app `6827148073`).
+
+Configure these names in the existing Codemagic personal account before running:
+
+| Account setting | Required value |
+|---|---|
+| Apple Developer Portal API integration | `Tomverse Codemagic Signing` |
+| Apple Distribution certificate reference | `tomverse-apple-distribution` |
+| App Store profile reference for `app.tomverse.shell` | `tomverse-app-store` |
+
+The signing API integration needs a dedicated App Store Connect key with App
+Manager access. It is separate from the RevenueCat In-App Purchase key. Creating
+the key, retaining its private file locally, sharing it with Codemagic, and
+creating the signing certificate/profile require the owner's specific approval.
+Private keys and profiles stay outside Git; the workflow imports the named
+account identities and does not create new credentials during a build.
+
+The export option `testFlightInternalTestingOnly=true` restricts the resulting
+build to internal testing. Publishing uses the stored integration to upload the
+IPA; `submit_to_testflight=false` avoids an external beta-review submission and
+`submit_to_app_store=false` avoids a public release submission. No automatic
+trigger or recipient notification is configured. Once Apple finishes processing,
+add only the owner's existing App Store Connect user to an internal tester group
+and assign this build. Open that invitation in TestFlight on the iPad.
+
+`ITSAppUsesNonExemptEncryption=false` records the current use of Apple's
+platform cryptography (URLSession TLS, Keychain and CryptoKit PKCE hashing).
+The bundled app does not implement a separate encryption algorithm. Reassess
+this declaration if the app or a bundled SDK adds non-exempt encryption.
+
+For this first upload, the Apple dashboard had no existing TestFlight builds.
+If builds are uploaded from another system later, keep the Codemagic project
+number above the latest Apple build number before starting another upload.
+Artifacts include only the IPA, preflight receipt and Xcode logs. Signed-device
+installation and actual location/login/purchase behavior require observations
+on the iPad; a successful upload alone does not establish those results.
 
 ## First hosted build (2026-10-27)
 
