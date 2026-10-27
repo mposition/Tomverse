@@ -315,6 +315,61 @@ test("what a release carries is its commits: a merge subject or a cherry-picked 
   );
 });
 
+test("a train's Left out and skipped lists are not mentions: a left-out pull request stays available", () => {
+  // 2026-10-27: #3041, left out of #3046 for a conflict, read as "mentioned · check".
+  const body = [
+    "Release train 20261027-0800 (AEST).",
+    "",
+    "## Included (1)",
+    "",
+    "- #3040 amux all providers",
+    "",
+    "## Left out (1)",
+    "",
+    "- #3041 mcp provider expansion — cherry-pick conflict on main",
+    "",
+    "Already on main, skipped: none.",
+    "",
+    "Already on an open train, skipped: #3039.",
+  ].join("\n");
+  const train = (merged) => ({
+    number: 3046,
+    title: "release: train 20261027-0800 (1 PR)",
+    body,
+    merged_at: merged ? "2026-10-22T05:00:00Z" : null,
+    head: { ref: "release/train-20261027-0800", repo: THIS_REPOSITORY },
+  });
+  for (const merged of [true, false]) {
+    const candidates = qaReleaseTrainCargoCandidates({
+      mergedDevelopJson: [develop(3041, "2026-10-22T04:00:00Z"), develop(3040, "2026-10-22T03:00:00Z")],
+      mergedMainJson: merged ? [train(true)] : [],
+      openMainJson: merged ? [] : [train(false)],
+      files: new Map([
+        [3041, ["lib/a.ts"]],
+        [3040, ["lib/b.ts"]],
+      ]),
+      nowMs: NOW,
+    });
+    assert.deepEqual(
+      candidates.map((c) => [c.number, c.status, c.mainPullRequest]),
+      [
+        [3041, "available", null],
+        [3040, merged ? "on_main" : "in_main_pull_request", 3046],
+      ],
+    );
+  }
+  // A hand-written release's body is still read for mentions.
+  const handWritten = { ...train(true), head: { ref: "release/memory", repo: THIS_REPOSITORY } };
+  const [left] = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [develop(3041, "2026-10-22T04:00:00Z")],
+    mergedMainJson: [handWritten],
+    openMainJson: [],
+    files: new Map([[3041, ["lib/a.ts"]]]),
+    nowMs: NOW,
+  });
+  assert.equal(left.status, "mentioned");
+});
+
 test("a release that cherry-picks a pull request's own commits one by one carries it once every one is there", () => {
   const [a, b, c] = ["a", "b", "c"].map((x) => x.repeat(40));
   const release2943 = { number: 2943, title: "release(mobile): voice", body: "Carries the voice work from #2937.", merged_at: "2026-10-22T05:00:00Z" };

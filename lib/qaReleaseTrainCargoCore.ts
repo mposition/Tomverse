@@ -6,7 +6,7 @@
  *
  * Pure: the read and the store pass what they read.
  */
-import { QA_RELEASE_TRAIN_REPOSITORY, qaReleaseTrainIncludedNumbers } from "./qaReleaseTrainCore.ts";
+import { QA_RELEASE_TRAIN_REPOSITORY, qaReleaseTrainIncludedNumbers, qaReleaseTrainIsTrainPull } from "./qaReleaseTrainCore.ts";
 
 export const QA_RELEASE_TRAIN_CARGO_MAX = 30;
 /** How far back merged develop pull requests are offered. */
@@ -135,7 +135,10 @@ export function qaReleaseTrainCargoCandidates(input: {
       for (const number of qaReleaseTrainReferencedNumbers(pull)) carried.numbers.add(number);
       for (const number of carried.numbers) if (!byNumber.has(number)) byNumber.set(number, pull.number);
       for (const sha of carried.shas) if (!bySha.has(sha)) bySha.set(sha, pull.number);
-      const body = typeof pull.body === "string" ? pull.body : "";
+      // A train's body is all lists the train wrote: Included is read above,
+      // and Left out, already on main and on an open train name pull requests
+      // it did not carry (2026-10-27: #3041 left out of #3046 read as mentioned).
+      const body = typeof pull.body === "string" && !qaReleaseTrainIsTrainPull(pull) ? pull.body : "";
       for (const match of body.matchAll(/#(\d{1,7})\b/g)) if (!mentioned.has(Number(match[1]))) mentioned.set(Number(match[1]), pull.number);
     }
     return { byNumber, bySha, mentioned };
