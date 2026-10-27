@@ -8,6 +8,7 @@ import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorContr
 import {
   qaReleaseTrainEmergencyAdmissible,
   qaReleaseTrainEmergencyFrom,
+  qaReleaseTrainHiddenFrom,
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainSelectionFrom,
   type QaReleaseTrainEmergency,
@@ -283,4 +284,21 @@ export async function readQaReleaseTrainSchedule(): Promise<QaReleaseTrainSchedu
   } catch {
     return null;
   }
+}
+
+/**
+ * The candidates an operator hid from Admin's next-train list
+ * (lib/qaReleaseTrainCargoCore.ts): the newest hidden row's list. Display
+ * only; the train never reads it.
+ */
+export const QA_RELEASE_TRAIN_HIDDEN_ACTION = "qa_release.train_cargo_hidden";
+export const QA_RELEASE_TRAIN_HIDDEN_TARGET_ID = "hidden";
+
+export async function readQaReleaseTrainHidden(db: Prisma.TransactionClient = prisma): Promise<number[]> {
+  const row = await db.adminAuditLog.findFirst({
+    where: { action: QA_RELEASE_TRAIN_HIDDEN_ACTION, targetType: QA_RELEASE_TRAIN_CARGO_TARGET_TYPE, targetId: QA_RELEASE_TRAIN_HIDDEN_TARGET_ID },
+    orderBy: { createdAt: "desc" },
+    select: { metadata: true },
+  });
+  return qaReleaseTrainHiddenFrom((row?.metadata as { numbers?: unknown } | null | undefined)?.numbers);
 }
