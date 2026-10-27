@@ -64,6 +64,10 @@ import { commitIdeaTransferConfirmation } from
 import { amuxSessionPageKeyIdentities,
   commitAmuxSessionAnalysisPlanInTx, readAmuxSessionPageContextInTx } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
+import { readAmuxV4UnitDecision } from "@/lib/amux/ideaUnitDecisionStore";
+import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
+import { evaluateAmuxV4TaskReadyInTransaction, loadAmuxV4TaskReadyContext } from
+  "@/lib/amux/v4TaskReadyService";
 import { prisma } from "@/lib/prisma";
 import { ensureModelRegistrySeeded } from "@/lib/modelRegistry";
 import { seedAmuxWorkerCatalog, truncateAmuxWorkerRegistry } from "./amuxDerivedCatalogFixture";
@@ -111,6 +115,7 @@ let registeredSystemIdeaId: string;
 let registeredSystemIdeaPreviewId: string;
 let registeredSystemIdeaUnitIds: string[];
 let registeredTaskTitle: string;
+let registeredSystemTaskId: string;
 
 const listen = (server: Server) => new Promise<void>((resolve, reject) => {
   server.once("error", reject);
@@ -407,6 +412,7 @@ test("one completed session plan registers atomically under system evidence", as
   assert.ok(systemDecision?.finalAuditLogId);
   registeredSystemDecisionId = systemDecision.id;
   registeredSystemDecisionAuditId = systemDecision.finalAuditLogId;
+  registeredSystemTaskId = task.id;
   registeredSystemIdeaId = ideaId;
   registeredSystemIdeaPreviewId = previewId;
   registeredSystemIdeaUnitIds = unitIds;
@@ -478,6 +484,93 @@ test("one completed session plan registers atomically under system evidence", as
   assert.deepEqual(await readAmuxV19SystemRegistration(ideaId), {
     state: "committed", retryWrite: false, ideaId, auditId: result.auditId,
   });
+});
+
+class RolledBack extends Error {}
+
+/** Runs `check` against one rolled-back transaction. The worker heartbeat is
+ * the one ready fact registration never writes, so it is synthesized here;
+ * `mutate` may simulate stored-row corruption the product writers refuse. */
+async function inRolledBackTx<T>(check: (tx: Prisma.TransactionClient) => Promise<T>,
+  mutate?: (tx: Prisma.TransactionClient) => Promise<unknown>): Promise<T> {
+  let result: T | undefined;
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const now = new Date();
+    await tx.amuxWorkerRuntime.upsert({ where: { workerName: "claude-contract" },
+      create: { workerName: "claude-contract", instanceId: randomUUID(),
+        status: "idle", dispatchReady: true, heartbeatAt: now,
+        leaseExpiresAt: new Date(now.getTime() + 10 * 60_000) },
+      update: { status: "idle", dispatchReady: true, heartbeatAt: now,
+        leaseExpiresAt: new Date(now.getTime() + 10 * 60_000) } });
+    if (mutate) {
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+      await mutate(tx);
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    }
+    result = await check(tx);
+    throw new RolledBack();
+  }, { timeout: 30_000 }), RolledBack);
+  return result as T;
+}
+
+test("a system-registered Task is ready, keeps its public PR consent and reads back", async () => {
+  assert.ok(registeredSystemTaskId);
+  const taskId = registeredSystemTaskId;
+  const context = await loadAmuxV4TaskReadyContext(taskId);
+  // The automatic tick passes no actor; an owner's Admin read passes theirs.
+  for (const expectedActorUserId of [null, authority.approvedByUserId]) {
+    const ready = await inRolledBackTx((tx) => evaluateAmuxV4TaskReadyInTransaction(
+      tx, taskId, context, expectedActorUserId));
+    assert.deepEqual(ready.reasons, []);
+    assert.equal(ready.ready, true);
+    assert.equal(ready.sourceApprovalId, registeredSystemDecisionId);
+  }
+  assert.equal(await readAmuxV22PublicPrConsent(taskId), true);
+  const readback = await readAmuxV4UnitDecision(session,
+    { decisionId: registeredSystemDecisionId });
+  assert.equal(readback.state, "consumed");
+  assert.equal(readback.state === "consumed" && "cardId" in readback ?
+    readback.cardId : null, taskId);
+  const nodeDecision = await prisma.amuxIdeaUnitDecision.findFirstOrThrow({
+    where: { ideaId: registeredSystemIdeaId, action: "create_node" },
+    select: { id: true } });
+  assert.equal((await readAmuxV4UnitDecision(session,
+    { decisionId: nodeDecision.id })).state, "consumed");
+});
+
+test("a person's consume row with the system marker, or another system scope, is no approval", async () => {
+  assert.ok(registeredSystemTaskId);
+  const taskId = registeredSystemTaskId;
+  const context = await loadAmuxV4TaskReadyContext(taskId);
+  const unitAuditId = registeredSystemDecisionAuditId;
+  const forgeries: Array<(tx: Prisma.TransactionClient) => Promise<unknown>> = [
+    (tx) => tx.$executeRaw`UPDATE "AdminAuditLog"
+      SET "actorUserId" = ${authority.approvedByUserId} WHERE "id" = ${unitAuditId}`,
+    (tx) => tx.$executeRaw`UPDATE "AdminAuditLog"
+      SET "metadata" = jsonb_set("metadata", '{actorScope}',
+        '"unit-decision-housekeeping-v1"'::jsonb) WHERE "id" = ${unitAuditId}`,
+    (tx) => tx.$executeRaw`UPDATE "AdminAuditLog"
+      SET "metadata" = jsonb_set("metadata", '{registrationAuthority}',
+        '"owner"'::jsonb) WHERE "id" = ${unitAuditId}`,
+    // The idea's plan registration pointer must name the v19 plan audit.
+    (tx) => tx.$executeRaw`UPDATE "AmuxIdeaSubmission"
+      SET "systemRegistrationAuditLogId" = ${unitAuditId}
+      WHERE "id" = ${registeredSystemIdeaId}`,
+  ];
+  for (const forge of forgeries) {
+    const seen = await inRolledBackTx(async (tx) => ({
+      ready: await evaluateAmuxV4TaskReadyInTransaction(tx, taskId, context, null),
+      consent: await readAmuxV22PublicPrConsent(taskId, tx),
+    }), forge);
+    assert.equal(seen.ready.ready, false);
+    assert.deepEqual(seen.ready.reasons, ["source_approval_invalid"]);
+    assert.equal(seen.ready.sourceApprovalId, null);
+    assert.equal(seen.consent, false);
+  }
+  // Nothing above committed.
+  const stored = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: unitAuditId } });
+  assert.equal(auditRowActorKind(stored), "system");
 });
 
 /** A session idea analysing on its own: no owner preview, no confirmation,

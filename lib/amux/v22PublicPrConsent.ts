@@ -3,6 +3,8 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { AMUX_UNIT_DECISION_AUDIT_SELECT,
+  readAmuxPlanRegistrationAuditFor } from "@/lib/amux/ideaSystemRegistrationCore";
 import { amuxV22PublicPrConsentAllowed } from
   "@/lib/amux/v22PublicPrConsentCore";
 import { prisma } from "@/lib/prisma";
@@ -17,25 +19,26 @@ export async function readAmuxV22PublicPrConsent(cardId: string,
   if (!card?.v4SourceApprovalId) return false;
   const decision = await db.amuxIdeaUnitDecision.findUnique({
     where: { id: card.v4SourceApprovalId },
-    select: { id: true, state: true, action: true, actorUserId: true,
-      registeredWorkItemId: true, confirmationDigest: true,
+    select: { id: true, ideaId: true, state: true, action: true,
+      actorUserId: true, registeredWorkItemId: true, confirmationDigest: true,
       confirmationDigestKeyId: true, confirmationSnapshot: true,
       finalAuditLogId: true },
   });
   if (!decision?.finalAuditLogId) return false;
   const audit = await db.adminAuditLog.findUnique({
     where: { id: decision.finalAuditLogId },
-    select: { id: true, action: true, actorUserId: true,
-      targetType: true, targetId: true, entryHash: true, metadata: true },
+    select: { id: true, ...AMUX_UNIT_DECISION_AUDIT_SELECT },
   });
   if (!audit) return false;
+  const planRegistrationAudit = await readAmuxPlanRegistrationAuditFor(db,
+    decision.ideaId, audit);
   try {
     const keys = loadCurrentAmuxContentKeys(process.env);
     try {
       return amuxV22PublicPrConsentAllowed({ cardId: card.id,
         sourceSystem: card.sourceSystem, cardType: card.cardType,
         taskRole: card.taskRole, sourceApprovalId: card.v4SourceApprovalId,
-        decision, audit, digestKey: keys });
+        decision, audit, planRegistrationAudit, digestKey: keys });
     } finally { keys.masterKey.fill(0); keys.digestKey.fill(0); }
   } catch {
     // Optional publication degrades to a private result if key material or
