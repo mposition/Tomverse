@@ -497,11 +497,20 @@ sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실�
 
 ## CI 자동 수정 (PR CI Auto-Fix)
 
-develop으로 가는 `claude/to-develop/**`·`codex/to-develop/**` PR에서 필수 CI(PR Fast Gate,
+develop으로 가는 `claude/to-develop/**`·`codex/to-develop/**`·`dependabot/**` PR에서 필수 CI(PR Fast Gate,
 Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패하면, 이 서버의
 구독 Claude CLI가 가장 작은 수정을 만들고 `.github/workflows/pr-ci-auto-fix.yml`이 검사한 뒤
 그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
 운영자 결정 2026-10-23). PR 하나에 자동 수정 커밋은 최대 2개이고, head 하나에 한 번만 시도합니다.
+
+**Dependabot PR(운영자 결정 2026-10-26).**
+- main으로 가는 보안 업데이트는 대상이 아닙니다. Dependabot이 연 PR만 대상이고, 사람이 `dependabot/` 이름으로 만든 브랜치는 대상이 아닙니다.
+- 수정은 업데이트된 패키지에 맞춰 앱 코드를 고치는 것입니다. 패키지 버전과 `package.json`·lock은 그대로 둡니다.
+- 루트에서는 앱 빌드·계측 설정(`next.config.ts|mjs|js`, `sentry.client|server|edge.config.ts`, `instrumentation.ts`, `instrumentation-client.ts`)만 고칠 수 있습니다.
+  `proxy.ts`와 검사 설정(`tsconfig`, `eslint`, `playwright` 등)은 계속 막힙니다.
+- 다른 계정의 커밋이 들어간 PR은 Dependabot이 더 이상 자동 rebase하지 않습니다. `@dependabot recreate`를
+  쓰면 자동 수정 커밋은 지워집니다.
+- merge lane은 `dependabot/**`를 병합하지 않으므로, 수정된 Dependabot PR의 병합은 사람이 합니다.
 
 **두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.** 상태 보고와 같은 이유입니다. 모델은 `review`
 계정으로 돌고, CI 로그와 브랜치 내용은 모델에게 그 계정이 읽을 수 있는 파일이나 프로세스 환경을

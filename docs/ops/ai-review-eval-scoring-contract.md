@@ -2,8 +2,9 @@
 
 **승인되지 않은 설계안이다.** 정책도 승인 기록도 아니다. 이 문서가 정의하는
 계약은 `lib/aiReviewEvalJudgement.ts`에 순수 core로 구현돼 있고
-`tests/aiReviewEvalJudgementScoring.test.mjs`가 요구를 고정하지만, **아직 어떤
-평가에도 연결되어 있지 않다.** 기존 점수·승인·임계값은 그대로이며 이 계약으로
+`tests/aiReviewEvalJudgementScoring.test.mjs`가 요구를 고정한다. **2026-10-26에
+명시적으로 선택하는 judged 게이트 연결을 구현했다. 승인된 실제 judged 임계값과
+평가 증거는 아직 없으며 운영 전환은 활성화되지 않았다.** 기존 점수·승인·임계값은 그대로이며 이 계약으로
 자동 승계되지 않는다.
 
 작성 2026-09-08. 근거가 된 측정은
@@ -365,8 +366,8 @@ truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것�
 결정이다.
 
 `verifyEvidenceBundle()`의 `judged` 입력은 **선택**이다. 넘기지 않은 호출자는
-오늘과 정확히 같은 검사를 받는다 — 이 계약은 아직 미승인이고 어떤 평가에도
-연결되어 있지 않다.
+기존 검사를 받는다. judged 게이트를 선택한 호출자는 별도로 전체 판정 보고서를
+같은 공유 검증 경로에서 읽고 새 상한을 적용한다. 계약 전체 승인과 실제 운영 전환은 별개다.
 
 ### 보조 설명과 불충분한 발견 — v2에서 정해졌다
 
@@ -631,9 +632,16 @@ judged 지표가 게이트에 닿으려면 arm별 수치가 있어야 한다.
 shape·등록·계약 버전·원문 digest·label을 통과해야 세어지고, id 중복은 거절이며,
 하나라도 걸리면 분모를 내지 않는다.
 
-**게이트는 여전히 연결되지 않았다.** 전환 범위는 2026-09-10에 승인됐지만
-aggregate 상한 두 값과 arm 숫자 두 개는 승인되지 않았고, 값이 없으면 새 threshold
-집합을 만들 수 없다. 근거와 선택 자료는
+**2026-10-26 연결 코드는 구현됐고 활성화는 대기한다.**
+`lib/aiReviewJudgedGate.ts`는 여섯 기존 하한과 두 judged 상한, 언어 격차와 과제별
+허용치를 검사한다. 음성 부분집합의 별도 상한을 선택하면 aggregate 부분집합에
+적용한다. `lib/aiReviewJudgedThresholds.ts`의 활성 집합은 비어 있다. 임계값 초안은
+모든 값이 비어 있으며 서명·필수값·전체 판정 증거가 없으면 통과하지 않는다.
+등록부는 `metricSource: "judged-v3"`와 실행별 `judgementsRef`로 선택하며,
+명시적 파일 검사는 `check:ai-review-eval`의 `--artifact`, `--judged-thresholds`,
+`--judgements`를 함께 사용한다. 기존 기록은 기존 경로로 계속 검증하지만 judged
+검사 실패를 키워드 오류율로 대체하지 않는다. 값 선택과 실제 증거 승인은 수행하지
+않았다. 전환 범위 근거와 선택 자료는
 `.github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md`.
 
 #### 저장된 실행을 읽는 호출자
@@ -681,8 +689,8 @@ npm run report:ai-review-judged-run -- \
 - **gold 밖 requirement id의 배정 개수.** 위 C1의 마지막 항목이다. 같은 문장에
   id를 하나 배정하면 FP 1, 둘 배정하면 FP 2다. 규칙이 없다.
 
-**§5가 거의 비었다는 것이 계약이 승인됐다는 뜻은 아니다.** 이 문서는 여전히
-미승인 설계안이고 어떤 평가에도 연결돼 있지 않으며, 후보 채택·dataset 동결·품질
+**§5가 거의 비었다는 것이 계약이 승인됐다는 뜻은 아니다.** 계약 전체 승인은
+미완료이며 운영 judged 평가는 아직 없고, 후보 채택·dataset 동결·품질
 임계값 승인·M5 승급은 각각 별개의 사람의 행위다.
 
 ## 6. 구현 범위
@@ -697,8 +705,8 @@ npm run report:ai-review-judged-run -- \
 - `judgedScoredClaims()` — 채점되는 claim의 모집단. `scoreJudgedCase()`가 쓰고,
   집계기가 같은 함수를 쓴다. 목록을 두 벌 두지 않기 위해서다.
 - `lib/aiReviewJudgedRunAggregate.ts` — 실행 단위 집계기(2026-09-09 승인).
-  순수 함수이며 파일도 DB도 provider도 읽지 않는다. **승인 게이트에 연결돼 있지
-  않다.**
+  순수 함수이며 파일도 DB도 provider도 읽지 않는다. 선택적 judged 게이트는
+  공유 보고서 읽기 경로를 통해 이 집계기를 사용한다. 승인된 실제 임계값은 없다.
 - `scripts/report-ai-review-judged-run.mjs` — 저장된 실행 기록을 읽어 위 집계기를
   부르는 보고 전용 CLI. 쓰기도 게이트도 아니다.
 - `tests/aiReviewJudgedRunAggregate.test.mjs`,

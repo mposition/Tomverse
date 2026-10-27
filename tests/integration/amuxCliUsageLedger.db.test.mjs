@@ -85,6 +85,36 @@ test("CLI usage is append-only, scoped and retained for 13 months", {
       attemptId, taskId]);
     assert.equal((await db.query(`DELETE FROM "AmuxCliUsageEvent"
       WHERE "id" = $1 RETURNING "id"`, [expired.rows[0].id])).rowCount, 1);
+    // Owner decision 2026-10-26: Copilot and Cursor v22 runs are recorded
+    // with the token semantics measured for their v19 channels.
+    const subscriptionRow = (cli, provider, source, includeCacheRead) => db.query(
+      `INSERT INTO "AmuxCliUsageEvent" (
+        "id", "invocationId", "receiptDigest", "bindingKind", "attemptId",
+        "taskId", "worker", "cli", "provider", "selectedModelId",
+        "authentication", "startedAt", "endedAt", "status",
+        "completeness", "source", "inputTokens", "outputTokens",
+        "cacheReadInputTokens", "cacheCreationInputTokens",
+        "inputTokensIncludeCacheRead", "inputTokensIncludeCacheWrite",
+        "completedTurns", "createdAt", "retentionUntil")
+        VALUES ($1, $2, $3, 'task_attempt', $4, $5, 'worker-a', $6, $7,
+        'composer-2.5', 'unknown', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+        'succeeded', 'reported_complete', $8, 100, 25, 0, 0, $9, false, 1,
+        CURRENT_TIMESTAMP::timestamp(3),
+        CURRENT_TIMESTAMP::timestamp(3) + interval '13 months')`,
+      [randomUUID(), randomUUID(), "c".repeat(64), attemptId, taskId,
+        cli, provider, source, includeCacheRead]);
+    await subscriptionRow("copilot", "github-copilot", "copilot_json", true);
+    await subscriptionRow("cursor", "cursor", "cursor_stream", false);
+    for (const [cli, provider, source, includeCacheRead] of [
+      ["copilot", "openai", "copilot_json", true],
+      ["cursor", "cursor", "codex_jsonl", false],
+      ["cursor", "cursor", "cursor_stream", true],
+      ["copilot", "github-copilot", "copilot_json", false]]) {
+      await db.query("SAVEPOINT subscription_refusal");
+      await assert.rejects(subscriptionRow(cli, provider, source, includeCacheRead),
+        /source_check|shape_check/);
+      await db.query("ROLLBACK TO SAVEPOINT subscription_refusal");
+    }
   } finally {
     await db.query("ROLLBACK").catch(() => undefined);
     await db.end();

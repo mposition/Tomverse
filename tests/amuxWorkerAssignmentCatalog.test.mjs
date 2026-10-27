@@ -110,7 +110,10 @@ test("R2e: R2c's latch is gone and the reader always derives, one statement each
   const reader = code(read("lib/amux/workerAssignmentCatalog.ts"));
   assert.match(reader, /export async function readAmuxAssignmentCatalogs\(client: CatalogReader\): Promise<AmuxAssignmentCatalogs> \{/);
   assert.match(reader, /export async function amuxWorkerCatalogRefusal\(\s*client: CatalogReader,\s*workerName: string,\s*\): Promise/);
-  assert.doesNotMatch(reader, /process\.env|source:/);
+  // The one variable it reads turns on non-Claude v22 profiles (owner decision
+  // 2026-10-26); none sends assignment back to a catalog variable.
+  assert.doesNotMatch(reader.replace(
+    "process.env[AMUX_V22_MULTI_PROVIDER_ENV]", ""), /process\.env|source:/);
   const client = fakeClient(statement());
   const catalogs = await readAmuxAssignmentCatalogs(client);
   assert.equal(client.sent.length, 1);

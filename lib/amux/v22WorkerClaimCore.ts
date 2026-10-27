@@ -13,15 +13,55 @@ const ROLE_TOOL: Record<string, string> = {
 };
 export const amuxV22RequiredTool = (role: string) => ROLE_TOOL[role] ?? null;
 
-/** The environment-gated A15 one-shot path only has these Claude capabilities.
+/** The environment-gated A15 one-shot path only has these capabilities.
  * Do not claim a Task that the local sidecar will refuse after execution
  * start; test/verify need a separately approved isolated test runner. */
 const ONE_SHOT_ROLES = new Set(["design", "implement", "review", "investigate"]);
 export const amuxV22OneShotRoleSupported = (role: string) =>
   ONE_SHOT_ROLES.has(role);
-export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) =>
-  provider.toLowerCase() === "anthropic" &&
-  /^claude-[A-Za-z0-9._-]{1,120}$/.test(modelId);
+
+/**
+ * The one-shot providers, keyed by the v19 CLI channel names (owner decision
+ * 2026-10-26: every registered provider class may run v22 Tasks). Claude is
+ * always on; the others enter the catalog only while
+ * TOMVERSE_AMUX_V22_MULTI_PROVIDER is `enabled`. Every route is priced from
+ * Admin › Models by its model ID, so a model missing there holds the route.
+ * Cursor's print mode cannot be kept from its shell once it may write, so a
+ * Cursor worker takes the read roles only (`implement: false`).
+ */
+// The CLI usage receipt's model grammar has no colon, so neither does a route.
+const ANY_MODEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+export const AMUX_V22_PROVIDERS = Object.freeze({
+  anthropic: Object.freeze({ providerClass: "claude", cli: "claude",
+    model: /^claude-[A-Za-z0-9._-]{1,120}$/, implement: true }),
+  openai: Object.freeze({ providerClass: "codex", cli: "codex",
+    model: ANY_MODEL, implement: true }),
+  "github-copilot": Object.freeze({ providerClass: "copilot", cli: "copilot",
+    model: ANY_MODEL, implement: true }),
+  cursor: Object.freeze({ providerClass: "cursor", cli: "cursor",
+    model: ANY_MODEL, implement: false }),
+});
+export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
+export const AMUX_V22_MULTI_PROVIDER_ENV = "TOMVERSE_AMUX_V22_MULTI_PROVIDER";
+export const amuxV22MultiProviderEnabled = (value: string | undefined) =>
+  value === "enabled";
+export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {
+  const key = provider.toLowerCase();
+  return Object.hasOwn(AMUX_V22_PROVIDERS, key) ? key as AmuxV22Provider : null;
+};
+export const amuxV22ProviderForClass = (providerClass: string): AmuxV22Provider | null =>
+  (Object.keys(AMUX_V22_PROVIDERS) as AmuxV22Provider[]).find((provider) =>
+    AMUX_V22_PROVIDERS[provider].providerClass === providerClass) ?? null;
+/** Whether this provider's one-shot run may take this role. */
+export const amuxV22ProviderRoleSupported = (provider: string, role: string) => {
+  const known = amuxV22Provider(provider);
+  return known !== null && amuxV22OneShotRoleSupported(role) &&
+    (role !== "implement" || AMUX_V22_PROVIDERS[known].implement);
+};
+export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) => {
+  const known = amuxV22Provider(provider);
+  return known !== null && AMUX_V22_PROVIDERS[known].model.test(modelId);
+};
 
 export const amuxV22WorkerClaimEnabled = (value: string | undefined) =>
   AMUX_V22_WORKER_CLAIM_CODE_LATCH && value === "enabled";
