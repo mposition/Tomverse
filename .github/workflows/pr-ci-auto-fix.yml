@@ -14,20 +14,29 @@
 # permission). Off unless the repository variable PR_AUTO_FIX_ENABLED is
 # exactly "true". workflow_dispatch runs from the default branch.
 #
+# Conflicts with develop (owner 2026-10-27, kind "conflict"): the server
+# merges develop into the branch, the model resolves the markers, and the
+# resolution -- the conflicted files' contents -- comes here with the develop
+# commit it was made against. Off unless PR_AUTO_FIX_CONFLICTS_ENABLED is
+# exactly "true" as well.
+#
 # Every input is untrusted: whoever can dispatch can send any patch. So:
 # - target: a trusted checkout of the default branch re-decides everything
 #   from GitHub's own records -- the pull request is open at exactly head_sha
-#   and served (same repository, develop base, not draft, served branch, every
-#   commit read, fewer than two auto-fix commits), and each named run is a
-#   failed pull_request run of a required workflow on that same commit and
-#   the newest run of that workflow there.
+#   and served (same repository, develop base, not draft unless a conflict,
+#   served branch, every commit read, fewer than two auto-fix commits of the
+#   kind), and each named run is a failed pull_request run of a required
+#   workflow on that same commit and the newest run of that workflow there; a
+#   conflict is one GitHub shows, and base_sha is on develop.
 # - publish: a fresh runner with a trusted checkout runs
 #   scripts/pr-ci-auto-fix-guard.mjs against the patch applied to a clean
 #   checkout of the pull request (no gate path -- the merge lane's own list --,
 #   no test file, no deletion, no binary, at most 400 changed lines; a root
 #   file only for a Dependabot head, and only the app's own build and
-#   instrumentation config) and only
-#   then pushes with GH_AUTOMATION_PAT, leased to the commit CI ran on. It
+#   instrumentation config), or, for a conflict, merges base_sha itself and
+#   judges the resolution (exactly the conflicted files, no marker left, no
+#   line on neither side in a gate path, at most 40 such lines in all), and
+#   only then pushes with GH_AUTOMATION_PAT, leased to the commit judged. It
 #   installs and runs nothing from the pull request.
 
 name: PR CI Auto-Fix
@@ -42,17 +51,28 @@ on:
         required: true
         type: string
       head_sha:
-        description: The head commit CI failed on
+        description: The head commit CI failed on, or that conflicts
         required: true
         type: string
       run_ids:
-        description: Comma-separated failed workflow run ids on that commit
-        required: true
+        description: Comma-separated failed workflow run ids on that commit (none for a conflict)
+        required: false
         type: string
+        default: ""
       patch_gz_b64:
-        description: The proposed change, git diff --binary, gzip then base64
+        description: The proposed change, git diff --binary (a conflict's resolution as JSON), gzip then base64
         required: true
         type: string
+      kind:
+        description: ci (a failed CI) or conflict (a conflict with develop)
+        required: false
+        type: string
+        default: ci
+      base_sha:
+        description: For a conflict, the develop commit the resolution merges
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -67,6 +87,8 @@ env:
   PR_NUMBER: ${{ inputs.pr_number }}
   HEAD_SHA: ${{ inputs.head_sha }}
   RUN_IDS: ${{ inputs.run_ids }}
+  KIND: ${{ inputs.kind || 'ci' }}
+  BASE_SHA: ${{ inputs.base_sha }}
 
 jobs:
   target:
@@ -93,33 +115,51 @@ jobs:
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
+          CONFLICTS_ENABLED: ${{ vars.PR_AUTO_FIX_CONFLICTS_ENABLED }}
         run: |
           refuse() { echo "$1"; echo "served=false" >> "$GITHUB_OUTPUT"; exit 0; }
           [[ "$PR_NUMBER" =~ ^[0-9]{1,7}$ ]] || refuse "pr_number is not a number."
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || refuse "head_sha is not a commit id."
-          [[ "$RUN_IDS" =~ ^[0-9]{1,15}(,[0-9]{1,15}){0,7}$ ]] || refuse "run_ids is not a list of run ids."
+          if [ "$KIND" = conflict ]; then
+            [ "$CONFLICTS_ENABLED" = true ] || refuse "Conflict resolution is off (PR_AUTO_FIX_CONFLICTS_ENABLED)."
+            [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || refuse "base_sha is not a commit id."
+            [ -z "$RUN_IDS" ] || refuse "A conflict resolution names no runs."
+          elif [ "$KIND" = ci ]; then
+            [ -z "$BASE_SHA" ] || refuse "A CI fix names no base commit."
+            [[ "$RUN_IDS" =~ ^[0-9]{1,15}(,[0-9]{1,15}){0,7}$ ]] || refuse "run_ids is not a list of run ids."
+          else
+            refuse "kind is neither ci nor conflict."
+          fi
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr.json
           [ "$(jq -r .state /tmp/pr.json)" = open ] || refuse "The pull request is not open."
-          [ "$(jq -r .head.sha /tmp/pr.json)" = "$HEAD_SHA" ] || refuse "The branch moved on after the failed run; its own CI decides."
-          # Every pull_request run on this commit: a named run must be the newest
-          # of its workflow here, or a later green run (reopen, ready for
-          # review) would still let an old failure publish onto a green head.
-          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" > /tmp/head-runs.json
+          [ "$(jq -r .head.sha /tmp/pr.json)" = "$HEAD_SHA" ] || refuse "The branch moved on after the commit judged; its own CI decides."
           workflows=""
-          for id in ${RUN_IDS//,/ }; do
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" > /tmp/run.json
-            ok=$(jq -r --arg sha "$HEAD_SHA" --arg repo "$GITHUB_REPOSITORY" '
-              .head_sha == $sha and .conclusion == "failure" and .event == "pull_request"
-              and .head_repository.full_name == $repo
-              and (.name | IN("PR Fast Gate", "Admin Console E2E", "Credit Finance DB Integration", "Orchestrator Rust"))' /tmp/run.json)
-            [ "$ok" = true ] || refuse "Run ${id} is not a failed required pull_request run on ${HEAD_SHA}."
-            newest=$(jq -r --argjson wf "$(jq .workflow_id /tmp/run.json)" \
-              '[.[].workflow_runs[] | select(.workflow_id == $wf)] | max_by(.id) | .id // empty' /tmp/head-runs.json)
-            [ "$newest" = "$id" ] || refuse "Run ${id} is not the newest run of its workflow on ${HEAD_SHA}."
-            workflows="${workflows:+${workflows}, }$(jq -r .name /tmp/run.json)"
-          done
+          if [ "$KIND" = conflict ]; then
+            # A conflict GitHub shows (null: still computing, so not shown), and
+            # a develop commit, not one from anywhere else.
+            [ "$(jq -r .mergeable /tmp/pr.json)" = false ] || refuse "GitHub does not show the pull request conflicting."
+            relation=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...develop" --jq .status) || refuse "base_sha cannot be compared with develop."
+            [ "$relation" = identical ] || [ "$relation" = ahead ] || refuse "base_sha is not on develop."
+          else
+            # Every pull_request run on this commit: a named run must be the newest
+            # of its workflow here, or a later green run (reopen, ready for
+            # review) would still let an old failure publish onto a green head.
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" > /tmp/head-runs.json
+            for id in ${RUN_IDS//,/ }; do
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" > /tmp/run.json
+              ok=$(jq -r --arg sha "$HEAD_SHA" --arg repo "$GITHUB_REPOSITORY" '
+                .head_sha == $sha and .conclusion == "failure" and .event == "pull_request"
+                and .head_repository.full_name == $repo
+                and (.name | IN("PR Fast Gate", "Admin Console E2E", "Credit Finance DB Integration", "Orchestrator Rust"))' /tmp/run.json)
+              [ "$ok" = true ] || refuse "Run ${id} is not a failed required pull_request run on ${HEAD_SHA}."
+              newest=$(jq -r --argjson wf "$(jq .workflow_id /tmp/run.json)" \
+                '[.[].workflow_runs[] | select(.workflow_id == $wf)] | max_by(.id) | .id // empty' /tmp/head-runs.json)
+              [ "$newest" = "$id" ] || refuse "Run ${id} is not the newest run of its workflow on ${HEAD_SHA}."
+              workflows="${workflows:+${workflows}, }$(jq -r .name /tmp/run.json)"
+            done
+          fi
           gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits?per_page=100" > /tmp/commits.json
-          node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json /tmp/commits.json || refuse "The pull request is not served."
+          node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target /tmp/pr.json /tmp/commits.json "$KIND" || refuse "The pull request is not served."
           {
             echo "served=true"
             echo "head_branch=$(jq -r .head.ref /tmp/pr.json)"
@@ -138,12 +178,14 @@ jobs:
           path: trusted
           persist-credentials: false
 
-      - name: Clean checkout of the commit CI failed on
+      - name: Clean checkout of the commit judged
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.head_sha }}
           path: pr
           persist-credentials: false
+          # A conflict merges develop here: the whole history, so base_sha is present.
+          fetch-depth: ${{ inputs.kind == 'conflict' && '0' || '1' }}
 
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -153,6 +195,7 @@ jobs:
 
       - name: Apply and judge the patch
         id: judge
+        if: inputs.kind != 'conflict'
         env:
           PATCH_GZ_B64: ${{ inputs.patch_gz_b64 }}
           # From the target job's read of the pull request, not from the dispatch.
@@ -170,8 +213,31 @@ jobs:
             git -C pr diff --cached --stat HEAD >> "$GITHUB_STEP_SUMMARY" || true
           fi
 
+      - name: Merge develop and judge the resolution
+        id: resolve
+        if: inputs.kind == 'conflict'
+        env:
+          PATCH_GZ_B64: ${{ inputs.patch_gz_b64 }}
+          HEAD_BRANCH: ${{ needs.target.outputs.head_branch }}
+        run: |
+          mkdir -p patch
+          printf '%s' "$PATCH_GZ_B64" | base64 -d | gunzip | head -c 8000000 > patch/resolution.json
+          # The merge is made here, from base_sha, never taken from the dispatch.
+          git -C pr -c user.name=pr-auto-fix -c user.email=pr-auto-fix@users.noreply.github.com merge --no-commit --no-ff "$BASE_SHA" > /dev/null 2>&1 || true
+          if [ -z "$(git -C pr diff --name-only --diff-filter=U)" ]; then
+            echo "Merging ${BASE_SHA} leaves no conflict to resolve."
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if node --experimental-strip-types trusted/scripts/pr-ci-auto-fix-guard.mjs conflict pr "$GITHUB_WORKSPACE/patch/resolution.json" "$HEAD_BRANCH"; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            git -C pr diff --name-only --diff-filter=U >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+
       - name: Commit and push to the pull request branch
-        if: steps.judge.outputs.push == 'true'
+        if: steps.judge.outputs.push == 'true' || steps.resolve.outputs.push == 'true'
         working-directory: pr
         env:
           GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
@@ -180,7 +246,12 @@ jobs:
         run: |
           git config user.name "tomverse-pr-auto-fix"
           git config user.email "pr-auto-fix@users.noreply.github.com"
-          git add --all
-          git commit -q -m "auto-fix(ci): ${WORKFLOWS} failure on #${PR_NUMBER}" -m "Runs ${RUN_IDS}. Proposed by Claude Code on the AMUX server; published by .github/workflows/pr-ci-auto-fix.yml."
+          if [ "$KIND" = conflict ]; then
+            [ -z "$(git diff --name-only --diff-filter=U)" ] || { echo "Conflicts are left."; exit 1; }
+            git commit -q -m "auto-fix(conflict): merge develop into #${PR_NUMBER}" -m "develop at ${BASE_SHA}. Resolved by Claude Code on the AMUX server; judged and published by .github/workflows/pr-ci-auto-fix.yml."
+          else
+            git add --all
+            git commit -q -m "auto-fix(ci): ${WORKFLOWS} failure on #${PR_NUMBER}" -m "Runs ${RUN_IDS}. Proposed by Claude Code on the AMUX server; published by .github/workflows/pr-ci-auto-fix.yml."
+          fi
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${HEAD_BRANCH}" --force-with-lease="refs/heads/${HEAD_BRANCH}:${HEAD_SHA}"
-          echo "Pushed one auto-fix commit to ${HEAD_BRANCH}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed one ${KIND} auto-fix commit to ${HEAD_BRANCH}." >> "$GITHUB_STEP_SUMMARY"

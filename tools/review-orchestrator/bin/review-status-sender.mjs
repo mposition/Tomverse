@@ -44,7 +44,7 @@ const MAX_QUOTA_AMOUNT = 1_000_000_000;
 // The CI auto-fix's tries (lib/ci-fix.mjs ciFixReport), the app's limits.
 const CI_FIX_KINDS = ["ci", "conflict"];
 const CI_FIX_OUTCOMES = ["started", "queued", "no_change", "model_failed", "model_timeout", "patch_refused", "patch_too_large",
-  "attempts_exhausted", "error", "unknown"];
+  "attempts_exhausted", "error", "unknown", "pushed", "superseded"];
 const CI_FIX_REASONS = ["fixed", "transient", "outside_rules", "not_found"];
 const CI_FIX_MAX_ENTRIES = 12;
 const CI_FIX_MAX_AGE_SECONDS = 30 * 86_400;

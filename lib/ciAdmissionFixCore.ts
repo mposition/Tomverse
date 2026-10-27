@@ -74,7 +74,8 @@ export function ciFixView(stored: StoredReviewStatus | null, nowMs: number, stal
  * What the screen says about a pull request's auto-fix, or null for nothing:
  * - analysing: the model works on the current head;
  * - sent: a fix is on its way to the workflow, which re-checks and pushes it;
- * - pushed: the head moved on after a fix was sent -- CI runs on the new one;
+ * - pushed: the server saw the fix's own commit become the head -- CI runs
+ *   on it (a head moved by anything else says nothing here);
  * - not_fixed: the model changed nothing (its result code says why);
  * - failed: the model run failed or timed out;
  * - refused: the fix broke a rule here (a secret, a binary) or did not fit;
@@ -85,7 +86,7 @@ export type CiFixState = "analysing" | "sent" | "pushed" | "not_fixed" | "failed
 
 export function ciFixState(fix: CiFixTry | undefined, headSha: string): CiFixState | null {
   if (!fix) return null;
-  if (fix.head !== headSha) return fix.outcome === "queued" ? "pushed" : null;
+  if (fix.head !== headSha) return fix.outcome === "pushed" ? "pushed" : null;
   switch (fix.outcome) {
     case "started":
       return "analysing";
@@ -103,6 +104,10 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string): CiFixSta
       return "refused";
     case "attempts_exhausted":
       return "exhausted";
+    case "pushed":
+    case "superseded":
+      // Settled only once the head moved: not this head's state.
+      return null;
   }
 }
 
@@ -113,8 +118,10 @@ export function ciFixRetryable(fix: CiFixTry | undefined, headSha: string): bool
 }
 
 /**
- * Open pull requests whose "try again" label has done its work: the report
- * shows a retry on their current head. The round takes the label off them.
+ * Open pull requests whose "try again" label has nothing left to do: their
+ * current head is no longer one to try again -- retried, fixed, or a new head
+ * the label was not put on for. The round takes the label off them. The
+ * server never acts on a label older than the head's try anyway.
  */
 export function ciFixLabelsToClear(
   pulls: readonly { number: number; headSha: string; labels?: readonly string[] }[],
@@ -124,7 +131,7 @@ export function ciFixLabelsToClear(
     .filter((pull) => (pull.labels ?? []).includes(CI_FIX_AGAIN_LABEL))
     .filter((pull) => {
       const fix = view.byPull[pull.number];
-      return fix !== undefined && fix.head === pull.headSha && fix.retried;
+      return !ciFixRetryable(fix, pull.headSha);
     })
     .map((pull) => pull.number);
 }

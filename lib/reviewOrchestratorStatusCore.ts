@@ -65,6 +65,8 @@ export const CI_FIX_OUTCOMES = [
   "attempts_exhausted",
   "error",
   "unknown",
+  "pushed",
+  "superseded",
 ] as const;
 export const CI_FIX_REASONS = ["fixed", "transient", "outside_rules", "not_found"] as const;
 

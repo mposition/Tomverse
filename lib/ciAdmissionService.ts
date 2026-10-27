@@ -208,7 +208,8 @@ export type CiFixAgainOutcome =
  * The operator's "Analyse again": the review server's CI auto-fix tries the
  * pull request's current head once more. Only a head it tried and did not fix,
  * and has not retried, is asked for; the request is the CI_FIX_AGAIN_LABEL
- * label (the server reads GitHub, never the app), audited here.
+ * label put on now (the server reads GitHub, never the app, and acts only on
+ * a label put on after the head's try), audited here.
  */
 export async function requestCiFixAgain(actor: AdminActor, number: number): Promise<CiFixAgainOutcome> {
   const config = ciAdmissionGithubConfig();
@@ -226,6 +227,9 @@ export async function requestCiFixAgain(actor: AdminActor, number: number): Prom
   if (!ciFixRetryable(fix, found.pull.headSha)) return { outcome: "not_retryable" };
   if (!github.setLabel) return { outcome: "not_configured" };
   try {
+    // Off, then on: the server acts only on a "labeled" event newer than the
+    // head's try, and a label still on from before makes no new one.
+    await github.setLabel(number, CI_FIX_AGAIN_LABEL, false);
     await github.setLabel(number, CI_FIX_AGAIN_LABEL, true);
   } catch (error) {
     return { outcome: "failed", failure: failureCode(error) };

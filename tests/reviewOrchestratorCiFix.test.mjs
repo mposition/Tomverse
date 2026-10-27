@@ -302,7 +302,9 @@ test("settings: the sender needs its token and absolute paths; the proposing hal
   const mine = { [READ_TOKEN_ENV]: TOKEN, PR_CI_AUTO_FIX_REPO: "o/r", PR_CI_AUTO_FIX_OUTBOX: "/var/lib/fix/outbox",
     PR_CI_AUTO_FIX_WORK: "/var/lib/fix/work", HOME: "/home/review" };
   assert.deepEqual(ciFixSettings(mine, config), { token: TOKEN, repo: "o/r", outbox: "/var/lib/fix/outbox",
-    workDir: "/var/lib/fix/work", home: "/home/review", model: "sonnet", minRemainingPercent: 30 });
+    workDir: "/var/lib/fix/work", home: "/home/review", model: "sonnet", minRemainingPercent: 30, conflicts: false });
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "on" }, config).conflicts, true, "conflicts only when switched on");
+  assert.equal(ciFixSettings({ ...mine, PR_CI_AUTO_FIX_CONFLICTS: "true" }, config).conflicts, false);
   assert.match(ciFixSettings({ ...mine, [DISPATCH_TOKEN_ENV]: TOKEN }, config).error, /sender's account/);
   assert.match(ciFixSettings(mine, { ...config, providers: [{ id: "claude", passEnv: [READ_TOKEN_ENV] }] }).error, /passEnv must not carry/);
   // The model is denied these, so its checkout must lie outside them.
@@ -746,10 +748,20 @@ test("an operator's label tries a head once more, and only once", async () => {
   const f = passFixture();
   try {
     let labels = [];
+    // When the label was put on, as GitHub's issue events say.
+    let labelledAt = null;
     const github = {
       ...f.github,
       async json(path) {
         if (path.startsWith("/pulls?")) return [pull(41, "claude/to-develop/broken", f.sha, { labels })];
+        if (path.startsWith("/issues/41/events")) {
+          return labelledAt === null
+            ? []
+            : [
+              { event: "labeled", label: { name: "other" }, created_at: new Date(labelledAt + 99_000).toISOString() },
+              { event: "labeled", label: { name: CI_FIX_AGAIN_LABEL }, created_at: new Date(labelledAt).toISOString() },
+            ];
+        }
         return f.github.json(path);
       },
     };
@@ -769,7 +781,13 @@ test("an operator's label tries a head once more, and only once", async () => {
     );
     assert.equal((await pass(2000)).outcome, "nothing_to_fix", "no label, no second try");
 
+    // A label put on before this head's try (left from an earlier head) asks nothing of it.
     labels = [{ name: CI_FIX_AGAIN_LABEL }];
+    labelledAt = 500;
+    assert.equal((await pass(2500)).outcome, "nothing_to_fix", "a label older than the try is not a request");
+    assert.equal(calls, 1);
+
+    labelledAt = 2800;
     assert.equal((await pass(3000)).outcome, "no_change");
     assert.equal(calls, 2);
     const retried = readLedger(ledgerPath)[f.sha];

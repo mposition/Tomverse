@@ -29,6 +29,18 @@ export const PR_CI_AUTO_FIX_DEPENDABOT_AUTHOR = "dependabot[bot]";
 export const PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES =
   /^(next\.config\.(ts|mjs|js)|sentry\.(client|server|edge)\.config\.ts|instrumentation(-client)?\.ts)$/;
 export const PR_CI_AUTO_FIX_COMMIT_PREFIX = "auto-fix(ci): ";
+/**
+ * A conflict with develop resolved by the auto-fix (owner 2026-10-27): a
+ * merge commit of develop into the branch. Off unless the repository
+ * variable PR_AUTO_FIX_CONFLICTS_ENABLED is "true".
+ */
+export const PR_CI_AUTO_FIX_CONFLICT_PREFIX = "auto-fix(conflict): ";
+/**
+ * Lines a conflict resolution may write that are on neither side, in all its
+ * files: joining two edits of one line takes a few. Gate paths may take none.
+ */
+export const PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES = 40;
+const CONFLICT_MARKER = /^(<{7}|>{7})( |$)|^={7}$|^\|{7}( |$)/m;
 
 export type PrCiAutoFixVerdict = { push: true } | { push: false; reasons: string[] };
 
@@ -106,11 +118,14 @@ export function judgePrCiAutoFixTarget(input: {
   commitMessages: readonly string[];
   /** The number of commits GitHub says the pull request has; the attempt count is only trusted when every one was read. */
   commitCount: number;
+  /** A failed CI (the default) or a conflict with develop, which a draft may have too. */
+  kind?: "ci" | "conflict";
 }): PrCiAutoFixVerdict {
+  const conflict = input.kind === "conflict";
   const reasons: string[] = [];
   if (!input.sameRepository) reasons.push("fork");
   if (input.baseBranch !== "develop") reasons.push("base_not_develop");
-  if (input.draft) reasons.push("draft");
+  if (input.draft && !conflict) reasons.push("draft");
   if (!PR_CI_AUTO_FIX_BRANCH.test(input.headBranch)) reasons.push("branch_not_served");
   // A dependabot/ name alone is not Dependabot: a person with push access can
   // name a branch so, and the root allowance follows the name.
@@ -118,7 +133,63 @@ export function judgePrCiAutoFixTarget(input: {
     reasons.push("dependabot_branch_not_by_dependabot");
   }
   if (!Number.isInteger(input.commitCount) || input.commitMessages.length !== input.commitCount) reasons.push("commits_incomplete");
-  const attempts = input.commitMessages.filter((m) => m.startsWith(PR_CI_AUTO_FIX_COMMIT_PREFIX)).length;
+  const prefix = conflict ? PR_CI_AUTO_FIX_CONFLICT_PREFIX : PR_CI_AUTO_FIX_COMMIT_PREFIX;
+  const attempts = input.commitMessages.filter((m) => m.startsWith(prefix)).length;
   if (attempts >= PR_CI_AUTO_FIX_MAX_ATTEMPTS) reasons.push("attempts_exhausted");
   return reasons.length === 0 ? { push: true } : { push: false, reasons };
+}
+
+/**
+ * Whether a resolution of a conflict with develop may be committed. The
+ * workflow has merged develop itself; `files` is every conflicted path with
+ * the branch's side (`ours`), develop's (`theirs`) and the proposed content
+ * (`resolved`), and `proposed` every path the resolution names.
+ *
+ * Refused: a resolution for any path that is not conflicted, or none for one
+ * that is; a conflict a side deleted (a resolution can only be content); a
+ * conflict marker or a NUL byte left; a line on neither side in a gate path
+ * (the merge lane's list, the test-free fence aside: a merge brings tests in);
+ * more than PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES such lines in all.
+ */
+export function judgePrCiAutoFixConflict(input: {
+  files: readonly { path: string; ours: string | null; theirs: string | null; resolved: string | null }[];
+  proposed: readonly string[];
+  headBranch?: string;
+}): PrCiAutoFixVerdict {
+  const reasons = new Set<string>();
+  const conflicted = new Set(input.files.map((file) => file.path));
+  if (conflicted.size === 0) reasons.add("no_conflict");
+  for (const path of input.proposed) if (!conflicted.has(path)) reasons.add("not_conflicted");
+  const dependabot = PR_CI_AUTO_FIX_DEPENDABOT_BRANCH.test(input.headBranch ?? "");
+  let newLines = 0;
+  for (const file of input.files) {
+    if (file.ours === null || file.theirs === null) {
+      reasons.add("deleted_side");
+      continue;
+    }
+    if (file.resolved === null) {
+      reasons.add("unresolved");
+      continue;
+    }
+    if (CONFLICT_MARKER.test(file.resolved)) reasons.add("marker_left");
+    if (file.resolved.includes("\u0000")) reasons.add("binary");
+    const known = new Set([...file.ours.split("\n"), ...file.theirs.split("\n")].map((line) => line.trimEnd()));
+    const added = file.resolved.split("\n").filter((line) => !known.has(line.trimEnd())).length;
+    newLines += added;
+    const gate =
+      CONTRACT_DOCUMENT.test(file.path) ||
+      AUTO_FIX_FENCE.test(file.path) ||
+      PACKAGE_FILE.test(file.path) ||
+      (!file.path.includes("/") && !(dependabot && PR_CI_AUTO_FIX_DEPENDABOT_ROOT_FILES.test(file.path))) ||
+      judgeQaReleaseMergeLaneExclusion({
+        headBranch: "auto-fix",
+        changedFiles: [{ path: file.path }],
+        changedFilesComplete: true,
+        policyTestPaths: [],
+        agentOwnPatterns: [],
+      }).excluded;
+    if (gate && added > 0) reasons.add("gate_path_new_line");
+  }
+  if (newLines > PR_CI_AUTO_FIX_MAX_NEW_CONFLICT_LINES) reasons.add("too_many_new_lines");
+  return reasons.size === 0 ? { push: true } : { push: false, reasons: [...reasons].sort() };
 }

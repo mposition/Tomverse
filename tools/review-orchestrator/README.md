@@ -508,6 +508,23 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
 그 PR 브랜치에 `auto-fix(ci):` 커밋 하나로 push합니다(API key 과금 없이 구독 quota를 씁니다,
 운영자 결정 2026-10-23). PR 하나에 자동 수정 커밋은 최대 2개이고, head 하나에 한 번만 시도합니다.
 
+**develop과의 충돌(운영자 결정 2026-10-27, 기본 꺼짐).** 실패한 CI가 없을 때, 같은 대상 브랜치의 PR(draft 포함)이
+GitHub에서 develop과 충돌하면 이 서버가 mirror의 develop을 그 head에 merge하고(커밋하지 않음) 모델이
+충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 충돌 파일들의 내용과 merge한 develop 커밋뿐이고,
+workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(conflict):` merge 커밋으로 push합니다.
+- 충돌 파일만 바꿨는지, 충돌 표시가 남지 않았는지 봅니다.
+- 게이트 경로에서는 양쪽에 없던 줄을 쓸 수 없고, 그 밖의 경로도 새로 쓴 줄은 모두 합쳐 40줄까지입니다.
+- 한쪽이 지운 파일, symlink, 지시 파일이 걸린 충돌은 풀지 않습니다(`no_change`, `outside_rules`).
+- PR마다 `auto-fix(conflict):` 커밋은 최대 2개입니다.
+켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,
+그리고 GitHub 저장소 변수 `PR_AUTO_FIX_CONFLICTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이
+main에 들어간 뒤에 켭니다. develop 쪽에서 workflow 파일이 바뀐 merge는 `GH_AUTOMATION_PAT`에
+workflow 권한이 없으면 push가 거절됩니다.
+
+**보낸 수정의 확인.** 다음 pass가 PR의 새 head를 보고, 그것이 자동 수정 커밋(접두사가 맞고 부모가 시도한
+head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `superseded`로 바꿉니다. 입장 화면의
+"push됨"은 `pushed`일 때만 나옵니다.
+
 **Dependabot PR(운영자 결정 2026-10-26).**
 - main으로 가는 보안 업데이트는 대상이 아닙니다. Dependabot이 연 PR만 대상이고, 사람이 `dependabot/` 이름으로 만든 브랜치는 대상이 아닙니다.
 - 수정은 업데이트된 패키지에 맞춰 앱 코드를 고치는 것입니다. 패키지 버전과 `package.json`·lock은 그대로 둡니다.
@@ -536,9 +553,10 @@ Admin Console E2E, Credit Finance DB Integration, Orchestrator Rust)가 실패�
   답의 마지막 줄 `RESULT: fixed|transient|outside_rules|not_found`는 ledger의 `reason`이 되고, 상태 보고로
   Admin › QA·릴리스 › CI 입장 화면에 PR별로 보입니다(2026-10-27). 모델의 문장 자체는 앱으로 가지 않습니다.
 - **다시 분석.** 같은 head는 한 번만 시도합니다. 운영자가 입장 화면에서 "다시 분석"을 누르면 입장 App이
-  PR에 `ci:fix-again` 라벨을 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
-  고치지 못함·분석 실패·검사 거부만 대상이고, 시도 2회 소진은 대상이 아닙니다. 입장 라운드는 보고에서
-  재시도를 확인하면 라벨을 뗍니다.
+  PR의 `ci:fix-again` 라벨을 뗐다가 다시 붙이고, 다음 pass가 그 head를 **한 번 더** 시도합니다(ledger에 `retried`).
+  서버는 PR의 이벤트에서 라벨이 붙은 시각을 읽어, 그 head의 시도보다 **나중에** 붙은 라벨만 요청으로 봅니다.
+  그래서 예전 head에서 남은 라벨은 새 head를 다시 시도하게 하지 않습니다. 고치지 못함·분석 실패·검사 거부만
+  대상이고, 시도 2회 소진은 대상이 아닙니다. 입장 라운드는 현재 head가 더 다시 시도할 대상이 아니면 라벨을 뗍니다.
 - **모델이 볼 수 있는 것.** 이 계정에는 구독 자격증명(`~/.claude/.credentials.json`)이 있고, 모델이
   만든 patch는 공개 브랜치로 push되므로, 읽힌 비밀은 되돌릴 수 없이 유출됩니다. 그래서:
   - 도구는 Read/Edit/Write/Grep/Glob뿐이고 shell·MCP·네트워크는 막혀 있습니다.

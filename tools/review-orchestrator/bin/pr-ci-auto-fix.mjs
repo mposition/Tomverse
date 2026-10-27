@@ -17,6 +17,9 @@
  *                                          outside HOME, the review stateDir and the outbox
  *   PR_CI_AUTO_FIX_MODEL                   optional, default sonnet
  *   PR_CI_AUTO_FIX_MIN_REMAINING_PERCENT   optional, default 30: the account quota a pass needs
+ *   PR_CI_AUTO_FIX_CONFLICTS               optional: "on" also resolves conflicts with develop
+ *                                          (the workflow publishes them only when the repository
+ *                                          variable PR_AUTO_FIX_CONFLICTS_ENABLED is "true")
  *
  * Exit 0 after a pass whatever it found, 64 when the settings cannot run, 65 on error.
  */
@@ -64,7 +67,8 @@ export function ciFixSettings(env, config) {
   // reviewerEnv hands a CLI only the names it lists plus passEnv.
   const leaky = config.providers.find((p) => (p.passEnv ?? []).some((name) => name === READ_TOKEN_ENV || name === DISPATCH_TOKEN_ENV));
   if (leaky) return { error: `providers.${leaky.id}: passEnv must not carry a GitHub token` };
-  return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox, workDir, home, model, minRemainingPercent };
+  const conflicts = env.PR_CI_AUTO_FIX_CONFLICTS === "on";
+  return { token, repo: env.PR_CI_AUTO_FIX_REPO, outbox, workDir, home, model, minRemainingPercent, conflicts };
 }
 
 const isAbsolute = (path) => typeof path === "string" && path.startsWith("/") && !path.split("/").includes("..");
@@ -120,6 +124,7 @@ async function main() {
       workDir: settings.workDir,
       model: settings.model,
       minRemainingPercent: settings.minRemainingPercent,
+      conflicts: settings.conflicts,
       // The daemon's last reading: a pass never probes the account itself.
       quota: async (provider) => readQuotaStatus(config, Date.now())[provider.id],
       secrets: knownSecrets(process.env, config),

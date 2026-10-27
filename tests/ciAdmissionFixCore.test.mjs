@@ -66,8 +66,13 @@ test("a try says something only about the head it was made on, unless it was the
   );
   const states = [1, 2, 3, 4, 5, 6].map((pr) => ciFixState(view.byPull[pr], A));
   assert.deepEqual(states, ["analysing", "sent", "not_fixed", "failed", "refused", "exhausted"]);
-  // The head moved: a sent fix became the new head; anything else is stale.
-  assert.equal(ciFixState(view.byPull[2], B), "pushed");
+  // The head moved: only a fix the server saw become the head is "pushed";
+  // a sent fix not settled yet, one something else replaced, and any other
+  // try say nothing about the new head.
+  const settled = ciFixView(stored([entry(1, A, "pushed"), entry(2, A, "superseded")]), NOW, REVIEW_ORCHESTRATOR_STALE_AFTER_MS);
+  assert.equal(ciFixState(settled.byPull[1], B), "pushed");
+  assert.equal(ciFixState(settled.byPull[2], B), null);
+  assert.equal(ciFixState(view.byPull[2], B), null);
   assert.equal(ciFixState(view.byPull[3], B), null);
   assert.equal(ciFixState(undefined, A), null);
 });
@@ -85,15 +90,18 @@ test("analysing again helps only a tried, unfixed head not retried yet", () => {
   assert.equal(ciFixRetryable(view.byPull[1], B), false, "another head was not tried");
 });
 
-test("the round takes the label off once the retry on the current head is reported", () => {
-  const view = ciFixView(stored([entry(1, A, "started", { retried: true }), entry(2, A, "no_change"), entry(3, A, "no_change", { retried: true })]), NOW, REVIEW_ORCHESTRATOR_STALE_AFTER_MS);
+test("the round takes the label off once the current head is no longer one to try again", () => {
+  const view = ciFixView(stored([entry(1, A, "started", { retried: true }), entry(2, A, "no_change"), entry(3, A, "no_change")]), NOW, REVIEW_ORCHESTRATOR_STALE_AFTER_MS);
   const pulls = [
+    // Retried: done.
     { number: 1, headSha: A, labels: [CI_FIX_AGAIN_LABEL] },
+    // Asked for and not started yet: kept.
     { number: 2, headSha: A, labels: [CI_FIX_AGAIN_LABEL] },
+    // A new head the label was not put on for.
     { number: 3, headSha: B, labels: [CI_FIX_AGAIN_LABEL] },
     { number: 4, headSha: A, labels: [] },
   ];
-  assert.deepEqual(ciFixLabelsToClear(pulls, view), [1]);
+  assert.deepEqual(ciFixLabelsToClear(pulls, view), [1, 3]);
 });
 
 test("the app and the review server name the label and the result codes alike", () => {

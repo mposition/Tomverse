@@ -49,27 +49,40 @@ const REQUEST_NAME = /^[0-9a-f]{40}\.json$/;
 
 const isAbsolute = (path) => typeof path === "string" && path.startsWith("/") && !path.split("/").includes("..");
 
-/** The request rebuilt from an outbox file, or null when it is not one. */
+/**
+ * The request rebuilt from an outbox file, or null when it is not one. A
+ * failed-CI fix names its failed runs; a conflict resolution (`kind:
+ * "conflict"`) names the develop commit to merge and no runs.
+ */
 export function normaliseDispatchRequest(value, fileName) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const { schemaVersion, prNumber, headSha, runIds, patchGzB64, createdAt } = value;
+  const { schemaVersion, kind = "ci", baseSha, prNumber, headSha, runIds, patchGzB64, createdAt } = value;
   if (schemaVersion !== 1) return null;
+  if (kind !== "ci" && kind !== "conflict") return null;
   if (!Number.isInteger(prNumber) || prNumber < 1 || prNumber > 9_999_999) return null;
   if (typeof headSha !== "string" || !SHA.test(headSha) || fileName !== `${headSha}.json`) return null;
-  if (!Array.isArray(runIds) || runIds.length < 1 || runIds.length > MAX_RUN_IDS) return null;
+  if (!Array.isArray(runIds) || runIds.length > MAX_RUN_IDS) return null;
+  if (kind === "ci" ? runIds.length < 1 : runIds.length !== 0) return null;
   if (!runIds.every((id) => Number.isSafeInteger(id) && id > 0 && id <= MAX_RUN_ID)) return null;
+  if (kind === "conflict" ? typeof baseSha !== "string" || !SHA.test(baseSha) : baseSha !== undefined) return null;
   if (typeof patchGzB64 !== "string" || patchGzB64.length === 0 || patchGzB64.length > PATCH_MAX_CHARS) return null;
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(patchGzB64)) return null;
   if (!Number.isFinite(createdAt)) return null;
-  return { prNumber, headSha, runIds: [...runIds], patchGzB64, createdAt };
+  const request = { prNumber, headSha, runIds: [...runIds], patchGzB64, createdAt };
+  return kind === "conflict" ? { kind, baseSha, ...request } : request;
 }
 
-/** The workflow_dispatch inputs, named as .github/workflows/pr-ci-auto-fix.yml declares them. */
+/**
+ * The workflow_dispatch inputs, named as .github/workflows/pr-ci-auto-fix.yml
+ * declares them. A failed-CI fix sends exactly the inputs it always has, so a
+ * workflow on main older than the conflict inputs still takes it.
+ */
 export const dispatchInputs = (request) => ({
   pr_number: String(request.prNumber),
   head_sha: request.headSha,
   run_ids: request.runIds.join(","),
   patch_gz_b64: request.patchGzB64,
+  ...(request.kind === "conflict" ? { kind: "conflict", base_sha: request.baseSha } : {}),
 });
 
 /**
