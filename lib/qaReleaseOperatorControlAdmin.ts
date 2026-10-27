@@ -27,6 +27,10 @@ export async function runQaReleaseControlAdminMutation<TBody, TResult>(spec: {
   bucket: string;
   schema: z.ZodType<TBody>;
   run: (context: { body: TBody; session: Session }) => Promise<TResult>;
+  /** false for a display-only change (a hidden candidate), which needs no recent sign-in. */
+  recentSignIn?: boolean;
+  /** The rate limit, when not the control's ten a minute. */
+  limit?: { minute: number; day: number };
 }): Promise<Response> {
   try {
     const session = await getServerSession(authOptions);
@@ -40,8 +44,8 @@ export async function runQaReleaseControlAdminMutation<TBody, TResult>(spec: {
         { status: 403 },
       );
     }
-    await assertRecentAdminAuthentication(session);
-    await consumeApiRateLimit(spec.request, session.user.id, spec.bucket, { minute: 10, day: 100 });
+    if (spec.recentSignIn !== false) await assertRecentAdminAuthentication(session);
+    await consumeApiRateLimit(spec.request, session.user.id, spec.bucket, spec.limit ?? { minute: 10, day: 100 });
     const body = await readLimitedJson(spec.request, 4 * 1024, spec.schema);
     const result = await spec.run({ body, session });
     return NextResponse.json({ ok: true, result });

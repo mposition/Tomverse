@@ -5,7 +5,7 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { QaReleaseOperatorControlRefusedError } from "@/lib/qaReleaseOperatorControlStore";
-import type { QaReleaseTrainEmergency, QaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoCore";
+import { qaReleaseTrainHiddenUpdate, type QaReleaseTrainEmergency, type QaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoCore";
 import {
   QA_RELEASE_TRAIN_CARGO_ACTION,
   QA_RELEASE_TRAIN_CARGO_TARGET_ID,
@@ -13,7 +13,10 @@ import {
   QA_RELEASE_TRAIN_EMERGENCY_ACTION,
   QA_RELEASE_TRAIN_EMERGENCY_TARGET_ID,
   QA_RELEASE_TRAIN_EMERGENCY_TARGET_TYPE,
+  QA_RELEASE_TRAIN_HIDDEN_ACTION,
+  QA_RELEASE_TRAIN_HIDDEN_TARGET_ID,
   readQaReleaseTrainEmergency,
+  readQaReleaseTrainHidden,
   readQaReleaseTrainSelection,
 } from "@/lib/qaReleaseTrainStore";
 
@@ -82,4 +85,30 @@ export async function saveQaReleaseTrainEmergency(
     { maxWait: 5_000, timeout: 15_000 },
   );
   return readQaReleaseTrainEmergency();
+}
+
+/**
+ * Hides one candidate from the next train's list, or shows it again (owner
+ * request 2026-10-27), audited in the same transaction. Read and written
+ * under the audit chain lock, so two operators' clicks never drop each
+ * other's. Display only: the train never reads it.
+ */
+export async function saveQaReleaseTrainHidden(actor: { session: Session; request: Request }, number: number, hidden: boolean): Promise<number[]> {
+  return prisma.$transaction(
+    async (tx) => {
+      await takeAuditChainLock(tx);
+      const numbers = qaReleaseTrainHiddenUpdate(await readQaReleaseTrainHidden(tx), number, hidden);
+      await writeAdminAuditLog({
+        ...actor,
+        tx,
+        action: QA_RELEASE_TRAIN_HIDDEN_ACTION,
+        targetType: QA_RELEASE_TRAIN_CARGO_TARGET_TYPE,
+        targetId: QA_RELEASE_TRAIN_HIDDEN_TARGET_ID,
+        summary: hidden ? `Hid #${number} from the next release train's list.` : `Showed #${number} again in the next release train's list.`,
+        metadata: { number, hidden, numbers },
+      });
+      return numbers;
+    },
+    { maxWait: 5_000, timeout: 15_000 },
+  );
 }
