@@ -207,12 +207,16 @@ registry로 통제 평면의 동작을 바꾸는 경로도 같다.
 
 **승인된 좁은 예외 — 배포 이미지에 없는 비런타임 파일.** 2026-10-07 읽기 전용 실측에서
 staging과 production의 앱 이미지 모두 `/app/tests`, `/app/docs`, `/app/lib`와 대표 파일을
-포함했다. 따라서 현재 이미지에는 제외할 수 있는 확인된 경로가 없고 T1 판정은 바뀌지
-않는다. 후속 빌드에서 `tests/`의 원본을 제외하더라도, 동일 `develop` base commit·tree 및
-배포 이미지 digest에 운영자가 결속해 확인한 완전한 이미지 파일 목록, 앱의 목록 SHA
-재계산, 런타임 source SHA·deployment ID 대조, 동적 파일 접근 분석, 배포 후 실측과
-독립 검토가 없으면 제외 목록은 비어 있고 T2다. 앱은 OCI 이미지 digest를 독립적으로
-조회하지 않으며 그 결속은 운영자 확인 기록의 책임이다. Task 실행과 공개 게시의 별도
+포함했다. 그 뒤 `.dockerignore`가 `tests/`와 `playwright.admin.config.ts`를 이미지에서
+뺐다. 운영자 결정(2026-10-27)으로 제외는 실행 중인 앱이 자기 이미지를 직접 재서 판정한다.
+작업 디렉터리가 `/app`이고, `/app/tests`와 `/app/playwright.admin.config.ts`가 없고, `/app`
+전체 파일 목록의 `tests` 경로 수가 0이고, base commit 자신의 `.dockerignore`가 두 경로를
+빼야 한다. 하나라도 아니거나 측정에 실패하면 제외 목록은 비어 있고 T2다. 운영자가
+배포마다 붙여 넣던 증명 JSON(배포 ID 결속)은 없앴다. 변수를 넣는 순간 새 배포가 생겨
+일치할 수 없었기 때문이다. base 소스는 `develop` commit의 GitHub tree가 정하고, 이미지
+파일이 그 blob OID와 다르면(production은 `main`을 실행한다) 같은 OID의 blob을 GitHub에서
+읽는다(최대 500개, 넘으면 T2). 측정 digest는 배포 ID·source commit·목록 SHA를 담아,
+preflight와 정산 사이에 배포가 바뀌면 게시하지 않는다. Task 실행과 공개 게시의 별도
 코드·운영 스위치는 이 정책 승인만으로 열리지 않는다. `docs/` 전체는 제외 대상이 아니다. 앱이 `docs/ops`의 웹훅 검증 기록을 런타임에
 읽으므로, 문서는 실제 접근을 파일 단위로 검증한 경우에만 별도 제안할 수 있다. 이미지에
 없는 것이 증명되어도 runtime code·import·경로 참조·설정 이름을 통한 기존 T2 판정은
@@ -809,10 +813,10 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    worker이고 게시 결과를 보고하는 것은 게시 경로다. 본 앱은 게시 결과의 결속(카드·attempt·
    capability·tree hash)으로 그 attempt를 찾아 PR을 기록한다. 보고 주체가 attempt의 worker와
    같아야 한다는 조건은 이 경로에서 "게시 capability가 그 attempt에 발급됐다"로 바뀐다.
-3. **이미지 증명은 배포 파이프라인이 만든다(§4).** 배포 직후 자동화가 실제 이미지의 파일
-   목록과 digest, source commit, deployment ID를 산출해 앱에 기록하고, 앱이 목록 SHA를 다시
-   계산해 대조한다. 운영자가 배포마다 증명 JSON을 확인·서명하던 단계는 없다. 이 버전의
-   운영자 승인이 그 산출 절차를 승인한 것이다. 산출물이 없거나 대조가 하나라도 어긋나면
+3. **이미지 증명은 실행 중인 앱이 스스로 잰다(§4, 운영자 결정 2026-10-27).** 앱이 `/app`
+   전체 파일 목록을 직접 측정하고, 배포 ID·source commit·목록 SHA를 담은 digest로 preflight와
+   정산을 결속한다. 운영자가 배포마다 증명 JSON을 확인·서명하던 단계는 없다. 측정이
+   실패하거나 대조가 하나라도 어긋나면
    기존처럼 T2다.
 4. **`t1` 진입(§14).** shadow 기간·판정 건수 하한·"PR로 받을 만했다" 비율 대신, 아래 일회성
    점검을 모두 통과한 기록과 이 버전의 운영자 승인으로 `t1`에 들어간다. 점검: 게시 App

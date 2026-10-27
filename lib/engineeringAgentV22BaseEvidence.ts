@@ -12,12 +12,28 @@ import type { WorkflowFile } from "@/lib/agentCredentialReachability";
 const ANALYSIS_TEXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md)$/;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
+// Production runs `main`, not the `develop` base, so some image files differ
+// from the base tree. Those come from GitHub by OID, up to this many.
+const MAX_FETCHED_BLOBS = 500;
 
 type ReadFile = (path: string) => Promise<Uint8Array>;
 type FileStat = (path: string) => Promise<{ isFile(): boolean }>;
+type FetchBlob = (oid: string, maxBytes: number) => Promise<Uint8Array>;
 
-/** The GitHub tree is already bound to the current develop commit. Image
- * files are accepted only when their Git blob OIDs match that tree; excluded
+/** An excluded prefix stands only when the base commit's own build leaves it
+ * out of the image, not merely the image this process happens to run. */
+function dockerIgnoreExcludes(text: string, prefixes: readonly string[]) {
+  const lines = new Set(text.split(/\r?\n/).map((line) => line.trim()));
+  return prefixes.every((prefix) =>
+    lines.has(`${prefix}/`) || lines.has(`/${prefix}/`)) &&
+    (!prefixes.includes("tests") ||
+      lines.has("playwright.admin.config.ts") ||
+      lines.has("/playwright.admin.config.ts"));
+}
+
+/** The GitHub tree is already bound to the current develop commit. A file is
+ * accepted only when its bytes match that tree's Git blob OID: the image copy
+ * when it matches, otherwise the blob read from GitHub by that OID. Excluded
  * tests are represented by paths but never assumed to contain source text. */
 export async function loadEngineeringAgentV22BaseEvidence(input: {
   tree: readonly TreeEntry[];
@@ -25,6 +41,7 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   root?: string;
   read?: ReadFile;
   stat?: FileStat;
+  fetchBlob?: FetchBlob;
 }): Promise<{
   baseFiles: { path: string; text: string }[];
   workflows: WorkflowFile[];
@@ -39,7 +56,26 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   const workflows: WorkflowFile[] = [];
   const policyDocuments: string[] = [];
   let lockText: string | null = null;
+  let dockerIgnoreText: string | null = null;
   let totalBytes = 0;
+  let fetched = 0;
+  const baseBytes = async (entry: TreeEntry): Promise<Uint8Array | null> => {
+    const path = resolve(root, entry.path);
+    if (!path.startsWith(`${root}${sep}`)) return null;
+    try {
+      if ((await stat(path)).isFile()) {
+        const bytes = await read(path);
+        if (bytes.byteLength <= MAX_FILE_BYTES &&
+            gitObjectId("blob", bytes) === entry.oid) return bytes;
+      }
+    } catch { /* not in the image: read the base blob instead */ }
+    if (!input.fetchBlob || fetched >= MAX_FETCHED_BLOBS) return null;
+    fetched += 1;
+    try {
+      const bytes = await input.fetchBlob(entry.oid, MAX_FILE_BYTES);
+      return gitObjectId("blob", bytes) === entry.oid ? bytes : null;
+    } catch { return null; }
+  };
   for (const entry of input.tree) {
     if (entry.type === "tree") continue;
     if (!isCanonicalRepoPath(entry.path) ||
@@ -50,6 +86,14 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     const absentConfig = input.excludedPrefixes.includes("tests") &&
       entry.path === "playwright.admin.config.ts";
     if (excluded || absentConfig) {
+      baseFiles.push({ path: entry.path, text: "" });
+      continue;
+    }
+    if (entry.path === ".dockerignore") {
+      const bytes = await baseBytes(entry);
+      if (!bytes) return null;
+      try { dockerIgnoreText = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+      catch { return null; }
       baseFiles.push({ path: entry.path, text: "" });
       continue;
     }
@@ -68,16 +112,10 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       baseFiles.push({ path: entry.path, text: "" });
       continue;
     }
-    const path = resolve(root, entry.path);
-    if (!path.startsWith(`${root}${sep}`)) return null;
-    let bytes: Uint8Array;
-    try {
-      if (!(await stat(path)).isFile()) return null;
-      bytes = await read(path);
-    } catch { return null; }
+    const bytes = await baseBytes(entry);
+    if (!bytes) return null;
     totalBytes += bytes.byteLength;
-    if (bytes.byteLength > MAX_FILE_BYTES || totalBytes > MAX_TOTAL_BYTES ||
-        gitObjectId("blob", bytes) !== entry.oid) return null;
+    if (totalBytes > MAX_TOTAL_BYTES) return null;
     let text: string;
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
     catch { return null; }
@@ -93,6 +131,9 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   }
   if (lockText === null || !baseFiles.some((file) =>
     file.path === "tsconfig.json")) return null;
+  if (input.excludedPrefixes.length > 0 && (dockerIgnoreText === null ||
+      !dockerIgnoreExcludes(dockerIgnoreText, input.excludedPrefixes)))
+    return null;
   let lock: { packages?: Record<string, { version?: string }> };
   try { lock = JSON.parse(lockText); }
   catch { return null; }

@@ -6,71 +6,46 @@ import { listEngineeringAgentImagePaths,
   summarizeEngineeringAgentImagePaths } from
   "@/scripts/report-engineering-agent-image-proof-core.mjs";
 
-export const ENGINEERING_AGENT_V22_IMAGE_PROOF_ENV =
-  "ENGINEERING_AGENT_V22_IMAGE_PROOF";
+type Manifest = { completePathCount: number;
+  completePathListSha256: string; testsPathCount: number };
 
-/** Cheap transaction-time recheck: the exact proof used in the preflight
- * must still be installed before a capability is created. */
-export function currentEngineeringAgentV22ImageProofDigest(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): string | null {
-  const raw = env[ENGINEERING_AGENT_V22_IMAGE_PROOF_ENV];
-  return raw && Buffer.byteLength(raw, "utf8") <= 2_048 ?
-    createHash("sha256").update(raw).digest("hex") : null;
-}
-
-type Proof = {
-  sourceCommit: string;
-  deploymentId: string;
-  imageDigest: string;
-  completePathCount: number;
-  completePathListSha256: string;
-  testsPathCount: number;
-  approvedBy: string;
-  approvedAt: string;
-};
-
-const SHA1 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const DEPLOYMENT = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 
-/** Only the owner-attested exact deployment may exclude tests from the
- * runtime slice. The complete path list is retained outside the app; this
- * runtime check does not pretend to derive an image digest from inside it. */
+/** The running image measures itself (owner decision 2026-10-27). An
+ * operator-pasted proof bound to a deployment ID could never match: setting
+ * the variable starts a new deployment. Only an image that really lacks the
+ * test sources may leave them out of the runtime slice; whether the base
+ * commit's build excludes them too is checked against that commit's own
+ * `.dockerignore` in the base evidence. */
 export function decideEngineeringAgentV22ImageExclusion(input: {
-  proof: unknown;
-  baseSha: string;
-  runtimeSourceSha: string | undefined;
-  runtimeDeploymentId: string | undefined;
-  runtimeManifest: { completePathCount: number;
-    completePathListSha256: string; testsPathCount: number };
+  cwd: string;
+  runtimeManifest: Manifest;
   testsExist: boolean;
   adminPlaywrightConfigExists: boolean;
 }): readonly string[] {
-  const proof = input.proof as Partial<Proof> | null;
-  if (!proof || typeof proof !== "object" || Array.isArray(proof) ||
-      !SHA1.test(input.baseSha) ||
-      proof.sourceCommit !== input.baseSha ||
-      proof.sourceCommit !== input.runtimeSourceSha ||
-      typeof proof.deploymentId !== "string" ||
-      !DEPLOYMENT.test(proof.deploymentId) ||
-      proof.deploymentId !== input.runtimeDeploymentId ||
-      typeof proof.imageDigest !== "string" ||
-      !/^sha256:[0-9a-f]{64}$/.test(proof.imageDigest) ||
-      typeof proof.completePathListSha256 !== "string" ||
-      !SHA256.test(proof.completePathListSha256) ||
-      !Number.isSafeInteger(proof.completePathCount) ||
-      proof.completePathCount !== input.runtimeManifest.completePathCount ||
-      proof.completePathListSha256 !==
-        input.runtimeManifest.completePathListSha256 ||
-      input.runtimeManifest.testsPathCount !== 0 ||
-      proof.testsPathCount !== 0 ||
-      proof.approvedBy !== "mposition" ||
-      typeof proof.approvedAt !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(proof.approvedAt) ||
+  const manifest = input.runtimeManifest;
+  if (input.cwd !== "/app" ||
+      !Number.isSafeInteger(manifest.completePathCount) ||
+      manifest.completePathCount < 1 ||
+      !SHA256.test(manifest.completePathListSha256) ||
+      manifest.testsPathCount !== 0 ||
       input.testsExist || input.adminPlaywrightConfigExists)
     return [];
   return ["tests"];
+}
+
+/** The digest names the measured image, so a redeploy between the preflight
+ * and the settlement transaction changes it and the patch is not published. */
+export function engineeringAgentV22ImageEvidenceDigest(manifest: Manifest,
+  env: Readonly<Record<string, string | undefined>>): string {
+  return createHash("sha256").update(JSON.stringify({
+    format: "engineering-agent-v22-live-image-v1",
+    deploymentId: env.RAILWAY_DEPLOYMENT_ID ?? null,
+    sourceCommit: env.RAILWAY_GIT_COMMIT_SHA ?? null,
+    completePathCount: manifest.completePathCount,
+    completePathListSha256: manifest.completePathListSha256,
+    testsPathCount: manifest.testsPathCount,
+  })).digest("hex");
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -87,40 +62,43 @@ let imageManifestPromise: Promise<ReturnType<
 const runtimeImageManifest = () => {
   imageManifestPromise ??= listEngineeringAgentImagePaths("/app")
     .then(summarizeEngineeringAgentImagePaths);
+  // A failed scan is not cached: the next read measures again.
+  imageManifestPromise.catch(() => { imageManifestPromise = null; });
   return imageManifestPromise;
 };
 const liveRuntime = { cwd: () => process.cwd(), exists,
-  imageManifest: runtimeImageManifest };
+  imageManifest: runtimeImageManifest as () => Promise<Manifest> };
 
-/** An absent or malformed proof is T2, never a guessed exclusion. */
+/** A failed measurement is T2, never a guessed exclusion. */
 export async function readEngineeringAgentV22ImageExclusion(
-  baseSha: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
   runtime: typeof liveRuntime = liveRuntime,
 ): Promise<{ excludedPrefixes: readonly string[];
   proofDigest: string | null }> {
   const refused = { excludedPrefixes: [], proofDigest: null } as const;
-  if (runtime.cwd() !== "/app") return refused;
-  const raw = env[ENGINEERING_AGENT_V22_IMAGE_PROOF_ENV];
-  if (!raw || Buffer.byteLength(raw, "utf8") > 2_048) return refused;
-  let proof: unknown;
-  try { proof = JSON.parse(raw); }
-  catch { return refused; }
   try {
+    const cwd = runtime.cwd();
+    if (cwd !== "/app") return refused;
     const [testsExist, adminPlaywrightConfigExists, runtimeManifest] =
       await Promise.all([
       runtime.exists("/app/tests"),
       runtime.exists("/app/playwright.admin.config.ts"),
       runtime.imageManifest(),
     ]);
-    const excludedPrefixes = decideEngineeringAgentV22ImageExclusion({ proof, baseSha,
-      runtimeSourceSha: env.RAILWAY_GIT_COMMIT_SHA,
-      runtimeDeploymentId: env.RAILWAY_DEPLOYMENT_ID,
-      runtimeManifest,
-      testsExist, adminPlaywrightConfigExists });
+    const excludedPrefixes = decideEngineeringAgentV22ImageExclusion({ cwd,
+      runtimeManifest, testsExist, adminPlaywrightConfigExists });
     return excludedPrefixes.length === 0 ? refused : {
       excludedPrefixes,
-      proofDigest: currentEngineeringAgentV22ImageProofDigest(env),
+      proofDigest: engineeringAgentV22ImageEvidenceDigest(runtimeManifest, env),
     };
   } catch { return refused; }
+}
+
+/** Transaction-time recheck: the image measured in the preflight must still
+ * be the one this process runs. */
+export async function currentEngineeringAgentV22ImageProofDigest(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  runtime: typeof liveRuntime = liveRuntime,
+): Promise<string | null> {
+  return (await readEngineeringAgentV22ImageExclusion(env, runtime)).proofDigest;
 }

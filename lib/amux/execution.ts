@@ -1611,7 +1611,7 @@ export async function settleAmuxV22TaskExecution(input: {
             taskId: task.id, baseSha: patch.baseSha,
             patchDigest: patch.sha256, publication,
             currentImageProofDigest:
-              currentEngineeringAgentV22ImageProofDigest(),
+              await currentEngineeringAgentV22ImageProofDigest(),
           }) &&
             amuxV22EngineeringPublicationEnabled(
               process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&

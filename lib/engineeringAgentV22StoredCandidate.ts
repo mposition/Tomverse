@@ -12,6 +12,7 @@ import { loadEngineeringAgentV22BaseEvidence } from
   "@/lib/engineeringAgentV22BaseEvidence";
 import { readEngineeringAgentV22ImageExclusion } from
   "@/lib/engineeringAgentV22ImageEvidence";
+import { readEngineeringAgentGitBlob } from "@/lib/engineeringAgentGitHubRead";
 import { decideEngineeringAgentV22Tier } from
   "@/lib/engineeringAgentV22Tier";
 import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
@@ -31,13 +32,17 @@ type Ports = {
       imageProofDigest: string | null }>;
 };
 
-async function readTier(baseSha: string,
+// The base commit is bound through `candidate.baseTree`; the image only says
+// which test sources are absent from the running deployment.
+async function readTier(_baseSha: string,
   candidate: Extract<Candidate, { ok: true }>): Promise<{
     tier: TierVerdict; imageProofDigest: string | null }> {
-  const image = await readEngineeringAgentV22ImageExclusion(baseSha);
+  const image = await readEngineeringAgentV22ImageExclusion();
   const evidence = await loadEngineeringAgentV22BaseEvidence({
     tree: candidate.baseTree,
     excludedPrefixes: image.excludedPrefixes,
+    fetchBlob: (oid, maxBytes) =>
+      readEngineeringAgentGitBlob(oid, {}, maxBytes),
   });
   if (!evidence) return { tier: { tier: "T2", findings: [{
     reason: "slice_analysis_failed", path: null,
