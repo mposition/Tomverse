@@ -98,7 +98,21 @@ workflows:
           xcode-project build-ipa --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME" --config Release \
             2>&1 | tee .tmp/codemagic/xcodebuild-testflight.log
-          test -n "$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)"
+          IPA_PATH="$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)"
+          test -f "$IPA_PATH"
+          python3 - "$IPA_PATH" "$PROJECT_BUILD_NUMBER" <<'PY'
+          import plistlib, re, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as ipa:
+              names = [name for name in ipa.namelist() if re.fullmatch(r"Payload/[^/]+\.app/Info\.plist", name)]
+              assert len(names) == 1, "Expected one app in the IPA"
+              info = plistlib.loads(ipa.read(names[0]))
+          assert info["CFBundleIdentifier"] == "app.tomverse.shell", "Unexpected app"
+          assert info["CFBundleVersion"] == sys.argv[2], "Unexpected build number"
+          assert info["MinimumOSVersion"] == "17.4", "Unexpected minimum OS"
+          assert set(info["UIDeviceFamily"]) == {1, 2}, "Expected iPhone and iPad support"
+          assert info["CFBundleSupportedPlatforms"] == ["iPhoneOS"], "Expected a device IPA"
+          print("Verified Tomverse device IPA and CI build number before upload")
+          PY
     artifacts:
       - build/ios/ipa/*.ipa
       - .tmp/codemagic/prebuild.json

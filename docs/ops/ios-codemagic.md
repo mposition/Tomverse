@@ -83,6 +83,10 @@ Configure these names in the existing Codemagic personal account before running:
 | Apple Distribution certificate reference | `tomverse-apple-distribution` |
 | App Store profile reference for `app.tomverse.shell` | `tomverse-app-store` |
 
+The registered App ID and provisioning profile must include Associated Domains
+for the existing `applinks:tomverse.app` and `webcredentials:tomverse.app`
+entitlements. Enable that capability before generating the App Store profile.
+
 The signing API integration needs a dedicated App Store Connect key with App
 Manager access. It is separate from the RevenueCat In-App Purchase key. Creating
 the key, retaining its private file locally, sharing it with Codemagic, and
@@ -106,7 +110,10 @@ this declaration if the app or a bundled SDK adds non-exempt encryption.
 For this first upload, the Apple dashboard had no existing TestFlight builds.
 If builds are uploaded from another system later, keep the Codemagic project
 number above the latest Apple build number before starting another upload.
-Artifacts include only the IPA, preflight receipt and Xcode logs. Signed-device
+The project enables Apple Generic versioning; the finished IPA is checked for
+the expected bundle ID, CI build number, minimum OS, iPhone/iPad families and
+device platform before publishing. Artifacts include only the IPA, preflight
+receipt and Xcode logs. Signed-device
 installation and actual location/login/purchase behavior require observations
 on the iPad; a successful upload alone does not establish those results.
 
