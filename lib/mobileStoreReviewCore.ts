@@ -11,4 +11,3 @@ export function matchesMobileStoreReviewCode(credential: MobileStoreReviewCreden
       input.appId !== credential.appId || input.buildNumber !== credential.buildNumber || !/^\d{6}$/.test(input.code)) return false;
   return timingSafeEqual(Buffer.from(hashMobileStoreReviewCode(credential, input.code), "hex"), Buffer.from(credential.codeHash, "hex"));
 }
-
