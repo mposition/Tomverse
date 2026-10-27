@@ -70,6 +70,33 @@ test("the migration is additive and its guard holds the ceiling rule, the regist
   assert.match(guard, /role = 'investigate' AND NOT \('repo_read' = ANY/);
 });
 
+// Version 52 (owner decision 2026-10-27): the latest guard is the previous
+// one with only the implementation ceiling on v22 implement removed, and it
+// pins the body it replaces.
+test("the routine-implement guard is the previous guard with only the implement ceiling dropped", async () => {
+  const { createHash } = await import("node:crypto");
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const lf = (path) => read(path).split("\r\n").join("\n");
+  const previous = lf("prisma/migrations/20261026100000_amux_v22_all_providers/migration.sql");
+  const latest = lf("prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql");
+  const body = (sql) => /CREATE OR REPLACE FUNCTION "amux_worker_capability_event_guard"\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/.exec(sql)?.[1];
+  assert.ok(body(previous) && body(latest));
+  assert.deepEqual(presenceDeclarationIn(latest), {
+    kind: "function-replacement",
+    function: "amux_worker_capability_event_guard",
+    previousBodySha256: createHash("sha256").update(body(previous)).digest("hex"),
+  });
+  const code = (text) => withoutSqlComments(text);
+  assert.equal(code(body(latest)), code(body(previous)).replace(
+    "IF role = 'implement' AND (ceiling_rank < 2 OR NOT ('repo_write' = ANY (NEW.\"v22Tools\"))) THEN",
+    "IF role = 'implement' AND NOT ('repo_write' = ANY (NEW.\"v22Tools\")) THEN"));
+  assert.notEqual(code(body(latest)), code(body(previous)));
+  // Only the function: no table, constraint, trigger or row changes.
+  const statements = withoutSqlComments(latest).replace(/AS \$\$[\s\S]*?\$\$;/, "AS $$$$;");
+  assert.doesNotMatch(statements, /\bALTER\b|\bDROP\b|\bTRUNCATE\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|CREATE (TABLE|TRIGGER|INDEX)/i);
+  assert.equal((statements.match(/CREATE OR REPLACE FUNCTION /g) ?? []).length, 1);
+});
+
 const walk = (dir) =>
   readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);

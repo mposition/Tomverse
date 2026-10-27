@@ -176,7 +176,7 @@ test("a later change is the next revision; a stale revision is refused before an
 
 test("the CHECKs refuse a name, class or role outside version 31", async () => {
   const userId = `owner-${randomUUID()}`;
-  // Owner decision 2026-10-27 (migration 20261027100000): a name is free and
+  // Owner decision 2026-10-27 (migration 20261027120000): a name is free and
   // does not name the CLI; the engineering runner's name is still refused.
   await rejectsWith(register(userId, { workerName: "Devin_worker", providerClass: "claude", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /worker_name_check/);
   await rejectsWith(register(userId, { workerName: "engineering-runner", providerClass: "claude", roleCeiling: "chore", desiredState: "requested", revision: 1 }), /worker_name_check/);

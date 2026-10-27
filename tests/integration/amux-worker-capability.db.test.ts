@@ -126,7 +126,12 @@ test("the guard binds every tag and v22 role to the worker's current ceiling and
   await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["implementation"] }), /AMUX_WORKER_CAPABILITY_TAG_CEILING/);
   await rejectsWith(insertRaw(userId, { workerName: "codex-impl", routingTags: ["architecture"] }), /AMUX_WORKER_CAPABILITY_TAG_CEILING/);
   await rejectsWith(insertRaw(userId, { workerName: "cursor-impl", routingTags: ["review"] }), /AMUX_WORKER_CAPABILITY_TAG_VERIFIED/);
-  await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "claude-opus-5-5", v22Roles: ["implement"], v22Tools: ["repo_write"] }), /AMUX_WORKER_CAPABILITY_V22_ROLE/);
+  // Version 52 (owner decision 2026-10-27): a v4 worker's ceiling is its
+  // grade, so v22 implement needs repo_write and no ceiling; design keeps its.
+  await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "claude-opus-5-5", v22Roles: ["implement"], v22Tools: ["repo_read"] }), /AMUX_WORKER_CAPABILITY_V22_ROLE/);
+  await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "claude-opus-5-5", v22Roles: ["design"], v22Tools: ["repo_read"] }), /AMUX_WORKER_CAPABILITY_V22_ROLE/);
+  await registerWorker(session, "codex-chore", "chore");
+  await insertRaw(userId, { workerName: "codex-chore", routingTags: ["chore"], v22Model: "gpt-6-luna", v22Roles: ["implement", "investigate"], v22Tools: ["repo_read", "repo_write"] });
   // Owner decision 2026-10-26: every provider class may run v22; only a
   // Claude worker is held to a claude-* model.
   await rejectsWith(insertRaw(userId, { workerName: "claude-chore", routingTags: ["chore"], v22Model: "gpt-6-luna", v22Roles: ["investigate"], v22Tools: ["repo_read"] }), /AMUX_WORKER_CAPABILITY_V22_CLASS/);

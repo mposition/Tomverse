@@ -48,7 +48,9 @@ export const AMUX_WORKER_PROFILE_PRESET_TABLE: Readonly<Record<AmuxWorkerProfile
   Object.freeze({
     chore: Object.freeze({
       ceiling: "chore", verifiedOnly: false,
-      routingTags: ["bugfix", "chore", "tests"], tools: WRITE_TOOLS, v22Roles: ["investigate"],
+      // Version 52 (2026-10-27): a routine implement Task runs only on a chore
+      // worker, so the chore preset implements as well.
+      routingTags: ["bugfix", "chore", "tests"], tools: WRITE_TOOLS, v22Roles: ["implement", "investigate"],
     }),
     impl: Object.freeze({
       ceiling: "implementation", verifiedOnly: false,

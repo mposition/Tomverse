@@ -30,7 +30,7 @@ export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
       oneShot: "AMUX hands this worker Tasks of its own",
     },
     preset: {
-      chore: { label: "Chore", help: "Small fixes, tests and routine work. Investigates when it takes Tasks." },
+      chore: { label: "Chore", help: "Small fixes, tests and routine work. Implements routine Tasks and investigates." },
       impl: { label: "Implementation", help: "Ordinary features and fixes across files. Implements and investigates Tasks." },
       contract: { label: "Contract", help: "Irreversible work: pricing, migrations, security. Designs, implements, reviews and investigates." },
       review: { label: "Review", help: "Reads and reviews only. Reviews and investigates Tasks, never writes." },
@@ -74,7 +74,7 @@ export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
       oneShot: "AMUX가 이 worker에게 Task를 직접 맡깁니다",
     },
     preset: {
-      chore: { label: "Chore (잡무)", help: "작은 수정, 테스트, 반복 작업. Task를 받으면 조사를 맡습니다." },
+      chore: { label: "Chore (잡무)", help: "작은 수정, 테스트, 반복 작업. routine Task 구현과 조사를 맡습니다." },
       impl: { label: "Implementation (구현)", help: "여러 파일에 걸친 일반 기능과 수정. Task를 받으면 구현과 조사를 맡습니다." },
       contract: { label: "Contract (되돌릴 수 없는 작업)", help: "가격, migration, 보안 같은 되돌릴 수 없는 작업. 설계, 구현, 검토, 조사를 맡습니다." },
       review: { label: "Review (검토 전용)", help: "읽고 검토만 합니다. 검토와 조사 Task를 맡고 코드를 쓰지 않습니다." },

@@ -1488,7 +1488,7 @@ v27의 여섯 세션은 이 일곱 곳이 모두 걸려 아직 제품 배정에 
 ### 3. worker 등록부 — 사람이 정하는 원하는 상태
 
 - **단일 출처.** worker 목록의 출처는 앱 DB의 등록부 표 하나다. 등록부에 들어가는 값은 이름, 종류, 역할 상한(종류의 최고 역할 이하), 원하는 상태, revision이다.
-  - 이름은 소문자·숫자·하이픈 1–40자(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)이고 종류를 담지 않는다. 종류(실행하는 CLI)는 등록할 때 owner가 고르고, 한 번 등록한 이름의 종류는 바꾸지 않는다. `engineering-runner`는 등록할 수 없다(운영자 결정 2026-10-27, migration `20261027100000_amux_cli_models_and_worker_cli`).
+  - 이름은 소문자·숫자·하이픈 1–40자(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)이고 종류를 담지 않는다. 종류(실행하는 CLI)는 등록할 때 owner가 고르고, 한 번 등록한 이름의 종류는 바꾸지 않는다. `engineering-runner`는 등록할 수 없다(운영자 결정 2026-10-27, migration `20261027120000_amux_cli_models_and_worker_cli`).
   - 이 버전 8항의 전환을 마치면 이 버전 1항의 2·3·4·5번이 등록부를 읽는다. 7번은 이 버전 4항의 조정기가 맞춘다.
 - **등록부는 사람만 쓴다.** owner가 Admin에서 최근 step-up을 거쳐 쓰고, 변경과 같은 트랜잭션에 사람 감사 `amux.worker.*`를 남긴다. Agent, worker, 조정기, bridge, 앱의 시스템 경로는 등록부를 쓰지 않는다(공통 기반 원칙 6).
 - **원하는 상태(사람이 정함):**
@@ -1742,7 +1742,8 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
   | 태그 또는 v22 역할 | 필요한 것 |
   |---|---|
   | `chore`; v22 `investigate`(읽기 전용, `repo_read`만) | 아무 상한 |
-  | `implementation`; v22 `implement` | 상한 `implementation` 이상 |
+  | v22 `implement`(`repo_write` 필요, Cursor 불가) | 아무 상한. v4 Task에서 상한은 worker의 등급이므로(버전 52 2항), `chore` worker가 `routine` implement Task를 맡는다(운영자 결정 2026-10-27) |
+  | `implementation` | 상한 `implementation` 이상 |
   | `contract`, `architecture`, `security`; v22 `design` | 상한 `contract` |
   | `review`; v22 `review` | 검증된 종류(버전 31 2항). 아래 선택 규칙도 함께 적용 |
   | 그 밖의 작업 태그(`bugfix`, `tests`, `multi_file`, `reasoning`, `integration`, `long_running`, `fallback`) | 아무 상한 |
@@ -2832,6 +2833,11 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
 
 v4 Task에 대해서는 등록부의 `roleCeiling`이 상한이 아니라 **그 worker의 등급**이다. legacy 카드에는
 버전 35·45의 상한 의미가 그대로 남는다.
+
+운영자 결정 2026-10-27: 그래서 v22 `implement`는 상한을 요구하지 않는다(`repo_write`는 필요, Cursor는 계속 불가).
+버전 35의 표가 `implementation` 이상을 요구해 `chore` worker가 implement를 가질 수 없었고, routine implement
+경로가 없어 그런 Task를 가진 아이디어의 무인 등록이 `not_ready`로 실패했다(production, 2026-10-27).
+migration `20261027100000_amux_v22_routine_implement`가 능력 guard에서 그 조건만 뺀다.
 
 ### 3. contract 경로 목록
 

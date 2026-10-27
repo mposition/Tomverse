@@ -14,7 +14,7 @@ import { prisma } from "@/lib/prisma";
 
 // The worker CLIs' model catalog (owner decision 2026-10-27) against
 // PostgreSQL through the migration history
-// (20261027100000_amux_cli_models_and_worker_cli), in the agents lane: what the
+// (20261027120000_amux_cli_models_and_worker_cli), in the agents lane: what the
 // host refresh records, a link bound to its audit row and never changed, the
 // closed CLI list and name grammar, and the newest link winning. The store's
 // own statements are counted in tests/amuxCliModelCatalogStore.test.mjs.

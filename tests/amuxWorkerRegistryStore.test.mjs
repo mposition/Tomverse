@@ -585,9 +585,9 @@ test("the Admin route's DB boundaries are the store's statements at their larges
   });
 });
 
-test("migration 20261027100000 frees the name in all five worker tables and drops the name/class CHECK", () => {
+test("migration 20261027120000 frees the name in all five worker tables and drops the name/class CHECK", () => {
   // Owner decision 2026-10-27: the CLI is chosen at registration, not read from the name.
-  const sql = withoutSqlComments(read("prisma/migrations/20261027100000_amux_cli_models_and_worker_cli/migration.sql"));
+  const sql = withoutSqlComments(read("prisma/migrations/20261027120000_amux_cli_models_and_worker_cli/migration.sql"));
   const grammar = `'${AMUX_WORKER_NAME_PATTERN.source}'`;
   for (const table of [...TABLES, "AmuxWorkerCapabilityEvent"]) {
     assert.ok(

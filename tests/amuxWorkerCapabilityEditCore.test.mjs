@@ -38,7 +38,8 @@ test("each preset is the owner's table of 2026-10-27 for a worker that may hold 
   assert.deepEqual(amuxWorkerProfilePresetCapability(claude, "chore", "claude-haiku-5-5", true), {
     model: "claude-haiku-5-5", routingTags: ["bugfix", "chore", "tests"],
     toolCapabilities: ["repo_read", "repo_write", "test_run"],
-    v22: { model: "claude-haiku-5-5", roles: ["investigate"], tools: ["repo_read"] },
+    // Version 52: a routine implement Task runs only on a chore worker.
+    v22: { model: "claude-haiku-5-5", roles: ["implement", "investigate"], tools: ["repo_read", "repo_write"] },
   });
   assert.deepEqual(amuxWorkerProfilePresetCapability(claude, "impl", "m", true).v22,
     { model: "m", roles: ["implement", "investigate"], tools: ["repo_read", "repo_write"] });

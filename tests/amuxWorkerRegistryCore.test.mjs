@@ -350,7 +350,7 @@ test("version 34: the engineering adapter's runner is a code constant by name an
   assert.deepEqual([...AMUX_WORKER_CATALOG_EXEMPT], ["engineering-runner"]);
   assert.ok(Object.isFrozen(AMUX_WORKER_CATALOG_EXEMPT));
   // An exempt name can never also be a registry entry: the grammar refuses it
-  // by name (and the CHECK of migration 20261027100000 likewise), so the
+  // by name (and the CHECK of migration 20261027120000 likewise), so the
   // derived catalog's constant entry and the ceiling check's exception cannot
   // collide with a registered worker.
   for (const name of AMUX_WORKER_CATALOG_EXEMPT) {
@@ -359,7 +359,7 @@ test("version 34: the engineering adapter's runner is a code constant by name an
       assert.equal(parseAmuxWorkerRegistryChange({ workerName: name, providerClass, roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 }), null, name);
     }
   }
-  const sql = readFileSync(new URL("../prisma/migrations/20261027100000_amux_cli_models_and_worker_cli/migration.sql", import.meta.url), "utf8");
+  const sql = readFileSync(new URL("../prisma/migrations/20261027120000_amux_cli_models_and_worker_cli/migration.sql", import.meta.url), "utf8");
   for (const name of AMUX_WORKER_CATALOG_EXEMPT) assert.equal(sql.split(`"workerName" <> '${name}'`).length - 1, 5, name);
   // No other name is: devin-worker, removed in version 27, is not a constant;
   // since names are free it is registrable, but only with one of the four CLIs.

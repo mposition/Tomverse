@@ -63,11 +63,17 @@ export const AMUX_WORKER_ROUTING_TAG_REQUIREMENTS: Readonly<Record<string, AmuxW
   });
 export const AMUX_WORKER_ROUTING_TAGS = Object.freeze(Object.keys(AMUX_WORKER_ROUTING_TAG_REQUIREMENTS).sort());
 
-/** Version 35's v22 one-shot roles: investigate is read-only and needs no ceiling. */
+/**
+ * Version 35's v22 one-shot roles: investigate is read-only and needs no
+ * ceiling. Implement needs none either since version 52 made `roleCeiling` a
+ * v4 Task worker's grade, not a cap: a `routine` implement Task runs only on
+ * a `chore` worker (owner decision 2026-10-27). It still needs `repo_write`,
+ * and Cursor still cannot take it (amuxV22ProviderRoleSupported).
+ */
 export const AMUX_WORKER_V22_ROLE_REQUIREMENTS: Readonly<Record<string, AmuxWorkerCapabilityRequirement>> =
   Object.freeze({
     investigate: "any",
-    implement: "implementation",
+    implement: "any",
     design: "contract",
     review: "verified",
   });
