@@ -192,6 +192,27 @@ export function tokenRefusal(status: number, body: () => unknown): string {
   return `github_token_${status}`;
 }
 
+/**
+ * Why GitHub refused to update a pull request's branch, as a short code; its
+ * message is matched, never kept. 2026-10-26: the repository ruleset "no
+ * updates outside develop" refused every update of #3041's branch, and the
+ * line said "being updated" for half an hour.
+ */
+export function updateBranchRefusal(status: number, body: () => unknown): string {
+  let message = "";
+  try {
+    const parsed = body();
+    if (typeof parsed === "object" && parsed !== null && typeof (parsed as Json).message === "string") message = (parsed as Json).message as string;
+  } catch {
+    // An unreadable body says nothing more than its status.
+  }
+  if (/rule violation|protected ref|ruleset/i.test(message)) return "github_update_branch_ruleset";
+  if (/workflow/i.test(message)) return "github_update_branch_workflows";
+  if (/expected head sha|head sha/i.test(message)) return "github_update_branch_head_moved";
+  if (/conflict/i.test(message)) return "github_update_branch_conflict";
+  return `github_update_branch_${status}`;
+}
+
 export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: () => number = Date.now): CiAdmissionGithub {
   const call = async (method: "GET" | "POST" | "PUT", url: string, auth: string, body?: Json) => {
     const response = await fetch(url, {
@@ -388,7 +409,7 @@ export function createCiAdmissionGithub(config: CiAdmissionGithubConfig, now: ()
       );
       // 422: the head moved meanwhile, a conflict, or GitHub refused (a
       // workflow file change needs the Workflows permission too).
-      if (answer.status !== 202) throw new Error(`github_update_branch_${answer.status}`);
+      if (answer.status !== 202) throw new Error(updateBranchRefusal(answer.status, () => answer.json()));
     },
     async runnerUsage() {
       const runs = new Map<number, Json>();
