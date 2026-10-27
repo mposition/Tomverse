@@ -13,7 +13,7 @@ import { qaReleaseTrainNextDepartureMs } from "@/lib/qaReleaseTrainCore";
 import { expireQaReleaseTrainBoardReads } from "@/lib/qaReleaseTrainBoardRead";
 import { readQaReleaseTrainCargoCandidates } from "@/lib/qaReleaseTrainCargoRead";
 import { saveQaReleaseTrainSelection } from "@/lib/qaReleaseTrainCargoStore";
-import { readQaReleaseTrainSchedule, readQaReleaseTrainSelection } from "@/lib/qaReleaseTrainStore";
+import { readQaReleaseTrainHidden, readQaReleaseTrainSchedule, readQaReleaseTrainSelection } from "@/lib/qaReleaseTrainStore";
 
 // The next release train's cargo (lib/qaReleaseTrainCargoCore.ts): any
 // administrator reads the candidates and the saved pick; owner or ops with a
@@ -29,16 +29,18 @@ export async function GET(request: Request) {
     // reads expire too, for the page's next server read.
     const fresh = new URL(request.url).searchParams.get("fresh") === "1";
     if (fresh) expireQaReleaseTrainBoardReads(Date.now());
-    const [candidates, selection, schedule] = await Promise.all([
+    const [candidates, selection, schedule, hidden] = await Promise.all([
       readQaReleaseTrainCargoCandidates(Date.now(), { fresh }),
       readQaReleaseTrainSelection(),
       readQaReleaseTrainSchedule(),
+      readQaReleaseTrainHidden(),
     ]);
     // The next departure by the hours the train service reported, from this server clock.
     const nextMs = schedule ? qaReleaseTrainNextDepartureMs(Date.now(), schedule.hours) : null;
     return NextResponse.json({
       candidates,
       selection,
+      hidden,
       schedule: schedule ? { ...schedule, nextDepartureAt: nextMs === null ? null : new Date(nextMs).toISOString() } : null,
     });
   } catch (error) {

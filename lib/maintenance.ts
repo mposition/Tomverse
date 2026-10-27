@@ -446,6 +446,18 @@ export async function cleanupExpiredData() {
   // sequence keeps a notice in the same run as the expiry it announces.
   const { step, failures } = createMaintenanceStepRunner();
 
+  // Expire pending MCP payloads even with the connector switch off. Running
+  // calls have an unknown outcome after a crash and must never be replayed.
+  await step("mcp_connector_payloads", async () => {
+    await prisma.mcpOAuthFlow.updateMany({ where: { expiresAt: { lte: now }, secretCiphertext: { not: null } },
+      data: { state: "expired", secretCiphertext: null } });
+    await prisma.mcpOAuthFlow.deleteMany({ where: { expiresAt: { lt: new Date(now.getTime() - 86_400_000) } } });
+    await prisma.mcpInvocation.updateMany({ where: { expiresAt: { lte: now }, state: "pending" },
+      data: { state: "expired", argumentsCiphertext: null } });
+    await prisma.mcpInvocation.updateMany({ where: { expiresAt: { lte: now }, state: "running" },
+      data: { state: "unknown", argumentsCiphertext: null } });
+  });
+
   const creditReservations = await step("chat_credit_reservations", () =>
     reconcileExpiredChatCreditReservations()
   );

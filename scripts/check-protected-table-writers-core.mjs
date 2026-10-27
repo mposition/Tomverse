@@ -1347,6 +1347,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The replaced capability guard keeps its one SELECT EXISTS read of the person's audit row of the same transaction. It replaces the capability guard body only (owner decision 2026-10-27: v22 implement needs repo_write and no ceiling, policy version 52); its one write verb is the trigger's TG_OP comparison. It writes no row.",
   },
   {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    table: "AmuxWorkerCapabilityEvent",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "Its two mentions are the replaced guard's read of the worker's newest capability revision and its error naming. It replaces the capability guard body only (owner decision 2026-10-27: v22 implement needs repo_write and no ceiling, policy version 52); its one write verb is the trigger's TG_OP comparison. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    table: "AmuxWorkerRegistryEvent",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The replaced capability guard reads the worker's newest registry event (class, ceiling, desired state), as before. It replaces the capability guard body only (owner decision 2026-10-27: v22 implement needs repo_write and no ceiling, policy version 52); its one write verb is the trigger's TG_OP comparison. It writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The replaced capability guard keeps its one SELECT EXISTS read of the person's audit row of the same transaction. It replaces the capability guard body only (owner decision 2026-10-27: v22 implement needs repo_write and no ceiling, policy version 52); its one write verb is the trigger's TG_OP comparison. It writes no row.",
+  },
+  {
     path: "lib/amux/workerCapabilityStore.ts",
     table: "AmuxWorkerCapabilityEvent",
     tableMentions: 4,
@@ -3301,6 +3325,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 3,
     reason:
       "The same three EXECUTE reads in the replaced capability event guard (owner decision 2026-10-26 widens only its class check): the worker's newest registry event, its newest capability revision and one SELECT EXISTS on AdminAuditLog, each over a TG_TABLE_SCHEMA-qualified constant name quoted with %I and bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",
+    count: 3,
+    reason:
+      "The same three EXECUTE reads in the replaced capability event guard (owner decision 2026-10-27 drops only the implement ceiling): the worker's newest registry event, its newest capability revision and one SELECT EXISTS on AdminAuditLog, each over a TG_TABLE_SCHEMA-qualified constant name quoted with %I and bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261027100000_amux_v22_routine_implement/migration.sql",

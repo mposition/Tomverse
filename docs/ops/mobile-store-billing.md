@@ -83,8 +83,9 @@ their authenticated webhook before access is granted.
 
 ## Configuration before activation
 
-All switches default off. This implementation does not activate a deployed
-service, publish a build, register real products or make a live purchase.
+All switches default off. Source/build scripts do not activate a deployed
+service, publish a build, register products or make a live purchase. Separate
+Apple dashboard draft registrations are recorded below.
 
 API server:
 
@@ -158,9 +159,10 @@ writers set the separate web snapshot explicitly; readers fall back to plan
 until then.
 Run cap sync after installing dependencies; the sync hook changes Android
 MainActivity to singleTop so banking-app confirmation does not cancel the
-purchase. Enable the In-App Purchase capability in the iOS Xcode target.
-Finalize the currently provisional bundle/application ID before registering
-products. Store credentials, agreements, tax/banking details, product review,
+purchase. The versioned iOS App target includes the In-App Purchase capability;
+`check:ios-prebuild` verifies that capability and Swift 5+ after sync.
+Keep the bundle/application ID consistent with each registered store app.
+Store credentials, agreements, tax/banking details, product review,
 pricing and a RevenueCat account are required operational setup; choose and
 approve the provider's commercial terms before production activation.
 The initial catalog uses standard recurring base plans without introductory,
@@ -178,6 +180,7 @@ npm --workspace @tomverse/mobile run build
 node --conditions=react-server --import tsx --test tests/mobileBilling.test.mjs
 node --conditions=react-server --experimental-test-module-mocks --import tsx --test tests/server-contract/mobile-billing-route.test.ts
 npx playwright test --config playwright.native.config.ts
+npm run test:ios-billing-ui
 ```
 
 The normal DB integration runner includes mobile-store-billing.db.test.ts.
@@ -194,10 +197,87 @@ expiry and refund. Verify web access and the same monthly usage after each
 transition. Mock UI tests and an Android compilation are not store/device
 evidence. iOS compilation requires macOS/Xcode.
 
-Official references checked 2026-10-25:
+### iOS preparation and remaining store setup
+
+The existing Apple purchase client uses the server's opaque billing identity and
+Apple public SDK key, loads subscription and consumable products separately,
+delegates tier changes to StoreKit, restores explicitly, and opens Apple's
+subscription-management page. Payment success alone does not update Tomverse
+entitlements or credits; the authenticated server/webhook remains authoritative.
+
+The iOS-specific synthetic suite covers localized annual totals, credit purchase
+before/after server verification, subscription upgrade, pending approval,
+cancellation, restoration, Apple management links and an existing web
+subscription. It runs in desktop WebKit and Chromium using fake native bridges,
+products and API responses. It does not contact RevenueCat or make a payment.
+The independent Android fixture suite remains in `tests/native-e2e`.
+
+After Apple membership activation, complete the account setup in the web
+dashboards before enabling purchases in an iOS build:
+
+1. The Apple App ID `app.tomverse.shell` and Tomverse App Store Connect app
+   `6827148073` were registered on 2026-10-26. The Paid Apps Agreement and required
+   banking/tax records were confirmed Active in App Store Connect on 2026-10-27
+   (AEST). Apple requires an active agreement for sandbox IAP.
+2. Draft records now exist for the four Apple subscriptions and three consumable
+   packs from the mapping above. Group `Tomverse Plans` (`22515689`) places both
+   Max variants at level 1 and both Pro variants at level 2. These are drafts,
+   with no pricing, availability or store review submission. English (U.S.)
+   display names/descriptions were saved for the group and all seven products
+   on 2026-10-27 (AEST). Use approved prices and complete review screenshots before
+   sandbox/device acceptance. Apple price points do not always match the existing
+   web catalog; differences require the owner's pricing decision before saving.
+3. RevenueCat project `210a4547` now contains Apple app `appaefd8126bd`, named
+   `Tomverse (App Store)`, with bundle ID `app.tomverse.shell`. On 2026-10-27
+   (AEST), the owner authorized generating and locally retaining an Apple In-App
+   Purchase key and registering it with this RevenueCat app. RevenueCat reports
+   **Valid credentials**. The private key stays outside the repository and build
+   artifacts. All seven exact Apple product IDs were added manually, with four
+   Subscription types and three Consumable types. Store-status checks remain
+   unavailable without the separate optional App Store Connect import API key;
+   this is distinct from successful purchase-key validation. No import API key
+   was created. No shared Offerings or entitlements were changed: the client
+   loads exact product IDs and the server resolves store subscriptions. Both Apple
+   Production and Sandbox server notification URLs were set to this RevenueCat
+   app's notification endpoint and confirmed after a page reload. No purchase or
+   refund notification has been received/tested yet. The RevenueCat option to
+   track new purchases directly from notifications remains off, preserving SDK
+   identity binding. Preserve the existing Google app, products, ownership rules
+   and shared webhook settings.
+4. In the iOS build environment, set `VITE_NATIVE_BILLING_ENABLED=true` and the
+   actual `VITE_REVENUECAT_APPLE_API_KEY=appl_...`. Google `goog_...` and RevenueCat
+   Test Store `test_...` keys cannot replace the Apple key. Server secrets remain
+   server-side. The manual unsigned Codemagic workflow does not set these values
+   or activate purchases by itself.
+5. Verify server configuration from the table above, including the Apple app ID,
+   exact product mapping and ownership-preserving webhook. TestFlight receipts
+   use sandbox. Follow the existing separate sandbox DB/deployment requirement;
+   do not switch a shared Android production server to SANDBOX for this test.
+6. Produce a signed TestFlight build, install it on the test iPad, and execute the
+   device acceptance scenarios above. Record verified purchase, refund and
+   redelivery results before calling the iOS payment integration operational.
+
+The draft product IDs registered on 2026-10-26 are
+`app.tomverse.pro.monthly`, `app.tomverse.pro.annual`,
+`app.tomverse.max.monthly`, `app.tomverse.max.annual`,
+`app.tomverse.credits500`, `app.tomverse.credits1500` and
+`app.tomverse.credits4000`. No customer payment or store release was performed.
+
+Local iOS billing verification on 2026-10-26: 16 synthetic UI cases passed (eight
+scenarios in each browser), 13 existing core/route/webhook cases passed, and
+14 iOS preparation/build-wrapper cases passed. The bundle build and iOS sync
+passed with the capability retained. Xcode compilation and real StoreKit
+sandbox/device purchase acceptance remain outstanding.
+
+Official references (billing rules checked 2026-10-25; Apple credential and
+notification setup rechecked 2026-10-27):
 
 - [Apple review guidelines 3.1.1–3.1.3](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase)
 - [Play payments policy](https://support.google.com/googleplay/android-developer/answer/9858738)
 - [Play subscription disclosures and cancellation](https://support.google.com/googleplay/android-developer/answer/9900533)
 - [RevenueCat Capacitor SDK](https://www.revenuecat.com/docs/getting-started/installation/capacitor)
 - [Subscription changes](https://www.revenuecat.com/docs/subscription-guidance/managing-subscriptions)
+- [Apple IAP account and agreement setup](https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases/)
+- [RevenueCat Apple sandbox and TestFlight](https://www.revenuecat.com/docs/test-and-launch/sandbox/apple-app-store)
+- [RevenueCat Apple In-App Purchase key configuration](https://www.revenuecat.com/docs/service-credentials/itunesconnect-app-specific-shared-secret/in-app-purchase-key-configuration)
+- [RevenueCat Apple server notifications](https://www.revenuecat.com/docs/platform-resources/server-notifications/apple-server-notifications)

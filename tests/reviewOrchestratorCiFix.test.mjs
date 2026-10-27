@@ -13,13 +13,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import {
+  CI_FIX_ANSWER_CHARS,
   CI_FIX_MAX_PATCH_CHARS,
   CI_FIX_MAX_QUEUED_PER_HOUR,
+  answerLine,
   autoFixAttempts,
   ciFixPrompt,
   deniedPaths,
   encodePatch,
   failedRuns,
+  failureExcerpt,
+  failureLog,
   patchProblem,
   pruneLedger,
   pruneOutbox,
@@ -589,5 +593,109 @@ test("an outbox entry is opened without blocking or following a link", { skip: p
     assert.throws(() => readRequestFile(join(dir, `${SHA_B}.json`)), /ELOOP/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #3048 (2026-10-27): the tail of every job held only cleanup lines, so the
+// model saw none of the failures and made no change.
+const stamp = (line, i = 0) => `2026-10-27T00:${String(10 + (i % 50)).padStart(2, "0")}:00.0000000Z ${line}`;
+const esc = String.fromCharCode(27);
+
+test("a job's excerpt is its failure lines, wherever they sit, not its tail", () => {
+  const log = [
+    stamp("Run npm run build"),
+    stamp(`${esc}[36;1mnext build${esc}[0m`),
+    stamp("##[error]lib/qaReleaseTrainPorts.ts(291,111): error TS2339: Property 'files' does not exist on type 'X'."),
+    stamp("Failed to type check."),
+    stamp("##[error]Process completed with exit code 1."),
+    ...Array.from({ length: 2000 }, (_, i) => stamp(`Post job cleanup line ${i} with some padding to make it long enough`, i)),
+  ].join("\n");
+  const { text, key } = failureExcerpt(log, 4000);
+  assert.match(text, /^##\[error\]lib\/qaReleaseTrainPorts\.ts\(291,111\): error TS2339/m, "the timestamp is stripped");
+  assert.doesNotMatch(text, /\u001b|2026-10-27T/);
+  assert.ok(text.length <= 4000 + 50);
+  assert.equal(key, "##[error]lib/qaReleaseTrainPorts.ts(291,111): error TS2339: Property 'files' does not exist on type 'X'.",
+    "the step-failed annotation every job ends with is not a failure line");
+});
+
+test("node:test's failing-tests summary outranks the errors passing tests print on purpose", () => {
+  const log = [
+    ...Array.from({ length: 300 }, (_, i) => [`✔ ok test ${i}`, `TypeError: connection ${i}`, `    at fetch (file:///t.mjs:${i}:1)`]).flat(),
+    "✖ failing tests:",
+    "",
+    "test at tests/agentRunnerIac.test.mjs:410:1",
+    "✖ the release train is its own production service (25ms)",
+    "  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:",
+    "  -   'QA_RELEASE_TRAIN_AUTO_PREDECESSORS',",
+  ].join("\n");
+  const { text, key } = failureExcerpt(log, 2000);
+  assert.match(text, /✖ failing tests:[\s\S]*AssertionError[\s\S]*QA_RELEASE_TRAIN_AUTO_PREDECESSORS/);
+  assert.match(text, /lower-ranked failure lines cut/);
+  assert.doesNotMatch(key, /TypeError: connection/, "a passing test's provoked error is not what the job failed on");
+});
+
+test("jobs that failed the same way are named once, and the whole file stays within its budget", async () => {
+  const failing = (noise) => [stamp(`checkout ${noise}`), stamp("##[error]a.ts(1,1): error TS2339: nope"), stamp(`cleanup ${noise}`)].join("\n");
+  const logs = { 1: failing("shard-a"), 2: failing("shard-b"), 3: [stamp("✖ failing tests:"), stamp("✖ other (1ms)")].join("\n") };
+  const jobs = [{ id: 1, label: "Gate / build" }, { id: 2, label: "Gate / ui 1/3" }, { id: 3, label: "Gate / unit" }];
+  const text = await failureLog(jobs, 60_000, async (job) => logs[job.id]);
+  assert.equal((text.match(/error TS2339/g) ?? []).length, 1);
+  assert.match(text, /===== Gate \/ ui 1\/3 =====\n\(the same failure lines as Gate \/ build\)/);
+  assert.match(text, /===== Gate \/ unit =====\n✖ failing tests:/);
+  const many = Array.from({ length: 40 }, (_, i) => ({ id: i, label: `job ${i}` }));
+  const big = await failureLog(many, 60_000, async (job) => Array.from({ length: 400 }, (_, j) => `##[error]job ${job.id} line ${j} ${"x".repeat(80)}`).join("\n"));
+  assert.ok(big.length <= 60_000);
+});
+
+test("the model's answer is kept as one line, its end first to stay", () => {
+  assert.equal(answerLine("  The failure is\n\na runner timeout.  "), "The failure is a runner timeout.");
+  const long = answerLine(`${"a".repeat(1000)} conclusion`);
+  assert.ok(long.startsWith("...") && long.endsWith(" conclusion"));
+  assert.ok(long.length <= CI_FIX_ANSWER_CHARS + 3);
+  assert.equal(answerLine(undefined), "");
+});
+
+test("a pass gives the model the failure lines and records what it answered", async () => {
+  const f = passFixture();
+  try {
+    const github = {
+      ...f.github,
+      async log() {
+        return [stamp("##[error]app.js(1,22): error TS1109: Expression expected."),
+          ...Array.from({ length: 3000 }, (_, i) => stamp(`Post job cleanup ${i} ${"y".repeat(60)}`, i))].join("\n");
+      },
+    };
+    const lines = [];
+    const seen = [];
+    const claude = ({ logDir }) => {
+      seen.push(readFileSync(join(logDir, "ci.log"), "utf8"));
+      return { ok: true, timedOut: false, tail: "I found nothing\nto change here.", errorTail: "" };
+    };
+    const result = await runCiFix({ ...f, github, model: "sonnet", minRemainingPercent: 0,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => 1, log: (line) => lines.push(line) });
+    assert.equal(result.outcome, "no_change");
+    assert.match(seen[0], /error TS1109: Expression expected/);
+    const entry = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[f.sha];
+    assert.equal(entry.answer, "I found nothing to change here.");
+    assert.ok(lines.some((line) => line === "ci-fix: #41 model said: I found nothing to change here."));
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("a failed model run records its answer and stderr", async () => {
+  const f = passFixture();
+  try {
+    const lines = [];
+    const claude = () => ({ ok: false, timedOut: false, tail: "Credit balance is too low", errorTail: "exit 1" });
+    const result = await runCiFix({ ...f, model: "sonnet", minRemainingPercent: 0,
+      quota: async () => ({ state: "available", remainingPercent: 90 }), claude, clock: () => 1, log: (line) => lines.push(line) });
+    assert.equal(result.outcome, "model_failed");
+    const entry = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[f.sha];
+    assert.deepEqual({ outcome: entry.outcome, answer: entry.answer, stderr: entry.stderr },
+      { outcome: "model_failed", answer: "Credit balance is too low", stderr: "exit 1" });
+    assert.ok(lines.includes("ci-fix: #41 model stderr: exit 1"));
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
   }
 });

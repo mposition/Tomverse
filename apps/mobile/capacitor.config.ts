@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-// The existing development identifier is retained until the owner chooses the
-// production app identifiers. No association or store identity is claimed.
+// This identifier matches the registered Apple App ID. Domain association and
+// signed-device acceptance remain separate operational steps.
 const config: CapacitorConfig = {
   appId: "app.tomverse.shell",
   appName: "Tomverse",

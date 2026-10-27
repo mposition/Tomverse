@@ -266,7 +266,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    않으면) ruleset을 걸지 않고, **S-M1에도 들어가지 않으며**, 운영자가 다음을 정합니다. 이 보호를 바꾸는 것은 이 정책의 개정입니다.
    ruleset은 bypass 목록 밖의 **모든** actor에게 걸리므로, 브랜치를 갱신해야 하는 기존 자동화(Dependabot, 저장소 workflow의
    GitHub Actions 등)는 bypass에 넣고 **이 App만 넣지 않습니다**. 관측에는 그 자동화의 브랜치 갱신 성공도 포함하며, 거는 날과
-   bypass 목록은 운영자가 관측 결과를 보고 정합니다.
+   bypass 목록은 운영자가 관측 결과를 보고 정합니다. 2026-10-26 운영자 결정으로 CI 입장 App(`tomverse-ci-admission`,
+   integration 5391627)을 "no updates outside develop" ruleset의 bypass에 더했습니다 — 뒤처진 draft의 브랜치를 base 기준으로
+   업데이트(update-branch)하기 위해서입니다. 병합 레인 App은 여전히 넣지 않습니다.
 8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
@@ -302,6 +304,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       실었던 PR은 운영자가 새로 저장하기 전까지 다음 열차에 다시 실립니다(운영자 2026-10-24; 보고 감사 기록에서 계산하며 새로
       쓰는 기록은 없습니다). workflow를 바꾼 PR은 이월하지 않습니다. 열린 열차 PR이 있으면 이번 출발은 건너뛰고, 고른 PR이 없으면 열지 않습니다. 한
       열차는 최대 30개를 싣습니다. 서비스는 30분마다 돌고(운영자 2026-10-23) 출발 창 한 시간 안에서 두 번 기회가 있습니다.
+      운영자는 후보를 목록에서 숨기거나 다시 보이게 할 수 있습니다(운영자 2026-10-27, `qa_release.train_cargo_hidden` 감사 기록,
+      owner·ops). 화면 표시만 바꾸며 열차는 읽지 않고, 고른 PR은 숨겨도 목록에 남아 실립니다.
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뜁니다. 충돌 구간마다 PR의 변경이 develop
       줄 앞이나 뒤에 줄을 더하기만 했다면(main이 그 이웃 줄만 다르게 가진 경우) main의 줄을 그대로 두고 PR이 더한 줄만 붙여

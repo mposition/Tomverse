@@ -27,6 +27,7 @@
  */
 
 import { chatStreamDisplayText } from "@tomverse/chat-core";
+import { mcpProgressFromStream, type McpProgressState } from "@/lib/mcpConnectorProgress";
 import { splitStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
 import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
 import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
@@ -34,6 +35,7 @@ import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import type { ChatTimeoutErrorCode } from "@/lib/chatStreamLiveness";
 
 export type ChatStreamProgress = {
+  mcpProgress?: McpProgressState;
   /** The answer as it should be rendered right now. Markers removed. */
   displayText: string;
   /** Set once §7 announced that another model took the turn over. */
@@ -128,6 +130,7 @@ export const consumeChatStream = async (input: {
     if (advanced) liveness.noteVisibleChunk();
 
     onProgress({
+      ...(mcpProgressFromStream(rawStreamText) ? { mcpProgress: mcpProgressFromStream(rawStreamText) } : {}),
       displayText,
       retryingWithModelId,
       isGeneratingArtifact,

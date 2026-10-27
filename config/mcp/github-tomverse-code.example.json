@@ -1,0 +1,20 @@
+[
+  {
+    "id": "github",
+    "name": "GitHub · mposition/TomverseCode",
+    "url": "https://api.githubcopilot.com/mcp/x/issues",
+    "auth": "oauth",
+    "readTools": ["search_issues", "issue_read"],
+    "sourceAdapter": "github-issues",
+    "githubRepository": "mposition/TomverseCode",
+    "githubRepositoryId": 1309523852,
+    "oauth": {
+      "issuer": "https://github.com/login/oauth",
+      "authorizationUrl": "https://github.com/login/oauth/authorize",
+      "tokenUrl": "https://github.com/login/oauth/access_token",
+      "scope": "offline_access",
+      "clientId": "replace-with-registered-github-app-client-id",
+      "clientSecretEnv": "MCP_GITHUB_OAUTH_CLIENT_SECRET"
+    }
+  }
+]

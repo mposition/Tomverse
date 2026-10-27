@@ -31,7 +31,116 @@ export const CI_FIX_LEDGER_DAYS = 14;
 export const CI_FIX_OUTBOX_KEEP_MS = 86_400_000;
 /** The sender's own hourly cap: queueing no faster means nothing waits there to expire. */
 export const CI_FIX_MAX_QUEUED_PER_HOUR = 6;
-export const CI_FIX_JOB_LOG_BYTES = 20_000;
+/**
+ * How much of each job log is read: its last 16 MB. The excerpt, not this
+ * read, is what the model sees; a failure line can sit far from the end,
+ * behind the cleanup steps that run after it (#3048, 2026-10-27).
+ */
+export const CI_FIX_JOB_LOG_BYTES = 16 * 1024 * 1024;
+/** No failed job's excerpt gets less than this of CI_FIX_MAX_LOG_CHARS. */
+export const CI_FIX_MIN_JOB_EXCERPT_CHARS = 4_000;
+/** How much of the model's final answer the ledger and the journal keep. */
+export const CI_FIX_ANSWER_CHARS = 600;
+
+const LOG_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z ?/;
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
+/**
+ * Lines that say what failed, strongest first. A test run also prints the
+ * errors its passing tests provoke on purpose, so a bare thrown error ranks
+ * last and is the first to go when a job's share runs out.
+ */
+const FAILURE_LINES = [
+  /^\s*✖ failing tests:/, // node:test's own summary of what failed
+  /##\[error\]|error TS\d+:|Failed to compile|Type error:/, // Actions annotations, tsc, Next.js
+  /^\s*✖ |^\s*not ok \d|AssertionError|^\s*FAIL\b/, // a failed test
+  /^\s*(Error|TypeError|ReferenceError|SyntaxError|RangeError)\b/, // a thrown error
+];
+/** An annotation that only says a step failed, which every failed job ends with. */
+const NOISE_LINE = /##\[error\]Process completed with exit code \d+\.?\s*$/;
+const failureRank = (line) => (NOISE_LINE.test(line) ? -1 : FAILURE_LINES.findIndex((pattern) => pattern.test(line)));
+
+/**
+ * The lines of one job log that say what failed, each with a few lines of
+ * context (node:test's failing-tests summary with all of its own), taken by
+ * rank and shown in log order, then the log's last lines when they fit.
+ * `key` is the failure lines alone, so two jobs that failed the same way can
+ * be told apart from their noise.
+ */
+export function failureExcerpt(log, maxChars, { before = 3, after = 12, summaryAfter = 80, tailLines = 15 } = {}) {
+  const lines = String(log ?? "").split(/\r?\n/).map((line) => line.replace(LOG_TIMESTAMP, "").replace(ANSI, ""));
+  const windows = [];
+  const strong = [];
+  const weak = [];
+  lines.forEach((line, index) => {
+    const rank = failureRank(line);
+    if (rank < 0) return;
+    (rank < FAILURE_LINES.length - 1 ? strong : weak).push(line.trim());
+    const end = index + (rank === 0 ? summaryAfter : after);
+    windows.push({ rank, start: Math.max(0, index - before), end: Math.min(lines.length - 1, end) });
+  });
+  const keep = new Set();
+  let used = 0;
+  let cut = false;
+  for (let rank = 0; rank < FAILURE_LINES.length; rank += 1) {
+    for (const window of windows.filter((w) => w.rank === rank)) {
+      const added = [];
+      for (let i = window.start; i <= window.end; i += 1) if (!keep.has(i)) added.push(i);
+      const size = added.reduce((total, i) => total + lines[i].length + 1, 0);
+      if (used + size > maxChars) {
+        cut = true;
+        continue;
+      }
+      for (const i of added) keep.add(i);
+      used += size;
+    }
+  }
+  const shown = [];
+  let previous = -2;
+  for (const index of [...keep].sort((a, b) => a - b)) {
+    if (index !== previous + 1 && shown.length > 0) shown.push("...");
+    shown.push(lines[index]);
+    previous = index;
+  }
+  let text = shown.join("\n");
+  if (!text && windows.length > 0) {
+    // One window alone is larger than the share: its start is what matters.
+    const first = [...windows].sort((a, b) => a.rank - b.rank || a.start - b.start)[0];
+    text = lines.slice(first.start, first.end + 1).join("\n").slice(0, maxChars);
+  }
+  if (cut) text += "\n... (lower-ranked failure lines cut)";
+  // The last lines the excerpt does not already show.
+  const tail = lines.map((line, index) => (index >= lines.length - tailLines && !keep.has(index) ? line : null))
+    .filter((line) => line !== null).join("\n").trim();
+  if (text.length + tail.length + 20 <= maxChars) text = text ? `${text}\n--- last lines ---\n${tail}` : tail;
+  return { text, key: [...new Set(strong.length > 0 ? strong : weak)].join("\n") };
+}
+
+/**
+ * One file for the model from every failed job: each job's failure excerpt,
+ * a job whose failure lines repeat an earlier job's named once, and the whole
+ * within maxChars. `jobs` is [{ label, ... }] and readLog(job) fetches one
+ * log at a time, so no more than one is held.
+ */
+export async function failureLog(jobs, maxChars, readLog) {
+  const perJob = Math.max(CI_FIX_MIN_JOB_EXCERPT_CHARS, Math.floor(maxChars / Math.max(1, jobs.length)));
+  const seen = new Map();
+  let text = "";
+  for (const job of jobs) {
+    const excerpt = failureExcerpt(await readLog(job), perJob);
+    const same = excerpt.key ? seen.get(excerpt.key) : undefined;
+    text += same
+      ? `\n===== ${job.label} =====\n(the same failure lines as ${same})\n`
+      : `\n===== ${job.label} =====\n${excerpt.text}\n`;
+    if (excerpt.key && !same) seen.set(excerpt.key, job.label);
+  }
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+/** A model answer as one line, its end kept: a CLI's last words are its conclusion. */
+export const answerLine = (text) => {
+  const line = String(text ?? "").replace(/\s+/g, " ").trim();
+  return line.length > CI_FIX_ANSWER_CHARS ? `...${line.slice(-CI_FIX_ANSWER_CHARS)}` : line;
+};
 
 /** Open develop pull requests the workflow would serve, oldest first. */
 export function servedPulls(pulls) {
@@ -199,7 +308,13 @@ export function runClaude({ provider, model, cwd, logDir, prompt, timeoutMs, den
     "--disallowedTools", "Bash,NotebookEdit,WebFetch,WebSearch,Agent,Task",
     "--output-format", "text",
   ], { cwd, env: reviewerEnv(provider), encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
-  return { ok: result.status === 0, timedOut: result.error?.code === "ETIMEDOUT", tail: String(result.stdout ?? "").slice(-2000) };
+  return {
+    ok: result.status === 0,
+    timedOut: result.error?.code === "ETIMEDOUT",
+    tail: String(result.stdout ?? "").slice(-2000),
+    // The Claude CLI reports some failures on stdout and exits 1; stderr is kept for the rest.
+    errorTail: String(result.stderr ?? "").slice(-2000),
+  };
 }
 
 /**
@@ -304,12 +419,12 @@ export async function runCiFix({
   const sha = pull.head.sha;
   let text = "";
   try {
+    const jobs = [];
     for (const run of failed) {
-      const { jobs = [] } = await github.json(`/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
-      for (const job of jobs.filter((j) => j.conclusion === "failure")) {
-        text += `\n===== ${run.name} / ${job.name} =====\n${await github.log(job.id)}`;
-      }
+      const { jobs: list = [] } = await github.json(`/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
+      for (const job of list.filter((j) => j.conclusion === "failure")) jobs.push({ id: job.id, label: `${run.name} / ${job.name}` });
     }
+    text = await failureLog(jobs, CI_FIX_MAX_LOG_CHARS, (job) => github.log(job.id));
   } catch (error) {
     return { outcome: "logs_unreadable", detail: String(error?.message ?? error).slice(0, 200) };
   }
@@ -324,7 +439,7 @@ export async function runCiFix({
   const mirrorLock = join(config.stateDir, "mirror.lock");
   try {
     const logFile = join(logDir, "ci.log");
-    writeFileSync(logFile, text.slice(-CI_FIX_MAX_LOG_CHARS));
+    writeFileSync(logFile, text);
 
     let links = [];
     await withLock(mirrorLock, () => {
@@ -340,31 +455,36 @@ export async function runCiFix({
       deny: deniedPaths({ stateDir: config.stateDir, outbox }),
       timeoutMs: (provider.timeoutSeconds ?? config.timeoutSeconds) * 1000,
     });
+    // What the model said it found or did: the only record of why it made no change.
+    const said = answerLine(answer.tail);
+    log(`ci-fix: #${pull.number} model said: ${said || "(nothing)"}`);
     if (!answer.ok) {
-      record(sha, { outcome: answer.timedOut ? "model_timeout" : "model_failed" });
+      const errorTail = answerLine(answer.errorTail);
+      if (errorTail) log(`ci-fix: #${pull.number} model stderr: ${errorTail}`);
+      record(sha, { outcome: answer.timedOut ? "model_timeout" : "model_failed", answer: said, ...(errorTail ? { stderr: errorTail } : {}) });
       return { outcome: "model_failed" };
     }
     const patch = proposedPatch(worktree, links);
     if (patch.length === 0) {
-      record(sha, { outcome: "no_change" });
+      record(sha, { outcome: "no_change", answer: said });
       return { outcome: "no_change" };
     }
     const problem = patchProblem(patch, secrets);
     if (problem) {
-      record(sha, { outcome: "patch_refused", detail: problem });
+      record(sha, { outcome: "patch_refused", detail: problem, answer: said });
       log(`ci-fix: #${pull.number} patch refused: ${problem}`);
       return { outcome: "patch_refused", reason: problem };
     }
     const encoded = encodePatch(patch);
     if (!encoded) {
-      record(sha, { outcome: "patch_too_large" });
+      record(sha, { outcome: "patch_too_large", answer: said });
       return { outcome: "patch_too_large" };
     }
     const queuedAt = clock();
     writeDispatchRequest(outbox, {
       prNumber: pull.number, headSha: sha, runIds: failed.map((run) => run.id), patchGzB64: encoded, now: queuedAt,
     });
-    record(sha, { outcome: "queued", queuedAt });
+    record(sha, { outcome: "queued", queuedAt, answer: said });
     return { outcome: "queued", pr: pull.number };
   } catch (error) {
     record(sha, { outcome: "error", detail: String(error?.message ?? error).slice(0, 200) });
