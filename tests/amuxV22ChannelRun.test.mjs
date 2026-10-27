@@ -7,8 +7,8 @@ import test from "node:test";
 
 import { amuxCliPricedModelId, estimateAmuxCliApiCost, makeAmuxCliUsageReceipt } from
   "../lib/amux/cliUsageLedgerCore.ts";
-import { amuxV22ChannelArgs, amuxV22ChannelEnv, amuxV22ChannelPreflight,
-  createAmuxV22ChannelRunHome,
+import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv,
+  amuxV22ChannelPreflight, createAmuxV22ChannelRunHome,
   parseAmuxV22ChannelOutput } from
   "../lib/amux/v22ChannelRun.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
@@ -16,6 +16,17 @@ import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
 
 const ATTEMPT = "00000000-0000-4000-8000-000000000001";
 const request = (role, modelId = "gpt-6-luna") => ({ role, modelId });
+const HOUR = 60 * 60 * 1000;
+// A synthetic, unsigned JWT that only carries an expiry.
+const jwt = (expiresAt) => ["e30", Buffer.from(JSON.stringify({
+  exp: Math.floor(expiresAt / 1000) })).toString("base64url"), "c3ludGhldGlj"].join(".");
+const codexLogin = (now, { expiresIn = 24 * HOUR, refreshedAgo = HOUR, ...extra } = {}) =>
+  JSON.stringify({ auth_mode: "chatgpt", OPENAI_API_KEY: null,
+    tokens: { id_token: jwt(now + expiresIn), access_token: jwt(now + expiresIn),
+      refresh_token: "synthetic-operator-refresh-secret", account_id: "acct-1" },
+    last_refresh: new Date(now - refreshedAgo).toISOString(), ...extra });
+const cursorLogin = (now, expiresIn = 24 * HOUR) => JSON.stringify({
+  accessToken: jwt(now + expiresIn), refreshToken: "synthetic-operator-refresh-secret" });
 const jsonl = (...events) => events.map((event) => JSON.stringify(event)).join("\n") + "\n";
 
 test("a read role gets no write tool; Copilot never gets a shell; Cursor never writes", () => {
@@ -59,13 +70,11 @@ test("a read role gets no write tool; Copilot never gets a shell; Cursor never w
   assert.equal(amuxV22ChannelEnv("openai", { homePath: "/h", claudeConfigDir: "/c" }).CODEX_HOME, "/c");
   const config = { homePath: "/h", claudeConfigDir: "/c" };
   const token = `gho_${"a".repeat(36)}`;
-  assert.equal(amuxV22ChannelEnv("github-copilot", config,
-    { readToken: () => Buffer.from(`${token}\n`) }).COPILOT_GITHUB_TOKEN, token);
-  assert.equal(amuxV22ChannelEnv("github-copilot", config,
-    { readToken: () => Buffer.from("not-a-token") }).COPILOT_GITHUB_TOKEN, undefined);
-  assert.equal(amuxV22ChannelEnv("github-copilot", config,
-    { readToken: () => { throw new Error("missing"); } }).COPILOT_GITHUB_TOKEN, undefined);
-  assert.equal(amuxV22ChannelEnv("cursor", config, { readToken: () => Buffer.from(token) })
+  // The token was checked when the run home was made; the env only carries it.
+  assert.equal(amuxV22ChannelEnv("github-copilot", config, { copilotToken: token })
+    .COPILOT_GITHUB_TOKEN, token);
+  assert.equal(amuxV22ChannelEnv("github-copilot", config).COPILOT_GITHUB_TOKEN, undefined);
+  assert.equal(amuxV22ChannelEnv("cursor", config, { copilotToken: token })
     .COPILOT_GITHUB_TOKEN, undefined);
 });
 
@@ -238,12 +247,15 @@ test("each run gets a fresh home holding only its sign-in, removed afterwards", 
   await mkdir(join(home, ".copilot"));
   await writeFile(join(home, ".copilot", "mcp-config.json"), "{}");
   await writeFile(join(cli, "config.toml"), "[mcp_servers.x]");
-  await writeFile(join(cli, "auth.json"), "codex-sign-in");
-  await writeFile(join(cli, "cursor", "auth.json"), "cursor-sign-in");
+  const now = Date.now();
+  const token = `gho_${"a".repeat(36)}`;
+  await writeFile(join(cli, "auth.json"), codexLogin(now));
+  await writeFile(join(cli, "cursor", "auth.json"), cursorLogin(now));
+  await writeFile(join(cli, "auth-token"), `${token}\n`);
   const config = { worktreePath: join(root, "w"), homePath: home, claudeConfigDir: cli };
   for (const [provider, expected] of [["openai", ["codex/auth.json"]],
     ["cursor", [".config/cursor/auth.json"]], ["github-copilot", []]]) {
-    const run = await createAmuxV22ChannelRunHome(provider, config);
+    const run = await createAmuxV22ChannelRunHome(provider, config, { now });
     const files = [];
     const walk = async (dir, prefix = "") => {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -253,12 +265,19 @@ test("each run gets a fresh home holding only its sign-in, removed afterwards", 
     };
     await walk(run.config.homePath);
     assert.deepEqual(files, expected, provider);
-    const env = amuxV22ChannelEnv(provider, run.config, { authDir: cli,
-      readToken: () => Buffer.from("x") });
+    const env = amuxV22ChannelEnv(provider, run.config, { copilotToken: run.copilotToken });
     assert.equal(env.HOME, run.config.homePath);
+    assert.equal(env.COPILOT_GITHUB_TOKEN, provider === "github-copilot" ? token : undefined);
+    for (const file of expected) {
+      // The operator's refresh secret never reaches the run home.
+      const copy = await readFile(join(run.config.homePath, file), "utf8");
+      assert.ok(!copy.includes("synthetic-operator-refresh-secret"), provider);
+    }
     if (provider === "openai") {
       assert.equal(env.CODEX_HOME, join(run.config.homePath, "codex"));
-      assert.equal(await readFile(join(env.CODEX_HOME, "auth.json"), "utf8"), "codex-sign-in");
+      const copy = JSON.parse(await readFile(join(env.CODEX_HOME, "auth.json"), "utf8"));
+      assert.equal(copy.tokens.refresh_token, "");
+      assert.equal(copy.tokens.access_token, JSON.parse(codexLogin(now)).tokens.access_token);
     }
     await run.cleanup();
     await assert.rejects(stat(run.config.homePath));
@@ -268,4 +287,31 @@ test("each run gets a fresh home holding only its sign-in, removed afterwards", 
   const empty = { ...config, claudeConfigDir: join(root, "missing") };
   await assert.rejects(createAmuxV22ChannelRunHome("openai", empty));
   assert.deepEqual((await readdir(home)).filter((name) => name.startsWith("run-")), []);
+});
+
+test("a sign-in the run must not use is refused before any run home is made", async () => {
+  const { mkdtemp, mkdir, writeFile, readdir } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "amux-v22-auth-"));
+  const home = join(root, "home");
+  const cli = join(root, "cli");
+  await mkdir(join(cli, "cursor"), { recursive: true });
+  await mkdir(home);
+  const config = { worktreePath: join(root, "w"), homePath: home, claudeConfigDir: cli };
+  const now = Date.now();
+  const refused = async (provider, file, body) => {
+    await writeFile(join(cli, file), body);
+    await assert.rejects(createAmuxV22ChannelRunHome(provider, config, { now }),
+      (error) => error instanceof AmuxV22ChannelAuthRefused, `${provider} ${file}`);
+  };
+  // Expiring within six hours: the run could need a refresh it cannot make.
+  await refused("openai", "auth.json", codexLogin(now, { expiresIn: 5 * HOUR }));
+  await refused("cursor", "cursor/auth.json", cursorLogin(now, 5 * HOUR));
+  // A Codex login not refreshed for over seven days, or one on an API key.
+  await refused("openai", "auth.json", codexLogin(now, { refreshedAgo: 8 * 24 * HOUR }));
+  await refused("openai", "auth.json", codexLogin(now, { OPENAI_API_KEY: "sk-synthetic" }));
+  await refused("openai", "auth.json", "not json");
+  await refused("github-copilot", "auth-token", "not-a-token");
+  assert.deepEqual(await readdir(home), []);
 });
