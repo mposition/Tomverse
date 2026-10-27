@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ReactNode } from "react";
 
 import {
+  AmuxCliModelIssueChips,
   AmuxWorkerCapabilityEditor,
   runAmuxWorkerCapabilityEdit,
   runAmuxWorkerCapabilityImport,
@@ -17,8 +18,14 @@ import {
   buildAmuxWorkerCapabilityAdminView,
   type AmuxWorkerCapabilityAdminView,
 } from "@/lib/amux/workerCapabilityCore";
-import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "@/lib/amux/workerRegistryCore";
+import { AMUX_WORKER_REGISTRY_V31_SEED } from "@/lib/amux/workerRegistryCore";
 import { amuxWorkerCapabilityFormFromRow, type AmuxWorkerCapabilityForm } from "@/lib/amux/workerCapabilityEditCore";
+import { buildAmuxCliModelCatalogAdminView } from "@/lib/amux/cliModelCatalogCore";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name: string) =>
+  name.slice(0, name.indexOf("-")) as import("@/lib/amux/workerRegistryCore").AmuxWorkerProviderClass;
+
 
 /**
  * The capability editor of AMUX › Operations settings › Workers (orchestration
@@ -130,31 +137,59 @@ test("a refusal by the ceiling rule, the latch or a stale revision stops on that
   assert.equal(unread.last("notice"), "unread");
 });
 
-const CHORE_ROW = VIEW.rows.find((row) => row.workerName === "claude-chore")!;
-const renderEditor = (form: AmuxWorkerCapabilityForm, row = CHORE_ROW, busy = false) => {
+const IMPL_ROW = VIEW.rows.find((row) => row.workerName === "claude-impl")!;
+const CATALOG = buildAmuxCliModelCatalogAdminView({
+  observed: [],
+  links: [],
+  registry: [
+    { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic",
+      catalogDeleted: false, enabled: true, status: "enabled", replacementModelId: null },
+    { id: "claude-opus-5", name: "Claude Opus 5", apiModel: "claude-opus-5", provider: "anthropic",
+      catalogDeleted: true, enabled: true, status: "enabled", replacementModelId: "claude-sonnet-5" },
+  ],
+});
+const renderEditor = (form: AmuxWorkerCapabilityForm, row = IMPL_ROW, cliModels: typeof CATALOG | null = CATALOG) => {
   const saved: AmuxWorkerCapabilityForm[] = [];
   const tree = AmuxWorkerCapabilityEditor({
-    m, row, form, busy, writesLatch: true,
+    m, row, form, busy: false, writesLatch: true, cliModels,
     onChange: () => {}, onCancel: () => {}, onSave: (sent) => saved.push(sent),
   });
   return { tree, saved };
 };
 
-test("the editor says why the store would refuse before sending, and holds the save", () => {
-  const blank = amuxWorkerCapabilityFormFromRow(CHORE_ROW);
-  assert.equal(byTestId(renderEditor(blank).tree, "amux-worker-capability-edit-save")[0]!.disabled, true);
-  const above = { ...blank, routingTags: ["implementation"] };
-  const refused = renderEditor(above).tree;
-  assert.match(textOf(byTestId(refused, "amux-worker-capability-edit-refusal")[0]!.children as ReactNode), /tag_above_ceiling/);
+test("the editor is a role, one model and whether AMUX hands it Tasks, and holds what the store would refuse", () => {
+  const blank = amuxWorkerCapabilityFormFromRow(IMPL_ROW);
+  // Only the presets this worker's ceiling allows are offered.
+  const preset = byTestId(renderEditor(blank).tree, "amux-worker-capability-edit-preset")[0]!;
+  assert.deepEqual(propsOf(preset.children as ReactNode).filter((props) => "value" in props).map((props) => props.value), ["chore", "impl"]);
+  // No free tag, tool or role inputs remain.
+  assert.equal(byTestId(renderEditor(blank).tree, "amux-worker-capability-edit-tools").length, 0);
+  // A Claude worker's model is chosen from the usable Anthropic models of Admin › Models.
+  const select = byTestId(renderEditor(blank).tree, "amux-worker-capability-edit-model")[0]!;
+  assert.deepEqual(propsOf(select.children as ReactNode).filter((props) => "value" in props).map((props) => props.value), ["", "claude-sonnet-5"]);
+  const refused = renderEditor({ ...blank, model: "gpt-6-luna", oneShot: true }).tree;
+  assert.match(textOf(byTestId(refused, "amux-worker-capability-edit-refusal")[0]!.children as ReactNode), /v22_model_unsupported/);
   assert.equal(byTestId(refused, "amux-worker-capability-edit-save")[0]!.disabled, true);
-  const fine = { ...blank, routingTags: ["chore"], tools: "shell, git" };
+  const fine = { ...blank, model: "claude-sonnet-5", oneShot: true };
   const { tree, saved } = renderEditor(fine);
   assert.equal(byTestId(tree, "amux-worker-capability-edit-refusal").length, 0);
   assert.equal(byTestId(tree, "amux-worker-capability-edit-save")[0]!.disabled, false);
-  assert.match(textOf(byTestId(tree, "amux-worker-capability-edit-preview")[0]!.children as ReactNode), /tools: git, shell/);
+  assert.match(textOf(byTestId(tree, "amux-worker-capability-edit-preview")[0]!.children as ReactNode), /tools: repo_read, repo_write, test_run/);
   const form = propsOf(tree).find((props) => props["data-testid"] === "amux-worker-capability-editor")!;
   (form.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
   assert.deepEqual(saved, [fine]);
+  // With no catalog the model is typed.
+  assert.equal(byTestId(renderEditor(blank, IMPL_ROW, null).tree, "amux-worker-capability-edit-model")[0]!.maxLength, 160);
+});
+
+test("a retired model shows its chip with the replacement Admin › Models names", () => {
+  const retired = { ...amuxWorkerCapabilityFormFromRow(IMPL_ROW), model: "claude-opus-5" };
+  const props = propsOf(renderEditor(retired).tree).find((candidate) => "cliModels" in candidate && candidate.model === "claude-opus-5")!;
+  const chips = AmuxCliModelIssueChips(props as Parameters<typeof AmuxCliModelIssueChips>[0]);
+  assert.ok(byTestId(chips, "amux-cli-model-issue-retired")[0], "the chip is shown");
+  assert.match(textOf(chips), /Retired in Tomverse · use Claude Sonnet 5/);
+  // A usable model shows no chip.
+  assert.equal(AmuxCliModelIssueChips({ m, cliModels: CATALOG, cli: "claude", model: "claude-sonnet-5" }), null);
 });
 
 test("an edit is one change against the recorded revision, receipt-checked and read back", async () => {
@@ -164,7 +199,7 @@ test("an edit is one change against the recorded revision, receipt-checked and r
     writesLatch: true,
   });
   const row = recorded.rows.find((candidate) => candidate.workerName === "codex-impl")!;
-  const form = { ...amuxWorkerCapabilityFormFromRow(row), tools: "shell" };
+  const form = { ...amuxWorkerCapabilityFormFromRow(row), model: "gpt-6.1-sol", oneShot: true };
   const posted: AmuxWorkerCapabilityImport[] = [];
   const io = (answer: (entry: AmuxWorkerCapabilityImport) => Response): AmuxWorkerCapabilityIo => ({
     post: async (entry) => { posted.push(entry); return answer(entry); },
@@ -172,9 +207,14 @@ test("an edit is one change against the recorded revision, receipt-checked and r
     failureOf: async () => FAILURE,
     networkFailure: () => FAILURE,
   });
-  assert.equal(await runAmuxWorkerCapabilityEdit(form, io(receipt), () => {}), true);
-  assert.deepEqual(posted, [{ workerName: "codex-impl", expectedRevision: 3, capability: { model: null, routingTags: ["implementation"], toolCapabilities: ["shell"], v22: null } }]);
-  assert.equal(await runAmuxWorkerCapabilityEdit(form, io(() => json(409, { error: "stale_revision" })), () => {}), false);
-  assert.equal(await runAmuxWorkerCapabilityEdit(form, io(() => json(503, { error: "outcome_unknown" })), () => {}), false);
+  assert.equal(await runAmuxWorkerCapabilityEdit(row, form, io(receipt), () => {}), true);
+  assert.deepEqual(posted, [{ workerName: "codex-impl", expectedRevision: 3, capability: {
+    model: "gpt-6.1-sol",
+    routingTags: ["bugfix", "implementation", "integration", "multi_file", "tests"],
+    toolCapabilities: ["repo_read", "repo_write", "test_run"],
+    v22: { model: "gpt-6.1-sol", roles: ["implement", "investigate"], tools: ["repo_read", "repo_write"] },
+  } }]);
+  assert.equal(await runAmuxWorkerCapabilityEdit(row, form, io(() => json(409, { error: "stale_revision" })), () => {}), false);
+  assert.equal(await runAmuxWorkerCapabilityEdit(row, form, io(() => json(503, { error: "outcome_unknown" })), () => {}), false);
   assert.equal(posted.length, 3);
 });

@@ -288,6 +288,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // guard body and three CHECK constraints admit the Codex, Copilot and Cursor
   // CLIs; no commit-deadline marker, classifier or deferred trigger changes.
   "20261026100000_amux_v22_all_providers",
+  // Worker CLI chosen at registration and the CLI model catalog, owner
+  // decision 2026-10-27: five worker name CHECKs and two new tables with an
+  // append-only guard; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261027100000_amux_cli_models_and_worker_cli",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

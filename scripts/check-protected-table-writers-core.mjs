@@ -1329,6 +1329,17 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The ALTER TABLE that replaces the usage ledger's source and shape CHECKs to admit the Copilot and Cursor CLIs. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
   },
+  ...["AmuxWorkerRegistryEvent", "AmuxWorkerCapabilityEvent", "AdminAuditLog"].map((table) => ({
+    path: "prisma/migrations/20261027100000_amux_cli_models_and_worker_cli/migration.sql",
+    table,
+    tableMentions: 1,
+    writeVerbs: 18,
+    reason:
+      (table === "AdminAuditLog"
+        ? "The one mention is the new CLI model link table's foreign key to its audit row (ON DELETE RESTRICT)."
+        : `The one mention is the ALTER TABLE that replaces ${table}'s worker name CHECK with the free grammar (owner decision 2026-10-27: the CLI is chosen at registration, not read from the name).`) +
+      " The migration only replaces five name CHECKs, drops the registry's name/class CHECK and creates the CLI model tables with their append-only guard; its write verbs are DROP/ALTER clauses, the guard's TG_OP comparison and words of comments. It writes no row.",
+  })),
   {
     path: "lib/amux/workerCapabilityStore.ts",
     table: "AmuxWorkerCapabilityEvent",

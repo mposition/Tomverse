@@ -337,6 +337,10 @@ run(
     // the closed tag and v22 lists, every tag and role within the worker's
     // current ceiling and class, the owner's audit, nothing changed.
     "tests/integration/amux-worker-capability.db.test.ts",
+    // The worker CLIs' model catalog (owner decision 2026-10-27): the host
+    // refresh, each owner link bound to its audit and never changed, and the
+    // cost catalog's one statement over the registry and the links.
+    "tests/integration/amux-cli-model-catalog.db.test.ts",
     // AMUX card display numbers (docs/policy/amux-card-display-key.md §3):
     // the format, uniqueness and immutability of a card's number and a
     // Feature's prefix, and a per-prefix counter that only advances by one

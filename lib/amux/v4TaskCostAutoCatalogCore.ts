@@ -79,6 +79,11 @@ export type AmuxTaskCatalogResolvedPrice = {
   cachedInputPriceMultiplier: number;
   /** The verified five-minute write rate; null when none was verified. */
   cacheWriteUsdPerMillionTokens: number | null;
+  /**
+   * The Admin › Models entry an owner's CLI model link priced the route from
+   * (owner decision 2026-10-27); absent when the route's own model name did.
+   */
+  linkedModelId?: string;
 };
 
 export type AmuxTaskAutoCatalog =
@@ -110,8 +115,8 @@ const gradeOf = (roleCeiling: string | null): AmuxExecutionGrade | null =>
 
 export function deriveAmuxV4TaskAutoCatalog(input: {
   workers: readonly AmuxTaskCatalogWorker[];
-  /** The registry price for a model at a prompt of this many input tokens. */
-  priceFor: (modelId: string, inputTokens: number) => AmuxTaskCatalogResolvedPrice | null;
+  /** The registry price for a provider's model at a prompt of this many input tokens. */
+  priceFor: (modelId: string, inputTokens: number, provider: string) => AmuxTaskCatalogResolvedPrice | null;
   caps?: Readonly<Record<AmuxExecutionGrade, AmuxTaskCatalogGradeCaps>>;
 }): AmuxTaskAutoCatalog {
   const caps = input.caps ?? AMUX_TASK_CATALOG_CAPS;
@@ -121,7 +126,7 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
     const grade = gradeOf(worker.roleCeiling);
     const roles = AMUX_TASK_CATALOG_ROLES.filter((role) => worker.roles.includes(role));
     if (!grade || roles.length === 0) continue;
-    const price = input.priceFor(worker.modelId, caps[grade].inputTokens);
+    const price = input.priceFor(worker.modelId, caps[grade].inputTokens, worker.provider);
     const uncached = microUsd(price?.inputUsdPerMillionTokens);
     const output = microUsd(price?.outputUsdPerMillionTokens);
     // A zero or missing price never becomes a free route.
@@ -145,7 +150,8 @@ export function deriveAmuxV4TaskAutoCatalog(input: {
       enabled: true,
       roles,
       grades: [grade],
-      pricingSource: `model-registry:${worker.modelId}`,
+      // A linked name names the entry that priced it; an unlinked one is unchanged.
+      pricingSource: `model-registry:${price.linkedModelId ?? worker.modelId}`,
       pricingVerifiedAt: PRICES_FROM,
       pricingExpiresAt: PRICES_UNTIL,
       uncachedInputMicroUsdPerMillion: uncached,

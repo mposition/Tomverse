@@ -65,7 +65,7 @@ const owner = (): Session =>
 
 const register = (session: Session, workerName: string, roleCeiling: string, desiredState: string) =>
   withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryChange, (tx) =>
-    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName, roleCeiling, desiredState, expectedRevision: 0 }),
+    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName, providerClass: workerName.slice(0, workerName.indexOf("-")), roleCeiling, desiredState, expectedRevision: 0 }),
   );
 
 const record = (session: Session, workerName: string, capability: unknown) =>
@@ -143,7 +143,7 @@ test("registration and heartbeat ask the derived catalog inside their own transa
   // Once it leaves the catalog its heartbeat is still accepted -- a refusal
   // would halt the bridge -- but it is no longer dispatch-ready.
   await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryChange, (tx) =>
-    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName: "claude-impl", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 1 }),
+    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName: "claude-impl", providerClass: "claude", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 1 }),
   );
   assert.equal((await beat()).accepted, true);
   assert.equal((await prisma.amuxWorkerRuntime.findUniqueOrThrow({ where: { workerName: "claude-impl" } })).dispatchReady, false);

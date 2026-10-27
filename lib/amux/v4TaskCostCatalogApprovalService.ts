@@ -1,9 +1,12 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import type { ModelRegistryEntry, Prisma } from "@prisma/client";
 
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { registryRowToModel } from "@/lib/modelRegistry";
+import { amuxCliModelLinkFor, amuxCliModelLinkMap,
+  type AmuxCliModelLink } from "./cliModelCatalogCore.ts";
+import { AMUX_V22_PROVIDERS, amuxV22Provider } from "./v22WorkerClaimCore.ts";
 import { calculateV4TaskCeilingFromCatalog } from "./v4TaskCostCatalogCore.ts";
 import { deriveAmuxV4TaskAutoCatalog,
   type AmuxTaskCatalogResolvedPrice } from "./v4TaskCostAutoCatalogCore.ts";
@@ -43,17 +46,38 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
   const ceilings = new Map(registrations.map((registration) =>
     [registration.workerName, registration.roleCeiling]));
   // Any provider's row: a Codex, Copilot or Cursor route prices from the
-  // Admin › Models entry its model ID names, as a Claude route does.
-  const rows = await tx.modelRegistryEntry.findMany({
-    where: { catalogDeleted: false } });
+  // Admin › Models entry its model ID names, as a Claude route does -- unless
+  // the owner linked that CLI's name to an entry (owner decision 2026-10-27).
+  // Both are read in one statement, so no AMUX boundary that prices a Task
+  // sends one more.
+  const [read] = await tx.$queryRaw<Array<{ rows: unknown; links: unknown }>>`
+    SELECT
+      COALESCE((SELECT pg_catalog.json_agg(entry) FROM "ModelRegistryEntry" entry
+        WHERE NOT entry."catalogDeleted"), '[]'::json) AS "rows",
+      COALESCE((SELECT pg_catalog.json_agg(link) FROM (
+        SELECT DISTINCT ON ("cli", "cliModel") "cli", "cliModel", "pricedModelId"
+        FROM "AmuxCliModelLinkEvent"
+        ORDER BY "cli", "cliModel", "sequence" DESC) link), '[]'::json) AS "links"
+  `;
+  if (!read || !Array.isArray(read.rows) || !Array.isArray(read.links)) {
+    throw new AmuxV4TaskCatalogApprovalError("unavailable");
+  }
+  // The JSON carries every column the registry reader uses; no date is read.
+  const rows = read.rows as ModelRegistryEntry[];
+  const links = amuxCliModelLinkMap(read.links as AmuxCliModelLink[]);
   const unreadable = new Set<string>();
   const models = rows.flatMap((row) => {
     try { return [registryRowToModel(row)]; } catch { unreadable.add(row.id); return []; }
   });
-  const priceFor = (modelId: string, inputTokens: number):
+  const priceFor = (modelId: string, inputTokens: number, provider: string):
     AmuxTaskCatalogResolvedPrice | null => {
-    const exactRows = rows.filter((row) => row.id === modelId);
-    const pool = exactRows.length > 0 ? exactRows :
+    const known = amuxV22Provider(provider);
+    const link = known === null ? { linked: false as const } :
+      amuxCliModelLinkFor(links, AMUX_V22_PROVIDERS[known].cli, modelId);
+    // A link to nothing holds the name; a link prices from its entry alone.
+    if (link.linked && link.pricedModelId === null) return null;
+    const exactRows = rows.filter((row) => row.id === (link.linked ? link.pricedModelId : modelId));
+    const pool = exactRows.length > 0 || link.linked ? exactRows :
       rows.filter((row) => row.apiModel === modelId);
     // A row that cannot be read might be the dearest: price nothing rather
     // than fall through to a cheaper one.
@@ -70,6 +94,7 @@ export async function readAmuxV4TaskAutoCatalog(tx: Prisma.TransactionClient) {
       inputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.inputUsdPerMillionTokens)),
       outputUsdPerMillionTokens: Math.max(...resolved.map((row) => row.outputUsdPerMillionTokens)),
       cachedInputPriceMultiplier: Math.max(...resolved.map((row) => row.cachedInputPriceMultiplier)),
+      ...(link.linked && link.pricedModelId !== null ? { linkedModelId: link.pricedModelId } : {}),
     };
   };
   return deriveAmuxV4TaskAutoCatalog({ priceFor,

@@ -70,7 +70,7 @@ const rejectsWith = async (promise: Promise<unknown>, pattern: RegExp) => {
 
 const registerWorker = (session: Session, workerName: string, roleCeiling: string, desiredState = "requested") =>
   withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryChange, (tx) =>
-    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName, roleCeiling, desiredState, expectedRevision: 0 }),
+    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName, providerClass: workerName.slice(0, workerName.indexOf("-")), roleCeiling, desiredState, expectedRevision: 0 }),
   );
 
 const write = (session: Session, workerName: string, capability: unknown, expectedRevision = 0) =>
@@ -151,7 +151,7 @@ test("only a registered, non-retired worker has capabilities; revisions follow o
   await rejectsWith(insertRaw(userId, { workerName: "claude-ghost", routingTags: ["chore"] }), /AMUX_WORKER_CAPABILITY_NOT_REGISTERED/);
   await registerWorker(session, "codex-chore", "chore");
   await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryChange, (tx) =>
-    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName: "codex-chore", roleCeiling: "chore", desiredState: "retired", expectedRevision: 1 }));
+    recordAmuxWorkerRegistryChangeByOwner(tx, { session, workerName: "codex-chore", providerClass: "codex", roleCeiling: "chore", desiredState: "retired", expectedRevision: 1 }));
   await rejectsWith(insertRaw(userId, { workerName: "codex-chore", routingTags: ["chore"] }), /AMUX_WORKER_CAPABILITY_RETIRED/);
   await registerWorker(session, "claude-impl", "implementation");
   await rejectsWith(insertRaw(userId, { workerName: "claude-impl", revision: 2, routingTags: ["chore"] }), /AMUX_WORKER_CAPABILITY_STALE_REVISION/);

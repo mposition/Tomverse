@@ -127,8 +127,8 @@ async function loadRoute(): Promise<Route> {
         AmuxWorkerRegistryWriteError: FakeWriteError,
         recordAmuxWorkerRegistryChangeByOwner: async (tx: unknown, input: Record<string, unknown>) => {
           assert.deepEqual(tx, { fake: "tx" });
-          const { workerName, roleCeiling, desiredState, expectedRevision } = input;
-          world.changes.push({ workerName, roleCeiling, desiredState, expectedRevision });
+          const { workerName, providerClass, roleCeiling, desiredState, expectedRevision } = input;
+          world.changes.push({ workerName, providerClass, roleCeiling, desiredState, expectedRevision });
           if (world.storeError) throw world.storeError;
           return {
             eventId: "event-1",
@@ -159,7 +159,8 @@ const stale = () => ({
   session: { user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() } },
 });
 
-const VALID = { workerName: "cursor-impl", roleCeiling: "implementation", desiredState: "requested", expectedRevision: 0 };
+// The CLI is chosen, never read from the name (owner decision 2026-10-27).
+const VALID = { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "implementation", desiredState: "requested", expectedRevision: 0 };
 
 test("any administrator reads the registry; nobody else learns it exists", async () => {
   const { GET } = await loadRoute();
@@ -234,6 +235,8 @@ test("a body outside the strict shape never reaches the store; the change rule's
     { ...VALID, expectedRevision: "0" },
     { ...VALID, expectedRevision: -1 },
     { ...VALID, workerName: "x".repeat(41) },
+    { ...VALID, providerClass: undefined },
+    { ...VALID, providerClass: "x".repeat(17) },
     "not json",
   ]) {
     reset();

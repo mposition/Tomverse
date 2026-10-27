@@ -23,6 +23,7 @@ import {
   AMUX_WORKER_PROVIDER_CLASSES,
   AMUX_WORKER_PROVIDER_CLASS_TABLE,
   AMUX_WORKER_REGISTRY_AUDIT_ACTIONS,
+  AMUX_WORKER_NAME_PATTERN,
   AMUX_WORKER_ROLE_CEILINGS,
   AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD,
   AMUX_WORKER_TRIAL_CARD_COUNT,
@@ -384,6 +385,7 @@ for (const [label, key, auditStatements] of [
       const result = await recordAmuxWorkerRegistryChangeByOwner(tx, {
         session,
         workerName: "cursor-impl",
+        providerClass: "cursor",
         roleCeiling: "implementation",
         desiredState: "requested",
         expectedRevision: 0,
@@ -437,6 +439,7 @@ test("a later change is audited as a change, over the revision the owner saw", a
     const result = await recordAmuxWorkerRegistryChangeByOwner(tx, {
       session,
       workerName: "claude-impl",
+      providerClass: "claude",
       roleCeiling: "chore",
       desiredState: "paused",
       expectedRevision: 3,
@@ -457,6 +460,7 @@ test("the owner activates directly: a first active event and a requested or paus
       const result = await recordAmuxWorkerRegistryChangeByOwner(tx, {
         session,
         workerName: "cursor-impl",
+        providerClass: "cursor",
         roleCeiling: "implementation",
         desiredState: "active",
         expectedRevision: 0,
@@ -471,6 +475,7 @@ test("the owner activates directly: a first active event and a requested or paus
       const result = await recordAmuxWorkerRegistryChangeByOwner(tx, {
         session,
         workerName: "copilot-impl",
+        providerClass: "copilot",
         roleCeiling: "implementation",
         desiredState: "active",
         expectedRevision: 2,
@@ -486,10 +491,10 @@ test("the owner activates directly: a first active event and a requested or paus
 
 test("a refused change writes nothing: bad input sends no statement, a refused rule stops after the read", async () => {
   for (const input of [
-    { workerName: "devin-worker", roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 },
-    { workerName: "cursor-impl", roleCeiling: "review", desiredState: "requested", expectedRevision: 0 },
-    { workerName: "cursor-impl", roleCeiling: "chore", desiredState: "autonomous", expectedRevision: 0 },
-    { workerName: "cursor-impl", roleCeiling: "chore", desiredState: "requested", expectedRevision: "0" },
+    { workerName: "devin-worker", providerClass: "devin", roleCeiling: "chore", desiredState: "requested", expectedRevision: 0 },
+    { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "review", desiredState: "requested", expectedRevision: 0 },
+    { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "chore", desiredState: "autonomous", expectedRevision: 0 },
+    { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "chore", desiredState: "requested", expectedRevision: "0" },
   ]) {
     const { tx, sent } = recordingTx();
     await assert.rejects(
@@ -504,6 +509,7 @@ test("a refused change writes nothing: bad input sends no statement, a refused r
       recordAmuxWorkerRegistryChangeByOwner(tx, {
         session: { expires: session.expires },
         workerName: "cursor-impl",
+        providerClass: "cursor",
         roleCeiling: "chore",
         desiredState: "requested",
         expectedRevision: 0,
@@ -513,26 +519,31 @@ test("a refused change writes nothing: bad input sends no statement, a refused r
     assert.equal(sent.length, 0);
   }
   for (const [newest, input, code] of [
-    [[], { workerName: "cursor-impl", roleCeiling: "chore", desiredState: "paused", expectedRevision: 0 }, "first_state_invalid"],
+    [[], { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "chore", desiredState: "paused", expectedRevision: 0 }, "first_state_invalid"],
     [
       [{ workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "paused", revision: 2 }],
-      { workerName: "codex-impl", roleCeiling: "contract", desiredState: "active", expectedRevision: 2 },
+      { workerName: "codex-impl", providerClass: "codex", roleCeiling: "contract", desiredState: "active", expectedRevision: 2 },
       "role_widening_requires_trial",
     ],
-    [[], { workerName: "cursor-impl", roleCeiling: "contract", desiredState: "requested", expectedRevision: 0 }, "role_above_class"],
+    [[], { workerName: "cursor-impl", providerClass: "cursor", roleCeiling: "contract", desiredState: "requested", expectedRevision: 0 }, "role_above_class"],
     [
       [{ workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "retired", revision: 2 }],
-      { workerName: "codex-impl", roleCeiling: "implementation", desiredState: "requested", expectedRevision: 2 },
+      { workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "requested", expectedRevision: 2 },
       "retired",
     ],
     [
       [{ workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "active", revision: 2 }],
-      { workerName: "codex-impl", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 1 },
+      { workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 1 },
       "stale_revision",
     ],
     [
       [{ workerName: "codex-impl", providerClass: "claude", roleCeiling: "implementation", desiredState: "active", revision: 2 }],
-      { workerName: "codex-impl", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 2 },
+      { workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 2 },
+      "class_changed",
+    ],
+    [
+      [{ workerName: "codex-impl", providerClass: "devin", roleCeiling: "implementation", desiredState: "active", revision: 2 }],
+      { workerName: "codex-impl", providerClass: "codex", roleCeiling: "implementation", desiredState: "paused", expectedRevision: 2 },
       "unreadable_previous",
     ],
   ]) {
@@ -552,6 +563,7 @@ test("the Admin route's DB boundaries are the store's statements at their larges
     await recordAmuxWorkerRegistryChangeByOwner(tx, {
       session,
       workerName: "claude-impl",
+      providerClass: "claude",
       roleCeiling: "implementation",
       desiredState: "active",
       expectedRevision: 0,
@@ -571,4 +583,20 @@ test("the Admin route's DB boundaries are the store's statements at their larges
     prismaCallCeiling: sent.length + 2,
     isolation: "read",
   });
+});
+
+test("migration 20261027100000 frees the name in all five worker tables and drops the name/class CHECK", () => {
+  // Owner decision 2026-10-27: the CLI is chosen at registration, not read from the name.
+  const sql = withoutSqlComments(read("prisma/migrations/20261027100000_amux_cli_models_and_worker_cli/migration.sql"));
+  const grammar = `'${AMUX_WORKER_NAME_PATTERN.source}'`;
+  for (const table of [...TABLES, "AmuxWorkerCapabilityEvent"]) {
+    assert.ok(
+      sql.includes(`DROP CONSTRAINT "${table}_worker_name_check",\n  ADD CONSTRAINT "${table}_worker_name_check"\n      CHECK ("workerName" ~ ${grammar} AND "workerName" <> 'engineering-runner');`),
+      table,
+    );
+  }
+  assert.match(sql, /DROP CONSTRAINT "AmuxWorkerRegistryEvent_name_class_check"/);
+  // The registry guard is not replaced: it still refuses a class change.
+  assert.doesNotMatch(sql, /amux_worker_registry_event_guard/);
+  assert.match(functionStatement(withoutSqlComments(read(GUARD_MIGRATION)), GUARD_HEAD), /AMUX_WORKER_REGISTRY_CLASS_CHANGED/);
 });

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
+  AmuxCliModelIssueChips,
   AmuxWorkerCapabilityEditor,
   runAmuxWorkerCapabilityEdit,
   type AmuxWorkerCapabilityIo,
@@ -14,9 +15,11 @@ import {
   type AmuxWorkerCapabilityUpdate,
 } from "@/components/admin/AmuxWorkerCapabilityPanel";
 import {
+  runAmuxWorkerRegistration,
   runAmuxWorkerRegistryReread,
   runAmuxWorkerSeedRegistration,
   runAmuxWorkerStateChange,
+  type AmuxWorkerRegistrationRequest,
   type AmuxWorkerRegistryIo,
   type AmuxWorkerRegistryNotice,
   type AmuxWorkerRegistryPending,
@@ -32,6 +35,7 @@ import {
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import { adminAmuxWorkersMessages } from "@/lib/adminMessages/amuxWorkers";
+import type { AmuxCliModelCatalogAdminView } from "@/lib/amux/cliModelCatalogCore";
 import {
   parseAmuxWorkerCapabilityAdminView,
   type AmuxWorkerCapabilityAdminRow,
@@ -58,8 +62,14 @@ import {
   type AmuxWorkerStatusTone,
 } from "@/lib/amux/workerOverviewCore";
 import {
+  AMUX_WORKER_PROVIDER_CLASSES,
+  AMUX_WORKER_ROLE_CEILINGS,
+  amuxWorkerRoleWithinClass,
   amuxWorkerSeedEntriesToRegister,
+  isAmuxWorkerName,
   parseAmuxWorkerRegistryAdminView,
+  type AmuxWorkerProviderClass,
+  type AmuxWorkerRoleCeiling,
   type AmuxWorkerRegistryAdminView,
   type AmuxWorkerSeedEntry,
 } from "@/lib/amux/workerRegistryCore";
@@ -122,6 +132,92 @@ const refusalSentence = (m: Messages, code: string) =>
   (m.change.refusal as Record<string, string>)[code] ?? m.change.failed;
 
 /**
+ * The owner names a new worker and chooses the CLI it runs (owner decision
+ * 2026-10-27: the name no longer carries the CLI) and its role ceiling. It
+ * starts waiting to be turned on. Only what the route would accept is sent.
+ */
+export function AmuxWorkerRegisterForm({
+  m,
+  busy,
+  taken,
+  onRegister,
+}: {
+  m: Messages;
+  busy: boolean;
+  /** Names already registered (a retired name is not reused). */
+  taken: ReadonlySet<string>;
+  onRegister: (request: AmuxWorkerRegistrationRequest) => void;
+}) {
+  const [workerName, setWorkerName] = useState("");
+  const [providerClass, setProviderClass] = useState<AmuxWorkerProviderClass>("codex");
+  const [roleCeiling, setRoleCeiling] = useState<AmuxWorkerRoleCeiling>("implementation");
+  const ceilings = AMUX_WORKER_ROLE_CEILINGS.filter((ceiling) => amuxWorkerRoleWithinClass(providerClass, ceiling));
+  const ceiling = ceilings.includes(roleCeiling) ? roleCeiling : ceilings[ceilings.length - 1]!;
+  const name = workerName.trim();
+  const problem = name.length === 0 ? null : !isAmuxWorkerName(name) ? m.register.nameInvalid
+    : taken.has(name) ? m.register.nameTaken : null;
+  const inputClass = "min-h-11 w-full rounded-md border border-zinc-600 bg-zinc-900 px-3 text-base text-zinc-100";
+  return (
+    <details className="rounded-xl border border-zinc-700 p-4" data-testid="amux-workers-register">
+      <summary className="min-h-11 cursor-pointer text-sm font-semibold text-zinc-100">{m.register.title}</summary>
+      <form
+        className="mt-3 grid gap-3 sm:grid-cols-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!busy && name.length > 0 && problem === null) onRegister({ workerName: name, providerClass, roleCeiling: ceiling });
+        }}
+      >
+        <p className="text-sm text-zinc-300 sm:col-span-3">{m.register.help}</p>
+        <label className="flex flex-col gap-1 text-sm text-zinc-200">
+          {m.register.name}
+          <input
+            className={inputClass}
+            value={workerName}
+            maxLength={40}
+            autoComplete="off"
+            onChange={(event) => setWorkerName(event.target.value.toLowerCase())}
+            data-testid="amux-workers-register-name"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-zinc-200">
+          {m.register.cli}
+          <select
+            className={inputClass}
+            value={providerClass}
+            onChange={(event) => setProviderClass(event.target.value as AmuxWorkerProviderClass)}
+            data-testid="amux-workers-register-cli"
+          >
+            {AMUX_WORKER_PROVIDER_CLASSES.map((cli) => <option key={cli} value={cli}>{m.register.cliName[cli]}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-zinc-200">
+          {m.register.ceiling}
+          <select
+            className={inputClass}
+            value={ceiling}
+            onChange={(event) => setRoleCeiling(event.target.value as AmuxWorkerRoleCeiling)}
+            data-testid="amux-workers-register-ceiling"
+          >
+            {ceilings.map((entry) => <option key={entry} value={entry}>{entry}</option>)}
+          </select>
+        </label>
+        {problem === null ? null : (
+          <p role="alert" className="text-sm text-red-300 sm:col-span-3" data-testid="amux-workers-register-problem">{problem}</p>
+        )}
+        <button
+          type="submit"
+          className={`${buttonClass} w-fit`}
+          disabled={busy || name.length === 0 || problem !== null}
+          data-testid="amux-workers-register-submit"
+        >
+          {m.register.submit}
+        </button>
+      </form>
+    </details>
+  );
+}
+
+/**
  * AMUX › Operations settings › Workers, without hooks, so a test can call it
  * and read the tree it returns. It shows what the overview says and offers
  * what the viewer may do; whether a change succeeds is the route's decision
@@ -160,6 +256,9 @@ export function AmuxWorkersOverviewView({
   onEditCancel,
   onEditSave,
   onCopy,
+  cliModels,
+  onFix,
+  onRegister,
 }: {
   m: Messages;
   cm: CapabilityMessages;
@@ -195,9 +294,20 @@ export function AmuxWorkersOverviewView({
   onEditCancel: () => void;
   onEditSave: (form: AmuxWorkerCapabilityForm) => void;
   onCopy: (command: string) => void;
+  /** Each CLI's model names, for the editor's choices and the rows' chips; null when unread. */
+  cliModels?: AmuxCliModelCatalogAdminView | null;
+  /** Opens a worker's details with its editor, from a model chip. */
+  onFix?: (row: AmuxWorkerOverviewRow) => void;
+  /** Registers a new worker the owner named, with the CLI it runs. */
+  onRegister?: (request: AmuxWorkerRegistrationRequest) => void;
 }) {
   const busy = pending !== null;
   const canChange = isOwner && writesLatch;
+  const models = cliModels ?? null;
+  // The model a worker runs: its one-shot model when it takes Tasks.
+  const usedModel = (row: AmuxWorkerOverviewRow) => row.capability?.current?.capability.v22?.model ?? row.model;
+  const fixable = (row: AmuxWorkerOverviewRow) =>
+    canChange && overview !== null && overview.capabilitiesReadable && row.capability !== null && onFix !== undefined;
 
   if (overview === null) {
     return (
@@ -369,7 +479,10 @@ export function AmuxWorkersOverviewView({
                 <dt className="text-zinc-400">{m.drawer.roleCeiling}</dt>
                 <dd className="font-mono text-xs font-semibold">{row.roleCeiling}</dd>
                 <dt className="text-zinc-400">{m.drawer.model}</dt>
-                <dd className="break-all font-mono text-xs font-semibold">{row.model ?? m.drawer.none}</dd>
+                <dd className="flex flex-wrap items-center gap-1">
+                  <span className="break-all font-mono text-xs font-semibold">{usedModel(row) ?? m.drawer.none}</span>
+                  <AmuxCliModelIssueChips m={cm} cliModels={models} cli={row.providerClass} model={usedModel(row)} />
+                </dd>
                 <dt className="text-zinc-400">{m.drawer.tags}</dt>
                 <dd className="flex flex-wrap gap-1">
                   {row.routingTags.length === 0 ? <span className="text-xs">{m.drawer.none}</span> : row.routingTags.map((tag) => <span key={tag} className={chipClass}>{tag}</span>)}
@@ -383,6 +496,7 @@ export function AmuxWorkersOverviewView({
                   form={form}
                   busy={capabilityBusy}
                   writesLatch={writesLatch}
+                  cliModels={models}
                   onChange={onEditChange}
                   onCancel={onEditCancel}
                   onSave={onEditSave}
@@ -539,7 +653,14 @@ export function AmuxWorkersOverviewView({
                           <span className="text-xs text-zinc-400">{m.noCapability}</span>
                         ) : (
                           <>
-                            {row.model === null ? null : <span className={chipClass}>{row.model}</span>}
+                            {usedModel(row) === null ? null : <span className={chipClass}>{usedModel(row)}</span>}
+                            <AmuxCliModelIssueChips
+                              m={cm}
+                              cliModels={models}
+                              cli={row.providerClass}
+                              model={usedModel(row)}
+                              onFix={fixable(row) ? () => onFix!(row) : undefined}
+                            />
                             {row.routingTags.map((tag) => <span key={tag} className={chipClass}>{tag}</span>)}
                           </>
                         )}
@@ -592,6 +713,10 @@ export function AmuxWorkersOverviewView({
             </button>
           </div>
         </details>
+      ) : null}
+
+      {canChange && onRegister !== undefined ? (
+        <AmuxWorkerRegisterForm m={m} busy={busy} taken={new Set(rows.map((row) => row.workerName))} onRegister={onRegister} />
       ) : null}
 
       {runNotice}
@@ -796,6 +921,7 @@ export function AmuxWorkersOverviewPanel({
         void runAmuxWorkerStateChange(
           {
             workerName: row.workerName,
+            providerClass: row.providerClass,
             roleCeiling: row.roleCeiling,
             desiredState: AMUX_WORKER_ACTION_TARGET[action],
             expectedRevision: row.revision,
@@ -812,13 +938,36 @@ export function AmuxWorkersOverviewPanel({
       onEditStart={(row) => setEditing(amuxWorkerCapabilityFormFromRow(row))}
       onEditChange={setEditing}
       onEditCancel={() => setEditing(null)}
-      onEditSave={(form) =>
-        void runAmuxWorkerCapabilityEdit(form, capabilityIo, applyCapability).then((saved) => {
+      onEditSave={(form) => {
+        const row = capabilityView?.rows.find((candidate) => candidate.workerName === form.workerName);
+        if (!row) return;
+        void runAmuxWorkerCapabilityEdit(row, form, capabilityIo, applyCapability).then((saved) => {
           if (saved) {
             setEditing(null);
             router.refresh();
           }
-        })}
+        });
+      }}
+      cliModels={capabilityView?.cliModels ?? null}
+      onFix={(row) => {
+        if (openWorker === null && typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+          returnFocus.current = document.activeElement;
+        }
+        setOpenWorker(row.workerName);
+        setCapabilityNotice(null);
+        setCapabilityRefusal(null);
+        setCapabilityFailure(null);
+        setEditing(row.capability === null ? null : amuxWorkerCapabilityFormFromRow(row.capability));
+      }}
+      onRegister={(request) => {
+        setLastRun("change");
+        setChangeWorker(request.workerName);
+        void runAmuxWorkerRegistration(request, registryIo, applyRegistry).then(async () => {
+          // A new worker also has a capability row to edit.
+          applyCapability({ view: await capabilityIo.read() });
+          router.refresh();
+        });
+      }}
       onCopy={(command) => {
         try {
           void navigator.clipboard.writeText(command).then(() => setCopied(true), () => setCopied(false));

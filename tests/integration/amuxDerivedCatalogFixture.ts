@@ -67,7 +67,7 @@ export async function seedAmuxWorkerCatalog(workers: readonly AmuxFixtureWorker[
     if (!roleCeiling) throw new Error(`${worker.worker_name} is not one of the seven seed workers`);
     await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerRegistryChange, (tx) =>
       recordAmuxWorkerRegistryChangeByOwner(tx, {
-        session, workerName: worker.worker_name, roleCeiling, desiredState: "active", expectedRevision: 0,
+        session, workerName: worker.worker_name, providerClass: worker.worker_name.slice(0, worker.worker_name.indexOf("-")), roleCeiling, desiredState: "active", expectedRevision: 0,
       }));
     await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.workerCapabilityChange, (tx) =>
       recordAmuxWorkerCapabilityByOwner(tx, {

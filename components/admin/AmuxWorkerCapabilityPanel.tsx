@@ -3,23 +3,25 @@
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import type { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import {
+  amuxCliModelOptions,
+  amuxCliModelStatus,
+  type AmuxCliModelCatalogAdminView,
+  type AmuxCliModelIssue,
+} from "@/lib/amux/cliModelCatalogCore";
+import {
   AMUX_WORKER_CAPABILITY_REFUSALS,
-  AMUX_WORKER_ROUTING_TAG_REQUIREMENTS,
-  AMUX_WORKER_ROUTING_TAGS,
-  AMUX_WORKER_V22_ROLE_REQUIREMENTS,
-  AMUX_WORKER_V22_ROLES,
-  AMUX_WORKER_V22_TOOLS,
   type AmuxWorkerCapability,
   type AmuxWorkerCapabilityAdminRow,
   type AmuxWorkerCapabilityAdminView,
 } from "@/lib/amux/workerCapabilityCore";
 import {
-  amuxToggleListValue,
   amuxWorkerCapabilityFormChanges,
   amuxWorkerCapabilityFormRefusal,
   amuxWorkerCapabilityFromForm,
+  amuxWorkerCapabilityIsCustom,
   type AmuxWorkerCapabilityForm,
 } from "@/lib/amux/workerCapabilityEditCore";
+import { amuxWorkerProfilePresetsFor, type AmuxWorkerProfilePreset } from "@/lib/amux/workerProfilePresetCore";
 
 type Messages = (typeof adminAmuxWorkerCapabilityMessages)["en"];
 
@@ -36,18 +38,66 @@ const describe = (m: Messages, capability: AmuxWorkerCapability | null) => {
   const parts = [`${m.tags}: ${capability.routingTags.join(", ")}`];
   if (capability.toolCapabilities.length > 0) parts.push(`${m.tools}: ${capability.toolCapabilities.join(", ")}`);
   if (capability.model) parts.push(`${m.model}: ${capability.model}`);
-  if (capability.v22) parts.push(`${m.v22}: ${capability.v22.roles.join(", ")} (${capability.v22.tools.join(", ")}, ${capability.v22.model})`);
+  if (capability.v22) parts.push(`${m.oneShotTasks}: ${capability.v22.roles.join(", ")}`);
   return parts.join(" · ");
 };
 
 const inputClass =
   "min-h-11 w-full rounded-md border px-2 py-1 text-base border-zinc-500 bg-zinc-900 text-zinc-100";
 const checkLabelClass = "flex min-h-11 items-center gap-2 text-sm text-zinc-200";
+const ISSUE_TONE: Readonly<Record<AmuxCliModelIssue, string>> = {
+  retired: "border-red-500/40 bg-red-500/10 text-red-300",
+  disabled: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  unpriced: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  unlisted: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+};
 
 /**
- * The owner's edit form for one worker (version 35 R2a, "Admin 편집"). Every
- * control is labelled; the save is held while the store's rule would refuse
- * the form or nothing differs, and the reason is shown before sending.
+ * What is wrong with a worker's model, as chips: retired or disabled in
+ * Tomverse (with the replacement Admin › Models names), not priced, or no
+ * longer offered by the CLI. Nothing when it is fine or the catalog is unread.
+ */
+export function AmuxCliModelIssueChips({
+  m,
+  cliModels,
+  cli,
+  model,
+  onFix,
+}: {
+  m: Messages;
+  cliModels: AmuxCliModelCatalogAdminView | null;
+  cli: string;
+  model: string | null;
+  /** When given, each chip is a button that opens the editor. */
+  onFix?: () => void;
+}) {
+  if (cliModels === null || model === null || model.length === 0) return null;
+  const status = amuxCliModelStatus(cliModels, cli, model);
+  if (status.issues.length === 0) return null;
+  return (
+    <>
+      {status.issues.map((issue) => {
+        const text = issue === "retired" || issue === "disabled"
+          ? m.issue[issue](status.replacement?.name ?? null)
+          : m.issue[issue];
+        const className = `inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-semibold ${ISSUE_TONE[issue]}`;
+        return onFix ? (
+          <button key={issue} type="button" className={className} onClick={onFix} data-testid={`amux-cli-model-issue-${issue}`}>
+            {text}
+          </button>
+        ) : (
+          <span key={issue} className={className} data-testid={`amux-cli-model-issue-${issue}`}>{text}</span>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * The owner's edit form for one worker (version 35 R2a, "Admin 편집"; presets
+ * since the owner decision of 2026-10-27). Every control is labelled; the save
+ * is held while the store's rule would refuse the form or nothing differs, and
+ * the reason is shown before sending.
  */
 export function AmuxWorkerCapabilityEditor({
   m,
@@ -55,6 +105,7 @@ export function AmuxWorkerCapabilityEditor({
   form,
   busy,
   writesLatch,
+  cliModels,
   onChange,
   onCancel,
   onSave,
@@ -64,6 +115,8 @@ export function AmuxWorkerCapabilityEditor({
   form: AmuxWorkerCapabilityForm;
   busy: boolean;
   writesLatch: boolean;
+  /** Each CLI's model names; null when unread, and the model is then typed. */
+  cliModels: AmuxCliModelCatalogAdminView | null;
   onChange: (form: AmuxWorkerCapabilityForm) => void;
   onCancel: () => void;
   onSave: (form: AmuxWorkerCapabilityForm) => void;
@@ -71,6 +124,8 @@ export function AmuxWorkerCapabilityEditor({
   const refusal = amuxWorkerCapabilityFormRefusal(row, form);
   const changes = amuxWorkerCapabilityFormChanges(row, form);
   const id = (field: string) => `amux-worker-capability-edit-${row.workerName}-${field}`;
+  const presets = amuxWorkerProfilePresetsFor(row);
+  const options = cliModels === null ? [] : amuxCliModelOptions(cliModels, row.providerClass, form.model);
   return (
     <form
       className="flex flex-col gap-3 rounded-md border p-3 border-zinc-600"
@@ -83,103 +138,72 @@ export function AmuxWorkerCapabilityEditor({
     >
       <h3 id={id("title")} className="text-base font-semibold text-zinc-100">{m.editTitle(row.workerName)}</h3>
       <p className="text-sm text-zinc-300">{m.editHelp}</p>
+      {amuxWorkerCapabilityIsCustom(row) ? (
+        <p className="flex flex-wrap items-center gap-2 text-sm text-amber-300" data-testid="amux-worker-capability-edit-custom">
+          <span className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs font-semibold">
+            {m.custom}
+          </span>
+          {m.customHelp}
+        </p>
+      ) : null}
+      <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={id("preset")}>
+        {m.field.preset}
+        <select
+          id={id("preset")}
+          className={inputClass}
+          value={form.preset}
+          onChange={(event) => onChange({ ...form, preset: event.target.value as AmuxWorkerProfilePreset })}
+          data-testid="amux-worker-capability-edit-preset"
+        >
+          {presets.map((preset) => <option key={preset} value={preset}>{m.preset[preset].label}</option>)}
+        </select>
+        <span className="text-xs text-zinc-400">{m.preset[form.preset].help}</span>
+      </label>
       <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={id("model")}>
         {m.field.model}
-        <input
-          id={id("model")}
-          className={inputClass}
-          value={form.model}
-          maxLength={160}
-          onChange={(event) => onChange({ ...form, model: event.target.value })}
-          data-testid="amux-worker-capability-edit-model"
-        />
-      </label>
-      <fieldset className="flex flex-col gap-1">
-        <legend className="text-sm font-semibold text-zinc-100">{m.field.tags}</legend>
-        <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
-          {AMUX_WORKER_ROUTING_TAGS.map((tag) => (
-            <label key={tag} className={checkLabelClass}>
-              <input
-                type="checkbox"
-                className="h-5 w-5"
-                checked={form.routingTags.includes(tag)}
-                onChange={(event) => onChange({ ...form, routingTags: amuxToggleListValue(form.routingTags, tag, event.target.checked) })}
-                data-testid={`amux-worker-capability-edit-tag-${tag}`}
-              />
-              <span className="font-mono text-xs">{tag}</span>
-              <span className="text-xs text-zinc-400">{m.requirement[AMUX_WORKER_ROUTING_TAG_REQUIREMENTS[tag]!]}</span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-      <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={id("tools")}>
-        {m.field.tools}
-        <input
-          id={id("tools")}
-          className={inputClass}
-          value={form.tools}
-          onChange={(event) => onChange({ ...form, tools: event.target.value })}
-          data-testid="amux-worker-capability-edit-tools"
-        />
+        {options.length > 0 ? (
+          <select
+            id={id("model")}
+            className={inputClass}
+            value={form.model}
+            onChange={(event) => onChange({ ...form, model: event.target.value })}
+            data-testid="amux-worker-capability-edit-model"
+          >
+            {form.model.length === 0 ? <option value="">{m.chooseModel}</option> : null}
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label === option.value ? option.value : `${option.label} (${option.value})`}
+                {option.issues.length > 0 ? ` · ${option.issues.map((issue) => m.issueShort[issue]).join(", ")}` : ""}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={id("model")}
+            className={inputClass}
+            value={form.model}
+            maxLength={160}
+            onChange={(event) => onChange({ ...form, model: event.target.value })}
+            data-testid="amux-worker-capability-edit-model"
+          />
+        )}
+        <span className="flex flex-wrap gap-1">
+          <AmuxCliModelIssueChips m={m} cliModels={cliModels} cli={row.providerClass} model={form.model} />
+        </span>
       </label>
       <label className={checkLabelClass}>
         <input
           type="checkbox"
           className="h-5 w-5"
-          checked={form.v22Enabled}
-          onChange={(event) => onChange({ ...form, v22Enabled: event.target.checked })}
-          data-testid="amux-worker-capability-edit-v22"
+          checked={form.oneShot}
+          onChange={(event) => onChange({ ...form, oneShot: event.target.checked })}
+          data-testid="amux-worker-capability-edit-one-shot"
         />
-        {m.field.v22}
+        {m.field.oneShot}
       </label>
-      {form.v22Enabled ? (
-        <div className="flex flex-col gap-3 border-l-2 pl-3 border-zinc-600">
-          <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={id("v22-model")}>
-            {m.field.v22Model}
-            <input
-              id={id("v22-model")}
-              className={inputClass}
-              value={form.v22Model}
-              maxLength={160}
-              onChange={(event) => onChange({ ...form, v22Model: event.target.value })}
-              data-testid="amux-worker-capability-edit-v22-model"
-            />
-          </label>
-          <fieldset className="flex flex-col gap-1">
-            <legend className="text-sm font-semibold text-zinc-100">{m.field.v22Roles}</legend>
-            {AMUX_WORKER_V22_ROLES.map((role) => (
-              <label key={role} className={checkLabelClass}>
-                <input
-                  type="checkbox"
-                  className="h-5 w-5"
-                  checked={form.v22Roles.includes(role)}
-                  onChange={(event) => onChange({ ...form, v22Roles: amuxToggleListValue(form.v22Roles, role, event.target.checked) })}
-                  data-testid={`amux-worker-capability-edit-v22-role-${role}`}
-                />
-                <span className="font-mono text-xs">{role}</span>
-                <span className="text-xs text-zinc-400">{m.requirement[AMUX_WORKER_V22_ROLE_REQUIREMENTS[role]!]}</span>
-              </label>
-            ))}
-          </fieldset>
-          <fieldset className="flex flex-col gap-1">
-            <legend className="text-sm font-semibold text-zinc-100">{m.field.v22Tools}</legend>
-            {AMUX_WORKER_V22_TOOLS.map((tool) => (
-              <label key={tool} className={checkLabelClass}>
-                <input
-                  type="checkbox"
-                  className="h-5 w-5"
-                  checked={form.v22Tools.includes(tool)}
-                  onChange={(event) => onChange({ ...form, v22Tools: amuxToggleListValue(form.v22Tools, tool, event.target.checked) })}
-                  data-testid={`amux-worker-capability-edit-v22-tool-${tool}`}
-                />
-                <span className="font-mono text-xs">{tool}</span>
-              </label>
-            ))}
-          </fieldset>
-        </div>
-      ) : null}
+      <p className="text-xs text-zinc-400">{form.oneShot ? m.oneShotOnHelp : m.oneShotOffHelp}</p>
       <p className="text-sm text-zinc-300" data-testid="amux-worker-capability-edit-preview">
-        {describe(m, amuxWorkerCapabilityFromForm(form))}
+        {describe(m, amuxWorkerCapabilityFromForm(row, form))}
       </p>
       {refusal ? (
         <p role="alert" className="text-sm text-red-300" data-testid="amux-worker-capability-edit-refusal">
@@ -328,13 +352,14 @@ export async function runAmuxWorkerCapabilityReread(
  * when the change was recorded and read back.
  */
 export async function runAmuxWorkerCapabilityEdit(
+  row: AmuxWorkerCapabilityAdminRow,
   form: AmuxWorkerCapabilityForm,
   io: AmuxWorkerCapabilityIo,
   update: (changes: AmuxWorkerCapabilityUpdate) => void,
 ): Promise<boolean> {
   let notice: AmuxWorkerCapabilityNotice = null;
   await runAmuxWorkerCapabilityImport(
-    [{ workerName: form.workerName, expectedRevision: form.expectedRevision, capability: amuxWorkerCapabilityFromForm(form) }],
+    [{ workerName: form.workerName, expectedRevision: form.expectedRevision, capability: amuxWorkerCapabilityFromForm(row, form) }],
     io,
     (changes) => {
       if ("notice" in changes) notice = changes.notice ?? null;
