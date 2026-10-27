@@ -66,11 +66,13 @@ try {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ catalog: preparation, progress }));
     } else if (req.url === "/ui.js" || req.url === "/ui.css") {
+      // A fixed name, not the request path, reaches the filesystem.
+      const file = req.url === "/ui.css" ? "ui.css" : "ui.js";
       res.setHeader(
         "Content-Type",
-        req.url.endsWith("css") ? "text/css" : "text/javascript",
+        file.endsWith("css") ? "text/css" : "text/javascript",
       );
-      res.end(await readFile(join(dir, req.url.slice(1))));
+      res.end(await readFile(join(dir, file)));
     } else {
       res.setHeader("Content-Type", "text/html");
       res.end(
