@@ -2203,6 +2203,8 @@ export const zh = {
         sharingTitle: "分享链接",
         sharing: "启用分享后，任何拥有链接的人都可能读取该对话。分享前请确认其中不包含敏感信息。",
         rightsTitle: "用户选择与权利",
+        deletionRequest: "无需安装应用，即可使用账户注册邮箱向 support@tomverse.app 发送邮件，申请删除 Tomverse 账户及相关数据。我们会先核实账户所有权，账户删除设有 7 天安全等待期。如仅需删除特定数据，请在申请中说明。请勿发送密码或登录验证码。",
+        deletionSubscriptions: "请在 Google Play 或 App Store 单独取消订阅；删除 Tomverse 账户不会取消商店订阅。必要的账单、法律和安全记录可能按上方的数据保留说明继续保存。",
         rights: "用户可以删除和导出对话，并选择是否分享。隐私相关请求可通过 Tomverse 官方支持渠道提交。",
         securityTitle: "安全",
         security: "我们采取合理保护措施，包括访问控制、加密传输、密码哈希、使用量限制和私有对象存储。但无法保证互联网传输绝对安全。",
