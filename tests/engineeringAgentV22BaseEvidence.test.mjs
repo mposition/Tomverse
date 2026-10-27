@@ -69,7 +69,8 @@ test("the base .dockerignore is applied in order, re-includes winning", () => {
 test("a rule the reader does not fully understand fails closed", () => {
   const paths = ["tests/a.test.mjs", "tests/kept.test.mjs"];
   for (const rule of ["**/*.log", "tests/*.mjs", "!tests/k?pt.test.mjs",
-    "tests/[ab].mjs", "tests/../lib", "tests\\a.test.mjs"])
+    "tests/[ab].mjs", "tests/../lib", "tests\\a.test.mjs",
+    "! tests/kept.test.mjs", "!\ttests/kept.test.mjs", "tests/a b.mjs"])
     assert.equal(engineeringAgentV22DeployExclusion(
       `tests/*\n${rule}\n`, paths), null, rule);
 });

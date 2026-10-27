@@ -39,7 +39,9 @@ export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
     let path = (negate ? line.slice(1) : line).replace(/^\/+/, "");
     const below = path.endsWith("/*");
     path = below ? path.slice(0, -2) : path.replace(/\/$/, "");
-    if (path === "" || /[*?[\]\\]/.test(path) ||
+    // Whitespace inside a rule (`! tests/x`) is read differently by Docker
+    // versions; such a rule is not understood, so the tier is T2.
+    if (path === "" || /[*?[\]\\\s]/.test(path) ||
         path.split("/").some((part) => part === "" || part === "." ||
           part === "..")) return null;
     rules.push({ negate, path, below });
@@ -135,9 +137,9 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       baseFiles.push({ path: entry.path, text: "" });
       continue;
     }
-    // Non-analysis blobs still need their image presence checked by the
-    // complete image manifest, not re-read here. Source text is read only for
-    // the analyser's known extensions and policy inputs.
+    // Non-analysis blobs are represented by path; the pinned base tree, not
+    // the image, says they exist. Source text is read only for the
+    // analyser's known extensions and policy inputs.
     if (!ANALYSIS_TEXT.test(entry.path)) {
       baseFiles.push({ path: entry.path, text: "" });
       continue;
