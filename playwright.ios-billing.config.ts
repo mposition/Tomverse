@@ -1,6 +1,11 @@
 import { defineConfig } from "@playwright/test";
 import base from "./playwright.native.config";
 
+const webServer = base.webServer;
+if (!webServer || Array.isArray(webServer)) {
+  throw new Error("iOS billing tests require a single native test server.");
+}
+
 // Synthetic bridges exercise Apple-specific client behavior without a store,
 // server credentials or a payment. StoreKit still needs signed-device acceptance.
 export default defineConfig({
@@ -13,7 +18,7 @@ export default defineConfig({
     { name: "ios-billing-chromium", use: { browserName: "chromium" } },
   ],
   webServer: {
-    ...base.webServer,
+    ...webServer,
     env: {
       VITE_NATIVE_BILLING_ENABLED: "true",
       VITE_REVENUECAT_APPLE_API_KEY: "appl_ios_fixture_public_key",
