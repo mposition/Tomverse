@@ -20,7 +20,11 @@ import {
   buildAmuxWorkerCapabilityAdminView,
   parseAmuxWorkerCapabilityAdminView,
 } from "../lib/amux/workerCapabilityCore.ts";
-import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
+import { AMUX_WORKER_REGISTRY_V31_SEED } from "../lib/amux/workerRegistryCore.ts";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+
 
 const registration = (workerName, roleCeiling, desiredState = "active") => ({
   workerName,
@@ -56,7 +60,7 @@ test("the closed lists are version 35's table", () => {
   });
   assert.deepEqual({ ...AMUX_WORKER_V22_ROLE_REQUIREMENTS }, {
     investigate: "any",
-    implement: "implementation",
+    implement: "any",
     design: "contract",
     review: "verified",
   });
@@ -113,7 +117,15 @@ test("a v22 profile is on its provider's model, with each role's tool, within th
   const v22 = (roles, tools, model = "claude-opus-5-5") => ({ model, roles, tools });
   // investigate is read-only and needs no ceiling (the post-approval correction).
   assert.equal(amuxWorkerCapabilityRefusal(chore, capability(["chore"], v22(["investigate"], ["repo_read"]))), null);
-  assert.equal(amuxWorkerCapabilityRefusal(chore, capability(["chore"], v22(["implement"], ["repo_write"]))), "v22_role_above_ceiling");
+  // Version 52 (owner decision 2026-10-27): a v4 worker's ceiling is its
+  // grade, so a chore worker runs routine implement Tasks -- with repo_write.
+  assert.equal(amuxWorkerCapabilityRefusal(chore, capability(["chore"], v22(["implement"], ["repo_write"]))), null);
+  assert.equal(amuxWorkerCapabilityRefusal(chore, capability(["chore"], v22(["implement"], ["repo_read"]))), "v22_tool_missing");
+  assert.equal(amuxWorkerCapabilityRefusal(chore, capability(["chore"], v22(["design"], ["repo_read"]))), "v22_role_above_ceiling");
+  assert.equal(amuxWorkerCapabilityRefusal(registration("codex-chore", "chore"),
+    capability(["chore"], v22(["implement"], ["repo_write"], "gpt-6-luna"))), null);
+  assert.equal(amuxWorkerCapabilityRefusal(registration("cursor-chore", "chore"),
+    capability(["chore"], v22(["implement"], ["repo_write"], "auto"))), "v22_role_provider");
   assert.equal(amuxWorkerCapabilityRefusal(impl, capability(["implementation"], v22(["implement"], ["repo_write"]))), null);
   assert.equal(amuxWorkerCapabilityRefusal(impl, capability(["implementation"], v22(["design"], ["repo_read"]))), "v22_role_above_ceiling");
   assert.equal(amuxWorkerCapabilityRefusal(impl, capability(["implementation"], v22(["implement"], ["repo_read"]))), "v22_tool_missing");
@@ -143,7 +155,8 @@ test("a ceiling narrowed after the write drops what it no longer allows", () => 
   const written = capability(["implementation", "tests", "chore"], { model: "claude-opus-5-5", roles: ["implement", "investigate"], tools: ["repo_read", "repo_write"] });
   const narrowed = amuxWorkerCapabilityWithinCeiling(registration("claude-impl", "chore"), written);
   assert.deepEqual(narrowed.routingTags, ["tests", "chore"]);
-  assert.deepEqual(narrowed.v22.roles, ["investigate"]);
+  // The legacy implementation tag keeps its cap; v22 implement has none.
+  assert.deepEqual(narrowed.v22.roles, ["implement", "investigate"]);
   assert.equal(amuxWorkerCapabilityWithinCeiling(registration("claude-impl", "chore"), capability(["implementation"])), null);
   const whole = amuxWorkerCapabilityWithinCeiling(registration("claude-impl", "implementation"), written);
   assert.ok(amuxWorkerCapabilitiesEqual(whole, written));
@@ -161,12 +174,15 @@ test("the Admin view lists every registered, non-retired worker with what is rec
   const view = buildAmuxWorkerCapabilityAdminView({ registrations, current: recorded });
   // Defaults to the code latch (true since version 36).
   assert.equal(view.writesLatch, AMUX_WORKER_CAPABILITY_WRITES_LATCH);
-  assert.deepEqual(Object.keys(view).sort(), ["rows", "writesLatch"]);
+  // The CLI model catalog is read apart; null when it was not given.
+  assert.deepEqual(Object.keys(view).sort(), ["cliModels", "rows", "writesLatch"]);
+  assert.equal(view.cliModels, null);
   assert.equal(view.rows.length, 13);
   assert.deepEqual(view.rows.map((row) => row.workerName), [...PRODUCTION_REGISTRY.map((row) => row.workerName)].sort());
   for (const row of view.rows) {
-    // R2a's import columns went with the catalog variables at R2e.
-    assert.deepEqual(Object.keys(row).sort(), ["current", "desiredState", "roleCeiling", "workerName"]);
+    // R2a's import columns went with the catalog variables at R2e; the class
+    // is the registered one (owner decision 2026-10-27), never the name's.
+    assert.deepEqual(Object.keys(row).sort(), ["current", "desiredState", "providerClass", "roleCeiling", "workerName"]);
   }
   const byName = Object.fromEntries(view.rows.map((row) => [row.workerName, row]));
   assert.deepEqual(byName["claude-chore"].current, recorded.get("claude-chore"));
@@ -188,7 +204,9 @@ test("the GET body is accepted only in its exact shape", () => {
     null,
     { ...body, writesLatch: "no" },
     { ...body, rows: "none" },
-    withRow({ ...body.rows[index], workerName: "devin-worker" }),
+    withRow({ ...body.rows[index], workerName: "Devin_worker" }),
+    withRow({ ...body.rows[index], providerClass: "devin" }),
+    { ...body, cliModels: { refreshedAt: {} } },
     withRow({ ...body.rows[index], roleCeiling: "review" }),
     withRow({ ...body.rows[index], desiredState: "retired" }),
     withRow({ ...body.rows[index], current: { ...body.rows[index].current, revision: 0 } }),
@@ -202,5 +220,5 @@ test("the server read takes nothing from the environment", () => {
   const source = readFileSync(new URL("../lib/amux/workerCapabilityAdminRead.ts", import.meta.url), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
   assert.doesNotMatch(source, /process\.env|getConfiguredAmux|parseAmuxV22WorkerCatalog/);
-  assert.match(source, /buildAmuxWorkerCapabilityAdminView\(\{ registrations: registry\.registrations, current \}\)/);
+  assert.match(source, /buildAmuxWorkerCapabilityAdminView\(\{ registrations: registry\.registrations, current, cliModels \}\)/);
 });

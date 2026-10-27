@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { AMUX_CLI_MODEL_PRICED_ID_MAX, parseAmuxCliModelLinkChange } from "../lib/amux/cliModelCatalogCore.ts";
+
 import {
   AMUX_TASK_CATALOG_CAPS,
   amuxTaskRoutePrice,
@@ -12,6 +14,9 @@ import {
   inspectV4TaskCostCatalog,
   inspectV52TaskCatalogGrades,
 } from "../lib/amux/v4TaskCostCatalogCore.ts";
+import { deriveAmuxWorkerCatalog } from "../lib/amux/workerDerivedCatalogCore.ts";
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
 
 const NOW = "2026-10-25T01:02:03.000Z";
 const workers = [
@@ -178,4 +183,57 @@ test("a dear model is priced, not left out: the reservation is the budget", () =
   assert.equal(dear.ok, true);
   assert.ok(BigInt(ceiling(dear.catalog, "design", "frontier").receipt.routes[0].perAttemptMicroUsd) >
     BigInt(5_000_000));
+});
+
+test("a linked route names its entry, and one whose source would not fit leaves the rest priced", () => {
+  // Review r-20261027-042558-2575fc: the catalog refuses a pricing source over
+  // 160 characters, so one long link must not take every other route with it.
+  const linked = (id) => (modelId) => modelId === "claude-sonnet-5"
+    ? { ...flat["claude-sonnet-5"], linkedModelId: id } : flat[modelId] ?? null;
+  const fits = "x".repeat(AMUX_CLI_MODEL_PRICED_ID_MAX);
+  const ok = derive({ priceFor: linked(fits) });
+  assert.equal(ok.ok, true);
+  const route = ok.catalog.routes.find((entry) => entry.workerName === "claude-impl");
+  assert.equal(route.pricingSource, `model-registry:${fits}`);
+  assert.equal(route.pricingSource.length, 160);
+  assert.equal(route.modelId, "claude-sonnet-5", "the route keeps the CLI's own name");
+  const tooLong = derive({ priceFor: linked("x".repeat(AMUX_CLI_MODEL_PRICED_ID_MAX + 1)) });
+  assert.equal(tooLong.ok, true);
+  assert.deepEqual(tooLong.catalog.routes.map((entry) => entry.workerName).sort(), ["claude-chore", "claude-contract"]);
+  // The link's own limit is the one that keeps every linked source within 160.
+  assert.equal(parseAmuxCliModelLinkChange({ cli: "cursor", cliModel: "x", pricedModelId: fits })?.pricedModelId, fits);
+  assert.equal(parseAmuxCliModelLinkChange({ cli: "cursor", cliModel: "x", pricedModelId: `${fits}y` }), null);
+});
+
+test("a chore worker's v22 implement profile prices routine implement Tasks (v52, 2026-10-27)", () => {
+  // The registry and capability as the owner records them, through the
+  // derived assignment catalog the approval service reads.
+  const registration = (workerName, roleCeiling) => ({ workerName,
+    providerClass: amuxWorkerProviderClassOf(workerName), roleCeiling,
+    desiredState: "active", revision: 1 });
+  const registrations = [registration("claude-chore", "chore"),
+    registration("codex-chore", "chore")];
+  const profile = (model) => ({ capability: { model: null, routingTags: ["chore"],
+    toolCapabilities: [], v22: { model, roles: ["implement", "investigate"],
+      tools: ["repo_read", "repo_write"] } } });
+  const derived = deriveAmuxWorkerCatalog({ registrations,
+    capabilities: new Map([["claude-chore", profile("claude-haiku-4-5")],
+      ["codex-chore", profile("gpt-6-luna")]]),
+    latches: new Map(), multiProvider: true });
+  assert.deepEqual(derived.v22.map((entry) => [entry.worker_name, entry.routing_roles]), [
+    ["claude-chore", ["implement", "investigate"]],
+    ["codex-chore", ["implement", "investigate"]]]);
+  const ceilings = new Map(registrations.map((entry) => [entry.workerName, entry.roleCeiling]));
+  const result = deriveAmuxV4TaskAutoCatalog({ priceFor: (modelId) =>
+    flat[modelId] ?? (modelId === "gpt-6-luna" ? flat["claude-haiku-4-5"] : null),
+  workers: derived.v22.map((entry) => ({ workerName: entry.worker_name,
+    provider: entry.provider, modelId: entry.model, roles: entry.routing_roles,
+    roleCeiling: ceilings.get(entry.worker_name) ?? null })) });
+  assert.equal(result.ok, true);
+  assert.deepEqual(inspectV52TaskCatalogGrades(result.catalog, ceilings), { ok: true });
+  assert.deepEqual(result.catalog.routes.map((route) => [route.workerName, route.grades]), [
+    ["claude-chore", ["routine"]], ["codex-chore", ["routine"]]]);
+  assert.equal(ceiling(result.catalog, "implement", "routine").ok, true);
+  // Same-grade routing is unchanged: a chore worker never prices advanced work.
+  assert.equal(ceiling(result.catalog, "implement", "advanced").ok, false);
 });

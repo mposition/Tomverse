@@ -1664,6 +1664,39 @@ domains:
       or any customer's prompt or file. Rows are never changed or removed by
       the application; the database refuses both.
 
+  - domain: amuxCliModelLinkEvent
+    prismaModel: AmuxCliModelLinkEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one link from a worker CLI's model name to the
+        Admin › Models entry that prices it (owner decision 2026-10-27: written
+        only by the owner, under a human audit entry of the same transaction).
+        The row names the administrator who made the link and is retained for
+        security investigation and audit of what AMUX Task costs were priced
+        from. The retention period is not a legal determination; it stays TBD
+        until security and legal approval, and a legal hold outranks any later
+        purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the owner who recorded the link and
+      intentionally has no User foreign key. The row stores a CLI name, a CLI
+      model name and an Admin › Models id, not free text or any customer's
+      prompt or file. Rows are never changed or removed by the application;
+      the database refuses both.
+
   - domain: amuxTaskRecoveryInspectionRequest
     prismaModel: AmuxV22TaskRecoveryInspectionRequest
     userLinkageRole: actor

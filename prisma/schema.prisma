@@ -2557,6 +2557,7 @@ model AdminAuditLog {
   amuxWorkerTrialEvidence AmuxWorkerTrialEvidence?
   amuxWorkerLatchEvent AmuxWorkerLatchEvent?
   amuxWorkerCapabilityEvent AmuxWorkerCapabilityEvent?
+  amuxCliModelLinkEvent AmuxCliModelLinkEvent?
   promptRefinerAutoBudgetReservations PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetReservationAudit")
   promptRefinerAutoBudgetDispatches PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetDispatchAudit")
   promptRefinerAutoBudgetUnknowns PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetUnknownAudit")
@@ -11285,6 +11286,41 @@ model AmuxWorkerCapabilityEvent {
 
   @@unique([workerName, revision])
   @@index([workerName, sequence])
+}
+
+/// One model name a worker CLI lists, as the AMUX host last read it (owner
+/// decision 2026-10-27). A system observation refreshed in place; it prices
+/// nothing by itself. `listed` is false once a refresh no longer lists it.
+model AmuxCliModel {
+  id          String   @id
+  cli         String
+  cliModel    String
+  displayName String?
+  listed      Boolean  @default(true)
+  firstSeenAt DateTime @default(now()) @db.Timestamptz(3)
+  lastSeenAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([cli, cliModel])
+}
+
+/// The owner's link from a CLI model name to the Admin › Models entry that
+/// prices it. Append-only, each with its audit row; the newest per name wins.
+/// A NULL `pricedModelId` holds that name. With no link, the name prices from
+/// the Admin › Models entry whose id or API model is that exact name.
+model AmuxCliModelLinkEvent {
+  id            String   @id
+  sequence      BigInt   @unique @default(autoincrement())
+  cli           String
+  cliModel      String
+  pricedModelId String?
+  actorUserId   String
+  auditLogId    String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([cli, cliModel, sequence])
 }
 
 /// Runtime overrides and additions for the image and coding model catalogues.
