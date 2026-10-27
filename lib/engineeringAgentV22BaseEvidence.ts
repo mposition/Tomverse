@@ -26,7 +26,8 @@ type FetchBlob = (oid: string, maxBytes: number) => Promise<Uint8Array>;
  * commit's `.dockerignore` is read in order, last matching rule winning, a
  * rule on a directory covering everything below it -- as Docker applies it.
  * The same rules apply to paths a change adds. Only test sources and the
- * admin Playwright config may leave the runtime slice (§4). A missing file or
+ * admin Playwright config may leave the runtime slice
+ * (`docs/policy/engineering-agent.md §4`). A missing file or
  * a rule this reader does not fully understand is null: the tier is T2. */
 export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
   paths: readonly string[]): string[] | null {
