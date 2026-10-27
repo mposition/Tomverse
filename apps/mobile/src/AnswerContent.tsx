@@ -5,16 +5,21 @@ import type { ChatTransport } from "./chatTransport";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import type { MobileLanguage } from "../../../locales/mobile";
 import { ImageTurn } from "./ImageTurn";
+import { Copy } from "lucide-react";
+import { mobileParityCopy } from "../../../locales/mobileParity";
 
-export function AnswerContent({ content, artifacts, citations, transport, language, imageTurn }: {
+export function AnswerContent({ content, artifacts, citations, transport, language, imageTurn, copyable = false }: {
   content: string; artifacts?: ChatStreamArtifact[];
   citations?: Array<{ url: string; title?: string }>;
   transport: ChatTransport; language: MobileLanguage;
   imageTurn?: { groupId: string; modelIds: string[] };
+  copyable?: boolean;
 }) {
   const copy = mobileCompletionCopy(language);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const actions = mobileParityCopy(language);
   return <div className="answer-content">
     {imageTurn ? <ImageTurn groupId={imageTurn.groupId} transport={transport} language={language} /> : <AnswerMarkdown components={{
       a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
@@ -32,6 +37,10 @@ export function AnswerContent({ content, artifacts, citations, transport, langua
         void transport.downloadArtifact(artifact).catch((error) => { if ((error as { code?: string }).code !== "FILE_SAVE_CANCELLED") setError(copy.downloadFailed); }).finally(() => setPending(null));
       }}>{pending === artifact.id ? copy.saving : copy.download}</button> : <p>{artifact.status === "blocked" ? copy.signIn : copy.fileFailed}</p>}
     </section>)}
+    {copyable && content.trim() && !imageTurn && <button type="button" className="answer-copy" onClick={() => {
+      setError(""); setCopied(false);
+      void Promise.resolve().then(() => navigator.clipboard.writeText(content)).then(() => setCopied(true)).catch(() => setError(actions.copyFailed));
+    }}><Copy size={15} aria-hidden="true" />{copied ? actions.copied : actions.copy}</button>}
     {error && <p role="alert">{error}</p>}
   </div>;
 }

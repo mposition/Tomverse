@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { MobileApp } from "./MobileApp";
 import { createApiTransport } from "./apiTransport";
 import "./app.css";
+import "./workspace.css";
 
 const container = document.getElementById("root");
 if (!container) throw new Error("Missing #root element.");

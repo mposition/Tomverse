@@ -1,3 +1,4 @@
+import { selectProduct } from "./workspaceNavigation";
 import { expect, test } from '@playwright/test';
 
 /*
@@ -71,7 +72,7 @@ test('a Chat continuation is listed with Chat and opens with its original above 
 });
 
 test('a Review continuation is listed with Review and shows its original', async ({ page }) => {
-  await page.getByTestId('product-switcher').selectOption('review');
+  await selectProduct(page, "review");
   await page.getByRole('button', { name: '대화', exact: true }).click();
   await expect(page.locator('.conversation-row', { hasText: 'Imported comparison' })).toBeVisible();
   await expect(page.locator('.conversation-row', { hasText: 'Imported trip plan' })).toHaveCount(0);
