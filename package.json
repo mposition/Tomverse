@@ -402,7 +402,7 @@
     "@prisma/config": "^7.10.1",
     "@sentry/nextjs": "^10.75.2",
     "ai": "^7.0.150",
-    "ajv": "^6.15.0",
+    "ajv": "^8.20.0",
     "ajv-mcp": "npm:ajv@8.20.0",
     "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
