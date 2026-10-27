@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 
@@ -20,24 +21,47 @@ type ReadFile = (path: string) => Promise<Uint8Array>;
 type FileStat = (path: string) => Promise<{ isFile(): boolean }>;
 type FetchBlob = (oid: string, maxBytes: number) => Promise<Uint8Array>;
 
-/** An excluded prefix stands only when the base commit's own build leaves it
- * out of the image, not merely the image this process happens to run. */
-function dockerIgnoreExcludes(text: string, prefixes: readonly string[]) {
-  const lines = new Set(text.split(/\r?\n/).map((line) => line.trim()));
-  return prefixes.every((prefix) =>
-    lines.has(`${prefix}/`) || lines.has(`/${prefix}/`)) &&
-    (!prefixes.includes("tests") ||
-      lines.has("playwright.admin.config.ts") ||
-      lines.has("/playwright.admin.config.ts"));
+/** Which base-tree paths the base commit's own build leaves out of its image
+ * (owner decision 2026-10-27, replacing the operator-pasted image proof).
+ * The commit's `.dockerignore` is read in order, last matching rule winning,
+ * a rule on a directory covering everything below it -- as Docker applies it.
+ * Only test sources and the admin Playwright config may leave the runtime
+ * slice (§4). A rule this reader does not fully understand excludes nothing. */
+export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
+  paths: readonly string[]): string[] {
+  if (dockerIgnore === null) return [];
+  const rules: { negate: boolean; path: string; below: boolean }[] = [];
+  for (const raw of dockerIgnore.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const negate = line.startsWith("!");
+    let path = (negate ? line.slice(1) : line).replace(/^\/+/, "");
+    const below = path.endsWith("/*");
+    path = below ? path.slice(0, -2) : path.replace(/\/$/, "");
+    if (path === "" || /[*?[\]\\]/.test(path) ||
+        path.split("/").some((part) => part === "" || part === "." ||
+          part === "..")) return [];
+    rules.push({ negate, path, below });
+  }
+  return paths.filter((path) => {
+    if (!path.startsWith("tests/") && path !== "playwright.admin.config.ts")
+      return false;
+    let excluded = false;
+    for (const rule of rules) {
+      if (path.startsWith(`${rule.path}/`) ||
+          (!rule.below && path === rule.path)) excluded = !rule.negate;
+    }
+    return excluded;
+  });
 }
 
 /** The GitHub tree is already bound to the current develop commit. A file is
  * accepted only when its bytes match that tree's Git blob OID: the image copy
- * when it matches, otherwise the blob read from GitHub by that OID. Excluded
- * tests are represented by paths but never assumed to contain source text. */
+ * when it matches, otherwise the blob read from GitHub by that OID. Paths the
+ * base commit's build excludes are represented by paths but never assumed to
+ * contain source text. */
 export async function loadEngineeringAgentV22BaseEvidence(input: {
   tree: readonly TreeEntry[];
-  excludedPrefixes: readonly string[];
   root?: string;
   read?: ReadFile;
   stat?: FileStat;
@@ -48,6 +72,9 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   installedVersions: Record<keyof typeof CONVENTION_VERSIONS,
     string | null>;
   policyDocuments: string[];
+  deployExcludedPaths: string[];
+  /** Names the exclusion the tier used; null when nothing is excluded. */
+  exclusionDigest: string | null;
 } | null> {
   const root = resolve(input.root ?? process.cwd());
   const read = input.read ?? readFile;
@@ -56,7 +83,6 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   const workflows: WorkflowFile[] = [];
   const policyDocuments: string[] = [];
   let lockText: string | null = null;
-  let dockerIgnoreText: string | null = null;
   let totalBytes = 0;
   let fetched = 0;
   const baseBytes = async (entry: TreeEntry): Promise<Uint8Array | null> => {
@@ -76,24 +102,27 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       return gitObjectId("blob", bytes) === entry.oid ? bytes : null;
     } catch { return null; }
   };
+  const decode = (bytes: Uint8Array) => {
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { return null; }
+  };
+  const ignoreEntry = input.tree.find((entry) =>
+    entry.path === ".dockerignore" && entry.type === "blob");
+  let ignoreText: string | null = null;
+  if (ignoreEntry) {
+    const bytes = await baseBytes(ignoreEntry);
+    ignoreText = bytes && decode(bytes);
+    if (ignoreText === null) return null;
+  }
+  const excluded = new Set(engineeringAgentV22DeployExclusion(ignoreText,
+    input.tree.filter((entry) => entry.type === "blob")
+      .map((entry) => entry.path)));
   for (const entry of input.tree) {
     if (entry.type === "tree") continue;
     if (!isCanonicalRepoPath(entry.path) ||
         entry.type !== "blob" ||
         (entry.mode !== "100644" && entry.mode !== "100755")) return null;
-    const excluded = input.excludedPrefixes.some((prefix) =>
-      entry.path.startsWith(`${prefix}/`));
-    const absentConfig = input.excludedPrefixes.includes("tests") &&
-      entry.path === "playwright.admin.config.ts";
-    if (excluded || absentConfig) {
-      baseFiles.push({ path: entry.path, text: "" });
-      continue;
-    }
-    if (entry.path === ".dockerignore") {
-      const bytes = await baseBytes(entry);
-      if (!bytes) return null;
-      try { dockerIgnoreText = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-      catch { return null; }
+    if (excluded.has(entry.path)) {
       baseFiles.push({ path: entry.path, text: "" });
       continue;
     }
@@ -116,9 +145,8 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
     if (!bytes) return null;
     totalBytes += bytes.byteLength;
     if (totalBytes > MAX_TOTAL_BYTES) return null;
-    let text: string;
-    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-    catch { return null; }
+    const text = decode(bytes);
+    if (text === null) return null;
     baseFiles.push({ path: entry.path, text });
     if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(entry.path))
       workflows.push({ path: entry.path, blobSha: entry.oid, text });
@@ -131,13 +159,16 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   }
   if (lockText === null || !baseFiles.some((file) =>
     file.path === "tsconfig.json")) return null;
-  if (input.excludedPrefixes.length > 0 && (dockerIgnoreText === null ||
-      !dockerIgnoreExcludes(dockerIgnoreText, input.excludedPrefixes)))
-    return null;
   let lock: { packages?: Record<string, { version?: string }> };
   try { lock = JSON.parse(lockText); }
   catch { return null; }
-  return { baseFiles, workflows, policyDocuments,
+  const deployExcludedPaths = [...excluded].sort();
+  return { baseFiles, workflows, policyDocuments, deployExcludedPaths,
+    exclusionDigest: deployExcludedPaths.length === 0 ? null :
+      createHash("sha256").update(JSON.stringify({
+        format: "engineering-agent-v22-deploy-exclusion-v1",
+        dockerIgnoreOid: ignoreEntry!.oid, deployExcludedPaths,
+      })).digest("hex"),
     installedVersions: Object.fromEntries(
       Object.keys(CONVENTION_VERSIONS).map((name) => [name,
         lock.packages?.[`node_modules/${name}`]?.version ?? null]),

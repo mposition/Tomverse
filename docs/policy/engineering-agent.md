@@ -207,20 +207,21 @@ registry로 통제 평면의 동작을 바꾸는 경로도 같다.
 
 **승인된 좁은 예외 — 배포 이미지에 없는 비런타임 파일.** 2026-10-07 읽기 전용 실측에서
 staging과 production의 앱 이미지 모두 `/app/tests`, `/app/docs`, `/app/lib`와 대표 파일을
-포함했다. 그 뒤 `.dockerignore`가 `tests/`와 `playwright.admin.config.ts`를 이미지에서
-뺐다. 운영자 결정(2026-10-27)으로 제외는 실행 중인 앱이 자기 이미지를 직접 재서 판정한다.
-작업 디렉터리가 `/app`이고, `/app/tests`와 `/app/playwright.admin.config.ts`가 없고, `/app`
-전체 파일 목록의 `tests` 경로 수가 0이고, base commit 자신의 `.dockerignore`가 두 경로를
-빼야 한다. 하나라도 아니거나 측정에 실패하면 제외 목록은 비어 있고 T2다. 운영자가
-배포마다 붙여 넣던 증명 JSON(배포 ID 결속)은 없앴다. 변수를 넣는 순간 새 배포가 생겨
-일치할 수 없었기 때문이다. base 소스는 `develop` commit의 GitHub tree가 정하고, 이미지
-파일이 그 blob OID와 다르면(production은 `main`을 실행한다) 같은 OID의 blob을 GitHub에서
-읽는다(최대 500개, 넘으면 T2). 측정 digest는 배포 ID·source commit·목록 SHA를 담아,
-preflight와 정산 사이에 배포가 바뀌면 게시하지 않는다. Task 실행과 공개 게시의 별도
+포함했다. 그 뒤 `.dockerignore`가 `tests/`의 대부분과 `playwright.admin.config.ts`를
+이미지에서 뺐다(런타임이 읽는 테스트 파일 두 개는 다시 포함한다). 운영자 결정
+(2026-10-27)으로 제외 목록은 **base commit 자신의 `.dockerignore`** 로 정한다. 규칙을 순서대로
+읽고 마지막에 맞는 규칙이 이기며(`!` 재포함 포함), 디렉터리 규칙은 그 아래 전체에 적용한다.
+제외할 수 있는 것은 `tests/` 아래 파일과 `playwright.admin.config.ts`뿐이고, 해석하지 못하는
+문법(`*`·`?`·`[`가 경로 중간에 있는 규칙 등)이 하나라도 있으면 제외 목록은 비어 있고 T2다.
+운영자가 배포마다 붙여 넣던 증명 JSON(배포 ID와 source commit 결속)은 없앴다. 변수를 넣는
+순간 새 배포가 생기고 production은 `main`을 실행하므로 일치할 수 없었다. base 소스는
+`develop` commit의 GitHub tree가 정하고, 이미지 파일이 그 blob OID와 다르면 같은 OID의
+blob을 GitHub에서 읽는다(최대 500개, 넘으면 T2). 제외 digest는 `.dockerignore` blob OID와
+제외 경로 목록을 담는다. Task 실행과 공개 게시의 별도
 코드·운영 스위치는 이 정책 승인만으로 열리지 않는다. `docs/` 전체는 제외 대상이 아니다. 앱이 `docs/ops`의 웹훅 검증 기록을 런타임에
 읽으므로, 문서는 실제 접근을 파일 단위로 검증한 경우에만 별도 제안할 수 있다. 이미지에
 없는 것이 증명되어도 runtime code·import·경로 참조·설정 이름을 통한 기존 T2 판정은
-그대로 유지한다. 측정 대상 commit 또는 이미지가 달라지면 이전 증거를 재사용하지 않는다.
+그대로 유지한다. base commit이 달라지면 이전 증거를 재사용하지 않는다.
 
 ## 5. 쓰기 가능 자격증명 도달 분석
 
@@ -813,10 +814,10 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    worker이고 게시 결과를 보고하는 것은 게시 경로다. 본 앱은 게시 결과의 결속(카드·attempt·
    capability·tree hash)으로 그 attempt를 찾아 PR을 기록한다. 보고 주체가 attempt의 worker와
    같아야 한다는 조건은 이 경로에서 "게시 capability가 그 attempt에 발급됐다"로 바뀐다.
-3. **이미지 증명은 실행 중인 앱이 스스로 잰다(§4, 운영자 결정 2026-10-27).** 앱이 `/app`
-   전체 파일 목록을 직접 측정하고, 배포 ID·source commit·목록 SHA를 담은 digest로 preflight와
-   정산을 결속한다. 운영자가 배포마다 증명 JSON을 확인·서명하던 단계는 없다. 측정이
-   실패하거나 대조가 하나라도 어긋나면
+3. **배포 제외는 base commit의 `.dockerignore`가 정한다(§4, 운영자 결정 2026-10-27).**
+   앱이 base tree의 `.dockerignore`를 Docker의 규칙 순서대로 해석해 제외 경로를 정하고,
+   그 digest를 게시 후보에 남긴다. 운영자가 배포마다 증명 JSON을 확인·서명하던 단계는
+   없다. 해석하지 못하는 규칙이 있거나 대조가 하나라도 어긋나면
    기존처럼 T2다.
 4. **`t1` 진입(§14).** shadow 기간·판정 건수 하한·"PR로 받을 만했다" 비율 대신, 아래 일회성
    점검을 모두 통과한 기록과 이 버전의 운영자 승인으로 `t1`에 들어간다. 점검: 게시 App
