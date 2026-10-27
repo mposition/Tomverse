@@ -269,7 +269,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    않으면) ruleset을 걸지 않고, **S-M1에도 들어가지 않으며**, 운영자가 다음을 정합니다. 이 보호를 바꾸는 것은 이 정책의 개정입니다.
    ruleset은 bypass 목록 밖의 **모든** actor에게 걸리므로, 브랜치를 갱신해야 하는 기존 자동화(Dependabot, 저장소 workflow의
    GitHub Actions 등)는 bypass에 넣고 **이 App만 넣지 않습니다**. 관측에는 그 자동화의 브랜치 갱신 성공도 포함하며, 거는 날과
-   bypass 목록은 운영자가 관측 결과를 보고 정합니다.
+   bypass 목록은 운영자가 관측 결과를 보고 정합니다. 2026-10-26 운영자 결정으로 CI 입장 App(`tomverse-ci-admission`,
+   integration 5391627)을 "no updates outside develop" ruleset의 bypass에 더했습니다 — 뒤처진 draft의 브랜치를 base 기준으로
+   업데이트(update-branch)하기 위해서입니다. 병합 레인 App은 여전히 넣지 않습니다.
 8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
