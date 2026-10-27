@@ -147,3 +147,26 @@ test("the board holds seven AEST days, today first, each with only its own train
   assert.deepEqual(days[1].rows.map((r) => r.slot), ["2026-10-25T13:59:00Z"]);
   assert.deepEqual(days[6].rows.map((r) => r.slot), ["2026-10-19T14:00:00Z"]);
 });
+
+test("a pull request boarded for another pick is shown as rode, with the pick that needed it", () => {
+  const [row] = qaReleaseTrainBoardRows({
+    admissions: [{ slot: "s", at: ago(30), emergency: false }],
+    reports: [
+      report("s", 28, {
+        outcome: "opened",
+        pullRequestNumber: 3100,
+        picks: [
+          { number: 10, outcome: "included", boardedFor: 11 },
+          { number: 11, outcome: "included" },
+        ],
+      }),
+    ],
+    pullStates: new Map([[3100, { state: "open", settledAt: null }]]),
+    titles: new Map([[10, "ten"]]),
+    nowMs: NOW,
+  });
+  assert.deepEqual(row.included, [
+    { number: 10, title: "ten", boardedFor: 11 },
+    { number: 11, title: "" },
+  ]);
+});

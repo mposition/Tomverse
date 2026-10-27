@@ -45,7 +45,7 @@ const privateKey = (env.QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY ?? "").includes("\
 
 const readHttp = httpWith(READ_TIMEOUT_MS);
 const token = qaReleaseInstallationToken(readHttp, (env.QA_RELEASE_MERGE_LANE_APP_ID ?? "").trim(), privateKey, Date.now);
-const git = createQaReleaseTrainGitPorts({ token });
+const git = createQaReleaseTrainGitPorts({ token, autoPredecessors: (env.QA_RELEASE_TRAIN_AUTO_PREDECESSORS ?? "").trim() !== "false" });
 const train = await runQaReleaseTrainRound(
   env,
   {

@@ -45,6 +45,7 @@ const body = z.union([
               number: PR,
               outcome: z.enum(["included", "already_in_main", "conflict", "over_capacity", "changes_workflows", "in_open_train"]),
               predecessors: z.array(PR).max(QA_RELEASE_TRAIN_MAX_PREDECESSORS).optional(),
+              boardedFor: PR.optional(),
             })
             .strict(),
         )
