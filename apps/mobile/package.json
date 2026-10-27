@@ -14,6 +14,7 @@
     "brand:assets": "node brand-assets.mjs",
     "test:ui": "playwright test --config playwright.config.ts",
     "test:ui:ios": "playwright test --config playwright.ios.config.ts",
+    "test:ui:ios-design": "playwright test --config playwright.ios-design.config.ts",
     "build:android": "node build-android.mjs",
     "capacitor:sync:after": "node scripts/configure-store-billing.mjs && node scripts/configure-location-permissions.mjs"
   },

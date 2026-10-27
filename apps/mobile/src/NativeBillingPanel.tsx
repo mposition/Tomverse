@@ -1,24 +1,49 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
 import { Purchases, type PurchasesStoreProduct } from "@revenuecat/purchases-capacitor";
+import { Coins, CreditCard, ExternalLink, RefreshCw, RotateCcw } from "lucide-react";
 import { mobileApiFetch } from "./authBridge";
 import { canPurchaseMobileProduct, createNativeBillingClient, type MobileBillingState, type MobileStore } from "./billingClient";
+import type { MobileLanguage } from "../../../locales/mobile";
+import { formatMobileBillingCopy, mobileBillingCopy, type MobileBillingCopyKey } from "../../../locales/mobileBilling";
+import { PurchaseConfirmation } from "./PurchaseConfirmation";
+import { confirmedPurchase, type PurchaseConfirmation as Confirmation, type PurchaseObservation } from "./billingPurchaseResult";
 import "./billing.css";
 
-export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
+export function NativeBillingPanel({ language, onClose }: { language: MobileLanguage; onClose?: () => void }) {
+  const c = mobileBillingCopy(language);
+  const number = (value: number | undefined) => (value ?? 0).toLocaleString(language);
+  const date = (value: string) => new Date(value).toLocaleDateString(language);
   const [state, setState] = useState<MobileBillingState | null>(null);
   const [products, setProducts] = useState<PurchasesStoreProduct[]>([]);
   const [busy, setBusy] = useState(() => Capacitor.isNativePlatform());
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState(() => Capacitor.isNativePlatform() ? "" : "Purchases are available in the installed iOS or Android app.");
+  const [message, setMessage] = useState<MobileBillingCopyKey | "">("");
+  const [error, setError] = useState<MobileBillingCopyKey | "">(() => Capacitor.isNativePlatform() ? "" : "installedOnly");
   const [interval, setInterval] = useState("monthly");
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [checkingPurchase, setCheckingPurchase] = useState(false);
+  const pendingPurchase = useRef<PurchaseObservation | null>(null);
   const client = useRef<ReturnType<typeof createNativeBillingClient> | null>(null);
   const alive = useRef(false);
   const action = useRef(false);
   const store: MobileStore = Capacitor.getPlatform() === "ios" ? "app_store" : "play_store";
   const storeName = store === "app_store" ? "App Store" : "Google Play";
+  const [creditPrefix, creditSuffix = ""] = c.purchasedCredits.split("{credits}");
+  const acceptState = useCallback((value: MobileBillingState) => {
+    setState(value);
+    const pending = pendingPurchase.current;
+    if (!pending) return;
+    if (pending.before.billingId !== value.billingId) { pendingPurchase.current = null; setCheckingPurchase(false); return; }
+    const result = confirmedPurchase(pending, value);
+    if (result) {
+      pendingPurchase.current = null; setCheckingPurchase(false); setMessage(""); setError(""); setConfirmation(result);
+      return true;
+    }
+    return false;
+  }, []);
   useEffect(() => {
     let mounted = true; alive.current = true;
     if (!Capacitor.isNativePlatform()) {
@@ -28,86 +53,125 @@ export function NativeBillingPanel({ onClose }: { onClose: () => void }) {
       apiKey: store === "app_store" ? import.meta.env.VITE_REVENUECAT_APPLE_API_KEY || "" : import.meta.env.VITE_REVENUECAT_GOOGLE_API_KEY || "",
       isCurrent: () => mounted });
     client.current = billing;
-    void billing.load().then(({ state: value, products: available }) => {
-      if (mounted) { setState(value); setProducts(available); setInterval(value.interval || "monthly"); }
-    }).catch(() => { if (mounted) setError("Store billing is unavailable. Please try again."); }).finally(() => { if (mounted) setBusy(false); });
-    const refresh = () => { if (document.visibilityState === "visible" && !action.current) void billing.refresh().then((value) => { if (mounted) setState(value); }).catch(() => {}); };
+    void (async () => {
+      const value = await billing.refresh();
+      if (!mounted) return;
+      setState(value); setInterval(value.interval || "monthly");
+      try {
+        const available = await billing.catalog(value);
+        if (mounted) setProducts(available);
+      } catch {
+        if (mounted) setError("catalogFailed");
+      }
+    })().catch(() => { if (mounted) setError("planFailed"); }).finally(() => { if (mounted) setBusy(false); });
+    const refresh = () => { if (document.visibilityState === "visible" && !action.current) void billing.refresh().then((value) => { if (mounted) acceptState(value); }).catch(() => {}); };
     document.addEventListener("visibilitychange", refresh); window.addEventListener("focus", refresh);
     return () => { mounted = false; alive.current = false; document.removeEventListener("visibilitychange", refresh); window.removeEventListener("focus", refresh); };
-  }, [store]);
-  const run = async (work: () => Promise<MobileBillingState>, success: string) => {
+  }, [store, storeName, reload, acceptState]);
+  const retryCatalog = () => { setBusy(true); setError(""); setProducts([]); setReload(value => value + 1); };
+  useEffect(() => {
+    if (!checkingPurchase || busy) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    const check = async () => {
+      if (cancelled || !pendingPurchase.current) return;
+      try { const value = await client.current!.refresh(); if (!cancelled && alive.current) acceptState(value); } catch { /* Manual refresh remains available. */ }
+      if (!cancelled && pendingPurchase.current && ++attempts < 3) timer = setTimeout(check, 4000);
+    };
+    timer = setTimeout(check, 2500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [checkingPurchase, busy, acceptState]);
+  const run = async (work: () => Promise<MobileBillingState>, success: MobileBillingCopyKey) => {
     if (action.current) return;
     action.current = true; setBusy(true); setError(""); setMessage("");
     try {
       const value = await work();
-      if (alive.current) { setState(value); setMessage(success); }
-      const available = await client.current!.catalog(value);
-      if (alive.current) setProducts(available);
+      if (alive.current) { setMessage(pendingPurchase.current ? "" : success); acceptState(value); }
+      try {
+        const available = await client.current!.catalog(value);
+        if (alive.current) setProducts(available);
+      } catch { if (alive.current) setError("catalogFailed"); }
     }
     catch (cause) {
-      try { const latest = await client.current!.refresh(); if (alive.current) setState(latest); } catch { /* Keep the last verified view if the server is unavailable. */ }
+      let confirmed = false;
+      try { const latest = await client.current!.refresh(); if (alive.current) confirmed = acceptState(latest) === true; } catch { /* Keep the last verified view if the server is unavailable. */ }
       const code = typeof cause === "object" && cause ? String((cause as { code?: unknown }).code) : "";
-      if (alive.current && code !== "1") {
-        if (code === "20") setMessage("Payment is pending approval. Your plan and balance will update after the store confirms payment.");
-        else setError("We could not confirm the result. Refresh your balance or restore purchases before trying another purchase.");
+      if (alive.current && !confirmed && code !== "1") {
+        if (code === "20") setMessage("paymentPending");
+        else setError("resultUnconfirmed");
       }
     } finally { action.current = false; if (alive.current) setBusy(false); }
   };
+  const purchase = (product: PurchasesStoreProduct) => run(() => client.current!.purchase(product, before => {
+    // Store-managed downgrades take effect at renewal, not when the sheet closes.
+    const item = before.products.find(item => item.productId === product.identifier);
+    if (before.active && before.plan === "Max" && item?.kind === "subscription" && item.plan === "Pro") return;
+    pendingPurchase.current = { before, productId: product.identifier };
+    if (alive.current) setCheckingPurchase(true);
+  }), "storeCompleted");
   const manage = async () => {
     if (!state?.subscriptionStore || state.subscriptionStore === "web") return;
     await Browser.open({ url: state.subscriptionStore === "app_store" ? "https://apps.apple.com/account/subscriptions" : "https://play.google.com/store/account/subscriptions" });
   };
   return <section className="native-billing" aria-labelledby="native-billing-title" data-testid="native-billing">
-    <div className="native-billing-heading"><h2 id="native-billing-title">Plans & credits</h2><button type="button" onClick={onClose} disabled={busy}>Back to account</button></div>
-    {busy && <p role="status">Connecting to {storeName}…</p>}
+    <div className="native-billing-heading"><h2 id="native-billing-title">{c.title}</h2>{onClose && <button type="button" onClick={onClose} disabled={busy}>{c.back}</button>}</div>
+    {checkingPurchase && <div className="purchase-verifying" role="status"><strong>{c.purchaseChecking}</strong><p>{c.purchaseCheckingDescription}</p></div>}
+    {confirmation && <PurchaseConfirmation confirmation={confirmation} language={language} onClose={() => setConfirmation(null)} />}
+    {busy && <p role="status">{formatMobileBillingCopy(c.connecting, { store: storeName })}</p>}
     {state && <>
-      {state.verificationPending && <p role="status">Store verification is pending. Refresh your balance before starting another subscription purchase.</p>}
-      {state.subscriptionPurchaseAttempt && <p role="status">A subscription request is awaiting store verification. Another subscription purchase is blocked. Refresh or restore after approval; contact support@tomverse.app if the store has cancelled the request.</p>}
-      {!!state.creditPurchasesNeedingReview && <p role="alert">A store credit payment needs support review. Contact support@tomverse.app before making another credit purchase. Your payment record has been retained.</p>}
-      <div className="native-billing-current"><h3>Current plan: {state.plan}</h3><p>Purchased credits: {state.purchasedCredits.toLocaleString()}</p>
-        {state.active && state.expiresAt && <p>{state.cancelAtPeriodEnd ? "Access until" : "Renews"}: {new Date(state.expiresAt).toLocaleDateString()}</p>}
-        {state.active && state.subscriptionStore && state.subscriptionStore !== "web" && <button type="button" disabled={busy} onClick={() => { void manage().catch(() => setError("Unable to open subscription management.")); }}>Manage or cancel subscription</button>}
-        {[...new Set(state.storeSubscriptions?.map((entry) => entry.store) || [])].filter((provider) => provider !== state.subscriptionStore).map((provider) =>
-          <button key={provider} type="button" disabled={busy} onClick={() => { void Browser.open({ url: provider === "app_store" ? "https://apps.apple.com/account/subscriptions" : "https://play.google.com/store/account/subscriptions" }).catch(() => setError("Unable to open subscription management.")); }}>
-            Manage {provider === "app_store" ? "App Store" : "Google Play"} subscription
-          </button>)}
-        {state.active && (state.subscriptionStore === "web" || state.webSubscription?.active) && <><p>Your web subscription is managed by Tomverse. Cancel renewal here; access continues until the end of the paid period.</p>
-          {state.webSubscription?.expiresAt && <p>Web subscription access until: {new Date(state.webSubscription.expiresAt).toLocaleDateString()}</p>}
-          {!(state.webSubscription?.cancelAtPeriodEnd ?? state.cancelAtPeriodEnd) && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel subscription</button>}
-          {confirmCancel && <div role="group" aria-label="Confirm cancellation"><p>Cancel automatic renewal? Your paid access continues until the date above.</p>
-            <button type="button" disabled={busy} onClick={() => { setConfirmCancel(false); void run(() => client.current!.cancelWeb(), "Automatic renewal has been cancelled."); }}>Confirm cancellation</button>
-            <button type="button" disabled={busy} onClick={() => setConfirmCancel(false)}>Keep subscription</button></div>}
-        </>}
+      {state.verificationPending && <p role="status">{c.verificationPending}</p>}
+      {state.subscriptionPurchaseAttempt && <p role="status">{c.subscriptionPending}</p>}
+      {!!state.creditPurchasesNeedingReview && <p role="alert">{c.creditReview}</p>}
+      <div className="native-billing-current"><h3><CreditCard size={22} aria-hidden="true" /><span>{formatMobileBillingCopy(c.currentPlan, { plan: state.plan })}</span></h3><p className="native-billing-balance"><span>{creditPrefix}</span>{" "}<strong>{number(state.purchasedCredits)}{creditSuffix}</strong></p>
+        {state.active && state.expiresAt && <p>{formatMobileBillingCopy(state.cancelAtPeriodEnd ? c.accessUntil : c.renews, { date: date(state.expiresAt) })}</p>}
       </div>
-      {state.subscriptionStore !== "web" && state.webSubscription?.active && <p role="alert">You have subscriptions with both providers. You can cancel web renewal here and manage your store subscription separately. Your credit allowance is shared and is not doubled.</p>}
-      {state.active && state.subscriptionStore !== store && <p>To avoid a second subscription, change your plan through its original provider. You can still buy additional credits here.</p>}
-      {state.active && state.cancelAtPeriodEnd && <p>Renewal is cancelled. Use subscription management to resume renewal before changing plans.</p>}
-      <h3>Choose a plan</h3>
-      <div role="group" aria-label="Billing period" className="native-billing-actions">
-        <button type="button" aria-pressed={interval === "monthly"} onClick={() => setInterval("monthly")} disabled={busy}>Monthly</button>
-        <button type="button" aria-pressed={interval === "annual"} onClick={() => setInterval("annual")} disabled={busy}>Annual</button>
+      {state.subscriptionStore !== "web" && state.webSubscription?.active && <p role="alert">{c.overlap}</p>}
+      {state.active && state.subscriptionStore !== store && <p>{c.originalProvider}</p>}
+      {state.active && state.cancelAtPeriodEnd && <p>{c.cancelledRenewal}</p>}
+      <h3 className="native-billing-plan-heading">{c.choose}</h3>
+      <div role="group" aria-label={c.billingPeriod} className="native-billing-interval">
+        <button type="button" aria-pressed={interval === "monthly"} onClick={() => setInterval("monthly")} disabled={busy}>{c.monthly}</button>
+        <button type="button" aria-pressed={interval === "annual"} onClick={() => setInterval("annual")} disabled={busy}>{c.annual}</button>
       </div>
-      <p>Free chat is available without a subscription. Paid plans include ongoing access to premium models and a monthly credit allowance, resetting each UTC calendar month.</p>
-      <div className="native-billing-products">{state.products.filter((p) => p.kind === "subscription" && p.interval === interval).map((item) => {
+      <div className="native-billing-products native-billing-plans">{state.products.filter((p) => p.kind === "subscription" && p.interval === interval).map((item) => {
+        if (item.kind !== "subscription") return null;
         const product = products.find((p) => p.identifier === item.productId);
-        return <article key={item.productId}><h4>{item.kind === "subscription" ? item.plan : ""}</h4><p>{item.monthlyCredits?.toLocaleString()} plan credits each month · up to {item.maxModels} models per comparison</p>
-          <p>{product?.priceString || "Unavailable"} / {interval === "annual" ? "year" : "month"}</p>
-          <button type="button" disabled={busy || !product || !canPurchaseMobileProduct(state, item, store)} onClick={() => { void run(() => client.current!.purchase(product!), "Store request completed. Verified changes appear here; if still processing, refresh your balance."); }}>
-            {item.kind === "subscription" && state.active && state.plan === item.plan ? "Current plan" : state.active ? "Change plan" : "Subscribe"}
+        return <article key={item.productId} data-featured={item.plan === "Max" || undefined}><h4>{item.plan}</h4>
+          <p className="native-billing-price"><strong>{product?.priceString || c.unavailable}</strong><span> / {interval === "annual" ? c.priceYear : c.priceMonth}</span></p>
+          <p className="native-billing-benefits">{formatMobileBillingCopy(c.planBenefitCompact, { credits: number(item.monthlyCredits), models: number(item.maxModels) })}</p>
+          <button type="button" disabled={busy || !product || !canPurchaseMobileProduct(state, item, store)} onClick={() => { void purchase(product!); }}>
+            {item.kind === "subscription" && state.active && state.plan === item.plan ? c.currentPlanButton : state.active ? c.changePlan : c.subscribe}
           </button></article>;
       })}</div>
-      <p>Subscriptions renew automatically at the displayed price and billing period until cancelled in subscription management. The store confirmation shows the final charge and effective date. Upgrades apply after payment confirmation; downgrades apply at the end of the paid period.</p>
-      <h3>Additional credits</h3><p>One-time purchases. Purchased credits do not expire and remain available after cancellation.</p>
-      <div className="native-billing-products">{state.products.filter((p) => p.kind === "credits").map((item) => {
+
+      <h3>{c.additionalCredits}</h3><p className="native-billing-credit-terms">{c.creditTerms}</p>
+      <div className="native-billing-products native-billing-credit-list">{state.products.filter((p) => p.kind === "credits").map((item) => {
         const product = products.find((p) => p.identifier === item.productId);
-        return <article key={item.productId}><h4>{item.credits?.toLocaleString()} credits</h4><p>{product?.priceString || "Unavailable"}</p>
-          <button type="button" disabled={busy || !product || !canPurchaseMobileProduct(state, item, store)} onClick={() => { void run(() => client.current!.purchase(product!), "Purchase submitted. Credits appear after store verification; refresh if the payment is still processing."); }}>Buy credits</button></article>;
+        return <article key={item.productId}><Coins size={20} aria-hidden="true" /><div className="native-billing-credit-copy"><h4>{formatMobileBillingCopy(c.creditPack, { credits: number(item.credits) })}</h4><p>{product?.priceString || c.unavailable}</p></div>
+          <button type="button" disabled={busy || !product || !canPurchaseMobileProduct(state, item, store)} onClick={() => { void purchase(product!); }}>{c.buyCredits}</button></article>;
       })}</div>
-      {!products.length && <p>No store products are available. Please try again later.</p>}
+      <div className="native-billing-management">
+        {state.active && state.subscriptionStore && state.subscriptionStore !== "web" && <button type="button" disabled={busy} onClick={() => { void manage().catch(() => setError("managementFailed")); }}><CreditCard size={18} aria-hidden="true" /><span>{c.manage}</span><ExternalLink size={15} aria-hidden="true" /></button>}
+        {[...new Set(state.storeSubscriptions?.map((entry) => entry.store) || [])].filter((provider) => provider !== state.subscriptionStore).map((provider) =>
+          <button key={provider} type="button" disabled={busy} onClick={() => { void Browser.open({ url: provider === "app_store" ? "https://apps.apple.com/account/subscriptions" : "https://play.google.com/store/account/subscriptions" }).catch(() => setError("managementFailed")); }}>
+            {formatMobileBillingCopy(c.manageStore, { store: provider === "app_store" ? "App Store" : "Google Play" })}
+          </button>)}
+        {state.active && (state.subscriptionStore === "web" || state.webSubscription?.active) && <><p>{c.webDescription}</p>
+          {state.webSubscription?.expiresAt && <p>{formatMobileBillingCopy(c.webAccessUntil, { date: date(state.webSubscription.expiresAt) })}</p>}
+          {!(state.webSubscription?.cancelAtPeriodEnd ?? state.cancelAtPeriodEnd) && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)}>{c.cancel}</button>}
+          {confirmCancel && <div role="group" aria-label={c.confirmCancel}><p>{c.confirmCancelPrompt}</p>
+            <button type="button" disabled={busy} onClick={() => { setConfirmCancel(false); void run(() => client.current!.cancelWeb(), "renewalCancelled"); }}>{c.confirmCancel}</button>
+            <button type="button" disabled={busy} onClick={() => setConfirmCancel(false)}>{c.keep}</button></div>}
+        </>}
+      </div>
+      {!busy && !products.length && <><p>{c.noProducts}</p>{!error && <button type="button" onClick={retryCatalog}>{c.retry}</button>}</>}
     </>}
-    <div className="native-billing-actions"><button type="button" disabled={busy || !state} onClick={() => { void run(() => client.current!.refresh(), "Balance refreshed."); }}>Refresh balance</button>
-      <button type="button" disabled={busy || !state} onClick={() => { void run(() => client.current!.restore(), "Purchases restored for this Tomverse account. Purchased credits remain in your account balance."); }}>Restore purchases</button></div>
-    <p><a href="https://tomverse.app/terms" target="_blank" rel="noreferrer">Terms of Use</a> · <a href="https://tomverse.app/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></p>
-    {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
+    {state && <details className="native-billing-details"><summary>{c.planInformation}</summary><p>{c.planDescription}</p></details>}
+    {state && <p className="native-billing-subscription-terms">{c.subscriptionTerms}</p>}
+    <div className="native-billing-actions"><button type="button" disabled={busy || !state} onClick={() => { void run(() => client.current!.refresh(), "balanceRefreshed"); }}><RefreshCw size={16} aria-hidden="true" />{c.refreshBalance}</button>
+      <button type="button" disabled={busy || !state} onClick={() => { void run(() => client.current!.restore(), "purchasesRestored"); }}><RotateCcw size={16} aria-hidden="true" />{c.restore}</button></div>
+    <p className="native-billing-legal"><a href="https://tomverse.app/terms" target="_blank" rel="noreferrer">{c.terms}<ExternalLink size={12} aria-hidden="true" /></a><a href="https://tomverse.app/privacy" target="_blank" rel="noreferrer">{c.privacy}<ExternalLink size={12} aria-hidden="true" /></a></p>
+    {message && <p role="status">{c[message]}</p>}{error && <><p role="alert">{formatMobileBillingCopy(c[error], { store: storeName })}</p>{Capacitor.isNativePlatform() && <button type="button" disabled={busy} onClick={retryCatalog}>{c.retry}</button>}</>}
   </section>;
 }

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import { mobileNavigationCopy } from "../../../locales/mobileNavigation";
 import { mobileCopy, mobileLanguages, type MobileLanguage } from "../../../locales/mobile";
 import type { ChatSummary, ChatTransport, Conversation, MobileAttachment, ChatMessage } from "./chatTransport";
 import { SidebarAccount } from "./SidebarAccount";
@@ -27,6 +29,10 @@ import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDev
 import { ImportedTranscript } from "./ImportedTranscript";
 import { reviewSeedFromChat } from "../../../lib/chatReviewHandoff";
 import { mobileCompareInReviewCopy } from "../../../locales/mobileCompareInReview";
+import type { AccountSettingsTab } from "../../../lib/accountSettingsEvents";
+import { mobileSettingsCopy } from "../../../locales/mobileSettings";
+import { useCompactBottomDock, useVisibleViewportHeight } from "../../../components/chat/useVisualViewport";
+import { NativeLocationOnboarding } from "./NativeLocationOnboarding";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 function AnswerAttribution({ message, language }: { message: ChatMessage; language: MobileLanguage }) {
@@ -39,12 +45,16 @@ function AnswerAttribution({ message, language }: { message: ChatMessage; langua
 }
 
 export function MobileApp({ transport, demo = false }: { transport: ChatTransport; demo?: boolean }) {
+  const visibleHeight = useVisibleViewportHeight();
+  const shortViewport = useCompactBottomDock();
+  const compact = shortViewport || (visibleHeight > 0 && visibleHeight < 640);
   const [language, setLanguage] = useState<MobileLanguage>(() => {
     const saved = localStorage.getItem("tomverse-language") ?? navigator.language.split("-")[0];
     return mobileLanguages.includes(saved as MobileLanguage) ? saved as MobileLanguage : "en";
   });
   const [theme, setTheme] = useState(() => localStorage.getItem("tomverse-theme") ?? "system");
   const copy = mobileCopy[language];
+  const navigationCopy = mobileNavigationCopy[language];
   const loginCopy = mobileLoginCopy[language];
   const workspaceCopy = mobileWorkspaceCopy[language];
   const [signedIn, setSignedIn] = useState(false);
@@ -55,6 +65,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [view, setView] = useState<"chat" | "list">("chat");
   const [settings, setSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<AccountSettingsTab>("account");
   const [modelPicker, setModelPicker] = useState(false);
   const [draftAutoOffered, setDraftAutoOffered] = useState(false);
   const [product, setProduct] = useState<"chat" | "review">("chat");
@@ -62,6 +73,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [streaming, setStreaming] = useState(false);
   const [newReviewRequest, setNewReviewRequest] = useState(0);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
   const [partial, setPartial] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [owner, setOwner] = useState<string | null>(null);
@@ -94,7 +106,10 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
 
   useEffect(() => { document.documentElement.lang = language; localStorage.setItem("tomverse-language", language); }, [language]);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("tomverse-theme", theme); }, [theme]);
-  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [partial, conversation?.messages.length]);
+  useEffect(() => {
+    if (conversation?.messages.length || partial !== null) end.current?.scrollIntoView({ block: "end" });
+    else end.current?.parentElement?.scrollTo({ top: 0 });
+  }, [partial, conversation?.messages.length]);
   useEffect(() => {
     if (!signedIn || conversation) return;
     let active = true;
@@ -258,14 +273,20 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     setProduct(next); setView("chat"); setError("");
     if (next === "chat") { setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
   }
-  const accountFooter = <SidebarAccount transport={transport} language={language} onSettings={() => { setView("chat"); setSettings(true); }} />;
+  function openSettings(tab: AccountSettingsTab = "account") { setView("chat"); setSettingsTab(tab); setSettings(true); }
+  function openPlan() { openSettings("plan"); }
+  function returnToWorkspace() { setSettings(false); setAccountOpen(false); setView("chat"); }
+  const accountFooter = <SidebarAccount transport={transport} language={language} onSettings={() => openSettings()} onPlan={openPlan} />;
 
-  return <main className="mobile-app">
-    <header className="app-header">
-      <button className="menu-button" aria-label={copy.chats} onClick={() => setView(view === "list" ? "chat" : "list")} disabled={!signedIn}><AppIcon name="menu" /><AppIcon name="menuDark" /></button>
-      <span className="brand-lockup"><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></span>
-      {signedIn && <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || uncertain} onChange={event => switchProduct(event.target.value as "chat" | "review")}><option value="chat">Chat</option><option value="review">Review</option></select>}
-      {signedIn ? <button className="header-new-chat" aria-label={copy.newChat} disabled={streaming || reviewBusy || loading} onClick={newConversation}><AppIcon name="newChat" /></button> : <button className="account-button" aria-label={copy.settings} onClick={() => setSettings(true)}><AppIcon name="settings" /></button>}
+  const productSelector = <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || uncertain} onChange={event => switchProduct(event.target.value as "chat" | "review")}><option value="chat">Chat</option><option value="review">Review</option></select>;
+
+  return <main className="mobile-app" data-compact={compact || undefined} style={visibleHeight ? { height: visibleHeight } : undefined}>
+    <header className="app-header" data-product-control={signedIn && compact && view === "chat" || undefined}>
+      <button className="menu-button" aria-label={view === "list" ? navigationCopy.returnToChat : copy.chats} onClick={() => view === "list" ? returnToWorkspace() : setView("list")} disabled={!signedIn}>{view === "list" ? <ArrowLeft size={22} aria-hidden="true" /> : <><AppIcon name="menu" /><AppIcon name="menuDark" /></>}</button>
+      <button type="button" className="brand-lockup" aria-label={navigationCopy.home} onClick={returnToWorkspace}><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></button>
+      {signedIn && compact && view === "chat" && productSelector}
+      {compact && (loading || reviewLoading) && <span className="workspace-loading" role="status"><span className="sr-only">{copy.loading}</span></span>}
+      {signedIn ? <button className="header-new-chat" aria-label={copy.newChat} disabled={streaming || reviewBusy || loading} onClick={newConversation}><AppIcon name="newChat" /></button> : <button className="account-button" aria-label={copy.settings} onClick={() => openSettings()}><AppIcon name="settings" /></button>}
     </header>
     {demo && <div className="demo-label">{copy.demo}</div>}
     {offline && <p role="status" className="notice">{mobileCompletionCopy(language).offline}</p>}
@@ -280,14 +301,14 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       finally { if (current === requestEpoch.current) setLoading(false); }
     }} />}
 
-    {loading && <p role="status" className="notice">{copy.loading}</p>}
+    {!signedIn && loading && <span className="sign-in-progress workspace-loading" role="status"><span className="sr-only">{copy.loading}</span></span>}
     {error && <div role="alert" className="notice error">{error}</div>}
     {!signedIn ? <section className="welcome">
       <div className="welcome-mark"><AppIcon name="logo" /></div><h1>{copy.welcome}</h1><p>{copy.intro}</p>
       <button className="primary" onClick={() => void signIn()} disabled={loading} aria-describedby="browser-sign-in-note">{copy.signIn} <span aria-hidden="true">→</span></button>
       <p id="browser-sign-in-note" className="browser-sign-in-note">{loginCopy.browserIntro}</p>
       {transport.requestEmailCode && transport.verifyEmailCode && <button type="button" className="sign-in-email" disabled={loading} onClick={() => { setError(""); setEmailLogin(true); }}>{loginCopy.inAppEmail}</button>}
-    </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={() => setView("chat")} onBusyChange={setReviewBusy} historyFooter={accountFooter} newConversationRequest={newReviewRequest} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
+    </section> : product === "review" ? <ReviewWorkspace transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={returnToWorkspace} onBusyChange={setReviewBusy} onLoadingChange={setReviewLoading} onProductChange={switchProduct} historyFooter={accountFooter} newConversationRequest={newReviewRequest} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
       <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
         const scope = epoch.current; const rows = await transport.list();
         if (scope !== epoch.current) throw Error("SIGN_IN_REQUIRED");
@@ -297,23 +318,22 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {/* A continuation is never a blank new chat: its original is its start. */}
         {conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}
-        {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <WorkspaceWelcome product="chat" language={language} transport={transport} onSeed={(text, starter) => {
-          if (starter === "compareAnswers" || starter === "compareImageModels") { preserveNativeDraft(owner, "review:new", text); setProduct("review"); setView("chat"); }
-          else { setDraft(text); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); if (starter === "sourcedAnswer" && conversation && conversation.webSearchMode !== "always") void configureTools({ webSearchMode: "always" }).catch(() => {}); }
-        }} />}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}><AnswerContent content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
-        {partial !== null && <article className="message assistant"><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
+        {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <WorkspaceWelcome product="chat" language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} />}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {partial !== null && <article className="message assistant"><span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />
       </section>
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
-      <button className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><AppIcon name="spark" />{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? workspaceCopy.model}<span aria-hidden="true">⌄</span></button>
-      <Composer locationIdentity={owner} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(() => undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
+      <Composer product="chat" onProductChange={switchProduct} productBusy={streaming || loading || uncertain} productLoading={loading}
+        selectionControl={<button type="button" className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><span>{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : getModel(conversation?.selectedModels[0] ?? "")?.name ?? workspaceCopy.model}</span><span aria-hidden="true">⌄</span></button>}
+        locationIdentity={owner} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files).then(() => undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
-    {accountOpen && <Sheet title={copy.account} closeLabel={copy.close} onClose={() => setAccountOpen(false)}><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
+    {accountOpen && <Sheet title={mobileSettingsCopy(language).accountData} closeLabel={copy.close} onClose={() => setAccountOpen(false)} exitLabel={navigationCopy.returnToChat} onExit={returnToWorkspace}><button type="button" className="settings-detail-back" onClick={() => { setAccountOpen(false); openSettings("data"); }}><span aria-hidden="true">← </span>{mobileSettingsCopy(language).back}</button><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
+    {!demo && <NativeLocationOnboarding language={language} />}
     {reportFor && signedIn && <Sheet title={workspaceCopy.report} closeLabel={copy.close} onClose={() => setReportFor(null)}><AnswerReport transport={transport} language={language} messageId={reportFor.messageId} modelId={reportFor.modelId} /></Sheet>}
-    {settings && <Sheet title={copy.settings} closeLabel={copy.close} onClose={() => setSettings(false)}><SettingsScreen transport={transport} signedIn={signedIn} language={language} theme={theme} onLanguage={setLanguage} onTheme={setTheme} onAccount={() => { setSettings(false); setAccountOpen(true); }} onSignOut={() => void signOut()} /></Sheet>}
+    {settings && <Sheet className="settings-sheet" title={copy.settings} closeLabel={copy.close} onClose={() => setSettings(false)} exitLabel={navigationCopy.returnToChat} onExit={returnToWorkspace}><SettingsScreen transport={transport} signedIn={signedIn} language={language} theme={theme} initialTab={settingsTab} onLanguage={setLanguage} onTheme={setTheme} onAccount={() => { setSettings(false); setAccountOpen(true); }} onSignOut={() => void signOut()} /></Sheet>}
 
   </main>;
 }
