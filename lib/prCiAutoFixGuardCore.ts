@@ -175,7 +175,9 @@ export function parseConflictMarkers(text: string): MergedFile | null {
   return state === "outside" && hunks.length > 0 ? { outside, hunks } : null;
 }
 
-const sameLine = (a: string, b: string) => a.trimEnd() === b.trimEnd();
+// Exact, whitespace included: a trailing space can carry meaning (a shell
+// line continuation, a multi-line string).
+const sameLine = (a: string, b: string) => a === b;
 const startsAt = (lines: string[], at: number, piece: string[]) =>
   at + piece.length <= lines.length && piece.every((line, index) => sameLine(lines[at + index], line));
 
@@ -247,8 +249,8 @@ export function judgePrCiAutoFixConflict(input: {
         kept = end <= tailAt - next.length;
       }
       if (!kept) break;
-      const sides = new Set(merged.hunks[index].sides.map((line) => line.trimEnd()));
-      added += lines.slice(at, end).filter((line) => !sides.has(line.trimEnd())).length;
+      const sides = new Set(merged.hunks[index].sides);
+      added += lines.slice(at, end).filter((line) => !sides.has(line)).length;
       at = end + (index + 1 === last ? tail.length : merged.outside[index + 1].length);
     }
     if (!kept) {

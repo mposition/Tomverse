@@ -64,6 +64,9 @@ test("the guard commits a resolution that keeps everything outside the conflicts
   assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\nb-branch\n- run: npm test\n"), ["outside_conflict_changed"]);
   assert.deepEqual(one("lib/x.ts", "name: ci\n- run: npm test\nb-branch\n- run: npm audit\n"), ["outside_conflict_changed"]);
   assert.deepEqual(one("lib/x.ts", "name: ci\n- run: npm audit\nb-branch\n- run: npm test --bail\n"), ["outside_conflict_changed"]);
+  // Whitespace counts: a trailing space added or dropped outside is a change.
+  assert.deepEqual(one("lib/x.ts", "name: ci \n- run: npm audit\nb-branch\n- run: npm test\n"), ["outside_conflict_changed"]);
+  assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nb-branch \n- run: npm test\n"), ["gate_path_new_line"]);
 
   // Inside it, a gate path takes only its sides' lines; elsewhere a few joined lines are fine.
   assert.deepEqual(one(".github/workflows/ci.yml", "name: ci\n- run: npm audit\nrun: curl evil\n- run: npm test\n"), ["gate_path_new_line"]);
@@ -222,7 +225,7 @@ test("a conflicting draft is merged with develop, resolved by the model, and the
     // What the workflow does with it: a clean checkout at the head, develop's
     // commit merged there, and the trusted guard judging and writing it.
     const checkout = join(f.root, "pr");
-    sh(f.root, "clone", "-q", f.source, checkout);
+    sh(f.root, "clone", "-q", "-c", "core.autocrlf=false", f.source, checkout);
     sh(checkout, "checkout", "-q", "--detach", f.head);
     spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "merge", "--no-commit", "--no-ff", request.baseSha], { cwd: checkout });
     const resolutionPath = join(f.root, "resolution.json");
@@ -236,7 +239,7 @@ test("a conflicting draft is merged with develop, resolved by the model, and the
     const forged = join(f.root, "forged.json");
     writeFileSync(forged, JSON.stringify({ files: { ...resolution.files, "lib/other.js": Buffer.from("evil\n").toString("base64") } }));
     const again = join(f.root, "pr2");
-    sh(f.root, "clone", "-q", f.source, again);
+    sh(f.root, "clone", "-q", "-c", "core.autocrlf=false", f.source, again);
     sh(again, "checkout", "-q", "--detach", f.head);
     spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "merge", "--no-commit", "--no-ff", request.baseSha], { cwd: again });
     const refused = spawnSync(process.execPath, ["--experimental-strip-types", "scripts/pr-ci-auto-fix-guard.mjs", "conflict", again, forged], { encoding: "utf8" });
@@ -244,6 +247,25 @@ test("a conflicting draft is merged with develop, resolved by the model, and the
     assert.match(refused.stdout, /not_conflicted/);
     // (A Windows clone may check it out with CRLF.)
     assert.equal(readFileSync(join(again, "lib", "other.js"), "utf8").replace(/\r\n/g, "\n"), "export {};\n");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("one head carries one request: a conflict waits while a CI fix for that head is under way or sent", async () => {
+  const f = conflictFixture();
+  try {
+    const ledgerPath = join(f.config.stateDir, "ci-fix", "ledger.json");
+    mkdirSync(join(f.config.stateDir, "ci-fix"), { recursive: true });
+    for (const outcome of ["started", "queued"]) {
+      writeFileSync(ledgerPath, JSON.stringify({ [f.head]: { pr: 51, kind: "ci", outcome, at: 6000 } }));
+      assert.equal((await pass(f, () => assert.fail("the conflict must wait"))).outcome, "nothing_to_fix", outcome);
+    }
+    // A CI try that ended without a request leaves the head to the conflict.
+    writeFileSync(ledgerPath, JSON.stringify({ [f.head]: { pr: 51, kind: "ci", outcome: "no_change", at: 6000 } }));
+    const result = await pass(f, () => ({ ok: true, timedOut: false, tail: "RESULT: not_found" }));
+    assert.equal(result.outcome, "no_change");
+    assert.equal(readLedger(ledgerPath)[`${f.head}:conflict`].kind, "conflict");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
@@ -266,7 +288,7 @@ test("the guard writes through no link: a conflicted path that is one is refused
   const f = conflictFixture();
   try {
     const checkout = join(f.root, "pr");
-    sh(f.root, "clone", "-q", f.source, checkout);
+    sh(f.root, "clone", "-q", "-c", "core.autocrlf=false", f.source, checkout);
     sh(checkout, "checkout", "-q", "--detach", f.head);
     spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "merge", "--no-commit", "--no-ff", f.develop], { cwd: checkout });
     const outside = join(f.root, "outside.txt");

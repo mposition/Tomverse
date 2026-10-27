@@ -601,6 +601,7 @@ export async function runCiFix({
   let chosen = null;
   for (const pull of servedPulls(pulls)) {
     const tried = ledger[pull.head.sha];
+    if (busy(ledger[`${pull.head.sha}:conflict`])) continue;
     if (tried && !retryable(tried, await askedAgain(pull, tried), now)) continue;
     const { workflow_runs: runs = [] } = await github.json(`/actions/runs?head_sha=${pull.head.sha}&per_page=100`);
     const { ready, failed } = failedRuns(runs);
@@ -617,6 +618,7 @@ export async function runCiFix({
     for (const pull of servedPulls(pulls, { drafts: true })) {
       const key = `${pull.head.sha}:conflict`;
       const tried = ledger[key];
+      if (busy(ledger[pull.head.sha])) continue;
       if (tried && !retryable(tried, await askedAgain(pull, tried), now)) continue;
       // The list does not carry mergeability; a null is GitHub still computing it.
       const detail = await github.json(`/pulls/${pull.number}`);
@@ -641,6 +643,14 @@ export async function runCiFix({
   const pass = { config, github, outbox, workDir, model, secrets, claude, clock, log, ledger, record, provider };
   return chosen.kind === "conflict" ? fixConflict(pass, chosen) : fixFailedCi(pass, chosen);
 }
+
+/**
+ * Whether the other kind already has this head: being tried, or a request
+ * sent. One head carries one request -- the outbox file and the sender's
+ * once-per-head record are keyed by the head -- so the second kind waits for
+ * the head that request makes, or for a later pass.
+ */
+const busy = (entry) => entry?.outcome === "started" || entry?.outcome === "queued";
 
 /** Starts a head's entry: a retry starts it afresh, marked so it is the only one. */
 function start({ ledger, record }, { key, pull, retry }, entry) {

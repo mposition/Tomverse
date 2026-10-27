@@ -513,12 +513,13 @@ GitHub에서 develop과 충돌하면 이 서버가 mirror의 develop을 그 head
 충돌 파일의 표시만 풉니다. 서버를 떠나는 것은 충돌 파일들의 내용과 merge한 develop 커밋뿐이고,
 workflow는 그 커밋을 직접 merge한 뒤 다음을 검사하고 `auto-fix(conflict):` merge 커밋으로 push합니다.
 - 충돌 파일만 바꿨는지, 충돌 표시가 남지 않았는지 봅니다.
-- git이 충돌 구간 밖에 합쳐 둔 내용은 순서까지 그대로 남아야 합니다. 바뀌는 것은 충돌 구간뿐입니다.
+- git이 충돌 구간 밖에 합쳐 둔 내용은 공백까지, 순서까지 그대로 남아야 합니다. 바뀌는 것은 충돌 구간뿐입니다.
 - 충돌 구간 안에서 그 구간의 어느 쪽에도 없던 줄은 새 줄입니다. 게이트 경로에서는 새 줄을 쓸 수 없고,
   그 밖의 경로도 모두 합쳐 40줄까지입니다.
 - 양쪽 모두 일반 파일이어야 하고, 링크를 따라가지 않고 씁니다.
 - 한쪽이 지운 파일, symlink, 지시 파일이 걸린 충돌은 풀지 않습니다(`no_change`, `outside_rules`).
 - PR마다 `auto-fix(conflict):` 커밋은 최대 2개입니다.
+- head 하나에는 요청 하나만 보냅니다. 같은 head의 CI 수정이 진행 중이거나 보내졌으면 충돌 해결은 기다립니다(반대도 같습니다).
 켜는 방법(둘 다 필요): 이 서버의 `/etc/pr-ci-auto-fix/read.env`에 `PR_CI_AUTO_FIX_CONFLICTS=on`,
 그리고 GitHub 저장소 변수 `PR_AUTO_FIX_CONFLICTS_ENABLED=true`. workflow는 main의 것이 돌므로 이 변경이
 main에 들어간 뒤에 켭니다. develop 쪽에서 workflow 파일이 바뀐 merge는 `GH_AUTOMATION_PAT`에
