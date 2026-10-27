@@ -2,7 +2,7 @@
 
 Prepared on 2026-10-26 for the owner's personal Codemagic account. The Apple
 Developer Program is not required for this Simulator compile. The workflow has
-been checked locally; a Codemagic/Xcode build has not run yet.
+been checked locally; the first hosted build is recorded below.
 
 ## Repository and workflow
 
@@ -13,11 +13,11 @@ the iOS bundle, runs the preparation and billing-boundary tests, compiles withou
 the Simulator application. There are no automatic triggers or publishing steps.
 
 Repository: `https://github.com/mposition/Tomverse`.
-Prepared branch: `codex/to-develop/ios-remote-build-prep`. Its initial main revision
-and subsequent develop rebase are recorded in
-[the remote-build handoff](ios-remote-build.md). The six iOS patches were preserved
-unchanged when resolving PR #3044 on 2026-10-27. The branch is pushed and can be
-built directly; a merge to main or develop is not needed.
+Prepared branch: `codex/to-develop/ios-android-design-parity`, including the
+2026-10-27 Android design. The original iOS preparation and PR #3044 were merged
+before this branch was created. Its initial main revision and develop rebase
+are recorded in [the remote-build handoff](ios-remote-build.md). The branch is
+pushed and can be built directly; a merge to main or develop is not needed.
 
 ## Connect from Windows
 
@@ -34,7 +34,7 @@ it requires no production service secrets or Apple signing credentials.
    selector is shown, use **Other** for this repository's custom Capacitor build.
    Finish adding the application to your personal account.
 4. After the prepared branch is available on GitHub, choose **Start new build**,
-   select branch `codex/to-develop/ios-remote-build-prep` and workflow
+   select branch `codex/to-develop/ios-android-design-parity` and workflow
    `ios-simulator` / **Tomverse iOS Simulator**.
 5. Confirm the personal account's remaining free M2 minutes before starting the
    build. The published personal plan includes 500 M2 minutes per month; the
@@ -65,6 +65,35 @@ Program membership, a final Bundle ID and App Store Connect app, and signing/API
 access configured inside Codemagic. The existing target supports iPhone and iPad
 on iOS/iPadOS 17.4+. Signed builds and TestFlight upload are a separate workflow;
 this file does not configure or perform them.
+
+## First hosted build (2026-10-27)
+
+The owner authorized the first cloud build. Personal-account usage was 0/500
+free macOS minutes before starting; no paid subscription was enabled.
+
+Build #1 at `23ec58bad` reached Xcode and failed because Swift inferred the
+native file bridge's methods as `[CAPPluginMethod?]`, which does not satisfy
+`CAPBridgedPlugin`. Commit `e3e7530bd` explicitly declares `[CAPPluginMethod]`,
+matching the existing authentication bridge and Capacitor's protocol. File
+validation, upload restrictions and document-picker behavior are unchanged.
+
+[Build #2](https://codemagic.io/app/6adf504aa37cedc4dfe11471/build/6ae07b76206ce93970c66b94)
+compiled commit `e3e7530bd9ab745858770ccfeb982c8e26e98359` successfully in
+3m 32s on Mac mini M2 with Xcode 26.6. The production bundle preparation,
+prebuild/billing tests, native compile and artifact packaging all completed.
+The downloaded Xcode log contains `BUILD SUCCEEDED`.
+
+The actual downloaded `tomverse-ios-simulator.zip` was inspected:
+
+- Size: 19,271,534 bytes.
+- SHA-256: `ebba05de7ede048a04172af3b469fe0cee8bb058b3c0fe7b4cf9e2a17eb5a42e`.
+- Bundle ID `app.tomverse.shell`; minimum OS 17.4; device families iPhone/iPad.
+- Simulator platform with both arm64 and x86_64 executable architectures.
+- All four new Chat/Review light/dark illustrations are bundled.
+
+This establishes native compilation and package contents. Simulator launch,
+signed-device installation, permission dialogs, authentication and StoreKit
+acceptance remain separate checks. No app-store upload or deployment occurred.
 
 The Apple App ID `app.tomverse.shell` and [Tomverse App Store Connect draft](https://appstoreconnect.apple.com/apps/6827148073/distribution)
 were registered on 2026-10-26. Seven payment products have draft records as noted
