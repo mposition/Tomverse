@@ -255,6 +255,10 @@ approvedBy: mposition · approvedAt: 2026-10-16 · 정책 버전: 19
      켜짐)를 **같은 트랜잭션**에서 시스템 actor로 기록한다. 부분 등록은 없다.
    - 하나라도 걸리면 아무것도 등록하지 않고 그 아이디어를 운영자 검토 대기로 둔다. 운영자는 계획
      검토 화면에서 한 번에 등록하거나 거절한다.
+   - v22 ready 판정, 공개 PR 동의, 결정 readback은 단위 결정의 prepare·consume 감사로 결정한 owner
+     본인의 사람 감사, 또는 이 무인 등록의 시스템 감사(`amux-v4-intake`, `system-unit-registration-v1`
+     범위, receipt의 시스템 등록 권한, 그 아이디어의 `amux.v19.plan.auto_registered` 감사)를 인정한다.
+     사람 감사가 시스템 표식을 달거나 범위가 다른 시스템 감사는 둘 다 아니다(운영자 결정 2026-10-27).
    - 등록된 Task는 v22 자동 편입 대상이다. 구현 결과물의 사람 결정은 PR review·병합
      (`development-agent-orchestration.md` v49·v50)이며 이 개정이 바꾸지 않는다.
 6. **비용.** 아이디어당·접수당 상한은 없다. Agent 비용 namespace `agent/amux-intake`의 월 예산(v16,
