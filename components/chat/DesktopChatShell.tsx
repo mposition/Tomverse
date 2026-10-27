@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
-import { reviewFocusHint, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import { reviewFocusHint, reviewReorderHint, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -551,7 +551,9 @@ export function DesktopChatShell({
   const [draggingFocusModel, setDraggingFocusModel] = useState<string | null>(null);
   useEffect(() => { if (promptPayload || imageWorkspace || review?.imageRequest) queueMicrotask(() => setStudioView("results")); }, [promptPayload, imageWorkspace, review?.imageRequest]);
   const singleTranscript = transcriptScope === "conversation";
-  const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
+  const canFocusStudioModels = studio && !singleTranscript && selectedModels.length === 3;
+  const resolvedStudioComparison = studio && !singleTranscript && selectedModels.length !== 3 ? "compare" : studioComparison;
+  const canReorderStudioModels = studio && !singleTranscript && selectedModels.length > 1;
   const statusModels = useMemo(() => singleTranscript ? ["@conversation"] : selectedModels, [singleTranscript, selectedModels]);
   const {
     models: AVAILABLE_MODELS,
@@ -563,6 +565,18 @@ export function DesktopChatShell({
   // Identity of the conversation currently on screen, used to scope
   // per-conversation UI state (the active tab below).
   const conversationStateKey = currentChatId || "new";
+  const [studioPanelOrder, setStudioPanelOrder] = useState<{ chatKey: string; slots: number[] } | null>(null);
+  // Keep each panel's original slot key so moving it preserves its live ChatApp.
+  const panelEntries = useMemo(() => {
+    const models = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
+    const entries = models.map((modelId, slot) => ({ modelId, slot }));
+    if (studio && studioPanelOrder?.chatKey === conversationStateKey) {
+      const order = studioPanelOrder.slots;
+      const position = (slot: number) => order.includes(slot) ? order.indexOf(slot) : order.length + slot;
+      entries.sort((a, b) => position(a.slot) - position(b.slot));
+    }
+    return entries;
+  }, [conversationStateKey, selectedModels, singleTranscript, studio, studioPanelOrder]);
   const [modelContentStates, setModelContentStates] = useState<
     Record<string, ChatContentState>
   >({});
@@ -880,7 +894,7 @@ export function DesktopChatShell({
       ? activeModelId
       : selectedModels[0] || null;
   const activeModelIndex = resolvedActiveModelId
-    ? selectedModels.indexOf(resolvedActiveModelId)
+    ? panelEntries.findIndex(entry => entry.modelId === resolvedActiveModelId)
     : -1;
   // Roving tabindex per the WAI-ARIA tabs pattern: only the active tab is
   // in the Tab order, and arrow keys move both selection and focus. Focus
@@ -894,19 +908,19 @@ export function DesktopChatShell({
     if (focus) tabRefs.current[modelId]?.focus();
   }, []);
   const focusModel = (modelId: string) => {
-    if (!selectedModels.includes(modelId)) return;
+    if (!canFocusStudioModels || !selectedModels.includes(modelId)) return;
     activateModel(modelId, false);
     setStudioComparison("focus");
   };
   const switchModelByOffset = useCallback(
     (offset: number) => {
-      if (selectedModels.length < 2 || activeModelIndex < 0) return;
+      if (panelEntries.length < 2 || activeModelIndex < 0) return;
       const nextIndex =
-        (activeModelIndex + offset + selectedModels.length) %
-        selectedModels.length;
-      activateModel(selectedModels[nextIndex], true);
+        (activeModelIndex + offset + panelEntries.length) %
+        panelEntries.length;
+      activateModel(panelEntries[nextIndex].modelId, true);
     },
-    [activateModel, activeModelIndex, selectedModels]
+    [activateModel, activeModelIndex, panelEntries]
   );
   const handleTabKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -918,14 +932,14 @@ export function DesktopChatShell({
         switchModelByOffset(-1);
       } else if (event.key === "Home") {
         event.preventDefault();
-        if (selectedModels[0]) activateModel(selectedModels[0], true);
+        if (panelEntries[0]) activateModel(panelEntries[0].modelId, true);
       } else if (event.key === "End") {
         event.preventDefault();
-        const last = selectedModels[selectedModels.length - 1];
-        if (last) activateModel(last, true);
+        const last = panelEntries[panelEntries.length - 1];
+        if (last) activateModel(last.modelId, true);
       }
     },
-    [activateModel, selectedModels, switchModelByOffset]
+    [activateModel, panelEntries, switchModelByOffset]
   );
 
   const sidebarElement = (
@@ -961,7 +975,7 @@ export function DesktopChatShell({
       data-review-appearance={review?.appearance ?? chatWorkspace?.appearance}
       data-studio-product={currentProduct}
       data-studio-view={studioView}
-      data-studio-comparison={studioComparison}
+      data-studio-comparison={resolvedStudioComparison}
       data-studio-has-results={!showsWelcomeSurface || Boolean(review?.imageRequest)}
       // Observable so a regression test can assert on the state machine itself
       // -- "unknown" must never be rendered as the welcome screen -- rather
@@ -998,27 +1012,26 @@ export function DesktopChatShell({
           <>
         <div className={studio ? "review-studio-results" : "contents"}>
         {review?.imageRequest && review.unsupportedProviders.length > 0 && <ReviewUnsupportedProviders providers={review.unsupportedProviders} />}
-        {studio && !singleTranscript && <div className="review-result-toolbar">
-          <button type="button" onClick={() => setStudioView("write")}>{reviewWorkspaceCopy[lang].edit}</button>
-          <div role="group" aria-label={reviewWorkspaceCopy[lang].results}>
-            <button type="button" aria-pressed={studioComparison === "focus"} onClick={() => setStudioComparison("focus")}>{reviewWorkspaceCopy[lang].focus}</button>
-            <button type="button" aria-pressed={studioComparison === "compare"} onClick={() => setStudioComparison("compare")}>{reviewWorkspaceCopy[lang].sideBySide}</button>
-          </div>
-        </div>}
-        {studio && !singleTranscript && !showsWelcomeSurface && selectedModels.length > 1 && <div className="review-focus-controls">
-          <div role="group" aria-label={reviewWorkspaceCopy[lang].focus} aria-describedby="review-focus-instructions">
-            {selectedModels.map(modelId => {
+        {canReorderStudioModels && !showsWelcomeSurface && <div className="review-focus-controls">
+          <div className="review-result-toolbar">
+          <div className="review-model-chips" role="group" aria-label={reviewWorkspaceCopy[lang][resolvedStudioComparison === "focus" ? "focus" : "sideBySide"]} aria-describedby="review-layout-instructions">
+            {panelEntries.map(({ modelId }) => {
               const model = AVAILABLE_MODELS.find(item => item.id === modelId);
               return <button key={modelId} type="button" data-testid="review-focus-model" data-model-id={modelId}
                 aria-pressed={modelId === resolvedActiveModelId} draggable
-                onClick={() => focusModel(modelId)}
+                onClick={() => resolvedStudioComparison === "focus" ? focusModel(modelId) : activateModel(modelId, false)}
                 onDragStart={event => { event.dataTransfer.setData(FOCUS_DRAG_TYPE, modelId); event.dataTransfer.effectAllowed = "move"; setDraggingFocusModel(modelId); }}
                 onDragEnd={() => setDraggingFocusModel(null)}>
                 <ModelLogo model={model} size="sm" /><span>{model?.name ?? modelId}</span><span aria-hidden="true">⠿</span>
               </button>;
             })}
           </div>
-          <p id="review-focus-instructions">{reviewFocusHint[lang]}</p>
+          {canFocusStudioModels && <div className="review-comparison-switch" role="group" aria-label={reviewWorkspaceCopy[lang].results}>
+            <button type="button" aria-pressed={resolvedStudioComparison === "focus"} onClick={() => setStudioComparison("focus")}>{reviewWorkspaceCopy[lang].focus}</button>
+            <button type="button" aria-pressed={resolvedStudioComparison === "compare"} onClick={() => setStudioComparison("compare")}>{reviewWorkspaceCopy[lang].sideBySide}</button>
+          </div>}
+          </div>
+          <p id="review-layout-instructions">{resolvedStudioComparison === "focus" ? reviewFocusHint[lang] : reviewReorderHint[lang]}</p>
         </div>}
         <ProviderStatusBanner
           selectedModels={selectedModels}
@@ -1051,7 +1064,7 @@ export function DesktopChatShell({
             data-testid="model-compare-tablist"
             className="flex shrink-0 snap-x snap-mandatory gap-1.5 overflow-x-auto border-b border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950"
           >
-            {selectedModels.map((modelId) => {
+            {panelEntries.map(({ modelId }) => {
               const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
               const isActive = modelId === resolvedActiveModelId;
             const isPanelDisabled = !singleTranscript && disabledPanels.includes(modelId);
@@ -1152,28 +1165,42 @@ export function DesktopChatShell({
             </div>
           )}
 
-          {panelModels.map((modelId, panelIndex) => {
+          {panelEntries.map(({ modelId, slot }, panelIndex) => {
             const modelInfo = AVAILABLE_MODELS.find((model) => model.id === modelId);
             const isPanelDisabled = !singleTranscript && disabledPanels.includes(modelId);
             const isPanelVisible = !review?.imageRequest && (!useTabsLayout || modelId === resolvedActiveModelId);
+            const canDropModel = Boolean(draggingFocusModel && draggingFocusModel !== modelId && selectedModels.includes(draggingFocusModel) && (
+              resolvedStudioComparison === "compare" ? canReorderStudioModels : canFocusStudioModels && modelId === resolvedActiveModelId
+            ));
 
             return (
               <div
-                key={`${currentChatId || "new"}:panel:${panelIndex}`}
+                key={`${currentChatId || "new"}:panel:${slot}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
                 data-studio-focused={modelId === resolvedActiveModelId}
-                data-focus-drop-target={studio && !singleTranscript && studioComparison === "focus" && modelId === resolvedActiveModelId && Boolean(draggingFocusModel)}
+                data-focus-drop-target={canFocusStudioModels && resolvedStudioComparison === "focus" && modelId === resolvedActiveModelId && Boolean(draggingFocusModel)}
+                data-model-reorder-target={resolvedStudioComparison === "compare" && canDropModel}
                 onDragOver={event => {
-                  if (studio && !singleTranscript && studioComparison === "focus" && modelId === resolvedActiveModelId && draggingFocusModel && selectedModels.includes(draggingFocusModel) && event.dataTransfer.types.includes(FOCUS_DRAG_TYPE)) {
-                    event.preventDefault(); event.dataTransfer.dropEffect = "move";
+                  if (canDropModel && event.dataTransfer.types.includes(FOCUS_DRAG_TYPE)) {
+                    event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move";
                   }
                 }}
                 onDrop={event => {
-                  if (!studio || singleTranscript || studioComparison !== "focus" || modelId !== resolvedActiveModelId || !draggingFocusModel) return;
+                  if (!canDropModel) return;
                   const droppedModel = event.dataTransfer.getData(FOCUS_DRAG_TYPE);
                   if (droppedModel !== draggingFocusModel || !selectedModels.includes(droppedModel)) return;
-                  event.preventDefault(); focusModel(droppedModel); setDraggingFocusModel(null);
+                  event.preventDefault(); event.stopPropagation();
+                  if (resolvedStudioComparison === "compare") {
+                    const slots = panelEntries.map(entry => entry.slot);
+                    const sourceIndex = panelEntries.findIndex(entry => entry.modelId === droppedModel);
+                    const [sourceSlot] = slots.splice(sourceIndex, 1);
+                    slots.splice(panelIndex, 0, sourceSlot);
+                    setStudioPanelOrder({ chatKey: conversationStateKey, slots });
+                  } else {
+                    focusModel(droppedModel);
+                  }
+                  setDraggingFocusModel(null);
                 }}
                 {...(useTabsLayout
                   ? {
@@ -1217,14 +1244,14 @@ export function DesktopChatShell({
                   !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
                 }`}
               >
-                <div data-testid="review-model-drag-handle" draggable={studio && !singleTranscript && !showsWelcomeSurface}
+                <div data-testid="review-model-drag-handle" draggable={canReorderStudioModels && !showsWelcomeSurface}
                   onDragStart={event => {
-                    if (!studio || singleTranscript) return;
+                    if (!canReorderStudioModels) return;
                     event.dataTransfer.setData(FOCUS_DRAG_TYPE, modelId); event.dataTransfer.effectAllowed = "move"; setDraggingFocusModel(modelId);
                   }}
                   onDragEnd={() => setDraggingFocusModel(null)}
-                  title={studio && !singleTranscript ? reviewFocusHint[lang] : undefined}
-                  className={`flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400 ${studio && !singleTranscript ? "cursor-grab active:cursor-grabbing" : ""}`}>
+                  title={canReorderStudioModels ? (resolvedStudioComparison === "compare" ? reviewReorderHint[lang] : reviewFocusHint[lang]) : undefined}
+                  className={`flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400 ${canReorderStudioModels ? "cursor-grab active:cursor-grabbing" : ""}`}>
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
                     {isAutoMode ? (
                       <>
