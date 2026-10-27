@@ -136,15 +136,21 @@ export function ciRunnerCount(need: number, owner: Pick<CiRunnerOwner, "running"
 }
 
 /**
- * Whether admission may bring a pull request's branch up to date: only one
- * into develop from a working branch. Updating a branch merges its base into
- * it, so a pull request into main (a release or hotfix) or from develop or
- * main would merge one deploy branch into another -- the operator's merge
- * and deploy, never admission's.
+ * Whether admission may bring a pull request's branch up to date. Updating a
+ * branch merges its base into it, so:
+ * - into develop, from a working branch: yes;
+ * - into main, from a release train (`release/train-*`): yes (owner,
+ *   2026-10-27) -- the train service cut that branch from main, nobody
+ *   verified a commit of it by hand, and main merges only what is up to date,
+ *   so #3047 sat behind until someone pressed "Update branch";
+ * - anything else: no. From develop or main it would merge one deploy branch
+ *   into another; a hand-made `release/**` or `hotfix/**` may be the commit
+ *   staging verified -- the operator's merge and deploy, never admission's.
  */
 export function ciAdmissionUpdatesBranchOf(pull: Pick<CiAdmissionPull, "base" | "head" | "fork">): boolean {
+  if (pull.fork) return false;
+  if (pull.base === "main") return /^release\/train-\d{8}-\d{4}$/.test(pull.head);
   return (
-    !pull.fork &&
     pull.base === "develop" &&
     pull.head !== "develop" &&
     pull.head !== "main" &&
