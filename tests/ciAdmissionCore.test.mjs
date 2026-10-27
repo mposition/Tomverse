@@ -152,7 +152,8 @@ test("nothing jumps a higher draft: one that does not fit stops the drafts below
 
 test("a ready pull request lower in line whose CI runs past the budget goes back to draft", () => {
   const open = [pull(1, { draft: false }), pull(2), pull(3, { draft: false }), pull(4, { draft: false })];
-  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4) }), openPulls: open, running: runs(open[0], open[2], open[3]), checks: checksFor(open) });
+  // GitHub's jobs read (none listed: each CI at its need), so the count is real enough to cancel on.
+  const evaluation = judge({ state: state({ queue: lineOf(1, 2, 3, 4) }), openPulls: open, running: runs(open[0], open[2], open[3]), checks: checksFor(open), runners: [] });
   // 1 runs (1), 2 is reached (2), 3 runs (3); 4 is past the budget.
   assert.deepEqual(statuses(evaluation), { 1: "running", 2: "next", 3: "running", 4: "held" });
   // 2 waits until 4's cancelled runs stop: they still hold runners.
@@ -169,6 +170,24 @@ test("a ready pull request lower in line whose CI runs past the budget goes back
     nowMs: T0 + 30_000,
   });
   assert.deepEqual(kinds(later), ["release:2"]);
+});
+
+test("a running pull request is not sent back to draft when GitHub's jobs went unread, or within the grace after admission marked it ready", () => {
+  const open = [pull(1, { draft: false }), pull(3, { draft: false }), pull(4, { draft: false })];
+  const base = { state: state({ queue: lineOf(1, 3, 4) }), openPulls: open, running: runs(...open), checks: checksFor(open) };
+  // 1 + 1 + 1 runners with a deploy holding 1 of 3: 4 is past the budget.
+  const deploys = [{ branch: "develop", sha: "d".repeat(40), title: "Merge" }];
+  assert.deepEqual(kinds(judge({ ...base, deploys, runners: [] })), ["hold:4"]);
+  // Unread: every CI at its need is a different sum from the round that released it; nothing is cancelled on it.
+  const unread = judge({ ...base, deploys, runners: null });
+  assert.deepEqual(kinds(unread), []);
+  assert.equal(statuses(unread)[4], "running");
+  // Marked ready by admission five minutes ago: kept; eleven minutes ago: held.
+  const releasedEvent = (minutes) => ({ at: new Date(T0 - minutes * 60_000).toISOString(), kind: "released", number: 4, shadow: false, detail: null });
+  const recent = judge({ ...base, deploys, runners: [], state: state({ queue: lineOf(1, 3, 4), events: [releasedEvent(5)] }) });
+  assert.deepEqual(kinds(recent), []);
+  const older = judge({ ...base, deploys, runners: [], state: state({ queue: lineOf(1, 3, 4), events: [releasedEvent(11)] }) });
+  assert.deepEqual(kinds(older), ["hold:4"]);
 });
 
 test("a ready pull request whose CI is not running takes no slot and is left alone", () => {
