@@ -188,6 +188,7 @@ export async function GET(req: Request) {
         pinned: conv.pinnedAt !== null,
         pinSeq: conv.pinSeq,
         kind: conv.kind === "image" ? ("image" as const) : ("chat" as const),
+        productKey: conv.productKey,
         projectId: conv.projectId || null,
         selectedModels:
           selectedModels.length > 0 ? selectedModels : [resolvedDefaultEngine],
