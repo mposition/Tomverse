@@ -43,10 +43,18 @@ async function readTier(candidate: Extract<Candidate, { ok: true }>):
   if (!evidence) return { tier: { tier: "T2", findings: [{
     reason: "slice_analysis_failed", path: null,
   }] }, imageProofDigest: null };
-  const { deployExcludedPaths, exclusionDigest, ...sources } = evidence;
+  const { deployExcluded, exclusionDigest, ...sources } = evidence;
+  // Exact file paths, base and changed alike: the slice treats each entry as
+  // that path or a directory above it, so a new test file a change adds is
+  // excluded by the same rules as an existing one.
+  const excluded = deployExcluded([...new Set([
+    ...sources.baseFiles.map((file) => file.path),
+    ...candidate.changes.flatMap((change) =>
+      [change.path, change.previousPath ?? change.path]),
+  ])]);
   return { tier: decideEngineeringAgentV22Tier({
     changes: candidate.changes, ...sources,
-    deployExcludedPrefixes: deployExcludedPaths,
+    deployExcludedPrefixes: excluded,
   }), imageProofDigest: exclusionDigest };
 }
 

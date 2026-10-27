@@ -21,15 +21,16 @@ type ReadFile = (path: string) => Promise<Uint8Array>;
 type FileStat = (path: string) => Promise<{ isFile(): boolean }>;
 type FetchBlob = (oid: string, maxBytes: number) => Promise<Uint8Array>;
 
-/** Which base-tree paths the base commit's own build leaves out of its image
- * (owner decision 2026-10-27, replacing the operator-pasted image proof).
- * The commit's `.dockerignore` is read in order, last matching rule winning,
- * a rule on a directory covering everything below it -- as Docker applies it.
- * Only test sources and the admin Playwright config may leave the runtime
- * slice (§4). A rule this reader does not fully understand excludes nothing. */
+/** Which paths the base commit's own build leaves out of its image (owner
+ * decision 2026-10-27, replacing the operator-pasted image proof). The
+ * commit's `.dockerignore` is read in order, last matching rule winning, a
+ * rule on a directory covering everything below it -- as Docker applies it.
+ * The same rules apply to paths a change adds. Only test sources and the
+ * admin Playwright config may leave the runtime slice (§4). A missing file or
+ * a rule this reader does not fully understand is null: the tier is T2. */
 export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
-  paths: readonly string[]): string[] {
-  if (dockerIgnore === null) return [];
+  paths: readonly string[]): string[] | null {
+  if (dockerIgnore === null) return null;
   const rules: { negate: boolean; path: string; below: boolean }[] = [];
   for (const raw of dockerIgnore.split(/\r?\n/)) {
     const line = raw.trim();
@@ -40,7 +41,7 @@ export function engineeringAgentV22DeployExclusion(dockerIgnore: string | null,
     path = below ? path.slice(0, -2) : path.replace(/\/$/, "");
     if (path === "" || /[*?[\]\\]/.test(path) ||
         path.split("/").some((part) => part === "" || part === "." ||
-          part === "..")) return [];
+          part === "..")) return null;
     rules.push({ negate, path, below });
   }
   return paths.filter((path) => {
@@ -72,9 +73,11 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   installedVersions: Record<keyof typeof CONVENTION_VERSIONS,
     string | null>;
   policyDocuments: string[];
-  deployExcludedPaths: string[];
-  /** Names the exclusion the tier used; null when nothing is excluded. */
-  exclusionDigest: string | null;
+  /** The exact paths, base or added by a change, that the base build leaves
+   * out of its image. */
+  deployExcluded: (paths: readonly string[]) => string[];
+  /** Names the `.dockerignore` blob the exclusion was read from. */
+  exclusionDigest: string;
 } | null> {
   const root = resolve(input.root ?? process.cwd());
   const read = input.read ?? readFile;
@@ -108,15 +111,13 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   };
   const ignoreEntry = input.tree.find((entry) =>
     entry.path === ".dockerignore" && entry.type === "blob");
-  let ignoreText: string | null = null;
-  if (ignoreEntry) {
-    const bytes = await baseBytes(ignoreEntry);
-    ignoreText = bytes && decode(bytes);
-    if (ignoreText === null) return null;
-  }
-  const excluded = new Set(engineeringAgentV22DeployExclusion(ignoreText,
+  const ignoreBytes = ignoreEntry ? await baseBytes(ignoreEntry) : null;
+  const ignoreText = ignoreBytes && decode(ignoreBytes);
+  const baseExcluded = engineeringAgentV22DeployExclusion(ignoreText,
     input.tree.filter((entry) => entry.type === "blob")
-      .map((entry) => entry.path)));
+      .map((entry) => entry.path));
+  if (!ignoreEntry || baseExcluded === null) return null;
+  const excluded = new Set(baseExcluded);
   for (const entry of input.tree) {
     if (entry.type === "tree") continue;
     if (!isCanonicalRepoPath(entry.path) ||
@@ -162,13 +163,14 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
   let lock: { packages?: Record<string, { version?: string }> };
   try { lock = JSON.parse(lockText); }
   catch { return null; }
-  const deployExcludedPaths = [...excluded].sort();
-  return { baseFiles, workflows, policyDocuments, deployExcludedPaths,
-    exclusionDigest: deployExcludedPaths.length === 0 ? null :
-      createHash("sha256").update(JSON.stringify({
-        format: "engineering-agent-v22-deploy-exclusion-v1",
-        dockerIgnoreOid: ignoreEntry!.oid, deployExcludedPaths,
-      })).digest("hex"),
+  return { baseFiles, workflows, policyDocuments,
+    // The text parsed once above, so this cannot be null here.
+    deployExcluded: (paths) =>
+      engineeringAgentV22DeployExclusion(ignoreText, paths) ?? [],
+    exclusionDigest: createHash("sha256").update(JSON.stringify({
+      format: "engineering-agent-v22-deploy-exclusion-v1",
+      dockerIgnoreOid: ignoreEntry.oid,
+    })).digest("hex"),
     installedVersions: Object.fromEntries(
       Object.keys(CONVENTION_VERSIONS).map((name) => [name,
         lock.packages?.[`node_modules/${name}`]?.version ?? null]),

@@ -63,15 +63,15 @@ test("the base .dockerignore is applied in order, re-includes winning", () => {
   ["tests/a.test.mjs", "tests/kept.test.mjs"]);
   // Only test sources and the admin config may leave the slice.
   assert.deepEqual(engineeringAgentV22DeployExclusion("lib/\ndocs\n", paths), []);
-  assert.deepEqual(engineeringAgentV22DeployExclusion(null, paths), []);
+  assert.equal(engineeringAgentV22DeployExclusion(null, paths), null);
 });
 
-test("a rule the reader does not fully understand excludes nothing", () => {
+test("a rule the reader does not fully understand fails closed", () => {
   const paths = ["tests/a.test.mjs", "tests/kept.test.mjs"];
   for (const rule of ["**/*.log", "tests/*.mjs", "!tests/k?pt.test.mjs",
     "tests/[ab].mjs", "tests/../lib", "tests\\a.test.mjs"])
-    assert.deepEqual(engineeringAgentV22DeployExclusion(
-      `tests/*\n${rule}\n`, paths), [], rule);
+    assert.equal(engineeringAgentV22DeployExclusion(
+      `tests/*\n${rule}\n`, paths), null, rule);
 });
 
 test("the repository's own .dockerignore keeps the runtime-read tests in the image", () => {
@@ -94,16 +94,39 @@ test("base evidence admits exact image bytes and the base build's exclusions", a
     file.path === "tests/fixtures/sample.json").text, "");
   assert.equal(result.baseFiles.find((file) =>
     file.path === "tests/kept.test.mjs").text, source.get("kept.test.mjs"));
-  assert.deepEqual(result.deployExcludedPaths, ["tests/fixtures/sample.json"]);
+  // A test a change adds is excluded by the same base rules; a re-included
+  // one is not.
+  assert.deepEqual(result.deployExcluded(["tests/fixtures/sample.json",
+    "tests/new-feature.test.mjs", "tests/kept.test.mjs", "lib/new.ts"]),
+  ["tests/fixtures/sample.json", "tests/new-feature.test.mjs"]);
   assert.match(result.exclusionDigest, /^[0-9a-f]{64}$/);
   assert.equal(result.installedVersions.next, "16.3.8");
   assert.ok(result.policyDocuments.some((text) =>
     text.includes("tests/e2e/support/canonical-visual.ts")));
 });
 
-test("without a base .dockerignore nothing is excluded and missing tests fail closed", async () => {
+const withIgnore = (text) => {
+  const oid = gitObjectId("blob", Buffer.from(text));
+  return { ...ports, fetchBlob,
+    tree: tree.map((entry) => entry.path === ".dockerignore" ?
+      { ...entry, oid } : entry),
+    read: async (path) => basename(path) === ".dockerignore" ?
+      Buffer.from(text) : ports.read(path) };
+};
+
+test("a missing or unreadable base .dockerignore fails closed", async () => {
   assert.equal(await loadEngineeringAgentV22BaseEvidence({ ...ports,
     tree: tree.filter((entry) => entry.path !== ".dockerignore") }), null);
+  assert.equal(await loadEngineeringAgentV22BaseEvidence(
+    withIgnore("tests/**/*.mjs\n")), null);
+});
+
+test("the exclusion digest names the base .dockerignore", async () => {
+  const first = (await loadEngineeringAgentV22BaseEvidence(ports)).exclusionDigest;
+  const second = (await loadEngineeringAgentV22BaseEvidence(
+    withIgnore("tests/*\nplaywright.admin.config.ts\n"))).exclusionDigest;
+  assert.match(second, /^[0-9a-f]{64}$/);
+  assert.notEqual(second, first);
 });
 
 test("missing source or mismatched bytes fail closed without a blob reader", async () => {

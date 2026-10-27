@@ -211,8 +211,9 @@ staging과 production의 앱 이미지 모두 `/app/tests`, `/app/docs`, `/app/l
 이미지에서 뺐다(런타임이 읽는 테스트 파일 두 개는 다시 포함한다). 운영자 결정
 (2026-10-27)으로 제외 목록은 **base commit 자신의 `.dockerignore`** 로 정한다. 규칙을 순서대로
 읽고 마지막에 맞는 규칙이 이기며(`!` 재포함 포함), 디렉터리 규칙은 그 아래 전체에 적용한다.
-제외할 수 있는 것은 `tests/` 아래 파일과 `playwright.admin.config.ts`뿐이고, 해석하지 못하는
-문법(`*`·`?`·`[`가 경로 중간에 있는 규칙 등)이 하나라도 있으면 제외 목록은 비어 있고 T2다.
+같은 규칙을 변경이 새로 추가하거나 옮기는 경로에도 적용한다. 제외할 수 있는 것은 `tests/`
+아래 파일과 `playwright.admin.config.ts`뿐이다. `.dockerignore`가 없거나 해석하지 못하는
+문법(`*`·`?`·`[`가 경로 중간에 있는 규칙 등)이 하나라도 있으면 T2다.
 운영자가 배포마다 붙여 넣던 증명 JSON(배포 ID와 source commit 결속)은 없앴다. 변수를 넣는
 순간 새 배포가 생기고 production은 `main`을 실행하므로 일치할 수 없었다. base 소스는
 `develop` commit의 GitHub tree가 정하고, 이미지 파일이 그 blob OID와 다르면 같은 OID의
