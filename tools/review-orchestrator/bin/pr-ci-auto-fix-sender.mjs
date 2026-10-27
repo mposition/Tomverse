@@ -77,7 +77,9 @@ export function normaliseDispatchRequest(value, fileName) {
   if (kind === "conflict" ? typeof baseSha !== "string" || !SHA.test(baseSha) : baseSha !== undefined) return null;
   if (typeof patchGzB64 !== "string" || patchGzB64.length === 0 || patchGzB64.length > PATCH_MAX_CHARS) return null;
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(patchGzB64)) return null;
-  if (!Number.isFinite(createdAt)) return null;
+  // A whole number of milliseconds: it is the request's key in the sent
+  // ledger (requestKey), which must read back as the key it was written.
+  if (!Number.isSafeInteger(createdAt) || createdAt < 0) return null;
   const request = { prNumber, headSha, runIds: [...runIds], patchGzB64, createdAt };
   return kind === "conflict" ? { kind, baseSha, ...request } : request;
 }

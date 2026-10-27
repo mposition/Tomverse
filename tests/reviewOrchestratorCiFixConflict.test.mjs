@@ -344,6 +344,39 @@ test("the real sender sends a head's first request and, when it was not publishe
   }
 });
 
+test("every request the sender accepts keeps its key through the sent ledger", async () => {
+  const base = { schemaVersion: 1, prNumber: 9, headSha: SHA_A, runIds: [1], patchGzB64: "QUJD" };
+  for (const createdAt of [1.5, -1, Number.MAX_SAFE_INTEGER + 2, 1e21]) {
+    assert.equal(normaliseDispatchRequest({ ...base, createdAt }, `${SHA_A}.json`), null, String(createdAt));
+  }
+  // A forged fractional time was the way around the once-per-request record.
+  const outbox = mkdtempSync(join(tmpdir(), "ci-fix-key-outbox-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-key-state-"));
+  try {
+    const now = 10 * 3_600_000;
+    let posts = 0;
+    const sender = createDispatchSender({
+      settings: { token: "t".repeat(40), repo: "o/r", outbox, stateDir },
+      log: () => {},
+      now: () => now,
+      fetchImpl: async () => {
+        posts += 1;
+        return { status: 204, body: null };
+      },
+    });
+    writeFileSync(join(outbox, `${SHA_A}.json`), JSON.stringify({ ...base, createdAt: now - 1000.5 }));
+    await sender.scanOnce();
+    await sender.scanOnce();
+    assert.equal(posts, 0);
+    writeFileSync(join(outbox, `${SHA_A}.json`), JSON.stringify({ ...base, createdAt: now - 1000 }));
+    for (let i = 0; i < 3; i += 1) await sender.scanOnce();
+    assert.equal(posts, 1, "sent once, and the record read back keeps it so");
+  } finally {
+    rmSync(outbox, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("the sender sends each request once, honours an older sender's record, and caps a head", async () => {
   const outbox = mkdtempSync(join(tmpdir(), "ci-fix-cap-outbox-"));
   const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-cap-state-"));
