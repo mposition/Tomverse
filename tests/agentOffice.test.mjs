@@ -46,7 +46,7 @@ import {
   routingTone,
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "../lib/agentOfficeAmuxState.ts";
-import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
+import { AMUX_WORKER_REGISTRY_V31_SEED } from "../lib/amux/workerRegistryCore.ts";
 import { AGENT_OFFICE_AMUX_ROSTER } from "../lib/agentOffice/amuxRoster.ts";
 import { agentOfficeDecisionState } from "../lib/agentOfficeDecisionState.ts";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "../lib/agentOfficeDigestState.ts";
@@ -74,6 +74,10 @@ import {
   COLS,
   ROWS,
 } from "../lib/agentOffice/world.ts";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+
 
 /** The live read module's code (comments stripped), cut from one read function to the next. */
 const readFunction = (name) => {

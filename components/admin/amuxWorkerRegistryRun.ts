@@ -2,6 +2,7 @@ import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import {
   AMUX_WORKER_REGISTRY_REFUSALS,
   type AmuxWorkerDesiredState,
+  type AmuxWorkerProviderClass,
   type AmuxWorkerRegistryAdminView,
   type AmuxWorkerRoleCeiling,
   type AmuxWorkerSeedEntry,
@@ -30,6 +31,8 @@ export type AmuxWorkerRegistryRefusal = { workerName: string; code: string } | n
 /** One change of a worker's desired state or role ceiling, against the revision the person saw. */
 export type AmuxWorkerChangeRequest = {
   workerName: string;
+  /** The CLI it runs: chosen at registration, then always the same. */
+  providerClass: AmuxWorkerProviderClass;
   roleCeiling: AmuxWorkerRoleCeiling;
   desiredState: AmuxWorkerDesiredState;
   expectedRevision: number;
@@ -154,6 +157,18 @@ export function runAmuxWorkerSeedRegistration(
   update: (changes: AmuxWorkerRegistryUpdate) => void,
 ): Promise<void> {
   return runChanges(entries.map((entry) => ({ ...entry, expectedRevision: 0 })), io, update);
+}
+
+/** A new worker: its name, the CLI it runs and its role ceiling. */
+export type AmuxWorkerRegistrationRequest = Omit<AmuxWorkerChangeRequest, "expectedRevision" | "desiredState">;
+
+/** Registers one new worker the owner named, as `requested`: revision 0. */
+export function runAmuxWorkerRegistration(
+  request: AmuxWorkerRegistrationRequest,
+  io: AmuxWorkerRegistryIo,
+  update: (changes: AmuxWorkerRegistryUpdate) => void,
+): Promise<void> {
+  return runChanges([{ ...request, desiredState: "requested", expectedRevision: 0 }], io, update);
 }
 
 /** Turns one worker on, off or back on: one change against the revision the person saw. */

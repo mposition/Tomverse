@@ -17,7 +17,11 @@ import {
   readAmuxDerivedWorkerCatalog,
 } from "../lib/amux/workerAssignmentCatalog.ts";
 import * as derivedCatalogCore from "../lib/amux/workerDerivedCatalogCore.ts";
-import { AMUX_WORKER_REGISTRY_V31_SEED, amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
+import { AMUX_WORKER_REGISTRY_V31_SEED } from "../lib/amux/workerRegistryCore.ts";
+
+// The fixtures' names start with their CLI; the registry no longer reads it from them.
+const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+
 
 
 // What the catalog variables' parser returned for production's catalog
@@ -161,7 +165,7 @@ test("anything the stores would not accept makes the catalog absent, never short
     assert.deepEqual([catalogs.workers, catalogs.v22, catalogs.ceilings], [null, null, null]);
   };
   await absent(undefined);
-  await absent(statement(REGISTRY_ROWS.map((row, index) => (index === 0 ? { ...row, providerClass: "cursor" } : row))));
+  await absent(statement(REGISTRY_ROWS.map((row, index) => (index === 0 ? { ...row, providerClass: "devin" } : row))));
   await absent(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "unknown" }]));
   await absent(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[0], routingTags: [] }]));
   await absent(statement(REGISTRY_ROWS, [], [{ ...CAPABILITY_ROWS[3], v22Roles: null }]));

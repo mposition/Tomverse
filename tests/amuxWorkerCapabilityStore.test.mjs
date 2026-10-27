@@ -219,7 +219,7 @@ for (const [label, key, auditStatements] of [["without", null, 3], ["with", "uni
 
 test("a refused write sends no audit: bad shape sends nothing; a rule refusal stops after the reads", async () => {
   for (const input of [
-    { workerName: "devin-worker", expectedRevision: 0, capability: CAPABILITY },
+    { workerName: "Devin_worker", expectedRevision: 0, capability: CAPABILITY },
     { workerName: "claude-chore", expectedRevision: "0", capability: CAPABILITY },
     { workerName: "claude-chore", expectedRevision: 0, capability: { ...CAPABILITY, routingTags: "chore" } },
   ]) {

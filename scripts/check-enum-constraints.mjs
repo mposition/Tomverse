@@ -1170,7 +1170,21 @@ const REGISTRY = {
     module: "lib/amux/workerRegistryCore.ts",
     list: "AMUX_WORKER_PROVIDER_CLASSES",
     reason:
-      "Orchestration policy version 31, section 2: the four provider classes. A fifth class, or a ceiling raised for one, is a new policy version; a second CHECK keeps the unverified cursor and copilot below contract, and a third ties the class to the worker name's prefix.",
+      "Orchestration policy version 31, section 2: the four provider classes. A fifth class, or a ceiling raised for one, is a new policy version; a second CHECK keeps the unverified cursor and copilot below contract. Since the owner decision of 2026-10-27 the class is chosen at registration and no CHECK ties it to the name.",
+  },
+  AmuxCliModel_cli_check: {
+    owner: "list",
+    module: "lib/amux/cliModelCatalogCore.ts",
+    list: "AMUX_CLI_MODEL_CLIS",
+    reason:
+      "The worker CLIs whose model names the AMUX host refreshes (owner decision 2026-10-27): the four worker classes, since a worker's class is the CLI it runs.",
+  },
+  AmuxCliModelLinkEvent_cli_check: {
+    owner: "list",
+    module: "lib/amux/cliModelCatalogCore.ts",
+    list: "AMUX_CLI_MODEL_CLIS",
+    reason:
+      "The CLIs an owner may link a model name of to the Admin › Models entry that prices it (owner decision 2026-10-27): the four worker classes.",
   },
   AmuxWorkerRegistryEvent_role_ceiling_check: {
     owner: "list",
