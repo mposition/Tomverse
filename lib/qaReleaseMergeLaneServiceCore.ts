@@ -281,7 +281,71 @@ async function rereadAttempt(
 /** Receives what the round saw, for the Admin screen; never consulted by the round. */
 export type QaReleaseMergeLaneObserver = { verdicts: (verdicts: QaReleaseLaneVerdict[]) => void };
 
+/**
+ * For the Admin screen only, after the pick is fixed: the ready pull requests
+ * behind it are judged too, so a person's work shows before its turn. A read
+ * that fails here leaves that one unjudged, never the round.
+ */
+async function observeVerdicts(
+  ports: QaReleaseMergeLanePorts,
+  observer: QaReleaseMergeLaneObserver,
+  ordered: readonly QaReleaseLanePullRequest[],
+  exclusions: ReadonlyMap<number, QaReleaseExclusion>,
+  excludingFiles: Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>,
+  pickNumber: number | null,
+): Promise<void> {
+  const shown = new Map(exclusions);
+  for (const pull of ordered) {
+    if (shown.has(pull.number) || pull.number === pickNumber) continue;
+    if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
+    const inputs = await ports.github.exclusionInputs(pull).catch(() => null);
+    if (inputs === null) continue;
+    const judged = judgeQaReleaseMergeLaneExclusion(inputs);
+    shown.set(pull.number, judged);
+    if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
+  }
+  observer.verdicts(qaReleaseLaneVerdicts({ pulls: ordered, exclusions: shown, excludingFiles, pickNumber }));
+}
+
+/** Rounds that end without listing pull requests and still show them; the rest list them, or cannot. */
+const OBSERVED_WITHOUT_LISTING = new Set(["refused_to_start", "disabled", "candidates_unknown"]);
+
+/**
+ * One round. A round that stops before it lists pull requests -- dev
+ * deploying, a merge's deploy awaited, latched, dev broken -- still reads
+ * them for the Admin screen afterwards, so its verdicts follow GitHub every
+ * round rather than only on rounds free to merge (owner, 2026-10-27: pull
+ * requests whose CI had passed still showed as needing a fix while the lane
+ * held for half an hour). The extra read never changes the outcome.
+ */
 export async function runQaReleaseMergeLaneRound(
+  env: Readonly<Record<string, string | undefined>>,
+  ports: QaReleaseMergeLanePorts,
+  observer?: QaReleaseMergeLaneObserver,
+): Promise<QaReleaseMergeLaneRoundOutcome> {
+  let observed = false;
+  const watching = observer
+    ? {
+        verdicts: (list: QaReleaseLaneVerdict[]) => {
+          observed = true;
+          observer.verdicts(list);
+        },
+      }
+    : undefined;
+  const outcome = await laneRound(env, ports, watching);
+  if (observer && !observed && !OBSERVED_WITHOUT_LISTING.has(outcome.outcome)) {
+    try {
+      const pulls = await ports.github.listOpenDevelopPulls();
+      const ordered = [...pulls].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.number - b.number);
+      await observeVerdicts(ports, observer, ordered, new Map(), new Map(), null);
+    } catch {
+      // The screen keeps the last verdicts.
+    }
+  }
+  return outcome;
+}
+
+async function laneRound(
   env: Readonly<Record<string, string | undefined>>,
   ports: QaReleaseMergeLanePorts,
   observer?: QaReleaseMergeLaneObserver,
@@ -344,22 +408,7 @@ export async function runQaReleaseMergeLaneRound(
     return { exitCode: 1, outcome: "candidates_unknown" };
   }
   const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions);
-  if (observer) {
-    // For the Admin screen only, after the pick is fixed: the ready pull
-    // requests behind it are judged too, so a person's work shows before its
-    // turn. A read that fails here leaves that one unjudged, never the round.
-    const shown = new Map(exclusions);
-    for (const pull of ordered) {
-      if (shown.has(pull.number) || pull.number === pick?.number) continue;
-      if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-      const inputs = await ports.github.exclusionInputs(pull).catch(() => null);
-      if (inputs === null) continue;
-      const judged = judgeQaReleaseMergeLaneExclusion(inputs);
-      shown.set(pull.number, judged);
-      if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
-    }
-    observer.verdicts(qaReleaseLaneVerdicts({ pulls, exclusions: shown, excludingFiles, pickNumber: pick?.number ?? null }));
-  }
+  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null);
   if (pick === null) return { exitCode: 0, outcome: "idle" };
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);
