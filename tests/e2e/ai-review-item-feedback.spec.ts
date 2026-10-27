@@ -51,7 +51,8 @@ async function openReview(page: Page) {
   const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
-  await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
+  await expect(dialog.locator('[data-testid="ai-review-workspace"]:visible')).toBeVisible();
+  await dialog.locator('[data-testid="ai-review-workspace"]:visible').getByRole("button", {name: /공통된 내용/}).click();
   return dialog;
 }
 
@@ -76,7 +77,7 @@ for (const viewport of [
     await openReviewConversation(page);
 
     const dialog = await openReview(page);
-    const rows = dialog.getByTestId("ai-review-item-feedback");
+    const rows = dialog.locator('[data-testid="ai-review-item-feedback"]:visible');
     await expect(rows.first()).toBeVisible();
 
     const first = rows.first();
@@ -112,7 +113,7 @@ test("selecting the same verdict again withdraws it", async ({ page }) => {
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
-  const first = dialog.getByTestId("ai-review-item-feedback").first();
+  const first = dialog.locator('[data-testid="ai-review-item-feedback"]:visible').first();
   const incorrect = first.getByTestId("ai-review-item-feedback-incorrect");
 
   await incorrect.click();
@@ -134,7 +135,7 @@ test("the three negative verdicts stay separate reports", async ({ page }) => {
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
-  const first = dialog.getByTestId("ai-review-item-feedback").first();
+  const first = dialog.locator('[data-testid="ai-review-item-feedback"]:visible').first();
 
   for (const verdict of ["incorrect", "unclear", "missing_point"]) {
     await first.getByTestId(`ai-review-item-feedback-${verdict}`).click();
@@ -160,14 +161,14 @@ test("each claim carries its own control, and the two reviewers' claims are sepa
 
   const dialog = await openReview(page);
   await dialog
-    .getByTestId("ai-review-item-feedback")
+    .locator('[data-testid="ai-review-item-feedback"]:visible')
     .first()
     .getByTestId("ai-review-item-feedback-helpful")
     .click();
 
   await dialog.getByRole("tab", { name: /검토자 2/ }).click();
   await dialog
-    .getByTestId("ai-review-item-feedback")
+    .locator('[data-testid="ai-review-item-feedback"]:visible')
     .first()
     .getByTestId("ai-review-item-feedback-helpful")
     .click();
@@ -239,7 +240,7 @@ test("a failed submission restores the previous state and says so", async ({
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
-  const first = dialog.getByTestId("ai-review-item-feedback").first();
+  const first = dialog.locator('[data-testid="ai-review-item-feedback"]:visible').first();
   const helpful = first.getByTestId("ai-review-item-feedback-helpful");
   await helpful.click();
 
@@ -261,7 +262,7 @@ test("the control never claims the review itself is right or wrong", async ({
   await openReviewConversation(page);
 
   const dialog = await openReview(page);
-  const first = dialog.getByTestId("ai-review-item-feedback").first();
+  const first = dialog.locator('[data-testid="ai-review-item-feedback"]:visible').first();
   await expect(first).toContainText("이 항목 하나에 대한 회원님의 판단입니다");
   await expect(first).toContainText("맞다·틀리다로 표시하지 않습니다");
 });

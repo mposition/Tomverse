@@ -1490,8 +1490,8 @@ test.describe("UI-004: AI Review dialog states", () => {
     await enterReviewConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
     await openReviewDialog(page);
     const dialog = await runReview(page);
-    await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
-    await dialog.getByText("1. 공통된 내용").scrollIntoViewIfNeeded();
+    await expect(dialog.locator('[data-testid="ai-review-workspace"]:visible')).toBeVisible();
+    await dialog.locator('[data-testid="ai-review-workspace"]:visible').scrollIntoViewIfNeeded();
 
     await expectStableScreenshot(page, "chat-ai-review-success-desktop-light-ko.png", {
       theme: "light",
@@ -1543,9 +1543,9 @@ test.describe("UI-004: AI Review dialog states", () => {
     // Second attempt succeeds: the error clears and the result replaces it,
     // rather than the two stacking.
     await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
-    await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
+    await expect(dialog.locator('[data-testid="ai-review-workspace"]:visible')).toBeVisible();
     await expect(dialog.getByTestId("comparison-review-error")).toHaveCount(0);
-    await dialog.getByText("1. 공통된 내용").scrollIntoViewIfNeeded();
+    await dialog.locator('[data-testid="ai-review-workspace"]:visible').scrollIntoViewIfNeeded();
 
     await expectStableScreenshot(page, "chat-ai-review-retry-desktop-light-ko.png", {
       theme: "light",
