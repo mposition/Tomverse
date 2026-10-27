@@ -347,3 +347,24 @@ export function qaReleaseTrainEmergencyFrom(input: {
     departedWith: null,
   };
 }
+
+/**
+ * Candidates the operator hid from the next train's list (owner request
+ * 2026-10-27: the list is too long). Display only: the train never reads it,
+ * and a hidden pull request still rides when it is picked. Saved as an
+ * administrator audit row like the pick; the newest `QA_RELEASE_TRAIN_HIDDEN_MAX`
+ * are kept.
+ */
+export const QA_RELEASE_TRAIN_HIDDEN_MAX = 500;
+
+/** The hidden numbers from the newest saved row's metadata; anything malformed reads as none. */
+export function qaReleaseTrainHiddenFrom(numbers: unknown): number[] {
+  if (!Array.isArray(numbers)) return [];
+  return [...new Set(numbers.filter((n): n is number => Number.isInteger(n) && n > 0))].slice(-QA_RELEASE_TRAIN_HIDDEN_MAX);
+}
+
+/** Hides or shows one number again; the newest hidden is last. */
+export function qaReleaseTrainHiddenUpdate(current: readonly number[], number: number, hidden: boolean): number[] {
+  const rest = current.filter((n) => n !== number);
+  return hidden ? [...rest, number].slice(-QA_RELEASE_TRAIN_HIDDEN_MAX) : rest;
+}

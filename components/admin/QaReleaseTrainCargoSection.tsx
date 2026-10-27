@@ -35,7 +35,13 @@ const BADGE: Record<QaReleaseTrainCargoStatus, string> = {
   back_merge: "bg-zinc-800 text-zinc-400",
 };
 
-type View = { candidates: QaReleaseTrainCargoCandidatesRead; selection: QaReleaseTrainSelection; schedule: (QaReleaseTrainSchedule & { nextDepartureAt: string | null }) | null };
+type View = {
+  candidates: QaReleaseTrainCargoCandidatesRead;
+  selection: QaReleaseTrainSelection;
+  /** Candidates an operator hid from this list; display only. */
+  hidden?: number[];
+  schedule: (QaReleaseTrainSchedule & { nextDepartureAt: string | null }) | null;
+};
 
 const hoursText = (hours: readonly number[]) => hours.map((hour) => String(hour).padStart(2, "0")).join("·");
 
@@ -63,6 +69,9 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
   const [query, setQuery] = useState("");
   // What cannot ride is counted, not listed, unless asked for (owner, 2026-10-23: the list ran to hundreds).
   const [showAll, setShowAll] = useState(false);
+  // Hidden by an operator (owner, 2026-10-27): out of the list until shown again; a picked one stays listed.
+  const [hidden, setHidden] = useState<Set<number>>(new Set());
+  const [hiding, setHiding] = useState<number | null>(null);
   // On the train tab its own "Read again" (and the emergency panel's save) read it again.
   const reads = useQaReleaseTrainReads();
 
@@ -77,6 +86,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
         if (cancelled) return;
         setView(next);
         setPicked(new Set(next.selection.numbers));
+        setHidden(new Set(next.hidden ?? []));
         setFailed(false);
       })
       .catch((error: unknown) => {
@@ -91,18 +101,20 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
   const changed = picked.size !== saved.size || [...picked].some((number) => !saved.has(number));
   const candidates = view?.candidates.status === "ok" ? view.candidates.candidates : [];
   const pickable = candidates.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status));
+  const isHidden = (candidate: QaReleaseTrainCargoCandidate) => hidden.has(candidate.number) && !picked.has(candidate.number);
   const shown = candidates.filter(
     (candidate) =>
-      (showAll || qaReleaseTrainCargoPickable(candidate.status)) &&
+      (showAll || (qaReleaseTrainCargoPickable(candidate.status) && !isHidden(candidate))) &&
       (query.trim() === "" || `#${candidate.number} ${candidate.title}`.toLowerCase().includes(query.trim().toLowerCase())),
   );
   const hiddenByStatus = new Map<QaReleaseTrainCargoStatus, number>();
   for (const candidate of candidates) {
     if (!qaReleaseTrainCargoPickable(candidate.status)) hiddenByStatus.set(candidate.status, (hiddenByStatus.get(candidate.status) ?? 0) + 1);
   }
+  const hiddenByOperator = pickable.filter(isHidden).length;
 
   // "Select all" covers what can ride among the rows shown, so a search narrows it.
-  const shownPickable = shown.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status)).map((candidate) => candidate.number);
+  const shownPickable = shown.filter((candidate) => qaReleaseTrainCargoPickable(candidate.status) && !isHidden(candidate)).map((candidate) => candidate.number);
   const allShownPicked = shownPickable.length > 0 && shownPickable.every((number) => picked.has(number));
   const someShownPicked = shownPickable.some((number) => picked.has(number));
   const toggleAll = () =>
@@ -120,6 +132,28 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
       else if (next.size < QA_RELEASE_TRAIN_CARGO_MAX) next.add(number);
       return next;
     });
+
+  const saveHidden = async (number: number, hide: boolean) => {
+    setHiding(number);
+    setNotice(null);
+    try {
+      const response = await adminFetch(`${API}/hidden`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ number, hidden: hide }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { result?: unknown };
+      if (!response.ok || !Array.isArray(payload.result)) {
+        setNotice({ tone: "error", text: m.trainCargoHideFailed });
+        return;
+      }
+      setHidden(new Set(payload.result as number[]));
+    } catch {
+      setNotice({ tone: "error", text: m.trainCargoHideFailed });
+    } finally {
+      setHiding(null);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
@@ -281,7 +315,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
             </button>
           </div>
 
-          {hiddenByStatus.size > 0 ? (
+          {hiddenByStatus.size > 0 || hiddenByOperator > 0 ? (
             <p className="mt-3 flex flex-wrap items-center gap-2 text-[13px] text-zinc-400" data-testid="qa-release-train-cargo-hidden">
               {m.trainCargoHiddenSummary.replace(
                 "{list}",
@@ -295,6 +329,7 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
                 )
                   .filter(([status]) => hiddenByStatus.has(status))
                   .map(([status, label]) => `${label} ${hiddenByStatus.get(status)}`)
+                  .concat(hiddenByOperator > 0 ? [`${m.trainCargoHiddenByOperator} ${hiddenByOperator}`] : [])
                   .join(" · "),
               )}
               <button type="button" className="font-medium text-zinc-200 underline" onClick={() => setShowAll((value) => !value)}>
@@ -309,12 +344,13 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
             <ul className="mt-3 divide-y divide-zinc-800 rounded-lg border border-zinc-800" data-testid="qa-release-train-cargo-list">
               {shown.map((candidate) => {
                 const can = qaReleaseTrainCargoPickable(candidate.status);
+                const hiddenRow = can && isHidden(candidate);
                 const carried = can ? carriedByNumber.get(candidate.number) : undefined;
                 const needs = carried?.reason === "conflict" && carried.predecessors ? unreleased(carried.predecessors) : [];
                 return (
                   <li
                     key={candidate.number}
-                    className={`flex items-center gap-3 px-3 py-2.5 ${can ? "" : "opacity-55"}`}
+                    className={`flex items-center gap-3 px-3 py-2.5 ${can && !hiddenRow ? "" : "opacity-55"}`}
                     data-testid={`qa-release-train-cargo-${candidate.number}`}
                   >
                     <input
@@ -372,6 +408,18 @@ export function QaReleaseTrainCargoSection({ canWrite, id, reloadKey = 0 }: { ca
                       ) : null}
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE[candidate.status]}`}>{statusText(candidate)}</span>
+                    {canWrite && can && !picked.has(candidate.number) ? (
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs font-medium text-zinc-400 underline hover:text-zinc-200 disabled:opacity-50"
+                        disabled={busy || hiding !== null}
+                        onClick={() => void saveHidden(candidate.number, !hiddenRow)}
+                        aria-label={hiddenRow ? undefined : m.trainCargoHideLabel.replace("{number}", String(candidate.number))}
+                        data-testid={`qa-release-train-cargo-hide-${candidate.number}`}
+                      >
+                        {hiddenRow ? m.trainCargoUnhide : m.trainCargoHide}
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}

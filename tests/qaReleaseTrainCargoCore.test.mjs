@@ -9,6 +9,9 @@ import {
   parseQaReleaseTrainEmergencyReason,
   qaReleaseTrainEmergencyAdmissible,
   qaReleaseTrainEmergencyFrom,
+  qaReleaseTrainHiddenFrom,
+  qaReleaseTrainHiddenUpdate,
+  QA_RELEASE_TRAIN_HIDDEN_MAX,
   qaReleaseTrainCarried,
   qaReleaseTrainLastTrainFrom,
   qaReleaseTrainReferencedNumbers,
@@ -433,4 +436,22 @@ test("a fork's open main pull request is not believed for what it carries", () =
     ours.map((c) => [c.number, c.status, c.mainPullRequest]),
     [[21, "in_main_pull_request", 990]],
   );
+});
+
+test("an operator's hidden candidates: read back, hidden and shown again, malformed reads as none", () => {
+  assert.deepEqual(qaReleaseTrainHiddenFrom(undefined), []);
+  assert.deepEqual(qaReleaseTrainHiddenFrom(null), []);
+  assert.deepEqual(qaReleaseTrainHiddenFrom("3042"), []);
+  assert.deepEqual(qaReleaseTrainHiddenFrom([3042, -1, 1.5, "7", 3042, 2967]), [3042, 2967]);
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([3042], 2967, true), [3042, 2967]);
+  // Hiding again moves it to the newest end; showing it removes it.
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([3042, 2967], 3042, true), [2967, 3042]);
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([3042, 2967], 3042, false), [2967]);
+  assert.deepEqual(qaReleaseTrainHiddenUpdate([2967], 3042, false), [2967]);
+  // Only the newest are kept.
+  const full = Array.from({ length: QA_RELEASE_TRAIN_HIDDEN_MAX }, (_, i) => i + 1);
+  const next = qaReleaseTrainHiddenUpdate(full, 9999, true);
+  assert.equal(next.length, QA_RELEASE_TRAIN_HIDDEN_MAX);
+  assert.equal(next[0], 2);
+  assert.equal(next.at(-1), 9999);
 });
