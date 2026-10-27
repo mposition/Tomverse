@@ -32,11 +32,13 @@ try {
   await writeFile(join(dir, "ui.css"), css.css);
   server = createServer(async (req, res) => {
     if (req.url === "/ui.js" || req.url === "/ui.css") {
+      // A fixed name, not the request path, reaches the filesystem.
+      const file = req.url === "/ui.css" ? "ui.css" : "ui.js";
       res.setHeader(
         "Content-Type",
-        req.url.endsWith("css") ? "text/css" : "text/javascript",
+        file.endsWith("css") ? "text/css" : "text/javascript",
       );
-      res.end(await readFile(join(dir, req.url.slice(1))));
+      res.end(await readFile(join(dir, file)));
     } else {
       res.setHeader("Content-Type", "text/html");
       res.end(
