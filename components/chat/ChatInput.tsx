@@ -4208,52 +4208,6 @@ export function ChatInput({
                         </span>
                       </button>
                   )}
-                  {(onStartImageDraft || imageGenerationLock) && (
-                    <button
-                      type="button"
-                      data-testid="tools-image-generation-row"
-                      data-locked={imageGenerationLock ? "true" : "false"}
-                      onClick={() => {
-                        closeMenu(false);
-                        if (imageGenerationLock) {
-                          // Same routing the locked model rows use: state the
-                          // requirement, then hand off to the existing
-                          // sign-in / upgrade prompt rather than inventing a
-                          // second one.
-                          onLockedImageGenerationClick?.(imageGenerationLock);
-                          return;
-                        }
-                        // No server row is created here: switching to the
-                        // image draft is a client-side move, and the
-                        // conversation only exists once a generation is
-                        // actually reserved (policy section 6).
-                        onStartImageDraft?.(value);
-                      }}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-image-500/10 text-accent-image-500">
-                        <ImagePlus className="h-5 w-5" />
-                      </span>
-                      <span className="flex min-w-0 flex-col">
-                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                          {t("chat.toolsImageGeneration")}
-                        </span>
-                        <span
-                          className={`text-xs ${
-                            imageGenerationLock
-                              ? "font-semibold text-amber-600 dark:text-amber-400"
-                              : "text-zinc-500"
-                          }`}
-                        >
-                          {imageGenerationLock === "sign_in"
-                            ? t("modelStatusReasons.loginRequired")
-                            : imageGenerationLock === "upgrade"
-                              ? t("modelStatusReasons.upgradeRequired")
-                              : t("chat.toolsImageGenerationDescription")}
-                        </span>
-                      </span>
-                    </button>
-                  )}
                 </div>
               ) : menuView === "memory" ? (
                 <div className="space-y-1">
