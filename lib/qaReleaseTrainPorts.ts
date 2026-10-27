@@ -160,7 +160,19 @@ export function createQaReleaseTrainGitPorts(input: {
   // blamed along develop's merges; a line main's file also has is not the
   // cause. The fetch of the merge commit brought develop's history; a failed
   // read names none. Each comes with its merge commit, so it can board.
+  // A conflict that stays one is read once for boarding and once for the report, at the same head.
+  const named = new Map<string, QaReleaseTrainCandidate[]>();
+  /** Commits this train made by settling an adjacent-line conflict, with the files. */
+  const settledCommits = new Map<string, readonly string[]>();
   const predecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<QaReleaseTrainCandidate[]> => {
+    const key = [(await git(["rev-parse", "HEAD"])).stdout, pull.mergeCommitSha, ...files].join("\n");
+    const known = named.get(key);
+    if (known) return known;
+    const found = await blamePredecessors(pull, files);
+    named.set(key, found);
+    return found;
+  };
+  const blamePredecessors = async (pull: QaReleaseTrainCandidate, files: readonly string[]): Promise<QaReleaseTrainCandidate[]> => {
     const parent = `${pull.mergeCommitSha}^1`;
     const causes = new Set<string>();
     for (const file of files.slice(0, BLAMED_FILES)) {
@@ -174,7 +186,7 @@ export function createQaReleaseTrainGitPorts(input: {
       const onMain = new Set((await git(["show", `HEAD:${file}`], { allowFail: true, raw: true })).stdout.split("\n"));
       let commit = "";
       for (const line of blame.stdout.split("\n")) {
-        const header = /^([0-9a-f]{40}) \d+ \d+/.exec(line);
+        const header = /^\^?([0-9a-f]{40}) \d+ \d+/.exec(line);
         if (header) commit = header[1];
         else if (line.startsWith("\t") && !onMain.has(line.slice(1))) causes.add(commit);
       }
@@ -193,8 +205,8 @@ export function createQaReleaseTrainGitPorts(input: {
   // (qaReleaseTrainSettleAdjacent) is settled in the working tree and staged;
   // false leaves the rest to the caller's abort.
   const settleAdjacent = async (files: readonly string[]): Promise<boolean> => {
-    // A name the trailer cannot carry as one item is not settled.
-    if (!dir || files.length === 0 || files.some((file) => /[,\r\n]/.test(file))) return false;
+    // A name the trailer or the body's code span cannot carry as one item is not settled.
+    if (!dir || files.length === 0 || files.some((file) => /[,`\r\n]/.test(file))) return false;
     for (const file of files) {
       // Only a regular file on all three sides: one changed on one side and
       // deleted on the other, a symlink or a submodule is not settled.
@@ -206,7 +218,14 @@ export function createQaReleaseTrainGitPorts(input: {
         if (!side.ok || side.stdout.includes("\0") || MARKER_LINE.test(side.stdout)) return false;
       }
       if (!(await git(["checkout", "--conflict=diff3", "--", file], { allowFail: true })).ok) return false;
-      const lines = (await readFile(join(dir, file), "utf8")).split("\n");
+      // Rewritten as UTF-8, so only a file that is strictly UTF-8 (byte order mark kept): any other text encoding is not settled.
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readFile(join(dir, file)));
+      } catch {
+        return false;
+      }
+      const lines = text.split("\n");
       const settled: string[] = [];
       let hunks = 0;
       for (let i = 0; i < lines.length; ) {
@@ -261,6 +280,8 @@ export function createQaReleaseTrainGitPorts(input: {
         await git(["cherry-pick", "--abort"]);
         return { result: "conflict", files };
       }
+      // Kept here, not read back from messages: a develop merge commit's own message could carry the trailer's words.
+      settledCommits.set((await git(["rev-parse", "HEAD"])).stdout, files);
     }
     if ((await git(["rev-parse", "HEAD"])).stdout === before) return { result: "empty" };
     // The App has no workflows permission, and GitHub refuses a push that
@@ -375,13 +396,13 @@ export function createQaReleaseTrainGitPorts(input: {
         }
       }
       const headSha = (await git(["rev-parse", "HEAD"])).stdout;
-      // What rides settled, read off the branch itself: an attempt undone took its commit with it.
+      // What rides settled: the commits this train settled that are still on the branch (an attempt undone took its commit with it).
       const settled: { number: number; files: string[] }[] = [];
-      for (const entry of (await git(["log", "--format=%s%x1f%b%x1e", `${mainSha}..HEAD`])).stdout.split("\x1e")) {
-        const [subject = "", body = ""] = entry.trim().split("\x1f");
+      for (const entry of (await git(["log", "--format=%H%x1f%s", `${mainSha}..HEAD`])).stdout.split("\n")) {
+        const [sha = "", subject = ""] = entry.split("\x1f");
         const number = qaReleaseTrainMergedPullNumber(subject);
-        const trailer = new RegExp(`^${SETTLED_TRAILER}: (.+)$`, "m").exec(body);
-        if (number !== null && trailer) settled.push({ number, files: trailer[1].split(", ").filter((file) => file !== "") });
+        const files = settledCommits.get(sha);
+        if (number !== null && files) settled.push({ number, files: [...files] });
       }
       return { mainSha, headSha, picks, boarded, settled };
     },

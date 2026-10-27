@@ -287,6 +287,8 @@ test("an adjacent-line conflict is settled; a real one names only the pull reque
     writeFileSync(join(repo, "x.txt"), with_({}));
     writeFileSync(join(repo, "list.txt"), text("first"));
     writeFileSync(join(repo, "logo.bin"), Buffer.from([0, 1, 2]));
+    // Latin-1 "café", then "b": text to git, not UTF-8.
+    writeFileSync(join(repo, "latin.txt"), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a, 0x62, 0x0a]));
     git("add", ".");
     git("commit", "--quiet", "-m", "base");
     git("switch", "--quiet", "-c", "develop");
@@ -310,10 +312,21 @@ test("an adjacent-line conflict is settled; a real one names only the pull reque
     const ported = mergePull(23, { "x.txt": with_({ 0: ["ONE"], 9: ["TEN", "TEN AND A HALF"], 12: ["thirteen", "ported"] }), "list.txt": text("first", "develop's") });
     // #24 changes a binary file main changed too: git marks no hunk, so it is never settled.
     const binary = mergePull(24, { "logo.bin": Buffer.from([0, 1, 2, 24]) });
+    // #25 adds a line after the first of a Latin-1 file whose first line main changed: never rewritten as UTF-8.
+    const latin = mergePull(25, { "latin.txt": Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a, 0x6e, 0x0a, 0x62, 0x0a]) });
+    // #26 applies cleanly; its own merge message carries the trailer's words.
+    git("switch", "--quiet", "-c", "feature-26", "develop");
+    writeFileSync(join(repo, "new.txt"), text("new"));
+    git("add", ".");
+    git("commit", "--quiet", "-m", "change 26");
+    git("switch", "--quiet", "develop");
+    git("merge", "--quiet", "--no-ff", "-m", "Merge pull request #26 from mposition/feature-26\n\nRelease-train-settled: new.txt", "feature-26");
+    const forged = git("rev-parse", "HEAD");
     git("switch", "--quiet", "main");
     writeFileSync(join(repo, "x.txt"), with_({ 9: ["ten on main"], 12: ["thirteen on main", "ported"] }));
     writeFileSync(join(repo, "list.txt"), text("first", "main's"));
     writeFileSync(join(repo, "logo.bin"), Buffer.from([0, 1, 2, 99]));
+    writeFileSync(join(repo, "latin.txt"), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x21, 0x0a, 0x62, 0x0a]));
     git("commit", "--quiet", "-am", "main moves");
 
     const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo, autoPredecessors: false });
@@ -324,6 +337,8 @@ test("an adjacent-line conflict is settled; a real one names only the pull reque
         { number: 22, title: "22", mergeCommitSha: changes, mergedAt: new Date(now + 1).toISOString() },
         { number: 23, title: "23", mergeCommitSha: ported, mergedAt: new Date(now + 2).toISOString() },
         { number: 24, title: "24", mergeCommitSha: binary, mergedAt: new Date(now + 3).toISOString() },
+        { number: 25, title: "25", mergeCommitSha: latin, mergedAt: new Date(now + 4).toISOString() },
+        { number: 26, title: "26", mergeCommitSha: forged, mergedAt: new Date(now + 5).toISOString() },
       ], 30);
       assert.deepEqual(result.picks, [
         { number: 21, outcome: "included" },
@@ -331,12 +346,14 @@ test("an adjacent-line conflict is settled; a real one names only the pull reque
         { number: 22, outcome: "conflict", predecessors: [19] },
         { number: 23, outcome: "already_in_main" },
         { number: 24, outcome: "conflict", predecessors: [] },
+        { number: 25, outcome: "conflict", predecessors: [] },
+        { number: 26, outcome: "included" },
       ]);
       assert.deepEqual(result.settled, [{ number: 21, files: ["list.txt", "x.txt"] }]);
       await ports.push("release/train-20261027-2300");
       assert.equal(git("show", "release/train-20261027-2300:x.txt"), with_({ 9: ["ten on main", "ten and a half"], 12: ["thirteen on main", "ported"] }).trim());
       assert.equal(git("show", "release/train-20261027-2300:list.txt"), text("first", "main's", "develop's").trim());
-      assert.match(git("log", "-1", "--format=%B", "release/train-20261027-2300"), /^Merge pull request #21 from [\s\S]*^Release-train-settled: list\.txt, x\.txt$/m);
+      assert.match(git("log", "--format=%B", "release/train-20261027-2300"), /^Merge pull request #21 from [\s\S]*^Release-train-settled: list\.txt, x\.txt$/m);
     } finally {
       await ports.cleanup();
     }
