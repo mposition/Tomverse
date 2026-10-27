@@ -361,3 +361,47 @@ test("an adjacent-line conflict is settled; a real one names only the pull reque
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Review r-20261027-021602-f2ce17: a line main has elsewhere in the file is
+// no proof main has the change. #30 turns block b on; main has block a on
+// but not b, so #31, which changes b's next line, needs #30.
+test("a predecessor is named even when main has the same line elsewhere in the file", async () => {
+  const root = mkdtempSync(join(tmpdir(), "train-git-repeat-test-"));
+  try {
+    const repo = join(root, "origin");
+    const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    const config = (a, b, bName) => ["[a]", `enabled: ${a}`, "name: a", "", "[b]", `enabled: ${b}`, `name: ${bName}`, ""].join("\n");
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", repo]);
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    git("config", "core.autocrlf", "false");
+    writeFileSync(join(repo, "config.txt"), config("false", "false", "b"));
+    git("add", ".");
+    git("commit", "--quiet", "-m", "base");
+    git("switch", "--quiet", "-c", "develop");
+    const mergePull = (number, content) => {
+      git("switch", "--quiet", "-c", `feature-${number}`, "develop");
+      writeFileSync(join(repo, "config.txt"), content);
+      git("add", ".");
+      git("commit", "--quiet", "-m", `change ${number}`);
+      git("switch", "--quiet", "develop");
+      git("merge", "--quiet", "--no-ff", "-m", `Merge pull request #${number} from mposition/feature-${number}`, `feature-${number}`);
+      return git("rev-parse", "HEAD");
+    };
+    mergePull(30, config("false", "true", "b"));
+    const thirtyOne = mergePull(31, config("false", "true", "bee"));
+    git("switch", "--quiet", "main");
+    writeFileSync(join(repo, "config.txt"), config("true", "false", "b"));
+    git("commit", "--quiet", "-am", "main turns a on");
+
+    const ports = createQaReleaseTrainGitPorts({ token: async () => "unused", remote: repo, autoPredecessors: false });
+    try {
+      const result = await ports.assemble("release/train-20261027-2330", [{ number: 31, title: "31", mergeCommitSha: thirtyOne, mergedAt: new Date().toISOString() }], 30);
+      assert.deepEqual(result.picks, [{ number: 31, outcome: "conflict", predecessors: [30] }]);
+    } finally {
+      await ports.cleanup();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

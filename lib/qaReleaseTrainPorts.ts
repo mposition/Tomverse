@@ -157,9 +157,11 @@ export function createQaReleaseTrainGitPorts(input: {
   // last 14 days" named ten unrelated package.json pull requests for #3042 and
   // missed the cause, #2131). For each conflicted file, the lines the pick's
   // change was made against (its diff's old side, context included) are
-  // blamed along develop's merges; a line main's file also has is not the
-  // cause. The fetch of the merge commit brought develop's history; a failed
-  // read names none. Each comes with its merge commit, so it can board.
+  // blamed along develop's merges; only a line main lacks at that place (an
+  // added side of main-to-develop's line diff of the file, not a line that
+  // merely appears somewhere in main's file) is a cause. The fetch of the merge
+  // commit brought develop's history; a failed read names none. Each comes
+  // with its merge commit, so it can board.
   // A conflict that stays one is read once for boarding and once for the report, at the same head.
   const named = new Map<string, QaReleaseTrainCandidate[]>();
   /** Commits this train made by settling an adjacent-line conflict, with the files. */
@@ -183,12 +185,15 @@ export function createQaReleaseTrainGitPorts(input: {
       const blobs = [...new Set([...versions.stdout.matchAll(/^:\d+ \d+ [0-9a-f]{40} ([0-9a-f]{40}) /gm)].map((m) => m[1]))].filter((blob) => !/^0+$/.test(blob));
       if (blobs.length > 0) await git(["-c", "fetch.negotiationAlgorithm=noop", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--filter=blob:none", "origin", ...blobs], { allowFail: true });
       const blame = await git(["blame", "--first-parent", "--porcelain", ...ranges.flatMap((r) => ["-L", `${r.start},+${r.count}`]), parent, "--", file], { allowFail: true, raw: true });
-      const onMain = new Set((await git(["show", `HEAD:${file}`], { allowFail: true, raw: true })).stdout.split("\n"));
-      let commit = "";
-      for (const line of blame.stdout.split("\n")) {
-        const header = /^\^?([0-9a-f]{40}) \d+ \d+/.exec(line);
-        if (header) commit = header[1];
-        else if (line.startsWith("\t") && !onMain.has(line.slice(1))) causes.add(commit);
+      // Develop's lines main lacks where they stand: the new side of main -> develop, no context. Main without the file lacks them all.
+      const missing = [...(await git(["diff", "-U0", "--no-color", "--no-ext-diff", "HEAD", parent, "--", file], { allowFail: true })).stdout.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)].map((m) => ({
+        start: Number(m[1]),
+        count: m[2] === undefined ? 1 : Number(m[2]),
+      }));
+      // Porcelain gives every line a header: the commit, its line there, and its line in develop's file.
+      for (const header of blame.stdout.matchAll(/^\^?([0-9a-f]{40}) \d+ (\d+)/gm)) {
+        const line = Number(header[2]);
+        if (missing.some((r) => line >= r.start && line < r.start + r.count)) causes.add(header[1]);
       }
     }
     const found = new Map<number, QaReleaseTrainCandidate>();
@@ -250,7 +255,7 @@ export function createQaReleaseTrainGitPorts(input: {
       // A conflicted file with no hunk to read is one git could not mark: never staged as main's.
       if (hunks === 0) return false;
       await writeFile(join(dir, file), settled.join("\n"));
-      await git(["add", "--", file]);
+      if (!(await git(["add", "--", file], { allowFail: true })).ok) return false;
     }
     return true;
   };
@@ -269,10 +274,10 @@ export function createQaReleaseTrainGitPorts(input: {
       }
       const files = unmerged.split("\n").filter((file) => file !== "");
       picked = await settleAdjacent(files);
-      // Settled to nothing new: main already had what it adds.
+      // Settled to nothing new: main already had what it adds. A skip that fails is aborted like a conflict.
       if (picked && (await git(["diff", "--cached", "--quiet"], { allowFail: true })).ok) {
-        await git(["cherry-pick", "--skip"], { allowFail: true });
-        return { result: "empty" };
+        if ((await git(["cherry-pick", "--skip"], { allowFail: true })).ok) return { result: "empty" };
+        picked = false;
       }
       // Settled, it commits with the original message and a trailer naming the files.
       picked = picked && (await git(["commit", "--quiet", "--no-edit", "--trailer", `${SETTLED_TRAILER}: ${files.join(", ")}`], { allowFail: true })).ok;
