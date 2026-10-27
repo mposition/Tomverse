@@ -455,3 +455,19 @@ test("an operator's hidden candidates: read back, hidden and shown again, malfor
   assert.equal(next[0], 2);
   assert.equal(next.at(-1), 9999);
 });
+
+test("a Dependabot package update is never a candidate: Dependabot opens its own main pull request", () => {
+  const candidates = qaReleaseTrainCargoCandidates({
+    mergedDevelopJson: [
+      develop(3045),
+      develop(2975, "2026-10-22T00:00:00Z", { user: { login: "dependabot[bot]" }, head: { ref: "dependabot/npm_and_yarn/develop/ajv-8.20.0" } }),
+      develop(2974, "2026-10-22T00:00:00Z", { user: { login: "Dependabot" } }),
+      develop(2973, "2026-10-22T00:00:00Z", { user: { login: "dependabot-preview[bot]" } }),
+    ],
+    mergedMainJson: [],
+    openMainJson: [],
+    files: new Map(),
+    nowMs: NOW,
+  });
+  assert.deepEqual(candidates.map((candidate) => candidate.number), [3045, 2973]);
+});
