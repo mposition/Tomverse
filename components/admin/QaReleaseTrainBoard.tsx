@@ -253,7 +253,12 @@ export function QaReleaseTrainBoard({ rows, pullsRead, nowMs }: { rows: QaReleas
                           <h3 className="mt-3 text-xs font-medium text-[#f5c46b]">{m.detailRode.replace("{count}", String(row.included.length))}</h3>
                           <ul className="mt-1 flex flex-col gap-0.5">
                             {row.included.map((pull) => (
-                              <li key={pull.number}>{pullLink(pull.number, pull.title)}</li>
+                              <li key={pull.number}>
+                                {pullLink(pull.number, pull.title)}
+                                {pull.boardedFor !== undefined ? (
+                                  <span className="block text-xs text-[#a8d672]">{m.detailBoardedFor.replace("{number}", `#${pull.boardedFor}`)}</span>
+                                ) : null}
+                              </li>
                             ))}
                           </ul>
                         </>

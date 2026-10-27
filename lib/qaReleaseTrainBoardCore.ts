@@ -33,7 +33,8 @@ export type QaReleaseTrainBoardStatus =
   | "empty"
   | "failed";
 
-export type QaReleaseTrainBoardPull = { number: number; title: string };
+/** `boardedFor`: not picked; boarded because that pick needed it. */
+export type QaReleaseTrainBoardPull = { number: number; title: string; boardedFor?: number };
 
 export type QaReleaseTrainBoardRow = {
   slot: string;
@@ -129,7 +130,10 @@ export function qaReleaseTrainBoardRows(input: {
       status,
       pullRequestNumber: report.pullRequestNumber,
       settledAt: state?.settledAt ?? null,
-      included: picks.filter((p) => p.outcome === "included").map((p) => pull(p.number as number)),
+      included: picks
+        .filter((p) => p.outcome === "included")
+        // Boarded for a pick that needed it, not picked by the operator.
+        .map((p) => (Number.isInteger(p.boardedFor) ? { ...pull(p.number as number), boardedFor: p.boardedFor as number } : pull(p.number as number))),
       leftOut: picks
         .filter((p) => p.outcome === "conflict" || p.outcome === "over_capacity" || p.outcome === "changes_workflows")
         .map((p) => ({
