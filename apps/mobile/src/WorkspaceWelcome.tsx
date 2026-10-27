@@ -1,46 +1,28 @@
-import { useEffect, useId, useState } from "react";
-import { Sparkles, FileText, Globe, Code2, FileSpreadsheet, Image as ImageIcon } from "lucide-react";
-import { workspaceWelcomeCopy } from "../../../locales/workspaceWelcome";
-import { reviewWorkspaceCopy } from "../../../lib/reviewWorkspaceCopy";
+import { useId } from "react";
 import type { MobileLanguage } from "../../../locales/mobile";
-import type { ChatTransport, MobileCapabilities } from "./chatTransport";
+import { mobileWorkspaceStartCopy } from "../../../locales/mobileWorkspaceStart";
+import chatLight from "./assets/workspace-chat-light.webp";
+import chatDark from "./assets/workspace-chat-dark.webp";
+import reviewLight from "./assets/workspace-review-light.webp";
+import reviewDark from "./assets/workspace-review-dark.webp";
 
-type Starter = "compareAnswers" | "documentQuestions" | "sourcedAnswer" | "debugStackTrace" | "spreadsheetFromAnswer" | "compareImageModels";
-const icons = { compareAnswers: Sparkles, documentQuestions: FileText, sourcedAnswer: Globe, debugStackTrace: Code2, spreadsheetFromAnswer: FileSpreadsheet, compareImageModels: ImageIcon };
-export function WorkspaceWelcome({ product, language, transport, capability, onSeed }: {
-  product: "chat" | "review"; language: MobileLanguage; transport: ChatTransport; capability?: MobileCapabilities | null;
-  onSeed: (text: string, starter: Starter) => void;
+export function WorkspaceWelcome({ product, language, automatic = false }: {
+  product: "chat" | "review"; language: MobileLanguage; automatic?: boolean;
 }) {
-  const [loaded, setLoaded] = useState<MobileCapabilities | null>(null);
-  const descriptionId = useId();
-  useEffect(() => {
-    if (capability !== undefined) return;
-    let active = true;
-    void transport.mobileCapabilities?.().then(value => { if (active) setLoaded(value); }).catch(() => {});
-    return () => { active = false; };
-  }, [transport, capability]);
-  const available = capability ?? loaded;
-  const c = workspaceWelcomeCopy[language]; const review = reviewWorkspaceCopy[language];
-  const imageAvailable = available?.images?.enabled && available.images.models.length > 0;
-  const card = (key: Starter, title?: string, hint?: string) => {
-    const item = c.starter.cards[key]; const Icon = icons[key];
-    return <button key={key} type="button" className={`welcome-card welcome-${key}`} aria-label={title?.replaceAll("\n", " ") ?? item.label} aria-describedby={`${descriptionId}-${key}`} onClick={() => onSeed(item.seed, key)}>
-      <Icon size={18} strokeWidth={1.7} aria-hidden="true" /><span><strong>{title ?? item.label}</strong>{hint && <small>{hint}</small>}</span>
-      <span id={`${descriptionId}-${key}`} hidden>{item.outcome}</span>
-    </button>;
-  };
-  return <div className={`workspace-welcome ${product}-welcome`}><div className="workspace-welcome-content">
-    {product === "review" && <span className="welcome-product-label">{review.newReview}</span>}
-    <h1>{product === "review" ? review.welcome : c.greeting.replace(". ", ".\n")}</h1>
-    {product === "review" && <p className="welcome-intro">{review.intro}</p>}
-    <p className="welcome-seed-hint">{c.starter.hint}</p>
-    {product === "chat" ? <div className="welcome-card-grid">
-      {(available?.maxModels ?? 0) >= 3 && card("compareAnswers")}
-      {card("documentQuestions")}{card("sourcedAnswer")}{card("debugStackTrace")}{card("spreadsheetFromAnswer")}
-      {imageAvailable && card("compareImageModels")}
-    </div> : <>
-      <div className="review-welcome-cards">{card("documentQuestions", review.documents, review.documentHint)}{imageAvailable && card("compareImageModels", review.images, review.imageHint)}{card("sourcedAnswer", review.research, review.researchHint)}</div>
-      <div className="welcome-extra-actions">{card("debugStackTrace", review.code)}{card("spreadsheetFromAnswer", review.files)}</div>
-    </>}
-  </div></div>;
+  const c = mobileWorkspaceStartCopy(language);
+  const id = useId();
+  const review = product === "review";
+  return <section className={`workspace-welcome ${product}-welcome`} data-testid="workspace-start" data-product={product} aria-labelledby={id}>
+    <div className="workspace-welcome-content">
+      <h1 id={id}><span>{review ? c.reviewFirst : c.chatFirst}</span><span className="welcome-headline-last">{review ? c.reviewLast : c.chatLast}<span className="welcome-period">.</span></span></h1>
+      <p className="welcome-intro">{review ? c.reviewDescription : automatic ? c.chatAutomatic : c.chatDescription}</p>
+    </div>
+    <div className="welcome-art" aria-hidden="true">
+      {/* Decorative assets are bundled locally; first entry never creates a conversation. */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- Native Vite image assets. */}
+      <img className="welcome-art-light" src={review ? reviewLight : chatLight} alt="" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- Native Vite image assets. */}
+      <img className="welcome-art-dark" src={review ? reviewDark : chatDark} alt="" />
+    </div>
+  </section>;
 }
