@@ -25,7 +25,7 @@ try {
   if (await prisma.user.findUnique({ where: { email }, select: { id: true } })) throw new Error("Address already exists. Inspect the previous outcome; never reuse a customer account.");
   const user = await prisma.user.create({ data: { email, name: "Google Play Review", plan: "Free", emailVerified: new Date(), emailLoginEnabled: true }, select: { id: true } });
   const code = randomInt(1_000_000).toString().padStart(6, "0");
-  const credential = { submissionId, userId: user.id, email, appId: "app.tomverse.shell", buildNumber, state: "prepared", validUntil: new Date(Date.now() + 14 * 86400000).toISOString(), salt: randomBytes(32).toString("hex"), codeHash: "" };
+  const credential = { submissionId, userId: user.id, email, appId: "app.tomverse.shell", buildNumber, plan: "Free", state: "prepared", validUntil: new Date(Date.now() + 14 * 86400000).toISOString(), salt: randomBytes(32).toString("hex"), codeHash: "" };
   credential.codeHash = hashMobileStoreReviewCode(credential, code);
   await writeFile(resolve(output, "server-credential.json"), JSON.stringify(credential, null, 2), { flag: "wx", mode: 0o600 });
   await writeFile(resolve(output, "private-review-instructions.txt"), `Submission: ${submissionId}\nBuild: ${buildNumber}\nAccount: ${email}\nPrivate verification code: ${code}\n\nChoose Use an email code in the app. Enter the account, continue, then enter the supplied code. No mailbox access is needed. The Free account requires no purchase.\n\nAccount data can be exported or deleted in Settings > Data. Internet access is required.\n`, { flag: "wx", mode: 0o600 });

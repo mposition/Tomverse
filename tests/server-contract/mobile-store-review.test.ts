@@ -55,3 +55,15 @@ test("wrong build refuses before querying account data", async () => {
   assert.equal((await api.verifyMobileStoreReviewCode(request, { ...input, buildNumber: 15 }))?.ok, false);
   assert.deepEqual(calls, ["mobile-store-review-verify"]);
 });
+test("Max review access needs a separately granted, unexpired manual plan", async () => {
+  const configured = { ...credential, plan: "Max" as const };
+  configured.codeHash = hashMobileStoreReviewCode(configured, input.code);
+  process.env.MOBILE_STORE_REVIEW_CREDENTIAL_JSON = JSON.stringify(configured);
+  assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
+  user.plan = "Max";
+  assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
+  user.subscriptionStatus = "manually_adjusted"; user.subscriptionCurrentPeriodEnd = new Date(Date.now() + 86400000);
+  assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, true);
+  user.subscriptionCurrentPeriodEnd = new Date(Date.now() - 1000);
+  assert.equal((await api.verifyMobileStoreReviewCode(request, input))?.ok, false);
+});

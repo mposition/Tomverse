@@ -19,10 +19,12 @@ export async function verifyMobileStoreReviewCode(request: Request, input: { ema
   await consumeApiRateLimit(request, credential.userId, "mobile-store-review-verify", { minute: 5, day: 100 });
   const refused = { ok: false as const, reason: "invalid_or_expired" };
   if (!matchesMobileStoreReviewCode(credential, input)) return refused;
-  const user = await prisma.user.findUnique({ where: { id: credential.userId }, select: { id: true, email: true, plan: true, emailVerified: true, emailLoginEnabled: true, accountStatus: true } });
-  if (!user || user.email?.trim().toLowerCase() !== credential.email || user.plan !== "Free" ||
+  const user = await prisma.user.findUnique({ where: { id: credential.userId }, select: { id: true, email: true, plan: true, subscriptionStatus: true, subscriptionCurrentPeriodEnd: true, emailVerified: true, emailLoginEnabled: true, accountStatus: true } });
+  if (!user || user.email?.trim().toLowerCase() !== credential.email || user.plan !== credential.plan ||
       !user.emailVerified || !user.emailLoginEnabled || user.accountStatus !== "active" ||
       normalizeAdminList(process.env.ADMIN_USER_IDS).includes(user.id.toLowerCase()) ||
       normalizeAdminList(process.env.ADMIN_EMAILS).includes(credential.email)) return refused;
+  if (credential.plan === "Max" && (user.subscriptionStatus !== "manually_adjusted" ||
+      !user.subscriptionCurrentPeriodEnd || user.subscriptionCurrentPeriodEnd.getTime() <= Date.now())) return refused;
   return { ok: true as const, userId: user.id };
 }

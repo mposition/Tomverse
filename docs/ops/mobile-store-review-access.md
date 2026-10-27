@@ -28,7 +28,14 @@ review address, so its email is not treated as a secret; the code remains privat
 Verification uses the existing native route origin refusal, admission budget,
 active-account check and session issuance/rotation. The additional code check
 has an account-wide 5/minute and 100/day budget, before the slow password hash.
-The account must remain verified, active, email-login-enabled, non-admin and Free.
+The account must remain verified, active, email-login-enabled and non-admin. Its
+plan must exactly match the credential's `plan` (`Free` by default). The owner's
+Google-review exception permits `Max` only after a separate normal Admin plan
+adjustment: `manually_adjusted` status with an unexpired period end is required.
+The credential never upgrades a plan, grants credits or resets usage. The owner
+approved one temporary Max review account using the existing monthly allowance,
+no additional credit top-ups, with access revoked after review. Use the existing
+Admin plan-adjust approval and audit path; never update plan fields directly.
 App/build claims are client assertions, not platform attestation. The credential,
 account binding, expiry and limits enforce access; ordinary OTP login is unchanged.
 

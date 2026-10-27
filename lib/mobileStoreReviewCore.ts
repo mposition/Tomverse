@@ -7,6 +7,7 @@ const credentialSchema = z.object({
   email: z.string().email().transform(value => value.trim().toLowerCase()),
   appId: z.literal("app.tomverse.shell"),
   buildNumber: z.number().int().positive(),
+  plan: z.enum(["Free", "Max"]).default("Free"),
   state: z.enum(["prepared", "submitted", "in_review", "unresolved"]),
   validUntil: z.string().datetime(),
   salt: z.string().regex(/^[a-f0-9]{64}$/),
@@ -26,8 +27,8 @@ export function readMobileStoreReviewCredential(env = process.env, now = Date.no
   } catch { return null; }
 }
 
-export function hashMobileStoreReviewCode(credential: Pick<MobileStoreReviewCredential, "email" | "submissionId" | "appId" | "buildNumber" | "salt">, code: string) {
-  return scryptSync(code, [credential.salt, credential.email, credential.submissionId, credential.appId, credential.buildNumber].join(":"), 32).toString("hex");
+export function hashMobileStoreReviewCode(credential: Pick<MobileStoreReviewCredential, "email" | "submissionId" | "appId" | "buildNumber" | "salt"> & { plan?: "Free" | "Max" }, code: string) {
+  return scryptSync(code, [credential.salt, credential.email, credential.submissionId, credential.appId, credential.buildNumber, credential.plan ?? "Free"].join(":"), 32).toString("hex");
 }
 
 export function matchesMobileStoreReviewCode(credential: MobileStoreReviewCredential, input: { email: string; code: string; platform: string; appId?: string; buildNumber?: number }) {
