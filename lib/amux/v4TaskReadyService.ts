@@ -21,6 +21,8 @@ import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { evaluateAmuxV4TaskReady, type AmuxV4TaskReadyFacts } from
   "./v4TaskReadyCore.ts";
+import { AMUX_UNIT_DECISION_AUDIT_SELECT, amuxUnitDecisionAuditActorValid,
+  readAmuxPlanRegistrationAuditFor } from "./ideaSystemRegistrationCore.ts";
 
 const TASK_ID = /^[A-Za-z0-9:_-]{8,128}$/;
 const IDEA_ID = /^[A-Za-z0-9_-]{8,80}$/;
@@ -237,9 +239,10 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
         snapshot?.card?.task?.grade) && approvedCost !== null;
     const audit = decision?.finalAuditLogId ? await tx.adminAuditLog.findUnique({
       where: { id: decision.finalAuditLogId },
-      select: { action: true, actorUserId: true, targetId: true,
-        targetType: true, entryHash: true },
+      select: AMUX_UNIT_DECISION_AUDIT_SELECT,
     }) : null;
+    const planRegistrationAudit = await readAmuxPlanRegistrationAuditFor(tx,
+      ideaId, audit);
     const sourceApprovalValid = decision?.state === "consumed" &&
       decision.action === "register_card" &&
       (expectedActorUserId === null || decision.actorUserId === expectedActorUserId) &&
@@ -258,7 +261,9 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       approvedCost !== null &&
       audit?.entryHash !== null && audit?.entryHash !== undefined &&
       audit.action === "amux.v4.unit.consume" &&
-      audit.actorUserId === decision.actorUserId && audit.targetId === decision.id &&
+      amuxUnitDecisionAuditActorValid({ audit, decision,
+        planRegistrationAudit }) &&
+      audit.targetId === decision.id &&
       audit.targetType === "AmuxIdeaUnitDecision";
     let briefAndScopeVerified = false;
     if (card.v4BodyCiphertext && card.v4BodyKeyId && card.v4BodyKeyVersion &&

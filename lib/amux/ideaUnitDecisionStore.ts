@@ -34,6 +34,9 @@ import { allocateAmuxCardDisplayKey,
   chooseAmuxFeatureDisplayPrefix } from "./cardDisplayKeyAllocator.ts";
 import { AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
+import { AMUX_UNIT_DECISION_AUDIT_SELECT, type AmuxUnitDecisionAuditRow,
+  amuxUnitDecisionAuditActorValid, readAmuxPlanRegistrationAuditFor } from
+  "./ideaSystemRegistrationCore.ts";
 import { amuxRegistrationAuthorityActor, amuxRegistrationAuthorityKind,
   amuxRegistrationDataOwner,
   type AmuxRegistrationAuditAuthority, writeAmuxRegistrationAudit } from
@@ -1127,19 +1130,18 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       linkedWorkItemId: true, baseWorkItemId: true,
       baseNodeId: true, baseNodeRevision: true,
       baseNodeDigest: true, baseNodeDigestKeyId: true,
-      prepareAuditLogId: true, finalAuditLogId: true },
+      prepareAuditLogId: true, finalAuditLogId: true,
+      confirmationSnapshot: true },
   });
   if (!row) return { state: "not_visible", retryWrite: false } as const;
   const [prepareAudit, finalAudit, card, nodeRevision, node, decisionDraft,
     linkedNode, linkedRevision, linkedCard, unknownAudit,
     unknownResolvedAudit] = await Promise.all([
     prisma.adminAuditLog.findUnique({ where: { id: row.prepareAuditLogId },
-      select: { action: true, actorUserId: true, targetType: true,
-        targetId: true, entryHash: true } }),
+      select: AMUX_UNIT_DECISION_AUDIT_SELECT }),
     row.finalAuditLogId ? prisma.adminAuditLog.findUnique({
       where: { id: row.finalAuditLogId },
-      select: { action: true, actorUserId: true, targetType: true,
-        targetId: true, entryHash: true, metadata: true },
+      select: AMUX_UNIT_DECISION_AUDIT_SELECT,
     }) : Promise.resolve(null),
     row.registeredWorkItemId ? prisma.amuxWorkItem.findUnique({
       where: { id: row.registeredWorkItemId },
@@ -1187,11 +1189,19 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
         targetId: true, entryHash: true },
     }) : Promise.resolve(null),
   ]);
+  // An intake v19 registration writes both receipts as the scoped system
+  // registrar; an Admin one writes them as this owner.
+  const planRegistrationAudit = await readAmuxPlanRegistrationAuditFor(prisma,
+    row.ideaId, prepareAudit);
+  const registrationActorValid = (audit: AmuxUnitDecisionAuditRow) =>
+    amuxUnitDecisionAuditActorValid({ audit, planRegistrationAudit,
+      decision: { id: row.id, ideaId: row.ideaId, actorUserId,
+        confirmationSnapshot: row.confirmationSnapshot } });
   if (!["register_card", "create_node", "reject_unit",
       "select_existing_node", "link_existing_node",
       "link_existing_card"].includes(row.action) ||
       !prepareAudit?.entryHash || prepareAudit.action !== "amux.v4.unit.prepare" ||
-      prepareAudit.actorUserId !== actorUserId ||
+      !registrationActorValid(prepareAudit) ||
       prepareAudit.targetType !== "AmuxIdeaUnitDecision" ||
       prepareAudit.targetId !== row.id ||
       (row.outcomeUnknownAt !== null && (!unknownAudit?.entryHash ||
@@ -1220,7 +1230,7 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
             finalAudit.metadata === null ||
             (finalAudit.metadata as Record<string, unknown>)[SYSTEM_AUDIT_ACTOR_METADATA_KEY] !==
               AMUX_V4_IDEA_SYSTEM_ACTOR) :
-          finalAudit.actorUserId !== actorUserId) ||
+          !registrationActorValid(finalAudit)) ||
         finalAudit.targetId !== row.id)) ||
       (row.state === "consumed" && row.action === "register_card" && (!card ||
         card.sourceSystem !== "admin-idea-v4" ||

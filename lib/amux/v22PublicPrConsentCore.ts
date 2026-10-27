@@ -2,6 +2,8 @@ import { deriveAmuxIdeaUnitConfirmation,
   sameAmuxIdeaUnitConfirmation,
   type AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
+import { type AmuxUnitDecisionAuditRow, amuxUnitDecisionAuditActorValid } from
+  "./ideaSystemRegistrationCore.ts";
 
 type ConsentEvidence = {
   cardId: string;
@@ -10,16 +12,14 @@ type ConsentEvidence = {
   taskRole: string | null;
   sourceApprovalId: string | null;
   decision: {
-    id: string; state: string; action: string; actorUserId: string;
-    registeredWorkItemId: string | null; confirmationDigest: string;
-    confirmationDigestKeyId: string; confirmationSnapshot: unknown;
+    id: string; ideaId: string; state: string; action: string;
+    actorUserId: string; registeredWorkItemId: string | null;
+    confirmationDigest: string; confirmationDigestKeyId: string; confirmationSnapshot: unknown;
     finalAuditLogId: string | null;
   } | null;
-  audit: {
-    id: string; action: string; actorUserId: string | null;
-    targetType: string; targetId: string | null; entryHash: string | null;
-    metadata: unknown;
-  } | null;
+  audit: (AmuxUnitDecisionAuditRow & { id: string }) | null;
+  /** The idea's v19 plan registration audit when a system row consumed it. */
+  planRegistrationAudit: AmuxUnitDecisionAuditRow | null;
   digestKey: { digestKeyId: string; digestKey: Buffer };
 };
 
@@ -35,7 +35,8 @@ export function amuxV22PublicPrConsentAllowed(input: ConsentEvidence): boolean {
       decision.confirmationDigestKeyId !== input.digestKey.digestKeyId ||
       decision.finalAuditLogId !== audit.id ||
       audit.action !== "amux.v4.unit.consume" ||
-      audit.actorUserId !== decision.actorUserId ||
+      !amuxUnitDecisionAuditActorValid({ audit, decision,
+        planRegistrationAudit: input.planRegistrationAudit }) ||
       audit.targetType !== "AmuxIdeaUnitDecision" ||
       audit.targetId !== decision.id || !audit.entryHash ||
       !/^[a-f0-9]{64}$/.test(audit.entryHash)) return false;
