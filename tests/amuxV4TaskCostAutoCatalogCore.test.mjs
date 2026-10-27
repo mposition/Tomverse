@@ -17,6 +17,8 @@ import {
 import { deriveAmuxWorkerCatalog } from "../lib/amux/workerDerivedCatalogCore.ts";
 // The fixtures' names start with their CLI; the registry no longer reads it from them.
 const amuxWorkerProviderClassOf = (name) => name.slice(0, name.indexOf("-"));
+import { deriveAmuxWorkerCatalog } from "../lib/amux/workerDerivedCatalogCore.ts";
+import { amuxWorkerProviderClassOf } from "../lib/amux/workerRegistryCore.ts";
 
 const NOW = "2026-10-25T01:02:03.000Z";
 const workers = [
