@@ -82,8 +82,9 @@ export async function startMcpSyntheticServer(options: { basicClientAuth?: boole
       writes++; return { content: [{ type: "text", text: "deleted" }] };
     });
     if (unsupportedTools) {
-      server.registerTool("unsupported_input", { inputSchema: { value: z.string().regex(/(a+)+$/) } }, async () => ({ content: [] }));
-      server.registerTool("unsupported_output", { inputSchema: {}, outputSchema: { value: z.string().regex(/(a+)+$/) } }, async () => ({ content: [], structuredContent: { value: "a" } }));
+      // Any `pattern` is refused (lib/mcpConnectorSchema.ts), so a plain one is enough.
+      server.registerTool("unsupported_input", { inputSchema: { value: z.string().regex(/^a$/) } }, async () => ({ content: [] }));
+      server.registerTool("unsupported_output", { inputSchema: {}, outputSchema: { value: z.string().regex(/^a$/) } }, async () => ({ content: [], structuredContent: { value: "a" } }));
     }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => { void transport.close(); void server.close(); });
