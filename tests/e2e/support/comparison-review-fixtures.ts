@@ -25,6 +25,7 @@ export async function mockComparisonReview(
   options: {
     deferSetup?: boolean;
     withSecondary?: boolean;
+    longSource?: boolean;
     /**
      * Makes the review request itself fail. The setup step still succeeds, so
      * the dialog reaches the state a user actually hits: they chose a mode,
@@ -52,6 +53,14 @@ export async function mockComparisonReview(
           contentType: "application/json",
           body: JSON.stringify({
             available: true,
+            source: {
+              question: "Compare these approaches",
+              responses: [
+                { messageId: "21111111-1111-4111-8111-111111111111", content: (options.longSource ? "추가 배경 설명입니다.\n\n".repeat(60) : "") + "단계적으로 접근해야 합니다. 먼저 배포부터 진행합니다. 보안 검토를 먼저 합니다." },
+                { messageId: "31111111-1111-4111-8111-111111111111", content: "사용자 검증을 먼저 합니다. 단계적 접근이 필요합니다." },
+                { messageId: "41111111-1111-4111-8111-111111111111", content: "비용과 속도를 분석합니다." },
+              ],
+            },
             promptMessageId: "11111111-1111-4111-8111-111111111111",
             assistantMessageIds: [
               "21111111-1111-4111-8111-111111111111",

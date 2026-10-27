@@ -2,7 +2,10 @@
 // workflow .github/workflows/pr-ci-auto-fix.yml.
 //
 //   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json>
-//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff <checkout-dir>
+//   node --experimental-strip-types scripts/pr-ci-auto-fix-guard.mjs diff <checkout-dir> [<head-branch>]
+//
+// `diff` takes the head branch the target job read from GitHub; without it no
+// root file is allowed.
 //
 // `target` reads the pull request and its commits as `gh api --paginate
 // --slurp` returned them; `diff` reads the diff against HEAD of another
@@ -14,9 +17,10 @@ import { readFileSync } from "node:fs";
 
 import { judgePrCiAutoFixDiff, judgePrCiAutoFixTarget } from "../lib/prCiAutoFixGuardCore.ts";
 
-const [mode, prPath, commitsPath] = process.argv.slice(2);
+const [mode, ...args] = process.argv.slice(2);
 let verdict;
-if (mode === "target") {
+if (mode === "target" && args.length === 2) {
+  const [prPath, commitsPath] = args;
   const pr = JSON.parse(readFileSync(prPath, "utf8"));
   // --slurp: one array per page.
   const pages = JSON.parse(readFileSync(commitsPath, "utf8"));
@@ -26,18 +30,21 @@ if (mode === "target") {
     baseBranch: pr.base?.ref ?? "",
     draft: pr.draft === true,
     sameRepository: pr.head?.repo?.full_name === pr.base?.repo?.full_name,
+    author: String(pr.user?.login ?? ""),
     commitMessages: commits.map((c) => String(c.commit?.message ?? "")),
     commitCount: pr.commits,
   });
-} else if (mode === "diff" && prPath) {
-  const git = (args) => execFileSync("git", ["-C", prPath, ...args], { encoding: "utf8" });
+} else if (mode === "diff" && (args.length === 1 || args.length === 2)) {
+  const [checkoutDir, headBranch] = args;
+  const git = (gitArgs) => execFileSync("git", ["-C", checkoutDir, ...gitArgs], { encoding: "utf8" });
   git(["add", "--intent-to-add", "--all"]);
   verdict = judgePrCiAutoFixDiff({
     nameStatus: git(["diff", "--name-status", "-M", "HEAD"]),
     numstat: git(["diff", "--numstat", "-M", "HEAD"]),
+    headBranch,
   });
 } else {
-  console.error("usage: pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> | diff <checkout-dir>");
+  console.error("usage: pr-ci-auto-fix-guard.mjs target <pr.json> <commits.json> | diff <checkout-dir> [<head-branch>]");
   process.exit(2);
 }
 console.log(JSON.stringify(verdict));

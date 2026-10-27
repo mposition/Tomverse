@@ -67,6 +67,7 @@ const die = (message) => {
 const directory = argValue("dir");
 if (!directory) die("--dir=<directory> is required.");
 const root = resolve(process.cwd(), directory);
+const checkOnly = process.argv.includes("--check");
 
 const readJson = (name) => {
     const path = join(root, name);
@@ -187,7 +188,7 @@ const createSkeleton = () => {
     return true;
 };
 
-if (createSkeleton()) process.exit(0);
+if (!checkOnly && createSkeleton()) process.exit(0);
 
 // A record already exists. Say what is still missing, and nothing else -- this
 // script never edits a judgement somebody has started.
@@ -264,3 +265,4 @@ if (all.length > 0) {
     console.log(`  npm run score:ai-review-judgements -- --dir ${directory}`);
 }
 console.log("\nNo provider was called.");
+if (checkOnly && (all.length > 0 || outcome?.scored !== true)) process.exitCode = 1;

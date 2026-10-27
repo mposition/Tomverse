@@ -1,6 +1,16 @@
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { AdminAiReviewScorecardPanel } from "@/components/admin/AdminAiReviewScorecardPanel";
+import { AdminAiReviewJudgedPanel } from "@/components/admin/AdminAiReviewJudgedPanel";
+import { readAiReviewJudgedRunCatalog } from "@/lib/aiReviewJudgedRunReport";
+import { readAiReviewPreparationCatalog } from "@/lib/aiReviewPreparationServer";
+import { AdminAiReviewPreparationPanel } from "@/components/admin/AdminAiReviewPreparationPanel";
+import { AdminAiReviewThresholdDraft } from "@/components/admin/AdminAiReviewThresholdDraft";
+import { AdminAiReviewM5Progress } from "@/components/admin/AdminAiReviewM5Progress";
+import { aiReviewM5Progress } from "@/lib/aiReviewM5Progress";
+import { getAdminLocale, getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAiReviewJudgedMessages } from "@/lib/adminMessages/aiReviewJudged";
 import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
 import { AdminMemoryRevocationPanel } from "@/components/admin/AdminMemoryRevocationPanel";
 import { AdminPackageImportPanel } from "@/components/admin/AdminPackageImportPanel";
@@ -88,6 +98,45 @@ export default async function AdminAnalyticsPage({
   }
 
   if (tab.id === "ai-review") {
+    const locale = await getAdminLocale();
+    const preparation = query.reviewView !== "reports";
+    const reviewNavigation = (
+      <nav
+        aria-label={locale === "ko" ? "AI Review 작업" : "AI Review workspace"}
+        className="flex flex-wrap gap-3 text-sm"
+      >
+        <Link
+          href="/admin/analytics?tab=ai-review&reviewView=prepare"
+          aria-current={preparation ? "page" : undefined}
+          className="rounded-lg border border-zinc-700 px-4 py-2 text-zinc-200"
+        >
+          {locale === "ko" ? "평가 준비" : "Prepare evaluation"}
+        </Link>
+        <Link
+          href="/admin/analytics?tab=ai-review&reviewView=reports"
+          prefetch={false}
+          aria-current={!preparation ? "page" : undefined}
+          className="rounded-lg border border-zinc-700 px-4 py-2 text-zinc-200"
+        >
+          {locale === "ko"
+            ? "실행 결과·운영 지표"
+            : "Run results and operations"}
+        </Link>
+      </nav>
+    );
+    // Preparing criteria must not fetch or render observed evaluation scores.
+    if (preparation)
+      return (
+        <div className="flex min-w-0 flex-col gap-5">
+          {tabs}
+          {reviewNavigation}
+          <AdminAiReviewPreparationPanel
+            catalog={readAiReviewPreparationCatalog()}
+            locale={locale}
+          />
+          <AdminAiReviewThresholdDraft locale={locale} />
+        </div>
+      );
     // Read here rather than fetched by the panel: three windows over two
     // tables, and the tab is already a server component. Nothing on this tab
     // writes -- the reviewer-pair register is changed by a person in commit
@@ -95,13 +144,34 @@ export default async function AdminAnalyticsPage({
     // trail the register exists for.
     const scorecards = await Promise.all(
       AI_REVIEW_SCORECARD_WINDOWS.map((windowDays) =>
-        readAiReviewScorecard(windowDays)
-      )
+        readAiReviewScorecard(windowDays),
+      ),
     );
+    const messages = await getAdminMessages(adminAiReviewJudgedMessages);
+    const catalog = readAiReviewJudgedRunCatalog();
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AdminAiReviewScorecardPanel scorecards={scorecards} />
+        {reviewNavigation}
+        <AdminAiReviewM5Progress
+          progress={aiReviewM5Progress(
+            readAiReviewPreparationCatalog(),
+            catalog,
+          )}
+          locale={locale}
+        />
+        <AdminAiReviewJudgedPanel catalog={catalog} locale={locale} />
+        <details
+          open
+          className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5"
+        >
+          <summary className="cursor-pointer text-sm font-semibold text-zinc-200">
+            {messages.operational}
+          </summary>
+          <div className="mt-5">
+            <AdminAiReviewScorecardPanel scorecards={scorecards} />
+          </div>
+        </details>
       </div>
     );
   }
