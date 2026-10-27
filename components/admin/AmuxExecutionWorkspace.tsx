@@ -17,6 +17,7 @@ import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 import { adminAmuxDecisionMakerAttentionMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAttention";
 import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
+import { requestArchiveAllActiveCards } from "./amuxExecutionArchiveRequest";
 import {
   AMUX_EXECUTION_VISIBLE_LANES,
   amuxVisibleInspectionText,
@@ -240,11 +241,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     if (!window.confirm(m.archiveAllConfirm(activeCardCount))) return;
     setBoardLoading(true); setError(null);
     try {
-      const response = await adminFetch("/api/admin/amux/execution-archive", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ confirm: "archive_all_active_cards" }) });
-      if (response.status === 428) throw new Error("reauth");
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await requestArchiveAllActiveCards();
     } catch (reason) { showError(reason); setBoardLoading(false); return; }
     await refreshBoard();
   };
