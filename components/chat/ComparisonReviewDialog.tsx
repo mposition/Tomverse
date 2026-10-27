@@ -19,6 +19,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
+import { ComparisonReviewWorkspace } from "@/components/chat/ComparisonReviewWorkspace";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
@@ -740,7 +741,7 @@ export function ComparisonReviewDialog({
       aria-modal="true"
       aria-labelledby="comparison-review-title"
     >
-      <div ref={reviewPanelRef} className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-h-[90dvh] sm:max-w-5xl sm:rounded-3xl">
+      <div ref={reviewPanelRef} className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-h-[90dvh] sm:max-w-7xl sm:rounded-3xl">
         <div
           aria-hidden="true"
           className="h-[3px] shrink-0 bg-gradient-to-r from-tomverse-accent-start via-tomverse-accent-mid to-tomverse-accent-end"
@@ -813,6 +814,15 @@ export function ComparisonReviewDialog({
                               role="tab"
                               aria-selected={isActive}
                               onClick={() => setActiveReviewer(key)}
+                              tabIndex={isActive ? 0 : -1}
+                              onKeyDown={(event) => {
+                                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                                event.preventDefault();
+                                const next = event.key === "Home" ? "primary" : event.key === "End" ? "secondary" : key === "primary" ? "secondary" : "primary";
+                                setActiveReviewer(next);
+                                const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role=tab]");
+                                buttons?.[next === "primary" ? 0 : 1]?.focus();
+                              }}
                               className={`rounded-xl border px-3 py-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
                                 isActive
                                   ? "border-transparent bg-gradient-to-r from-accent-ai-review-start-600 via-accent-ai-review-mid-600 to-accent-ai-review-end-600 text-white"
@@ -905,6 +915,46 @@ export function ComparisonReviewDialog({
                     )}
                   </div>
 
+                  {(["primary", "secondary"] as const).map((reviewer) => {
+                    const entry = review.result[reviewer];
+                    if (!entry) return null;
+                    return <div key={`${review.id}:${reviewer}`} hidden={activeReviewer !== reviewer}>
+                      <ComparisonReviewWorkspace
+                        result={entry.result}
+                        responseMap={review.responseMap}
+                        source={guestSource ?? setup?.source}
+                        renderActions={(item) => <>
+                          {item.section === "verificationNeeded" && (
+                            isGuestReview || review.webVerificationAvailable === false ? (
+                              <p data-testid={isGuestReview ? "ai-review-verify-guest-locked" : "ai-review-verify-unavailable"} className="mb-3 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+                                <Lock size={16} />{t(isGuestReview ? "chat.guestAiReviewVerifySignIn" : "chat.aiReviewWebUnavailable")}
+                                {isGuestReview && onSignIn && <button type="button" onClick={onSignIn} className="font-bold underline">{t("chat.guestAiReviewSignInCta")}</button>}
+                              </p>
+                            ) : <div className="mb-4">
+                              <VerifyItemButton
+                                conversationId={conversationId as string}
+                                item={item.text}
+                                checkLabel={t("chat.aiReviewVerifyWithWeb")}
+                                checkingLabel={t("chat.aiReviewVerifying")}
+                                failedLabel={t("chat.aiReviewVerifyFailed")}
+                                statusLabels={{ supported: t("chat.aiReviewVerifySupported"), unsupported: t("chat.aiReviewVerifyUnsupported"), inconclusive: t("chat.aiReviewVerifyInconclusive") }}
+                              />
+                              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{t("chat.aiReviewWebSeparate")}</p>
+                            </div>
+                          )}
+                          <ReviewItemFeedback
+                            conversationId={conversationId}
+                            reviewId={review.id}
+                            itemId={reviewItemIds.get(`${reviewer}:${item.section}:${item.ordinal}`)}
+                            guest={isGuestReview}
+                          />
+                        </>}
+                      />
+                    </div>;
+                  })}
+                  <details data-testid="ai-review-full-report" className="group">
+                    <summary className="cursor-pointer rounded-xl border border-zinc-200 px-4 py-3 text-sm font-bold focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700">{t("chat.aiReviewFullReport")}</summary>
+                  <div className="mt-4 space-y-5">
                   <div className="grid gap-4 md:grid-cols-2">
                     <GroundedReviewList
                       title={t("chat.aiReviewConsensus")}
@@ -914,16 +964,6 @@ export function ComparisonReviewDialog({
                       responseLabel={t("chat.aiReviewResponse")}
                       verifiedLabel={t("chat.aiReviewQuoteVerified")}
                       unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
-                      renderFeedback={(ordinal) => (
-                        <ReviewItemFeedback
-                          conversationId={conversationId}
-                          reviewId={review.id}
-                          itemId={reviewItemIds.get(
-                            `${activeReviewer}:consensus:${ordinal}`
-                          )}
-                          guest={isGuestReview}
-                        />
-                      )}
                     />
                     <GroundedReviewList
                       title={t("chat.aiReviewContradictions")}
@@ -934,16 +974,6 @@ export function ComparisonReviewDialog({
                       verifiedLabel={t("chat.aiReviewQuoteVerified")}
                       unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
                       tone="warning"
-                      renderFeedback={(ordinal) => (
-                        <ReviewItemFeedback
-                          conversationId={conversationId}
-                          reviewId={review.id}
-                          itemId={reviewItemIds.get(
-                            `${activeReviewer}:contradictions:${ordinal}`
-                          )}
-                          guest={isGuestReview}
-                        />
-                      )}
                     />
                   </div>
 
@@ -989,16 +1019,6 @@ export function ComparisonReviewDialog({
                                 </div>
                               ))}
                             </div>
-                            <div className="px-3 pb-3">
-                              <ReviewItemFeedback
-                                conversationId={conversationId}
-                                reviewId={review.id}
-                                itemId={reviewItemIds.get(
-                                  `${activeReviewer}:differences:${index}`
-                                )}
-                                guest={isGuestReview}
-                              />
-                            </div>
                           </article>
                         ))}
                       </div>
@@ -1012,67 +1032,12 @@ export function ComparisonReviewDialog({
                       title={t("chat.aiReviewMissingPoints")}
                       items={activeResult.missingPoints}
                       emptyLabel={t("chat.aiReviewNoneFound")}
-                      renderExtra={(_item, index) => (
-                        <ReviewItemFeedback
-                          conversationId={conversationId}
-                          reviewId={review.id}
-                          itemId={reviewItemIds.get(
-                            `${activeReviewer}:missingPoints:${index}`
-                          )}
-                          guest={isGuestReview}
-                        />
-                      )}
                     />
                     <ReviewList
                       title={t("chat.aiReviewVerificationNeeded")}
                       items={activeResult.verificationNeeded}
                       emptyLabel={t("chat.aiReviewNoneFound")}
                       tone="warning"
-                      renderExtra={(item, index) =>
-                        // Per-item web verification runs a paid external
-                        // search against a saved conversation, which a guest
-                        // does not have. Rather than showing a control that
-                        // would 401, the reason and the way to get it are
-                        // stated once, under the first item.
-                        isGuestReview ? (
-                          index === 0 ? (
-                            <p
-                              data-testid="ai-review-verify-guest-locked"
-                              className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-zinc-200 px-2 py-1.5 text-[11px] leading-5 text-zinc-600 dark:border-zinc-800 dark:text-zinc-300"
-                            >
-                              <Lock
-                                className="mt-0.5 h-3 w-3 shrink-0"
-                                aria-hidden="true"
-                              />
-                              <span className="min-w-0">
-                                {t("chat.guestAiReviewVerifySignIn")}
-                                {onSignIn && (
-                                  <button
-                                    type="button"
-                                    onClick={onSignIn}
-                                    className="ml-1 font-bold underline underline-offset-2"
-                                  >
-                                    {t("chat.guestAiReviewSignInCta")}
-                                  </button>
-                                )}
-                              </span>
-                            </p>
-                          ) : null
-                        ) : (
-                          <VerifyItemButton
-                            conversationId={conversationId as string}
-                            item={item}
-                            checkLabel={t("chat.aiReviewVerifyWithWeb")}
-                            checkingLabel={t("chat.aiReviewVerifying")}
-                            failedLabel={t("chat.aiReviewVerifyFailed")}
-                            statusLabels={{
-                              supported: t("chat.aiReviewVerifySupported"),
-                              unsupported: t("chat.aiReviewVerifyUnsupported"),
-                              inconclusive: t("chat.aiReviewVerifyInconclusive"),
-                            }}
-                          />
-                        )
-                      }
                     />
                   </div>
 
@@ -1134,6 +1099,8 @@ export function ComparisonReviewDialog({
                     emptyLabel={review.disclaimer}
                     tone="warning"
                   />
+                  </div>
+                  </details>
                   </div>
                   <button
                     type="button"

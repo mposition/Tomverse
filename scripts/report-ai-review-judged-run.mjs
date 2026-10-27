@@ -40,11 +40,8 @@
 //
 // Nothing here calls a provider, and nothing here writes a file.
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
-
-import { observationRefFor } from "../lib/aiReviewEvalJudgement.ts";
-import { aggregateJudgedRun } from "../lib/aiReviewJudgedRunAggregate.ts";
+import { resolve } from "node:path";
+import { readAiReviewJudgedRunReport } from "../lib/aiReviewJudgedRunReport.ts";
 
 const argValue = (name) => {
   const args = process.argv.slice(2);
@@ -71,242 +68,25 @@ const datasetPath = argValue("dataset");
 const judgementsPath = argValue("judgements");
 if (!runPath || !journalPath || !datasetPath || !judgementsPath) die(USAGE);
 
-/** Read a JSON file, or stop with the path that could not be read. */
-const readJson = (path, what) => {
-  const resolved = resolve(process.cwd(), path);
-  if (!existsSync(resolved)) die(`${what} does not exist: ${path}`);
-  try {
-    return JSON.parse(readFileSync(resolved, "utf8"));
-  } catch (error) {
-    die(`${what} is not valid JSON (${path}): ${error.message}`);
-  }
-  return undefined;
-};
-
-const run = readJson(runPath, "the run artifact");
-const dataset = readJson(datasetPath, "the frozen dataset");
-
-const journalResolved = resolve(process.cwd(), journalPath);
-if (!existsSync(journalResolved)) die(`the run journal does not exist: ${journalPath}`);
-const journal = readFileSync(journalResolved, "utf8")
-  .split("\n")
-  .filter((line) => line.trim() !== "")
-  .map((line, index) => {
-    try {
-      return JSON.parse(line);
-    } catch (error) {
-      die(`the run journal line ${index + 1} is not valid JSON: ${error.message}`);
-      return null;
-    }
+let report;
+try {
+  report = readAiReviewJudgedRunReport({
+    run: resolve(runPath), journal: resolve(journalPath),
+    dataset: resolve(datasetPath), judgements: resolve(judgementsPath),
   });
-
-// ---------------------------------------------------------------------------
-// The two inputs whose PROVENANCE is the point
-// ---------------------------------------------------------------------------
-
-const blockers = [];
-
-/**
- * The digest the run recorded, read from the run's own artifact.
- *
- * Never `datasetDigest(dataset)`. The aggregator compares this against the set
- * it is handed, and computing it here from that same set would make the
- * comparison trivially true -- which is exactly the hole it was added to close.
- */
-const manifest = { datasetDigest: run?.summary?.datasetDigest };
-if (typeof manifest.datasetDigest !== "string" || manifest.datasetDigest === "") {
-  blockers.push(
-    "the run artifact records no summary.datasetDigest, so nothing says which " +
-      "frozen set this run measured"
-  );
-}
-
-/**
- * The run's plan, reconstructed from the run's own record.
- *
- * Three sources have to agree, and none of them is the set of judgements that
- * happen to be on disk:
- *
- *   * the frozen set says which cases existed,
- *   * `summary.plannedCases` says how many the run set out to measure,
- *   * the journal says which output each case produced.
- *
- * A case the journal cannot account for is a refusal rather than a row left
- * out. The run that stopped early is the case this protects: its judgements
- * may all be sound, and aggregating them would report a partial run as a
- * whole one.
- *
- * **Both directions.** Walking the frozen set and looking each case up in the
- * journal leaves a journal entry for a case the set does not hold with nowhere
- * to be noticed: it was dropped, and the remaining two cases aggregated to
- * 1/2. A record holding an output nobody can place is not a record this can
- * read.
- *
- * **And `completedCases` is not the journal's line count.** The runner journals
- * a failed call too -- the entry is there with no `observation` -- and counts
- * only the entries that produced an output. Comparing against the line count
- * reported an ordinary run with one provider failure as a record contradicting
- * itself, which is both wrong and the wrong thing to tell the operator: the
- * failure is real, it means that case produced no output, and that is why the
- * plan cannot be completed.
- */
-const planned = Array.isArray(dataset?.cases)
-  ? dataset.cases.filter((item) => typeof item?.id === "string").map((item) => item.id)
-  : [];
-if (planned.length === 0) {
-  blockers.push("the frozen dataset names no cases, so there is no plan to read");
-}
-if (typeof run?.summary?.plannedCases !== "number") {
-  blockers.push("the run artifact records no summary.plannedCases, so its plan cannot be checked");
-} else if (run.summary.plannedCases !== planned.length) {
-  blockers.push(
-    `the run planned ${run.summary.plannedCases} case(s) and this frozen set holds ` +
-      `${planned.length}; the plan cannot be reconstructed from a set the run did not measure`
-  );
-}
-const plannedIds = new Set(planned);
-
-// The journal, against the plan. Without this an entry for a case the frozen
-// set does not hold was simply never looked at.
-for (const [index, entry] of journal.entries()) {
-  const caseId = entry?.caseId;
-  if (typeof caseId !== "string") {
-    blockers.push(`the run's journal line ${index + 1} names no caseId`);
-  } else if (!plannedIds.has(caseId)) {
-    blockers.push(
-      `the run's journal holds an output for ${caseId}, which this frozen set does not ` +
-        `hold; the record describes a run this plan cannot account for`
-    );
-  }
-}
-
-// `completedCases` the way the runner counts it: journal entries that name a
-// case in the set AND carry an output. A failed call is journalled with no
-// `observation` and counted as a provider failure, not as a completed case.
-const completedInJournal = journal.filter(
-  (entry) => plannedIds.has(entry?.caseId) && entry?.observation
-).length;
-if (typeof run?.summary?.completedCases !== "number") {
-  blockers.push("the run artifact records no summary.completedCases");
-} else {
-  if (run.summary.completedCases !== completedInJournal) {
-    blockers.push(
-      `the run recorded ${run.summary.completedCases} completed case(s) and its journal ` +
-        `holds ${completedInJournal} output(s) for cases in this set; the record ` +
-        `disagrees with itself`
-    );
-  }
-  // A run that completed fewer cases than it planned did not measure the whole
-  // plan, whatever the reason -- a cost ceiling, five failures in a row, or a
-  // provider error on one case.
-  if (
-    typeof run?.summary?.plannedCases === "number" &&
-    run.summary.completedCases !== run.summary.plannedCases
-  ) {
-    blockers.push(
-      `the run completed ${run.summary.completedCases} of ${run.summary.plannedCases} ` +
-        `planned case(s), so it did not measure the whole plan`
-    );
-  }
-}
-
-const plan = [];
-for (const caseId of planned) {
-  const entries = journal.filter((entry) => entry?.caseId === caseId);
-  if (entries.length === 0) {
-    blockers.push(
-      `${caseId}: planned in the run and its journal holds no entry, so the plan ` +
-        `cannot be completed from what the run recorded`
-    );
-    continue;
-  }
-  if (entries.length > 1) {
-    blockers.push(
-      `${caseId}: the run's journal holds ${entries.length} entries, so which output the ` +
-        `plan names is ambiguous`
-    );
-    continue;
-  }
-  // A journalled failure. The record is correct and the run is incomplete --
-  // two different things, and saying the record contradicts itself says
-  // neither.
-  if (!entries[0].observation) {
-    blockers.push(
-      `${caseId}: the run's journal records a failed call` +
-        `${entries[0].failure ? ` (${entries[0].failure})` : ""}, so this case produced no ` +
-        `output and the plan cannot be completed`
-    );
-    continue;
-  }
-  plan.push({ caseId, observationRef: observationRefFor(entries[0].observation) });
-}
-
-// ---------------------------------------------------------------------------
-// The judged bundles, as the scoring CLI writes them
-// ---------------------------------------------------------------------------
-
-const judgementsRoot = resolve(process.cwd(), judgementsPath);
-if (!existsSync(judgementsRoot) || !statSync(judgementsRoot).isDirectory()) {
-  die(`the judgements directory does not exist: ${judgementsPath}`);
-}
-
-/**
- * Every bundle directory, not only the planned ones.
- *
- * A bundle the plan does not name is its own refusal in the aggregator, and
- * filtering to the planned ids here would hide it.
- */
-const entries = [];
-for (const name of readdirSync(judgementsRoot).sort()) {
-  const directory = join(judgementsRoot, name);
-  if (!statSync(directory).isDirectory()) continue;
-  const bundle = {};
-  let readable = true;
-  for (const [key, file] of [
-    ["testCase", "case.json"],
-    ["observation", "observation.json"],
-    ["record", "record.json"],
-    ["artifact", "artifact.json"],
-  ]) {
-    const path = join(directory, file);
-    if (!existsSync(path)) {
-      blockers.push(`${name}: the bundle has no ${file}`);
-      readable = false;
-      continue;
-    }
-    try {
-      bundle[key] = JSON.parse(readFileSync(path, "utf8"));
-    } catch (error) {
-      blockers.push(`${name}: ${file} is not valid JSON: ${error.message}`);
-      readable = false;
-    }
-  }
-  if (readable) entries.push(bundle);
-}
-
-// ---------------------------------------------------------------------------
-// Report
-// ---------------------------------------------------------------------------
+} catch (error) { die(error.message); }
+const { result } = report;
 
 const heading = (text) => console.log(`\n=== ${text} ===`);
 const line = (label, value) => console.log(`  ${label.padEnd(34)} ${value}`);
 
 heading("inputs");
 line("run artifact", runPath);
-line("journal", `${journalPath} (${journal.length} entr${journal.length === 1 ? "y" : "ies"})`);
+line("journal", `${journalPath} (${report.journalEntries} entr${report.journalEntries === 1 ? "y" : "ies"})`);
 line("frozen dataset", datasetPath);
-line("judgement bundles", `${judgementsPath} (${entries.length})`);
-line("manifest datasetDigest", manifest.datasetDigest ?? "(absent)");
-line("plan", `${plan.length} case(s), read from the run's record`);
-
-// The input checks above can already refuse. Run them first rather than
-// handing a half-built plan to the aggregator, which would then report the
-// missing rows as "planned and never judged" -- true, but about the wrong
-// file.
-const result =
-  blockers.length > 0
-    ? { aggregable: false, blockers }
-    : aggregateJudgedRun({ plan, entries, runInputs: { journal, dataset }, manifest });
+line("judgement bundles", `${judgementsPath} (${report.bundleCount})`);
+line("manifest datasetDigest", report.datasetDigest ?? "(absent)");
+line("plan", `${report.planCount} case(s), read from the run's record`);
 
 if (!result.aggregable) {
   heading("not aggregable");
