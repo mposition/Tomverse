@@ -217,8 +217,8 @@ staging과 production의 앱 이미지 모두 `/app/tests`, `/app/docs`, `/app/l
 운영자가 배포마다 붙여 넣던 증명 JSON(배포 ID와 source commit 결속)은 없앴다. 변수를 넣는
 순간 새 배포가 생기고 production은 `main`을 실행하므로 일치할 수 없었다. base 소스는
 `develop` commit의 GitHub tree가 정하고, 이미지 파일이 그 blob OID와 다르면 같은 OID의
-blob을 GitHub에서 읽는다(최대 500개, 넘으면 T2). 제외 digest는 `.dockerignore` blob OID와
-제외 경로 목록을 담는다. Task 실행과 공개 게시의 별도
+blob을 GitHub에서 읽는다(최대 500개, 넘으면 T2). 제외 digest는 `.dockerignore` blob OID를
+담는다. 제외 경로는 그 규칙과 게시 후보에 결속된 base SHA·patch에서 결정적으로 나온다. Task 실행과 공개 게시의 별도
 코드·운영 스위치는 이 정책 승인만으로 열리지 않는다. `docs/` 전체는 제외 대상이 아니다. 앱이 `docs/ops`의 웹훅 검증 기록을 런타임에
 읽으므로, 문서는 실제 접근을 파일 단위로 검증한 경우에만 별도 제안할 수 있다. 이미지에
 없는 것이 증명되어도 runtime code·import·경로 참조·설정 이름을 통한 기존 T2 판정은
