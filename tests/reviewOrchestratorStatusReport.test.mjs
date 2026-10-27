@@ -385,7 +385,7 @@ test("a reviewer's credit travels with its quota, only when the probe read it", 
 
 test("the CI auto-fix's tries travel as numbers and fixed names; a bad part is dropped, never the report", () => {
   const SHA = "a".repeat(40);
-  const ciFix = { queuedLastHour: 1, entries: [{ pr: 7, head: SHA, kind: "ci", outcome: "no_change", reason: "transient", retried: false, ageSeconds: 30 }] };
+  const ciFix = { queuedLastHour: 1, entries: [{ pr: 7, head: SHA, kind: "ci", outcome: "no_change", reason: "transient", retried: false, settled: null, ageSeconds: 30 }] };
   // The daemon adds the part only when a ledger exists.
   assert.deepEqual(buildStatusSnapshot({ jobs: [], providers: [], load: {}, now: NOW, ciFix }).ciFix, ciFix);
   assert.equal("ciFix" in buildStatusSnapshot({ jobs: [], providers: [], load: {}, now: NOW }), false);

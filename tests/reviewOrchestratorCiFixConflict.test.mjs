@@ -14,6 +14,7 @@ import { gunzipSync } from "node:zlib";
 
 import {
   CI_FIX_CONFLICT_COMMIT_PREFIX,
+  CI_FIX_PUBLISH_WAIT_MS,
   ciFixReport,
   conflictPrompt,
   readLedger,
@@ -143,14 +144,28 @@ test("a sent fix is settled from the pull request's new head: its own commit, or
     2: [{ sha: "2".repeat(40), parents: [{ sha: SHA_B }], commit: { message: "fix by hand" } }],
   };
   const recorded = {};
-  await settleSentFixes({
-    ledger, pulls,
+  const settle = (now) => settleSentFixes({
+    ledger, pulls, now,
     github: { json: async (path) => commits[Number(path.split("/")[2])] },
-    record: (key, entry) => { recorded[key] = entry.outcome; },
+    record: (key, entry) => { recorded[key] = entry; },
   });
-  assert.deepEqual(recorded, { [SHA_A]: "pushed", [`${SHA_B}:conflict`]: "superseded" }, "#3 has not moved: still sent");
-  const report = ciFixReport({ [`${SHA_B}:conflict`]: { pr: 2, kind: "conflict", outcome: "superseded", at: 5 } }, 6000);
-  assert.deepEqual(report.entries[0], { pr: 2, head: SHA_B, kind: "conflict", outcome: "superseded", reason: null, retried: false, ageSeconds: 6 });
+  await settle(3 + 60_000);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(recorded).map(([key, entry]) => [key, entry.outcome])),
+    { [SHA_A]: "pushed", [`${SHA_B}:conflict`]: "superseded" },
+    "#3 has not moved: still sent",
+  );
+  assert.equal(recorded[SHA_A].settledHead, "1".repeat(40));
+  // Unmoved two hours after it was queued: the workflow refused it or the push failed.
+  await settle(3 + CI_FIX_PUBLISH_WAIT_MS + 1);
+  assert.equal(recorded["c".repeat(40)].outcome, "not_published");
+
+  const report = ciFixReport({
+    [`${SHA_B}:conflict`]: { pr: 2, kind: "conflict", outcome: "superseded", settledHead: "2".repeat(40), at: 5 },
+    [SHA_A]: { pr: 1, kind: "ci", outcome: "pushed", settledHead: "1".repeat(40), at: 4 },
+  }, 6000);
+  assert.deepEqual(report.entries[0], { pr: 2, head: SHA_B, kind: "conflict", outcome: "superseded", reason: null, retried: false, settled: null, ageSeconds: 6 });
+  assert.equal(report.entries[1].settled, "1".repeat(40), "only a pushed fix carries the head it became");
 });
 
 /** A develop and a branch that both changed one line of app.js after they parted. */

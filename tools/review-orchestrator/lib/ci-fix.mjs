@@ -56,11 +56,19 @@ export const CI_FIX_AGAIN_LABEL = "ci:fix-again";
 /**
  * What became of a sent fix, judged on a later pass from the pull request's
  * new head: `pushed` when it is an auto-fix commit on the tried head,
- * `superseded` when something else moved the branch.
+ * `superseded` when something else moved the branch -- or, the head
+ * unmoved for CI_FIX_PUBLISH_WAIT_MS, `not_published`.
  */
-export const CI_FIX_SETTLED = Object.freeze(["pushed", "superseded"]);
-/** Outcomes a retry may follow: the head was tried and nothing was sent. */
-const RETRYABLE_OUTCOMES = new Set(["no_change", "model_failed", "model_timeout", "patch_refused", "patch_too_large", "error"]);
+export const CI_FIX_SETTLED = Object.freeze(["pushed", "superseded", "not_published"]);
+/** Outcomes a retry may follow: the head was tried and nothing changed it. */
+const RETRYABLE_OUTCOMES = new Set(["no_change", "model_failed", "model_timeout", "patch_refused", "patch_too_large", "error", "not_published"]);
+/**
+ * A sent fix whose pull request still has the tried head this long after it
+ * was queued was not published: the workflow refused it, the push failed, or
+ * the sender let it expire. The sender sends within the hour (its cap is the
+ * proposing side's) and the workflow takes minutes.
+ */
+export const CI_FIX_PUBLISH_WAIT_MS = 2 * 3_600_000;
 /** A pass that started an hour ago and never recorded an end crashed. */
 const STARTED_STALE_MS = 3_600_000;
 /**
@@ -219,12 +227,17 @@ export function retryable(entry, labelledAt, now) {
  * new head is the auto-fix's commit when its message has the prefix and its
  * parent is the tried head. Read failures leave an entry for the next pass.
  */
-export async function settleSentFixes({ ledger, pulls, github, record }) {
+export async function settleSentFixes({ ledger, pulls, github, record, now }) {
   for (const [key, entry] of Object.entries(ledger)) {
     if (entry?.outcome !== "queued") continue;
     const sha = key.slice(0, 40);
     const pull = pulls.find((candidate) => candidate.number === entry.pr);
-    if (!pull || pull.head?.sha === sha) continue;
+    if (!pull) continue;
+    if (pull.head?.sha === sha) {
+      // Never published: ended, so it neither blocks the other kind nor bars a retry.
+      if (now - (entry.queuedAt ?? entry.at ?? now) > CI_FIX_PUBLISH_WAIT_MS) record(key, { outcome: "not_published" });
+      continue;
+    }
     try {
       const commits = await github.json(`/pulls/${pull.number}/commits?per_page=100`);
       const head = Array.isArray(commits) ? commits.find((commit) => commit?.sha === pull.head.sha) : undefined;
@@ -255,6 +268,8 @@ export function ciFixReport(ledger, now) {
       outcome: typeof entry.outcome === "string" ? entry.outcome : "unknown",
       reason: CI_FIX_RESULT_CODES.includes(entry.reason) ? entry.reason : null,
       retried: entry.retried === true,
+      // The head a sent fix became, once seen: the screen says "pushed" only while it is the head.
+      settled: entry.outcome === "pushed" && /^[0-9a-f]{40}$/.test(entry.settledHead ?? "") ? entry.settledHead : null,
       ageSeconds: Math.max(0, Math.round((now - entry.at) / 1000)),
     }));
   const queuedLastHour = Object.values(ledger ?? {}).filter((entry) => now - (entry?.queuedAt ?? -Infinity) < 3_600_000).length;
@@ -590,7 +605,7 @@ export async function runCiFix({
   };
 
   const pulls = await github.json("/pulls?state=open&base=develop&per_page=100");
-  await settleSentFixes({ ledger, pulls, github, record });
+  await settleSentFixes({ ledger, pulls, github, record, now });
 
   const queuedLastHour = Object.values(ledger).filter((entry) => now - (entry?.queuedAt ?? -Infinity) < 3_600_000).length;
   if (queuedLastHour >= CI_FIX_MAX_QUEUED_PER_HOUR) return { outcome: "rate_capped" };

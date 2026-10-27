@@ -527,7 +527,9 @@ workflow 권한이 없으면 push가 거절됩니다.
 
 **보낸 수정의 확인.** 다음 pass가 PR의 새 head를 보고, 그것이 자동 수정 커밋(접두사가 맞고 부모가 시도한
 head)이면 ledger를 `pushed`로, 다른 무엇이 브랜치를 옮겼으면 `superseded`로 바꿉니다. 입장 화면의
-"push됨"은 `pushed`일 때만 나옵니다.
+"push됨"은 `pushed`이고 그 자동 수정 커밋이 지금도 head일 때만 나옵니다(보고의 `settled`). 보낸 지 2시간이
+지나도 head가 그대로면 workflow가 거절했거나 push가 실패한 것으로 보고 `not_published`로 끝냅니다. 이 상태는
+다시 분석할 수 있고, 같은 head의 다른 종류 수정을 더 막지 않습니다.
 
 **Dependabot PR(운영자 결정 2026-10-26).**
 - main으로 가는 보안 업데이트는 대상이 아닙니다. Dependabot이 연 PR만 대상이고, 사람이 `dependabot/` 이름으로 만든 브랜치는 대상이 아닙니다.

@@ -104,6 +104,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
       not_fixed: "not fixed",
       failed: "analysis failed",
       refused: "fix refused by the checks",
+      not_published: "fix not published · refused by the workflow or not pushed",
       exhausted: "two fixes tried · yours now",
     } as Record<string, string>,
     fixReason: {
@@ -226,6 +227,7 @@ export const adminCiAdmissionMessages = defineAdminMessages({
       not_fixed: "고치지 못함",
       failed: "분석 실패",
       refused: "수정안이 검사에서 거부됨",
+      not_published: "수정안이 게시되지 않음 · workflow 거부 또는 push 실패",
       exhausted: "수정 2회 소진 · 사람이 이어받음",
     } as Record<string, string>,
     fixReason: {

@@ -44,7 +44,7 @@ const MAX_QUOTA_AMOUNT = 1_000_000_000;
 // The CI auto-fix's tries (lib/ci-fix.mjs ciFixReport), the app's limits.
 const CI_FIX_KINDS = ["ci", "conflict"];
 const CI_FIX_OUTCOMES = ["started", "queued", "no_change", "model_failed", "model_timeout", "patch_refused", "patch_too_large",
-  "attempts_exhausted", "error", "unknown", "pushed", "superseded"];
+  "attempts_exhausted", "error", "unknown", "pushed", "superseded", "not_published"];
 const CI_FIX_REASONS = ["fixed", "transient", "outside_rules", "not_found"];
 const CI_FIX_MAX_ENTRIES = 12;
 const CI_FIX_MAX_AGE_SECONDS = 30 * 86_400;
@@ -83,12 +83,13 @@ export function normaliseCiFix(value) {
   const rebuilt = [];
   for (const entry of entries) {
     if (entry === null || typeof entry !== "object") return undefined;
-    const { pr, head, kind, outcome, reason, retried, ageSeconds } = entry;
+    const { pr, head, kind, outcome, reason, retried, ageSeconds, settled = null } = entry;
     if (!Number.isInteger(pr) || pr < 1 || pr > 9_999_999 || !SHA.test(head ?? "")) return undefined;
     if (!CI_FIX_KINDS.includes(kind) || !CI_FIX_OUTCOMES.includes(outcome)) return undefined;
     if (reason !== null && !CI_FIX_REASONS.includes(reason)) return undefined;
     if (typeof retried !== "boolean" || !isCount(ageSeconds) || ageSeconds > CI_FIX_MAX_AGE_SECONDS) return undefined;
-    rebuilt.push({ pr, head, kind, outcome, reason, retried, ageSeconds });
+    if (settled !== null && !SHA.test(settled)) return undefined;
+    rebuilt.push({ pr, head, kind, outcome, reason, retried, settled, ageSeconds });
   }
   return { queuedLastHour: Math.min(queuedLastHour, MAX_COUNT), entries: rebuilt };
 }

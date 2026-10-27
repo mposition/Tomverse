@@ -69,9 +69,17 @@ test("a try says something only about the head it was made on, unless it was the
   // The head moved: only a fix the server saw become the head is "pushed";
   // a sent fix not settled yet, one something else replaced, and any other
   // try say nothing about the new head.
-  const settled = ciFixView(stored([entry(1, A, "pushed"), entry(2, A, "superseded")]), NOW, REVIEW_ORCHESTRATOR_STALE_AFTER_MS);
+  const settled = ciFixView(
+    stored([entry(1, A, "pushed", { settled: B }), entry(2, A, "superseded"), entry(3, A, "not_published")]),
+    NOW,
+    REVIEW_ORCHESTRATOR_STALE_AFTER_MS,
+  );
   assert.equal(ciFixState(settled.byPull[1], B), "pushed");
+  assert.equal(ciFixState(settled.byPull[1], "c".repeat(40)), null, "a later push is not the fix's result");
   assert.equal(ciFixState(settled.byPull[2], B), null);
+  // Sent and never published: the head stayed, the try ended, another may follow.
+  assert.equal(ciFixState(settled.byPull[3], A), "not_published");
+  assert.equal(ciFixRetryable(settled.byPull[3], A), true);
   assert.equal(ciFixState(view.byPull[2], B), null);
   assert.equal(ciFixState(view.byPull[3], B), null);
   assert.equal(ciFixState(undefined, A), null);

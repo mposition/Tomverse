@@ -812,9 +812,9 @@ test("the report carries numbers, commit ids and fixed names only, newest first"
   const report = ciFixReport(ledger, 61_000);
   assert.equal(report.queuedLastHour, 1);
   assert.deepEqual(report.entries, [
-    { pr: 42, head: SHA_B, kind: "ci", outcome: "queued", reason: "fixed", retried: true, ageSeconds: 59 },
-    { pr: 45, head: "d".repeat(40), kind: "ci", outcome: "started", reason: null, retried: false, ageSeconds: 60 },
-    { pr: 41, head: SHA_A, kind: "ci", outcome: "no_change", reason: "not_found", retried: false, ageSeconds: 60 },
+    { pr: 42, head: SHA_B, kind: "ci", outcome: "queued", reason: "fixed", retried: true, settled: null, ageSeconds: 59 },
+    { pr: 45, head: "d".repeat(40), kind: "ci", outcome: "started", reason: null, retried: false, settled: null, ageSeconds: 60 },
+    { pr: 41, head: SHA_A, kind: "ci", outcome: "no_change", reason: "not_found", retried: false, settled: null, ageSeconds: 60 },
   ]);
   assert.doesNotMatch(JSON.stringify(report), /secret-ish/);
   const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [i.toString(16).padStart(40, "0"), { pr: i + 1, outcome: "no_change", at: i }]));

@@ -25,6 +25,8 @@ export type CiFixTry = {
   outcome: ReportEntry["outcome"];
   reason: ReportEntry["reason"];
   retried: boolean;
+  /** For a pushed fix, the head it became. */
+  settled: string | null;
   /** When the server recorded it, by the app's receipt clock less its age. */
   at: string;
 };
@@ -58,6 +60,7 @@ export function ciFixView(stored: StoredReviewStatus | null, nowMs: number, stal
       outcome: entry.outcome,
       reason: entry.reason,
       retried: entry.retried,
+      settled: entry.settled ?? null,
       at: new Date(receivedMs - entry.ageSeconds * 1000).toISOString(),
     };
   }
@@ -79,14 +82,17 @@ export function ciFixView(stored: StoredReviewStatus | null, nowMs: number, stal
  * - not_fixed: the model changed nothing (its result code says why);
  * - failed: the model run failed or timed out;
  * - refused: the fix broke a rule here (a secret, a binary) or did not fit;
+ * - not_published: the fix was sent but never became the head (the workflow
+ *   refused it, the push failed or it expired);
  * - exhausted: two auto-fix commits already, no more tries.
  * A try on an older head says nothing unless it was the fix that moved it.
  */
-export type CiFixState = "analysing" | "sent" | "pushed" | "not_fixed" | "failed" | "refused" | "exhausted";
+export type CiFixState = "analysing" | "sent" | "pushed" | "not_fixed" | "failed" | "refused" | "not_published" | "exhausted";
 
 export function ciFixState(fix: CiFixTry | undefined, headSha: string): CiFixState | null {
   if (!fix) return null;
-  if (fix.head !== headSha) return fix.outcome === "pushed" ? "pushed" : null;
+  // Pushed only while the fix's own commit is the head: a later push is not the fix's result.
+  if (fix.head !== headSha) return fix.outcome === "pushed" && fix.settled === headSha ? "pushed" : null;
   switch (fix.outcome) {
     case "started":
       return "analysing";
@@ -102,6 +108,8 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string): CiFixSta
     case "patch_refused":
     case "patch_too_large":
       return "refused";
+    case "not_published":
+      return "not_published";
     case "attempts_exhausted":
       return "exhausted";
     case "pushed":
@@ -114,7 +122,7 @@ export function ciFixState(fix: CiFixTry | undefined, headSha: string): CiFixSta
 /** Whether "Analyse again" can help: the current head was tried, not fixed, and not retried yet. */
 export function ciFixRetryable(fix: CiFixTry | undefined, headSha: string): boolean {
   const state = ciFixState(fix, headSha);
-  return fix !== undefined && !fix.retried && (state === "not_fixed" || state === "failed" || state === "refused");
+  return fix !== undefined && !fix.retried && (state === "not_fixed" || state === "failed" || state === "refused" || state === "not_published");
 }
 
 /**

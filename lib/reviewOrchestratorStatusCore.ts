@@ -67,6 +67,7 @@ export const CI_FIX_OUTCOMES = [
   "unknown",
   "pushed",
   "superseded",
+  "not_published",
 ] as const;
 export const CI_FIX_REASONS = ["fixed", "transient", "outside_rules", "not_found"] as const;
 
@@ -84,6 +85,8 @@ const ciFixSchema = z
             outcome: z.enum(CI_FIX_OUTCOMES),
             reason: z.enum(CI_FIX_REASONS).nullable(),
             retried: z.boolean(),
+            /** For `pushed`: the head the fix became. Absent from a server older than it. */
+            settled: z.string().regex(/^[0-9a-f]{40}$/).nullable().optional(),
             ageSeconds: z.number().int().min(0).max(30 * 86_400),
           })
           .strict()
