@@ -1,6 +1,7 @@
 import { randomBytes, randomInt } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { hashMobileStoreReviewCode } from "../lib/mobileStoreReviewCore.ts";
 
@@ -15,7 +16,8 @@ if (!args.includes("--create-account") || !/^play-review[-+][a-z0-9-]+@tomverse\
   throw new Error("Explicit --create-account, a dedicated play-review address, --submission, --build and an absolute private --output directory are required.");
 }
 const output = resolve(directory);
-const fromRepo = relative(process.cwd(), output);
+const repoRoot = await realpath(fileURLToPath(new URL("../", import.meta.url)));
+const fromRepo = relative(repoRoot, resolve(await realpath(dirname(output)), basename(output)));
 if (!fromRepo.startsWith(`..${sep}`) && !isAbsolute(fromRepo)) throw new Error("Credential output must be outside the repository.");
 await mkdir(output, { recursive: false, mode: 0o700 });
 const prisma = new PrismaClient();

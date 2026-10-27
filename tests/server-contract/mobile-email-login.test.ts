@@ -94,3 +94,8 @@ test("configured store reviewer request does not send mail or return the code", 
   const result = await request({ action: "request", email: "user@example.com" });
   assert.deepEqual(await result.json(), { ok: true }); assert.deepEqual(calls, ["admission"]);
 });
+test("a refused store credential never falls back to ordinary OTP proof", async () => {
+  reviewHandled = true; proof = { ok: false, reason: "invalid_or_expired" };
+  const result = await POST(new Request("https://tomverse.app/api/auth/mobile/email", { method: "POST", headers: { "content-type": "application/json", "x-tomverse-app-id": "app.tomverse.shell", "x-tomverse-build": "16" }, body: JSON.stringify(verify) }));
+  assert.equal(result.status, 401); assert.deepEqual(calls, ["admission", "review-proof"]);
+});

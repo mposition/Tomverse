@@ -19,6 +19,12 @@ Rotate the salt and code per submission. Apply the existing daily readback and
 rolling-extension runbook before activating a real submission; this patch does
 not provision that schedule or its alert destinations.
 
+Provision a new dedicated address and account for each submission; the script
+intentionally refuses account reuse. The account-wide budget also limits correct
+logins and can be exhausted by someone who knows the review address. Monitor that
+failure separately from a bad code. The request response can identify the special
+review address, so its email is not treated as a secret; the code remains private.
+
 Verification uses the existing native route origin refusal, admission budget,
 active-account check and session issuance/rotation. The additional code check
 has an account-wide 5/minute and 100/day budget, before the slow password hash.
